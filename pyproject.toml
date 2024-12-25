@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "gpt2giga"
+version = "0.0.7"
+description = ""
+authors = ["Konstantin Krestnikov <rai220@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+gigachat = "^0.1.35"
+asyncio = "^3.4.3"
+python-dotenv = "^1.0.1"
+aiohttp = "^3.10.10"
+
+
+[tool.poetry.scripts]
+gpt2giga = "gpt2giga:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
