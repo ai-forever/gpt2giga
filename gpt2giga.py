@@ -12,7 +12,6 @@ import warnings
 from functools import lru_cache
 from typing import Optional, Tuple, List, Iterator
 
-import numpy as np
 import tiktoken
 from dotenv import find_dotenv, load_dotenv
 from gigachat import GigaChat
@@ -132,6 +131,7 @@ def has_numpy() -> bool:
 
 def list_to_base64(l: list[float]) -> str:
     if has_numpy():
+        import numpy as np
         arr = np.array(l, dtype=np.float32)
     else:
         arr = array.array("f", l)
