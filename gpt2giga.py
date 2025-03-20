@@ -369,7 +369,6 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
             self._send_CORS_headers()
 
             input_ = json_body.get("input", [])
-            new_input = None
             if isinstance(input_, list):
                 new_input = []
                 if len(input_) > 0:
