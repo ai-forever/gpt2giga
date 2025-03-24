@@ -1,0 +1,56 @@
+{
+    "openai/GigaChat-2-Max": {
+        "max_tokens": 16384,
+        "max_input_tokens": 128000,
+        "max_output_tokens": 16384,
+        "input_cost_per_token": 0.000023,
+        "output_cost_per_token": 0.000023,
+        "litellm_provider": "openai",
+        "mode": "chat"
+    },
+    "openai/GigaChat-2-Pro": {
+        "max_tokens": 16384,
+        "max_input_tokens": 128000,
+        "max_output_tokens": 16384,
+        "input_cost_per_token": 0.000018,
+        "output_cost_per_token": 0.000018,
+        "litellm_provider": "openai",
+        "mode": "chat"
+    },
+    "openai/GigaChat-2": {
+        "max_tokens": 16384,
+        "max_input_tokens": 128000,
+        "max_output_tokens": 16384,
+        "input_cost_per_token": 0.0000024,
+        "output_cost_per_token": 0.0000024,
+        "litellm_provider": "openai",
+        "mode": "chat"
+    },
+    "openai/GigaChat-Max": {
+        "max_tokens": 10000,
+        "max_input_tokens": 32000,
+        "max_output_tokens": 10000,
+        "input_cost_per_token": 0.000023,
+        "output_cost_per_token": 0.000023,
+        "litellm_provider": "openai",
+        "mode": "chat"
+    },
+    "openai/GigaChat-Pro": {
+        "max_tokens": 10000,
+        "max_input_tokens": 32000,
+        "max_output_tokens": 10000,
+        "input_cost_per_token": 0.000018,
+        "output_cost_per_token": 0.000018,
+        "litellm_provider": "openai",
+        "mode": "chat"
+    },
+    "openai/GigaChat": {
+        "max_tokens": 10000,
+        "max_input_tokens": 32000,
+        "max_output_tokens": 10000,
+        "input_cost_per_token": 0.0000024,
+        "output_cost_per_token": 0.0000024,
+        "litellm_provider": "openai",
+        "mode": "chat"
+    }
+}

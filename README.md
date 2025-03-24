@@ -117,6 +117,8 @@ Aider - AI-ассистент для написания приложений. Д
 aider --openai-api-base http://localhost:8090 --model gpt-4o --openai-api-key 123
 ```
 
+Более подробно про настройку aider с помощью gpt2giga можно прочитать [здесь](integrations/aider/README.md)
+
 ## Лицензия
 
 Этот проект распространяется под лицензией MIT. См. [LICENSE](LICENSE) для получения подробной информации.

@@ -480,7 +480,7 @@ def run_proxy_server(host: str, port: int,
     logging.basicConfig(level=logging_level)
 
     httpd = ThreadingHTTPServer(server_address, ProxyHandler)
-    print(f"Serving HTTP proxy on {host} port {port}...")
+    print(f"Serving HTTP proxy on http://{host}:{port}")
     httpd.serve_forever()
 
 
