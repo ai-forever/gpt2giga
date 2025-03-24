@@ -442,13 +442,13 @@ files = [
 
 [[package]]
 name = "gigachat"
-version = "0.1.39"
+version = "0.1.39.post1"
 description = "GigaChat. Python-library for GigaChain and LangChain"
 optional = false
 python-versions = "<4.0,>=3.8"
 files = [
-    {file = "gigachat-0.1.39-py3-none-any.whl", hash = "sha256:ae9aa89953ac0bca01eb84a5883f9b3bd7035bde41d683b96f246f2b45a79cdb"},
-    {file = "gigachat-0.1.39.tar.gz", hash = "sha256:6deca321cd9654291c0f2636db5758db2883eb152f88c95aaa3988b5c23b8be4"},
+    {file = "gigachat-0.1.39.post1-py3-none-any.whl", hash = "sha256:7b60d9ce08d874b118f55ebe18b8ff0c7fa53ae2437d07a86a714773ea7bb212"},
+    {file = "gigachat-0.1.39.post1.tar.gz", hash = "sha256:5d7d14c3340e72c24f09ba0755324a3937da6ee45b5ce9f7aab4d4037b050db6"},
 ]
 
 [package.dependencies]
@@ -1184,4 +1184,4 @@ propcache = ">=0.2.0"
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "b214b5c050d29ca3f3c4437268568be00b436c783948c08d5c970916757a9fa3"
+content-hash = "402bed6a0266265cb55a5e438677533baf1e2029f7e5bef74aa97ab5ed2af27f"

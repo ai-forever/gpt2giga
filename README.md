@@ -16,18 +16,21 @@
 
 ## Установка
 
-1. Установите пакет:
+1. Установите пакет из pypi:
+   ```bash
+   pip install gpt2giga
+   ```
+   Или напрямую из исходников:
    ```bash
    pip install git+https://github.com/Rai220/Gpt2Giga.git
    ```
-2. Создайте файл `.env` в корне вашего проекта и укажите необходимые параметры для доступа к GigaChat:
+
+2. Переименуйте файл `.env.example` в `.env` и расположите его в корне вашего проекта, укажите необходимые учетные данные для доступа к GigaChat:
    ```bash
-   GIGACHAT_USER=
-   GIGACHAT_PASSWORD=
-   GIGACHAT_BASE_URL=
-   GIGACHAT_MODEL=
+   cp .env.example .env
    ```
-   Или используйте другие переменные, поддерживаемые GigaChat (см. [документацию](https://github.com/ai-forever/gigachat)).
+   Обратите внимание, что поддерживаются различные способы авторизации в зависимости от типа вашей учетной записи.
+   Также можно настроить другие переменные, поддерживаемые GigaChat (см. [документацию](https://github.com/ai-forever/gigachat)).
 
 ## Использование
 
@@ -104,6 +107,15 @@ gpt2giga \
 - `Bearer giga-user-<user>:<password>`
 - `Bearer giga-cred-<credentials>:<scope>`
 - `Bearer giga-auth-<access_token>`
+
+## Примеры использования
+Ниже приведен список проверенных приложений, работа с которыми возможна через gpt2giga.
+
+## [Aider](https://aider.chat/)
+Aider - AI-ассистент для написания приложений. Для запуска используйте следующую команду:
+```
+aider --openai-api-base http://localhost:8090 --model gpt-4o --openai-api-key 123
+```
 
 ## Лицензия
 
