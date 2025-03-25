@@ -5,7 +5,7 @@ description = ""
 authors = ["Konstantin Krestnikov <rai220@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-include = ["gpt2giga_models.json"]
+include = [{ path = "data/gpt2giga_models.json", format = ["sdist", "wheel"] }]
 
 [tool.poetry.dependencies]
 python = "^3.9"
