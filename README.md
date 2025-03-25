@@ -22,7 +22,7 @@
    ```
    Или напрямую из исходников:
    ```bash
-   pip install git+https://github.com/Rai220/Gpt2Giga.git
+   pip install git+https://github.com/ai-forever/gpt2giga.git
    ```
 
 2. Переименуйте файл `.env.example` в `.env` и расположите его в корне вашего проекта, укажите необходимые учетные данные для доступа к GigaChat:
