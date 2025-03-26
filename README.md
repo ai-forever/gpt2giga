@@ -104,9 +104,9 @@ gpt2giga \
 Если вы запускаете прокси с флагом `--pass-token` (или переменной окружения `GPT2GIGA_PASS_TOKEN=True`), то прокси будет пытаться преобразовать заголовок `Authorization` в формат, понятный GigaChat.  
 Поддерживаются варианты:
 
-- `Bearer giga-user-<user>:<password>`
-- `Bearer giga-cred-<credentials>:<scope>`
-- `Bearer giga-auth-<access_token>`
+- `giga-cred-<credentials>:<scope>`
+- `giga-user-<user>:<password>`
+- `giga-auth-<access_token>`
 
 ## Совместимые решения
 Ниже приведен список проверенных приложений, работа с которыми возможна через gpt2giga.
