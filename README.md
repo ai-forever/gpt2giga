@@ -108,16 +108,19 @@ gpt2giga \
 - `Bearer giga-cred-<credentials>:<scope>`
 - `Bearer giga-auth-<access_token>`
 
-## Примеры использования
+## Совместимые решения
 Ниже приведен список проверенных приложений, работа с которыми возможна через gpt2giga.
 
-## [Aider](https://aider.chat/)
+### [Aider](https://aider.chat/)
 Aider - AI-ассистент для написания приложений. Для запуска используйте следующую команду:
 ```
 aider --openai-api-base http://localhost:8090 --model gpt-4o --openai-api-key 123
 ```
 
 Более подробно про настройку aider с помощью gpt2giga можно прочитать [здесь](integrations/aider/README.md)
+
+### [n8n](https://n8n.io/)
+Платформа для создания nocode агентов
 
 ## Лицензия
 
