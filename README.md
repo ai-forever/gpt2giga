@@ -55,6 +55,7 @@ gpt2giga
 - `--timeout <TIMEOUT>` — таймаут для запросов к GigaChat (по умолчанию `600` секунд).
 - `--embeddings <EMBED_MODEL>` — модель Embeddings (по умолчанию `EmbeddingsGigaR`).
 - `--env-path <PATH>` — путь до .env-файла (по умолчанию ищется `.env` в текущей директории).
+- `--verify-ssl-certs <True/False>` - проверять сертификаты SSL (по умолчанию `True`)
 
 ### Пример использования с кастомными настройками
 
@@ -98,6 +99,7 @@ gpt2giga \
 - `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — если требуется аутентификация по логину/паролю.
 - `GIGACHAT_CREDENTIALS` — если нужно передавать токен в стиле `Bearer giga-cred-...`.
 - `GIGACHAT_ACCESS_TOKEN` — если уже есть готовый токен аутентификации.
+- `VERIFY_SSL_CERTS` - для того, что бы игнорировать ошибки SSL - флаг `False`, по умолчанию `True`.
 
 ## Авторизация через заголовок
 
