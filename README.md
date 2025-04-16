@@ -89,6 +89,8 @@ sequenceDiagram
 - `--timeout <TIMEOUT>` — таймаут для запросов к GigaChat API. По умолчанию `600` секунд;
 - `--embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
 - `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
+- `--verify-ssl-certs <True/False>` - проверять сертификаты SSL (по умолчанию `True`)
+- `--enable-images` — экспериментальный флаг, который включает передачу изображений в формате OpenAI в GigaChat API
 
 ### Переменные окружения
 
@@ -111,6 +113,7 @@ sequenceDiagram
 - `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля.
 - `GIGACHAT_CREDENTIALS` — для авторизации с помощью ключа авторизации.
 - `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токен доступа, полученного в обмен на ключ.
+- `GIGACHAT_VERIFY_SSL_CERTS` — для того, что бы проверять SSL сертификаты, по умолчанию `False`.
 
 ### Пример запуска утилиты с заданными параметрами
 
@@ -133,15 +136,15 @@ gpt2giga \
 
 ## Авторизация с помощью заголовка
 
-Утилита может пробовать преобразовать содержимое заголовка `Authorization` в формат, который поддерживает GigaChat API.
+Утилита может пробовать принимать содержимое заголовка `Authorization` и авторизироваться через него в GigaChat API (через креды, юзер-парль или access_token)
 
 Для этого нужно запустить gpt2giga с аргументом `--pass-token` или использовать переменную окружения `GPT2GIGA_PASS_TOKEN=True`. 
 
 Поддерживаются варианты:
 
-- `giga-cred-<credentials>:<scope>`
-- `giga-user-<user>:<password>`
-- `giga-auth-<access_token>`
+- `giga-cred-<credentials>:<scope>` — для авторизации credentials + scope
+- `giga-user-<user>:<password>` — для авторизации через юзер:пароль
+- `giga-auth-<access_token>` — для передачи access_token (который получается одним из первых двух способов)
 
 ## Совместимые приложения
 
