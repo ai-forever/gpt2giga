@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  gpt2giga:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gpt2giga
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
+    environment:
+      PROXY_HOST: 0.0.0.0
+      GIGACHAT_CREDENTIALS: <your_api_key>

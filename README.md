@@ -36,6 +36,17 @@ sequenceDiagram
 
 ## Начало работы
 
+### Запуск в Docker
+
+1. Отредактируйте `docker-compose.yml`, чтобы указать ваш API-ключ. Пример для `docker-compose.yml`:
+   ```yaml
+   environment:
+      - GIGACHAT_CREDENTIALS: <your_api_key>
+   ```
+2. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
+
+### Запуск на локальной машине
+
 Для начала работы:
 
 1. Установите пакет gpt2giga с помощью менеджера пакетов pip:
