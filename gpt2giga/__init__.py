@@ -64,6 +64,8 @@ def process_gigachat_response(giga_resp: ChatCompletion, gpt_model: str, is_tool
                         "type": "function",
                         "function": choice["message"].pop("function_call")
                     }]
+                    if choice["message"].get("finish_reason", None) == "function_call":
+                        choice["message"]["finish_reason"] = "tool_calls"
 
     result = {
         "id": "chatcmpl-" + str(uuid.uuid4()),
@@ -127,6 +129,11 @@ def process_gigachat_stream(giga_resp: ChatCompletionChunk, gpt_model: str, is_t
             "prompt_tokens_details": {"cached_tokens": giga_dict["usage"].get("precached_prompt_tokens", 0)},
             "completion_tokens_details": {"reasoning_tokens": 0},
         }
+
+    if is_tool_call:
+        for c in giga_dict["choices"]:
+            if c["finish_reason"] == "function_call":
+                c["finish_reason"] = "tool_calls"
 
     result = {
         "id": "chatcmpl-" + str(uuid.uuid4()),
@@ -261,7 +268,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
                     json.loads(message.get("content", ""))
                 except json.JSONDecodeError:
                     message["content"] = json.dumps(message.get("content", ""), ensure_ascii=False)
-            if message["content"] is None:
+            if message.get("content", None) is None:
                 message["content"] = ""
             if "tool_calls" in message and message["tool_calls"] is not None and len(message["tool_calls"]) > 0:
                 message["function_call"] = message["tool_calls"][0]["function"]
