@@ -120,6 +120,8 @@ def process_gigachat_stream(giga_resp: ChatCompletionChunk, gpt_model: str, is_t
                     "type": "function",
                     "function": choice["delta"].pop("function_call")
                 }]
+        if choice.get("finish_reason") == "function_call" and is_tool_call:
+            choice["finish_reason"] = "tool_calls"
     usage = None
     if giga_dict.get("usage", None) is not None:
         usage = {
@@ -129,11 +131,6 @@ def process_gigachat_stream(giga_resp: ChatCompletionChunk, gpt_model: str, is_t
             "prompt_tokens_details": {"cached_tokens": giga_dict["usage"].get("precached_prompt_tokens", 0)},
             "completion_tokens_details": {"reasoning_tokens": 0},
         }
-
-    if is_tool_call:
-        for c in giga_dict["choices"]:
-            if c["finish_reason"] == "function_call":
-                c["finish_reason"] = "tool_calls"
 
     result = {
         "id": "chatcmpl-" + str(uuid.uuid4()),
