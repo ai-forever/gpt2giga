@@ -92,6 +92,9 @@ sequenceDiagram
 
 - `--host <HOST>` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
 - `--port <PORT>` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
+- `--mtls-ca-cert-path` - путь к файлу сертификата mTLS корневого центра сертификации;
+- `--mtls-cert-file-path` - путь к клиентский сертификату mTLS;
+- `--mtls-key-file-path` - путь к закрытому ключу mTLS;
 - `--verbose` — включить подробный вывод логов (запросы и ответы);
 - `--pass-model` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
 - `--pass-token` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
@@ -101,6 +104,7 @@ sequenceDiagram
 - `--embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
 - `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
 - `--verify-ssl-certs <True/False>` - проверять сертификаты SSL (по умолчанию `True`)
+- `--mtls-auth` - использовать атентификаию по сертефикатам mTLS;
 - `--enable-images` — экспериментальный флаг, который включает передачу изображений в формате OpenAI в GigaChat API
 
 ### Переменные окружения
@@ -111,12 +115,16 @@ sequenceDiagram
 
 - `PROXY_HOST="localhost"` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
 - `PROXY_PORT="8090"` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
+- `MTLS_CA_CERT_PATH` - путь к файлу сертификата корневого центра сертификации;
+- `MTLS_CERT_FILE_PATH` - путь к клиентский сертификату;
+- `MTLS_KEY_FILE_PATH` - путь к закрытому ключу;
 - `GPT2GIGA_VERBOSE="False"` — включает/отключает вывод подробной информации;
 - `GPT2GIGA_PASS_MODEL="False"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat;
 - `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
 - `GIGACHAT_MODEL="GigaChat"` — модель GigaChat API, которая будет обрабатывать запросы по умолчанию;
 - `GPT2GIGA_TIMEOUT="600"` — таймаут для запросов к GigaChat API (в секундах);
+- `GIGACHAT_MTLS_AUTH` -  использовать атентификаию по сертефикатам mTLS;
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов.
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0-%D0%BF%D0%B5%D1%80%D0%B5%D0%BC%D0%B5%D0%BD%D0%BD%D1%8B%D1%85-%D0%BE%D0%BA%D1%80%D1%83%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F):
