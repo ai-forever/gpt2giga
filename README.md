@@ -104,7 +104,7 @@ sequenceDiagram
 - `--embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
 - `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
 - `--verify-ssl-certs <True/False>` - проверять сертификаты SSL (по умолчанию `True`)
-- `--mtls-auth` - использовать атентификаию по сертефикатам mTLS;
+- `--mtls-auth` - использовать аутентификацию по сертефикатам mTLS;
 - `--enable-images` — экспериментальный флаг, который включает передачу изображений в формате OpenAI в GigaChat API
 
 ### Переменные окружения
@@ -124,7 +124,7 @@ sequenceDiagram
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
 - `GIGACHAT_MODEL="GigaChat"` — модель GigaChat API, которая будет обрабатывать запросы по умолчанию;
 - `GPT2GIGA_TIMEOUT="600"` — таймаут для запросов к GigaChat API (в секундах);
-- `GIGACHAT_MTLS_AUTH` -  использовать атентификаию по сертефикатам mTLS;
+- `GIGACHAT_MTLS_AUTH` -  использовать аутентификацию по сертефикатам mTLS;
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов.
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0-%D0%BF%D0%B5%D1%80%D0%B5%D0%BC%D0%B5%D0%BD%D0%BD%D1%8B%D1%85-%D0%BE%D0%BA%D1%80%D1%83%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F):
