@@ -25,7 +25,6 @@ from gigachat.client import GIGACHAT_MODEL
 from gigachat.models import Chat, ChatCompletion, ChatCompletionChunk, Messages
 from gigachat.settings import SCOPE, BASE_URL
 
-
 def process_gigachat_response(giga_resp: ChatCompletion, gpt_model: str, is_tool_call: bool = False) -> dict:
     """
     Processes the response from GigaChat API and transforms it to the format expected by the client.
@@ -556,6 +555,9 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 def run_proxy_server(host: str, port: int,
+                     mtls_ca_cert_path: str,
+                     mtls_cert_file_path: str,
+                     mtls_key_file_path: str,
                      verbose: bool = False,
                      pass_model: bool = False,
                      pass_token: bool = False,
@@ -564,6 +566,7 @@ def run_proxy_server(host: str, port: int,
                      timeout: int = 600,
                      embeddings: str = "EmbeddingsGigaR",
                      verify_ssl_certs: bool = False,
+                     mtls_auth: bool = False,
                      enable_images: bool = False):
     """
     Runs the proxy server.
@@ -579,11 +582,15 @@ def run_proxy_server(host: str, port: int,
         timeout: Timeout
         embeddings: Embeddings model
         verify_ssl_certs: Verify SSL certificates
+        mtls_auth: Use mTLS auth
     """
     server_address = (host, port)
     ProxyHandler.verbose = verbose
     ProxyHandler.giga = GigaChat(
         base_url=base_url,
+        ca_bundle_file=mtls_ca_cert_path if mtls_auth else None,
+        cert_file=mtls_cert_file_path if mtls_auth else None,
+        key_file=mtls_key_file_path if mtls_auth else None,
         model=model,
         timeout=timeout,
         verify_ssl_certs=verify_ssl_certs,
@@ -599,7 +606,6 @@ def run_proxy_server(host: str, port: int,
     logging.basicConfig(level=logging_level)
 
     httpd = ThreadingHTTPServer(server_address, ProxyHandler)
-    print(f"Serving HTTP proxy on http://{host}:{port}")
     httpd.serve_forever()
 
 
@@ -620,6 +626,21 @@ def main():
         help="Port to listen on",
     )
     parser.add_argument(
+        "--mtls-ca-cert-path",
+        default=None,
+        help="Use mtls auth",
+    )   
+    parser.add_argument(
+        "--mtls-cert-file-path",
+        default=None,
+        help="Use mtls auth",
+    )
+    parser.add_argument(
+        "--mtls-key-file-path",
+        default=None,
+        help="Use mtls auth",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         default=None,
@@ -636,12 +657,6 @@ def main():
         action="store_true",
         default=None,
         help="Pass token from request to API"
-    )
-    parser.add_argument(
-        "--enable-images",
-        action="store_true",
-        default=None,
-        help="Enable images auto-upload",
     )
     parser.add_argument(
         "--base-url",
@@ -668,16 +683,27 @@ def main():
         help="Embeddings model for GigaChat API",
     )
     parser.add_argument(
-        "--env-path",
-        type=str,
-        default=None,
-        help="Path to .env file (including .env file name)",
-    )
-    parser.add_argument(
         "--verify-ssl-certs",
         action="store_true",
         default=None,
         help="Bypass security certificates errors",
+    )
+    parser.add_argument(
+        "--mtls-auth",
+        default=None,
+        help="Use mtls auth",
+    )
+    parser.add_argument(
+        "--enable-images",
+        action="store_true",
+        default=None,
+        help="Enable images auto-upload",
+    )    
+    parser.add_argument(
+        "--env-path",
+        type=str,
+        default=None,
+        help="Path to .env file (including .env file name)",
     )
 
     args = parser.parse_args()
@@ -688,6 +714,9 @@ def main():
     defaults = {
         "host": os.getenv("PROXY_HOST", "localhost"),
         "port": int(os.getenv("PROXY_PORT", "8090")),
+        "mtls_ca_cert_path": os.getenv("MTLS_CA_CERT_PATH", ""),
+        "mtls_cert_file_path": os.getenv("MTLS_CERT_FILE_PATH", ""),
+        "mtls_key_file_path": os.getenv("MTLS_KEY_FILE_PATH", ""),
         "verbose": os.getenv("GPT2GIGA_VERBOSE", "False") != "False",
         "pass_model": os.getenv("GPT2GIGA_PASS_MODEL", "False") != "False",
         "pass_token": os.getenv("GPT2GIGA_PASS_TOKEN", "False") != "False",
@@ -696,20 +725,21 @@ def main():
         "timeout": os.getenv("GPT2GIGA_TIMEOUT", 600),
         "embeddings": os.getenv("GPT2GIGA_EMBEDDINGS", "EmbeddingsGigaR"),
         "verify_ssl_certs": os.getenv("GIGACHAT_VERIFY_SSL_CERTS", "False") != "False",
-        "enable_images": os.getenv("GPT2GIGA_ENABLE_IMAGES", "False") != "False",
+        "mtls_auth": os.getenv("GIGACHAT_MTLS_AUTH", "").lower() == "true",
+        "enable_images": os.getenv("GPT2GIGA_ENABLE_IMAGES", "False") != "False"
     }
     for key, value in defaults.items():
         if getattr(args, key) is None:
             setattr(args, key, value)
-
     run_proxy_server(
-        args.host, args.port, args.verbose,
+        args.host, args.port, 
+        args.mtls_ca_cert_path, args.mtls_cert_file_path,
+        args.mtls_key_file_path, args.verbose,
         args.pass_model, args.pass_token,
         args.base_url, args.model, args.timeout,
-        args.embeddings, args.verify_ssl_certs,
-        args.enable_images, 
+        args.embeddings,args.verify_ssl_certs,
+        args.mtls_auth, args.enable_images, 
     )
-
 
 if __name__ == "__main__":
     main()
