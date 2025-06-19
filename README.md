@@ -38,12 +38,24 @@ sequenceDiagram
 
 ### Запуск в Docker
 
-1. Отредактируйте `docker-compose.yml`, чтобы указать ваш API-ключ. Пример для `docker-compose.yml`:
-   ```yaml
-   environment:
-      - GIGACHAT_CREDENTIALS: <your_api_key>
+1. Переименуйте файл [`.env.example`](./.env.example) в `.env`.
+
+   ```sh
+   cp .env.example .env
    ```
-2. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
+
+2. В файле `.env` укажите данные для авторизации в GigaChat API.
+
+   GigaChat API поддерживает различные способы авторизации, которые отличаются в зависимости от типа вашей учетной записи. Пример с `Authorization key`.
+
+   ```
+   PROXY_HOST=0.0.0.0
+   GIGACHAT_CREDENTIALS=<Authorization key GigaChat API>
+   GIGACHAT_MODEL=GigaChat
+   GIGACHAT_VERIFY_SSL_CERTS=False
+   ```
+
+3. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
 
 ### Запуск на локальной машине
 
