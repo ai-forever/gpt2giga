@@ -409,7 +409,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
             self._send_CORS_headers()
 
             if stream:
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Content-Type", "application/json")
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("X-Accel-Buffering", "no")
                 self.end_headers()
