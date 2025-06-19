@@ -683,7 +683,8 @@ def main():
     args = parser.parse_args()
 
     # Load environment variables
-    env_path = find_dotenv(args.env_path if args.env_path else f"{os.getcwd()}/.env")
+    env_path = args.env_path if args.env_path else ".env"
+    env_path = find_dotenv(env_path, usecwd=True)
     load_dotenv(env_path)
     defaults = {
         "host": os.getenv("PROXY_HOST", "localhost"),
