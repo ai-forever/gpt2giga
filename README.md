@@ -147,7 +147,7 @@ gpt2giga \
 
 ## Авторизация с помощью заголовка
 
-Утилита может пробовать принимать содержимое заголовка `Authorization` и авторизироваться через него в GigaChat API (через креды, юзер-парль или access_token)
+Утилита может пробовать принимать содержимое заголовка `Authorization` и авторизироваться через него в GigaChat API (через креды, юзер-пароль или access_token)
 
 Для этого нужно запустить gpt2giga с аргументом `--pass-token` или использовать переменную окружения `GPT2GIGA_PASS_TOKEN=True`. 
 
@@ -166,6 +166,7 @@ gpt2giga \
 | [Aider](https://aider.chat/)            | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](/integrations/aider)         |
 | [n8n](https://n8n.io/)                  | Платформа для создания nocode-агентов                                                                                                              |
 | [Cline](https://github.com/cline/cline) | AI-ассистент разработчика                                                                                                                          |
+| [OpenHands](https://github.com/All-Hands-AI/OpenHands) | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](/integrations/openhands)                                                                                                                        |
 
 ## Лицензия
 
