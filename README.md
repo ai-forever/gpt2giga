@@ -142,6 +142,10 @@ sequenceDiagram
 - `GIGACHAT_KEY_FILE` - путь к закрытому ключу;
 - `GIGACHAT_KEY_FILE_PASSWORD` - пароль от закрытого ключа;
 - `GIGACHAT_VERIFY_SSL_CERTS` — для того, что бы проверять SSL сертификаты, по умолчанию `False`.
+- `GIGACHAT_CA_BUNDLE_FILE` - путь к файлу сертификата корневого центра сертификации;
+- `GIGACHAT_CERT_FILE` - путь к клиентскому сертификату;
+- `GIGACHAT_KEY_FILE` - путь к закрытому ключу;
+- `GIGACHAT_KEY_FILE_PASSWORD` - пароль к закрытому ключу;
 
 ### Пример запуска утилиты с заданными параметрами
 
@@ -184,6 +188,7 @@ gpt2giga \
 | [Aider](https://aider.chat/)            | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](/integrations/aider)         |
 | [n8n](https://n8n.io/)                  | Платформа для создания nocode-агентов                                                                                                              |
 | [Cline](https://github.com/cline/cline) | AI-ассистент разработчика                                                                                                                          |
+| [OpenHands](https://github.com/All-Hands-AI/OpenHands) | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](/integrations/openhands)                                                                                                                        |
 
 ## Лицензия
 
