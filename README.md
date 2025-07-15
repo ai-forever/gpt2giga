@@ -43,7 +43,7 @@ sequenceDiagram
    environment:
       - GIGACHAT_CREDENTIALS: <your_api_key>
    ```
-2. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
+2. Запустите контейнер с помощью Docker Compose: `docker-compose up -d` (`docker compose up -d` если у вас последняя версия)
 
 ### Запуск на локальной машине
 
