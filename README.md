@@ -134,18 +134,14 @@ sequenceDiagram
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 
-- `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля.
-- `GIGACHAT_CREDENTIALS` — для авторизации с помощью ключа авторизации.
-- `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токен доступа, полученного в обмен на ключ.
+- `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля;
+- `GIGACHAT_CREDENTIALS` — для авторизации с помощью ключа авторизации;
+- `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токена доступа, полученного в обмен на ключ;
 - `GIGACHAT_CA_BUNDLE_FILE` - путь к файлу сертификата корневого центра сертификации;
 - `GIGACHAT_CERT_FILE` - путь к клиентскому сертификату;
 - `GIGACHAT_KEY_FILE` - путь к закрытому ключу;
 - `GIGACHAT_KEY_FILE_PASSWORD` - пароль от закрытого ключа;
 - `GIGACHAT_VERIFY_SSL_CERTS` — для того, что бы проверять SSL сертификаты, по умолчанию `False`.
-- `GIGACHAT_CA_BUNDLE_FILE` - путь к файлу сертификата корневого центра сертификации;
-- `GIGACHAT_CERT_FILE` - путь к клиентскому сертификату;
-- `GIGACHAT_KEY_FILE` - путь к закрытому ключу;
-- `GIGACHAT_KEY_FILE_PASSWORD` - пароль к закрытому ключу;
 
 ### Пример запуска утилиты с заданными параметрами
 
