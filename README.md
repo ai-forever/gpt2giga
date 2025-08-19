@@ -47,6 +47,7 @@ sequenceDiagram
    ```yaml
    environment:
       - GIGACHAT_CREDENTIALS: <your_api_key>
+      - GIGACHAT_SCOPE: <your_api_scope>
    ```
 2. Запустите контейнер с помощью Docker Compose: 
    
@@ -135,7 +136,7 @@ sequenceDiagram
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 
 - `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля;
-- `GIGACHAT_CREDENTIALS` — для авторизации с помощью ключа авторизации;
+- `GIGACHAT_CREDENTIALS` и `GIGACHAT_SCOPE` — для авторизации с помощью ключа авторизации;
 - `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токена доступа, полученного в обмен на ключ;
 - `GIGACHAT_CA_BUNDLE_FILE` - путь к файлу сертификата корневого центра сертификации;
 - `GIGACHAT_CERT_FILE` - путь к клиентскому сертификату;
