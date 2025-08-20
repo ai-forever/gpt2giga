@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "gpt2giga"
-version = "0.0.11post1"
+version = "0.0.12"
 description = ""
 authors = ["Konstantin Krestnikov <rai220@gmail.com>"]
 license = "MIT"
@@ -9,7 +9,7 @@ include = [{ path = "data/gpt2giga_models.json", format = ["sdist", "wheel"] }]
 
 [tool.poetry.dependencies]
 python = "^3.9"
-gigachat = "^0.1.39post2"
+gigachat = "^0.1.42"
 asyncio = "^3.4.3"
 python-dotenv = "^1.0.1"
 aiohttp = "^3.10.10"
