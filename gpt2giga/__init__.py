@@ -256,6 +256,8 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
         for i, message in enumerate(data["messages"]):
             message.pop("name", None)
             # No non-first system messages available.
+            if message["role"] == "developer":
+                message["role"] = "system"
             if message["role"] == "system" and i > 0:
                 message["role"] = "user"
             if message["role"] == "tool":
