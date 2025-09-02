@@ -2,6 +2,24 @@
     "object": "list",
     "data": [
       {
+        "id": "GigaChat-2",
+        "object": "model",
+        "created": 1700000001,
+        "owned_by": "salutedevices"
+      },
+      {
+        "id": "GigaChat-2-Max",
+        "object": "model",
+        "created": 1700000002,
+        "owned_by": "salutedevices"
+      },
+      {
+        "id": "GigaChat-2-Pro",
+        "object": "model",
+        "created": 1700000003,
+        "owned_by": "salutedevices"
+      },
+      {
         "id": "gpt-4-turbo",
         "object": "model",
         "created": 1712361441,
