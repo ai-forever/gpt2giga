@@ -36,6 +36,8 @@ sequenceDiagram
 
 ## Начало работы
 
+Утилиту можно запустить как в контейнере, с помощью Docker, так и локально.
+
 ### Запуск в Docker
 
 1. Переименуйте файл [`.env.example`](./.env.example) в `.env`.
@@ -51,15 +53,16 @@ sequenceDiagram
    ```
    PROXY_HOST=0.0.0.0
    GIGACHAT_CREDENTIALS=<Authorization key GigaChat API>
+   GIGACHAT_SCOPE=<your_api_scope>
    GIGACHAT_MODEL=GigaChat
    GIGACHAT_VERIFY_SSL_CERTS=False
    ```
 
 3. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
 
-### Запуск на локальной машине
+### Локальный запуск
 
-Для начала работы:
+Для локального запуска:
 
 1. Установите пакет gpt2giga с помощью менеджера пакетов pip:
    
@@ -104,6 +107,9 @@ sequenceDiagram
 
 - `--host <HOST>` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
 - `--port <PORT>` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
+- `--mtls-ca-cert-path` - путь к файлу сертификата mTLS корневого центра сертификации;
+- `--mtls-cert-file-path` - путь к клиентский сертификату mTLS;
+- `--mtls-key-file-path` - путь к закрытому ключу mTLS;
 - `--verbose` — включить подробный вывод логов (запросы и ответы);
 - `--pass-model` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
 - `--pass-token` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
@@ -111,8 +117,9 @@ sequenceDiagram
 - `--model <MODEL>` — модель для запросов в GigaChat. По умолчанию `GIGACHAT_MODEL`;
 - `--timeout <TIMEOUT>` — таймаут для запросов к GigaChat API. По умолчанию `600` секунд;
 - `--embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
-- `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
+- `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории
 - `--verify-ssl-certs <True/False>` - проверять сертификаты SSL (по умолчанию `True`)
+- `--mtls-auth` - использовать аутентификацию по сертефикатам mTLS
 - `--enable-images` — экспериментальный флаг, который включает передачу изображений в формате OpenAI в GigaChat API
 
 ### Переменные окружения
@@ -123,19 +130,27 @@ sequenceDiagram
 
 - `PROXY_HOST="localhost"` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
 - `PROXY_PORT="8090"` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
+- `MTLS_CA_CERT_PATH` - путь к файлу сертификата корневого центра сертификации;
+- `MTLS_CERT_FILE_PATH` - путь к клиентский сертификату;
+- `MTLS_KEY_FILE_PATH` - путь к закрытому ключу;
 - `GPT2GIGA_VERBOSE="False"` — включает/отключает вывод подробной информации;
 - `GPT2GIGA_PASS_MODEL="False"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat;
 - `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
 - `GIGACHAT_MODEL="GigaChat"` — модель GigaChat API, которая будет обрабатывать запросы по умолчанию;
 - `GPT2GIGA_TIMEOUT="600"` — таймаут для запросов к GigaChat API (в секундах);
+- `GIGACHAT_MTLS_AUTH` -  использовать аутентификацию по сертефикатам mTLS;
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов.
 
-Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#%D0%BD%D0%B0%D1%81%D1%82%D1%80%D0%BE%D0%B9%D0%BA%D0%B0-%D0%BF%D0%B5%D1%80%D0%B5%D0%BC%D0%B5%D0%BD%D0%BD%D1%8B%D1%85-%D0%BE%D0%BA%D1%80%D1%83%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F):
+Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 
-- `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля.
-- `GIGACHAT_CREDENTIALS` — для авторизации с помощью ключа авторизации.
-- `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токен доступа, полученного в обмен на ключ.
+- `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля;
+- `GIGACHAT_CREDENTIALS` и `GIGACHAT_SCOPE` — для авторизации с помощью ключа авторизации;
+- `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токена доступа, полученного в обмен на ключ;
+- `GIGACHAT_CA_BUNDLE_FILE` - путь к файлу сертификата корневого центра сертификации;
+- `GIGACHAT_CERT_FILE` - путь к клиентскому сертификату;
+- `GIGACHAT_KEY_FILE` - путь к закрытому ключу;
+- `GIGACHAT_KEY_FILE_PASSWORD` - пароль от закрытого ключа;
 - `GIGACHAT_VERIFY_SSL_CERTS` — для того, что бы проверять SSL сертификаты, по умолчанию `False`.
 
 ### Пример запуска утилиты с заданными параметрами
@@ -159,15 +174,16 @@ gpt2giga \
 
 ## Авторизация с помощью заголовка
 
-Утилита может пробовать принимать содержимое заголовка `Authorization` и авторизироваться через него в GigaChat API (через креды, юзер-парль или access_token)
+Утилита может авторизовать запросы в GigaChat API с помощью данных, полученных в заголовке `Authorization`.
 
-Для этого нужно запустить gpt2giga с аргументом `--pass-token` или использовать переменную окружения `GPT2GIGA_PASS_TOKEN=True`. 
+Для этого запустите gpt2giga с аргументом `--pass-token` или задайте переменную окружения `GPT2GIGA_PASS_TOKEN=True`.
+Поддерживается авторизация с помощью ключа, токена доступа и логина и пароля.
 
-Поддерживаются варианты:
+Возможные варианты содержимого заголовка `Authorization`:
 
-- `giga-cred-<credentials>:<scope>` — для авторизации credentials + scope
-- `giga-user-<user>:<password>` — для авторизации через юзер:пароль
-- `giga-auth-<access_token>` — для передачи access_token (который получается одним из первых двух способов)
+- `giga-cred-<credentials>:<scope>` — авторизация с помощью ключа. Вместо `<scope>` нужно указать версию API, к которой будут выполняться запросы. [Подробнее о ключе авторизации и версии API](https://github.com/ai-forever/gigachat?tab=readme-ov-file#параметры-объекта-gigachat).
+- `giga-auth-<access_token>` — при авторизации с помощью токена доступа. Токен доступа получается в обмен на ключ авторизации и действителен в течение 30 минут.
+- `giga-user-<user>:<password>` — при авторизации с помощью логина и пароля.
 
 ## Совместимые приложения
 
@@ -178,6 +194,7 @@ gpt2giga \
 | [Aider](https://aider.chat/)            | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](/integrations/aider)         |
 | [n8n](https://n8n.io/)                  | Платформа для создания nocode-агентов                                                                                                              |
 | [Cline](https://github.com/cline/cline) | AI-ассистент разработчика                                                                                                                          |
+| [OpenHands](https://github.com/All-Hands-AI/OpenHands) | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](/integrations/openhands)                                                                                                                        |
 
 ## Лицензия
 
