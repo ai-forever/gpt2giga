@@ -643,7 +643,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
             usage_tokens += embedding.pop("usage", {}).get("prompt_tokens", 0)
 
         giga_dict["model"] = gpt_model
-        giga_dict["usage"] = {
+        giga_dict["usage_tokens"] = {
             "prompt_tokens": usage_tokens,
             "total_tokens": usage_tokens
         }
