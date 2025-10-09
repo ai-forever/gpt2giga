@@ -3,9 +3,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args: 
+      - PYTHON_VERSION=3.10
     container_name: gpt2giga
     ports:
       - "8090:8090"
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
