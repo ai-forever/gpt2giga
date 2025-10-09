@@ -670,7 +670,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
                         processed.append(row)
                 return processed
         else:
-            return input_data
+            return [input_data]
 
     @staticmethod
     @lru_cache
