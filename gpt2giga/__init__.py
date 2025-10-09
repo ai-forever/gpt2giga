@@ -621,9 +621,9 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
 
     def _process_embeddings_request(self, json_body: Dict) -> Dict:
         """Обрабатывает запрос embeddings"""
-        encoding_format = json_body.get("encoding_format", "float")
-        dimensions = json_body.get("dimensions")
-        gpt_model = json_body.get("model", self.config.model)
+        encoding_format = json_body.pop("encoding_format", "float")
+        dimensions = json_body.pop("dimensions", None)
+        gpt_model = json_body.pop("model", self.config.model)
 
         if dimensions:
             self.logger.warning("Dimension parameter not supported in GigaChat")
