@@ -21,11 +21,10 @@ import tiktoken
 from PIL import Image
 from dotenv import find_dotenv, load_dotenv
 from gigachat import GigaChat
-from gigachat.client import GIGACHAT_MODEL
 from gigachat.models import Chat, ChatCompletion, ChatCompletionChunk, Messages
-from gigachat.settings import SCOPE, BASE_URL
-from pydantic import Field, validator
-from pydantic_settings import BaseSettings
+from gigachat.settings import Settings as GigachatSettings
+from pydantic.v1 import Field
+from gigachat.pydantic_v1 import BaseSettings
 
 # Настройка логирования
 logging.basicConfig(
@@ -35,35 +34,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ProxyConfig(BaseSettings):
-    """Конфигурация прокси-сервера"""
+class ProxySettings(BaseSettings):
     host: str = Field(default="localhost", description="Хост для запуска сервера")
     port: int = Field(default=8090, description="Порт для запуска сервера")
-    mtls_ca_cert_path: Optional[str] = Field(None, description="Путь к CA сертификату mTLS")
-    mtls_cert_file_path: Optional[str] = Field(None, description="Путь к клиентскому сертификату mTLS")
-    mtls_key_file_path: Optional[str] = Field(None, description="Путь к приватному ключу mTLS")
-    verbose: bool = Field(default=False, description="Подробное логирование")
     pass_model: bool = Field(default=False, description="Передавать модель из запроса в API")
     pass_token: bool = Field(default=False, description="Передавать токен из запроса в API")
-    base_url: str = Field(default=BASE_URL, description="Базовый URL GigaChat API")
-    model: str = Field(default=GIGACHAT_MODEL, description="Модель GigaChat по умолчанию")
-    timeout: int = Field(default=600, description="Таймаут для запросов")
     embeddings: str = Field(default="EmbeddingsGigaR", description="Модель для эмбеддингов")
     verify_ssl_certs: bool = Field(default=False, description="Проверять SSL сертификаты")
-    mtls_auth: bool = Field(default=False, description="Использовать mTLS аутентификацию")
     enable_images: bool = Field(default=False, description="Включить загрузку изображений")
+    verbose: bool = Field(default=False, description="verbose of logs")
     env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 
     class Config:
         env_prefix = "gpt2giga_"
         case_sensitive = False
 
-    @validator('timeout')
-    def timeout_positive(cls, v):
-        if v <= 0:
-            raise ValueError('Timeout must be positive')
-        return v
-
+class ProxyConfig(BaseSettings):
+    """Конфигурация прокси-сервера"""
+    proxy_settings: ProxySettings = Field(default_factory=ProxySettings)
+    gigachat_settings: GigachatSettings = Field(default_factory=GigachatSettings)
 
 class ImageProcessor:
     """Обработчик изображений с кэшированием"""
@@ -189,7 +178,7 @@ class RequestTransformer:
             elif (content_part.get("type") == "image_url" and
                   content_part.get("image_url") and
                   self.image_processor and
-                  self.config.enable_images):
+                  self.config.proxy_settings.enable_images):
 
                 file_id = self.image_processor.upload_image(content_part["image_url"]["url"])
                 if file_id:
@@ -221,7 +210,7 @@ class RequestTransformer:
 
         # Обрабатываем температуру
         gpt_model = data.get("model", None)
-        if not self.config.pass_model and gpt_model:
+        if not self.config.proxy_settings.pass_model and gpt_model:
             del transformed["model"]
         temperature = transformed.pop("temperature", 0)
         if temperature == 0:
@@ -371,14 +360,14 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
         cls.giga = giga_client
         cls.response_processor = ResponseProcessor()
 
-        if config.enable_images:
+        if config.proxy_settings.enable_images:
             cls.image_processor = ImageProcessor(giga_client)
 
         cls.request_transformer = RequestTransformer(config, cls.image_processor)
 
-    def log_message(self, format: str, *args):
+    def log_message(self, fmt: str, *args):
         """Переопределяет стандартное логирование HTTP запросов"""
-        self.logger.info(f"{self.address_string()} - {format % args}")
+        self.logger.info(f"{self.address_string()} - {fmt % args}")
 
     def _send_cors_headers(self):
         """Отправляет CORS заголовки"""
@@ -409,7 +398,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
 
     def _setup_gigachat_auth(self):
         """Настраивает аутентификацию GigaChat из заголовков"""
-        if not self.config.pass_token:
+        if not self.config.proxy_settings.pass_token:
             return
 
         token = self.headers.get("Authorization", "").replace("Bearer ", "", 1)
@@ -426,7 +415,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
         elif token.startswith("giga-cred-"):
             parts = token.replace("giga-cred-", "", 1).split(":", 1)
             self.giga._settings.credentials = parts[0]
-            self.giga._settings.scope = parts[1] if len(parts) > 1 else SCOPE
+            self.giga._settings.scope = parts[1] if len(parts) > 1 else self.config.gigachat_settings.scope
             self.logger.debug("Using credentials auth")
         elif token.startswith("giga-auth-"):
             self.giga._settings.access_token = token.replace("giga-auth-", "", 1)
@@ -463,7 +452,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
 
             self.logger.info(f"Processing chat request with model: {json_body.get('model', 'default')}")
 
-            if self.config.verbose:
+            if self.config.proxy_settings.verbose:
                 self.logger.debug(f"Request headers: {dict(self.headers)}")
                 self.logger.debug(f"Request body: {json.dumps(json_body, ensure_ascii=False, indent=2)}")
 
@@ -487,13 +476,13 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
             chat_completion = self._send_to_gigachat(json_body)
             response_data = self.response_processor.process_response(
                 chat_completion,
-                json_body.get("model", self.config.model),
+                json_body.get("model", self.config.gigachat_settings.model),
                 is_tool_call="tools" in json_body
             )
 
             response_body = json.dumps(response_data, ensure_ascii=False, indent=2).encode("utf-8")
 
-            if self.config.verbose:
+            if self.config.proxy_settings.verbose:
                 self.logger.debug(f"Response: {response_body}")
 
             self._send_json_response(response_body)
@@ -512,14 +501,14 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
             for chunk in self._send_to_gigachat_stream(json_body):
                 chunk_data = self.response_processor.process_stream_chunk(
                     chunk,
-                    json_body.get("model", self.config.model),
+                    json_body.get("model", self.config.gigachat_settings.model),
                     is_tool_call="tools" in json_body
                 )
 
                 chunk_str = f"data: {json.dumps(chunk_data, ensure_ascii=False)}\r\n\r\n"
                 self.wfile.write(chunk_str.encode("utf-8"))
 
-                if self.config.verbose:
+                if self.config.proxy_settings.verbose:
                     self.logger.debug(f"Stream chunk: {chunk_str}")
 
             self.wfile.write(b"data: [DONE]\r\n\r\n")
@@ -536,6 +525,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
         self._add_openai_headers()
         self.end_headers()
         self.wfile.write(response_body)
+        print("ALL GOOD")
 
     def _add_openai_headers(self):
         """Добавляет стандартные заголовки OpenAI"""
@@ -604,7 +594,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
 
             self.logger.info("Processing embeddings request")
 
-            if self.config.verbose:
+            if self.config.proxy_settings.verbose:
                 self.logger.debug(f"Request headers: {dict(self.headers)}")
                 self.logger.debug(f"Request body: {json.dumps(json_body, ensure_ascii=False, indent=2)}")
 
@@ -612,7 +602,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
 
             response_data = self._process_embeddings_request(json_body)
             response_body = json.dumps(response_data, ensure_ascii=False, indent=2).encode("utf-8")
-
+            print(response_body)
             self._send_json_response(response_body)
             self.logger.info("Embeddings request completed successfully")
 
@@ -623,7 +613,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
         """Обрабатывает запрос embeddings"""
         encoding_format = json_body.pop("encoding_format", "float")
         dimensions = json_body.pop("dimensions", None)
-        gpt_model = json_body.pop("model", self.config.model)
+        gpt_model = json_body.pop("model", self.config.proxy_settings.embeddings)
 
         if dimensions:
             self.logger.warning("Dimension parameter not supported in GigaChat")
@@ -633,7 +623,7 @@ class ProxyHandler(http.server.SimpleHTTPRequestHandler):
         processed_input = self._preprocess_embedding_input(input_data, gpt_model)
 
         self.logger.info(f"Getting embeddings for {len(processed_input)} texts")
-        giga_resp = self.giga.embeddings(texts=processed_input, model=self.config.embeddings)
+        giga_resp = self.giga.embeddings(texts=processed_input, model=self.config.proxy_settings.embeddings)
         giga_dict = giga_resp.dict()
 
         usage_tokens = 0
@@ -721,33 +711,24 @@ class ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 def run_proxy_server(config: ProxyConfig):
     """Запускает прокси-сервер"""
-    logger.info(f"Starting proxy server on {config.host}:{config.port}")
+    logger.info(f"Starting proxy server on {config.proxy_settings.host}:{config.proxy_settings.port}")
     logger.info(f"Configuration: {config.dict()}")
 
     # Инициализируем GigaChat клиент
-    giga_client = GigaChat(
-        base_url=config.base_url,
-        ca_bundle_file=config.mtls_ca_cert_path if config.mtls_auth else None,
-        cert_file=config.mtls_cert_file_path if config.mtls_auth else None,
-        key_file=config.mtls_key_file_path if config.mtls_auth else None,
-        model=config.model,
-        timeout=config.timeout,
-        verify_ssl_certs=config.verify_ssl_certs,
-        profanity_check=os.getenv('GIGACHAT_PROFANITY_CHECK', False)
-    )
+    giga_client = GigaChat(**config.gigachat_settings.dict())
 
     # Инициализируем обработчик
     ProxyHandler.initialize(config, giga_client)
 
     # Настраиваем логирование
-    logging_level = logging.DEBUG if config.verbose else logging.INFO
+    logging_level = logging.DEBUG if config.proxy_settings.verbose else logging.INFO
     logging.getLogger().setLevel(logging_level)
 
     # Запускаем сервер
-    server_address = (config.host, config.port)
+    server_address = (config.proxy_settings.host, config.proxy_settings.port)
     httpd = ThreadingHTTPServer(server_address, ProxyHandler)
 
-    logger.info(f"Proxy server is running on http://{config.host}:{config.port}")
+    logger.info(f"Proxy server is running on http://{config.proxy_settings.host}:{config.proxy_settings.port}")
 
     try:
         httpd.serve_forever()
@@ -758,24 +739,48 @@ def run_proxy_server(config: ProxyConfig):
         logger.info("Server shut down gracefully")
 
 
+def add_nested_arguments(parser, model_class, prefix=""):
+    """Рекурсивно добавляет аргументы для вложенных моделей"""
+    for field_name, field in model_class.__fields__.items():
+        if hasattr(field.type_, '__fields__'):  # Если поле само является моделью
+            add_nested_arguments(parser, field.type_, f"{prefix}{field_name}-")
+        else:
+            arg_name = f"--{prefix}{field_name.replace('_', '-')}"
+            help_text = field.field_info.description or field_name
+
+            if field.type_ == bool:
+                parser.add_argument(arg_name, action="store_true", default=None, help=help_text)
+            else:
+                parser.add_argument(arg_name, type=field.type_, default=None, help=help_text)
+
+
 def load_config() -> ProxyConfig:
     """Загружает конфигурацию из аргументов командной строки и переменных окружения"""
     parser = argparse.ArgumentParser(
         description="Gpt2Giga converter proxy. Use GigaChat instead of OpenAI GPT models"
     )
 
-    # Добавляем аргументы командной строки
-    for field_name, field in ProxyConfig.__pydantic_fields__.items():
+    # Добавляем аргументы для proxy_settings
+    for field_name, field in ProxySettings.__fields__.items():
         if field_name == "env_path":
             continue
+        arg_name = f"--proxy-{field_name.replace('_', '-')}"
+        help_text = field.field_info.description or field_name
 
-        arg_name = f"--{field_name.replace('_', '-')}"
-        help_text = field.description or field_name
-
-        if field.annotation == bool:
+        if field.type_ == bool:
             parser.add_argument(arg_name, action="store_true", default=None, help=help_text)
         else:
-            parser.add_argument(arg_name, type=field.annotation, default=None, help=help_text)
+            parser.add_argument(arg_name, type=field.type_, default=None, help=help_text)
+
+    # Добавляем аргументы для gigachat_settings
+    for field_name, field in GigachatSettings.__fields__.items():
+        arg_name = f"--gigachat-{field_name.replace('_', '-')}"
+        help_text = field.field_info.description or field_name
+
+        if field.type_ == bool:
+            parser.add_argument(arg_name, action="store_true", default=None, help=help_text)
+        else:
+            parser.add_argument(arg_name, type=field.type_, default=None, help=help_text)
 
     parser.add_argument("--env-path", type=str, default=None, help="Path to .env file")
 
@@ -788,14 +793,25 @@ def load_config() -> ProxyConfig:
     if env_path:
         logger.info(f"Loaded environment from: {env_path}")
 
-    # Создаем конфиг, объединяя аргументы командной строки и переменные окружения
-    config_dict = {}
-    for field_name in ProxyConfig.__fields__:
-        arg_value = getattr(args, field_name, None)
-        if arg_value is not None:
-            config_dict[field_name] = arg_value
+    # Собираем конфигурацию из CLI аргументов
+    proxy_settings_dict = {}
+    gigachat_settings_dict = {}
 
-    config = ProxyConfig(**config_dict)
+    for arg_name, arg_value in vars(args).items():
+        if arg_value is not None:
+            if arg_name.startswith('proxy_'):
+                field_name = arg_name.replace('proxy_', '').replace('-', '_')
+                proxy_settings_dict[field_name] = arg_value
+            elif arg_name.startswith('gigachat_'):
+                field_name = arg_name.replace('gigachat_', '').replace('-', '_')
+                gigachat_settings_dict[field_name] = arg_value
+
+    # Создаем конфиг
+    config = ProxyConfig(
+        proxy_settings=ProxySettings(**proxy_settings_dict) if proxy_settings_dict else ProxySettings(),
+        gigachat_settings=GigachatSettings(**gigachat_settings_dict) if gigachat_settings_dict else GigachatSettings()
+    )
+
     return config
 
 
