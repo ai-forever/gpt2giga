@@ -1,0 +1,329 @@
+import base64
+import hashlib
+import io
+import json
+import logging
+import re
+import time
+import uuid
+from typing import Optional, List, Dict, Tuple
+
+import httpx
+from PIL import Image
+from gigachat import GigaChat
+from gigachat.models import ChatCompletionChunk, ChatCompletion, Chat, Messages
+
+from gpt2giga import ProxyConfig
+
+
+class ImageProcessor:
+    """Обработчик изображений с кэшированием"""
+
+    def __init__(self, giga_client: GigaChat):
+        self.giga = giga_client
+        self.cache: dict[str, str] = {}
+        self.logger = logging.getLogger(f"{__name__}.ImageProcessor")
+
+    def upload_image(self, image_url: str) -> Optional[str]:
+        """Загружает изображение в GigaChat и возвращает file_id"""
+        base64_matches = re.search(r"data:(.+);(.+),(.+)", image_url)
+        hashed = hashlib.sha256(image_url.encode()).hexdigest()
+
+        if hashed in self.cache:
+            self.logger.debug(f"Image found in cache: {hashed}")
+            return self.cache[hashed]
+
+        try:
+            if not base64_matches:
+                self.logger.info(f"Downloading image from URL: {image_url[:100]}...")
+                response = httpx.get(image_url, timeout=30)
+                content_type = response.headers.get('content-type', "")
+                content_bytes = response.content
+
+                if not content_type.startswith("image/"):
+                    self.logger.warning(f"Invalid content type for image: {content_type}")
+                    return None
+            else:
+                content_type, type_, image_str = base64_matches.groups()
+                if type_ != "base64":
+                    self.logger.warning(f"Unsupported encoding type: {type_}")
+                    return None
+                content_bytes = base64.b64decode(image_str)
+                self.logger.debug("Decoded base64 image")
+
+            # Конвертируем и сжимаем изображение
+            image = Image.open(io.BytesIO(content_bytes)).convert("RGB")
+            buf = io.BytesIO()
+            image.save(buf, format='JPEG', quality=85)
+            buf.seek(0)
+
+            self.logger.info("Uploading image to GigaChat...")
+            file = self.giga.upload_file((f"{uuid.uuid4()}.jpg", buf))
+
+            self.cache[hashed] = file.id_
+            self.logger.info(f"Image uploaded successfully, file_id: {file.id_}")
+            return file.id_
+
+        except Exception as e:
+            self.logger.error(f"Error processing image: {e}")
+            return None
+
+
+class RequestTransformer:
+    """Трансформер запросов из OpenAI в GigaChat формат"""
+
+    def __init__(self, config: ProxyConfig, image_processor: Optional[ImageProcessor] = None):
+        self.config = config
+        self.image_processor = image_processor
+        self.logger = logging.getLogger(f"{__name__}.RequestTransformer")
+
+    def transform_messages(self, messages: List[Dict]) -> List[Dict]:
+        """Трансформирует сообщения в формат GigaChat"""
+        transformed_messages = []
+        attachment_count = 0
+
+        for i, message in enumerate(messages):
+            self.logger.debug(f"Processing message {i}: role={message.get('role')}")
+
+            # Удаляем неиспользуемые поля
+            message.pop("name", None)
+
+            # Преобразуем роли
+            if message["role"] == "developer":
+                message["role"] = "system"
+            elif message["role"] == "system" and i > 0:
+                message["role"] = "user"
+            elif message["role"] == "tool":
+                message["role"] = "function"
+                try:
+                    json.loads(message.get("content", ""))
+                except json.JSONDecodeError:
+                    message["content"] = json.dumps(message.get("content", ""), ensure_ascii=False)
+
+            # Обрабатываем контент
+            if message.get("content") is None:
+                message["content"] = ""
+
+            # Обрабатываем tool_calls
+            if "tool_calls" in message and message["tool_calls"]:
+                message["function_call"] = message["tool_calls"][0]["function"]
+                try:
+                    message["function_call"]["arguments"] = json.loads(
+                        message["function_call"]["arguments"]
+                    )
+                except json.JSONDecodeError as e:
+                    self.logger.warning(f"Failed to parse function call arguments: {e}")
+
+            # Обрабатываем составной контент (текст + изображения)
+            if isinstance(message["content"], list):
+                texts, attachments = self._process_content_parts(message["content"])
+                message["content"] = "\n".join(texts)
+                message["attachments"] = attachments
+                attachment_count += len(attachments)
+
+            transformed_messages.append(message)
+
+        # Проверяем лимиты вложений
+        if attachment_count > 10:
+            self._limit_attachments(transformed_messages)
+
+        return transformed_messages
+
+    def _process_content_parts(self, content_parts: List[Dict]) -> Tuple[List[str], List[str]]:
+        """Обрабатывает части контента (текст и изображения)"""
+        texts = []
+        attachments = []
+
+        for content_part in content_parts:
+            if content_part.get("type") == "text":
+                texts.append(content_part.get("text", ""))
+            elif (content_part.get("type") == "image_url" and
+                  content_part.get("image_url") and
+                  self.image_processor and
+                  self.config.proxy_settings.enable_images):
+
+                file_id = self.image_processor.upload_image(content_part["image_url"]["url"])
+                if file_id:
+                    attachments.append(file_id)
+                    self.logger.info(f"Added attachment: {file_id}")
+
+        # Ограничиваем количество изображений
+        if len(attachments) > 2:
+            self.logger.warning("GigaChat can only handle 2 images per message. Cutting off excess.")
+            attachments = attachments[:2]
+
+        return texts, attachments
+
+    def _limit_attachments(self, messages: List[Dict]):
+        """Ограничивает количество вложений в сообщениях"""
+        cur_attachment_count = 0
+        for message in reversed(messages):
+            message_attachments = len(message.get("attachments", []))
+            if cur_attachment_count + message_attachments > 10:
+                allowed = 10 - cur_attachment_count
+                message["attachments"] = message["attachments"][:allowed]
+                self.logger.warning(f"Limited attachments in message to {allowed}")
+                break
+            cur_attachment_count += message_attachments
+
+    def transform_chat_parameters(self, data: Dict) -> Dict:
+        """Трансформирует параметры чата"""
+        transformed = data.copy()
+
+        # Обрабатываем температуру
+        gpt_model = data.get("model", None)
+        if not self.config.proxy_settings.pass_model and gpt_model:
+            del transformed["model"]
+        temperature = transformed.pop("temperature", 0)
+        if temperature == 0:
+            transformed["top_p"] = 0
+        elif temperature > 0:
+            transformed["temperature"] = temperature
+
+        # Преобразуем tools в functions
+        if "functions" not in transformed and "tools" in transformed:
+            functions = []
+            for tool in transformed["tools"]:
+                if tool["type"] == "function":
+                    functions.append(tool.get("function", tool))
+            transformed["functions"] = functions
+            self.logger.debug(f"Transformed {len(functions)} tools to functions")
+
+        return transformed
+
+    def send_to_gigachat(self, data: dict) -> Chat:
+        """Отправляет запрос в GigaChat API"""
+        print(data)
+        transformed_data = self.transform_chat_parameters(data)
+        transformed_data["messages"] = self.transform_messages(
+            transformed_data.get("messages", [])
+        )
+
+        chat = Chat.parse_obj(transformed_data)
+        chat.messages = self._collapse_messages(chat.messages)
+
+        self.logger.info("Sending request to GigaChat API")
+
+        return chat
+
+    @staticmethod
+    def _collapse_messages(messages: List[Messages]) -> List[Messages]:
+        """Объединяет последовательные пользовательские сообщения"""
+        collapsed_messages = []
+        for message in messages:
+            if (collapsed_messages and
+                    message.role == "user" and
+                    collapsed_messages[-1].role == "user"):
+                collapsed_messages[-1].content += "\n" + message.content
+            else:
+                collapsed_messages.append(message)
+        return collapsed_messages
+
+class ResponseProcessor:
+    """Обработчик ответов от GigaChat в формат OpenAI"""
+
+    def __init__(self):
+        self.logger = logging.getLogger(f"{__name__}.ResponseProcessor")
+
+    def process_response(self, giga_resp: ChatCompletion, gpt_model: str, is_tool_call: bool = False) -> dict:
+        """Обрабатывает обычный ответ от GigaChat"""
+        giga_dict = giga_resp.dict()
+
+        for choice in giga_dict["choices"]:
+            self._process_choice(choice, is_tool_call)
+
+        result = {
+            "id": f"chatcmpl-{uuid.uuid4()}",
+            "object": "chat.completion",
+            "created": int(time.time() * 1000),
+            "model": gpt_model,
+            "choices": giga_dict["choices"],
+            "usage": self._build_usage(giga_dict["usage"]),
+            "system_fingerprint": f"fp_{uuid.uuid4()}",
+        }
+
+        self.logger.debug("Processed chat completion response")
+        return result
+
+    def process_stream_chunk(self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False) -> dict:
+        """Обрабатывает стриминговый чанк от GigaChat"""
+        giga_dict = giga_resp.dict()
+
+        for choice in giga_dict["choices"]:
+            self._process_choice(choice, is_tool_call, is_stream=True)
+
+        result = {
+            "id": f"chatcmpl-{uuid.uuid4()}",
+            "object": "chat.completion.chunk",
+            "created": int(time.time() * 1000),
+            "model": gpt_model,
+            "choices": giga_dict["choices"],
+            "usage": self._build_usage(giga_dict.get("usage")),
+            "system_fingerprint": f"fp_{uuid.uuid4()}",
+        }
+
+        self.logger.debug("Processed stream chunk")
+        return result
+
+    def _process_choice(self, choice: Dict, is_tool_call: bool, is_stream: bool = False):
+        """Обрабатывает отдельный choice"""
+        message_key = "delta" if is_stream else "message"
+
+        choice["index"] = 0
+        choice["logprobs"] = None
+
+        if message_key in choice:
+            message = choice[message_key]
+            message["refusal"] = None
+
+            if message.get("role") == "assistant" and message.get("function_call"):
+                self._process_function_call(message, is_tool_call)
+
+    def _process_function_call(self, message: Dict, is_tool_call: bool):
+        """Обрабатывает function call"""
+        try:
+            arguments = json.dumps(
+                message["function_call"]["arguments"],
+                ensure_ascii=False,
+            )
+            function_call = {
+                "name": message["function_call"]["name"],
+                "arguments": arguments,
+            }
+
+            if is_tool_call:
+                message["tool_calls"] = [{
+                    "id": f"call_{uuid.uuid4()}",
+                    "type": "function",
+                    "function": function_call
+                }]
+                if message.get("finish_reason") == "function_call":
+                    message["finish_reason"] = "tool_calls"
+            else:
+                message["function_call"] = function_call
+
+            if message.get("content") == "":
+                message["content"] = None
+
+            message.pop("functions_state_id", None)
+
+        except Exception as e:
+            self.logger.error(f"Error processing function call: {e}")
+
+    @staticmethod
+    def _build_usage(usage_data: Optional[Dict]) -> Optional[Dict]:
+        """Строит объект usage"""
+        if not usage_data:
+            return None
+
+        return {
+            "prompt_tokens": usage_data["prompt_tokens"],
+            "completion_tokens": usage_data["completion_tokens"],
+            "total_tokens": usage_data["total_tokens"],
+            "prompt_tokens_details": {
+                "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
+            },
+            "completion_tokens_details": {
+                "reasoning_tokens": 0
+            },
+        }
