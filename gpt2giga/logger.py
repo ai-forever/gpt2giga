@@ -1,13 +1,20 @@
 import logging
+import sys
 
+def init_logger(verbose: bool = False) -> logging.Logger:
+    """Initialize a simple console logger."""
+    level = logging.DEBUG if verbose else logging.INFO
 
-def init_logger(name: str) -> logging.Logger:
-    """The main purpose of this function is to ensure that loggers are
-    retrieved in such a way that we can be sure the root vllm logger has
-    already been configured."""
+    logger = logging.getLogger("gpt2giga")
+    logger.setLevel(level)
 
-    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter(
+            fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S"
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
     return logger
-
-logger = init_logger("gpt2giga")

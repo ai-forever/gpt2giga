@@ -5,7 +5,7 @@ from dotenv import find_dotenv, load_dotenv
 from gigachat.settings import Settings as GigachatSettings
 
 from gpt2giga.config import ProxyConfig, ProxySettings
-from gpt2giga.logger import logger
+from gpt2giga.logger import init_logger
 
 
 def load_config() -> ProxyConfig:
@@ -44,9 +44,6 @@ def load_config() -> ProxyConfig:
     env_path = find_dotenv(args.env_path if args.env_path else f"{os.getcwd()}/.env")
     load_dotenv(env_path)
 
-    if env_path:
-        logger.info(f"Loaded environment from: {env_path}")
-
     # Собираем конфигурацию из CLI аргументов
     proxy_settings_dict = {}
     gigachat_settings_dict = {}
@@ -65,5 +62,7 @@ def load_config() -> ProxyConfig:
         proxy_settings=ProxySettings(**proxy_settings_dict) if proxy_settings_dict else ProxySettings(env_path),
         gigachat_settings=GigachatSettings(**gigachat_settings_dict) if gigachat_settings_dict else GigachatSettings()
     )
-    logger.info(f"Config: {config}")
+    logger = init_logger(config.proxy_settings.verbose)
+    logger.debug(f"Proxy settings: {config.proxy_settings}")
+    logger.debug(f"GigaChat settings: {config.gigachat_settings}")
     return config

@@ -193,7 +193,6 @@ class RequestTransformer:
 
     def send_to_gigachat(self, data: dict) -> Chat:
         """Отправляет запрос в GigaChat API"""
-        print(data)
         transformed_data = self.transform_chat_parameters(data)
         transformed_data["messages"] = self.transform_messages(
             transformed_data.get("messages", [])
@@ -202,7 +201,8 @@ class RequestTransformer:
         chat = Chat.parse_obj(transformed_data)
         chat.messages = self._collapse_messages(chat.messages)
 
-        self.logger.info("Sending request to GigaChat API")
+        self.logger.debug("Sending request to GigaChat API")
+        self.logger.debug(f"Request: {chat}")
 
         return chat
 
@@ -243,6 +243,7 @@ class ResponseProcessor:
         }
 
         self.logger.debug("Processed chat completion response")
+        self.logger.debug(f"Response: {result}")
         return result
 
     def process_stream_chunk(self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False) -> dict:
@@ -262,7 +263,7 @@ class ResponseProcessor:
             "system_fingerprint": f"fp_{uuid.uuid4()}",
         }
 
-        self.logger.debug("Processed stream chunk")
+        self.logger.debug(f"Processed stream chunk: {result}")
         return result
 
     def _process_choice(self, choice: Dict, is_tool_call: bool, is_stream: bool = False):
