@@ -62,7 +62,4 @@ def load_config() -> ProxyConfig:
         proxy_settings=ProxySettings(**proxy_settings_dict) if proxy_settings_dict else ProxySettings(env_path),
         gigachat_settings=GigachatSettings(**gigachat_settings_dict) if gigachat_settings_dict else GigachatSettings()
     )
-    logger = init_logger(config.proxy_settings.verbose)
-    logger.debug(f"Proxy settings: {config.proxy_settings}")
-    logger.debug(f"GigaChat settings: {config.gigachat_settings}")
     return config
