@@ -1,8 +1,9 @@
 from typing import Optional
 
+from gigachat.pydantic_v1 import BaseSettings
 from gigachat.settings import Settings as GigachatSettings
 from pydantic.v1 import Field
-from gigachat.pydantic_v1 import BaseSettings
+
 
 class ProxySettings(BaseSettings):
     host: str = Field(default="localhost", description="Хост для запуска сервера")

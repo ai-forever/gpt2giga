@@ -303,7 +303,7 @@ class ResponseProcessor:
                 message["function_call"] = function_call
 
             if message.get("content") == "":
-                message["content"] = None
+                message["content"] = arguments
 
             message.pop("functions_state_id", None)
 

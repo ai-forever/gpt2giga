@@ -1,7 +1,9 @@
 import json
 from functools import wraps
-from fastapi import HTTPException
+
 import gigachat
+from fastapi import HTTPException
+
 
 def exceptions_handler(func):
     @wraps(func)

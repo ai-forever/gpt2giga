@@ -2,10 +2,11 @@ import argparse
 import os
 
 from dotenv import find_dotenv, load_dotenv
+from gigachat.settings import Settings as GigachatSettings
 
 from gpt2giga.config import ProxyConfig, ProxySettings
 from gpt2giga.logger import logger
-from gigachat.settings import Settings as GigachatSettings
+
 
 def load_config() -> ProxyConfig:
     """Загружает конфигурацию из аргументов командной строки и переменных окружения"""
