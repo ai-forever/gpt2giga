@@ -1,3 +1,3 @@
-from gpt2giga import main
+#from gpt2giga import main
 
-main()
+#main()

@@ -3,7 +3,8 @@ import os
 
 from dotenv import find_dotenv, load_dotenv
 
-from gpt2giga import ProxyConfig, ProxySettings, logger
+from gpt2giga.config import ProxyConfig, ProxySettings
+from gpt2giga.logger import logger
 from gigachat.settings import Settings as GigachatSettings
 
 def load_config() -> ProxyConfig:
@@ -19,7 +20,7 @@ def load_config() -> ProxyConfig:
         arg_name = f"--proxy-{field_name.replace('_', '-')}"
         help_text = field.field_info.description or field_name
 
-        if field.type_ == bool:
+        if isinstance(field.type_, bool):
             parser.add_argument(arg_name, action="store_true", default=None, help=help_text)
         else:
             parser.add_argument(arg_name, type=field.type_, default=None, help=help_text)
@@ -29,7 +30,7 @@ def load_config() -> ProxyConfig:
         arg_name = f"--gigachat-{field_name.replace('_', '-')}"
         help_text = field.field_info.description or field_name
 
-        if field.type_ == bool:
+        if isinstance(field.type_, bool):
             parser.add_argument(arg_name, action="store_true", default=None, help=help_text)
         else:
             parser.add_argument(arg_name, type=field.type_, default=None, help=help_text)

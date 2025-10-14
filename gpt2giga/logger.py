@@ -9,3 +9,5 @@ def init_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
 
     return logger
+
+logger = init_logger("gpt2giga")

@@ -13,16 +13,16 @@ from PIL import Image
 from gigachat import GigaChat
 from gigachat.models import ChatCompletionChunk, ChatCompletion, Chat, Messages
 
-from gpt2giga import ProxyConfig
+from gpt2giga.config import ProxyConfig
 
 
-class ImageProcessor:
+class AttachmentProcessor:
     """Обработчик изображений с кэшированием"""
 
     def __init__(self, giga_client: GigaChat):
         self.giga = giga_client
         self.cache: dict[str, str] = {}
-        self.logger = logging.getLogger(f"{__name__}.ImageProcessor")
+        self.logger = logging.getLogger(f"{__name__}.AttachmentProcessor")
 
     def upload_image(self, image_url: str) -> Optional[str]:
         """Загружает изображение в GigaChat и возвращает file_id"""
@@ -72,9 +72,9 @@ class ImageProcessor:
 class RequestTransformer:
     """Трансформер запросов из OpenAI в GigaChat формат"""
 
-    def __init__(self, config: ProxyConfig, image_processor: Optional[ImageProcessor] = None):
+    def __init__(self, config: ProxyConfig, attachment_processor: Optional[AttachmentProcessor] = None):
         self.config = config
-        self.image_processor = image_processor
+        self.attachment_processor = attachment_processor
         self.logger = logging.getLogger(f"{__name__}.RequestTransformer")
 
     def transform_messages(self, messages: List[Dict]) -> List[Dict]:
@@ -139,10 +139,10 @@ class RequestTransformer:
                 texts.append(content_part.get("text", ""))
             elif (content_part.get("type") == "image_url" and
                   content_part.get("image_url") and
-                  self.image_processor and
+                  self.attachment_processor and
                   self.config.proxy_settings.enable_images):
 
-                file_id = self.image_processor.upload_image(content_part["image_url"]["url"])
+                file_id = self.attachment_processor.upload_image(content_part["image_url"]["url"])
                 if file_id:
                     attachments.append(file_id)
                     self.logger.info(f"Added attachment: {file_id}")
