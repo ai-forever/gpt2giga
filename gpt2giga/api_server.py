@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from gigachat import GigaChat
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
 from gpt2giga.cli import load_config
@@ -35,7 +36,13 @@ async def lifespan(app: FastAPI):
 def create_app()-> FastAPI:
     app = FastAPI(lifespan=lifespan,
                   title="Gpt2Giga converter proxy")
-
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     @app.get("/", include_in_schema=False)
     async def docs_redirect():
         return RedirectResponse(url="/docs")
