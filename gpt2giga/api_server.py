@@ -63,12 +63,13 @@ def run():
     logger.info("Starting Gpt2Giga proxy server...")
     logger.debug(f"Proxy settings: {proxy_settings}")
     logger.debug(f"GigaChat settings: {config.gigachat_settings.dict(exclude={"password", "credentials"})}")
-
     uvicorn.run(
         app,
         host=proxy_settings.host,
         port=proxy_settings.port,
         log_level="debug" if proxy_settings.verbose else "info",
+        ssl_keyfile=proxy_settings.https_key_file,
+        ssl_certfile=proxy_settings.https_cert_file
     )
 
 if __name__ == "__main__":
