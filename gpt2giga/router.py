@@ -53,7 +53,7 @@ async def chat_completions(request: Request):
     data = await request.json()
     stream = data.get("stream", False)
     response_format = data.get("response_format", False)
-    is_tool_call = False
+    is_tool_call = "response_format" in data or "tools" in data
     if response_format:
         function_parameters = FunctionParameters(**response_format["json_schema"]["schema"])
         func = Function(name=response_format["json_schema"]["name"],
