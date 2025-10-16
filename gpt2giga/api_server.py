@@ -68,8 +68,8 @@ def run():
         host=proxy_settings.host,
         port=proxy_settings.port,
         log_level="debug" if proxy_settings.verbose else "info",
-        ssl_keyfile=proxy_settings.https_key_file,
-        ssl_certfile=proxy_settings.https_cert_file
+        ssl_keyfile=proxy_settings.https_key_file if proxy_settings.use_https else None,
+        ssl_certfile=proxy_settings.https_cert_file if proxy_settings.use_https else None
     )
 
 if __name__ == "__main__":
