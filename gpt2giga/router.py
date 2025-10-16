@@ -53,13 +53,12 @@ async def chat_completions(request: Request):
     data = await request.json()
     stream = data.get("stream", False)
     response_format = data.get("response_format", False)
-    is_tool_call = "response_format" in data or "tools" in data
-    if response_format:
+    is_tool_call = "tools" in data
+    if is_tool_call:
         function_parameters = FunctionParameters(**response_format["json_schema"]["schema"])
         func = Function(name=response_format["json_schema"]["name"],
                         description=response_format["json_schema"]["schema"]["description"],
                         parameters=function_parameters)
-        is_tool_call = True
         data["functions"] = [func]
     chat_messages = request.app.state.request_transformer.send_to_gigachat(data)
     if not stream:

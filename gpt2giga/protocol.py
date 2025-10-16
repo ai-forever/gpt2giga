@@ -189,6 +189,9 @@ class RequestTransformer:
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
+        response_format = transformed.pop("response_format", None)
+        if response_format:
+            transformed["response_format"] = {'type': response_format['type'], **response_format['json_schema']}
         return transformed
 
     def send_to_gigachat(self, data: dict) -> Chat:
