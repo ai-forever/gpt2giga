@@ -8,6 +8,7 @@ from starlette.responses import RedirectResponse
 
 from gpt2giga.cli import load_config
 from gpt2giga.logger import init_logger
+from gpt2giga.middleware import PathNormalizationMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.router import router
 
@@ -43,6 +44,9 @@ def create_app()-> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    #/some_prefix/another_prefix/v1/... -> /v1/...
+    #/api/v1/embeddings -> /v1/embeddings/
+    app.add_middleware(PathNormalizationMiddleware, valid_roots=["v1", "chat", "models", "embeddings"])
     @app.get("/", include_in_schema=False)
     async def docs_redirect():
         return RedirectResponse(url="/docs")
