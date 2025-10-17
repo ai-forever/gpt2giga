@@ -11,16 +11,26 @@ def exceptions_handler(func):
         try:
             return await func(*args, **kwargs)
         except gigachat.exceptions.ResponseError as e:
-            url, status_code, message, _ = e.args
-            error_detail = json.loads(message)
-            raise HTTPException(
-                status_code=status_code,
-                detail={
-                    "url": str(url),
-                    "error": error_detail,
-                },
-            )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            if len(e.args) == 4:
+                url, status_code, message, _ = e.args
+                try:
+                    error_detail = json.loads(message)
+                except Exception:
+                    error_detail = message
+                raise HTTPException(
+                    status_code=status_code,
+                    detail={
+                        "url": str(url),
+                        "error": error_detail,
+                    },
+                )
+            else:
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": "Unexpected ResponseError structure",
+                        "args": e.args,
+                    },
+                )
 
     return wrapper

@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-def create_app()-> FastAPI:
+def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan,
                   title="Gpt2Giga converter proxy")
     app.add_middleware(

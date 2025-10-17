@@ -191,7 +191,10 @@ class RequestTransformer:
 
         response_format = transformed.pop("response_format", None)
         if response_format:
-            transformed["response_format"] = {'type': response_format['type'], **response_format['json_schema']}
+            transformed["response_format"] = {
+                'type': response_format.get('type'),
+                **response_format.get('json_schema', {})
+            }
         return transformed
 
     def send_to_gigachat(self, data: dict) -> Chat:
@@ -238,7 +241,7 @@ class ResponseProcessor:
         result = {
             "id": f"chatcmpl-{uuid.uuid4()}",
             "object": "chat.completion",
-            "created": int(time.time() * 1000),
+            "created": int(time.time()),
             "model": gpt_model,
             "choices": giga_dict["choices"],
             "usage": self._build_usage(giga_dict["usage"]),
@@ -259,7 +262,7 @@ class ResponseProcessor:
         result = {
             "id": f"chatcmpl-{uuid.uuid4()}",
             "object": "chat.completion.chunk",
-            "created": int(time.time() * 1000),
+            "created": int(time.time()),
             "model": gpt_model,
             "choices": giga_dict["choices"],
             "usage": self._build_usage(giga_dict.get("usage")),

@@ -52,14 +52,13 @@ async def get_model(model: str, request: Request):
 async def chat_completions(request: Request):
     data = await request.json()
     stream = data.get("stream", False)
-    response_format = data.get("response_format", False)
     is_tool_call = "tools" in data
     if is_tool_call:
         data["functions"] = []
         for tool in data.get("tools", []):
             function = tool["function"]
             giga_function = Function(name=function["name"],
-                            description=function['description'],
+                            description=function["description"],
                             parameters=FunctionParameters(**function["parameters"])
                             )
             data["functions"].append(giga_function)
