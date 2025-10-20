@@ -11,7 +11,9 @@ from typing import Optional, List, Dict, Tuple
 import httpx
 from PIL import Image
 from gigachat import GigaChat
-from gigachat.models import ChatCompletionChunk, ChatCompletion, Chat, Messages
+from gigachat.models import ChatCompletionChunk, ChatCompletion, Chat, Messages, Function, Choices, MessagesRole, Usage, \
+    FunctionCall
+from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
 from gpt2giga.config import ProxyConfig
 
@@ -212,21 +214,36 @@ class RequestTransformer:
         elif isinstance(input_, list):
             contents = []
             for message in input_:
-                content = message.get("content")
-                if isinstance(content, list):
-                    for content_part in content:
-                        if content_part.get("type") == "input_text":
-                            contents.append({"type": "text", "text": content_part.get("text")})
+                is_message = message.get("role")
+                is_tool_call = message.get("type") == "function_call"
+                is_tool_call_output = message.get("type") == "function_call_output"
+                if is_tool_call_output:
+                    message_payload.append({"role": "function", "content": message.get("output")})
+                elif is_tool_call:
+                    message_payload.append(self.mock_completion(message))
+                elif is_message:
+                    content = message.get("content")
+                    if isinstance(content, list):
+                        for content_part in content:
+                            if content_part.get("type") == "input_text":
+                                contents.append({"type": "text", "text": content_part.get("text")})
 
-                        elif content_part.get("type") == "input_image":
-                            contents.append({"type": "image_url",
-                                            "image_url": {"url": content_part.get("image_url")}})
+                            elif content_part.get("type") == "input_image":
+                                contents.append({"type": "image_url",
+                                                "image_url": {"url": content_part.get("image_url")}})
 
-                    message_payload.append({"role": message.get("role"), "content": contents})
-                else:
-                    message_payload.append({"role": message.get("role"), "content": message.get("content")})
-
+                        message_payload.append({"role": message.get("role"), "content": contents})
+                    else:
+                        message_payload.append({"role": message.get("role"), "content": message.get("content")})
         return message_payload
+
+    def mock_completion(self, message: dict) -> dict:
+        arguments = json.loads(message.get("arguments"))
+        name = message.get("name")
+        return Messages(
+                    role=MessagesRole.ASSISTANT,
+                    function_call=FunctionCall(name=name, arguments=arguments)
+        ).dict()
 
     def send_to_gigachat(self, data: dict) -> Chat:
         """Отправляет запрос в GigaChat API"""
@@ -289,39 +306,62 @@ class ResponseProcessor:
     def process_response_api(self, data: dict, giga_resp: ChatCompletion, gpt_model: str, is_tool_call: bool = False) -> dict:
         giga_dict = giga_resp.dict()
         for choice in giga_dict["choices"]:
-            self._process_choice(choice, is_tool_call)
+            self._process_choice_responses(choice)
+
         result = {
             "id": f"resp_{uuid.uuid4()}",
             "object": "response",
-            "created": int(time.time()),
+            "created_at": int(time.time()),
             "status": "completed",
             "instructions": data.get("instructions"),
             "model": gpt_model,
-            "output": [
-                {
-                  "type": "message",
-                  "id": f"msg_{uuid.uuid4()}",
-                  "status": "completed",
-                  "role": "assistant",
-                  "content": [
-                      {
-                          "type": "output_text",
-                          "text": giga_dict["choices"][0]["message"]["content"]
-                      }
-                  ]
-                }
-            ],
+            "output": self._create_output_responses(giga_dict, is_tool_call),
             "text": {
                 "format": {
                     "type": "text"
                 }
             },
-            "usage": self._build_usage(giga_dict.get("usage"))
+            "usage": self._build_response_usage(giga_dict.get("usage"))
 
         }
 
         return result
 
+    @staticmethod
+    def _create_output_responses(data: dict, is_tool_call: bool = False) -> list:
+        try:
+            if is_tool_call:
+                return [data["choices"][0]["message"]["output"]]
+            else:
+                return [
+                    {
+                        "type": "message",
+                        "id": f"msg_{uuid.uuid4()}",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": data["choices"][0]["message"]["content"]
+                            }
+                        ]
+                    }
+                ]
+        finally:
+            return [
+                    {
+                        "type": "message",
+                        "id": f"msg_{uuid.uuid4()}",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": data["choices"][0]["message"]["content"]
+                            }
+                        ]
+                    }
+                ]
     def process_stream_chunk(self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False) -> dict:
         """Обрабатывает стриминговый чанк от GigaChat"""
         giga_dict = giga_resp.dict()
@@ -340,6 +380,20 @@ class ResponseProcessor:
         }
 
         self.logger.debug(f"Processed stream chunk: {result}")
+        return result
+
+    def process_stream_chunk_response(self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False, sequence_number:int=0) -> dict:
+        giga_dict = giga_resp.dict()
+        for choice in giga_dict["choices"]:
+            self._process_choice_responses(choice, is_tool_call)
+        result = ResponseTextDeltaEvent(content_index=0,
+                                        delta=giga_dict["choices"][0]["delta"]["content"],
+                                        item_id=f"msg_{uuid.uuid4()}",
+                                        output_index=0,
+                                        logprobs=[],
+                                        type="response.output_text.delta",
+                                        sequence_number=sequence_number).dict()
+
         return result
 
     def _process_choice(self, choice: Dict, is_tool_call: bool, is_stream: bool = False):
@@ -378,11 +432,39 @@ class ResponseProcessor:
                     message["finish_reason"] = "tool_calls"
             else:
                 message["function_call"] = function_call
-
-            if message.get("content") == "":
-                message["content"] = arguments
-
             message.pop("functions_state_id", None)
+
+        except Exception as e:
+            self.logger.error(f"Error processing function call: {e}")
+
+    def _process_choice_responses(self, choice: Dict, is_stream: bool = False):
+        """Обрабатывает отдельный choice"""
+        message_key = "delta" if is_stream else "message"
+
+        choice["index"] = 0
+        choice["logprobs"] = None
+
+        if message_key in choice:
+            message = choice[message_key]
+            message["refusal"] = None
+
+            if message.get("role") == "assistant" and message.get("function_call"):
+                self._process_function_call_responses(message)
+
+    def _process_function_call_responses(self, message: Dict):
+        """Обрабатывает function call"""
+        try:
+            arguments = json.dumps(
+                message["function_call"]["arguments"],
+                ensure_ascii=False,
+            )
+            message["output"] = ResponseFunctionToolCall(arguments=arguments,
+                                     call_id=f"call_{uuid.uuid4()}",
+                                     name=message["function_call"]["name"],
+                                     id=f"fc_{message['functions_state_id']}",
+                                     status="completed",
+                                     type="function_call")
+
 
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")
@@ -403,4 +485,17 @@ class ResponseProcessor:
             "completion_tokens_details": {
                 "reasoning_tokens": 0
             },
+        }
+
+    @staticmethod
+    def _build_response_usage(usage_data: Optional[Dict]) -> Optional[Dict]:
+        if not usage_data:
+            return None
+        return {
+            "input_tokens": usage_data["prompt_tokens"],
+            "output_tokens": usage_data["completion_tokens"],
+            "total_tokens": usage_data["total_tokens"],
+            "prompt_tokens_details": {
+                "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
+            }
         }

@@ -1,16 +1,23 @@
+from typing import List
+
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
 client = OpenAI(base_url="http://localhost:8000",
-                api_key="0")
+               api_key="0")
 
-class ResponseFormat(BaseModel):
-    """Формат ответа для модели"""
-    thinking: str = Field(description="Размышления модели")
-    output: str = Field(description="Ответ")
+
+class Step(BaseModel):
+    explanation: str
+    output: str
+
+
+class MathResponse(BaseModel):
+    steps: List[Step]
+    final_answer: str
 
 response = client.responses.parse(
-    model="gpt-4o-2024-08-06",
+    model="gpt-4o",
     input=[
         {"role": "system", "content": "Ты - профессиональный математик"},
         {
@@ -18,8 +25,11 @@ response = client.responses.parse(
             "content": "Реши пример 8x^2 - 20x + 6 = 0",
         },
     ],
-    text_format=ResponseFormat,
+    text_format=MathResponse,
 )
 
-event = response.output_parsed
-print(event)
+message = response.output_parsed
+print(message)
+if message:
+    print(message.steps)
+    print("answer: ", message.final_answer)

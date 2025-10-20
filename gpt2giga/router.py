@@ -9,7 +9,7 @@ from fastapi.responses import Response, StreamingResponse
 from gigachat.models import FunctionParameters, Function
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
-
+from aioitertools import enumerate as aio_enumerate
 from gpt2giga.utils import exceptions_handler
 
 router = APIRouter()
@@ -78,23 +78,34 @@ async def chat_completions(request: Request):
             processed = request.app.state.response_processor.process_response(response, chat_messages.model, is_tool_call)
         return processed
     else:
-        async def stream_generator() -> AsyncGenerator[str, None]:
+        async def stream_generator(is_response_api: bool) -> AsyncGenerator[str, None]:
             """
             Yields formatted SSE (Server-Sent Events) chunks
             as they arrive from the model.
             """
-            async for chunk in request.app.state.gigachat_client.astream(chat_messages):
-                processed = request.app.state.response_processor.process_stream_chunk(
-                    chunk,
-                    chat_messages.model,
-                    is_tool_call="tools" in chat_messages
-                )
-                # Convert to proper SSE format
-                yield f"data: {json.dumps(processed)}\n\n"
+            if is_response_api:
+                async for i, chunk in aio_enumerate(request.app.state.gigachat_client.astream(chat_messages)):
+                    processed = request.app.state.response_processor.process_stream_chunk_response(
+                        chunk,
+                        chat_messages.model,
+                        is_tool_call="tools" in chat_messages,
+                        sequence_number=i
+                    )
+                    # Convert to proper SSE format
+                    yield f"data: {json.dumps(processed)}\n\n"
+            else:
+                async for chunk in request.app.state.gigachat_client.astream(chat_messages):
+                    processed = request.app.state.response_processor.process_stream_chunk(
+                        chunk,
+                        chat_messages.model,
+                        is_tool_call="tools" in chat_messages
+                    )
+                    # Convert to proper SSE format
+                    yield f"data: {json.dumps(processed)}\n\n"
 
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+        return StreamingResponse(stream_generator(is_response_api), media_type="text/event-stream")
 
 
 
