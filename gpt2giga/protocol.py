@@ -190,16 +190,50 @@ class RequestTransformer:
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
         response_format = transformed.pop("response_format", None)
+        response_format_responses = transformed.pop("text", None)
         if response_format:
             transformed["response_format"] = {
                 'type': response_format.get('type'),
                 **response_format.get('json_schema', {})
             }
+        if response_format_responses:
+            format = response_format_responses.get('format', {})
+            transformed["response_format"] = format
         return transformed
+
+    def transform_response_format(self, data: Dict) -> List:
+        message_payload = []
+        if "instructions" in data:
+            message_payload.append({"role": "system", "content": data["instructions"]})
+        input_ = data["input"]
+        if isinstance(input_, str):
+            message_payload.append({"role": "user", "content": input_})
+
+        elif isinstance(input_, list):
+            contents = []
+            for message in input_:
+                content = message.get("content")
+                if isinstance(content, list):
+                    for content_part in content:
+                        if content_part.get("type") == "input_text":
+                            contents.append({"type": "text", "text": content_part.get("text")})
+
+                        elif content_part.get("type") == "input_image":
+                            contents.append({"type": "image_url",
+                                            "image_url": {"url": content_part.get("image_url")}})
+
+                    message_payload.append({"role": message.get("role"), "content": contents})
+                else:
+                    message_payload.append({"role": message.get("role"), "content": message.get("content")})
+
+        return message_payload
 
     def send_to_gigachat(self, data: dict) -> Chat:
         """Отправляет запрос в GigaChat API"""
         transformed_data = self.transform_chat_parameters(data)
+        if not transformed_data.get("messages") and transformed_data.get("input"):
+            transformed_data["messages"] = self.transform_response_format(transformed_data)
+
         transformed_data["messages"] = self.transform_messages(
             transformed_data.get("messages", [])
         )
@@ -250,6 +284,42 @@ class ResponseProcessor:
 
         self.logger.debug("Processed chat completion response")
         self.logger.debug(f"Response: {result}")
+        return result
+
+    def process_response_api(self, data: dict, giga_resp: ChatCompletion, gpt_model: str, is_tool_call: bool = False) -> dict:
+        giga_dict = giga_resp.dict()
+        for choice in giga_dict["choices"]:
+            self._process_choice(choice, is_tool_call)
+        result = {
+            "id": f"resp_{uuid.uuid4()}",
+            "object": "response",
+            "created": int(time.time()),
+            "status": "completed",
+            "instructions": data.get("instructions"),
+            "model": gpt_model,
+            "output": [
+                {
+                  "type": "message",
+                  "id": f"msg_{uuid.uuid4()}",
+                  "status": "completed",
+                  "role": "assistant",
+                  "content": [
+                      {
+                          "type": "output_text",
+                          "text": giga_dict["choices"][0]["message"]["content"]
+                      }
+                  ]
+                }
+            ],
+            "text": {
+                "format": {
+                    "type": "text"
+                }
+            },
+            "usage": self._build_usage(giga_dict.get("usage"))
+
+        }
+
         return result
 
     def process_stream_chunk(self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False) -> dict:

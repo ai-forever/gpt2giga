@@ -53,20 +53,30 @@ async def chat_completions(request: Request):
     data = await request.json()
     stream = data.get("stream", False)
     is_tool_call = "tools" in data
+    is_response_api = "input" in data
     if is_tool_call:
         data["functions"] = []
         for tool in data.get("tools", []):
-            function = tool["function"]
-            giga_function = Function(name=function["name"],
-                            description=function["description"],
-                            parameters=FunctionParameters(**function["parameters"])
-                            )
+            if tool.get("function"):
+                function = tool["function"]
+                giga_function = Function(name=function["name"],
+                                description=function["description"],
+                                parameters=FunctionParameters(**function["parameters"])
+                                )
+            else:
+                giga_function = Function(name=tool["name"],
+                                         description=tool["description"],
+                                         parameters=FunctionParameters(**tool["parameters"])
+                                         )
             data["functions"].append(giga_function)
     chat_messages = request.app.state.request_transformer.send_to_gigachat(data)
     if not stream:
         response = await request.app.state.gigachat_client.achat(chat_messages)
-        process = request.app.state.response_processor.process_response(response, chat_messages.model, is_tool_call)
-        return process
+        if is_response_api:
+            processed = request.app.state.response_processor.process_response_api(data, response, chat_messages.model, is_tool_call)
+        else:
+            processed = request.app.state.response_processor.process_response(response, chat_messages.model, is_tool_call)
+        return processed
     else:
         async def stream_generator() -> AsyncGenerator[str, None]:
             """
@@ -113,3 +123,12 @@ async def embeddings(request: Request):
                                                               model=request.app.state.config.proxy_settings.embeddings)
 
     return embeddings
+
+
+@router.post("/responses")
+@exceptions_handler
+async def responses(request: Request):
+    return await chat_completions(request)
+
+
+
