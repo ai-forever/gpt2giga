@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI):
     if not config:
         from gpt2giga.cli import load_config
         from gpt2giga.logger import init_logger
+
         config = load_config()
         logger = init_logger(config.proxy_settings.verbose)
 
@@ -35,8 +36,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(lifespan=lifespan,
-                  title="Gpt2Giga converter proxy")
+    app = FastAPI(lifespan=lifespan, title="Gpt2Giga converter proxy")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -44,9 +44,12 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    #/some_prefix/another_prefix/v1/... -> /v1/...
-    #/api/v1/embeddings -> /v1/embeddings/
-    app.add_middleware(PathNormalizationMiddleware, valid_roots=["v1", "chat", "models", "embeddings"])
+    # /some_prefix/another_prefix/v1/... -> /v1/...
+    # /api/v1/embeddings -> /v1/embeddings/
+    app.add_middleware(
+        PathNormalizationMiddleware, valid_roots=["v1", "chat", "models", "embeddings"]
+    )
+
     @app.get("/", include_in_schema=False)
     async def docs_redirect():
         return RedirectResponse(url="/docs")
@@ -54,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(router)
     app.include_router(router, prefix="/v1", tags=["V1"])
     return app
+
 
 def run():
     config = load_config()
@@ -66,18 +70,20 @@ def run():
 
     logger.info("Starting Gpt2Giga proxy server...")
     logger.debug(f"Proxy settings: {proxy_settings}")
-    logger.debug(f"GigaChat settings: {config.gigachat_settings.dict(exclude={'password', 'credentials'})}")
+    logger.debug(
+        f"GigaChat settings: {config.gigachat_settings.dict(exclude={'password', 'credentials'})}"
+    )
     uvicorn.run(
         app,
         host=proxy_settings.host,
         port=proxy_settings.port,
         log_level="debug" if proxy_settings.verbose else "info",
         ssl_keyfile=proxy_settings.https_key_file if proxy_settings.use_https else None,
-        ssl_certfile=proxy_settings.https_cert_file if proxy_settings.use_https else None
+        ssl_certfile=(
+            proxy_settings.https_cert_file if proxy_settings.use_https else None
+        ),
     )
+
 
 if __name__ == "__main__":
     run()
-
-
-

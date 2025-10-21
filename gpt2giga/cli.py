@@ -21,9 +21,13 @@ def load_config() -> ProxyConfig:
         help_text = field.field_info.description or field_name
 
         if isinstance(field.type_, bool):
-            parser.add_argument(arg_name, action="store_true", default=None, help=help_text)
+            parser.add_argument(
+                arg_name, action="store_true", default=None, help=help_text
+            )
         else:
-            parser.add_argument(arg_name, type=field.type_, default=None, help=help_text)
+            parser.add_argument(
+                arg_name, type=field.type_, default=None, help=help_text
+            )
 
     # Добавляем аргументы для gigachat_settings
     for field_name, field in GigachatSettings.__fields__.items():
@@ -31,9 +35,13 @@ def load_config() -> ProxyConfig:
         help_text = field.field_info.description or field_name
 
         if isinstance(field.type_, bool):
-            parser.add_argument(arg_name, action="store_true", default=None, help=help_text)
+            parser.add_argument(
+                arg_name, action="store_true", default=None, help=help_text
+            )
         else:
-            parser.add_argument(arg_name, type=field.type_, default=None, help=help_text)
+            parser.add_argument(
+                arg_name, type=field.type_, default=None, help=help_text
+            )
 
     parser.add_argument("--env-path", type=str, default=None, help="Path to .env file")
 
@@ -49,16 +57,24 @@ def load_config() -> ProxyConfig:
 
     for arg_name, arg_value in vars(args).items():
         if arg_value is not None:
-            if arg_name.startswith('proxy_'):
-                field_name = arg_name.replace('proxy_', '').replace('-', '_')
+            if arg_name.startswith("proxy_"):
+                field_name = arg_name.replace("proxy_", "").replace("-", "_")
                 proxy_settings_dict[field_name] = arg_value
-            elif arg_name.startswith('gigachat_'):
-                field_name = arg_name.replace('gigachat_', '').replace('-', '_')
+            elif arg_name.startswith("gigachat_"):
+                field_name = arg_name.replace("gigachat_", "").replace("-", "_")
                 gigachat_settings_dict[field_name] = arg_value
 
     # Создаем конфиг
     config = ProxyConfig(
-        proxy_settings=ProxySettings(**proxy_settings_dict) if proxy_settings_dict else ProxySettings(env_path),
-        gigachat_settings=GigachatSettings(**gigachat_settings_dict) if gigachat_settings_dict else GigachatSettings()
+        proxy_settings=(
+            ProxySettings(**proxy_settings_dict)
+            if proxy_settings_dict
+            else ProxySettings(env_path)
+        ),
+        gigachat_settings=(
+            GigachatSettings(**gigachat_settings_dict)
+            if gigachat_settings_dict
+            else GigachatSettings()
+        ),
     )
     return config

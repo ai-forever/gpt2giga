@@ -11,7 +11,14 @@ from typing import Optional, List, Dict, Tuple, Literal
 import httpx
 from PIL import Image
 from gigachat import GigaChat
-from gigachat.models import ChatCompletionChunk, ChatCompletion, Chat, Messages, MessagesRole, FunctionCall
+from gigachat.models import (
+    ChatCompletionChunk,
+    ChatCompletion,
+    Chat,
+    Messages,
+    MessagesRole,
+    FunctionCall,
+)
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
 from gpt2giga.config import ProxyConfig
@@ -38,11 +45,13 @@ class AttachmentProcessor:
             if not base64_matches:
                 self.logger.info(f"Downloading image from URL: {image_url[:100]}...")
                 response = httpx.get(image_url, timeout=30)
-                content_type = response.headers.get('content-type', "")
+                content_type = response.headers.get("content-type", "")
                 content_bytes = response.content
 
                 if not content_type.startswith("image/"):
-                    self.logger.warning(f"Invalid content type for image: {content_type}")
+                    self.logger.warning(
+                        f"Invalid content type for image: {content_type}"
+                    )
                     return None
             else:
                 content_type, type_, image_str = base64_matches.groups()
@@ -55,7 +64,7 @@ class AttachmentProcessor:
             # Конвертируем и сжимаем изображение
             image = Image.open(io.BytesIO(content_bytes)).convert("RGB")
             buf = io.BytesIO()
-            image.save(buf, format='JPEG', quality=85)
+            image.save(buf, format="JPEG", quality=85)
             buf.seek(0)
 
             self.logger.info("Uploading image to GigaChat...")
@@ -73,7 +82,11 @@ class AttachmentProcessor:
 class RequestTransformer:
     """Трансформер запросов из OpenAI в GigaChat формат"""
 
-    def __init__(self, config: ProxyConfig, attachment_processor: Optional[AttachmentProcessor] = None):
+    def __init__(
+        self,
+        config: ProxyConfig,
+        attachment_processor: Optional[AttachmentProcessor] = None,
+    ):
         self.config = config
         self.attachment_processor = attachment_processor
         self.logger = logging.getLogger(f"{__name__}.RequestTransformer")
@@ -99,7 +112,9 @@ class RequestTransformer:
                 try:
                     json.loads(message.get("content", ""))
                 except json.JSONDecodeError:
-                    message["content"] = json.dumps(message.get("content", ""), ensure_ascii=False)
+                    message["content"] = json.dumps(
+                        message.get("content", ""), ensure_ascii=False
+                    )
 
             # Обрабатываем контент
             if message.get("content") is None:
@@ -130,7 +145,9 @@ class RequestTransformer:
 
         return transformed_messages
 
-    def _process_content_parts(self, content_parts: List[Dict]) -> Tuple[List[str], List[str]]:
+    def _process_content_parts(
+        self, content_parts: List[Dict]
+    ) -> Tuple[List[str], List[str]]:
         """Обрабатывает части контента (текст и изображения)"""
         texts = []
         attachments = []
@@ -138,19 +155,25 @@ class RequestTransformer:
         for content_part in content_parts:
             if content_part.get("type") == "text":
                 texts.append(content_part.get("text", ""))
-            elif (content_part.get("type") == "image_url" and
-                  content_part.get("image_url") and
-                  self.attachment_processor and
-                  self.config.proxy_settings.enable_images):
+            elif (
+                content_part.get("type") == "image_url"
+                and content_part.get("image_url")
+                and self.attachment_processor
+                and self.config.proxy_settings.enable_images
+            ):
 
-                file_id = self.attachment_processor.upload_image(content_part["image_url"]["url"])
+                file_id = self.attachment_processor.upload_image(
+                    content_part["image_url"]["url"]
+                )
                 if file_id:
                     attachments.append(file_id)
                     self.logger.info(f"Added attachment: {file_id}")
 
         # Ограничиваем количество изображений
         if len(attachments) > 2:
-            self.logger.warning("GigaChat can only handle 2 images per message. Cutting off excess.")
+            self.logger.warning(
+                "GigaChat can only handle 2 images per message. Cutting off excess."
+            )
             attachments = attachments[:2]
 
         return texts, attachments
@@ -196,11 +219,11 @@ class RequestTransformer:
         response_format_responses = transformed.pop("text", None)
         if response_format:
             transformed["response_format"] = {
-                'type': response_format.get('type'),
-                **response_format.get('json_schema', {})
+                "type": response_format.get("type"),
+                **response_format.get("json_schema", {}),
             }
         if response_format_responses:
-            format = response_format_responses.get('format', {})
+            format = response_format_responses.get("format", {})
             transformed["response_format"] = format
         return transformed
 
@@ -219,7 +242,9 @@ class RequestTransformer:
                 is_tool_call = message.get("type") == "function_call"
                 is_tool_call_output = message.get("type") == "function_call_output"
                 if is_tool_call_output:
-                    message_payload.append({"role": "function", "content": message.get("output")})
+                    message_payload.append(
+                        {"role": "function", "content": message.get("output")}
+                    )
                 elif is_tool_call:
                     message_payload.append(self.mock_completion(message))
                 elif is_message:
@@ -227,15 +252,30 @@ class RequestTransformer:
                     if isinstance(content, list):
                         for content_part in content:
                             if content_part.get("type") == "input_text":
-                                contents.append({"type": "text", "text": content_part.get("text")})
+                                contents.append(
+                                    {"type": "text", "text": content_part.get("text")}
+                                )
 
                             elif content_part.get("type") == "input_image":
-                                contents.append({"type": "image_url",
-                                                "image_url": {"url": content_part.get("image_url")}})
+                                contents.append(
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": content_part.get("image_url")
+                                        },
+                                    }
+                                )
 
-                        message_payload.append({"role": message.get("role"), "content": contents})
+                        message_payload.append(
+                            {"role": message.get("role"), "content": contents}
+                        )
                     else:
-                        message_payload.append({"role": message.get("role"), "content": message.get("content")})
+                        message_payload.append(
+                            {
+                                "role": message.get("role"),
+                                "content": message.get("content"),
+                            }
+                        )
         return message_payload
 
     @staticmethod
@@ -243,15 +283,17 @@ class RequestTransformer:
         arguments = json.loads(message.get("arguments"))
         name = message.get("name")
         return Messages(
-                    role=MessagesRole.ASSISTANT,
-                    function_call=FunctionCall(name=name, arguments=arguments)
+            role=MessagesRole.ASSISTANT,
+            function_call=FunctionCall(name=name, arguments=arguments),
         ).dict()
 
     def send_to_gigachat(self, data: dict) -> Chat:
         """Отправляет запрос в GigaChat API"""
         transformed_data = self.transform_chat_parameters(data)
         if not transformed_data.get("messages") and transformed_data.get("input"):
-            transformed_data["messages"] = self.transform_response_format(transformed_data)
+            transformed_data["messages"] = self.transform_response_format(
+                transformed_data
+            )
 
         transformed_data["messages"] = self.transform_messages(
             transformed_data.get("messages", [])
@@ -270,13 +312,16 @@ class RequestTransformer:
         """Объединяет последовательные пользовательские сообщения"""
         collapsed_messages = []
         for message in messages:
-            if (collapsed_messages and
-                    message.role == "user" and
-                    collapsed_messages[-1].role == "user"):
+            if (
+                collapsed_messages
+                and message.role == "user"
+                and collapsed_messages[-1].role == "user"
+            ):
                 collapsed_messages[-1].content += "\n" + message.content
             else:
                 collapsed_messages.append(message)
         return collapsed_messages
+
 
 class ResponseProcessor:
     """Обработчик ответов от GigaChat в формат OpenAI"""
@@ -284,7 +329,9 @@ class ResponseProcessor:
     def __init__(self):
         self.logger = logging.getLogger(f"{__name__}.ResponseProcessor")
 
-    def process_response(self, giga_resp: ChatCompletion, gpt_model: str, is_tool_call: bool = False) -> dict:
+    def process_response(
+        self, giga_resp: ChatCompletion, gpt_model: str, is_tool_call: bool = False
+    ) -> dict:
         """Обрабатывает обычный ответ от GigaChat"""
         giga_dict = giga_resp.dict()
 
@@ -305,7 +352,13 @@ class ResponseProcessor:
         self.logger.debug(f"Response: {result}")
         return result
 
-    def process_response_api(self, data: dict, giga_resp: ChatCompletion, gpt_model: str, is_tool_call: bool = False) -> dict:
+    def process_response_api(
+        self,
+        data: dict,
+        giga_resp: ChatCompletion,
+        gpt_model: str,
+        is_tool_call: bool = False,
+    ) -> dict:
         giga_dict = giga_resp.dict()
         for choice in giga_dict["choices"]:
             self._process_choice_responses(choice)
@@ -318,19 +371,18 @@ class ResponseProcessor:
             "instructions": data.get("instructions"),
             "model": gpt_model,
             "output": self._create_output_responses(giga_dict, is_tool_call),
-            "text": {
-                "format": {
-                    "type": "text"
-                }
-            },
-            "usage": self._build_response_usage(giga_dict.get("usage"))
-
+            "text": {"format": {"type": "text"}},
+            "usage": self._build_response_usage(giga_dict.get("usage")),
         }
 
         return result
 
     @staticmethod
-    def _create_output_responses(data: dict, is_tool_call: bool = False, message_key: Literal['message', 'delta'] = 'message') -> list:
+    def _create_output_responses(
+        data: dict,
+        is_tool_call: bool = False,
+        message_key: Literal["message", "delta"] = "message",
+    ) -> list:
         try:
             if is_tool_call:
                 return [data["choices"][0][message_key]["output"]]
@@ -344,27 +396,30 @@ class ResponseProcessor:
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": data["choices"][0][message_key]["content"]
+                                "text": data["choices"][0][message_key]["content"],
                             }
-                        ]
+                        ],
                     }
                 ]
-        except:
+        except Exception:
             return [
-                    {
-                        "type": "message",
-                        "id": f"msg_{uuid.uuid4()}",
-                        "status": "completed",
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": data["choices"][0][message_key]["content"]
-                            }
-                        ]
-                    }
-                ]
-    def process_stream_chunk(self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False) -> dict:
+                {
+                    "type": "message",
+                    "id": f"msg_{uuid.uuid4()}",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": data["choices"][0][message_key]["content"],
+                        }
+                    ],
+                }
+            ]
+
+    def process_stream_chunk(
+        self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False
+    ) -> dict:
         """Обрабатывает стриминговый чанк от GigaChat"""
         giga_dict = giga_resp.dict()
 
@@ -384,25 +439,33 @@ class ResponseProcessor:
         self.logger.debug(f"Processed stream chunk: {result}")
         return result
 
-    def process_stream_chunk_response(self, giga_resp: ChatCompletionChunk, sequence_number: int = 0) -> dict:
+    def process_stream_chunk_response(
+        self, giga_resp: ChatCompletionChunk, sequence_number: int = 0
+    ) -> dict:
         giga_dict = giga_resp.dict()
         for choice in giga_dict["choices"]:
             self._process_choice_responses(choice, is_stream=True)
         delta = giga_dict["choices"][0]["delta"]
         if delta["content"]:
-            result = ResponseTextDeltaEvent(content_index=0,
-                                            delta=delta["content"],
-                                            item_id=f"msg_{uuid.uuid4()}",
-                                            output_index=0,
-                                            logprobs=[],
-                                            type="response.output_text.delta",
-                                            sequence_number=sequence_number).dict()
+            result = ResponseTextDeltaEvent(
+                content_index=0,
+                delta=delta["content"],
+                item_id=f"msg_{uuid.uuid4()}",
+                output_index=0,
+                logprobs=[],
+                type="response.output_text.delta",
+                sequence_number=sequence_number,
+            ).dict()
         else:
-            result = self._create_output_responses(giga_dict, is_tool_call=True, message_key='delta')
+            result = self._create_output_responses(
+                giga_dict, is_tool_call=True, message_key="delta"
+            )
 
         return result
 
-    def _process_choice(self, choice: Dict, is_tool_call: bool, is_stream: bool = False):
+    def _process_choice(
+        self, choice: Dict, is_tool_call: bool, is_stream: bool = False
+    ):
         """Обрабатывает отдельный choice"""
         message_key = "delta" if is_stream else "message"
 
@@ -429,11 +492,13 @@ class ResponseProcessor:
             }
 
             if is_tool_call:
-                message["tool_calls"] = [{
-                    "id": f"call_{uuid.uuid4()}",
-                    "type": "function",
-                    "function": function_call
-                }]
+                message["tool_calls"] = [
+                    {
+                        "id": f"call_{uuid.uuid4()}",
+                        "type": "function",
+                        "function": function_call,
+                    }
+                ]
                 if message.get("finish_reason") == "function_call":
                     message["finish_reason"] = "tool_calls"
             else:
@@ -464,13 +529,14 @@ class ResponseProcessor:
                 message["function_call"]["arguments"],
                 ensure_ascii=False,
             )
-            message["output"] = ResponseFunctionToolCall(arguments=arguments,
-                                 call_id=f"call_{uuid.uuid4()}",
-                                 name=message["function_call"]["name"],
-                                 id=f"fc_{message['functions_state_id']}",
-                                 status="completed",
-                                 type="function_call").dict()
-
+            message["output"] = ResponseFunctionToolCall(
+                arguments=arguments,
+                call_id=f"call_{uuid.uuid4()}",
+                name=message["function_call"]["name"],
+                id=f"fc_{message['functions_state_id']}",
+                status="completed",
+                type="function_call",
+            ).dict()
 
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")
@@ -488,9 +554,7 @@ class ResponseProcessor:
             "prompt_tokens_details": {
                 "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
             },
-            "completion_tokens_details": {
-                "reasoning_tokens": 0
-            },
+            "completion_tokens_details": {"reasoning_tokens": 0},
         }
 
     @staticmethod
@@ -503,5 +567,5 @@ class ResponseProcessor:
             "total_tokens": usage_data["total_tokens"],
             "prompt_tokens_details": {
                 "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
-            }
+            },
         }

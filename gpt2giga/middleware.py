@@ -3,6 +3,7 @@ from starlette.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 import re
 
+
 class PathNormalizationMiddleware(BaseHTTPMiddleware):
     """
     Redirects any path that contains a known valid segment
