@@ -87,8 +87,6 @@ async def chat_completions(request: Request):
                 async for i, chunk in aio_enumerate(request.app.state.gigachat_client.astream(chat_messages)):
                     processed = request.app.state.response_processor.process_stream_chunk_response(
                         chunk,
-                        chat_messages.model,
-                        is_tool_call="tools" in chat_messages,
                         sequence_number=i
                     )
                     # Convert to proper SSE format

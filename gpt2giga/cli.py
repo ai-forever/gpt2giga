@@ -5,7 +5,6 @@ from dotenv import find_dotenv, load_dotenv
 from gigachat.settings import Settings as GigachatSettings
 
 from gpt2giga.config import ProxyConfig, ProxySettings
-from gpt2giga.logger import init_logger
 
 
 def load_config() -> ProxyConfig:

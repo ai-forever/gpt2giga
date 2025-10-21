@@ -6,13 +6,12 @@ import logging
 import re
 import time
 import uuid
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Literal
 
 import httpx
 from PIL import Image
 from gigachat import GigaChat
-from gigachat.models import ChatCompletionChunk, ChatCompletion, Chat, Messages, Function, Choices, MessagesRole, Usage, \
-    FunctionCall
+from gigachat.models import ChatCompletionChunk, ChatCompletion, Chat, Messages, MessagesRole, FunctionCall
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
 from gpt2giga.config import ProxyConfig
@@ -181,7 +180,9 @@ class RequestTransformer:
             transformed["top_p"] = 0
         elif temperature > 0:
             transformed["temperature"] = temperature
-
+        max_tokens = transformed.pop("max_output_tokens", None)
+        if max_tokens:
+            transformed["max_tokens"] = max_tokens
         # Преобразуем tools в functions
         if "functions" not in transformed and "tools" in transformed:
             functions = []
@@ -237,7 +238,8 @@ class RequestTransformer:
                         message_payload.append({"role": message.get("role"), "content": message.get("content")})
         return message_payload
 
-    def mock_completion(self, message: dict) -> dict:
+    @staticmethod
+    def mock_completion(message: dict) -> dict:
         arguments = json.loads(message.get("arguments"))
         name = message.get("name")
         return Messages(
@@ -328,10 +330,10 @@ class ResponseProcessor:
         return result
 
     @staticmethod
-    def _create_output_responses(data: dict, is_tool_call: bool = False) -> list:
+    def _create_output_responses(data: dict, is_tool_call: bool = False, message_key: Literal['message', 'delta'] = 'message') -> list:
         try:
             if is_tool_call:
-                return [data["choices"][0]["message"]["output"]]
+                return [data["choices"][0][message_key]["output"]]
             else:
                 return [
                     {
@@ -342,12 +344,12 @@ class ResponseProcessor:
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": data["choices"][0]["message"]["content"]
+                                "text": data["choices"][0][message_key]["content"]
                             }
                         ]
                     }
                 ]
-        finally:
+        except:
             return [
                     {
                         "type": "message",
@@ -357,7 +359,7 @@ class ResponseProcessor:
                         "content": [
                             {
                                 "type": "output_text",
-                                "text": data["choices"][0]["message"]["content"]
+                                "text": data["choices"][0][message_key]["content"]
                             }
                         ]
                     }
@@ -382,17 +384,21 @@ class ResponseProcessor:
         self.logger.debug(f"Processed stream chunk: {result}")
         return result
 
-    def process_stream_chunk_response(self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False, sequence_number:int=0) -> dict:
+    def process_stream_chunk_response(self, giga_resp: ChatCompletionChunk, sequence_number: int = 0) -> dict:
         giga_dict = giga_resp.dict()
         for choice in giga_dict["choices"]:
-            self._process_choice_responses(choice, is_tool_call)
-        result = ResponseTextDeltaEvent(content_index=0,
-                                        delta=giga_dict["choices"][0]["delta"]["content"],
-                                        item_id=f"msg_{uuid.uuid4()}",
-                                        output_index=0,
-                                        logprobs=[],
-                                        type="response.output_text.delta",
-                                        sequence_number=sequence_number).dict()
+            self._process_choice_responses(choice, is_stream=True)
+        delta = giga_dict["choices"][0]["delta"]
+        if delta["content"]:
+            result = ResponseTextDeltaEvent(content_index=0,
+                                            delta=delta["content"],
+                                            item_id=f"msg_{uuid.uuid4()}",
+                                            output_index=0,
+                                            logprobs=[],
+                                            type="response.output_text.delta",
+                                            sequence_number=sequence_number).dict()
+        else:
+            result = self._create_output_responses(giga_dict, is_tool_call=True, message_key='delta')
 
         return result
 
@@ -459,11 +465,11 @@ class ResponseProcessor:
                 ensure_ascii=False,
             )
             message["output"] = ResponseFunctionToolCall(arguments=arguments,
-                                     call_id=f"call_{uuid.uuid4()}",
-                                     name=message["function_call"]["name"],
-                                     id=f"fc_{message['functions_state_id']}",
-                                     status="completed",
-                                     type="function_call")
+                                 call_id=f"call_{uuid.uuid4()}",
+                                 name=message["function_call"]["name"],
+                                 id=f"fc_{message['functions_state_id']}",
+                                 status="completed",
+                                 type="function_call").dict()
 
 
         except Exception as e:
