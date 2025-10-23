@@ -10,6 +10,7 @@ from gigachat.models import FunctionParameters, Function
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 from aioitertools import enumerate as aio_enumerate
+
 from gpt2giga.utils import exceptions_handler
 
 router = APIRouter()
