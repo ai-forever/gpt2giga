@@ -1,5 +1,6 @@
-from gpt2giga.logger import init_logger
 import logging
+
+from gpt2giga.logger import init_logger
 
 
 def test_init_logger_info_level():

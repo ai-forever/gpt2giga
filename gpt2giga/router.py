@@ -3,13 +3,13 @@ import time
 from typing import AsyncGenerator
 
 import tiktoken
+from aioitertools import enumerate as aio_enumerate
 from fastapi import APIRouter
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 from gigachat.models import FunctionParameters, Function
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
-from aioitertools import enumerate as aio_enumerate
 
 from gpt2giga.utils import exceptions_handler
 

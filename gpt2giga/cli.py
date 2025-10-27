@@ -68,7 +68,7 @@ def load_config() -> ProxyConfig:
         proxy_settings=(
             ProxySettings(**proxy_settings_dict)
             if proxy_settings_dict
-            else ProxySettings(env_path)
+            else ProxySettings(env_path=env_path)
         ),
         gigachat_settings=(
             GigachatSettings(**gigachat_settings_dict)

@@ -1,9 +1,10 @@
+import asyncio
+
 import requests
 from agents import Agent, Runner, function_tool
 from agents import OpenAIChatCompletionsModel
 from agents import enable_verbose_stdout_logging
 from openai import AsyncOpenAI
-import asyncio
 
 enable_verbose_stdout_logging()
 
