@@ -32,10 +32,10 @@ jobs:
           pip install ruff
 
       - name: Lint with Ruff
-        run: ruff check .
+        run: poetry run ruff check .
 
       - name: Check formatting with Black
-        run: black --check .
+        run: poetry run black --check .
 
       #- name: Run tests
       #  run: pytest -v
