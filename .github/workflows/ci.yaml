@@ -36,5 +36,5 @@ jobs:
       - name: Check formatting with Black
         run: poetry run black --check .
 
-      #- name: Run tests
-      #  run: pytest -v
+      - name: Run tests
+        run: poetry run pytest -v
