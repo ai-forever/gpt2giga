@@ -1,5 +1,13 @@
 # Утилита для проксирования OpenAI-запросов в GigaChat
 
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/gpt2giga/ci.yml?&style=flat-square)](https://github.com/ai-forever/gpt2giga/actions/workflows/ci.yml)
+[![GitHub License](https://img.shields.io/github/license/ai-forever/gpt2giga?style=flat-square)](https://opensource.org/licenses/MIT)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/gpt2giga?style=flat-square)](https://pypistats.org/packages/gpt2giga)
+[![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/gpt2giga?style=flat-square)](https://star-history.com/#ai-forever/gpt2giga)
+[![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
+
+![Coverage](./badges/coverage.svg)
+
 Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API, в GigaChat API.
 
 При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API, заданного в вашем приложении (например, `https://api.openai.com/v1/`).
