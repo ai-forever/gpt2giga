@@ -25,7 +25,7 @@ class ProxySettings(BaseSettings):
         default="EmbeddingsGigaR", description="Модель для эмбеддингов"
     )
     enable_images: bool = Field(
-        default=False, description="Включить загрузку изображений"
+        default=True, description="Включить загрузку изображений"
     )
     log_level: Literal['CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG'] = Field(default='INFO', description="verbose of logs")
     env_path: Optional[str] = Field(None, description="Путь к .env файлу")
