@@ -1,18 +1,18 @@
-
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-client = OpenAI(base_url="http://localhost:8000",
-               api_key="0")
+client = OpenAI(base_url="http://localhost:8000", api_key="0")
 
 
 class ResponseFormat(BaseModel):
     """Формат ответа для модели"""
+
     thinking: str = Field(description="Размышления модели")
     output: str = Field(description="Ответ")
 
+
 response = client.chat.completions.parse(
-    model="gpt-4o",
+    model="GigaChat-2-Max",
     messages=[
         {"role": "system", "content": "Ты - профессиональный математик"},
         {

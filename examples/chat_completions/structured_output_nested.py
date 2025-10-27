@@ -3,8 +3,7 @@ from typing import List
 from openai import OpenAI
 from pydantic import BaseModel
 
-client = OpenAI(base_url="http://localhost:8000",
-               api_key="0")
+client = OpenAI(base_url="http://localhost:8000", api_key="0")
 
 
 class Step(BaseModel):
@@ -15,6 +14,7 @@ class Step(BaseModel):
 class MathResponse(BaseModel):
     steps: List[Step]
     final_answer: str
+
 
 response = client.chat.completions.parse(
     model="gpt-4o",

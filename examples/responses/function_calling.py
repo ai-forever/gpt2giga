@@ -1,8 +1,7 @@
 from openai import OpenAI
 import json
 
-client = OpenAI(base_url="http://localhost:8000",
-                api_key="0")
+client = OpenAI(base_url="http://localhost:8000", api_key="0")
 
 # 1. Define a list of callable tools for the model
 tools = [
@@ -29,9 +28,7 @@ def get_horoscope(sign):
 
 
 # Create a running input list we will add to over time
-input_list = [
-    {"role": "user", "content": "What is my horoscope? I am an Aquarius."}
-]
+input_list = [{"role": "user", "content": "What is my horoscope? I am an Aquarius."}]
 
 # 2. Prompt the model with tools defined
 response = client.responses.create(
@@ -49,13 +46,13 @@ for item in response.output:
             horoscope = get_horoscope(json.loads(item.arguments))
 
             # 4. Provide function call results to the model
-            input_list.append({
-                "type": "function_call_output",
-                "call_id": item.call_id,
-                "output": json.dumps({
-                    "horoscope": horoscope
-                })
-            })
+            input_list.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": item.call_id,
+                    "output": json.dumps({"horoscope": horoscope}),
+                }
+            )
 
 print("Final input:")
 print(input_list)

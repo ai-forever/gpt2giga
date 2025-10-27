@@ -1,7 +1,6 @@
-
 from openai import OpenAI
-client = OpenAI(base_url="http://localhost:8000",
-                api_key="0")
+
+client = OpenAI(base_url="http://localhost:8000", api_key="0")
 tools = [
     {
         "type": "function",
@@ -20,11 +19,15 @@ tools = [
     },
 ]
 
+
 def get_horoscope(sign):
     return f"{sign}: Next Tuesday you will befriend a baby otter."
+
+
 response = client.chat.completions.create(
-    model="gpt-4o",
+    model="GigaChat-2-Max",
     tools=tools,
-    messages=[{"role": "user", "content": "What is my horoscope? I am an Aquarius."}]
+    messages=[{"role": "user", "content": "What is my horoscope? I am an Aquarius."}],
+    # stream=True
 )
 print(response)

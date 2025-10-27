@@ -4,11 +4,11 @@ from agents import OpenAIChatCompletionsModel
 from agents import enable_verbose_stdout_logging
 from openai import AsyncOpenAI
 import asyncio
+
 enable_verbose_stdout_logging()
 
 
-client = AsyncOpenAI(base_url="http://localhost:8000",
-                api_key="0")
+client = AsyncOpenAI(base_url="http://localhost:8000", api_key="0")
 
 
 @function_tool
@@ -23,10 +23,11 @@ def get_weather(city: str) -> str:
     try:
         data = requests.get(url, timeout=60).json()
         temp_c = data["current_condition"][0]["temp_C"]
-        desc   = data["current_condition"][0]["weatherDesc"][0]["value"]
+        desc = data["current_condition"][0]["weatherDesc"][0]["value"]
         return f"{desc.lower()}, {temp_c} °C"
     except Exception as e:
         return f"Ошибка: {e}"
+
 
 @function_tool
 def get_air_quality(city: str) -> str:
@@ -55,6 +56,7 @@ def get_air_quality(city: str) -> str:
         return f"PM2.5 = {pm25} µg/m³, PM10 = {pm10} µg/m³"
     except Exception as e:
         return f"Ошибка: {e}"
+
 
 spanish_agent = Agent(
     name="Spanish agent",
@@ -85,7 +87,10 @@ triage_agent = Agent(
 
 
 async def main():
-    result = await Runner.run(triage_agent, input="Hola, ¿cómo es el clima en Budapest y cuál es la calidad del aire?")
+    result = await Runner.run(
+        triage_agent,
+        input="Hola, ¿cómo es el clima en Budapest y cuál es la calidad del aire?",
+    )
     print(result)
     print(result.final_output)
 

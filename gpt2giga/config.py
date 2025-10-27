@@ -27,7 +27,9 @@ class ProxySettings(BaseSettings):
     enable_images: bool = Field(
         default=True, description="Включить загрузку изображений"
     )
-    log_level: Literal['CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG'] = Field(default='INFO', description="verbose of logs")
+    log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = Field(
+        default="INFO", description="verbose of logs"
+    )
     env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 
     class Config:
