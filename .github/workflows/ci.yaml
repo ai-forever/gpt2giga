@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install poetry
+          pip install poetry jq
           poetry install --with dev
 
       - name: Lint with Ruff
@@ -36,21 +36,19 @@ jobs:
       - name: Check formatting with Black
         run: poetry run black --check .
 
-      - name: Run tests
-        run: poetry run pytest -v
-
       - name: Run tests with coverage
         run: |
           poetry run pytest --cov=. --cov-report=json:coverage.json --cov-fail-under=80 -v
 
       - name: Generate coverage badge
         if: matrix.python-version == '3.12'
-        uses: emibcn/badge-action@v2
-        with:
-          label: coverage
-          message: ${{ fromJson(file('coverage.json')).totals.percent_covered | round(1) }}%
-          color: ${{ fromJson(file('coverage.json')).totals.percent_covered > 80 && 'green' || 'red' }}
-          path: badges/coverage.svg
+        run: |
+          COVERAGE=$(jq '.totals.percent_covered' coverage.json)
+          COLOR="red"
+          if (( $(echo "$COVERAGE > 80" | bc -l) )); then COLOR="green"; fi
+          mkdir -p badges
+          echo "Coverage: $COVERAGE%, Color: $COLOR"
+          npx @emibcn/badge-action --label "coverage" --message "${COVERAGE}%" --color "$COLOR" --path "badges/coverage.svg"
 
       - name: Commit coverage badge
         if: matrix.python-version == '3.12'
@@ -58,5 +56,5 @@ jobs:
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add badges/coverage.svg
-          git commit -m "Update coverage badge"
+          git diff --quiet && echo "No badge changes" || git commit -m "Update coverage badge"
           git push
