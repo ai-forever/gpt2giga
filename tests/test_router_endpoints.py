@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -13,9 +12,7 @@ class FakeGigachat:
     async def achat(self, chat):
         return SimpleNamespace(
             dict=lambda: {
-                "choices": [
-                    {"message": {"role": "assistant", "content": "ok"}}
-                ],
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
                 "usage": {
                     "prompt_tokens": 1,
                     "completion_tokens": 1,
@@ -52,6 +49,7 @@ def make_app(monkeypatch=None):
     app.state.request_transformer = FakeRequestTransformer()
     app.state.config = ProxyConfig()
     if monkeypatch:
+
         class FakeEnc:
             def decode(self, ids):
                 return "TEXT"
@@ -71,7 +69,6 @@ def test_responses_non_stream():
     assert body["status"] == "completed"
 
 
-
 def test_embeddings_with_token_ids(monkeypatch):
     app = make_app(monkeypatch)
     client = TestClient(app)
@@ -81,5 +78,6 @@ def test_embeddings_with_token_ids(monkeypatch):
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert "data" in body and body["model"] == app.state.config.proxy_settings.embeddings
-
+    assert (
+        "data" in body and body["model"] == app.state.config.proxy_settings.embeddings
+    )

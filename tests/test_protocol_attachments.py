@@ -1,5 +1,4 @@
 import base64
-from types import SimpleNamespace
 
 from gpt2giga.protocol import AttachmentProcessor
 
@@ -41,9 +40,10 @@ def test_attachment_processor_httpx_invalid_content_type(monkeypatch):
             self.headers = {"content-type": "text/html"}
             self.content = b"<html>not image</html>"
 
-    monkeypatch.setattr("gpt2giga.protocol.httpx.get", lambda url, timeout=30: FakeResp())
+    monkeypatch.setattr(
+        "gpt2giga.protocol.httpx.get", lambda url, timeout=30: FakeResp()
+    )
 
     client = DummyClient()
     p = AttachmentProcessor(client)
     assert p.upload_image("http://example.com/image") is None
-

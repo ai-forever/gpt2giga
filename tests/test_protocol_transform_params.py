@@ -24,4 +24,3 @@ def test_transform_chat_parameters_max_tokens_and_tools():
     out = rt.transform_chat_parameters(data)
     assert out.get("max_tokens") == 128
     assert "functions" in out and len(out["functions"]) == 2
-

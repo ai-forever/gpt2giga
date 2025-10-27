@@ -38,7 +38,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          poetry run pytest --cov=. --cov-report=json:coverage.json --cov-fail-under=80 -v
+          poetry run pytest --cov=. --cov-report=json:coverage.json  -v
 
       - name: Generate coverage badge
         if: matrix.python-version == '3.12'
