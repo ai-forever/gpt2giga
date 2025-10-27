@@ -74,7 +74,6 @@ jobs:
           python scripts/generate_badge.py $COVERAGE badges/coverage.svg
 
       - name: Commit coverage badge
-        if: github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
