@@ -27,4 +27,4 @@ jobs:
         docker build . \
           --file Dockerfile \
           --build-arg PYTHON_VERSION=${{ matrix.python-version }} \
-          --tag gpt2giga:python${PYTHON_TAG}:latest
+          --tag gpt2giga:python${PYTHON_TAG}
