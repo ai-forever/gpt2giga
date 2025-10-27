@@ -70,7 +70,8 @@ jobs:
 
       - name: Generate badge
         run: |
-          python scripts/generate_badge.py coverage.json badges/coverage.svg
+          COVERAGE=$(jq '.totals.percent_covered' coverage.json)
+          python scripts/generate_badge.py $COVERAGE badges/coverage.svg
 
       - name: Commit coverage badge
         if: github.ref == 'refs/heads/main'
