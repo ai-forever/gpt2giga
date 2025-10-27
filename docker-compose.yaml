@@ -7,7 +7,7 @@ services:
       - PYTHON_VERSION=3.10
     container_name: gpt2giga
     ports:
-      - "8090:8090"
+      - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
     restart: unless-stopped
     env_file:
       - .env

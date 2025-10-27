@@ -6,7 +6,11 @@ WORKDIR /app
 
 RUN pip install poetry
 
-COPY . .
+COPY pyproject.toml README.md ./
+
+RUN poetry install --no-root
+
+COPY gpt2giga/ gpt2giga/
 
 RUN poetry install
 
