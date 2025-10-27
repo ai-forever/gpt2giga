@@ -26,3 +26,12 @@ gpt2giga = "gpt2giga:main"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "black (>=25.9.0,<26.0.0)",
+    "flake8 (>=7.3.0,<8.0.0)",
+    "mypy (>=1.18.2,<2.0.0)",
+    "pytest (>=8.4.2,<9.0.0)",
+    "pytest-asyncio (>=1.2.0,<2.0.0)",
+    "pytest-mock (>=3.15.1,<4.0.0)"
+]
