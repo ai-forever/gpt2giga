@@ -41,7 +41,8 @@ omit = [
   "docs/*",
   "*/migrations/*",
   "examples/*",
-  "*/__pycache__/*"
+  "*/__pycache__/*",
+  ".local/"
 ]
 [tool.coverage.report]
 exclude_lines = [
