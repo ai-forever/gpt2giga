@@ -38,7 +38,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          poetry run pytest --cov=. --cov-report=json:coverage.json
+          poetry run pytest --cov=. --cov-report=json:coverage.json --cov-fail-under=80
         continue-on-error: false
 
       - name: Upload coverage artifact
