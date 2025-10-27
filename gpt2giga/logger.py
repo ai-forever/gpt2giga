@@ -2,10 +2,9 @@ import logging
 import sys
 
 
-def init_logger(verbose: bool = False) -> logging.Logger:
+def init_logger(log_level: str) -> logging.Logger:
     """Initialize a simple console logger."""
-    level = logging.DEBUG if verbose else logging.INFO
-
+    level = getattr(logging, log_level.upper(), logging.INFO)
     logger = logging.getLogger("gpt2giga")
     logger.setLevel(level)
 

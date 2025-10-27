@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
         from gpt2giga.logger import init_logger
 
         config = load_config()
-        logger = init_logger(config.proxy_settings.verbose)
+        logger = init_logger(config.proxy_settings.log_level)
 
     app.state.config = config
     app.state.logger = logger
@@ -62,7 +62,7 @@ def create_app() -> FastAPI:
 def run():
     config = load_config()
     proxy_settings = config.proxy_settings
-    logger = init_logger(proxy_settings.verbose)
+    logger = init_logger(proxy_settings.log_level)
 
     app = create_app()
     app.state.config = config
@@ -77,7 +77,7 @@ def run():
         app,
         host=proxy_settings.host,
         port=proxy_settings.port,
-        log_level="debug" if proxy_settings.verbose else "info",
+        log_level=proxy_settings.log_level.lower(),
         ssl_keyfile=proxy_settings.https_key_file if proxy_settings.use_https else None,
         ssl_certfile=(
             proxy_settings.https_cert_file if proxy_settings.use_https else None

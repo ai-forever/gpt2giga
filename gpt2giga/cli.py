@@ -19,8 +19,7 @@ def load_config() -> ProxyConfig:
             continue
         arg_name = f"--proxy-{field_name.replace('_', '-')}"
         help_text = field.field_info.description or field_name
-
-        if isinstance(field.type_, bool):
+        if field.type_ == bool:
             parser.add_argument(
                 arg_name, action="store_true", default=None, help=help_text
             )
@@ -34,7 +33,7 @@ def load_config() -> ProxyConfig:
         arg_name = f"--gigachat-{field_name.replace('_', '-')}"
         help_text = field.field_info.description or field_name
 
-        if isinstance(field.type_, bool):
+        if field.type_ == bool:
             parser.add_argument(
                 arg_name, action="store_true", default=None, help=help_text
             )

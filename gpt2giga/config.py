@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Literal
 
 from gigachat.pydantic_v1 import BaseSettings
 from gigachat.settings import Settings as GigachatSettings
@@ -24,13 +24,10 @@ class ProxySettings(BaseSettings):
     embeddings: str = Field(
         default="EmbeddingsGigaR", description="Модель для эмбеддингов"
     )
-    verify_ssl_certs: bool = Field(
-        default=False, description="Проверять SSL сертификаты"
-    )
     enable_images: bool = Field(
         default=False, description="Включить загрузку изображений"
     )
-    verbose: bool = Field(default=False, description="verbose of logs")
+    log_level: Literal['CRITICAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG'] = Field(default='INFO', description="verbose of logs")
     env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 
     class Config:
