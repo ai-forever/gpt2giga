@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install poetry jq
+          pip install poetry
           poetry install --with dev
 
       - name: Lint with Ruff
@@ -38,12 +38,39 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          poetry run pytest --cov=. --cov-report=json:coverage.json  -v
-        
-      - name: Generate coverage badge
+          poetry run pytest --cov=. --cov-report=json:coverage.json
+        continue-on-error: false
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.json
+
+
+  coverage-badge:
+    name: Generate coverage badge
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download coverage artifact from one Python version
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-3.12
+          path: .
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate badge
         run: |
-          COVERAGE=$(jq '.totals.percent_covered' coverage.json)
-          python scripts/generate_badge.py $COVERAGE badges/coverage.svg
+          python scripts/generate_badge.py coverage.json badges/coverage.svg
 
       - name: Commit coverage badge
         if: github.ref == 'refs/heads/main'
