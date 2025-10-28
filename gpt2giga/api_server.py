@@ -47,7 +47,8 @@ def create_app() -> FastAPI:
     # /some_prefix/another_prefix/v1/... -> /v1/...
     # /api/v1/embeddings -> /v1/embeddings/
     app.add_middleware(
-        PathNormalizationMiddleware, valid_roots=["v1", "chat", "models", "embeddings"]
+        PathNormalizationMiddleware,
+        valid_roots=["v1", "chat", "models", "embeddings", "responses"],
     )
 
     @app.get("/", include_in_schema=False)

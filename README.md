@@ -7,6 +7,7 @@
 [![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
 
 ![Coverage](./badges/coverage.svg)
+
 Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API, в GigaChat API.
 
 При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API, заданного в вашем приложении (например, `https://api.openai.com/v1/`).
@@ -179,9 +180,9 @@ docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
 
 ```sh
 gpt2giga \
-    --host 127.0.0.1 \
-    --port 8080 \
-    --verbose \
+    --proxy-host 127.0.0.1 \
+    --proxy-port 8080 \
+    --proxy-log-level \
     --pass-model \
     --pass-token \
     --base-url https://gigachat.devices.sberbank.ru/api/v1 \

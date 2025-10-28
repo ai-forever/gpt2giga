@@ -1,5 +1,6 @@
 import argparse
 import os
+from typing import get_origin, Literal, get_args
 
 from dotenv import find_dotenv, load_dotenv
 from gigachat.settings import Settings as GigachatSettings
@@ -22,6 +23,15 @@ def load_config() -> ProxyConfig:
         if field.type_ is bool:
             parser.add_argument(
                 arg_name, action="store_true", default=None, help=help_text
+            )
+        elif get_origin(field.type_) is Literal:
+            allowed_values = get_args(field.type_)
+            parser.add_argument(
+                arg_name,
+                type=str,
+                choices=allowed_values,
+                default=None,
+                help=f"{help_text} (choices: {', '.join(allowed_values)})",
             )
         else:
             parser.add_argument(
