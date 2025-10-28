@@ -7,7 +7,6 @@
 [![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
 
 ![Coverage](./badges/coverage.svg)
-
 Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API, в GigaChat API.
 
 При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API, заданного в вашем приложении (например, `https://api.openai.com/v1/`).
@@ -66,7 +65,13 @@ sequenceDiagram
    GIGACHAT_VERIFY_SSL_CERTS=False
    ```
 
-3. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
+3. Выберите образ с нужной версией Python (3.9-3.13).
+```sh
+PYTHON_VERSION=3.10
+docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
+```
+Доступные образы можно увидеть на https://hub.docker.com/r/gigateam/gpt2giga
+4. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
 
 ### Локальный запуск
 

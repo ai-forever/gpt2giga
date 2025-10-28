@@ -1,5 +1,6 @@
 services:
   gpt2giga:
+    image: gigateam/gpt2giga:python3.10
     build:
       context: .
       dockerfile: Dockerfile

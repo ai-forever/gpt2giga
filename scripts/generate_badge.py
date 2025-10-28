@@ -12,9 +12,9 @@ from pathlib import Path
 def coverage_to_color(coverage: float) -> str:
     """Return a badge color for the given coverage percentage."""
     if coverage >= 80:
-        return "brightgreen"
-    elif coverage >= 60:
-        return "yellowgreen"
+        return "green"
+    elif coverage >= 65:
+        return "orange"
     elif coverage >= 50:
         return "yellow"
     else:
@@ -27,8 +27,8 @@ def generate_badge(coverage: float, color: str) -> str:
     color_map = {
         "yellow": "#FFFF00",
         "red": "#FF0000",
-        "yellowgreen": "#FF8000",
-        "brightgreen": "#008000",
+        "orange": "#FF8000",
+        "green": "#008000",
     }
     value = f"{int(round(coverage))}%"
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="120" height="20">
