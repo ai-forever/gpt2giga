@@ -1,25 +1,59 @@
 [tool.poetry]
 name = "gpt2giga"
-version = "0.0.13"
+version = "0.0.14"
 description = ""
 authors = ["Konstantin Krestnikov <rai220@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-include = [{ path = "data/gpt2giga_models.json", format = ["sdist", "wheel"] }]
 
 [tool.poetry.dependencies]
 python = "^3.9"
-gigachat = "^0.1.42"
 asyncio = "^3.4.3"
 python-dotenv = "^1.0.1"
 aiohttp = "^3.10.10"
 tiktoken = "^0.9.0"
 pillow = "^11.1.0"
-
+uvicorn = "^0.37.0"
+fastapi = "^0.119.0"
+openai = "^2.3.0"
+aioitertools = "^0.12.0"
+gigachat = "^0.1.42.post2"
 
 [tool.poetry.scripts]
-gpt2giga = "gpt2giga:main"
+gpt2giga = "gpt2giga:run"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "black (>=25.9.0,<26.0.0)",
+    "pytest (>=8.4.2,<9.0.0)",
+    "pytest-asyncio (>=1.2.0,<2.0.0)",
+    "pytest-mock (>=3.15.1,<4.0.0)",
+    "ruff (>=0.14.2,<0.15.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)"
+]
+[tool.coverage.run]
+omit = [
+  "tests/*",
+  "scripts/*",
+  "docs/*",
+  "*/migrations/*",
+  "examples/*",
+  "*/__pycache__/*",
+  ".local/"
+]
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod"
+]

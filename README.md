@@ -1,5 +1,13 @@
 # Утилита для проксирования OpenAI-запросов в GigaChat
 
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/gpt2giga/ci.yaml?&style=flat-square)](https://github.com/ai-forever/gpt2giga/actions/workflows/ci.yml)
+[![GitHub License](https://img.shields.io/github/license/ai-forever/gpt2giga?style=flat-square)](https://opensource.org/licenses/MIT)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/gpt2giga?style=flat-square)](https://pypistats.org/packages/gpt2giga)
+[![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/gpt2giga?style=flat-square)](https://star-history.com/#ai-forever/gpt2giga)
+[![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
+
+![Coverage](./badges/coverage.svg)
+
 Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API, в GigaChat API.
 
 При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API, заданного в вашем приложении (например, `https://api.openai.com/v1/`).
@@ -51,14 +59,20 @@ sequenceDiagram
    GigaChat API поддерживает различные способы авторизации, которые отличаются в зависимости от типа вашей учетной записи. Пример с `Authorization key`.
 
    ```
-   PROXY_HOST=0.0.0.0
+   GPT2GIGA_HOST=0.0.0.0
    GIGACHAT_CREDENTIALS=<Authorization key GigaChat API>
    GIGACHAT_SCOPE=<your_api_scope>
    GIGACHAT_MODEL=GigaChat
    GIGACHAT_VERIFY_SSL_CERTS=False
    ```
 
-3. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
+3. Выберите образ с нужной версией Python (3.9-3.13).
+```sh
+PYTHON_VERSION=3.10
+docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
+```
+Доступные образы можно увидеть на https://hub.docker.com/r/gigateam/gpt2giga
+4. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
 
 ### Локальный запуск
 
@@ -103,36 +117,43 @@ sequenceDiagram
 
 ### Аргументы командной строки
 
-Утилита поддерживает аргументы:
+Утилита поддерживает аргументы 2 типов(настройки прокси и настройки GigaChat:
+- `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
 
-- `--host <HOST>` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
-- `--port <PORT>` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
-- `--mtls-ca-cert-path` - путь к файлу сертификата mTLS корневого центра сертификации;
-- `--mtls-cert-file-path` - путь к клиентский сертификату mTLS;
-- `--mtls-key-file-path` - путь к закрытому ключу mTLS;
-- `--verbose` — включить подробный вывод логов (запросы и ответы);
-- `--pass-model` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
-- `--pass-token` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
-- `--base-url <BASE_URL>` — базовый URL для GigaChat API. По умолчанию берется значение переменной `GIGACHAT_BASE_URL` или поля `BASE_URL` внутри пакета;
-- `--model <MODEL>` — модель для запросов в GigaChat. По умолчанию `GIGACHAT_MODEL`;
-- `--timeout <TIMEOUT>` — таймаут для запросов к GigaChat API. По умолчанию `600` секунд;
-- `--embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
-- `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории
-- `--verify-ssl-certs <True/False>` - проверять сертификаты SSL (по умолчанию `True`)
-- `--mtls-auth` - использовать аутентификацию по сертефикатам mTLS
-- `--enable-images` — экспериментальный флаг, который включает передачу изображений в формате OpenAI в GigaChat API
+- `--proxy-host <HOST>` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
+- `--proxy-port <PORT>` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
+- `--proxy-use-https <True/False>` — Использовать ли https. По умолчанию `False`;
+- `--proxy-https-key-file <PATH>` — Путь до key файла для https. По умолчанию `None`;
+- `--proxy-https-cert-file <PATH>` — Путь до cert файла https. По умолчанию `None`;
+- `--proxy-pass-model` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
+- `--proxy-pass-token` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
+- `--proxy-embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
+- `--proxy-enable-images` — экспериментальный флаг, который включает передачу изображений в формате OpenAI в GigaChat API
+- `--proxy-log-level` — Уровень логов(INFO, DEBUG, WARNING). По умолчанию `INFO`
+
+Далее идут стандартные настройки из библиотеки GigaChat:
+- `--gigachat-base-url <BASE_URL>` — базовый URL для GigaChat API. По умолчанию берется значение переменной `GIGACHAT_BASE_URL` или поля `BASE_URL` внутри пакета;
+- `--gigachat-auth-url <AUTH_URL>` — базовый URL для Auth GigaChat API. По умолчанию берется значение переменной `GIGACHAT_AUTH_URL` или поля `AUTH_URL` внутри пакета;
+- `--gigachat-credentials <BASE_URL>` — Креды гигачат;
+- `--gigachat-scope <GIGACHAT_SCOPE>` — Скоуп гигачат (API_CORP, API_PERS...);
+- `--gigachat-user <GIGACHAT_USER>` — Вариант авторизации через user/password;
+- `--gigachat-password <GIGACHAT_PASSWORD>` — Вариант авторизации через user/password;
+- `--gigachat-access_token <ACCESS_TOKEN>` — JWE токен;
+- `--gigachat-model <MODEL>` — модель для запросов в GigaChat. По умолчанию `GIGACHAT_MODEL`;
+- `--gigachat-profanity-check <True/False>` — Параметр цензуры. По умолчанию `None`;
+- `--gigachat-timeout <TIMEOUT>` — таймаут для запросов к GigaChat API. По умолчанию `30` секунд;
+- `--gigachat-verify-ssl-certs <True/False>` - проверять сертификаты SSL (по умолчанию `True`)
 
 ### Переменные окружения
 
 Для настройки параметров утилиты также можно использовать переменные окружения, заданные в файле `.env`.
 
+У настроек прокси префикс GPT2GIGA_, у настроек GigaChat: GIGACHAT_
+
 Список доступных переменных:
 
-- `PROXY_HOST="localhost"` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
-- `PROXY_PORT="8090"` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
-- `MTLS_CA_CERT_PATH` - путь к файлу сертификата корневого центра сертификации;
-- `MTLS_CERT_FILE_PATH` - путь к клиентский сертификату;
-- `MTLS_KEY_FILE_PATH` - путь к закрытому ключу;
+- `GPT2GIGA_HOST="localhost"` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
+- `GPT2GIGA_PROXY_PORT="8090"` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
 - `GPT2GIGA_VERBOSE="False"` — включает/отключает вывод подробной информации;
 - `GPT2GIGA_PASS_MODEL="False"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat;
 - `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
@@ -159,9 +180,9 @@ sequenceDiagram
 
 ```sh
 gpt2giga \
-    --host 127.0.0.1 \
-    --port 8080 \
-    --verbose \
+    --proxy-host 127.0.0.1 \
+    --proxy-port 8080 \
+    --proxy-log-level \
     --pass-model \
     --pass-token \
     --base-url https://gigachat.devices.sberbank.ru/api/v1 \

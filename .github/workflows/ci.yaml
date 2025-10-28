@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry install --with dev
+
+      - name: Lint with Ruff
+        run: poetry run ruff check .
+
+      - name: Check formatting with Black
+        run: poetry run black --check .
+
+      - name: Run tests with coverage
+        run: |
+          poetry run pytest --cov=. --cov-report=json:coverage.json --cov-fail-under=80
+        continue-on-error: false
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.json
+
+
+  coverage-badge:
+    name: Generate coverage badge
+    runs-on: ubuntu-latest
+    needs: test
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Download coverage artifact from one Python version
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-3.12
+          path: .
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate badge
+        run: |
+          COVERAGE=$(jq '.totals.percent_covered' coverage.json)
+          echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
+          python scripts/generate_badge.py $COVERAGE badges/coverage.svg
+
+      - name: Upload badge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-badge
+          path: badges/coverage.svg
+
+      - name: Commit coverage badge to branch (if internal)
+        if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+        run: |
+          BRANCH=${{ github.head_ref || github.ref_name }}
+          echo "Pushing coverage badge to branch: $BRANCH"
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add badges/coverage.svg
+          git commit -m "Update coverage badge for $BRANCH" || echo "No changes to commit"
+          git push origin HEAD:$BRANCH
+
+      - name: Comment coverage badge on PR
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          header: coverage-badge
+          message: |
+            ## 🧪 Test Coverage Report
+            Coverage: ${{ env.COVERAGE }}%
+            
+            ![Coverage Badge](https://raw.githubusercontent.com/${{ github.repository }}/${{ github.head_ref || github.ref_name }}/badges/coverage.svg)
