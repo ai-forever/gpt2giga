@@ -1,8 +1,15 @@
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.config import ProxyConfig
 from gpt2giga.routers import system_router, logs_router
+
+@pytest.fixture
+def temp_log_file(tmp_path):
+    log_file = tmp_path / "gpt2giga.log"
+    log_file.write_text("INFO: this is a test log line\n")
+    return log_file
 
 
 def make_app():
@@ -12,9 +19,9 @@ def make_app():
     app.state.config = ProxyConfig()
     return app
 
-
-def test_logs_ok_reads_last_lines():
+def test_logs_ok_reads_last_lines(temp_log_file):
     app = make_app()
+    app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
     # по умолчанию log_filename = gpt2giga.log, файл присутствует в репо
     resp = client.get("/logs", params={"lines": 1})
