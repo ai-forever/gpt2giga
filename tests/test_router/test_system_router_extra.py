@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from gpt2giga.config import ProxyConfig
 from gpt2giga.routers import system_router, logs_router
 
+
 @pytest.fixture
 def temp_log_file(tmp_path):
     log_file = tmp_path / "gpt2giga.log"
@@ -18,6 +19,7 @@ def make_app():
     app.include_router(logs_router)
     app.state.config = ProxyConfig()
     return app
+
 
 def test_logs_ok_reads_last_lines(temp_log_file):
     app = make_app()
