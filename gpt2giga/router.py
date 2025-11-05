@@ -67,7 +67,7 @@ async def chat_completions(request: Request):
     state = request.app.state
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
-        state.logger.debug(f"Functions count: {len(data["functions"])}")
+        state.logger.debug(f'Functions count: {len(data["functions"])}')
     chat_messages = state.request_transformer.send_to_gigachat(data)
     if not stream:
         response = await state.gigachat_client.achat(chat_messages)
