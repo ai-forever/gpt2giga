@@ -40,16 +40,37 @@ def exceptions_handler(func):
     return wrapper
 
 
-async def stream_chat_completion_generator(request: Request, chat_messages: Chat) -> AsyncGenerator[str, None]:
+async def stream_chat_completion_generator(
+    request: Request, chat_messages: Chat
+) -> AsyncGenerator[str, None]:
     try:
-        async for chunk in request.app.state.gigachat_client.astream(
-                chat_messages
+        async for chunk in request.app.state.gigachat_client.astream(chat_messages):
+            if await request.is_disconnected():
+                break
+            processed = request.app.state.response_processor.process_stream_chunk(
+                chunk, chat_messages.model
+            )
+            yield f"data: {json.dumps(processed)}\n\n"
+
+    except GeneratorExit:
+        pass
+    except Exception:
+        yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+async def stream_responses_generator(
+    request: Request, chat_messages: Chat
+) -> AsyncGenerator[str, None]:
+    try:
+        async for i, chunk in aio_enumerate(
+            request.app.state.gigachat_client.astream(chat_messages)
         ):
             if await request.is_disconnected():
                 break
             processed = (
-                request.app.state.response_processor.process_stream_chunk(
-                    chunk, chat_messages.model
+                request.app.state.response_processor.process_stream_chunk_response(
+                    chunk, sequence_number=i, response_id=request.app.state.rquid
                 )
             )
             yield f"data: {json.dumps(processed)}\n\n"
@@ -60,23 +81,6 @@ async def stream_chat_completion_generator(request: Request, chat_messages: Chat
         yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
         yield "data: [DONE]\n\n"
 
-async def stream_responses_generator(request: Request, chat_messages: Chat) -> AsyncGenerator[str, None]:
-    try:
-        async for i, chunk in aio_enumerate(
-                request.app.state.gigachat_client.astream(chat_messages)
-        ):
-            if await request.is_disconnected():
-                break
-            processed = request.app.state.response_processor.process_stream_chunk_response(
-                chunk, sequence_number=i, response_id=request.app.state.rquid
-            )
-            yield f"data: {json.dumps(processed)}\n\n"
-
-    except GeneratorExit:
-        pass
-    except Exception:
-        yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
-        yield "data: [DONE]\n\n"
 
 def convert_tool_to_giga_functions(data: dict):
     functions = []

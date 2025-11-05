@@ -215,8 +215,8 @@ class RequestTransformer:
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
-        response_format = transformed.pop("response_format", None)
-        response_format_responses = transformed.pop("text", None)
+        response_format: dict | None = transformed.pop("response_format", None)
+        response_format_responses: dict | None = transformed.pop("text", None)
         if response_format:
             transformed["response_format"] = {
                 "type": response_format.get("type"),
@@ -329,7 +329,9 @@ class ResponseProcessor:
     def __init__(self):
         self.logger = logging.getLogger(f"{__name__}.ResponseProcessor")
 
-    def process_response(self, giga_resp: ChatCompletion, gpt_model: str, response_id: str) -> dict:
+    def process_response(
+        self, giga_resp: ChatCompletion, gpt_model: str, response_id: str
+    ) -> dict:
         """Обрабатывает обычный ответ от GigaChat"""
         giga_dict = giga_resp.dict()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
@@ -368,7 +370,9 @@ class ResponseProcessor:
             "status": "completed",
             "instructions": data.get("instructions"),
             "model": gpt_model,
-            "output": self._create_output_responses(giga_dict, is_tool_call, response_id),
+            "output": self._create_output_responses(
+                giga_dict, is_tool_call, response_id
+            ),
             "text": {"format": {"type": "text"}},
             "usage": self._build_response_usage(giga_dict.get("usage")),
         }
@@ -439,7 +443,10 @@ class ResponseProcessor:
         return result
 
     def process_stream_chunk_response(
-        self, giga_resp: ChatCompletionChunk, sequence_number: int = 0, response_id: str = str(uuid.uuid4())
+        self,
+        giga_resp: ChatCompletionChunk,
+        sequence_number: int = 0,
+        response_id: str = str(uuid.uuid4()),
     ) -> dict:
         giga_dict = giga_resp.dict()
         for choice in giga_dict["choices"]:
@@ -503,7 +510,9 @@ class ResponseProcessor:
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")
 
-    def _process_choice_responses(self, choice: Dict, response_id: str, is_stream: bool = False):
+    def _process_choice_responses(
+        self, choice: Dict, response_id: str, is_stream: bool = False
+    ):
         """Обрабатывает отдельный choice"""
         message_key = "delta" if is_stream else "message"
 

@@ -31,8 +31,10 @@ class ProxySettings(BaseSettings):
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = Field(
         default="INFO", description="log verbosity level"
     )
-    log_filename: str = Field("gpt2giga.log", description="Имя лог файла")
-    log_max_size: int = Field(default=10 * 1024 * 1024, description="максимальный размер файла в байтах")
+    log_filename: str = Field(default="gpt2giga.log", description="Имя лог файла")
+    log_max_size: int = Field(
+        default=10 * 1024 * 1024, description="максимальный размер файла в байтах"
+    )
     log_backup_count: int = Field(default=3, description="Количество архивов логов.")
     env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 

@@ -10,15 +10,17 @@ class RquidMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         """
-            Middleware to assign a unique request ID (rquid) to each request.
-            """
+        Middleware to assign a unique request ID (rquid) to each request.
+        """
         rquid = str(uuid.uuid4())
         request.app.state.rquid = rquid
         token = rquid_context.set(rquid)
         try:
             response = await call_next(request)
         except Exception:
-            request.app.state.logger.exception("Unhandled exception during request", extra={"rquid": rquid})
+            request.app.state.logger.exception(
+                "Unhandled exception during request", extra={"rquid": rquid}
+            )
             raise
         finally:
             rquid_context.reset(token)

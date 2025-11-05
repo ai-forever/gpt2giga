@@ -7,8 +7,12 @@ from fastapi.responses import Response, StreamingResponse
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 
-from gpt2giga.utils import exceptions_handler, stream_responses_generator, stream_chat_completion_generator, \
-    convert_tool_to_giga_functions
+from gpt2giga.utils import (
+    exceptions_handler,
+    stream_responses_generator,
+    stream_chat_completion_generator,
+    convert_tool_to_giga_functions,
+)
 
 router = APIRouter()
 
@@ -57,7 +61,7 @@ async def chat_completions(request: Request):
     tools = "tools" in data or "functions" in data
     is_response_api = "input" in data
     if tools:
-            data["functions"] = convert_tool_to_giga_functions(data)
+        data["functions"] = convert_tool_to_giga_functions(data)
     chat_messages = request.app.state.request_transformer.send_to_gigachat(data)
     if not stream:
         response = await request.app.state.gigachat_client.achat(chat_messages)
@@ -73,11 +77,13 @@ async def chat_completions(request: Request):
     else:
         if is_response_api:
             return StreamingResponse(
-                stream_responses_generator(request, chat_messages), media_type="text/event-stream"
+                stream_responses_generator(request, chat_messages),
+                media_type="text/event-stream",
             )
         else:
             return StreamingResponse(
-                stream_chat_completion_generator(request, chat_messages), media_type="text/event-stream"
+                stream_chat_completion_generator(request, chat_messages),
+                media_type="text/event-stream",
             )
 
 
