@@ -42,7 +42,7 @@ class ProxySettings(BaseSettings):
         default=False,
         description="Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ)",
     )
-    api_key: str | None = Field(
+    api_key: Optional[str] = Field(
         default=None,
         description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
     )

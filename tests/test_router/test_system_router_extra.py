@@ -8,6 +8,7 @@ from gpt2giga.routers import system_router, logs_router
 def make_app():
     app = FastAPI()
     app.include_router(system_router)
+    app.include_router(logs_router)
     app.state.config = ProxyConfig()
     return app
 
