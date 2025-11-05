@@ -100,5 +100,4 @@ def convert_tool_to_giga_functions(data: dict):
                 parameters=FunctionParameters(**tool["parameters"]),
             )
         functions.append(giga_function)
-    print(functions)
     return functions

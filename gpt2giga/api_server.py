@@ -7,7 +7,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
 from gpt2giga.cli import load_config
-from gpt2giga.logger import init_logger
+from gpt2giga.logger import setup_logger
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
@@ -24,22 +24,25 @@ async def lifespan(app: FastAPI):
 
         config = load_config()
     if not logger:
-        from gpt2giga.logger import init_logger
+        from gpt2giga.logger import setup_logger
 
-        logger = init_logger(
+        logger = setup_logger(
             log_level=config.proxy_settings.log_level,
             log_file=config.proxy_settings.log_filename,
             max_bytes=config.proxy_settings.log_max_size,
-            backup_count=config.proxy_settings.log_backup_count,
         )
 
     app.state.config = config
     app.state.logger = logger
     app.state.gigachat_client = GigaChat(**config.gigachat_settings.dict())
 
-    attachment_processor = AttachmentProcessor(app.state.gigachat_client)
-    app.state.request_transformer = RequestTransformer(config, attachment_processor)
-    app.state.response_processor = ResponseProcessor()
+    attachment_processor = AttachmentProcessor(
+        app.state.gigachat_client, app.state.logger
+    )
+    app.state.request_transformer = RequestTransformer(
+        config, app.state.logger, attachment_processor
+    )
+    app.state.response_processor = ResponseProcessor(app.state.logger)
     yield
 
 
@@ -72,11 +75,10 @@ def create_app() -> FastAPI:
 def run():
     config = load_config()
     proxy_settings = config.proxy_settings
-    logger = init_logger(
+    logger = setup_logger(
         log_level=proxy_settings.log_level,
         log_file=proxy_settings.log_filename,
         max_bytes=proxy_settings.log_max_size,
-        backup_count=proxy_settings.log_backup_count,
     )
 
     app = create_app()

@@ -7,6 +7,7 @@ from fastapi.responses import Response, StreamingResponse
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 
+from gpt2giga.logger import rquid_context
 from gpt2giga.utils import (
     exceptions_handler,
     stream_responses_generator,
@@ -33,8 +34,9 @@ async def ping() -> Response:
 
 @router.get("/models")
 @exceptions_handler
-async def show_available_models(raw_request: Request):
-    response = await raw_request.app.state.gigachat_client.aget_models()
+async def show_available_models(request: Request):
+    state = request.app.state
+    response = await state.gigachat_client.aget_models()
     models = [i.dict(by_alias=True) for i in response.data]
     current_timestamp = int(time.time())
     for model in models:
@@ -47,7 +49,8 @@ async def show_available_models(raw_request: Request):
 @router.get("/models/{model}")
 @exceptions_handler
 async def get_model(model: str, request: Request):
-    response = await request.app.state.gigachat_client.aget_model(model=model)
+    state = request.app.state
+    response = await state.gigachat_client.aget_model(model=model)
     model = response.dict(by_alias=True)
     model["created"] = int(time.time())
     return OpenAIModel(**model)
@@ -60,18 +63,21 @@ async def chat_completions(request: Request):
     stream = data.get("stream", False)
     tools = "tools" in data or "functions" in data
     is_response_api = "input" in data
+    current_rquid = rquid_context.get()
+    state = request.app.state
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
-    chat_messages = request.app.state.request_transformer.send_to_gigachat(data)
+        state.logger.debug(f"Functions count: {len(data["functions"])}")
+    chat_messages = state.request_transformer.send_to_gigachat(data)
     if not stream:
-        response = await request.app.state.gigachat_client.achat(chat_messages)
+        response = await state.gigachat_client.achat(chat_messages)
         if is_response_api:
-            processed = request.app.state.response_processor.process_response_api(
-                data, response, chat_messages.model, request.app.state.rquid
+            processed = state.response_processor.process_response_api(
+                data, response, chat_messages.model, current_rquid
             )
         else:
-            processed = request.app.state.response_processor.process_response(
-                response, chat_messages.model, request.app.state.rquid
+            processed = state.response_processor.process_response(
+                response, chat_messages.model, current_rquid
             )
         return processed
     else:

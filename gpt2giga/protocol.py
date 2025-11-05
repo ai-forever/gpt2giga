@@ -2,7 +2,6 @@ import base64
 import hashlib
 import io
 import json
-import logging
 import re
 import time
 import uuid
@@ -27,10 +26,10 @@ from gpt2giga.config import ProxyConfig
 class AttachmentProcessor:
     """Обработчик изображений с кэшированием"""
 
-    def __init__(self, giga_client: GigaChat):
+    def __init__(self, giga_client: GigaChat, logger):
         self.giga = giga_client
+        self.logger = logger
         self.cache: dict[str, str] = {}
-        self.logger = logging.getLogger(f"{__name__}.AttachmentProcessor")
 
     def upload_image(self, image_url: str) -> Optional[str]:
         """Загружает изображение в GigaChat и возвращает file_id"""
@@ -85,11 +84,12 @@ class RequestTransformer:
     def __init__(
         self,
         config: ProxyConfig,
+        logger,
         attachment_processor: Optional[AttachmentProcessor] = None,
     ):
         self.config = config
+        self.logger = logger
         self.attachment_processor = attachment_processor
-        self.logger = logging.getLogger(f"{__name__}.RequestTransformer")
 
     def transform_messages(self, messages: List[Dict]) -> List[Dict]:
         """Трансформирует сообщения в формат GigaChat"""
@@ -326,8 +326,8 @@ class RequestTransformer:
 class ResponseProcessor:
     """Обработчик ответов от GigaChat в формат OpenAI"""
 
-    def __init__(self):
-        self.logger = logging.getLogger(f"{__name__}.ResponseProcessor")
+    def __init__(self, logger):
+        self.logger = logger
 
     def process_response(
         self, giga_resp: ChatCompletion, gpt_model: str, response_id: str

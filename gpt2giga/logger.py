@@ -1,71 +1,52 @@
-import json
-import logging
+# logger.py
 import sys
-from contextvars import ContextVar
-from logging.handlers import RotatingFileHandler
-from pathlib import Path
+from loguru import logger
+import contextvars
 
-rquid_context: ContextVar[str | None] = ContextVar("rquid", default=None)
-
-
-class JSONFormatter(logging.Formatter):
-    """Structured JSON formatter with contextual rquid support."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        log_data = {
-            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S.%fZ"),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-            "rquid": rquid_context.get(),
-        }
-
-        if record.exc_info:
-            log_data["exception"] = self.formatException(record.exc_info)
-
-        return json.dumps({k: v for k, v in log_data.items() if v is not None})
+# Context variable for rquid
+rquid_context = contextvars.ContextVar("rquid", default="-")
 
 
-def init_logger(
-    name: str = "gpt2giga",
-    log_level: str = "INFO",
-    log_file: str | None = None,
-    max_bytes: int = 10 * 1024 * 1024,
-    backup_count: int = 5,
-) -> logging.Logger:
+def get_rquid() -> str:
+    """Retrieve current request's RQUID from contextvar."""
+    return rquid_context.get()
+
+
+def setup_logger(log_level="INFO", log_file="app.log", max_bytes=10_000_000):
     """
-    Initialize a JSON logger with contextual request ID support.
+    Configure Loguru logger with file rotation and contextual rquid.
     """
-    level = getattr(logging, log_level.upper(), logging.INFO)
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
+    logger.remove()  # Remove default logger
 
-    # Prevent duplicate handlers if called multiple times
-    if logger.handlers:
-        return logger
+    # Custom format that automatically includes rquid
+    format_str = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+        "<level>{level: <8}</level> | "
+        "<cyan>{extra[rquid]}</cyan> | "
+        "<level>{message}</level>"
+    )
 
-    formatter = JSONFormatter()
+    logger.add(
+        sys.stdout,
+        level=log_level,
+        format=format_str,
+        enqueue=True,
+    )
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    logger.addHandler(console_handler)
+    logger.add(
+        log_file,
+        level=log_level,
+        rotation=max_bytes,  # rotate by size
+        retention="7 days",
+        enqueue=True,
+        format=format_str,
+    )
 
-    # File handler (optional)
-    if log_file:
-        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        file_handler = RotatingFileHandler(
-            log_file, maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
-        )
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(level)
-        logger.addHandler(file_handler)
+    # Patch to automatically bind rquid from contextvar
+    class RquidFilter:
+        def __call__(self, record):
+            record["extra"]["rquid"] = get_rquid()
+            return True
 
-    # Silence noisy loggers
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-
-    logger.debug("Logger initialized with contextual rquid support.")
+    logger.configure(patcher=RquidFilter())
     return logger
