@@ -383,9 +383,10 @@ class ResponseProcessor:
     def _create_output_responses(
         data: dict,
         is_tool_call: bool = False,
-        response_id: str = str(uuid.uuid4()),
+        response_id: Optional[str] = None,
         message_key: Literal["message", "delta"] = "message",
     ) -> list:
+        response_id = str(uuid.uuid4()) if response_id is None else response_id
         try:
             if is_tool_call:
                 return [data["choices"][0][message_key]["output"]]
@@ -446,9 +447,10 @@ class ResponseProcessor:
         self,
         giga_resp: ChatCompletionChunk,
         sequence_number: int = 0,
-        response_id: str = str(uuid.uuid4()),
+        response_id: Optional[str] = None,
     ) -> dict:
         giga_dict = giga_resp.dict()
+        response_id = str(uuid.uuid4()) if response_id is None else response_id
         for choice in giga_dict["choices"]:
             self._process_choice_responses(choice, response_id, is_stream=True)
         delta = giga_dict["choices"][0]["delta"]

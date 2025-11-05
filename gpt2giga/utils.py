@@ -52,8 +52,6 @@ async def stream_chat_completion_generator(
             )
             yield f"data: {json.dumps(processed)}\n\n"
 
-    except GeneratorExit:
-        pass
     except Exception:
         yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
         yield "data: [DONE]\n\n"
@@ -75,8 +73,6 @@ async def stream_responses_generator(
             )
             yield f"data: {json.dumps(processed)}\n\n"
 
-    except GeneratorExit:
-        pass
     except Exception:
         yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
         yield "data: [DONE]\n\n"
