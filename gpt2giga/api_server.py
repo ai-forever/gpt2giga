@@ -1,17 +1,18 @@
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from gigachat import GigaChat
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
+from gpt2giga.auth import verify_api_key
 from gpt2giga.cli import load_config
 from gpt2giga.logger import setup_logger
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-from gpt2giga.routers import api_router
+from gpt2giga.routers import api_router, logs_router
 from gpt2giga.routers import system_router
 
 
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan, title="Gpt2Giga converter proxy")
+    config = load_config()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -68,9 +70,13 @@ def create_app() -> FastAPI:
     async def docs_redirect():
         return RedirectResponse(url="/docs")
 
-    app.include_router(api_router)
-    app.include_router(api_router, prefix="/v1", tags=["V1"])
-    app.include_router(system_router)
+    dependencies = (
+        [Depends(verify_api_key)] if config.proxy_settings.enable_api_key_auth else []
+    )
+    app.include_router(api_router, dependencies=dependencies)
+    app.include_router(api_router, prefix="/v1", tags=["V1"], dependencies=dependencies)
+    app.include_router(system_router, dependencies=dependencies)
+    app.include_router(logs_router)
     return app
 
 

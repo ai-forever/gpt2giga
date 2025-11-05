@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Live Log Stream</title>
+  <style>
+    body {
+      font-family: monospace;
+      background-color: #111;
+      color: #0f0;
+      padding: 20px;
+    }
+    #controls {
+      margin-bottom: 15px;
+    }
+    #apiKey {
+      width: 300px;
+      padding: 5px;
+      font-family: monospace;
+    }
+    #logs {
+      border: 1px solid #444;
+      padding: 10px;
+      height: 400px;
+      overflow-y: scroll;
+      background-color: #000;
+      white-space: pre-wrap;
+    }
+    button {
+      padding: 5px 10px;
+      margin-left: 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label for="apiKey">API Key:</label>
+    <input type="text" id="apiKey" placeholder="Enter your API key" />
+    <button id="connectBtn">Connect</button>
+  </div>
+
+  <div id="logs"></div>
+
+  <script>
+  const connectBtn = document.getElementById("connectBtn");
+  const apiKeyInput = document.getElementById("apiKey");
+  const logsDiv = document.getElementById("logs");
+
+  connectBtn.addEventListener("click", async () => {
+    const apiKey = apiKeyInput.value.trim();
+    if (!apiKey) {
+      alert("Please enter your API key");
+      return;
+    }
+
+    logsDiv.textContent = "Connecting...\n";
+
+    const response = await fetch("/logs/stream", {
+      headers: { "x-api-key": apiKey },
+    });
+
+    if (!response.ok) {
+      logsDiv.textContent = `[Error] Unauthorized: ${response.status}`;
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      logsDiv.textContent += chunk;
+      logsDiv.scrollTop = logsDiv.scrollHeight;
+    }
+  });
+</script>
+
+</body>
+</html>

@@ -38,6 +38,15 @@ class ProxySettings(BaseSettings):
     log_backup_count: int = Field(default=3, description="Количество архивов логов.")
     env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 
+    enable_api_key_auth: bool = Field(
+        default=False,
+        description="Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ)",
+    )
+    api_key: str | None = Field(
+        default=None,
+        description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
+    )
+
     class Config:
         env_prefix = "gpt2giga_"
         case_sensitive = False

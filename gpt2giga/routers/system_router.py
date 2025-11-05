@@ -1,14 +1,18 @@
 import asyncio
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, Query
 from sse_starlette import EventSourceResponse
 from starlette.requests import Request
-from starlette.responses import Response, PlainTextResponse
-
+from starlette.responses import Response, PlainTextResponse, HTMLResponse
 from gpt2giga.utils import exceptions_handler
 
 router = APIRouter(tags=["System"])
+
+logs_router = APIRouter(tags=["HTML logs"])
+
+
 @router.get("/health", response_class=Response)
 @exceptions_handler
 async def health() -> Response:
@@ -22,10 +26,10 @@ async def health() -> Response:
 async def ping() -> Response:
     return await health()
 
+
 @router.get("/logs", response_class=PlainTextResponse)
 @exceptions_handler
-async def get_logs(request: Request,
-        lines: int = Query(100, ge=1, le=5000)):
+async def get_logs(request: Request, lines: int = Query(100, ge=1, le=5000)):
     """
     Return the last N lines from the log file.
     """
@@ -41,12 +45,14 @@ async def get_logs(request: Request,
         request.app.state.logger.exception("Error reading log file")
         return PlainTextResponse(f"Error: {str(e)}", status_code=500)
 
+
 @router.get("/logs/stream")
 @exceptions_handler
 async def stream_logs(request: Request):
     """
     Stream live logs using Server-Sent Events (SSE).
     """
+
     async def log_generator():
         filename = request.app.state.config.proxy_settings.log_filename
         if not os.path.exists(filename):
@@ -65,3 +71,10 @@ async def stream_logs(request: Request):
                     await asyncio.sleep(0.5)  # wait briefly for new lines
 
     return EventSourceResponse(log_generator())
+
+
+@logs_router.get("/logs/html", response_class=HTMLResponse)
+async def root():
+    """Serve the simple log viewer."""
+    html_path = Path(__file__).parent.parent / "templates" / "log_viewer.html"
+    return HTMLResponse(html_path.read_text())

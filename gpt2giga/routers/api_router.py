@@ -6,7 +6,6 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
-
 from gpt2giga.logger import rquid_context
 from gpt2giga.utils import (
     exceptions_handler,
@@ -16,9 +15,6 @@ from gpt2giga.utils import (
 )
 
 router = APIRouter(tags=["API"])
-
-
-
 
 
 @router.get("/models")
@@ -115,4 +111,3 @@ async def embeddings(request: Request):
 @exceptions_handler
 async def responses(request: Request):
     return await chat_completions(request)
-
