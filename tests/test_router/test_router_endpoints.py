@@ -1,3 +1,4 @@
+import sys
 from types import SimpleNamespace
 
 from fastapi import FastAPI
@@ -61,7 +62,7 @@ def make_app(monkeypatch=None):
                 return "TEXT"
 
         fake_tk = SimpleNamespace(encoding_for_model=lambda m: FakeEnc())
-        monkeypatch.setattr("gpt2giga.router.tiktoken", fake_tk)
+        monkeypatch.setattr(sys.modules["gpt2giga.routers.api_router"], "tiktoken", fake_tk)
     return app
 
 

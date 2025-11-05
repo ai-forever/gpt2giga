@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.routers.api_router import router
+from gpt2giga.routers import api_router, system_router
 
 app = FastAPI()
-app.include_router(router)
+app.include_router(api_router)
+app.include_router(system_router)
 
 
 def test_health_endpoint():
