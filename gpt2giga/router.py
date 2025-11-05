@@ -11,7 +11,7 @@ from gigachat.models import FunctionParameters, Function
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 
-from gpt2giga.utils import exceptions_handler
+from gpt2giga.utils import exceptions_handler, stream_responses_generator, stream_chat_completion_generator
 
 router = APIRouter()
 
@@ -57,9 +57,9 @@ async def get_model(model: str, request: Request):
 async def chat_completions(request: Request):
     data = await request.json()
     stream = data.get("stream", False)
-    is_tool_call = "tools" in data
+    tools = "tools" in data or "functions" in data
     is_response_api = "input" in data
-    if is_tool_call:
+    if tools:
         data["functions"] = []
         for tool in data.get("tools", []):
             if tool.get("function"):
@@ -81,48 +81,22 @@ async def chat_completions(request: Request):
         response = await request.app.state.gigachat_client.achat(chat_messages)
         if is_response_api:
             processed = request.app.state.response_processor.process_response_api(
-                data, response, chat_messages.model, is_tool_call
+                data, response, chat_messages.model, request.app.state.rquid
             )
         else:
             processed = request.app.state.response_processor.process_response(
-                response, chat_messages.model, is_tool_call
+                response, chat_messages.model, request.app.state.rquid
             )
         return processed
     else:
-
-        async def stream_generator(is_response_api: bool) -> AsyncGenerator[str, None]:
-            """
-            Yields formatted SSE (Server-Sent Events) chunks
-            as they arrive from the model.
-            """
-            if is_response_api:
-                async for i, chunk in aio_enumerate(
-                    request.app.state.gigachat_client.astream(chat_messages)
-                ):
-                    processed = request.app.state.response_processor.process_stream_chunk_response(
-                        chunk, sequence_number=i
-                    )
-                    # Convert to proper SSE format
-                    yield f"data: {json.dumps(processed)}\n\n"
-            else:
-                async for chunk in request.app.state.gigachat_client.astream(
-                    chat_messages
-                ):
-                    processed = (
-                        request.app.state.response_processor.process_stream_chunk(
-                            chunk,
-                            chat_messages.model,
-                            is_tool_call="tools" in chat_messages,
-                        )
-                    )
-                    # Convert to proper SSE format
-                    yield f"data: {json.dumps(processed)}\n\n"
-
-            yield "data: [DONE]\n\n"
-
-        return StreamingResponse(
-            stream_generator(is_response_api), media_type="text/event-stream"
-        )
+        if is_response_api:
+            return StreamingResponse(
+                stream_responses_generator(request, chat_messages), media_type="text/event-stream"
+            )
+        else:
+            return StreamingResponse(
+                stream_chat_completion_generator(request, chat_messages), media_type="text/event-stream"
+            )
 
 
 @router.post("/embeddings")

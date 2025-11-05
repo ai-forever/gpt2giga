@@ -8,7 +8,8 @@ from starlette.responses import RedirectResponse
 
 from gpt2giga.cli import load_config
 from gpt2giga.logger import init_logger
-from gpt2giga.middleware import PathNormalizationMiddleware
+from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.router import router
 
@@ -20,9 +21,9 @@ async def lifespan(app: FastAPI):
 
     if not config:
         from gpt2giga.cli import load_config
-        from gpt2giga.logger import init_logger
-
         config = load_config()
+    if not logger:
+        from gpt2giga.logger import init_logger
         logger = init_logger(config.proxy_settings.log_level)
 
     app.state.config = config
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
         PathNormalizationMiddleware,
         valid_roots=["v1", "chat", "models", "embeddings", "responses"],
     )
+    app.add_middleware(RquidMiddleware)
 
     @app.get("/", include_in_schema=False)
     async def docs_redirect():
@@ -63,7 +65,8 @@ def create_app() -> FastAPI:
 def run():
     config = load_config()
     proxy_settings = config.proxy_settings
-    logger = init_logger(proxy_settings.log_level)
+    logger = init_logger(log_level=proxy_settings.log_level,
+                         log_file="gpt2giga.log")
 
     app = create_app()
     app.state.config = config

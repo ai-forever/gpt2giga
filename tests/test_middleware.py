@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from starlette.testclient import TestClient
 
-from gpt2giga.middleware import PathNormalizationMiddleware
+from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 
 app = FastAPI()
 app.add_middleware(PathNormalizationMiddleware, valid_roots=["v1"])

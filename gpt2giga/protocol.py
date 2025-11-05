@@ -329,23 +329,20 @@ class ResponseProcessor:
     def __init__(self):
         self.logger = logging.getLogger(f"{__name__}.ResponseProcessor")
 
-    def process_response(
-        self, giga_resp: ChatCompletion, gpt_model: str, is_tool_call: bool = False
-    ) -> dict:
+    def process_response(self, giga_resp: ChatCompletion, gpt_model: str, response_id: str) -> dict:
         """Обрабатывает обычный ответ от GigaChat"""
         giga_dict = giga_resp.dict()
-
+        is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
         for choice in giga_dict["choices"]:
             self._process_choice(choice, is_tool_call)
-
         result = {
-            "id": f"chatcmpl-{uuid.uuid4()}",
+            "id": f"chatcmpl-{response_id}",
             "object": "chat.completion",
             "created": int(time.time()),
             "model": gpt_model,
             "choices": giga_dict["choices"],
             "usage": self._build_usage(giga_dict["usage"]),
-            "system_fingerprint": f"fp_{uuid.uuid4()}",
+            "system_fingerprint": f"fp_{response_id}",
         }
 
         self.logger.debug("Processed chat completion response")
@@ -357,20 +354,21 @@ class ResponseProcessor:
         data: dict,
         giga_resp: ChatCompletion,
         gpt_model: str,
-        is_tool_call: bool = False,
+        response_id: str,
     ) -> dict:
         giga_dict = giga_resp.dict()
+        is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
         for choice in giga_dict["choices"]:
             self._process_choice_responses(choice)
 
         result = {
-            "id": f"resp_{uuid.uuid4()}",
+            "id": f"resp_{response_id}",
             "object": "response",
             "created_at": int(time.time()),
             "status": "completed",
             "instructions": data.get("instructions"),
             "model": gpt_model,
-            "output": self._create_output_responses(giga_dict, is_tool_call),
+            "output": self._create_output_responses(giga_dict, is_tool_call, response_id),
             "text": {"format": {"type": "text"}},
             "usage": self._build_response_usage(giga_dict.get("usage")),
         }
@@ -381,6 +379,7 @@ class ResponseProcessor:
     def _create_output_responses(
         data: dict,
         is_tool_call: bool = False,
+        response_id: str = str(uuid.uuid4()),
         message_key: Literal["message", "delta"] = "message",
     ) -> list:
         try:
@@ -390,7 +389,7 @@ class ResponseProcessor:
                 return [
                     {
                         "type": "message",
-                        "id": f"msg_{uuid.uuid4()}",
+                        "id": f"msg_{response_id}",
                         "status": "completed",
                         "role": "assistant",
                         "content": [
@@ -405,7 +404,7 @@ class ResponseProcessor:
             return [
                 {
                     "type": "message",
-                    "id": f"msg_{uuid.uuid4()}",
+                    "id": f"msg_{response_id}",
                     "status": "completed",
                     "role": "assistant",
                     "content": [
@@ -418,11 +417,11 @@ class ResponseProcessor:
             ]
 
     def process_stream_chunk(
-        self, giga_resp: ChatCompletionChunk, gpt_model: str, is_tool_call: bool = False
+        self, giga_resp: ChatCompletionChunk, gpt_model: str
     ) -> dict:
         """Обрабатывает стриминговый чанк от GigaChat"""
         giga_dict = giga_resp.dict()
-
+        is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
         for choice in giga_dict["choices"]:
             self._process_choice(choice, is_tool_call, is_stream=True)
 
@@ -440,17 +439,17 @@ class ResponseProcessor:
         return result
 
     def process_stream_chunk_response(
-        self, giga_resp: ChatCompletionChunk, sequence_number: int = 0
+        self, giga_resp: ChatCompletionChunk, sequence_number: int = 0, response_id: str = str(uuid.uuid4())
     ) -> dict:
         giga_dict = giga_resp.dict()
         for choice in giga_dict["choices"]:
-            self._process_choice_responses(choice, is_stream=True)
+            self._process_choice_responses(choice, response_id, is_stream=True)
         delta = giga_dict["choices"][0]["delta"]
         if delta["content"]:
             result = ResponseTextDeltaEvent(
                 content_index=0,
                 delta=delta["content"],
-                item_id=f"msg_{uuid.uuid4()}",
+                item_id=f"msg_{response_id}",
                 output_index=0,
                 logprobs=[],
                 type="response.output_text.delta",
@@ -471,12 +470,12 @@ class ResponseProcessor:
 
         choice["index"] = 0
         choice["logprobs"] = None
-
+        if is_tool_call:
+            choice["finish_reason"] = "tool_calls"
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
-
-            if message.get("role") == "assistant" and message.get("function_call"):
+            if message.get("function_call"):
                 self._process_function_call(message, is_tool_call)
 
     def _process_function_call(self, message: Dict, is_tool_call: bool):
@@ -490,7 +489,6 @@ class ResponseProcessor:
                 "name": message["function_call"]["name"],
                 "arguments": arguments,
             }
-
             if is_tool_call:
                 message["tool_calls"] = [
                     {
@@ -499,16 +497,13 @@ class ResponseProcessor:
                         "function": function_call,
                     }
                 ]
-                if message.get("finish_reason") == "function_call":
-                    message["finish_reason"] = "tool_calls"
             else:
                 message["function_call"] = function_call
             message.pop("functions_state_id", None)
-
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")
 
-    def _process_choice_responses(self, choice: Dict, is_stream: bool = False):
+    def _process_choice_responses(self, choice: Dict, response_id: str, is_stream: bool = False):
         """Обрабатывает отдельный choice"""
         message_key = "delta" if is_stream else "message"
 
@@ -520,9 +515,9 @@ class ResponseProcessor:
             message["refusal"] = None
 
             if message.get("role") == "assistant" and message.get("function_call"):
-                self._process_function_call_responses(message)
+                self._process_function_call_responses(message, response_id)
 
-    def _process_function_call_responses(self, message: Dict):
+    def _process_function_call_responses(self, message: Dict, response_id: str):
         """Обрабатывает function call"""
         try:
             arguments = json.dumps(
@@ -531,7 +526,7 @@ class ResponseProcessor:
             )
             message["output"] = ResponseFunctionToolCall(
                 arguments=arguments,
-                call_id=f"call_{uuid.uuid4()}",
+                call_id=f"call_{response_id}",
                 name=message["function_call"]["name"],
                 id=f"fc_{message['functions_state_id']}",
                 status="completed",
