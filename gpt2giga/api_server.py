@@ -24,7 +24,10 @@ async def lifespan(app: FastAPI):
         config = load_config()
     if not logger:
         from gpt2giga.logger import init_logger
-        logger = init_logger(config.proxy_settings.log_level)
+        logger = init_logger(log_level=config.proxy_settings.log_level,
+                             log_file=config.proxy_settings.log_filename,
+                             max_bytes=config.proxy_settings.log_max_size,
+                             backup_count=config.proxy_settings.log_backup_count)
 
     app.state.config = config
     app.state.logger = logger
@@ -66,7 +69,9 @@ def run():
     config = load_config()
     proxy_settings = config.proxy_settings
     logger = init_logger(log_level=proxy_settings.log_level,
-                         log_file="gpt2giga.log")
+                             log_file=proxy_settings.log_filename,
+                             max_bytes=proxy_settings.log_max_size,
+                             backup_count=proxy_settings.log_backup_count)
 
     app = create_app()
     app.state.config = config

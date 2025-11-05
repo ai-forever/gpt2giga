@@ -3,10 +3,11 @@ from functools import wraps
 from typing import AsyncGenerator
 
 import gigachat
-from fastapi import HTTPException
-from gigachat.models import Chat
-from starlette.requests import Request
 from aioitertools import enumerate as aio_enumerate
+from fastapi import HTTPException
+from gigachat.models import Chat, Function, FunctionParameters
+from starlette.requests import Request
+
 
 def exceptions_handler(func):
     @wraps(func)
@@ -55,7 +56,7 @@ async def stream_chat_completion_generator(request: Request, chat_messages: Chat
 
     except GeneratorExit:
         pass
-    except Exception as e:
+    except Exception:
         yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
         yield "data: [DONE]\n\n"
 
@@ -73,6 +74,26 @@ async def stream_responses_generator(request: Request, chat_messages: Chat) -> A
 
     except GeneratorExit:
         pass
-    except Exception as e:
+    except Exception:
         yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
         yield "data: [DONE]\n\n"
+
+def convert_tool_to_giga_functions(data: dict):
+    functions = []
+    for tool in data.get("tools", []):
+        if tool.get("function"):
+            function = tool["function"]
+            giga_function = Function(
+                name=function["name"],
+                description=function["description"],
+                parameters=FunctionParameters(**function["parameters"]),
+            )
+        else:
+            giga_function = Function(
+                name=tool["name"],
+                description=tool["description"],
+                parameters=FunctionParameters(**tool["parameters"]),
+            )
+        functions.append(giga_function)
+
+    return functions

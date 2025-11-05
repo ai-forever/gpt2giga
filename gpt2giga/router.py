@@ -1,17 +1,14 @@
-import json
 import time
-from typing import AsyncGenerator
 
 import tiktoken
-from aioitertools import enumerate as aio_enumerate
 from fastapi import APIRouter
 from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
-from gigachat.models import FunctionParameters, Function
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 
-from gpt2giga.utils import exceptions_handler, stream_responses_generator, stream_chat_completion_generator
+from gpt2giga.utils import exceptions_handler, stream_responses_generator, stream_chat_completion_generator, \
+    convert_tool_to_giga_functions
 
 router = APIRouter()
 
@@ -60,22 +57,7 @@ async def chat_completions(request: Request):
     tools = "tools" in data or "functions" in data
     is_response_api = "input" in data
     if tools:
-        data["functions"] = []
-        for tool in data.get("tools", []):
-            if tool.get("function"):
-                function = tool["function"]
-                giga_function = Function(
-                    name=function["name"],
-                    description=function["description"],
-                    parameters=FunctionParameters(**function["parameters"]),
-                )
-            else:
-                giga_function = Function(
-                    name=tool["name"],
-                    description=tool["description"],
-                    parameters=FunctionParameters(**tool["parameters"]),
-                )
-            data["functions"].append(giga_function)
+            data["functions"] = convert_tool_to_giga_functions(data)
     chat_messages = request.app.state.request_transformer.send_to_gigachat(data)
     if not stream:
         response = await request.app.state.gigachat_client.achat(chat_messages)

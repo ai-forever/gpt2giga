@@ -36,7 +36,7 @@ def init_logger(
     backup_count: int = 5,
 ) -> logging.Logger:
     """
-    Initialize a production-grade JSON logger with contextual request ID support.
+    Initialize a JSON logger with contextual request ID support.
     """
     level = getattr(logging, log_level.upper(), logging.INFO)
     logger = logging.getLogger(name)

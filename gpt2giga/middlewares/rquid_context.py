@@ -17,7 +17,7 @@ class RquidMiddleware(BaseHTTPMiddleware):
         token = rquid_context.set(rquid)
         try:
             response = await call_next(request)
-        except Exception as e:
+        except Exception:
             request.app.state.logger.exception("Unhandled exception during request", extra={"rquid": rquid})
             raise
         finally:
