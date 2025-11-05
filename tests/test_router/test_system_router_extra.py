@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -56,5 +54,3 @@ def test_logs_stream_file_missing_sends_error_event():
                 found = True
                 break
         assert found
-
-

@@ -24,12 +24,13 @@ def test_convert_from_functions_list():
             {
                 "name": "fn2",
                 "description": "desc2",
-                "parameters": {"type": "object", "properties": {"a": {"type": "string"}}},
+                "parameters": {
+                    "type": "object",
+                    "properties": {"a": {"type": "string"}},
+                },
             }
         ]
     }
     out = convert_tool_to_giga_functions(data)
     assert len(out) == 1
     assert out[0].name == "fn2"
-
-

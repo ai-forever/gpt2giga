@@ -67,5 +67,3 @@ def test_verify_api_key_value_error():
         verify_api_key(req)
     assert ex.value.status_code == 500
     assert "bad config" in ex.value.detail
-
-

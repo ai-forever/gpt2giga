@@ -1,4 +1,3 @@
-import json
 from types import SimpleNamespace
 
 import pytest
@@ -13,7 +12,9 @@ class FakeResponseProcessor:
     def process_stream_chunk(self, chunk, model):
         return {"model": model, "delta": chunk.dict()["choices"][0]["delta"]}
 
-    def process_stream_chunk_response(self, chunk, sequence_number: int, response_id: str):
+    def process_stream_chunk_response(
+        self, chunk, sequence_number: int, response_id: str
+    ):
         return {
             "id": response_id,
             "sequence": sequence_number,
@@ -25,10 +26,18 @@ class FakeClient:
     async def astream(self, chat):
         async def gen():
             yield SimpleNamespace(
-                dict=lambda: {"choices": [{"delta": {"content": "A"}}], "usage": None, "model": "giga"}
+                dict=lambda: {
+                    "choices": [{"delta": {"content": "A"}}],
+                    "usage": None,
+                    "model": "giga",
+                }
             )
             yield SimpleNamespace(
-                dict=lambda: {"choices": [{"delta": {"content": "B"}}], "usage": None, "model": "giga"}
+                dict=lambda: {
+                    "choices": [{"delta": {"content": "B"}}],
+                    "usage": None,
+                    "model": "giga",
+                }
             )
 
         return gen()
@@ -57,6 +66,7 @@ class FakeRequest:
     async def is_disconnected(self):
         return self._disconnected
 
+
 @pytest.mark.asyncio
 async def test_stream_chat_completion_generator_exception_path():
     req = FakeRequest(FakeClientError())
@@ -79,5 +89,3 @@ async def test_stream_responses_generator_exception_path():
     assert len(lines) == 2
     assert "Stream interrupted" in lines[0]
     assert lines[1].strip() == "data: [DONE]"
-
-
