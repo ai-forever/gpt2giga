@@ -223,8 +223,8 @@ class RequestTransformer:
                 **response_format.get("json_schema", {}),
             }
         if response_format_responses:
-            format = response_format_responses.get("format", {})
-            transformed["response_format"] = format
+            fmt = response_format_responses.get("format", {})
+            transformed["response_format"] = fmt
         return transformed
 
     def transform_response_format(self, data: Dict) -> List:
@@ -359,7 +359,7 @@ class ResponseProcessor:
         giga_dict = giga_resp.dict()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
         for choice in giga_dict["choices"]:
-            self._process_choice_responses(choice)
+            self._process_choice_responses(choice, response_id)
 
         result = {
             "id": f"resp_{response_id}",

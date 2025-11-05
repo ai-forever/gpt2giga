@@ -80,7 +80,8 @@ async def stream_responses_generator(request: Request, chat_messages: Chat) -> A
 
 def convert_tool_to_giga_functions(data: dict):
     functions = []
-    for tool in data.get("tools", []):
+    tools = data.get("tools", []) or data.get("functions", [])
+    for tool in tools:
         if tool.get("function"):
             function = tool["function"]
             giga_function = Function(
@@ -95,5 +96,5 @@ def convert_tool_to_giga_functions(data: dict):
                 parameters=FunctionParameters(**tool["parameters"]),
             )
         functions.append(giga_function)
-
+    print(functions)
     return functions
