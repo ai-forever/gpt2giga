@@ -1,5 +1,7 @@
 import base64
 
+from loguru import logger
+
 from gpt2giga.protocol import AttachmentProcessor
 
 
@@ -19,7 +21,7 @@ class DummyClient:
 
 def test_attachment_processor_base64_and_cache(monkeypatch):
     client = DummyClient()
-    p = AttachmentProcessor(client)
+    p = AttachmentProcessor(client, logger=logger)
 
     img_bytes = b"\xff\xd8\xff\xd9"  # минимальный jpeg маркер SOI/EOI
     data_url = "data:image/jpeg;base64," + base64.b64encode(img_bytes).decode()
@@ -45,5 +47,5 @@ def test_attachment_processor_httpx_invalid_content_type(monkeypatch):
     )
 
     client = DummyClient()
-    p = AttachmentProcessor(client)
+    p = AttachmentProcessor(client, logger=logger)
     assert p.upload_image("http://example.com/image") is None

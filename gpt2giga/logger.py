@@ -17,7 +17,7 @@ def setup_logger(log_level="INFO", log_file="app.log", max_bytes=10_000_000):
     Configure Loguru logger with file rotation and contextual rquid.
     """
     logger.remove()  # Remove default logger
-
+    log_level = log_level.upper()
     # Custom format that automatically includes rquid
     format_str = (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "

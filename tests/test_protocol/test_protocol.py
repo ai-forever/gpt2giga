@@ -2,21 +2,24 @@ from types import SimpleNamespace
 
 from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-
+from loguru import logger
 
 class DummyClient:
     def __init__(self):
         self.called = False
 
 
+class DummyLogger:
+    pass
+
 def test_attachment_processor_construction():
-    p = AttachmentProcessor(DummyClient())
+    p = AttachmentProcessor(DummyClient(), logger)
     assert hasattr(p, "upload_image")
 
 
 def test_request_transformer_collapse_messages():
     cfg = ProxyConfig()
-    rt = RequestTransformer(cfg)
+    rt = RequestTransformer(cfg, logger)
     messages = [
         {"role": "user", "content": "hello"},
         {"role": "user", "content": "world"},
@@ -30,7 +33,7 @@ def test_request_transformer_collapse_messages():
 
 def test_request_transformer_tools_to_functions():
     cfg = ProxyConfig()
-    rt = RequestTransformer(cfg)
+    rt = RequestTransformer(cfg, logger)
     data = {
         "model": "gpt-4o",
         "tools": [
@@ -53,7 +56,7 @@ def test_request_transformer_tools_to_functions():
 
 
 def test_response_processor_process_function_call():
-    rp = ResponseProcessor()
+    rp = ResponseProcessor(logger)
     # Синтетический ответ GigaChat с function_call
     giga_resp = SimpleNamespace(
         dict=lambda: {
@@ -63,21 +66,21 @@ def test_response_processor_process_function_call():
                         "role": "assistant",
                         "content": None,
                         "function_call": {"name": "sum", "arguments": {"a": 1}},
-                        "finish_reason": "function_call",
-                    }
+                    },
+                    "finish_reason": "function_call",
                 }
             ],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
     )
 
-    out = rp.process_response(giga_resp, gpt_model="gpt-x", is_tool_call=True)
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
     choice = out["choices"][0]
     assert choice["message"]["tool_calls"][0]["type"] == "function"
 
 
 def test_response_processor_stream_chunk_handles_delta():
-    rp = ResponseProcessor()
+    rp = ResponseProcessor(logger)
     giga_resp = SimpleNamespace(
         dict=lambda: {
             "choices": [
