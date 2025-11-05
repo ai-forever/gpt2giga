@@ -4,6 +4,7 @@ from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from loguru import logger
 
+
 class DummyClient:
     def __init__(self):
         self.called = False
@@ -11,6 +12,7 @@ class DummyClient:
 
 class DummyLogger:
     pass
+
 
 def test_attachment_processor_construction():
     p = AttachmentProcessor(DummyClient(), logger)

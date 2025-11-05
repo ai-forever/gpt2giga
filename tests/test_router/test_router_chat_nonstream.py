@@ -13,10 +13,12 @@ class FakeGigachat:
     async def achat(self, chat):
         return SimpleNamespace(
             dict=lambda: {
-                "choices": [{"message":
-                                 {"role": "assistant", "content": "ok"},
-                            "finish_reason": "function_call"}
-                            ],
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "function_call",
+                    }
+                ],
                 "usage": {
                     "prompt_tokens": 1,
                     "completion_tokens": 1,

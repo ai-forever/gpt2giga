@@ -33,7 +33,7 @@ def test_transform_messages_with_images_and_limit_two_per_message():
 def test_transform_messages_total_attachments_limit_ten():
     cfg = ProxyConfig()
     ap = DummyAttachmentProc()
-    rt = RequestTransformer(cfg, logger=logger,attachment_processor=ap)
+    rt = RequestTransformer(cfg, logger=logger, attachment_processor=ap)
 
     many = [{"type": "image_url", "image_url": {"url": f"u{i}"}} for i in range(20)]
     messages = [
