@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.config import ProxyConfig
-from gpt2giga.router import router
+from gpt2giga.routers.api_router import router
 
 
 class FakeClient:

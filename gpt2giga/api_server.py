@@ -11,7 +11,8 @@ from gpt2giga.logger import setup_logger
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-from gpt2giga.router import router
+from gpt2giga.routers import api_router
+from gpt2giga.routers import system_router
 
 
 @asynccontextmanager
@@ -67,8 +68,9 @@ def create_app() -> FastAPI:
     async def docs_redirect():
         return RedirectResponse(url="/docs")
 
-    app.include_router(router)
-    app.include_router(router, prefix="/v1", tags=["V1"])
+    app.include_router(api_router)
+    app.include_router(api_router, prefix="/v1", tags=["V1"])
+    app.include_router(system_router)
     return app
 
 

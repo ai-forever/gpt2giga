@@ -3,7 +3,7 @@ import time
 import tiktoken
 from fastapi import APIRouter
 from fastapi import Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 
@@ -15,21 +15,10 @@ from gpt2giga.utils import (
     convert_tool_to_giga_functions,
 )
 
-router = APIRouter()
+router = APIRouter(tags=["API"])
 
 
-@router.get("/health", response_class=Response)
-@exceptions_handler
-async def health() -> Response:
-    """Health check."""
-    return Response(status_code=200)
 
-
-@router.get("/ping", response_class=Response)
-@router.post("/ping", response_class=Response)
-@exceptions_handler
-async def ping() -> Response:
-    return await health()
 
 
 @router.get("/models")
@@ -126,3 +115,4 @@ async def embeddings(request: Request):
 @exceptions_handler
 async def responses(request: Request):
     return await chat_completions(request)
+

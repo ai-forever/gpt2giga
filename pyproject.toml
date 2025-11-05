@@ -19,6 +19,7 @@ openai = "^2.3.0"
 aioitertools = "^0.12.0"
 gigachat = "0.1.42"
 loguru = "^0.7.3"
+sse-starlette = "^3.0.3"
 
 [tool.poetry.scripts]
 gpt2giga = "gpt2giga:run"

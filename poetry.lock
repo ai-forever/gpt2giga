@@ -2579,8 +2579,7 @@ version = "3.0.3"
 description = "SSE plugin for Starlette"
 optional = false
 python-versions = ">=3.9"
-groups = ["integrations"]
-markers = "python_version >= \"3.10\""
+groups = ["main", "integrations"]
 files = [
     {file = "sse_starlette-3.0.3-py3-none-any.whl", hash = "sha256:af5bf5a6f3933df1d9c7f8539633dc8444ca6a97ab2e2a7cd3b6e431ac03a431"},
     {file = "sse_starlette-3.0.3.tar.gz", hash = "sha256:88cfb08747e16200ea990c8ca876b03910a23b547ab3bd764c0d8eb81019b971"},
@@ -2983,4 +2982,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.9"
-content-hash = "c962bdb4e19c1ac1cf59bd641f462515bef82693652dde807487c14be18e2bbe"
+content-hash = "bb53b2ed335287195d7f2f87e84cdbd2744611923866d8fc4dd191c9c4a4f2cb"
