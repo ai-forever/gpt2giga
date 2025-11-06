@@ -68,12 +68,12 @@ async def chat_completions(request: Request):
     else:
         if is_response_api:
             return StreamingResponse(
-                stream_responses_generator(request, chat_messages),
+                stream_responses_generator(request, chat_messages, current_rquid),
                 media_type="text/event-stream",
             )
         else:
             return StreamingResponse(
-                stream_chat_completion_generator(request, chat_messages),
+                stream_chat_completion_generator(request, chat_messages, current_rquid),
                 media_type="text/event-stream",
             )
 

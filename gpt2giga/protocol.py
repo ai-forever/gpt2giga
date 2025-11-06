@@ -376,6 +376,8 @@ class ResponseProcessor:
             "text": {"format": {"type": "text"}},
             "usage": self._build_response_usage(giga_dict.get("usage")),
         }
+        self.logger.debug("Processed responses API response")
+        self.logger.debug(f"Response: {result}")
 
         return result
 
@@ -422,7 +424,7 @@ class ResponseProcessor:
             ]
 
     def process_stream_chunk(
-        self, giga_resp: ChatCompletionChunk, gpt_model: str
+        self, giga_resp: ChatCompletionChunk, gpt_model: str, response_id: str
     ) -> dict:
         """Обрабатывает стриминговый чанк от GigaChat"""
         giga_dict = giga_resp.dict()
@@ -431,13 +433,13 @@ class ResponseProcessor:
             self._process_choice(choice, is_tool_call, is_stream=True)
 
         result = {
-            "id": f"chatcmpl-{uuid.uuid4()}",
+            "id": f"chatcmpl-{response_id}",
             "object": "chat.completion.chunk",
             "created": int(time.time()),
             "model": gpt_model,
             "choices": giga_dict["choices"],
             "usage": self._build_usage(giga_dict.get("usage")),
-            "system_fingerprint": f"fp_{uuid.uuid4()}",
+            "system_fingerprint": f"fp_{response_id}",
         }
 
         self.logger.debug(f"Processed stream chunk: {result}")
@@ -466,7 +468,7 @@ class ResponseProcessor:
             ).dict()
         else:
             result = self._create_output_responses(
-                giga_dict, is_tool_call=True, message_key="delta"
+                giga_dict, is_tool_call=True, message_key="delta", response_id=response_id
             )
 
         return result
