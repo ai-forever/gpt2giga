@@ -92,5 +92,5 @@ def test_response_processor_stream_chunk_handles_delta():
             "usage": None,
         }
     )
-    out = rp.process_stream_chunk(giga_resp, gpt_model="gpt-x")
+    out = rp.process_stream_chunk(giga_resp, gpt_model="gpt-x", response_id="1")
     assert out["object"] == "chat.completion.chunk"
