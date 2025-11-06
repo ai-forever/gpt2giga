@@ -59,16 +59,31 @@ async def stream_logs(request: Request):
             yield {"event": "error", "data": "Log file not found."}
             return
 
-        # Open file and seek to the end
-        with open(filename, "r", encoding="utf-8", errors="ignore") as f:
-            f.seek(0, os.SEEK_END)
+        # Track file position to continue reading from where we left off
+        file_position = 0
 
-            while True:
-                line = f.readline()
-                if line:
-                    yield {"event": "message", "data": line.strip()}
-                else:
-                    await asyncio.sleep(0.5)  # wait briefly for new lines
+        # Set initial position to end of file
+        try:
+            with open(filename, "r", encoding="utf-8", errors="ignore") as f:
+                f.seek(0, os.SEEK_END)
+                file_position = f.tell()
+        except Exception:
+            yield {"event": "error", "data": "Error accessing log file."}
+            return
+
+        while True:
+            try:
+                with open(filename, "r", encoding="utf-8", errors="ignore") as f:
+                    f.seek(file_position)
+                    line = f.readline()
+                    if line:
+                        file_position = f.tell()
+                        yield {"event": "message", "data": line.strip()}
+                    else:
+                        await asyncio.sleep(0.5)  # wait briefly for new lines
+            except Exception:
+                # If file becomes inaccessible, just wait and retry
+                await asyncio.sleep(0.5)
 
     return EventSourceResponse(log_generator())
 
