@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "gpt2giga"
-version = "0.0.14"
+version = "0.0.14.post1"
 description = ""
 authors = ["Konstantin Krestnikov <rai220@gmail.com>"]
 license = "MIT"
