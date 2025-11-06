@@ -20,7 +20,8 @@
 5. [Авторизация с помощью заголовка](#авторизация-с-помощью-заголовка)
 6. [Использование HTTPS](#использование-https)
 7. [Использование API ключа](#использование-api-ключа)
-8. [Совместимые приложения](#совместимые-приложения)
+8. [Системные эндпоинты](#системные-эндпоинты)
+9[Совместимые приложения](#совместимые-приложения)
 
 
 ## Описание
@@ -74,13 +75,13 @@ sequenceDiagram
 
    GigaChat API поддерживает различные способы авторизации, которые отличаются в зависимости от типа вашей учетной записи. Пример с `Authorization key`.
 
-   ```
-   GPT2GIGA_HOST=0.0.0.0
-   GIGACHAT_CREDENTIALS=<Authorization key GigaChat API>
-   GIGACHAT_SCOPE=<your_api_scope>
-   GIGACHAT_MODEL=GigaChat
-   GIGACHAT_VERIFY_SSL_CERTS=False
-   ```
+    ```dotenv
+    GPT2GIGA_HOST=0.0.0.0
+    GIGACHAT_CREDENTIALS="Authorization key GigaChat API"
+    GIGACHAT_SCOPE=<your_api_scope>
+    GIGACHAT_MODEL=GigaChat
+    GIGACHAT_VERIFY_SSL_CERTS=False
+    ```
 
 3. Выберите образ с нужной версией Python (3.9-3.13).
 ```sh
@@ -241,11 +242,15 @@ gpt2giga \
 ```bash
 openssl req -x509 -nodes -days 365   -newkey rsa:4096   -keyout key.pem   -out cert.pem   -subj "/CN=localhost"   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
-
+```dotenv
+GPT2GIGA_USE_HTTPS=False
+GPT2GIGA_HTTPS_KEY_FILE="Path to key.pem"
+GPT2GIGA_HTTPS_CERT_FILE="Path to cert.pem"
+```
 После этого, в переменные окружения или в cli-args нужно добавить данные сертификаты.
 
 ## Использование API ключа
-```
+```dotenv
 GPT2GIGA_ENABLE_API_KEY_AUTH=True
 GPT2GIGA_API_KEY=123
 ```
@@ -253,20 +258,20 @@ GPT2GIGA_API_KEY=123
 После этого, в сервисе будет добавлена авторизация по токену. Возможны разные варианты выполнения запросов, например:
 Авторизация по запросу:
 ```bash
-curl -L http://localhost:8000/models?x-api-key=123
+curl -L http://localhost:8090/models?x-api-key=123
 ```
 Авторизация по заголовкам:
 ```bash
-curl -H "x-api-key:123" -L http://localhost:8000/models
+curl -H "x-api-key:123" -L http://localhost:8090/models
 ```
 Авторизация через Bearer:
 ```bash
- curl -H "Authorization: Bearer 123" -L http://localhost:8000/models
+ curl -H "Authorization: Bearer 123" -L http://localhost:8090/models
 ```
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8000", api_key="123")
+client = OpenAI(base_url="http://localhost:8090", api_key="123")
 
 completion = client.chat.completions.create(
     model="gpt-5",
@@ -275,6 +280,18 @@ completion = client.chat.completions.create(
     ],
 )
 ```
+
+## Системные эндпоинты
+- `GET /health`
+- `GET | POST /ping`
+- `GET /logs/{last_n_lines}` - получение последних N строчек из логов;
+- `GET /logs/stream` - SSE стриминг логов;
+- `GET /logs/html` - HTML страница для удобства просмотра стрима логов
+
+При использовании можно зайти на страницу: http://localhost:8090/logs/html и после авторизации:
+1. Если используется [Использование API ключа](#использование-api-ключа), то введите ваш `GPT2GIGA_API_KEY`
+2. Иначе, введите любой символ
+
 ## Совместимые приложения
 
 Таблица содержит приложения, проверенные на совместную работу с gpt2giga.
