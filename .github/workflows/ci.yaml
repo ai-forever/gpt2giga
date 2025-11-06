@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     steps:
       - name: Checkout repository
@@ -91,7 +91,7 @@ jobs:
         run: |
           BRANCH=${{ github.head_ref || github.ref_name }}
           echo "Pushing coverage badge to branch: $BRANCH"
-          
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add badges/coverage.svg
@@ -107,5 +107,5 @@ jobs:
           message: |
             ## 🧪 Test Coverage Report
             Coverage: ${{ env.COVERAGE }}%
-            
+
             ![Coverage Badge](https://raw.githubusercontent.com/${{ github.repository }}/${{ github.head_ref || github.ref_name }}/badges/coverage.svg)
