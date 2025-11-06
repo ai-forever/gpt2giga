@@ -161,7 +161,6 @@ class RequestTransformer:
                 and self.attachment_processor
                 and self.config.proxy_settings.enable_images
             ):
-
                 file_id = self.attachment_processor.upload_image(
                     content_part["image_url"]["url"]
                 )
@@ -468,7 +467,10 @@ class ResponseProcessor:
             ).dict()
         else:
             result = self._create_output_responses(
-                giga_dict, is_tool_call=True, message_key="delta", response_id=response_id
+                giga_dict,
+                is_tool_call=True,
+                message_key="delta",
+                response_id=response_id,
             )
 
         return result
