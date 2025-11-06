@@ -35,9 +35,6 @@ class ProxySettings(BaseSettings):
     log_max_size: int = Field(
         default=10 * 1024 * 1024, description="максимальный размер файла в байтах"
     )
-    log_backup_count: int = Field(default=3, description="Количество архивов логов.")
-    env_path: Optional[str] = Field(None, description="Путь к .env файлу")
-
     enable_api_key_auth: bool = Field(
         default=False,
         description="Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ)",
@@ -46,6 +43,7 @@ class ProxySettings(BaseSettings):
         default=None,
         description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
     )
+    env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 
     class Config:
         env_prefix = "gpt2giga_"
