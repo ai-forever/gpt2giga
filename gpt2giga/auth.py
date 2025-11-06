@@ -11,8 +11,10 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 def verify_api_key(
     request: Request,
-    api_key: Annotated[str | None, Security(api_key_header)],
-    bearer: Annotated[HTTPAuthorizationCredentials | None, Security(bearer_scheme)],
+    api_key: Annotated[str | None, Security(api_key_header)] = None,
+    bearer: Annotated[
+        HTTPAuthorizationCredentials | None, Security(bearer_scheme)
+    ] = None,
 ) -> str:
     """Verify API key from query parameter or header."""
     provided_key = None
@@ -20,6 +22,13 @@ def verify_api_key(
         provided_key = bearer.credentials.strip()
     elif api_key:
         provided_key = api_key.strip()
+    else:
+        auth_header = request.headers.get("authorization")
+        x_api_key = request.headers.get("x-api-key")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            provided_key = auth_header.split(" ", 1)[1].strip()
+        elif x_api_key:
+            provided_key = x_api_key.strip()
 
     if not provided_key:
         raise HTTPException(

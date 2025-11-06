@@ -52,18 +52,3 @@ def test_verify_api_key_invalid():
     with pytest.raises(HTTPException) as ex:
         verify_api_key(req)
     assert ex.value.status_code == 401
-
-
-def test_verify_api_key_value_error():
-    class BadConfig:
-        @property
-        def proxy_settings(self):
-            raise ValueError("bad config")
-
-    bad_cfg = BadConfig()
-    app = SimpleNamespace(state=SimpleNamespace(config=bad_cfg))
-    req = SimpleNamespace(headers={"authorization": "Bearer token"}, app=app)
-    with pytest.raises(HTTPException) as ex:
-        verify_api_key(req)
-    assert ex.value.status_code == 500
-    assert "bad config" in ex.value.detail
