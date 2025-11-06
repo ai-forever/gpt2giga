@@ -1,17 +1,26 @@
 from typing import Annotated
 
 from fastapi import HTTPException, Security
-from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import (
+    APIKeyHeader,
+    HTTPBearer,
+    HTTPAuthorizationCredentials,
+    APIKeyQuery,
+)
 from starlette.requests import Request
 from starlette.status import HTTP_401_UNAUTHORIZED
 
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
+api_key_query = APIKeyQuery(
+    name="x-api-key", scheme_name="API key query", auto_error=False
+)
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def verify_api_key(
     request: Request,
-    api_key: Annotated[str | None, Security(api_key_header)] = None,
+    header_param: Annotated[str | None, Security(api_key_header)] = None,
+    query_param: Annotated[str | None, Security(api_key_query)] = None,
     bearer: Annotated[
         HTTPAuthorizationCredentials | None, Security(bearer_scheme)
     ] = None,
@@ -20,8 +29,8 @@ def verify_api_key(
     provided_key = None
     if bearer and bearer.credentials:
         provided_key = bearer.credentials.strip()
-    elif api_key:
-        provided_key = api_key.strip()
+    elif query_param or header_param:
+        provided_key = query_param or header_param
     else:
         auth_header = request.headers.get("authorization")
         x_api_key = request.headers.get("x-api-key")
