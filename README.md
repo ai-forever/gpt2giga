@@ -119,7 +119,6 @@ docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
 
    GigaChat API поддерживает различные способы авторизации, которые отличаются в зависимости от типа вашей учетной записи.
 
-   > [!NOTE]
    > Кроме переменных gpt2giga в `.env` можно указать переменные окружения, которые поддерживает [python-библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения).
 
 
