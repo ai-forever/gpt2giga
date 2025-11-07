@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 .local/
+local/
 .ipynb_checkpoints/
 
 lib/
