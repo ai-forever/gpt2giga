@@ -235,6 +235,18 @@ gpt2giga \
 - `giga-auth-<access_token>` — при авторизации с помощью токена доступа. Токен доступа получается в обмен на ключ авторизации и действителен в течение 30 минут.
 - `giga-user-<user>:<password>` — при авторизации с помощью логина и пароля.
 
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8090", api_key="giga-cred-<credentials>:<scope>")
+
+completion = client.chat.completions.create(
+    model="gpt-5",
+    messages=[
+        {"role": "user", "content": "Кто ты?"},
+    ],
+)
+```
 
 ## Использование HTTPS
 
