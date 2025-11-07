@@ -89,7 +89,7 @@ PYTHON_VERSION=3.10
 docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
 ```
 Доступные образы можно увидеть на https://hub.docker.com/r/gigateam/gpt2giga
-4. Запустите контейнер с помощью Docker Compose: `docker-compose up -d`
+4. Запустите контейнер с помощью Docker Compose: `docker compose up -d`
 
 ### Локальный запуск
 
