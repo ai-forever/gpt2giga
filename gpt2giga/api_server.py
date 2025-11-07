@@ -66,7 +66,9 @@ def create_app() -> FastAPI:
         valid_roots=["v1", "chat", "models", "embeddings", "responses"],
     )
     app.add_middleware(RquidMiddleware)
-    app.add_middleware(PassTokenMiddleware)
+
+    if config.proxy_settings.pass_token:
+        app.add_middleware(PassTokenMiddleware)
 
     @app.get("/", include_in_schema=False)
     async def docs_redirect():
