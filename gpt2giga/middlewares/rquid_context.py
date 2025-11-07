@@ -1,4 +1,6 @@
 import uuid
+from typing import Callable
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
@@ -6,7 +8,7 @@ from gpt2giga.logger import logger, rquid_context
 
 
 class RquidMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable):
         """
         Middleware to assign a unique request ID (rquid) to each request.
         """

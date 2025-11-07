@@ -9,6 +9,7 @@ from starlette.responses import RedirectResponse
 from gpt2giga.auth import verify_api_key
 from gpt2giga.cli import load_config
 from gpt2giga.logger import setup_logger
+from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
         valid_roots=["v1", "chat", "models", "embeddings", "responses"],
     )
     app.add_middleware(RquidMiddleware)
+    app.add_middleware(PassTokenMiddleware)
 
     @app.get("/", include_in_schema=False)
     async def docs_redirect():
