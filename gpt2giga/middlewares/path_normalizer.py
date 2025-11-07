@@ -1,4 +1,5 @@
 import re
+from typing import Callable
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -16,7 +17,7 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
         # Valid entrypoints
         self.valid_roots = valid_roots or ["v1", "chat", "models", "embeddings"]
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: Callable):
         path = request.url.path
 
         pattern = r".*/(" + "|".join(map(re.escape, self.valid_roots)) + r")(/.*|$)"

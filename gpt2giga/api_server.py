@@ -1,16 +1,20 @@
 from contextlib import asynccontextmanager
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from gigachat import GigaChat
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
+from gpt2giga.auth import verify_api_key
 from gpt2giga.cli import load_config
-from gpt2giga.logger import init_logger
-from gpt2giga.middleware import PathNormalizationMiddleware
+from gpt2giga.logger import setup_logger
+from gpt2giga.middlewares.pass_token import PassTokenMiddleware
+from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-from gpt2giga.router import router
+from gpt2giga.routers import api_router, logs_router
+from gpt2giga.routers import system_router
 
 
 @asynccontextmanager
@@ -20,23 +24,34 @@ async def lifespan(app: FastAPI):
 
     if not config:
         from gpt2giga.cli import load_config
-        from gpt2giga.logger import init_logger
 
         config = load_config()
-        logger = init_logger(config.proxy_settings.log_level)
+    if not logger:
+        from gpt2giga.logger import setup_logger
+
+        logger = setup_logger(
+            log_level=config.proxy_settings.log_level,
+            log_file=config.proxy_settings.log_filename,
+            max_bytes=config.proxy_settings.log_max_size,
+        )
 
     app.state.config = config
     app.state.logger = logger
     app.state.gigachat_client = GigaChat(**config.gigachat_settings.dict())
 
-    attachment_processor = AttachmentProcessor(app.state.gigachat_client)
-    app.state.request_transformer = RequestTransformer(config, attachment_processor)
-    app.state.response_processor = ResponseProcessor()
+    attachment_processor = AttachmentProcessor(
+        app.state.gigachat_client, app.state.logger
+    )
+    app.state.request_transformer = RequestTransformer(
+        config, app.state.logger, attachment_processor
+    )
+    app.state.response_processor = ResponseProcessor(app.state.logger)
     yield
 
 
 def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan, title="Gpt2Giga converter proxy")
+    config = load_config()
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -50,20 +65,33 @@ def create_app() -> FastAPI:
         PathNormalizationMiddleware,
         valid_roots=["v1", "chat", "models", "embeddings", "responses"],
     )
+    app.add_middleware(RquidMiddleware)
+
+    if config.proxy_settings.pass_token:
+        app.add_middleware(PassTokenMiddleware)
 
     @app.get("/", include_in_schema=False)
     async def docs_redirect():
         return RedirectResponse(url="/docs")
 
-    app.include_router(router)
-    app.include_router(router, prefix="/v1", tags=["V1"])
+    dependencies = (
+        [Depends(verify_api_key)] if config.proxy_settings.enable_api_key_auth else []
+    )
+    app.include_router(api_router, dependencies=dependencies)
+    app.include_router(api_router, prefix="/v1", tags=["V1"], dependencies=dependencies)
+    app.include_router(system_router, dependencies=dependencies)
+    app.include_router(logs_router)
     return app
 
 
 def run():
     config = load_config()
     proxy_settings = config.proxy_settings
-    logger = init_logger(proxy_settings.log_level)
+    logger = setup_logger(
+        log_level=proxy_settings.log_level,
+        log_file=proxy_settings.log_filename,
+        max_bytes=proxy_settings.log_max_size,
+    )
 
     app = create_app()
     app.state.config = config

@@ -1,18 +1,25 @@
+import sys
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.router import router
+from gpt2giga.routers.api_router import router
 
 
 class FakeGigachat:
     async def achat(self, chat):
         return SimpleNamespace(
             dict=lambda: {
-                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "ok"},
+                        "finish_reason": "function_call",
+                    }
+                ],
                 "usage": {
                     "prompt_tokens": 1,
                     "completion_tokens": 1,
@@ -45,7 +52,7 @@ def make_app(monkeypatch=None):
     app = FastAPI()
     app.include_router(router)
     app.state.gigachat_client = FakeGigachat()
-    app.state.response_processor = ResponseProcessor()
+    app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
     app.state.config = ProxyConfig()
     if monkeypatch:
@@ -55,7 +62,9 @@ def make_app(monkeypatch=None):
                 return "TEXT"
 
         fake_tk = SimpleNamespace(encoding_for_model=lambda m: FakeEnc())
-        monkeypatch.setattr("gpt2giga.router.tiktoken", fake_tk)
+        monkeypatch.setattr(
+            sys.modules["gpt2giga.routers.api_router"], "tiktoken", fake_tk
+        )
     return app
 
 

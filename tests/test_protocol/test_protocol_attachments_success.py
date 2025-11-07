@@ -1,6 +1,7 @@
 import io
 
 from PIL import Image
+from loguru import logger
 
 from gpt2giga.protocol import AttachmentProcessor
 
@@ -30,7 +31,7 @@ def test_attachment_processor_success_with_pil(monkeypatch):
     monkeypatch.setattr("gpt2giga.protocol.Image.open", fake_open)
 
     client = DummyClient()
-    p = AttachmentProcessor(client)
+    p = AttachmentProcessor(client, logger)
     # Используем data URL с корректной base64-строкой PNG 1x1
     img = Image.new("RGB", (1, 1))
     buf = io.BytesIO()

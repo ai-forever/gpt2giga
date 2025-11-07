@@ -1,10 +1,12 @@
+from loguru import logger
+
 from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol import RequestTransformer
 
 
 def test_transform_response_format_instructions_and_list_messages():
     cfg = ProxyConfig()
-    rt = RequestTransformer(cfg)
+    rt = RequestTransformer(cfg, logger=logger)
     data = {
         "instructions": "be nice",
         "input": [

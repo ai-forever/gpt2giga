@@ -38,6 +38,7 @@ jobs:
         build-args: |
           PYTHON_VERSION=${{ matrix.python-version }}
         push: true
+        platforms: linux/amd64,linux/arm64
         tags: |
           ${{ env.IMAGE_NAME }}:python${{ matrix.python-version }}
           ${{ env.IMAGE_NAME }}:python${{ matrix.python-version }}-${{ github.sha }}

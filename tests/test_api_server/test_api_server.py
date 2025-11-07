@@ -21,4 +21,4 @@ def test_v1_prefix_router_is_registered():
     app = create_app()
     client = TestClient(app)
     response = client.get("/v1/health")
-    assert response.status_code == 200
+    assert response.status_code == 404

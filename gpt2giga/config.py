@@ -27,8 +27,21 @@ class ProxySettings(BaseSettings):
     enable_images: bool = Field(
         default=True, description="Включить загрузку изображений"
     )
+
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = Field(
         default="INFO", description="log verbosity level"
+    )
+    log_filename: str = Field(default="gpt2giga.log", description="Имя лог файла")
+    log_max_size: int = Field(
+        default=10 * 1024 * 1024, description="максимальный размер файла в байтах"
+    )
+    enable_api_key_auth: bool = Field(
+        default=False,
+        description="Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ)",
+    )
+    api_key: Optional[str] = Field(
+        default=None,
+        description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
     )
     env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 

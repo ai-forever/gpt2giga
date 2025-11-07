@@ -1,0 +1,34 @@
+fail_fast: true
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-case-conflict
+      - id: end-of-file-fixer
+        files: \.(py)$
+      - id: mixed-line-ending
+        files: \.(py)$
+        args:
+          - --fix=lf
+      - id: trailing-whitespace
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check
+        entry: poetry run ruff check
+        language: system
+        types_or: [python, pyi]
+        args: [--fix]
+      - id: ruff-format
+        name: ruff format
+        entry: poetry run ruff format
+        language: system
+        types_or: [python, pyi]
+        args: [--config, pyproject.toml]
+
+      - id: black
+        name: black check
+        entry: poetry run black .
+        language: system
+        types_or: [ python, pyi ]
+        args: [--check]

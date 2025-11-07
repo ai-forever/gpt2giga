@@ -1,3 +1,5 @@
+from loguru import logger
+
 from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol import RequestTransformer
 
@@ -14,7 +16,7 @@ class DummyAttachmentProc:
 def test_transform_messages_with_images_and_limit_two_per_message():
     cfg = ProxyConfig()
     ap = DummyAttachmentProc()
-    rt = RequestTransformer(cfg, attachment_processor=ap)
+    rt = RequestTransformer(cfg, logger=logger, attachment_processor=ap)
 
     content = [
         {"type": "text", "text": "t1"},
@@ -31,7 +33,7 @@ def test_transform_messages_with_images_and_limit_two_per_message():
 def test_transform_messages_total_attachments_limit_ten():
     cfg = ProxyConfig()
     ap = DummyAttachmentProc()
-    rt = RequestTransformer(cfg, attachment_processor=ap)
+    rt = RequestTransformer(cfg, logger=logger, attachment_processor=ap)
 
     many = [{"type": "image_url", "image_url": {"url": f"u{i}"}} for i in range(20)]
     messages = [

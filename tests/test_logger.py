@@ -1,14 +1,16 @@
 import logging
 
-from gpt2giga.logger import init_logger
+import loguru
+
+from gpt2giga.logger import setup_logger
 
 
 def test_init_logger_info_level():
-    logger = init_logger("info")
-    assert isinstance(logger, logging.Logger)
-    assert logger.level == logging.INFO
+    logger = setup_logger("info")
+    assert isinstance(logger, loguru._logger.Logger)
+    assert logger.level("INFO").no == logging.INFO
 
 
 def test_init_logger_debug_level():
-    logger = init_logger("DEBUG")
-    assert logger.level == logging.DEBUG
+    logger = setup_logger("DEBUG")
+    assert logger.level("DEBUG").no == logging.DEBUG

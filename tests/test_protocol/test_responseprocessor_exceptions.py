@@ -1,10 +1,12 @@
 from types import SimpleNamespace
 
+from loguru import logger
+
 from gpt2giga.protocol import ResponseProcessor
 
 
 def test_process_stream_chunk_response_tool_call_branch():
-    rp = ResponseProcessor()
+    rp = ResponseProcessor(logger=logger)
     giga = SimpleNamespace(
         dict=lambda: {
             "choices": [
