@@ -83,7 +83,7 @@ sequenceDiagram
     GIGACHAT_VERIFY_SSL_CERTS=False
     ```
 
-3. Выберите образ с нужной версией Python (3.9-3.13).
+3. Выберите образ с нужной версией Python (3.10-3.13).
 ```sh
 PYTHON_VERSION=3.10
 docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
