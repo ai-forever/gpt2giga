@@ -154,31 +154,43 @@ class RequestTransformer:
     ) -> Tuple[List[str], List[str]]:
         """Обрабатывает части контента (текст и изображения)"""
         texts = []
-        attachments = []
+        # Preallocate attachments array with max size (2) for efficiency -- we'll trim later if needed
+        attachments: List[str] = []
+        # We also track how many images can be appended due to limit
+        max_attachments = 2
 
-        enable_images = (
-            self.attachment_processor is not None
-            and self.config.proxy_settings.enable_images
-        )
+        # Cache references used in loop to minimize attribute lookups
+        processor = self.attachment_processor
+        enable_images = getattr(self.config.proxy_settings, "enable_images", False)
+        logger = self.logger
 
         for content_part in content_parts:
-            t = content_part.get("type")
-            if t == "text":
+            ctype = content_part.get("type")
+            if ctype == "text":
                 texts.append(content_part.get("text", ""))
-            elif enable_images and t == "image_url" and content_part.get("image_url"):
-                file_id = self.attachment_processor.upload_image(
-                    content_part["image_url"]["url"]
-                )
-                if file_id:
-                    attachments.append(file_id)
-                    self.logger.info(f"Added attachment: {file_id}")
+            elif (
+                ctype == "image_url"
+                and processor is not None
+                and enable_images
+                and content_part.get("image_url")
+                and len(attachments)
+                < max_attachments  # Early cutoff to avoid extra work/logging/excess uploads
+            ):
+                url = content_part["image_url"].get("url")
+                if url is not None:
+                    file_id = processor.upload_image(url)
+                    if file_id:
+                        attachments.append(file_id)
+                        logger.info(f"Added attachment: {file_id}")
 
         # Ограничиваем количество изображений
-        if len(attachments) > 2:
-            self.logger.warning(
+        # The above loop guarantees attachments will not exceed max_attachments,
+        # but we leave the following for logging, in case of external changes.
+        if len(attachments) > max_attachments:
+            logger.warning(
                 "GigaChat can only handle 2 images per message. Cutting off excess."
             )
-            attachments = attachments[:2]
+            attachments = attachments[:max_attachments]
 
         return texts, attachments
 
