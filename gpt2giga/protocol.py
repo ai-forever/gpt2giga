@@ -33,12 +33,15 @@ class AttachmentProcessor:
 
     def upload_image(self, image_url: str) -> Optional[str]:
         """Загружает изображение в GigaChat и возвращает file_id"""
-        base64_matches = re.search(r"data:(.+);(.+),(.+)", image_url)
+
+        # Fast regex match, single search, avoids repeated parsing
+        base64_matches = re.search(r"data:(.+);base64,(.+)", image_url)
         hashed = hashlib.sha256(image_url.encode()).hexdigest()
 
-        if hashed in self.cache:
+        cached_id = self.cache.get(hashed)
+        if cached_id is not None:
             self.logger.debug(f"Image found in cache: {hashed}")
-            return self.cache[hashed]
+            return cached_id
 
         try:
             if not base64_matches:
@@ -53,17 +56,18 @@ class AttachmentProcessor:
                     )
                     return None
             else:
-                content_type, type_, image_str = base64_matches.groups()
-                if type_ != "base64":
-                    self.logger.warning(f"Unsupported encoding type: {type_}")
-                    return None
+                # Optimized: Only handle base64 and avoid .groups() slowdown if no match
+                # Regex pattern already ensures type_ == "base64"
+                content_type = base64_matches.group(1)
+                image_str = base64_matches.group(2)
                 content_bytes = base64.b64decode(image_str)
                 self.logger.debug("Decoded base64 image")
 
             # Конвертируем и сжимаем изображение
-            image = Image.open(io.BytesIO(content_bytes)).convert("RGB")
-            buf = io.BytesIO()
-            image.save(buf, format="JPEG", quality=85)
+            with Image.open(io.BytesIO(content_bytes)) as image:
+                image = image.convert("RGB")
+                buf = io.BytesIO()
+                image.save(buf, format="JPEG", quality=85)
             buf.seek(0)
 
             self.logger.info("Uploading image to GigaChat...")
@@ -152,15 +156,16 @@ class RequestTransformer:
         texts = []
         attachments = []
 
+        enable_images = (
+            self.attachment_processor is not None
+            and self.config.proxy_settings.enable_images
+        )
+
         for content_part in content_parts:
-            if content_part.get("type") == "text":
+            t = content_part.get("type")
+            if t == "text":
                 texts.append(content_part.get("text", ""))
-            elif (
-                content_part.get("type") == "image_url"
-                and content_part.get("image_url")
-                and self.attachment_processor
-                and self.config.proxy_settings.enable_images
-            ):
+            elif enable_images and t == "image_url" and content_part.get("image_url"):
                 file_id = self.attachment_processor.upload_image(
                     content_part["image_url"]["url"]
                 )
