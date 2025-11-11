@@ -89,7 +89,7 @@ class RequestTransformer:
         self,
         config: ProxyConfig,
         logger,
-        attachment_processor: Optional[AttachmentProcessor] = None,
+        attachment_processor: Optional["AttachmentProcessor"] = None,
     ):
         self.config = config
         self.logger = logger
@@ -316,16 +316,14 @@ class RequestTransformer:
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:
         """Объединяет последовательные пользовательские сообщения"""
-        collapsed_messages = []
+        collapsed_messages: List[Messages] = []
+        prev_user_message = None
         for message in messages:
-            if (
-                collapsed_messages
-                and message.role == "user"
-                and collapsed_messages[-1].role == "user"
-            ):
-                collapsed_messages[-1].content += "\n" + message.content
+            if message.role == "user" and prev_user_message is not None:
+                prev_user_message.content += "\n" + message.content
             else:
                 collapsed_messages.append(message)
+                prev_user_message = message if message.role == "user" else None
         return collapsed_messages
 
 
