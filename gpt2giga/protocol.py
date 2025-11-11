@@ -56,9 +56,6 @@ class AttachmentProcessor:
                     )
                     return None
             else:
-                # Optimized: Only handle base64 and avoid .groups() slowdown if no match
-                # Regex pattern already ensures type_ == "base64"
-                content_type = base64_matches.group(1)
                 image_str = base64_matches.group(2)
                 content_bytes = base64.b64decode(image_str)
                 self.logger.debug("Decoded base64 image")
@@ -154,9 +151,7 @@ class RequestTransformer:
     ) -> Tuple[List[str], List[str]]:
         """Обрабатывает части контента (текст и изображения)"""
         texts = []
-        # Preallocate attachments array with max size (2) for efficiency -- we'll trim later if needed
         attachments: List[str] = []
-        # We also track how many images can be appended due to limit
         max_attachments = 2
 
         # Cache references used in loop to minimize attribute lookups
@@ -183,9 +178,6 @@ class RequestTransformer:
                         attachments.append(file_id)
                         logger.info(f"Added attachment: {file_id}")
 
-        # Ограничиваем количество изображений
-        # The above loop guarantees attachments will not exceed max_attachments,
-        # but we leave the following for logging, in case of external changes.
         if len(attachments) > max_attachments:
             logger.warning(
                 "GigaChat can only handle 2 images per message. Cutting off excess."
