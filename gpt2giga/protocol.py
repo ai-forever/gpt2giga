@@ -572,10 +572,12 @@ class ResponseProcessor:
         if not usage_data:
             return None
         return {
-            "input_tokens": usage_data["prompt_tokens"],
-            "output_tokens": usage_data["completion_tokens"],
+            "input_tokens": usage_data.get("prompt_tokens", 0),
+            "output_tokens": usage_data.get("completion_tokens", 0),
             "total_tokens": usage_data["total_tokens"],
             "prompt_tokens_details": {
                 "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
             },
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 0},
         }
