@@ -240,28 +240,37 @@ class RequestTransformer:
             message_payload.append({"role": "user", "content": input_})
 
         elif isinstance(input_, list):
-            contents = []
             for message in input_:
-                is_message = message.get("role")
-                is_tool_call = message.get("type") == "function_call"
-                is_tool_call_output = message.get("type") == "function_call_output"
-                if is_tool_call_output:
+                m_type = message.get("type")
+                if m_type == "function_call_output":
                     message_payload.append(
                         {"role": "function", "content": message.get("output")}
                     )
-                elif is_tool_call:
+                    continue
+                elif m_type == "function_call":
                     message_payload.append(self.mock_completion(message))
-                elif is_message:
+                    continue
+
+                role = message.get("role")
+                if role:
                     content = message.get("content")
                     if isinstance(content, list):
+                        # Use a local list to avoid accumulating contents across messages
+                        contents = []
+                        append = (
+                            contents.append
+                        )  # Micro-optimization for attribute access
                         for content_part in content:
-                            if content_part.get("type") == "input_text":
-                                contents.append(
-                                    {"type": "text", "text": content_part.get("text")}
+                            ctype = content_part.get("type")
+                            if ctype == "input_text":
+                                append(
+                                    {
+                                        "type": "text",
+                                        "text": content_part.get("text"),
+                                    }
                                 )
-
-                            elif content_part.get("type") == "input_image":
-                                contents.append(
+                            elif ctype == "input_image":
+                                append(
                                     {
                                         "type": "image_url",
                                         "image_url": {
@@ -270,16 +279,9 @@ class RequestTransformer:
                                     }
                                 )
 
-                        message_payload.append(
-                            {"role": message.get("role"), "content": contents}
-                        )
+                        message_payload.append({"role": role, "content": contents})
                     else:
-                        message_payload.append(
-                            {
-                                "role": message.get("role"),
-                                "content": message.get("content"),
-                            }
-                        )
+                        message_payload.append({"role": role, "content": content})
         return message_payload
 
     @staticmethod
