@@ -33,12 +33,15 @@ class AttachmentProcessor:
 
     def upload_image(self, image_url: str) -> Optional[str]:
         """Загружает изображение в GigaChat и возвращает file_id"""
-        base64_matches = re.search(r"data:(.+);(.+),(.+)", image_url)
+
+        # Fast regex match, single search, avoids repeated parsing
+        base64_matches = re.search(r"data:(.+);base64,(.+)", image_url)
         hashed = hashlib.sha256(image_url.encode()).hexdigest()
 
-        if hashed in self.cache:
+        cached_id = self.cache.get(hashed)
+        if cached_id is not None:
             self.logger.debug(f"Image found in cache: {hashed}")
-            return self.cache[hashed]
+            return cached_id
 
         try:
             if not base64_matches:
@@ -53,17 +56,15 @@ class AttachmentProcessor:
                     )
                     return None
             else:
-                content_type, type_, image_str = base64_matches.groups()
-                if type_ != "base64":
-                    self.logger.warning(f"Unsupported encoding type: {type_}")
-                    return None
+                image_str = base64_matches.group(2)
                 content_bytes = base64.b64decode(image_str)
                 self.logger.debug("Decoded base64 image")
 
             # Конвертируем и сжимаем изображение
-            image = Image.open(io.BytesIO(content_bytes)).convert("RGB")
-            buf = io.BytesIO()
-            image.save(buf, format="JPEG", quality=85)
+            with Image.open(io.BytesIO(content_bytes)) as image:
+                image = image.convert("RGB")
+                buf = io.BytesIO()
+                image.save(buf, format="JPEG", quality=85)
             buf.seek(0)
 
             self.logger.info("Uploading image to GigaChat...")
@@ -85,7 +86,7 @@ class RequestTransformer:
         self,
         config: ProxyConfig,
         logger,
-        attachment_processor: Optional[AttachmentProcessor] = None,
+        attachment_processor: Optional["AttachmentProcessor"] = None,
     ):
         self.config = config
         self.logger = logger
@@ -109,12 +110,9 @@ class RequestTransformer:
                 message["role"] = "user"
             elif message["role"] == "tool":
                 message["role"] = "function"
-                try:
-                    json.loads(message.get("content", ""))
-                except json.JSONDecodeError:
-                    message["content"] = json.dumps(
-                        message.get("content", ""), ensure_ascii=False
-                    )
+                message["content"] = json.dumps(
+                    message.get("content", ""), ensure_ascii=False
+                )
 
             # Обрабатываем контент
             if message.get("content") is None:
@@ -150,30 +148,38 @@ class RequestTransformer:
     ) -> Tuple[List[str], List[str]]:
         """Обрабатывает части контента (текст и изображения)"""
         texts = []
-        attachments = []
+        attachments: List[str] = []
+        max_attachments = 2
+
+        # Cache references used in loop to minimize attribute lookups
+        processor = self.attachment_processor
+        enable_images = getattr(self.config.proxy_settings, "enable_images", False)
+        logger = self.logger
 
         for content_part in content_parts:
-            if content_part.get("type") == "text":
+            ctype = content_part.get("type")
+            if ctype == "text":
                 texts.append(content_part.get("text", ""))
             elif (
-                content_part.get("type") == "image_url"
+                ctype == "image_url"
+                and processor is not None
+                and enable_images
                 and content_part.get("image_url")
-                and self.attachment_processor
-                and self.config.proxy_settings.enable_images
+                and len(attachments)
+                < max_attachments  # Early cutoff to avoid extra work/logging/excess uploads
             ):
-                file_id = self.attachment_processor.upload_image(
-                    content_part["image_url"]["url"]
-                )
-                if file_id:
-                    attachments.append(file_id)
-                    self.logger.info(f"Added attachment: {file_id}")
+                url = content_part["image_url"].get("url")
+                if url is not None:
+                    file_id = processor.upload_image(url)
+                    if file_id:
+                        attachments.append(file_id)
+                        logger.info(f"Added attachment: {file_id}")
 
-        # Ограничиваем количество изображений
-        if len(attachments) > 2:
-            self.logger.warning(
+        if len(attachments) > max_attachments:
+            logger.warning(
                 "GigaChat can only handle 2 images per message. Cutting off excess."
             )
-            attachments = attachments[:2]
+            attachments = attachments[:max_attachments]
 
         return texts, attachments
 
@@ -235,28 +241,40 @@ class RequestTransformer:
             message_payload.append({"role": "user", "content": input_})
 
         elif isinstance(input_, list):
-            contents = []
             for message in input_:
-                is_message = message.get("role")
-                is_tool_call = message.get("type") == "function_call"
-                is_tool_call_output = message.get("type") == "function_call_output"
-                if is_tool_call_output:
+                message_type = message.get("type")
+                if message_type == "function_call_output":
                     message_payload.append(
-                        {"role": "function", "content": message.get("output")}
+                        {
+                            "role": "function",
+                            "content": json.dumps(message.get("output")),
+                        }
                     )
-                elif is_tool_call:
+                    continue
+                elif message_type == "function_call":
                     message_payload.append(self.mock_completion(message))
-                elif is_message:
+                    continue
+
+                role = message.get("role")
+                if role:
                     content = message.get("content")
                     if isinstance(content, list):
+                        # Use a local list to avoid accumulating contents across messages
+                        contents = []
+                        append = (
+                            contents.append
+                        )  # Micro-optimization for attribute access
                         for content_part in content:
-                            if content_part.get("type") == "input_text":
-                                contents.append(
-                                    {"type": "text", "text": content_part.get("text")}
+                            ctype = content_part.get("type")
+                            if ctype == "input_text":
+                                append(
+                                    {
+                                        "type": "text",
+                                        "text": content_part.get("text"),
+                                    }
                                 )
-
-                            elif content_part.get("type") == "input_image":
-                                contents.append(
+                            elif ctype == "input_image":
+                                append(
                                     {
                                         "type": "image_url",
                                         "image_url": {
@@ -265,16 +283,9 @@ class RequestTransformer:
                                     }
                                 )
 
-                        message_payload.append(
-                            {"role": message.get("role"), "content": contents}
-                        )
+                        message_payload.append({"role": role, "content": contents})
                     else:
-                        message_payload.append(
-                            {
-                                "role": message.get("role"),
-                                "content": message.get("content"),
-                            }
-                        )
+                        message_payload.append({"role": role, "content": content})
         return message_payload
 
     @staticmethod
@@ -309,16 +320,14 @@ class RequestTransformer:
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:
         """Объединяет последовательные пользовательские сообщения"""
-        collapsed_messages = []
+        collapsed_messages: List[Messages] = []
+        prev_user_message = None
         for message in messages:
-            if (
-                collapsed_messages
-                and message.role == "user"
-                and collapsed_messages[-1].role == "user"
-            ):
-                collapsed_messages[-1].content += "\n" + message.content
+            if message.role == "user" and prev_user_message is not None:
+                prev_user_message.content += "\n" + message.content
             else:
                 collapsed_messages.append(message)
+                prev_user_message = message if message.role == "user" else None
         return collapsed_messages
 
 

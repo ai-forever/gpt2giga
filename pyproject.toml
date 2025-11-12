@@ -55,8 +55,8 @@ tests-root = "tests"
 test-framework = "pytest"
 ignore-paths = []
 disable-telemetry = true
-git-remote = "fork"
 formatter-cmds = ["black $file"]
+
 
 [build-system]
 requires = ["poetry-core"]

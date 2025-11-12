@@ -314,6 +314,7 @@ completion = client.chat.completions.create(
 | [n8n](https://n8n.io/)                                 | Платформа для создания nocode-агентов                                                                                                      |
 | [Cline](https://github.com/cline/cline)                | AI-ассистент разработчика                                                                                                                  |
 | [OpenHands](https://github.com/All-Hands-AI/OpenHands) | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](/integrations/openhands)    |
+| [KiloCode](https://kilocode.ai/) | AI-кодовый агент | AI-агент для написания кода, доступен в jetbrains/vscode |
 
 ## Лицензия
 
