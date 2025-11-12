@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       # So that this workflow only runs when code within the target module is modified
-      - '**'
+      - 'gpt2giga/**'
   workflow_dispatch:
 
 concurrency:
