@@ -110,12 +110,9 @@ class RequestTransformer:
                 message["role"] = "user"
             elif message["role"] == "tool":
                 message["role"] = "function"
-                try:
-                    json.loads(message.get("content", ""))
-                except json.JSONDecodeError:
-                    message["content"] = json.dumps(
-                        message.get("content", ""), ensure_ascii=False
-                    )
+                message["content"] = json.dumps(
+                    message.get("content", ""), ensure_ascii=False
+                )
 
             # Обрабатываем контент
             if message.get("content") is None:
@@ -245,13 +242,16 @@ class RequestTransformer:
 
         elif isinstance(input_, list):
             for message in input_:
-                m_type = message.get("type")
-                if m_type == "function_call_output":
+                message_type = message.get("type")
+                if message_type == "function_call_output":
                     message_payload.append(
-                        {"role": "function", "content": message.get("output")}
+                        {
+                            "role": "function",
+                            "content": json.dumps(message.get("output")),
+                        }
                     )
                     continue
-                elif m_type == "function_call":
+                elif message_type == "function_call":
                     message_payload.append(self.mock_completion(message))
                     continue
 
