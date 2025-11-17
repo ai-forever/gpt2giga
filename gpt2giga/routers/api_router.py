@@ -88,13 +88,15 @@ async def embeddings(request: Request):
     if isinstance(inputs, list):
         new_inputs = []
         if isinstance(inputs[0], int):  # List[int]:
-            new_inputs = tiktoken.encoding_for_model(gpt_model).decode(inputs)
+            encoder = tiktoken.encoding_for_model(gpt_model)
+            new_inputs = encoder.decode(inputs)
         else:
+            encoder = None
             for row in inputs:
                 if isinstance(row, list):  # List[List[int]]
-                    new_inputs.append(
-                        tiktoken.encoding_for_model(gpt_model).decode(row)
-                    )
+                    if encoder is None:
+                        encoder = tiktoken.encoding_for_model(gpt_model)
+                    new_inputs.append(encoder.decode(row))
                 else:
                     new_inputs.append(row)
     else:
