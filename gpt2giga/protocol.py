@@ -1,6 +1,5 @@
 import base64
 import hashlib
-import io
 import json
 import re
 import time
@@ -8,7 +7,6 @@ import uuid
 from typing import Optional, List, Dict, Tuple, Literal
 
 import httpx
-from PIL import Image
 from gigachat import GigaChat
 from gigachat.models import (
     ChatCompletionChunk,
@@ -31,8 +29,10 @@ class AttachmentProcessor:
         self.logger = logger
         self.cache: dict[str, str] = {}
 
-    def upload_image(self, image_url: str) -> Optional[str]:
-        """Загружает изображение в GigaChat и возвращает file_id"""
+    async def upload_file(
+        self, image_url: str, filename: str | None = None
+    ) -> Optional[str]:
+        """Загружает файл в GigaChat и возвращает file_id"""
 
         # Fast regex match, single search, avoids repeated parsing
         base64_matches = re.search(r"data:(.+);base64,(.+)", image_url)
@@ -44,38 +44,27 @@ class AttachmentProcessor:
             return cached_id
 
         try:
-            if not base64_matches:
+            if base64_matches:
+                content_type = base64_matches.group(1)
+                image_str = base64_matches.group(2)
+                content_bytes = base64.b64decode(image_str)
+                self.logger.info("Decoded base64 image")
+            else:
                 self.logger.info(f"Downloading image from URL: {image_url[:100]}...")
                 response = httpx.get(image_url, timeout=30)
                 content_type = response.headers.get("content-type", "")
                 content_bytes = response.content
-
-                if not content_type.startswith("image/"):
-                    self.logger.warning(
-                        f"Invalid content type for image: {content_type}"
-                    )
-                    return None
-            else:
-                image_str = base64_matches.group(2)
-                content_bytes = base64.b64decode(image_str)
-                self.logger.debug("Decoded base64 image")
-
-            # Конвертируем и сжимаем изображение
-            with Image.open(io.BytesIO(content_bytes)) as image:
-                image = image.convert("RGB")
-                buf = io.BytesIO()
-                image.save(buf, format="JPEG", quality=85)
-            buf.seek(0)
-
-            self.logger.info("Uploading image to GigaChat...")
-            file = self.giga.upload_file((f"{uuid.uuid4()}.jpg", buf))
+            ext = content_type.split("/")[-1] or "jpg"
+            filename = filename or f"{uuid.uuid4()}.{ext}"
+            self.logger.info(f"Uploading file to GigaChat... with extension {ext}")
+            file = await self.giga.aupload_file((filename, content_bytes))
 
             self.cache[hashed] = file.id_
-            self.logger.info(f"Image uploaded successfully, file_id: {file.id_}")
+            self.logger.info(f"File uploaded successfully, file_id: {file.id_}")
             return file.id_
 
         except Exception as e:
-            self.logger.error(f"Error processing image: {e}")
+            self.logger.error(f"Error processing file: {e}")
             return None
 
 
@@ -92,7 +81,7 @@ class RequestTransformer:
         self.logger = logger
         self.attachment_processor = attachment_processor
 
-    def transform_messages(self, messages: List[Dict]) -> List[Dict]:
+    async def transform_messages(self, messages: List[Dict]) -> List[Dict]:
         """Трансформирует сообщения в формат GigaChat"""
         transformed_messages = []
         attachment_count = 0
@@ -130,7 +119,9 @@ class RequestTransformer:
 
             # Обрабатываем составной контент (текст + изображения)
             if isinstance(message["content"], list):
-                texts, attachments = self._process_content_parts(message["content"])
+                texts, attachments = await self._process_content_parts(
+                    message["content"]
+                )
                 message["content"] = "\n".join(texts)
                 message["attachments"] = attachments
                 attachment_count += len(attachments)
@@ -143,7 +134,7 @@ class RequestTransformer:
 
         return transformed_messages
 
-    def _process_content_parts(
+    async def _process_content_parts(
         self, content_parts: List[Dict]
     ) -> Tuple[List[str], List[str]]:
         """Обрабатывает части контента (текст и изображения)"""
@@ -170,11 +161,17 @@ class RequestTransformer:
             ):
                 url = content_part["image_url"].get("url")
                 if url is not None:
-                    file_id = processor.upload_image(url)
+                    file_id = await processor.upload_file(url)
                     if file_id:
                         attachments.append(file_id)
                         logger.info(f"Added attachment: {file_id}")
-
+            elif ctype == "file" and processor is not None and content_part.get("file"):
+                filename = content_part["file"].get("filename")
+                file_data = content_part["file"].get("file_data")
+                file_id = await processor.upload_file(file_data, filename)
+                if file_id:
+                    attachments.append(file_id)
+                    logger.info(f"Added attachment: {file_id}")
         if len(attachments) > max_attachments:
             logger.warning(
                 "GigaChat can only handle 2 images per message. Cutting off excess."
@@ -297,7 +294,7 @@ class RequestTransformer:
             function_call=FunctionCall(name=name, arguments=arguments),
         ).dict()
 
-    def send_to_gigachat(self, data: dict) -> Chat:
+    async def send_to_gigachat(self, data: dict) -> Chat:
         """Отправляет запрос в GigaChat API"""
         transformed_data = self.transform_chat_parameters(data)
         if not transformed_data.get("messages") and transformed_data.get("input"):
@@ -305,7 +302,7 @@ class RequestTransformer:
                 transformed_data
             )
 
-        transformed_data["messages"] = self.transform_messages(
+        transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", [])
         )
 
