@@ -319,12 +319,25 @@ class RequestTransformer:
         """Объединяет последовательные пользовательские сообщения"""
         collapsed_messages: List[Messages] = []
         prev_user_message = None
+        content_parts = []
+
         for message in messages:
             if message.role == "user" and prev_user_message is not None:
-                prev_user_message.content += "\n" + message.content
+                content_parts.append(message.content)
             else:
+                if content_parts:
+                    prev_user_message.content = "\n".join(
+                        [prev_user_message.content] + content_parts
+                    )
+                    content_parts = []
                 collapsed_messages.append(message)
                 prev_user_message = message if message.role == "user" else None
+
+        if content_parts:
+            prev_user_message.content = "\n".join(
+                [prev_user_message.content] + content_parts
+            )
+
         return collapsed_messages
 
 
