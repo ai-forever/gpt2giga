@@ -39,4 +39,4 @@ jobs:
       - name: ⚡️Codeflash Optimization
         run: |
           poetry env use python
-          poetry run codeflash
+          poetry run codeflash --async
