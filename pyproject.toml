@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "gpt2giga"
-version = "0.0.14.post1"
+version = "0.0.15"
 description = ""
 authors = ["Konstantin Krestnikov <rai220@gmail.com>"]
 license = "MIT"
@@ -17,29 +17,14 @@ uvicorn = "^0.37.0"
 fastapi = "^0.119.0"
 openai = "^2.3.0"
 aioitertools = "^0.12.0"
-gigachat = "0.1.42"
 loguru = "^0.7.3"
 sse-starlette = "^3.0.3"
+gigachat = "^0.1.43"
 
 [tool.poetry.scripts]
 gpt2giga = "gpt2giga:run"
 
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-[dependency-groups]
-dev = [
-    "black (>=25.9.0,<26.0.0)",
-    "pytest (>=8.4.2,<9.0.0)",
-    "pytest-asyncio (>=1.2.0,<2.0.0)",
-    "pytest-mock (>=3.15.1,<4.0.0)",
-    "ruff (>=0.14.2,<0.15.0)",
-    "pytest-cov (>=7.0.0,<8.0.0)",
-    "pre-commit (>=4.3.0,<5.0.0)",
-]
-integrations = [
-    "openai-agents (>=0.5.0,<0.6.0)"
-]
+
 [tool.coverage.run]
 omit = [
   "tests/*",
@@ -62,4 +47,31 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod"
+]
+[tool.codeflash]
+# All paths are relative to this pyproject.toml's directory.
+module-root = "gpt2giga"
+tests-root = "tests"
+test-framework = "pytest"
+ignore-paths = []
+disable-telemetry = true
+formatter-cmds = ["black $file"]
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+[dependency-groups]
+dev = [
+    "black (>=25.9.0,<26.0.0)",
+    "pytest (>=8.4.2,<9.0.0)",
+    "pytest-asyncio (>=1.2.0,<2.0.0)",
+    "pytest-mock (>=3.15.1,<4.0.0)",
+    "ruff (>=0.14.2,<0.15.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)",
+    "pre-commit (>=4.3.0,<5.0.0)",
+    "codeflash (>=0.18.3,<0.19.0)",
+]
+integrations = [
+    "openai-agents (>=0.5.0,<0.6.0)"
 ]

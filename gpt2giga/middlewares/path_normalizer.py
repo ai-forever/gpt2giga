@@ -16,12 +16,13 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         # Valid entrypoints
         self.valid_roots = valid_roots or ["v1", "chat", "models", "embeddings"]
+        pattern = r".*/(" + "|".join(map(re.escape, self.valid_roots)) + r")(/.*|$)"
+        self._pattern = re.compile(pattern)
 
     async def dispatch(self, request: Request, call_next: Callable):
         path = request.url.path
 
-        pattern = r".*/(" + "|".join(map(re.escape, self.valid_roots)) + r")(/.*|$)"
-        match = re.match(pattern, path)
+        match = self._pattern.match(path)
 
         if match and not path.startswith(f"/{match.group(1)}"):
             new_path = f"/{match.group(1)}{match.group(2)}"

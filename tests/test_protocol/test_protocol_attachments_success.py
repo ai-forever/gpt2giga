@@ -1,5 +1,6 @@
 import io
 
+import pytest
 from PIL import Image
 from loguru import logger
 
@@ -12,24 +13,12 @@ class DummyFile:
 
 
 class DummyClient:
-    def upload_file(self, file_tuple):
+    async def aupload_file(self, file_tuple):
         return DummyFile("ok2")
 
 
-def test_attachment_processor_success_with_pil(monkeypatch):
-    # Подменяем Image.open, чтобы не требовались реальные байты
-    real_open = Image.open
-
-    def fake_open(fp):
-        # создаём минимальное корректное изображение в памяти
-        img = Image.new("RGB", (1, 1))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-        return real_open(buf)
-
-    monkeypatch.setattr("gpt2giga.protocol.Image.open", fake_open)
-
+@pytest.mark.asyncio
+async def test_attachment_processor_success_with_pil(monkeypatch):
     client = DummyClient()
     p = AttachmentProcessor(client, logger)
     # Используем data URL с корректной base64-строкой PNG 1x1
@@ -40,5 +29,5 @@ def test_attachment_processor_success_with_pil(monkeypatch):
     import base64
 
     data_url = "data:image/png;base64," + base64.b64encode(b64).decode()
-    file_id = p.upload_image(data_url)
+    file_id = await p.upload_file(data_url)
     assert file_id == "ok2"

@@ -53,7 +53,7 @@ async def chat_completions(request: Request):
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
         state.logger.debug(f"Functions count: {len(data['functions'])}")
-    chat_messages = state.request_transformer.send_to_gigachat(data)
+    chat_messages = await state.request_transformer.send_to_gigachat(data)
     if not stream:
         response = await state.gigachat_client.achat(chat_messages)
         if is_response_api:
@@ -88,13 +88,15 @@ async def embeddings(request: Request):
     if isinstance(inputs, list):
         new_inputs = []
         if isinstance(inputs[0], int):  # List[int]:
-            new_inputs = tiktoken.encoding_for_model(gpt_model).decode(inputs)
+            encoder = tiktoken.encoding_for_model(gpt_model)
+            new_inputs = encoder.decode(inputs)
         else:
+            encoder = None
             for row in inputs:
                 if isinstance(row, list):  # List[List[int]]
-                    new_inputs.append(
-                        tiktoken.encoding_for_model(gpt_model).decode(row)
-                    )
+                    if encoder is None:
+                        encoder = tiktoken.encoding_for_model(gpt_model)
+                    new_inputs.append(encoder.decode(row))
                 else:
                     new_inputs.append(row)
     else:

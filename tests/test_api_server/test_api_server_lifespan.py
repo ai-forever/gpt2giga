@@ -20,4 +20,4 @@ def test_app_lifespan_initializes_state(monkeypatch):
     # Триггерим lifespan
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert not hasattr(app.state, "config") and not hasattr(app.state, "logger")
+    assert hasattr(app.state, "config")

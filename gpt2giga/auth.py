@@ -34,8 +34,12 @@ def verify_api_key(
     else:
         auth_header = request.headers.get("authorization")
         x_api_key = request.headers.get("x-api-key")
-        if auth_header and auth_header.lower().startswith("bearer "):
-            provided_key = auth_header.split(" ", 1)[1].strip()
+        if (
+            auth_header
+            and len(auth_header) > 7
+            and auth_header[:7].lower() == "bearer "
+        ):
+            provided_key = auth_header[7:].strip()
         elif x_api_key:
             provided_key = x_api_key.strip()
 
