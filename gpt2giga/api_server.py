@@ -101,8 +101,8 @@ def run():
     app.state.logger = logger
 
     logger.info("Starting Gpt2Giga proxy server...")
-    logger.debug(f"Proxy settings: {proxy_settings}")
-    logger.debug(
+    logger.info(f"Proxy settings: {proxy_settings}")
+    logger.info(
         f"GigaChat settings: {config.gigachat_settings.dict(exclude={'password', 'credentials', 'access_token'})}"
     )
     uvicorn.run(
