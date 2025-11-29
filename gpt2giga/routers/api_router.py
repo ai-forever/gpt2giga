@@ -21,7 +21,7 @@ router = APIRouter(tags=["API"])
 @exceptions_handler
 async def show_available_models(request: Request):
     state = request.app.state
-    response = await state.gigachat_client.aget_models()
+    response = await state.llm_queue.call(state.gigachat_client.aget_models)
     models = [i.dict(by_alias=True) for i in response.data]
     current_timestamp = int(time.time())
     for model in models:
@@ -35,7 +35,7 @@ async def show_available_models(request: Request):
 @exceptions_handler
 async def get_model(model: str, request: Request):
     state = request.app.state
-    response = await state.gigachat_client.aget_model(model=model)
+    response = await state.llm_queue.call(state.gigachat_client.aget_model, model=model)
     model = response.dict(by_alias=True)
     model["created"] = int(time.time())
     return OpenAIModel(**model)
@@ -55,7 +55,11 @@ async def chat_completions(request: Request):
         state.logger.debug(f"Functions count: {len(data['functions'])}")
     chat_messages = state.request_transformer.send_to_gigachat(data)
     if not stream:
-        response = await state.gigachat_client.achat(chat_messages)
+        response = \
+            await state.llm_queue.call(
+                        state.gigachat_client.achat,
+                        chat_messages
+                    )
         if is_response_api:
             processed = state.response_processor.process_response_api(
                 data, response, chat_messages.model, current_rquid
@@ -100,9 +104,11 @@ async def embeddings(request: Request):
     else:
         new_inputs = [inputs]
 
-    embeddings = await request.app.state.gigachat_client.aembeddings(
-        texts=new_inputs, model=request.app.state.config.proxy_settings.embeddings
-    )
+    embeddings = await request.app.state.llm_queue.call(
+                        request.app.state.gigachat_client.aembeddings,
+                        texts=new_inputs,
+                        model=request.app.state.config.proxy_settings.embeddings
+                    )
 
     return embeddings
 

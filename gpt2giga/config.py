@@ -45,6 +45,15 @@ class ProxySettings(BaseSettings):
     )
     env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 
+    pause_between_requests: Optional[float] = Field(
+        default=0.3, description="пауза между запросами к сервису GigaCgat (сек)"
+    )
+
+    requests_per_minute: Optional[int] = Field(
+        default=30, description="лимит запросов к сервису GigaCgat в минуту"
+    )
+
+
     class Config:
         env_prefix = "gpt2giga_"
         case_sensitive = False

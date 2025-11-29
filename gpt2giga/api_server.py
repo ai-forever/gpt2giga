@@ -1,6 +1,6 @@
 from contextlib import asynccontextmanager
 
-import uvicorn
+import uvicorn, os
 from fastapi import FastAPI, Depends
 from gigachat import GigaChat
 from starlette.middleware.cors import CORSMiddleware
@@ -15,6 +15,8 @@ from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.routers import api_router, logs_router
 from gpt2giga.routers import system_router
+
+from gpt2giga.routers.llm_queue import LLMQueueService
 
 
 @asynccontextmanager
@@ -38,6 +40,17 @@ async def lifespan(app: FastAPI):
     app.state.config = config
     app.state.logger = logger
     app.state.gigachat_client = GigaChat(**config.gigachat_settings.dict())
+
+    # очередь LLM — единая для всего приложения
+    print(f'{ config.proxy_settings.pause_between_requests = } { type(config.proxy_settings.pause_between_requests) = } ')
+    print(f'{ config.proxy_settings.requests_per_minute = } { type(config.proxy_settings.requests_per_minute) = } ')
+
+    app.state.llm_queue = LLMQueueService( config.proxy_settings.pause_between_requests,
+                                           config.proxy_settings.requests_per_minute,
+                                           app.state.logger
+                                       )
+    app.state.logger.info(f"Worker starting")
+    await app.state.llm_queue.start()
 
     attachment_processor = AttachmentProcessor(
         app.state.gigachat_client, app.state.logger

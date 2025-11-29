@@ -206,6 +206,9 @@ gpt2giga \
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
 - `GPT2GIGA_ENABLE_API_KEY_AUTH="False"` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
 - `GPT2GIGA_API_KEY=""` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
+- `GPT2GIGA_PAUSE_BETWEEN_REQUESTS=0.3` — пауза между запросами к сервису GigaCgat (сек).
+- `GPT2GIGA_REQUESTS_PER_MINUTE=60` — лимит запросов к сервису GigaCgat в минуту.
+
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
