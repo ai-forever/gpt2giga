@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import pytest
 from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from loguru import logger
@@ -12,10 +13,11 @@ class DummyClient:
 
 def test_attachment_processor_construction():
     p = AttachmentProcessor(DummyClient(), logger)
-    assert hasattr(p, "upload_image")
+    assert hasattr(p, "upload_file")
 
 
-def test_request_transformer_collapse_messages():
+@pytest.mark.asyncio
+async def test_request_transformer_collapse_messages():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
     messages = [
@@ -23,13 +25,14 @@ def test_request_transformer_collapse_messages():
         {"role": "user", "content": "world"},
     ]
     data = {"messages": messages}
-    chat = rt.send_to_gigachat(data)
+    chat = await rt.send_to_gigachat(data)
     # После collapse два подряд user должны склеиться
     assert len(chat.messages) == 1
     assert "hello" in chat.messages[0].content and "world" in chat.messages[0].content
 
 
-def test_request_transformer_tools_to_functions():
+@pytest.mark.asyncio
+async def test_request_transformer_tools_to_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
     data = {
@@ -49,7 +52,7 @@ def test_request_transformer_tools_to_functions():
         ],
         "messages": [{"role": "user", "content": "hi"}],
     }
-    chat = rt.send_to_gigachat(data)
+    chat = await rt.send_to_gigachat(data)
     assert chat.functions and len(chat.functions) == 1
 
 

@@ -49,9 +49,13 @@ async def lifespan(app: FastAPI):
     yield
 
 
-def create_app() -> FastAPI:
+def create_app(config=None) -> FastAPI:
     app = FastAPI(lifespan=lifespan, title="Gpt2Giga converter proxy")
-    config = load_config()
+    if config is None:
+        config = load_config()
+
+    app.state.config = config
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -93,13 +97,12 @@ def run():
         max_bytes=proxy_settings.log_max_size,
     )
 
-    app = create_app()
-    app.state.config = config
+    app = create_app(config)
     app.state.logger = logger
 
     logger.info("Starting Gpt2Giga proxy server...")
-    logger.debug(f"Proxy settings: {proxy_settings}")
-    logger.debug(
+    logger.info(f"Proxy settings: {proxy_settings}")
+    logger.info(
         f"GigaChat settings: {config.gigachat_settings.dict(exclude={'password', 'credentials', 'access_token'})}"
     )
     uvicorn.run(
