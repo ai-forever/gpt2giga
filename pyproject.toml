@@ -19,6 +19,7 @@ dependencies = [
     "loguru>=0.7.3,<0.8",
     "sse-starlette>=3.0.3,<4",
     "gigachat>=0.1.43,<1",
+    "pydantic-settings>=2.12.0",
 ]
 
 [project.scripts]
