@@ -15,17 +15,17 @@ def load_config() -> ProxyConfig:
     )
 
     # Добавляем аргументы для proxy_settings
-    for field_name, field in ProxySettings.__fields__.items():
+    for field_name, field in ProxySettings.model_fields.items():
         if field_name == "env_path":
             continue
         arg_name = f"--proxy-{field_name.replace('_', '-')}"
-        help_text = field.field_info.description or field_name
-        if field.type_ is bool:
+        help_text = field.description or field_name
+        if field.annotation is bool:
             parser.add_argument(
                 arg_name, action="store_true", default=None, help=help_text
             )
-        elif get_origin(field.type_) is Literal:
-            allowed_values = get_args(field.type_)
+        elif get_origin(field.annotation) is Literal:
+            allowed_values = get_args(field.annotation)
             parser.add_argument(
                 arg_name,
                 type=str,
@@ -35,21 +35,22 @@ def load_config() -> ProxyConfig:
             )
         else:
             parser.add_argument(
-                arg_name, type=field.type_, default=None, help=help_text
+                arg_name, type=field.annotation, default=None, help=help_text
             )
 
     # Добавляем аргументы для gigachat_settings
-    for field_name, field in GigachatSettings.__fields__.items():
+    for field_name, field in GigachatSettings.model_fields.items():
         arg_name = f"--gigachat-{field_name.replace('_', '-')}"
-        help_text = field.field_info.description or field_name
+        print(GigachatSettings)
+        help_text = field.description or field_name
 
-        if field.type_ is bool:
+        if field.annotation is bool:
             parser.add_argument(
                 arg_name, action="store_true", default=None, help=help_text
             )
         else:
             parser.add_argument(
-                arg_name, type=field.type_, default=None, help=help_text
+                arg_name, type=field.annotation, default=None, help=help_text
             )
 
     parser.add_argument("--env-path", type=str, default=None, help="Path to .env file")
@@ -59,7 +60,6 @@ def load_config() -> ProxyConfig:
     # Загружаем переменные окружения
     env_path = find_dotenv(args.env_path if args.env_path else f"{os.getcwd()}/.env")
     load_dotenv(env_path)
-
     # Собираем конфигурацию из CLI аргументов
     proxy_settings_dict = {}
     gigachat_settings_dict = {}

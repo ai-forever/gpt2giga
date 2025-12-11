@@ -1,8 +1,7 @@
 from typing import Optional, Literal
-
-from gigachat.pydantic_v1 import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from gigachat.settings import Settings as GigachatSettings
-from pydantic.v1 import Field
+from pydantic import Field
 
 
 class ProxySettings(BaseSettings):
@@ -43,11 +42,9 @@ class ProxySettings(BaseSettings):
         default=None,
         description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
     )
-    env_path: Optional[str] = Field(None, description="Путь к .env файлу")
+    env_path: Optional[str] = Field(".env", description="Путь к .env файлу")
 
-    class Config:
-        env_prefix = "gpt2giga_"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)
 
 
 class ProxyConfig(BaseSettings):
