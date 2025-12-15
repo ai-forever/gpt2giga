@@ -44,11 +44,19 @@ class ProxySettings(BaseSettings):
     )
     env_path: Optional[str] = Field(".env", description="Путь к .env файлу")
 
-    model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_prefix="gpt2giga_", case_sensitive=False, cli_parse_args=True
+    )
+
+
+class GigaChatCLI(GigachatSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="gigachat_", case_sensitive=False, cli_parse_args=True
+    )
 
 
 class ProxyConfig(BaseSettings):
     """Конфигурация прокси-сервера"""
 
     proxy_settings: ProxySettings = Field(default_factory=ProxySettings)
-    gigachat_settings: GigachatSettings = Field(default_factory=GigachatSettings)
+    gigachat_settings: GigaChatCLI = Field(default_factory=GigaChatCLI)
