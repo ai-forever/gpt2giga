@@ -23,6 +23,8 @@ def exceptions_handler(func):
                     error_detail = json.loads(message)
                 except Exception:
                     error_detail = message
+                    if isinstance(error_detail, bytes):
+                        error_detail = error_detail.decode("utf-8", errors="ignore")
                 raise HTTPException(
                     status_code=status_code,
                     detail={
