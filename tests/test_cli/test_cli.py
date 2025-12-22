@@ -19,15 +19,21 @@ def test_load_config_env_path(monkeypatch, tmp_path):
 
 
 def test_load_config_boolean_flags(monkeypatch):
-    # Булевы флаги должны выставляться как True
+    # Булевы флаги должны выставляться как True/False
+    # Используем новый формат аргументов pydantic-settings для вложенных моделей
     monkeypatch.setattr(
         "sys.argv",
         [
             "prog",
-            "--proxy-use-https",
-            "--gigachat-verify-prompt-limit",
+            "--proxy.use-https",
+            "true",
+            "--proxy.pass-model",
+            "true",
+            "--gigachat.verify-ssl-certs",
+            "false",
         ],
     )
     config = load_config()
     assert config.proxy_settings.use_https is True
-    assert getattr(config.gigachat_settings, "verify_prompt_limit", False) is False
+    assert config.proxy_settings.pass_model is True
+    assert config.gigachat_settings.verify_ssl_certs is False

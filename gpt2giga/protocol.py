@@ -292,7 +292,7 @@ class RequestTransformer:
         return Messages(
             role=MessagesRole.ASSISTANT,
             function_call=FunctionCall(name=name, arguments=arguments),
-        ).dict()
+        ).model_dump()
 
     async def send_to_gigachat(self, data: dict) -> Chat:
         """Отправляет запрос в GigaChat API"""
@@ -306,7 +306,7 @@ class RequestTransformer:
             transformed_data.get("messages", [])
         )
 
-        chat = Chat.parse_obj(transformed_data)
+        chat = Chat.model_validate(transformed_data)
         chat.messages = self._collapse_messages(chat.messages)
 
         self.logger.debug("Sending request to GigaChat API")
@@ -565,7 +565,7 @@ class ResponseProcessor:
                 id=f"fc_{message['functions_state_id']}",
                 status="completed",
                 type="function_call",
-            ).dict()
+            ).model_dump()
 
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")

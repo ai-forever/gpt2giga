@@ -22,7 +22,7 @@ router = APIRouter(tags=["API"])
 async def show_available_models(request: Request):
     state = request.app.state
     response = await state.gigachat_client.aget_models()
-    models = [i.dict(by_alias=True) for i in response.data]
+    models = [i.model_dump(by_alias=True) for i in response.data]
     current_timestamp = int(time.time())
     for model in models:
         model["created"] = current_timestamp

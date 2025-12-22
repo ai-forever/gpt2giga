@@ -17,7 +17,24 @@ def exceptions_handler(func):
         try:
             return await func(*args, **kwargs)
         except gigachat.exceptions.ResponseError as e:
-            if len(e.args) == 4:
+            if hasattr(e, "status_code") and hasattr(e, "content"):
+                url = getattr(e, "url", "unknown")
+                status_code = e.status_code
+                message = e.content
+                try:
+                    error_detail = json.loads(message)
+                except Exception:
+                    error_detail = message
+                    if isinstance(error_detail, bytes):
+                        error_detail = error_detail.decode("utf-8", errors="ignore")
+                raise HTTPException(
+                    status_code=status_code,
+                    detail={
+                        "url": str(url),
+                        "error": error_detail,
+                    },
+                )
+            elif len(e.args) == 4:
                 url, status_code, message, _ = e.args
                 try:
                     error_detail = json.loads(message)

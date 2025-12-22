@@ -8,7 +8,10 @@ async def test_exceptions_handler_unexpected_structure(monkeypatch):
     import gigachat
 
     class FakeResponseError(gigachat.exceptions.ResponseError):
-        pass
+        def __init__(self, *args):
+            # Bypass ResponseError.__init__ to avoid setting attributes
+            # so we can test the fallback branch
+            self.args = args
 
     err = FakeResponseError("only-one-arg")
 
