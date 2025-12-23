@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga"
-version = "0.0.15"
+version = "0.1.0"
 description = "Утилита для проксирования OpenAI-запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.14"
@@ -18,7 +18,7 @@ dependencies = [
     "aioitertools>=0.12.0,<0.13",
     "loguru>=0.7.3,<0.8",
     "sse-starlette>=3.0.3,<4",
-    "gigachat>=0.1.43,<1",
+    "gigachat>=0.2.0,<1",
     "pydantic-settings>=2.12.0",
 ]
 

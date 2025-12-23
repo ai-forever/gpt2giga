@@ -11,52 +11,89 @@ from gigachat.settings import SCOPE
 from starlette.requests import Request
 
 
+ERROR_MAPPING = {
+    gigachat.exceptions.AuthenticationError: (
+        401,
+        "authentication_error",
+        "invalid_api_key",
+    ),
+    gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),
+    gigachat.exceptions.ForbiddenError: (403, "permission_denied_error", None),
+    gigachat.exceptions.NotFoundError: (404, "not_found_error", None),
+    gigachat.exceptions.RateLimitError: (429, "rate_limit_error", None),
+    gigachat.exceptions.RequestEntityTooLargeError: (
+        413,
+        "invalid_request_error",
+        None,
+    ),
+    gigachat.exceptions.UnprocessableEntityError: (422, "invalid_request_error", None),
+    gigachat.exceptions.ServerError: (500, "server_error", None),
+}
+
+
 def exceptions_handler(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
         try:
             return await func(*args, **kwargs)
-        except gigachat.exceptions.ResponseError as e:
-            if hasattr(e, "status_code") and hasattr(e, "content"):
-                url = getattr(e, "url", "unknown")
-                status_code = e.status_code
-                message = e.content
-                try:
-                    error_detail = json.loads(message)
-                except Exception:
-                    error_detail = message
-                    if isinstance(error_detail, bytes):
-                        error_detail = error_detail.decode("utf-8", errors="ignore")
-                raise HTTPException(
-                    status_code=status_code,
-                    detail={
-                        "url": str(url),
-                        "error": error_detail,
-                    },
-                )
-            elif len(e.args) == 4:
-                url, status_code, message, _ = e.args
-                try:
-                    error_detail = json.loads(message)
-                except Exception:
-                    error_detail = message
-                    if isinstance(error_detail, bytes):
-                        error_detail = error_detail.decode("utf-8", errors="ignore")
-                raise HTTPException(
-                    status_code=status_code,
-                    detail={
-                        "url": str(url),
-                        "error": error_detail,
-                    },
-                )
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "error": "Unexpected ResponseError structure",
-                        "args": e.args,
-                    },
-                )
+        except gigachat.exceptions.GigaChatException as e:
+            print(e)
+            for exc_class, (status, error_type, code) in ERROR_MAPPING.items():
+                if isinstance(e, exc_class):
+                    raise HTTPException(
+                        status_code=status,
+                        detail={
+                            "error": {
+                                "message": str(e),
+                                "type": error_type,
+                                "param": None,
+                                "code": code,
+                            }
+                        },
+                    )
+
+            if isinstance(e, gigachat.exceptions.ResponseError):
+                if hasattr(e, "status_code") and hasattr(e, "content"):
+                    url = getattr(e, "url", "unknown")
+                    status_code = e.status_code
+                    message = e.content
+                    try:
+                        error_detail = json.loads(message)
+                    except Exception:
+                        error_detail = message
+                        if isinstance(error_detail, bytes):
+                            error_detail = error_detail.decode("utf-8", errors="ignore")
+                    raise HTTPException(
+                        status_code=status_code,
+                        detail={
+                            "url": str(url),
+                            "error": error_detail,
+                        },
+                    )
+                elif len(e.args) == 4:
+                    url, status_code, message, _ = e.args
+                    try:
+                        error_detail = json.loads(message)
+                    except Exception:
+                        error_detail = message
+                        if isinstance(error_detail, bytes):
+                            error_detail = error_detail.decode("utf-8", errors="ignore")
+                    raise HTTPException(
+                        status_code=status_code,
+                        detail={
+                            "url": str(url),
+                            "error": error_detail,
+                        },
+                    )
+
+            # Fallback for unexpected GigaChatException
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "Unexpected GigaChatException",
+                    "args": e.args,
+                },
+            )
 
     return wrapper
 
