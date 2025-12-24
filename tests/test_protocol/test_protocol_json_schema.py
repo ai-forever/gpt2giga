@@ -6,7 +6,6 @@ GigaChat не поддерживает response_format: json_schema напрям
 """
 from types import SimpleNamespace
 
-import pytest
 from loguru import logger
 
 from gpt2giga.config import ProxyConfig
