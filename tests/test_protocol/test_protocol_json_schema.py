@@ -4,6 +4,7 @@
 GigaChat не поддерживает response_format: json_schema напрямую,
 поэтому мы эмулируем это через function calling.
 """
+
 from types import SimpleNamespace
 
 from loguru import logger
@@ -98,7 +99,10 @@ class TestIsJsonSchemaResponse:
             "type": "json_schema",
             "json_schema": {},
         }
-        assert is_json_schema_response(RESPONSE_FORMAT_FUNCTION_NAME, response_format) is True
+        assert (
+            is_json_schema_response(RESPONSE_FORMAT_FUNCTION_NAME, response_format)
+            is True
+        )
 
 
 class TestTransformChatParametersJsonSchema:
@@ -192,12 +196,14 @@ class TestTransformChatParametersJsonSchema:
         rt = RequestTransformer(cfg, logger=logger)
 
         # Сначала запрос с json_schema
-        rt.transform_chat_parameters({
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": "test", "schema": {}},
+        rt.transform_chat_parameters(
+            {
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {"name": "test", "schema": {}},
+                }
             }
-        })
+        )
         assert rt._current_response_format is not None
 
         # Потом запрос без response_format
@@ -232,12 +238,19 @@ class TestResponseProcessorJsonSchema:
                         "finish_reason": "function_call",
                     }
                 ],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                },
             }
         )
 
         out = rp.process_response(
-            giga_resp, gpt_model="gpt-4o", response_id="test123", response_format=response_format
+            giga_resp,
+            gpt_model="gpt-4o",
+            response_id="test123",
+            response_format=response_format,
         )
 
         choice = out["choices"][0]
@@ -272,12 +285,19 @@ class TestResponseProcessorJsonSchema:
                         "finish_reason": "function_call",
                     }
                 ],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                },
             }
         )
 
         out = rp.process_response(
-            giga_resp, gpt_model="gpt-4o", response_id="test123", response_format=response_format
+            giga_resp,
+            gpt_model="gpt-4o",
+            response_id="test123",
+            response_format=response_format,
         )
 
         choice = out["choices"][0]
@@ -301,7 +321,11 @@ class TestResponseProcessorJsonSchema:
                         "finish_reason": "stop",
                     }
                 ],
-                "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+                "usage": {
+                    "prompt_tokens": 5,
+                    "completion_tokens": 3,
+                    "total_tokens": 8,
+                },
             }
         )
 
@@ -342,7 +366,10 @@ class TestStreamProcessorJsonSchema:
         )
 
         out = rp.process_stream_chunk(
-            giga_resp, gpt_model="gpt-4o", response_id="test123", response_format=response_format
+            giga_resp,
+            gpt_model="gpt-4o",
+            response_id="test123",
+            response_format=response_format,
         )
 
         choice = out["choices"][0]

@@ -24,7 +24,9 @@ from gpt2giga.config import ProxyConfig
 RESPONSE_FORMAT_FUNCTION_NAME = "__json_response__"
 
 
-def convert_response_format_to_function(response_format: Optional[Dict]) -> Optional[Dict]:
+def convert_response_format_to_function(
+    response_format: Optional[Dict],
+) -> Optional[Dict]:
     """Конвертирует response_format с json_schema в виртуальную функцию.
 
     GigaChat не поддерживает response_format напрямую, поэтому мы эмулируем
@@ -36,17 +38,23 @@ def convert_response_format_to_function(response_format: Optional[Dict]) -> Opti
     json_schema = response_format.get("json_schema", {})
     return {
         "name": json_schema.get("name", RESPONSE_FORMAT_FUNCTION_NAME),
-        "description": json_schema.get("description", "Return structured JSON response"),
+        "description": json_schema.get(
+            "description", "Return structured JSON response"
+        ),
         "parameters": json_schema.get("schema", {}),
     }
 
 
-def is_json_schema_response(function_name: str, response_format: Optional[Dict]) -> bool:
+def is_json_schema_response(
+    function_name: str, response_format: Optional[Dict]
+) -> bool:
     """Проверяет, является ли function_call ответом на json_schema request."""
     if not response_format or response_format.get("type") != "json_schema":
         return False
 
-    expected_name = response_format.get("json_schema", {}).get("name", RESPONSE_FORMAT_FUNCTION_NAME)
+    expected_name = response_format.get("json_schema", {}).get(
+        "name", RESPONSE_FORMAT_FUNCTION_NAME
+    )
     return function_name == expected_name
 
 
@@ -417,7 +425,9 @@ class ResponseProcessor:
         is_json_schema = False
         if is_tool_call and response_format:
             func_call = giga_dict["choices"][0].get("message", {}).get("function_call")
-            if func_call and is_json_schema_response(func_call.get("name", ""), response_format):
+            if func_call and is_json_schema_response(
+                func_call.get("name", ""), response_format
+            ):
                 is_json_schema = True
 
         for choice in giga_dict["choices"]:
@@ -552,7 +562,9 @@ class ResponseProcessor:
         if is_tool_call and response_format:
             delta = giga_dict["choices"][0].get("delta", {})
             func_call = delta.get("function_call")
-            if func_call and is_json_schema_response(func_call.get("name", ""), response_format):
+            if func_call and is_json_schema_response(
+                func_call.get("name", ""), response_format
+            ):
                 is_json_schema = True
 
         for choice in giga_dict["choices"]:
