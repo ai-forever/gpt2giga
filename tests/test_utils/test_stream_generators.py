@@ -9,7 +9,7 @@ from gpt2giga.utils import (
 
 
 class FakeResponseProcessor:
-    def process_stream_chunk(self, chunk, model):
+    def process_stream_chunk(self, chunk, model, response_id=None, response_format=None):
         return {"model": model, "delta": chunk.dict()["choices"][0]["delta"]}
 
     def process_stream_chunk_response(
@@ -51,10 +51,15 @@ class FakeClientError:
         return gen()
 
 
+class FakeRequestTransformer:
+    _current_response_format = None
+
+
 class FakeAppState:
     def __init__(self, client):
         self.gigachat_client = client
         self.response_processor = FakeResponseProcessor()
+        self.request_transformer = FakeRequestTransformer()
         self.rquid = "rquid-1"
 
 

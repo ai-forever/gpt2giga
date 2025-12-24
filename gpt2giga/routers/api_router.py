@@ -54,6 +54,8 @@ async def chat_completions(request: Request):
         data["functions"] = convert_tool_to_giga_functions(data)
         state.logger.debug(f"Functions count: {len(data['functions'])}")
     chat_messages = await state.request_transformer.send_to_gigachat(data)
+    # Получаем response_format для обратной конвертации json_schema
+    response_format = state.request_transformer._current_response_format
     if not stream:
         response = await state.gigachat_client.achat(chat_messages)
         if is_response_api:
@@ -62,7 +64,7 @@ async def chat_completions(request: Request):
             )
         else:
             processed = state.response_processor.process_response(
-                response, chat_messages.model, current_rquid
+                response, chat_messages.model, current_rquid, response_format
             )
         return processed
     else:

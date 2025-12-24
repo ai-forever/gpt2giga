@@ -18,6 +18,8 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
+    _current_response_format = None
+
     def send_to_gigachat(self, data):
         # имитируем наличие tools для ветки is_tool_call
         return SimpleNamespace(model=data.get("model", "giga"), tools=data.get("tools"))
