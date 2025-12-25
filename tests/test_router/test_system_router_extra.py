@@ -48,19 +48,48 @@ def test_logs_html_ok():
     assert "<html" in resp.text.lower()
 
 
-def test_logs_stream_file_missing_sends_error_event():
+def test_logs_read_exception(temp_log_file, monkeypatch):
     app = make_app()
-    app.state.config.proxy_settings.log_filename = "__no_such_file__.log"
-    client = TestClient(app)
+    app.state.config.proxy_settings.log_filename = temp_log_file
 
+    # Mock open to raise exception
+    def broken_open(*args, **kwargs):
+        raise IOError("Disk error")
+
+    monkeypatch.setattr("builtins.open", broken_open)
+
+    # Need to mock logger because exception handler uses it
+    from unittest.mock import MagicMock
+
+    app.state.logger = MagicMock()
+
+    client = TestClient(app)
+    resp = client.get("/logs")
+    assert resp.status_code == 500
+    assert "Error: Disk error" in resp.text
+
+
+def test_logs_stream_init_error(temp_log_file, monkeypatch):
+    app = make_app()
+    app.state.config.proxy_settings.log_filename = temp_log_file
+
+    # Mock open to raise exception ONLY on first call inside stream logic?
+    # Actually easier to mock open globally but we need it to work for other things?
+    # The stream_logs function opens file inside the generator.
+
+    def broken_open(*args, **kwargs):
+        raise OSError("Can't open")
+
+    monkeypatch.setattr("builtins.open", broken_open)
+
+    client = TestClient(app)
     with client.stream("GET", "/logs/stream") as r:
-        # Найдём первую строку data: ... с сообщением об ошибке
-        found = False
+        found_error = False
         for line in r.iter_lines():
             if not line:
                 continue
-            text = line.decode() if isinstance(line, (bytes, bytearray)) else line
-            if text.startswith("data:") and "Log file not found" in text:
-                found = True
+            text = line if isinstance(line, str) else line.decode()
+            if "Error accessing log file" in text:
+                found_error = True
                 break
-        assert found
+        assert found_error
