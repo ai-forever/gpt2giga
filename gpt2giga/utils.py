@@ -12,20 +12,20 @@ from starlette.requests import Request
 
 
 ERROR_MAPPING = {
+    gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),
     gigachat.exceptions.AuthenticationError: (
         401,
         "authentication_error",
         "invalid_api_key",
     ),
-    gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),
     gigachat.exceptions.ForbiddenError: (403, "permission_denied_error", None),
     gigachat.exceptions.NotFoundError: (404, "not_found_error", None),
-    gigachat.exceptions.RateLimitError: (429, "rate_limit_error", None),
     gigachat.exceptions.RequestEntityTooLargeError: (
         413,
         "invalid_request_error",
         None,
     ),
+    gigachat.exceptions.RateLimitError: (429, "rate_limit_error", None),
     gigachat.exceptions.UnprocessableEntityError: (422, "invalid_request_error", None),
     gigachat.exceptions.ServerError: (500, "server_error", None),
 }

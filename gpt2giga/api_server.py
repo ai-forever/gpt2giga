@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
 
     app.state.config = config
     app.state.logger = logger
-    app.state.gigachat_client = GigaChat(**config.gigachat_settings.dict())
+    app.state.gigachat_client = GigaChat(**config.gigachat_settings.model_dump())
 
     attachment_processor = AttachmentProcessor(
         app.state.gigachat_client, app.state.logger
@@ -103,7 +103,7 @@ def run():
     logger.info("Starting Gpt2Giga proxy server...")
     logger.info(f"Proxy settings: {proxy_settings}")
     logger.info(
-        f"GigaChat settings: {config.gigachat_settings.dict(exclude={'password', 'credentials', 'access_token'})}"
+        f"GigaChat settings: {config.gigachat_settings.model_dump(exclude={'password', 'credentials', 'access_token'})}"
     )
     uvicorn.run(
         app,
