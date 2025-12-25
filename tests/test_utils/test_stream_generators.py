@@ -53,15 +53,10 @@ class FakeClientError:
         return gen()
 
 
-class FakeRequestTransformer:
-    _current_response_format = None
-
-
 class FakeAppState:
     def __init__(self, client):
         self.gigachat_client = client
         self.response_processor = FakeResponseProcessor()
-        self.request_transformer = FakeRequestTransformer()
         self.rquid = "rquid-1"
 
 

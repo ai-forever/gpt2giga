@@ -53,9 +53,7 @@ async def chat_completions(request: Request):
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
         state.logger.debug(f"Functions count: {len(data['functions'])}")
-    chat_messages = await state.request_transformer.send_to_gigachat(data)
-    # Получаем response_format для обратной конвертации json_schema
-    response_format = state.request_transformer._current_response_format
+    chat_messages, response_format = await state.request_transformer.send_to_gigachat(data)
     if not stream:
         response = await state.gigachat_client.achat(chat_messages)
         if is_response_api:
@@ -75,7 +73,9 @@ async def chat_completions(request: Request):
             )
         else:
             return StreamingResponse(
-                stream_chat_completion_generator(request, chat_messages, current_rquid),
+                stream_chat_completion_generator(
+                    request, chat_messages, current_rquid, response_format
+                ),
                 media_type="text/event-stream",
             )
 

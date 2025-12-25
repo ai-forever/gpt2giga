@@ -117,8 +117,6 @@ class RequestTransformer:
         self.config = config
         self.logger = logger
         self.attachment_processor = attachment_processor
-        # Сохраняем response_format для обратной конвертации в ResponseProcessor
-        self._current_response_format: Optional[Dict] = None
 
     async def transform_messages(self, messages: List[Dict]) -> List[Dict]:
         """Трансформирует сообщения в формат GigaChat"""
@@ -267,7 +265,6 @@ class RequestTransformer:
 
         # Конвертируем json_schema в виртуальную функцию
         if response_format:
-            self._current_response_format = response_format
             virtual_function = convert_response_format_to_function(response_format)
 
             if virtual_function:
@@ -279,6 +276,9 @@ class RequestTransformer:
                 # Устанавливаем function_call для принудительного вызова
                 transformed["function_call"] = {"name": virtual_function["name"]}
 
+                # Сохраняем response_format для обратной конвертации (будет извлечён в send_to_gigachat)
+                transformed["_response_format"] = response_format
+
                 self.logger.debug(
                     f"Converted json_schema to function: {virtual_function['name']}"
                 )
@@ -287,8 +287,6 @@ class RequestTransformer:
                 transformed["response_format"] = {
                     "type": response_format.get("type"),
                 }
-        else:
-            self._current_response_format = None
 
         return transformed
 
@@ -357,9 +355,18 @@ class RequestTransformer:
             function_call=FunctionCall(name=name, arguments=arguments),
         ).dict()
 
-    async def send_to_gigachat(self, data: dict) -> Chat:
-        """Отправляет запрос в GigaChat API"""
+    async def send_to_gigachat(self, data: dict) -> Tuple[Chat, Optional[Dict]]:
+        """Отправляет запрос в GigaChat API.
+
+        Returns:
+            Tuple of (Chat, response_format) where response_format is needed
+            for converting json_schema function calls back to content.
+        """
         transformed_data = self.transform_chat_parameters(data)
+
+        # Извлекаем response_format для обратной конвертации (thread-safe)
+        response_format = transformed_data.pop("_response_format", None)
+
         if not transformed_data.get("messages") and transformed_data.get("input"):
             transformed_data["messages"] = self.transform_response_format(
                 transformed_data
@@ -375,7 +382,7 @@ class RequestTransformer:
         self.logger.debug("Sending request to GigaChat API")
         self.logger.debug(f"Request: {chat}")
 
-        return chat
+        return chat, response_format
 
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:

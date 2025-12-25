@@ -45,12 +45,13 @@ def exceptions_handler(func):
 
 
 async def stream_chat_completion_generator(
-    request: Request, chat_messages: Chat, response_id: str
+    request: Request,
+    chat_messages: Chat,
+    response_id: str,
+    response_format: dict | None = None,
 ) -> AsyncGenerator[str, None]:
     try:
         state = request.app.state
-        # Получаем response_format для обратной конвертации json_schema
-        response_format = state.request_transformer._current_response_format
         async for chunk in state.gigachat_client.astream(chat_messages):
             if await request.is_disconnected():
                 break

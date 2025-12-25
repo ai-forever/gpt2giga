@@ -140,9 +140,9 @@ class TestTransformChatParametersJsonSchema:
         # Проверяем, что response_format НЕ установлен (так как конвертирован)
         assert "response_format" not in out
 
-        # Проверяем, что response_format сохранён для обратной конвертации
-        assert rt._current_response_format is not None
-        assert rt._current_response_format["type"] == "json_schema"
+        # Проверяем, что _response_format сохранён для обратной конвертации
+        assert "_response_format" in out
+        assert out["_response_format"]["type"] == "json_schema"
 
     def test_json_schema_added_to_existing_functions(self):
         cfg = ProxyConfig()
@@ -189,26 +189,17 @@ class TestTransformChatParametersJsonSchema:
 
         assert out.get("response_format", {}).get("type") == "text"
         assert "functions" not in out
-        assert rt._current_response_format is not None
+        # Для простых типов (text, json_object) _response_format не сохраняется
+        assert "_response_format" not in out
 
-    def test_no_response_format_clears_state(self):
+    def test_no_response_format_returns_none(self):
         cfg = ProxyConfig()
         rt = RequestTransformer(cfg, logger=logger)
 
-        # Сначала запрос с json_schema
-        rt.transform_chat_parameters(
-            {
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {"name": "test", "schema": {}},
-                }
-            }
-        )
-        assert rt._current_response_format is not None
+        out = rt.transform_chat_parameters({})
 
-        # Потом запрос без response_format
-        rt.transform_chat_parameters({})
-        assert rt._current_response_format is None
+        # Без response_format не должно быть _response_format
+        assert "_response_format" not in out
 
 
 class TestResponseProcessorJsonSchema:
