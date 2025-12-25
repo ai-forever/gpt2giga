@@ -51,7 +51,7 @@ class GigaChatCLI(GigachatSettings):
 
 
 class ProxyConfig(BaseSettings):
-    """Конфигурация прокси-сервера"""
+    """Конфигурация прокси-сервера gpt2giga"""
 
     proxy_settings: ProxySettings = Field(default_factory=ProxySettings, alias="proxy")
     gigachat_settings: GigaChatCLI = Field(
