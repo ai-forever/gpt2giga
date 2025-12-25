@@ -9,4 +9,3 @@ completion = client.chat.completions.create(
     ],
 )
 print(completion)
-"GigaChat-2-Max:2.0.30.01"
