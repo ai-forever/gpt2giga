@@ -1,6 +1,6 @@
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8000", api_key="sk-1234")
+client = OpenAI(base_url="http://localhost:8090", api_key="sk-1234")
 response = client.models.list()
 print(response)
 

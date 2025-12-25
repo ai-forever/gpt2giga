@@ -9,7 +9,7 @@ from openai import AsyncOpenAI
 enable_verbose_stdout_logging()
 
 
-client = AsyncOpenAI(base_url="http://localhost:8000", api_key="0")
+client = AsyncOpenAI(base_url="http://localhost:8090", api_key="0")
 
 
 @function_tool
