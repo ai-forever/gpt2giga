@@ -17,10 +17,22 @@ def test_cors_headers_present():
     assert response.status_code == 405
 
 
-def test_v1_prefix_router_is_registered():
+def test_v1_prefix_router_is_registered(monkeypatch):
+    class FakeGigaChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aget_models(self):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(data=[], object_="list")
+
+    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+
     with TestClient(create_app()) as client:
         # Используем контекстный менеджер, чтобы lifespan сработал и инициализировал state
         response = client.get("/v1/models")
+        # Должен быть 200, 401, 500, но не 404 (404 значит роутер не подключен)
         assert response.status_code != 404
 
 
