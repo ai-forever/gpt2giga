@@ -20,7 +20,10 @@ class FakeGigachat:
 class FakeRequestTransformer:
     async def send_to_gigachat(self, data):
         # имитируем наличие tools для ветки is_tool_call
-        return SimpleNamespace(model=data.get("model", "giga"), tools=data.get("tools")), None
+        return (
+            SimpleNamespace(model=data.get("model", "giga"), tools=data.get("tools")),
+            None,
+        )
 
 
 def make_app():
