@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga"
-version = "0.1.0"
+version = "0.1.0.b1"
 description = "Утилита для проксирования OpenAI-запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.14"
@@ -18,8 +18,8 @@ dependencies = [
     "aioitertools>=0.12.0,<0.13",
     "loguru>=0.7.3,<0.8",
     "sse-starlette>=3.0.3,<4",
-    "gigachat>=0.2.0,<1",
     "pydantic-settings>=2.12.0",
+    "gigachat",
 ]
 
 [project.scripts]
@@ -61,6 +61,9 @@ test-framework = "pytest"
 ignore-paths = []
 disable-telemetry = true
 formatter-cmds = ["black $file"]
+
+[tool.uv.sources]
+gigachat = { path = "package/gigachat-0.2.0-py3-none-any.whl" }
 [dependency-groups]
 dev = [
     "black (>=25.9.0,<26.0.0)",
