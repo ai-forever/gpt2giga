@@ -9,10 +9,18 @@ from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.routers.api_router import router
 
 
+class MockResponse:
+    def __init__(self, data):
+        self.data = data
+
+    def model_dump(self):
+        return self.data
+
+
 class FakeGigachat:
     async def achat(self, chat):
-        return SimpleNamespace(
-            dict=lambda: {
+        return MockResponse(
+            {
                 "choices": [
                     {
                         "message": {"role": "assistant", "content": "ok"},
@@ -66,4 +74,4 @@ def test_chat_completions_non_stream_response_api():
     resp = client.post("/chat/completions", json=payload)
     assert resp.status_code == 200
     body = resp.json()
-    assert body["object"] == "response"
+    assert body["object"] == "chat.completion"

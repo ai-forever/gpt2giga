@@ -10,7 +10,7 @@ from gpt2giga.utils import (
 
 class FakeResponseProcessor:
     def process_stream_chunk(self, chunk, model):
-        return {"model": model, "delta": chunk.dict()["choices"][0]["delta"]}
+        return {"model": model, "delta": chunk.model_dump()["choices"][0]["delta"]}
 
     def process_stream_chunk_response(
         self, chunk, sequence_number: int, response_id: str
@@ -18,7 +18,7 @@ class FakeResponseProcessor:
         return {
             "id": response_id,
             "sequence": sequence_number,
-            "delta": chunk.dict()["choices"][0]["delta"],
+            "delta": chunk.model_dump()["choices"][0]["delta"],
         }
 
 

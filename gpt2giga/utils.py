@@ -85,6 +85,14 @@ def exceptions_handler(func):
                             "error": error_detail,
                         },
                     )
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail={
+                            "error": "Unexpected ResponseError structure",
+                            "args": e.args,
+                        },
+                    )
 
             # Fallback for unexpected GigaChatException
             raise HTTPException(

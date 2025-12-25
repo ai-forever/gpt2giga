@@ -13,6 +13,9 @@ async def test_exceptions_handler_unexpected_structure(monkeypatch):
             # so we can test the fallback branch
             self.args = args
 
+        def __str__(self):
+            return "FakeResponseError"
+
     err = FakeResponseError("only-one-arg")
 
     @exceptions_handler

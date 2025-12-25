@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
@@ -56,11 +54,19 @@ async def test_request_transformer_tools_to_functions():
     assert chat.functions and len(chat.functions) == 1
 
 
+class MockResponse:
+    def __init__(self, data):
+        self.data = data
+
+    def model_dump(self):
+        return self.data
+
+
 def test_response_processor_process_function_call():
     rp = ResponseProcessor(logger)
     # Синтетический ответ GigaChat с function_call
-    giga_resp = SimpleNamespace(
-        dict=lambda: {
+    giga_resp = MockResponse(
+        {
             "choices": [
                 {
                     "message": {
@@ -82,8 +88,8 @@ def test_response_processor_process_function_call():
 
 def test_response_processor_stream_chunk_handles_delta():
     rp = ResponseProcessor(logger)
-    giga_resp = SimpleNamespace(
-        dict=lambda: {
+    giga_resp = MockResponse(
+        {
             "choices": [
                 {
                     "delta": {
