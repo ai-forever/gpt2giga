@@ -72,6 +72,8 @@ async def stream_logs(request: Request):
             return
 
         while True:
+            if await request.is_disconnected():
+                break
             try:
                 with open(filename, "r", encoding="utf-8", errors="ignore") as f:
                     f.seek(file_position)

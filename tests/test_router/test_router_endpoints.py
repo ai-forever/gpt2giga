@@ -10,10 +10,18 @@ from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.routers.api_router import router
 
 
+class MockResponse:
+    def __init__(self, data):
+        self.data = data
+
+    def model_dump(self):
+        return self.data
+
+
 class FakeGigachat:
     async def achat(self, chat):
-        return SimpleNamespace(
-            dict=lambda: {
+        return MockResponse(
+            {
                 "choices": [
                     {
                         "message": {"role": "assistant", "content": "ok"},
@@ -30,11 +38,11 @@ class FakeGigachat:
 
     async def astream(self, chat):
         async def gen():
-            yield SimpleNamespace(
-                dict=lambda: {"choices": [{"delta": {"content": "he"}}], "usage": None}
+            yield MockResponse(
+                {"choices": [{"delta": {"content": "he"}}], "usage": None}
             )
-            yield SimpleNamespace(
-                dict=lambda: {"choices": [{"delta": {"content": "llo"}}], "usage": None}
+            yield MockResponse(
+                {"choices": [{"delta": {"content": "llo"}}], "usage": None}
             )
 
         return gen()
@@ -44,8 +52,11 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
-    async def send_to_gigachat(self, data):
-        return SimpleNamespace(model=data.get("model", "giga"))
+    async def prepare_chat_completion(self, data):
+        return {"model": data.get("model", "giga")}
+
+    async def prepare_response(self, data):
+        return {"model": data.get("model", "giga")}
 
 
 def make_app(monkeypatch=None):
