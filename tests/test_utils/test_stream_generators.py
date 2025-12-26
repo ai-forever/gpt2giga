@@ -72,7 +72,7 @@ async def test_stream_chat_completion_generator_exception_path():
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, chat, response_id="1"):
+    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
         lines.append(line)
     assert len(lines) == 2
     assert "Stream interrupted" in lines[0]
