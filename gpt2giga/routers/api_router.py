@@ -56,12 +56,14 @@ async def chat_completions(request: Request):
     if not stream:
         response = await state.gigachat_client.achat(chat_messages)
         processed = state.response_processor.process_response(
-            response, chat_messages.model, current_rquid
+            response, chat_messages.model, current_rquid, request_data=data
         )
         return processed
     else:
         return StreamingResponse(
-            stream_chat_completion_generator(request, chat_messages, current_rquid),
+            stream_chat_completion_generator(
+                request, chat_messages, current_rquid, request_data=data
+            ),
             media_type="text/event-stream",
         )
 

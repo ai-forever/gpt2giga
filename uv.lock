@@ -839,22 +839,16 @@ wheels = [
 
 [[package]]
 name = "gigachat"
-version = "0.2.0"
-source = { path = "package/gigachat-0.2.0-py3-none-any.whl" }
+version = "0.2.0b2"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/a0/dc/dfc8d8cee6a49551e28690c3c9f463f68d63ae6ad9e733eb086db2089d55/gigachat-0.2.0b2.tar.gz", hash = "sha256:a9d5f76163955b65b71bebb26a7574d5f0d90034e3bbbe29a6eccba17b07bd54", size = 30904, upload-time = "2025-12-26T09:58:24.707Z" }
 wheels = [
-    { filename = "gigachat-0.2.0-py3-none-any.whl", hash = "sha256:cd1ea16f054f73901c5079affddbfe2c2992e44c63c2b5ae44fbe08f598b246c" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx", specifier = ">=0.24,<1" },
-    { name = "pydantic", specifier = ">=2.0,<3" },
-    { name = "pydantic-settings", specifier = ">=2.0,<3" },
+    { url = "https://files.pythonhosted.org/packages/e6/d6/77241d9074dd80d8ca6f3f1993e759b46e6a8569cd10004a55b956f1cca0/gigachat-0.2.0b2-py3-none-any.whl", hash = "sha256:b21b2196b732393b8a48dea32551984867d34c6870ce561c414b7560664dc311", size = 41018, upload-time = "2025-12-26T09:58:23.306Z" },
 ]
 
 [[package]]
@@ -923,7 +917,7 @@ requires-dist = [
     { name = "aioitertools", specifier = ">=0.12.0,<0.13" },
     { name = "asyncio", specifier = ">=3.4.3,<4" },
     { name = "fastapi", specifier = ">=0.127.0,<0.128.0" },
-    { name = "gigachat", path = "package/gigachat-0.2.0-py3-none-any.whl" },
+    { name = "gigachat", specifier = "==0.2.0b2" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=2.3.0,<3" },
     { name = "pillow", specifier = ">=11.1.0,<12" },

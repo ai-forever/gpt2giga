@@ -14,13 +14,27 @@ class ResponseProcessor:
         self.logger = logger
 
     def process_response(
-        self, giga_resp: ChatCompletion, gpt_model: str, response_id: str
+        self,
+        giga_resp: ChatCompletion,
+        gpt_model: str,
+        response_id: str,
+        request_data: Optional[Dict] = None,
     ) -> dict:
         """Обрабатывает обычный ответ от GigaChat"""
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
+
+        is_structured_output = False
+        if (
+            request_data
+            and request_data.get("response_format", {}).get("type") == "json_schema"
+        ):
+            is_structured_output = True
+
         for choice in giga_dict["choices"]:
-            self._process_choice(choice, is_tool_call)
+            self._process_choice(
+                choice, is_tool_call, is_structured_output=is_structured_output
+            )
         result = {
             "id": f"chatcmpl-{response_id}",
             "object": "chat.completion",
@@ -108,13 +122,30 @@ class ResponseProcessor:
             ]
 
     def process_stream_chunk(
-        self, giga_resp: ChatCompletionChunk, gpt_model: str, response_id: str
+        self,
+        giga_resp: ChatCompletionChunk,
+        gpt_model: str,
+        response_id: str,
+        request_data: Optional[Dict] = None,
     ) -> dict:
         """Обрабатывает стриминговый чанк от GigaChat"""
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
+
+        is_structured_output = False
+        if (
+            request_data
+            and request_data.get("response_format", {}).get("type") == "json_schema"
+        ):
+            is_structured_output = True
+
         for choice in giga_dict["choices"]:
-            self._process_choice(choice, is_tool_call, is_stream=True)
+            self._process_choice(
+                choice,
+                is_tool_call,
+                is_stream=True,
+                is_structured_output=is_structured_output,
+            )
 
         result = {
             "id": f"chatcmpl-{response_id}",
@@ -161,19 +192,45 @@ class ResponseProcessor:
         return result
 
     def _process_choice(
-        self, choice: Dict, is_tool_call: bool, is_stream: bool = False
+        self,
+        choice: Dict,
+        is_tool_call: bool,
+        is_stream: bool = False,
+        is_structured_output: bool = False,
     ):
         """Обрабатывает отдельный choice"""
         message_key = "delta" if is_stream else "message"
 
         choice["index"] = 0
         choice["logprobs"] = None
-        if is_tool_call:
+
+        if is_structured_output and is_tool_call:
+            choice["finish_reason"] = (
+                "stop" if not is_stream or choice.get("finish_reason") else None
+            )
+
+            if message_key in choice:
+                message = choice[message_key]
+                message["refusal"] = None
+                if message.get("function_call"):
+                    args = message["function_call"]["arguments"]
+                    if not is_stream and isinstance(args, (dict, list)):
+                        content = json.dumps(args, ensure_ascii=False)
+                    else:
+                        content = str(args)
+
+                    message["content"] = content
+                    message.pop("function_call", None)
+                    # For streaming, we might need to handle incremental updates if GigaChat streams function args.
+                    # But here we assume we are just converting structure.
+
+        elif is_tool_call:
             choice["finish_reason"] = "tool_calls"
+
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
-            if message.get("function_call"):
+            if message.get("function_call") and not is_structured_output:
                 self._process_function_call(message, is_tool_call)
 
     def _process_function_call(self, message: Dict, is_tool_call: bool):

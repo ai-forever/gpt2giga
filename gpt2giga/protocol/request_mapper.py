@@ -1,8 +1,7 @@
 import json
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 
 from gigachat.models import (
-    Chat,
     Messages,
     MessagesRole,
     FunctionCall,
@@ -137,7 +136,7 @@ class RequestTransformer:
             cur_attachment_count += message_attachments
 
     def transform_chat_parameters(self, data: Dict) -> Dict:
-        """Трансформирует параметры чата"""
+        """Трансформирует параметры чата (Chat Completions API)"""
         transformed = data.copy()
 
         # Обрабатываем температуру
@@ -162,15 +161,79 @@ class RequestTransformer:
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
         response_format: dict | None = transformed.pop("response_format", None)
-        response_format_responses: dict | None = transformed.pop("text", None)
         if response_format:
-            transformed["response_format"] = {
-                "type": response_format.get("type"),
-                **response_format.get("json_schema", {}),
-            }
+            if response_format.get("type") == "json_schema":
+                json_schema = response_format.get("json_schema", {})
+                schema_name = json_schema.get("name", "structured_output")
+                schema = json_schema.get("schema")
+
+                function_def = {
+                    "name": schema_name,
+                    "description": f"Output response in structured format: {schema_name}",
+                    "parameters": schema,
+                }
+
+                if "functions" not in transformed:
+                    transformed["functions"] = []
+
+                transformed["functions"].append(function_def)
+                transformed["function_call"] = {"name": schema_name}
+
+            else:
+                transformed["response_format"] = {
+                    "type": response_format.get("type"),
+                    **response_format.get("json_schema", {}),
+                }
+
+        return transformed
+
+    def transform_responses_parameters(self, data: Dict) -> Dict:
+        """Трансформирует параметры responses (Responses API)"""
+        transformed = data.copy()
+
+        # Обрабатываем температуру
+        gpt_model = data.get("model", None)
+        if not self.config.proxy_settings.pass_model and gpt_model:
+            del transformed["model"]
+        temperature = transformed.pop("temperature", 0)
+        if temperature == 0:
+            transformed["top_p"] = 0
+        elif temperature > 0:
+            transformed["temperature"] = temperature
+        max_tokens = transformed.pop("max_output_tokens", None)
+        if max_tokens:
+            transformed["max_tokens"] = max_tokens
+        # Преобразуем tools в functions
+        if "functions" not in transformed and "tools" in transformed:
+            functions = []
+            for tool in transformed["tools"]:
+                if tool["type"] == "function":
+                    functions.append(tool.get("function", tool))
+            transformed["functions"] = functions
+            self.logger.debug(f"Transformed {len(functions)} tools to functions")
+
+        response_format_responses: dict | None = transformed.pop("text", None)
         if response_format_responses:
-            fmt = response_format_responses.get("format", {})
-            transformed["response_format"] = fmt
+            response_format = response_format_responses.get("format", {})
+            if response_format.get("type") == "json_schema":
+                json_schema = response_format.get("json_schema", {})
+                schema_name = json_schema.get("name", "structured_output")
+                schema = json_schema.get("schema")
+
+                function_def = {
+                    "name": schema_name,
+                    "description": f"Output response in structured format: {schema_name}",
+                    "parameters": schema,
+                }
+
+                if "functions" not in transformed:
+                    transformed["functions"] = []
+
+                transformed["functions"].append(function_def)
+                transformed["function_call"] = {"name": schema_name}
+            else:
+                transformed["response_format"] = response_format
+
         return transformed
 
     def transform_response_format(self, data: Dict) -> List:
@@ -238,25 +301,35 @@ class RequestTransformer:
             function_call=FunctionCall(name=name, arguments=arguments),
         ).model_dump()
 
-    async def send_to_gigachat(self, data: dict) -> Chat:
+    async def send_to_gigachat(self, data: dict) -> Dict[str, Any]:
         """Отправляет запрос в GigaChat API"""
-        transformed_data = self.transform_chat_parameters(data)
-        if not transformed_data.get("messages") and transformed_data.get("input"):
+        if data.get("input") and not data.get("messages"):
+            # Responses API
+            transformed_data = self.transform_responses_parameters(data)
             transformed_data["messages"] = self.transform_response_format(
                 transformed_data
             )
+        else:
+            # Chat Completions API
+            transformed_data = self.transform_chat_parameters(data)
 
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", [])
         )
 
-        chat = Chat.model_validate(transformed_data)
-        chat.messages = self._collapse_messages(chat.messages)
+        # Collapse messages
+        messages_objs = [
+            Messages.model_validate(m) for m in transformed_data["messages"]
+        ]
+        collapsed_objs = self._collapse_messages(messages_objs)
+        transformed_data["messages"] = [
+            m.model_dump(exclude_none=True) for m in collapsed_objs
+        ]
 
         self.logger.debug("Sending request to GigaChat API")
-        self.logger.debug(f"Request: {chat}")
+        self.logger.debug(f"Request: {transformed_data}")
 
-        return chat
+        return transformed_data
 
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:
