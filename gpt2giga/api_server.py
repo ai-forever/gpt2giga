@@ -39,9 +39,7 @@ async def lifespan(app: FastAPI):
     app.state.logger = logger
     app.state.gigachat_client = GigaChat(**config.gigachat_settings.model_dump())
 
-    attachment_processor = AttachmentProcessor(
-        app.state.gigachat_client, app.state.logger
-    )
+    attachment_processor = AttachmentProcessor(app.state.logger)
     app.state.request_transformer = RequestTransformer(
         config, app.state.logger, attachment_processor
     )

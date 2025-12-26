@@ -11,13 +11,12 @@ from gigachat import GigaChat
 class AttachmentProcessor:
     """Обработчик изображений с кэшированием"""
 
-    def __init__(self, giga_client: GigaChat, logger):
-        self.giga = giga_client
+    def __init__(self, logger):
         self.logger = logger
         self.cache: dict[str, str] = {}
 
     async def upload_file(
-        self, image_url: str, filename: str | None = None
+        self, giga_client: GigaChat, image_url: str, filename: str | None = None
     ) -> Optional[str]:
         """Загружает файл в GigaChat и возвращает file_id"""
 
@@ -44,7 +43,7 @@ class AttachmentProcessor:
             ext = content_type.split("/")[-1] or "jpg"
             filename = filename or f"{uuid.uuid4()}.{ext}"
             self.logger.info(f"Uploading file to GigaChat... with extension {ext}")
-            file = await self.giga.aupload_file((filename, content_bytes))
+            file = await giga_client.aupload_file((filename, content_bytes))
 
             self.cache[hashed] = file.id_
             self.logger.info(f"File uploaded successfully, file_id: {file.id_}")
