@@ -109,8 +109,11 @@ def test_transform_chat_parameters(request_transformer):
     assert "temperature" not in res  # pop(temperature, 0) -> if 0 set top_p=0
     assert res["max_tokens"] == 100
     assert "max_output_tokens" not in res
-    assert res["response_format"] == {"type": "json_schema", "schema": {}}
-    assert len(res["functions"]) == 1
+    # transform_chat_parameters no longer keeps response_format if it is converted to function call
+    # assert res["response_format"] == {"type": "json_schema", "schema": {}}
+    assert len(res["functions"]) == 2  # One from tools + one from structured output
+    assert res["functions"][1]["name"] == "structured_output"
+    assert res["function_call"]["name"] == "structured_output"
 
 
 def test_transform_response_format_complex(request_transformer):

@@ -25,8 +25,12 @@ async def test_request_transformer_collapse_messages():
     data = {"messages": messages}
     chat = await rt.send_to_gigachat(data)
     # После collapse два подряд user должны склеиться
-    assert len(chat.messages) == 1
-    assert "hello" in chat.messages[0].content and "world" in chat.messages[0].content
+    # chat is now a dict
+    assert len(chat["messages"]) == 1
+    assert (
+        "hello" in chat["messages"][0]["content"]
+        and "world" in chat["messages"][0]["content"]
+    )
 
 
 @pytest.mark.asyncio
@@ -51,7 +55,8 @@ async def test_request_transformer_tools_to_functions():
         "messages": [{"role": "user", "content": "hi"}],
     }
     chat = await rt.send_to_gigachat(data)
-    assert chat.functions and len(chat.functions) == 1
+    # chat is dict
+    assert chat.get("functions") and len(chat["functions"]) == 1
 
 
 class MockResponse:
