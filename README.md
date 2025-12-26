@@ -53,6 +53,7 @@ sequenceDiagram
 
 - использовать возможности моделей OpenAI и полностью заменить ChatGPT на GigaChat;
 - вызывать функции через API, включая передачу и выполнение функций с аргументами;
+- использовать структурированный вывод (Structured Outputs) для получения гарантированного JSON-ответа;
 - обрабатывать ответ модели в режиме потоковой генерации токенов с помощью параметра `stream=true`;
 - перенаправлять запросы на создание эмбеддингов (поддерживаются эндпоинты `/embeddings` и `/v1/embeddings`);
 - работать в асинхронном режиме с множеством потоков запросов от нескольких клиентов;
@@ -88,17 +89,24 @@ sequenceDiagram
 ```sh
 PYTHON_VERSION=3.10
 docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
+docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
 ```
-Доступные образы можно увидеть на https://hub.docker.com/r/gigateam/gpt2giga
+Доступные образы можно увидеть на https://hub.docker.com/r/gigateam/gpt2giga или
 
 4. Запустите контейнер с помощью Docker Compose: `docker compose up -d`
 
 ### Локальный запуск
 
-Для локального запуска:
+Для управления зависимостями и запуска проекта рекомендуется использовать [uv](https://github.com/astral-sh/uv).
 
-1. Установите пакет gpt2giga с помощью менеджера пакетов pip:
+1. Установите `gpt2giga`:
 
+   С помощью `uv`:
+   ```sh
+   uv tool install gpt2giga
+   ```
+
+   Или используя `pip`:
    ```sh
    pip install gpt2giga
    ```
@@ -124,7 +132,7 @@ docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
    > Кроме переменных gpt2giga в `.env` можно указать переменные окружения, которые поддерживает [python-библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения).
 
 
-1. В терминале выполните команду `gpt2giga`.
+4. В терминале выполните команду `gpt2giga`.
 
 Запустится прокси-сервер, по умолчанию доступный по адресу `localhost:8090`.
 Адрес и порт сервера, а также другие параметры, можно настроить с помощью аргументов командной строки или переменных окружения.
@@ -138,50 +146,60 @@ docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
 Утилита поддерживает аргументы 2 типов(настройки прокси и настройки GigaChat:
 - `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
 
-
-- `--proxy-host <HOST>` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
-- `--proxy-port <PORT>` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
-- `--proxy-use-https <True/False>` — Использовать ли https. По умолчанию `False`;
-- `--proxy-https-key-file <PATH>` — Путь до key файла для https. По умолчанию `None`;
-- `--proxy-https-cert-file <PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `--proxy-pass-model` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
-- `--proxy-pass-token` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
-- `--proxy-embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
-- `--proxy-enable-images` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API
-- `--proxy-log-level` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
-- `--proxy-log-filename` — Имя лог файла. По умолчанию `gpt2giga.log`
-- `--proxy-log-max-size` — Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
-- `--proxy-enable-api-key-auth` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
-- `--proxy-api-key` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
+- `--proxy [JSON]` —  set proxy from JSON string (По умолчанию `{}`);
+- `--proxy.host <HOST>` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
+- `--proxy.port <PORT>` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
+- `--proxy.use-https <True/False>` — Использовать ли https. По умолчанию `False`;
+- `--proxy.https-key-file <PATH>` — Путь до key файла для https. По умолчанию `None`;
+- `--proxy.https-cert-file <PATH>` — Путь до cert файла https. По умолчанию `None`;
+- `--proxy.pass-model` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
+- `--proxy.pass-token` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
+- `--proxy.embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
+- `--proxy.enable-images` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API
+- `--proxy.log-level` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
+- `--proxy.log-filename` — Имя лог файла. По умолчанию `gpt2giga.log`
+- `--proxy.log-max-size` — Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
+- `--proxy.enable-api-key-auth` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
+- `--proxy.api-key` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
 
 Далее идут стандартные настройки из библиотеки GigaChat:
-- `--gigachat-base-url <BASE_URL>` — базовый URL для GigaChat API. По умолчанию берется значение переменной `GIGACHAT_BASE_URL` или поля `BASE_URL` внутри пакета;
-- `--gigachat-auth-url <AUTH_URL>` — базовый URL для Auth GigaChat API. По умолчанию берется значение переменной `GIGACHAT_AUTH_URL` или поля `AUTH_URL` внутри пакета;
-- `--gigachat-credentials <BASE_URL>` — Креды гигачат;
-- `--gigachat-scope <GIGACHAT_SCOPE>` — Скоуп гигачат (API_CORP, API_PERS...);
-- `--gigachat-user <GIGACHAT_USER>` — Вариант авторизации через user/password;
-- `--gigachat-password <GIGACHAT_PASSWORD>` — Вариант авторизации через user/password;
-- `--gigachat-access_token <ACCESS_TOKEN>` — JWE токен;
-- `--gigachat-model <MODEL>` — модель для запросов в GigaChat. По умолчанию `GIGACHAT_MODEL`;
-- `--gigachat-profanity-check <True/False>` — Параметр цензуры. По умолчанию `None`;
-- `--gigachat-timeout <TIMEOUT>` — таймаут для запросов к GigaChat API. По умолчанию `30` секунд;
-- `--gigachat-verify-ssl-certs <True/False>` — проверять сертификаты SSL (по умолчанию `True`)
-
+- `--gigachat [JSON]` —  set gigachat from JSON string (По умолчанию `{}`);
+- `--gigachat.base-url <BASE_URL>` — базовый URL для GigaChat API. По умолчанию берется значение переменной `GIGACHAT_BASE_URL` или поля `BASE_URL` внутри пакета;
+- `--gigachat.auth-url <AUTH_URL>` — базовый URL для Auth GigaChat API. По умолчанию берется значение переменной `GIGACHAT_AUTH_URL` или поля `AUTH_URL` внутри пакета;
+- `--gigachat.credentials <BASE_URL>` — Креды гигачат;
+- `--gigachat.scope <GIGACHAT_SCOPE>` — Скоуп гигачат (API_CORP, API_PERS...);
+- `--gigachat.user <GIGACHAT_USER>` — Вариант авторизации через user/password;
+- `--gigachat.password <GIGACHAT_PASSWORD>` — Вариант авторизации через user/password;
+- `--gigachat.access_token <ACCESS_TOKEN>` — JWE токен;
+- `--gigachat.model <MODEL>` — модель для запросов в GigaChat. По умолчанию `GIGACHAT_MODEL`;
+- `--gigachat.profanity-check <True/False>` — Параметр цензуры. По умолчанию `None`;
+- `--gigachat.timeout <TIMEOUT>` — таймаут для запросов к GigaChat API. По умолчанию `30` секунд;
+- `--gigachat.verify-ssl-certs <True/False>` — проверять сертификаты SSL (по умолчанию `True`);
+- `--gigachat.ssl-context` — Пользовательский SSL контекст;
+- `--gigachat.ca-bundle-file <PATH>` — Путь к CA bundle файлу для проверки TLS сертификатов;
+- `--gigachat.cert-file <PATH>` — Путь к файлу клиентского сертификата;
+- `--gigachat.key-file <PATH>` — Путь к файлу приватного ключа клиента;
+- `--gigachat.key-file-password <PASSWORD>` — Пароль для зашифрованного файла приватного ключа;
+- `--gigachat.flags <FLAGS>` — Дополнительные флаги для управления поведением клиента;
+- `--gigachat.max-connections <INT>` — Максимальное количество одновременных подключений к GigaChat API;
+- `--gigachat.max-retries <INT>` — Максимальное количество попыток повтора для временных ошибок. По умолчанию `0` (отключено);
+- `--gigachat.retry-backoff-factor <FLOAT>` — Множитель задержки для повторных попыток. По умолчанию `0.5`;
+- `--gigachat.retry-on-status-codes <INT,INT...>` — HTTP коды статуса, вызывающие повторную попытку. По умолчанию `(429, 500, 502, 503, 504)`;
+- `--gigachat.token-expiry-buffer-ms <INT>` — Буфер времени (мс) до истечения токена для запуска обновления. По умолчанию `60000` (60 секунд).
 #### Пример запуска утилиты с заданными параметрами
 
 Для запуска прокси-сервера с заданным адресом и портом выполните команду:
 
 ```sh
 gpt2giga \
-    --proxy-host 127.0.0.1 \
-    --proxy-port 8080 \
-    --proxy-log-level \
-    --proxy-pass-model \
-    --proxy-pass-token \
-    --gigachat-base-url https://gigachat.devices.sberbank.ru/api/v1 \
-    --gigachat-model GigaChat-Max \
-    --gigachat-timeout 300 \
-    --gigachat-embeddings EmbeddingsGigaR
+    --proxy.host 127.0.0.1 \
+    --proxy.port 8080 \
+    --proxy.pass-model \
+    --proxy.pass-token \
+    --gigachat.base-url https://gigachat.devices.sberbank.ru/api/v1 \
+    --gigachat.model GigaChat-Max \
+    --gigachat.timeout 300 \
+    --gigachat.embeddings EmbeddingsGigaR
 ```
 
 ### Переменные окружения
@@ -219,7 +237,11 @@ gpt2giga \
 - `GIGACHAT_CERT_FILE` - путь к клиентскому сертификату;
 - `GIGACHAT_KEY_FILE` - путь к закрытому ключу;
 - `GIGACHAT_KEY_FILE_PASSWORD` - пароль от закрытого ключа;
-- `GIGACHAT_VERIFY_SSL_CERTS` — для того, что бы проверять SSL сертификаты, по умолчанию `False`.
+- `GIGACHAT_VERIFY_SSL_CERTS` — для того, что бы проверять SSL сертификаты, по умолчанию `False`;
+- `GIGACHAT_MAX_CONNECTIONS` - Максимальное количество одновременных подключений к GigaChat API;
+- `GIGACHAT_MAX_RETRIES` - Максимальное количество попыток повтора для временных ошибок. По умолчанию `0` (отключено);
+- `GIGACHAT_RETRY_BACKOFF_FACTOR` - Множитель задержки для повторных попыток. По умолчанию `0.5`;
+- `GIGACHAT_TOKEN_EXPIRY_BUFFER_MS` - Буфер времени (мс) до истечения токена для запуска обновления. По умолчанию `60000` (60 секунд).
 
 После запуска сервер будет перенаправлять все запросы, адресованные OpenAI API, в GigaChat API.
 
