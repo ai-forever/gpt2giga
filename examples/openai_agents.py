@@ -1,15 +1,30 @@
 import asyncio
+import os
 
 import requests
-from agents import Agent, Runner, function_tool
-from agents import OpenAIChatCompletionsModel
+from agents import (
+    Agent,
+    Runner,
+    function_tool,
+    set_default_openai_client,
+    set_tracing_disabled,
+    set_default_openai_api,
+)
 from agents import enable_verbose_stdout_logging
 from openai import AsyncOpenAI
 
 enable_verbose_stdout_logging()
 
+WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:8090")  # без /v1
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "0")
+MODEL_NAME = os.getenv("MODEL_NAME", "GigaChat-2-Max")
 
-client = AsyncOpenAI(base_url="http://localhost:8090", api_key="0")
+# Настраиваем клиент OpenAI для Agents SDK (Responses API по умолчанию)
+client = AsyncOpenAI(base_url=OPENAI_BASE_URL, api_key=OPENAI_API_KEY)
+set_default_openai_client(client)
+set_tracing_disabled(True)  # чтобы не слать трейсы наружу
+set_default_openai_api("responses")
 
 
 @function_tool
@@ -62,20 +77,17 @@ def get_air_quality(city: str) -> str:
 spanish_agent = Agent(
     name="Spanish agent",
     instructions="You only speak Spanish.",
-    model=OpenAIChatCompletionsModel(model="gpt-4o", openai_client=client),
     tools=[get_weather, get_air_quality],
 )
 
 english_agent = Agent(
     name="English agent",
     instructions="You only speak English",
-    model=OpenAIChatCompletionsModel(model="gpt-4o", openai_client=client),
 )
 
 russian_agent = Agent(
     name="Russian agent",
     instructions="You only speak Russian",
-    model=OpenAIChatCompletionsModel(model="gpt-4o", openai_client=client),
     tools=[get_weather, get_air_quality],
 )
 
@@ -83,7 +95,6 @@ triage_agent = Agent(
     name="Triage agent",
     instructions="Handoff to the appropriate agent based on the language of the request.",
     handoffs=[spanish_agent, english_agent, russian_agent],
-    model=OpenAIChatCompletionsModel(model="gpt-4o", openai_client=client),
 )
 
 

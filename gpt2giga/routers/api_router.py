@@ -61,7 +61,9 @@ async def chat_completions(request: Request):
         return processed
     else:
         return StreamingResponse(
-            stream_chat_completion_generator(request, chat_messages, current_rquid),
+            stream_chat_completion_generator(
+                request, data["model"], chat_messages, current_rquid
+            ),
             media_type="text/event-stream",
         )
 

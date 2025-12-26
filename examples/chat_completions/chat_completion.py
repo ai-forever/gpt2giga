@@ -7,5 +7,7 @@ completion = client.chat.completions.create(
     messages=[
         {"role": "user", "content": "Как дела?"},
     ],
+    stream=True,
 )
-print(completion)
+for event in completion:
+    print(event.choices[0].delta.content)

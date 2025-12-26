@@ -107,16 +107,18 @@ def exceptions_handler(func):
 
 
 async def stream_chat_completion_generator(
-    request: Request, chat_messages: Chat, response_id: str
+    request: Request, model: str, chat_messages: Chat, response_id: str
 ) -> AsyncGenerator[str, None]:
     try:
         async for chunk in request.app.state.gigachat_client.astream(chat_messages):
             if await request.is_disconnected():
                 break
             processed = request.app.state.response_processor.process_stream_chunk(
-                chunk, chat_messages.model, response_id
+                chunk, model, response_id
             )
             yield f"data: {json.dumps(processed)}\n\n"
+
+        yield "data: [DONE]\n\n"
 
     except Exception:
         yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
@@ -138,6 +140,8 @@ async def stream_responses_generator(
                 )
             )
             yield f"data: {json.dumps(processed)}\n\n"
+
+        yield "data: [DONE]\n\n"
 
     except Exception:
         yield f"data: {json.dumps({'error': 'Stream interrupted'})}\n\n"
