@@ -91,7 +91,7 @@ PYTHON_VERSION=3.10
 docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
 docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
 ```
-Доступные образы можно увидеть на https://hub.docker.com/r/gigateam/gpt2giga или
+Доступные образы можно увидеть на https://hub.docker.com/r/gigateam/gpt2giga или https://github.com/ai-forever/gpt2giga/pkgs/container/gpt2giga
 
 4. Запустите контейнер с помощью Docker Compose: `docker compose up -d`
 
