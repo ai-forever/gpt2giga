@@ -1,12 +1,12 @@
 import json
 from functools import wraps
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Dict, Union, Any
 
 import gigachat
 from aioitertools import enumerate as aio_enumerate
 from fastapi import HTTPException
 from gigachat import GigaChat
-from gigachat.models import Chat, Function, FunctionParameters
+from gigachat.models import Chat
 from gigachat.settings import SCOPE
 from starlette.requests import Request
 
@@ -107,14 +107,22 @@ def exceptions_handler(func):
 
 
 async def stream_chat_completion_generator(
-    request: Request, chat_messages: Chat, response_id: str
+    request: Request,
+    chat_messages: Union[Chat, Dict[str, Any]],
+    response_id: str,
+    request_data: dict = None,
 ) -> AsyncGenerator[str, None]:
+    model = (
+        chat_messages.get("model")
+        if isinstance(chat_messages, dict)
+        else chat_messages.model
+    )
     try:
         async for chunk in request.app.state.gigachat_client.astream(chat_messages):
             if await request.is_disconnected():
                 break
             processed = request.app.state.response_processor.process_stream_chunk(
-                chunk, chat_messages.model, response_id
+                chunk, model, response_id, request_data=request_data
             )
             yield f"data: {json.dumps(processed)}\n\n"
 
@@ -124,7 +132,7 @@ async def stream_chat_completion_generator(
 
 
 async def stream_responses_generator(
-    request: Request, chat_messages: Chat, response_id: str
+    request: Request, chat_messages: Union[Chat, Dict[str, Any]], response_id: str
 ) -> AsyncGenerator[str, None]:
     try:
         async for i, chunk in aio_enumerate(
@@ -150,17 +158,17 @@ def convert_tool_to_giga_functions(data: dict):
     for tool in tools:
         if tool.get("function"):
             function = tool["function"]
-            giga_function = Function(
-                name=function["name"],
-                description=function["description"],
-                parameters=FunctionParameters(**function["parameters"]),
-            )
+            giga_function = {
+                "name": function["name"],
+                "description": function.get("description", ""),
+                "parameters": function["parameters"],
+            }
         else:
-            giga_function = Function(
-                name=tool["name"],
-                description=tool["description"],
-                parameters=FunctionParameters(**tool["parameters"]),
-            )
+            giga_function = {
+                "name": tool["name"],
+                "description": tool.get("description", ""),
+                "parameters": tool["parameters"],
+            }
         functions.append(giga_function)
     return functions
 

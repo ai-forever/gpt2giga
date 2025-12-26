@@ -1,5 +1,5 @@
 import json
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union, Any
 
 from gigachat.models import (
     Chat,
@@ -164,10 +164,29 @@ class RequestTransformer:
         response_format: dict | None = transformed.pop("response_format", None)
         response_format_responses: dict | None = transformed.pop("text", None)
         if response_format:
-            transformed["response_format"] = {
-                "type": response_format.get("type"),
-                **response_format.get("json_schema", {}),
-            }
+            if response_format.get("type") == "json_schema":
+                json_schema = response_format.get("json_schema", {})
+                schema_name = json_schema.get("name", "structured_output")
+                schema = json_schema.get("schema")
+
+                function_def = {
+                    "name": schema_name,
+                    "description": f"Output response in structured format: {schema_name}",
+                    "parameters": schema,
+                }
+
+                if "functions" not in transformed:
+                    transformed["functions"] = []
+
+                transformed["functions"].append(function_def)
+                transformed["function_call"] = {"name": schema_name}
+
+            else:
+                transformed["response_format"] = {
+                    "type": response_format.get("type"),
+                    **response_format.get("json_schema", {}),
+                }
+
         if response_format_responses:
             fmt = response_format_responses.get("format", {})
             transformed["response_format"] = fmt
@@ -238,7 +257,7 @@ class RequestTransformer:
             function_call=FunctionCall(name=name, arguments=arguments),
         ).model_dump()
 
-    async def send_to_gigachat(self, data: dict) -> Chat:
+    async def send_to_gigachat(self, data: dict) -> Union[Chat, Dict[str, Any]]:
         """Отправляет запрос в GigaChat API"""
         transformed_data = self.transform_chat_parameters(data)
         if not transformed_data.get("messages") and transformed_data.get("input"):
@@ -250,13 +269,19 @@ class RequestTransformer:
             transformed_data.get("messages", [])
         )
 
-        chat = Chat.model_validate(transformed_data)
-        chat.messages = self._collapse_messages(chat.messages)
+        # Collapse messages
+        messages_objs = [
+            Messages.model_validate(m) for m in transformed_data["messages"]
+        ]
+        collapsed_objs = self._collapse_messages(messages_objs)
+        transformed_data["messages"] = [
+            m.model_dump(exclude_none=True) for m in collapsed_objs
+        ]
 
         self.logger.debug("Sending request to GigaChat API")
-        self.logger.debug(f"Request: {chat}")
+        self.logger.debug(f"Request: {transformed_data}")
 
-        return chat
+        return transformed_data
 
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:
