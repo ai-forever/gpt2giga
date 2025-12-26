@@ -301,18 +301,8 @@ class RequestTransformer:
             function_call=FunctionCall(name=name, arguments=arguments),
         ).model_dump()
 
-    async def send_to_gigachat(self, data: dict) -> Dict[str, Any]:
-        """Отправляет запрос в GigaChat API"""
-        if data.get("input") and not data.get("messages"):
-            # Responses API
-            transformed_data = self.transform_responses_parameters(data)
-            transformed_data["messages"] = self.transform_response_format(
-                transformed_data
-            )
-        else:
-            # Chat Completions API
-            transformed_data = self.transform_chat_parameters(data)
-
+    async def _finalize_transformation(self, transformed_data: dict) -> Dict[str, Any]:
+        """Общая логика трансформации сообщений и логгирования"""
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", [])
         )
@@ -330,6 +320,17 @@ class RequestTransformer:
         self.logger.debug(f"Request: {transformed_data}")
 
         return transformed_data
+
+    async def prepare_chat_completion(self, data: dict) -> Dict[str, Any]:
+        """Подготовка запроса для Chat Completions API"""
+        transformed_data = self.transform_chat_parameters(data)
+        return await self._finalize_transformation(transformed_data)
+
+    async def prepare_response(self, data: dict) -> Dict[str, Any]:
+        """Подготовка запроса для Responses API"""
+        transformed_data = self.transform_responses_parameters(data)
+        transformed_data["messages"] = self.transform_response_format(transformed_data)
+        return await self._finalize_transformation(transformed_data)
 
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:

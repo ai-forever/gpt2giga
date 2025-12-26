@@ -52,18 +52,16 @@ async def chat_completions(request: Request):
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
         state.logger.debug(f"Functions count: {len(data['functions'])}")
-    chat_messages = await state.request_transformer.send_to_gigachat(data)
+    chat_messages = await state.request_transformer.prepare_chat_completion(data)
     if not stream:
         response = await state.gigachat_client.achat(chat_messages)
         processed = state.response_processor.process_response(
-            response, chat_messages.model, current_rquid, request_data=data
+            response, data["model"], current_rquid, request_data=data
         )
         return processed
     else:
         return StreamingResponse(
-            stream_chat_completion_generator(
-                request, chat_messages, current_rquid, request_data=data
-            ),
+            stream_chat_completion_generator(request, chat_messages, current_rquid),
             media_type="text/event-stream",
         )
 
@@ -110,11 +108,11 @@ async def responses(request: Request):
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
         state.logger.debug(f"Functions count: {len(data['functions'])}")
-    chat_messages = await state.request_transformer.send_to_gigachat(data)
+    chat_messages = await state.request_transformer.prepare_response(data)
     if not stream:
         response = await state.gigachat_client.achat(chat_messages)
         processed = state.response_processor.process_response_api(
-            data, response, chat_messages.model, current_rquid
+            data, response, data["model"], current_rquid
         )
         return processed
     else:

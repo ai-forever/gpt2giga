@@ -52,8 +52,11 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
-    async def send_to_gigachat(self, data):
-        return SimpleNamespace(model=data.get("model", "giga"))
+    async def prepare_chat_completion(self, data):
+        return {"model": data.get("model", "giga")}
+
+    async def prepare_response(self, data):
+        return {"model": data.get("model", "giga")}
 
 
 def make_app(monkeypatch=None):
