@@ -20,6 +20,43 @@ from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEv
 
 from gpt2giga.config import ProxyConfig
 
+# Константа для виртуальной функции structured output
+RESPONSE_FORMAT_FUNCTION_NAME = "__json_response__"
+
+
+def convert_response_format_to_function(
+    response_format: Optional[Dict],
+) -> Optional[Dict]:
+    """Конвертирует response_format с json_schema в виртуальную функцию.
+
+    GigaChat не поддерживает response_format напрямую, поэтому мы эмулируем
+    structured output через function calling.
+    """
+    if not response_format or response_format.get("type") != "json_schema":
+        return None
+
+    json_schema = response_format.get("json_schema", {})
+    return {
+        "name": json_schema.get("name", RESPONSE_FORMAT_FUNCTION_NAME),
+        "description": json_schema.get(
+            "description", "Return structured JSON response"
+        ),
+        "parameters": json_schema.get("schema", {}),
+    }
+
+
+def is_json_schema_response(
+    function_name: str, response_format: Optional[Dict]
+) -> bool:
+    """Проверяет, является ли function_call ответом на json_schema request."""
+    if not response_format or response_format.get("type") != "json_schema":
+        return False
+
+    expected_name = response_format.get("json_schema", {}).get(
+        "name", RESPONSE_FORMAT_FUNCTION_NAME
+    )
+    return function_name == expected_name
+
 
 class AttachmentProcessor:
     """Обработчик изображений с кэшированием"""
@@ -219,14 +256,38 @@ class RequestTransformer:
 
         response_format: dict | None = transformed.pop("response_format", None)
         response_format_responses: dict | None = transformed.pop("text", None)
-        if response_format:
-            transformed["response_format"] = {
-                "type": response_format.get("type"),
-                **response_format.get("json_schema", {}),
-            }
+
+        # Обрабатываем response_format из Responses API
         if response_format_responses:
             fmt = response_format_responses.get("format", {})
-            transformed["response_format"] = fmt
+            if fmt.get("type") == "json_schema":
+                response_format = fmt
+
+        # Конвертируем json_schema в виртуальную функцию
+        if response_format:
+            virtual_function = convert_response_format_to_function(response_format)
+
+            if virtual_function:
+                # Добавляем виртуальную функцию в список functions
+                if "functions" not in transformed:
+                    transformed["functions"] = []
+                transformed["functions"].append(virtual_function)
+
+                # Устанавливаем function_call для принудительного вызова
+                transformed["function_call"] = {"name": virtual_function["name"]}
+
+                # Сохраняем response_format для обратной конвертации (будет извлечён в send_to_gigachat)
+                transformed["_response_format"] = response_format
+
+                self.logger.debug(
+                    f"Converted json_schema to function: {virtual_function['name']}"
+                )
+            else:
+                # Для простых типов (text, json_object) передаём как есть
+                transformed["response_format"] = {
+                    "type": response_format.get("type"),
+                }
+
         return transformed
 
     def transform_response_format(self, data: Dict) -> List:
@@ -294,9 +355,18 @@ class RequestTransformer:
             function_call=FunctionCall(name=name, arguments=arguments),
         ).dict()
 
-    async def send_to_gigachat(self, data: dict) -> Chat:
-        """Отправляет запрос в GigaChat API"""
+    async def send_to_gigachat(self, data: dict) -> Tuple[Chat, Optional[Dict]]:
+        """Отправляет запрос в GigaChat API.
+
+        Returns:
+            Tuple of (Chat, response_format) where response_format is needed
+            for converting json_schema function calls back to content.
+        """
         transformed_data = self.transform_chat_parameters(data)
+
+        # Извлекаем response_format для обратной конвертации (thread-safe)
+        response_format = transformed_data.pop("_response_format", None)
+
         if not transformed_data.get("messages") and transformed_data.get("input"):
             transformed_data["messages"] = self.transform_response_format(
                 transformed_data
@@ -312,7 +382,7 @@ class RequestTransformer:
         self.logger.debug("Sending request to GigaChat API")
         self.logger.debug(f"Request: {chat}")
 
-        return chat
+        return chat, response_format
 
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:
@@ -348,13 +418,31 @@ class ResponseProcessor:
         self.logger = logger
 
     def process_response(
-        self, giga_resp: ChatCompletion, gpt_model: str, response_id: str
+        self,
+        giga_resp: ChatCompletion,
+        gpt_model: str,
+        response_id: str,
+        response_format: Optional[Dict] = None,
     ) -> dict:
         """Обрабатывает обычный ответ от GigaChat"""
         giga_dict = giga_resp.dict()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
+
+        # Проверяем, является ли это ответом на json_schema запрос
+        is_json_schema = False
+        if is_tool_call and response_format:
+            func_call = giga_dict["choices"][0].get("message", {}).get("function_call")
+            if func_call and is_json_schema_response(
+                func_call.get("name", ""), response_format
+            ):
+                is_json_schema = True
+
         for choice in giga_dict["choices"]:
-            self._process_choice(choice, is_tool_call)
+            if is_json_schema:
+                self._convert_json_schema_response(choice)
+            else:
+                self._process_choice(choice, is_tool_call)
+
         result = {
             "id": f"chatcmpl-{response_id}",
             "object": "chat.completion",
@@ -368,6 +456,30 @@ class ResponseProcessor:
         self.logger.debug("Processed chat completion response")
         self.logger.debug(f"Response: {result}")
         return result
+
+    def _convert_json_schema_response(self, choice: Dict):
+        """Преобразует function_call от виртуальной функции в обычный контент"""
+        message = choice.get("message", {})
+        func_call = message.get("function_call", {})
+        arguments = func_call.get("arguments", {})
+
+        # Преобразуем arguments в JSON строку
+        if isinstance(arguments, dict):
+            content = json.dumps(arguments, ensure_ascii=False)
+        else:
+            content = str(arguments)
+
+        # Заменяем function_call на обычный контент
+        choice["message"] = {
+            "role": "assistant",
+            "content": content,
+            "refusal": None,
+        }
+        choice["finish_reason"] = "stop"
+        choice["index"] = 0
+        choice["logprobs"] = None
+
+        self.logger.debug("Converted json_schema function_call to content")
 
     def process_response_api(
         self,
@@ -442,13 +554,31 @@ class ResponseProcessor:
             ]
 
     def process_stream_chunk(
-        self, giga_resp: ChatCompletionChunk, gpt_model: str, response_id: str
+        self,
+        giga_resp: ChatCompletionChunk,
+        gpt_model: str,
+        response_id: str,
+        response_format: Optional[Dict] = None,
     ) -> dict:
         """Обрабатывает стриминговый чанк от GigaChat"""
         giga_dict = giga_resp.dict()
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
+
+        # Проверяем, является ли это ответом на json_schema запрос
+        is_json_schema = False
+        if is_tool_call and response_format:
+            delta = giga_dict["choices"][0].get("delta", {})
+            func_call = delta.get("function_call")
+            if func_call and is_json_schema_response(
+                func_call.get("name", ""), response_format
+            ):
+                is_json_schema = True
+
         for choice in giga_dict["choices"]:
-            self._process_choice(choice, is_tool_call, is_stream=True)
+            if is_json_schema:
+                self._convert_json_schema_stream_chunk(choice)
+            else:
+                self._process_choice(choice, is_tool_call, is_stream=True)
 
         result = {
             "id": f"chatcmpl-{response_id}",
@@ -462,6 +592,28 @@ class ResponseProcessor:
 
         self.logger.debug(f"Processed stream chunk: {result}")
         return result
+
+    def _convert_json_schema_stream_chunk(self, choice: Dict):
+        """Преобразует streaming function_call от виртуальной функции в контент"""
+        delta = choice.get("delta", {})
+        func_call = delta.get("function_call", {})
+        arguments = func_call.get("arguments", {})
+
+        # Преобразуем arguments в JSON строку
+        if isinstance(arguments, dict):
+            content = json.dumps(arguments, ensure_ascii=False)
+        else:
+            content = str(arguments) if arguments else ""
+
+        # Заменяем function_call на обычный контент
+        choice["delta"] = {
+            "role": "assistant",
+            "content": content,
+        }
+        if choice.get("finish_reason") == "function_call":
+            choice["finish_reason"] = "stop"
+        choice["index"] = 0
+        choice["logprobs"] = None
 
     def process_stream_chunk_response(
         self,

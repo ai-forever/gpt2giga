@@ -30,7 +30,7 @@ class FakeGigachat:
 
 class FakeRequestTransformer:
     async def send_to_gigachat(self, data):
-        return SimpleNamespace(model=data.get("model", "giga"))
+        return SimpleNamespace(model=data.get("model", "giga")), None
 
 
 def make_app():

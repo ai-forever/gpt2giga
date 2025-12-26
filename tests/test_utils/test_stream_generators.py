@@ -9,7 +9,9 @@ from gpt2giga.utils import (
 
 
 class FakeResponseProcessor:
-    def process_stream_chunk(self, chunk, model):
+    def process_stream_chunk(
+        self, chunk, model, response_id=None, response_format=None
+    ):
         return {"model": model, "delta": chunk.dict()["choices"][0]["delta"]}
 
     def process_stream_chunk_response(
