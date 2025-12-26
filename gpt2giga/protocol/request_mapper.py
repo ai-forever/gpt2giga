@@ -216,9 +216,13 @@ class RequestTransformer:
         if response_format_responses:
             response_format = response_format_responses.get("format", {})
             if response_format.get("type") == "json_schema":
-                json_schema = response_format.get("json_schema", {})
-                schema_name = json_schema.get("name", "structured_output")
-                schema = json_schema.get("schema")
+                if "json_schema" in response_format:
+                    json_schema = response_format.get("json_schema", {})
+                    schema_name = json_schema.get("name", "structured_output")
+                    schema = json_schema.get("schema")
+                else:
+                    schema_name = response_format.get("name", "structured_output")
+                    schema = response_format.get("schema")
 
                 function_def = {
                     "name": schema_name,
@@ -331,6 +335,21 @@ class RequestTransformer:
         transformed_data = self.transform_responses_parameters(data)
         transformed_data["messages"] = self.transform_response_format(transformed_data)
         return await self._finalize_transformation(transformed_data)
+
+    # Backward-compatible API (used by older tests / integrations)
+    async def send_to_gigachat(self, data: dict) -> Dict[str, Any]:
+        """
+        Совместимый алиас: исторически метод возвращал подготовленный payload для GigaChat.
+        Сейчас это делает `prepare_chat_completion`.
+        """
+        return await self.prepare_chat_completion(data)
+
+    async def send_to_gigachat_responses(self, data: dict) -> Dict[str, Any]:
+        """
+        Совместимый алиас для Responses API.
+        Сейчас это делает `prepare_response`.
+        """
+        return await self.prepare_response(data)
 
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:

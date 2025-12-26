@@ -58,8 +58,20 @@ class ResponseProcessor:
     ) -> dict:
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
+
+        is_structured_output = False
+        text_param = data.get("text")
+        if text_param and isinstance(text_param, dict):
+            fmt = text_param.get("format")
+            if fmt and isinstance(fmt, dict) and fmt.get("type") == "json_schema":
+                is_structured_output = True
+
         for choice in giga_dict["choices"]:
             self._process_choice_responses(choice, response_id)
+
+        response_text = {"format": {"type": "text"}}
+        if text_param and isinstance(text_param, dict):
+            response_text = text_param
 
         result = {
             "id": f"resp_{response_id}",
@@ -69,9 +81,12 @@ class ResponseProcessor:
             "instructions": data.get("instructions"),
             "model": gpt_model,
             "output": self._create_output_responses(
-                giga_dict, is_tool_call, response_id
+                giga_dict,
+                is_tool_call,
+                response_id,
+                is_structured_output=is_structured_output,
             ),
-            "text": {"format": {"type": "text"}},
+            "text": response_text,
             "usage": self._build_response_usage(giga_dict.get("usage")),
         }
         self.logger.debug("Processed responses API response")
@@ -85,11 +100,29 @@ class ResponseProcessor:
         is_tool_call: bool = False,
         response_id: Optional[str] = None,
         message_key: Literal["message", "delta"] = "message",
+        is_structured_output: bool = False,
     ) -> list:
         response_id = str(uuid.uuid4()) if response_id is None else response_id
         try:
-            if is_tool_call:
+            if is_tool_call and not is_structured_output:
                 return [data["choices"][0][message_key]["output"]]
+            elif is_tool_call and is_structured_output:
+                output_item = data["choices"][0][message_key]["output"]
+                arguments = output_item.get("arguments", "{}")
+                return [
+                    {
+                        "type": "message",
+                        "id": f"msg_{response_id}",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": arguments,
+                            }
+                        ],
+                    }
+                ]
             else:
                 return [
                     {
@@ -214,7 +247,7 @@ class ResponseProcessor:
                 message["refusal"] = None
                 if message.get("function_call"):
                     args = message["function_call"]["arguments"]
-                    if not is_stream and isinstance(args, (dict, list)):
+                    if isinstance(args, (dict, list)):
                         content = json.dumps(args, ensure_ascii=False)
                     else:
                         content = str(args)
