@@ -26,6 +26,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Get version
+        id: get_version
+        run: echo "VERSION=$(grep '^version =' pyproject.toml | head -n1 | cut -d'"' -f2)" >> $GITHUB_OUTPUT
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -48,6 +52,8 @@ jobs:
             latest=false
           tags: |
             type=raw,value=py${{ matrix.python }}
+            type=raw,value=${{ steps.get_version.outputs.VERSION }}-py${{ matrix.python }}
+            type=raw,value=${{ steps.get_version.outputs.VERSION }},enable=${{ matrix.python == '3.13' }}
             type=raw,value=latest,enable=${{ matrix.python == '3.13' }}
 
       - name: Build and push
