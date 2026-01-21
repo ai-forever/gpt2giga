@@ -57,7 +57,8 @@ sequenceDiagram
 - обрабатывать ответ модели в режиме потоковой генерации токенов с помощью параметра `stream=true`;
 - перенаправлять запросы на создание эмбеддингов (поддерживаются эндпоинты `/embeddings` и `/v1/embeddings`);
 - работать в асинхронном режиме с множеством потоков запросов от нескольких клиентов;
-- общение в openai-формате с файлом.
+- общение в openai-формате с файлом;
+- использовать эндпоинт `/responses` (OpenAI Responses API) для совместимости с новыми клиентами;
 - отображать подробные сведения о запросах и ответах при включенном логирования `DEBUG`, `INFO` ...;
 - задавать параметры работы как с помощью аргументов командной строки, так и с помощью переменных окружения (`.env`).
 
@@ -104,6 +105,7 @@ docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
    С помощью `uv`:
    ```sh
    uv tool install gpt2giga
+   # или uv add gpt2giga
    ```
 
    Или используя `pip`:
@@ -197,9 +199,9 @@ gpt2giga \
     --proxy.pass-model \
     --proxy.pass-token \
     --gigachat.base-url https://gigachat.devices.sberbank.ru/api/v1 \
-    --gigachat.model GigaChat-Max \
+    --gigachat.model GigaChat-2-Max \
     --gigachat.timeout 300 \
-    --gigachat.embeddings EmbeddingsGigaR
+    --proxy.embeddings EmbeddingsGigaR
 ```
 
 ### Переменные окружения
@@ -278,7 +280,7 @@ completion = client.chat.completions.create(
 openssl req -x509 -nodes -days 365   -newkey rsa:4096   -keyout key.pem   -out cert.pem   -subj "/CN=localhost"   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 ```
 ```dotenv
-GPT2GIGA_USE_HTTPS=False
+GPT2GIGA_USE_HTTPS=True
 GPT2GIGA_HTTPS_KEY_FILE="Path to key.pem"
 GPT2GIGA_HTTPS_CERT_FILE="Path to cert.pem"
 ```
@@ -331,13 +333,18 @@ completion = client.chat.completions.create(
 
 Таблица содержит приложения, проверенные на совместную работу с gpt2giga.
 
-| Приложение                                             | Описание                                                                                                                                   |
-|--------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
-| [Aider](https://aider.chat/)                           | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](/integrations/aider) |
-| [n8n](https://n8n.io/)                                 | Платформа для создания nocode-агентов                                                                                                      |
-| [Cline](https://github.com/cline/cline)                | AI-ассистент разработчика                                                                                                                  |
-| [OpenHands](https://github.com/All-Hands-AI/OpenHands) | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](/integrations/openhands)    |
-| [KiloCode](https://kilocode.ai/) | AI-кодовый агент | AI-агент для написания кода, доступен в jetbrains/vscode |
+| Приложение                                             | Описание                                                                                                                                    |
+|--------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| [Aider](https://aider.chat/)                           | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](./integrations/aider) |
+| [n8n](https://n8n.io/)                                 | Платформа для создания nocode-агентов                                                                                                       |
+| [Cline](https://github.com/cline/cline)                | AI-ассистент разработчика                                                                                                                   |
+| [OpenHands](https://github.com/All-Hands-AI/OpenHands) | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands)    |
+| [KiloCode](https://kilocode.ai/)                       | AI-агент для написания кода, доступен в JetBrains/VSCode                                                                                    |
+| [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py) |
+
+## История изменений
+
+Подробная информация об изменениях в каждой версии доступна в файле [CHANGELOG.md](CHANGELOG.md).
 
 ## Лицензия
 
