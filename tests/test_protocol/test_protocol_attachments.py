@@ -23,17 +23,17 @@ class DummyClient:
 @pytest.mark.asyncio
 async def test_attachment_processor_base64_and_cache(monkeypatch):
     client = DummyClient()
-    p = AttachmentProcessor(client, logger=logger)
+    p = AttachmentProcessor(logger=logger)
 
     img_bytes = b"\xff\xd8\xff\xd9"  # минимальный jpeg маркер SOI/EOI
     data_url = "data:image/jpeg;base64," + base64.b64encode(img_bytes).decode()
 
-    id1 = await p.upload_file(data_url)
+    id1 = await p.upload_file(client, data_url)
     assert id1 == "f1"
 
     # Повтор с тем же URL должен взять из кэша, не дергая upload_file
     before = client.calls
-    id2 = await p.upload_file(data_url)
+    id2 = await p.upload_file(client, data_url)
     assert id2 == id1
     assert client.calls == before
 
@@ -50,6 +50,6 @@ async def test_attachment_processor_httpx_invalid_content_type(monkeypatch):
     )
 
     client = DummyClient()
-    p = AttachmentProcessor(client, logger=logger)
-    result = await p.upload_file("http://example.com/image")
+    p = AttachmentProcessor(logger=logger)
+    result = await p.upload_file(client, "http://example.com/image")
     assert result == "f1"

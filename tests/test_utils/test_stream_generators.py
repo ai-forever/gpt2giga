@@ -9,8 +9,12 @@ from gpt2giga.utils import (
 
 
 class FakeResponseProcessor:
-    def process_stream_chunk(self, chunk, model):
-        return {"model": model, "delta": chunk.model_dump()["choices"][0]["delta"]}
+    def process_stream_chunk(self, chunk, model, response_id: str):
+        return {
+            "id": response_id,
+            "model": model,
+            "delta": chunk.model_dump()["choices"][0]["delta"],
+        }
 
     def process_stream_chunk_response(
         self, chunk, sequence_number: int, response_id: str
@@ -23,17 +27,17 @@ class FakeResponseProcessor:
 
 
 class FakeClient:
-    async def astream(self, chat):
+    def astream(self, chat):
         async def gen():
             yield SimpleNamespace(
-                dict=lambda: {
+                model_dump=lambda: {
                     "choices": [{"delta": {"content": "A"}}],
                     "usage": None,
                     "model": "giga",
                 }
             )
             yield SimpleNamespace(
-                dict=lambda: {
+                model_dump=lambda: {
                     "choices": [{"delta": {"content": "B"}}],
                     "usage": None,
                     "model": "giga",
@@ -44,9 +48,10 @@ class FakeClient:
 
 
 class FakeClientError:
-    async def astream(self, chat):
+    def astream(self, chat):
         async def gen():
             raise RuntimeError("boom")
+            yield  # pragma: no cover
 
         return gen()
 

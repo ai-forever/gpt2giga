@@ -32,7 +32,9 @@ async def test_process_content_parts_limits(request_transformer):
         {"type": "file", "file": {"filename": "f2", "file_data": "d"}},
         {"type": "file", "file": {"filename": "f3", "file_data": "d"}},
     ]
-    texts, attachments = await request_transformer._process_content_parts(content)
+    texts, attachments = await request_transformer._process_content_parts(
+        content, giga_client=object()
+    )
     assert len(attachments) == 2
     assert texts == []
     request_transformer.logger.warning.assert_called_with(
@@ -43,7 +45,9 @@ async def test_process_content_parts_limits(request_transformer):
 @pytest.mark.asyncio
 async def test_process_content_parts_file(request_transformer):
     content = [{"type": "file", "file": {"filename": "f.txt", "file_data": "data"}}]
-    texts, attachments = await request_transformer._process_content_parts(content)
+    texts, attachments = await request_transformer._process_content_parts(
+        content, giga_client=object()
+    )
     assert len(attachments) == 1
     assert attachments[0] == "file_id_123"
 
