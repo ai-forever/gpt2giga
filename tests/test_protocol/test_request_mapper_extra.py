@@ -74,8 +74,8 @@ async def test_transform_messages_roles(request_transformer):
     assert res[2]["content"] == "sys_later"
 
     assert res[3]["role"] == "function"
-    # Content of tool role is json dumped
-    assert res[3]["content"] == '"tool_res"'
+    # Tool/function results must be a JSON object for GigaChat
+    assert res[3]["content"] == '{"result": "tool_res"}'
 
 
 @pytest.mark.asyncio

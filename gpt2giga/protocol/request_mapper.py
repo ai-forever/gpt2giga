@@ -1,3 +1,4 @@
+import ast
 import json
 from typing import List, Dict, Tuple, Optional, Any
 
@@ -14,6 +15,59 @@ from gpt2giga.protocol.attachments import AttachmentProcessor
 
 class RequestTransformer:
     """Трансформер запросов из OpenAI в GigaChat формат"""
+
+    @staticmethod
+    def _ensure_json_object_str(value: Any) -> str:
+        """
+        GigaChat требует, чтобы результат function/tool был валидным JSON object.
+        При этом SDK `gigachat.models.Messages` ожидает `content: str`.
+
+        OpenAI-совместимые клиенты часто присылают:
+        - dict (ок)
+        - JSON-строку (нужно json.loads)
+        - двойную JSON-строку (нужно json.loads несколько раз)
+        - python-подобную строку (single quotes) — пробуем ast.literal_eval
+        """
+        if value is None:
+            return "{}"
+
+        if isinstance(value, bytes):
+            try:
+                value = value.decode("utf-8", errors="ignore")
+            except Exception:
+                return json.dumps({"result": str(value)}, ensure_ascii=False)
+
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=False)
+
+        if isinstance(value, str):
+            s: Any = value.strip()
+            for _ in range(3):
+                if not isinstance(s, str):
+                    break
+                if s == "":
+                    return "{}"
+                try:
+                    s = json.loads(s)
+                    continue
+                except json.JSONDecodeError:
+                    break
+
+            if isinstance(s, dict):
+                return json.dumps(s, ensure_ascii=False)
+            if isinstance(s, (list, int, float, bool)) or s is None:
+                return json.dumps({"result": s}, ensure_ascii=False)
+
+            if isinstance(s, str):
+                try:
+                    lit = ast.literal_eval(s)
+                    if isinstance(lit, dict):
+                        return json.dumps(lit, ensure_ascii=False)
+                    return json.dumps({"result": lit}, ensure_ascii=False)
+                except Exception:
+                    return json.dumps({"result": s}, ensure_ascii=False)
+
+        return json.dumps({"result": value}, ensure_ascii=False)
 
     def __init__(
         self,
@@ -35,19 +89,24 @@ class RequestTransformer:
         for i, message in enumerate(messages):
             self.logger.debug(f"Processing message {i}: role={message.get('role')}")
 
-            # Удаляем неиспользуемые поля
-            message.pop("name", None)
-
             # Преобразуем роли
             if message["role"] == "developer":
                 message["role"] = "system"
+                # Удаляем неиспользуемые поля
+                message.pop("name", None)
             elif message["role"] == "system" and i > 0:
                 message["role"] = "user"
+                # Удаляем неиспользуемые поля
+                message.pop("name", None)
             elif message["role"] == "tool":
                 message["role"] = "function"
-                message["content"] = json.dumps(
-                    message.get("content", ""), ensure_ascii=False
+                # Для function role желательно сохранять name (если пришел от клиента)
+                message["content"] = self._ensure_json_object_str(
+                    message.get("content")
                 )
+            else:
+                # Удаляем неиспользуемые поля
+                message.pop("name", None)
 
             # Обрабатываем контент
             if message.get("content") is None:
@@ -250,17 +309,24 @@ class RequestTransformer:
             message_payload.append({"role": "user", "content": input_})
 
         elif isinstance(input_, list):
+            last_function_name: Optional[str] = None
             for message in input_:
                 message_type = message.get("type")
                 if message_type == "function_call_output":
+                    # Best effort: attach name from last function_call so GigaChat sees function name
+                    fn_name = message.get("name") or last_function_name
                     message_payload.append(
                         {
                             "role": "function",
-                            "content": json.dumps(message.get("output")),
+                            "name": fn_name,
+                            "content": self._ensure_json_object_str(
+                                message.get("output")
+                            ),
                         }
                     )
                     continue
                 elif message_type == "function_call":
+                    last_function_name = message.get("name") or last_function_name
                     message_payload.append(self.mock_completion(message))
                     continue
 
