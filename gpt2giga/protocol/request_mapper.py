@@ -151,22 +151,27 @@ class RequestTransformer:
                 break
             cur_attachment_count += message_attachments
 
-    def transform_chat_parameters(self, data: Dict) -> Dict:
-        """Трансформирует параметры чата (Chat Completions API)"""
+    def _transform_common_parameters(self, data: Dict) -> Dict:
+        """Общая логика трансформации параметров для Chat Completions и Responses API"""
         transformed = data.copy()
 
-        # Обрабатываем температуру
+        # Обрабатываем модель
         gpt_model = data.get("model", None)
         if not self.config.proxy_settings.pass_model and gpt_model:
             del transformed["model"]
+
+        # Обрабатываем температуру
         temperature = transformed.pop("temperature", 0)
         if temperature == 0:
             transformed["top_p"] = 0
         elif temperature > 0:
             transformed["temperature"] = temperature
+
+        # Обрабатываем max_tokens
         max_tokens = transformed.pop("max_output_tokens", None)
         if max_tokens:
             transformed["max_tokens"] = max_tokens
+
         # Преобразуем tools в functions
         if "functions" not in transformed and "tools" in transformed:
             functions = []
@@ -176,25 +181,35 @@ class RequestTransformer:
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
+        return transformed
+
+    def _apply_json_schema_as_function(
+        self, transformed: Dict, schema_name: str, schema: Dict
+    ) -> None:
+        """Применяет JSON schema как function call для structured output"""
+        function_def = {
+            "name": schema_name,
+            "description": f"Output response in structured format: {schema_name}",
+            "parameters": schema,
+        }
+
+        if "functions" not in transformed:
+            transformed["functions"] = []
+
+        transformed["functions"].append(function_def)
+        transformed["function_call"] = {"name": schema_name}
+
+    def transform_chat_parameters(self, data: Dict) -> Dict:
+        """Трансформирует параметры чата (Chat Completions API)"""
+        transformed = self._transform_common_parameters(data)
+
         response_format: dict | None = transformed.pop("response_format", None)
         if response_format:
             if response_format.get("type") == "json_schema":
                 json_schema = response_format.get("json_schema", {})
                 schema_name = json_schema.get("name", "structured_output")
                 schema = json_schema.get("schema")
-
-                function_def = {
-                    "name": schema_name,
-                    "description": f"Output response in structured format: {schema_name}",
-                    "parameters": schema,
-                }
-
-                if "functions" not in transformed:
-                    transformed["functions"] = []
-
-                transformed["functions"].append(function_def)
-                transformed["function_call"] = {"name": schema_name}
-
+                self._apply_json_schema_as_function(transformed, schema_name, schema)
             else:
                 transformed["response_format"] = {
                     "type": response_format.get("type"),
@@ -205,28 +220,7 @@ class RequestTransformer:
 
     def transform_responses_parameters(self, data: Dict) -> Dict:
         """Трансформирует параметры responses (Responses API)"""
-        transformed = data.copy()
-
-        # Обрабатываем температуру
-        gpt_model = data.get("model", None)
-        if not self.config.proxy_settings.pass_model and gpt_model:
-            del transformed["model"]
-        temperature = transformed.pop("temperature", 0)
-        if temperature == 0:
-            transformed["top_p"] = 0
-        elif temperature > 0:
-            transformed["temperature"] = temperature
-        max_tokens = transformed.pop("max_output_tokens", None)
-        if max_tokens:
-            transformed["max_tokens"] = max_tokens
-        # Преобразуем tools в functions
-        if "functions" not in transformed and "tools" in transformed:
-            functions = []
-            for tool in transformed["tools"]:
-                if tool["type"] == "function":
-                    functions.append(tool.get("function", tool))
-            transformed["functions"] = functions
-            self.logger.debug(f"Transformed {len(functions)} tools to functions")
+        transformed = self._transform_common_parameters(data)
 
         response_format_responses: dict | None = transformed.pop("text", None)
         if response_format_responses:
@@ -239,18 +233,7 @@ class RequestTransformer:
                 else:
                     schema_name = response_format.get("name", "structured_output")
                     schema = response_format.get("schema")
-
-                function_def = {
-                    "name": schema_name,
-                    "description": f"Output response in structured format: {schema_name}",
-                    "parameters": schema,
-                }
-
-                if "functions" not in transformed:
-                    transformed["functions"] = []
-
-                transformed["functions"].append(function_def)
-                transformed["function_call"] = {"name": schema_name}
+                self._apply_json_schema_as_function(transformed, schema_name, schema)
             else:
                 transformed["response_format"] = response_format
 
@@ -260,7 +243,9 @@ class RequestTransformer:
         message_payload = []
         if "instructions" in data:
             message_payload.append({"role": "system", "content": data["instructions"]})
+            del data["instructions"]
         input_ = data["input"]
+        del data["input"]
         if isinstance(input_, str):
             message_payload.append({"role": "user", "content": input_})
 
