@@ -59,11 +59,14 @@ def test_pass_token_middleware(monkeypatch):
     )
     test_app.state.config = config
 
-    # Ensure middleware stays offline by stubbing GigaChat construction
-    monkeypatch.setattr("gpt2giga.middlewares.pass_token.GigaChat", FakeGigaChat)
+    # Ensure middleware stays offline by stubbing GigaChat construction in gigachat module
+    monkeypatch.setattr("gigachat.GigaChat", FakeGigaChat)
 
     # Base (app-scoped) GigaChat client
     test_app.state.gigachat_client = FakeGigaChat()
+
+    # No connection pool for this test (legacy behavior fallback)
+    test_app.state.gigachat_pool = None
 
     # Mock logger
     test_app.state.logger = MagicMock()

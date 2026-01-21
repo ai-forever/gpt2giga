@@ -1,7 +1,8 @@
 # logger.py
-import sys
-from loguru import logger
 import contextvars
+import sys
+
+from loguru import logger
 
 # Context variable for rquid
 rquid_context = contextvars.ContextVar("rquid", default="-")
