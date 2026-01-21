@@ -1,6 +1,7 @@
 import json
 from typing import List, Dict, Tuple, Optional, Any
 
+from gigachat import GigaChat
 from gigachat.models import (
     Messages,
     MessagesRole,
@@ -24,7 +25,9 @@ class RequestTransformer:
         self.logger = logger
         self.attachment_processor = attachment_processor
 
-    async def transform_messages(self, messages: List[Dict]) -> List[Dict]:
+    async def transform_messages(
+        self, messages: List[Dict], giga_client: Optional[GigaChat] = None
+    ) -> List[Dict]:
         """Трансформирует сообщения в формат GigaChat"""
         transformed_messages = []
         attachment_count = 0
@@ -63,7 +66,7 @@ class RequestTransformer:
             # Обрабатываем составной контент (текст + изображения)
             if isinstance(message["content"], list):
                 texts, attachments = await self._process_content_parts(
-                    message["content"]
+                    message["content"], giga_client
                 )
                 message["content"] = "\n".join(texts)
                 message["attachments"] = attachments
@@ -78,7 +81,7 @@ class RequestTransformer:
         return transformed_messages
 
     async def _process_content_parts(
-        self, content_parts: List[Dict]
+        self, content_parts: List[Dict], giga_client: Optional[GigaChat] = None
     ) -> Tuple[List[str], List[str]]:
         """Обрабатывает части контента (текст и изображения)"""
         texts = []
@@ -104,17 +107,30 @@ class RequestTransformer:
             ):
                 url = content_part["image_url"].get("url")
                 if url is not None:
-                    file_id = await processor.upload_file(url)
-                    if file_id:
-                        attachments.append(file_id)
-                        logger.info(f"Added attachment: {file_id}")
+                    # If giga_client is not provided (e.g. tests), upload might fail if processor needs it
+                    # But we assume caller provides it now.
+                    # If giga_client is None, we might want to fallback or error?
+                    # Given AttachmentProcessor refactor, it MUST receive a client.
+                    if giga_client:
+                        file_id = await processor.upload_file(giga_client, url)
+                        if file_id:
+                            attachments.append(file_id)
+                            logger.info(f"Added attachment: {file_id}")
+                    else:
+                        logger.warning("giga_client not provided for image upload")
+
             elif ctype == "file" and processor is not None and content_part.get("file"):
                 filename = content_part["file"].get("filename")
                 file_data = content_part["file"].get("file_data")
-                file_id = await processor.upload_file(file_data, filename)
-                if file_id:
-                    attachments.append(file_id)
-                    logger.info(f"Added attachment: {file_id}")
+                if giga_client:
+                    file_id = await processor.upload_file(
+                        giga_client, file_data, filename
+                    )
+                    if file_id:
+                        attachments.append(file_id)
+                        logger.info(f"Added attachment: {file_id}")
+                else:
+                    logger.warning("giga_client not provided for file upload")
         if len(attachments) > max_attachments:
             logger.warning(
                 "GigaChat can only handle 2 images per message. Cutting off excess."
@@ -305,10 +321,12 @@ class RequestTransformer:
             function_call=FunctionCall(name=name, arguments=arguments),
         ).model_dump()
 
-    async def _finalize_transformation(self, transformed_data: dict) -> Dict[str, Any]:
+    async def _finalize_transformation(
+        self, transformed_data: dict, giga_client: Optional[GigaChat] = None
+    ) -> Dict[str, Any]:
         """Общая логика трансформации сообщений и логгирования"""
         transformed_data["messages"] = await self.transform_messages(
-            transformed_data.get("messages", [])
+            transformed_data.get("messages", []), giga_client
         )
 
         # Collapse messages
@@ -325,31 +343,39 @@ class RequestTransformer:
 
         return transformed_data
 
-    async def prepare_chat_completion(self, data: dict) -> Dict[str, Any]:
+    async def prepare_chat_completion(
+        self, data: dict, giga_client: Optional[GigaChat] = None
+    ) -> Dict[str, Any]:
         """Подготовка запроса для Chat Completions API"""
         transformed_data = self.transform_chat_parameters(data)
-        return await self._finalize_transformation(transformed_data)
+        return await self._finalize_transformation(transformed_data, giga_client)
 
-    async def prepare_response(self, data: dict) -> Dict[str, Any]:
+    async def prepare_response(
+        self, data: dict, giga_client: Optional[GigaChat] = None
+    ) -> Dict[str, Any]:
         """Подготовка запроса для Responses API"""
         transformed_data = self.transform_responses_parameters(data)
         transformed_data["messages"] = self.transform_response_format(transformed_data)
-        return await self._finalize_transformation(transformed_data)
+        return await self._finalize_transformation(transformed_data, giga_client)
 
     # Backward-compatible API (used by older tests / integrations)
-    async def send_to_gigachat(self, data: dict) -> Dict[str, Any]:
+    async def send_to_gigachat(
+        self, data: dict, giga_client: Optional[GigaChat] = None
+    ) -> Dict[str, Any]:
         """
         Совместимый алиас: исторически метод возвращал подготовленный payload для GigaChat.
         Сейчас это делает `prepare_chat_completion`.
         """
-        return await self.prepare_chat_completion(data)
+        return await self.prepare_chat_completion(data, giga_client)
 
-    async def send_to_gigachat_responses(self, data: dict) -> Dict[str, Any]:
+    async def send_to_gigachat_responses(
+        self, data: dict, giga_client: Optional[GigaChat] = None
+    ) -> Dict[str, Any]:
         """
         Совместимый алиас для Responses API.
         Сейчас это делает `prepare_response`.
         """
-        return await self.prepare_response(data)
+        return await self.prepare_response(data, giga_client)
 
     @staticmethod
     def _collapse_messages(messages: List[Messages]) -> List[Messages]:

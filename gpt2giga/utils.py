@@ -1,6 +1,6 @@
 import json
 from functools import wraps
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 import gigachat
 from aioitertools import enumerate as aio_enumerate
@@ -107,10 +107,16 @@ def exceptions_handler(func):
 
 
 async def stream_chat_completion_generator(
-    request: Request, model: str, chat_messages: Chat, response_id: str
+    request: Request,
+    model: str,
+    chat_messages: Chat,
+    response_id: str,
+    giga_client: Optional[GigaChat] = None,
 ) -> AsyncGenerator[str, None]:
+    if not giga_client:
+        giga_client = request.app.state.gigachat_client
     try:
-        async for chunk in request.app.state.gigachat_client.astream(chat_messages):
+        async for chunk in giga_client.astream(chat_messages):
             if await request.is_disconnected():
                 break
             processed = request.app.state.response_processor.process_stream_chunk(
@@ -126,12 +132,15 @@ async def stream_chat_completion_generator(
 
 
 async def stream_responses_generator(
-    request: Request, chat_messages: Chat, response_id: str
+    request: Request,
+    chat_messages: Chat,
+    response_id: str,
+    giga_client: Optional[GigaChat] = None,
 ) -> AsyncGenerator[str, None]:
+    if not giga_client:
+        giga_client = request.app.state.gigachat_client
     try:
-        async for i, chunk in aio_enumerate(
-            request.app.state.gigachat_client.astream(chat_messages)
-        ):
+        async for i, chunk in aio_enumerate(giga_client.astream(chat_messages)):
             if await request.is_disconnected():
                 break
             processed = (
