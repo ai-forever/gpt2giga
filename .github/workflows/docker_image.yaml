@@ -18,6 +18,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Get version
+      id: get_version
+      run: echo "VERSION=$(grep '^version =' pyproject.toml | head -n1 | cut -d'"' -f2)" >> $GITHUB_OUTPUT
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
@@ -48,6 +52,8 @@ jobs:
         tags: |
           ${{ env.IMAGE_NAME }}:python${{ matrix.python-version }}
           ${{ env.IMAGE_NAME }}:python${{ matrix.python-version }}-${{ github.sha }}
+          ${{ env.IMAGE_NAME }}:${{ steps.get_version.outputs.VERSION }}-python${{ matrix.python-version }}
+          ${{ env.IMAGE_NAME }}:${{ steps.get_version.outputs.VERSION }}
           ${{ env.IMAGE_NAME }}:latest
         labels: |
           org.opencontainers.image.source=https://github.com/${{ github.repository }}

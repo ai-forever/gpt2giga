@@ -46,7 +46,7 @@ async def test_attachment_processor_httpx_invalid_content_type(monkeypatch):
             self.content = b"<html>not image</html>"
 
     monkeypatch.setattr(
-        "gpt2giga.protocol.httpx.get", lambda url, timeout=30: FakeResp()
+        "gpt2giga.protocol.attachments.httpx.get", lambda url, timeout=30: FakeResp()
     )
 
     client = DummyClient()

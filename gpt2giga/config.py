@@ -1,8 +1,7 @@
 from typing import Optional, Literal
-
-from gigachat.pydantic_v1 import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from gigachat.settings import Settings as GigachatSettings
-from pydantic.v1 import Field
+from pydantic import Field
 
 
 class ProxySettings(BaseSettings):
@@ -43,15 +42,26 @@ class ProxySettings(BaseSettings):
         default=None,
         description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
     )
-    env_path: Optional[str] = Field(None, description="Путь к .env файлу")
 
-    class Config:
-        env_prefix = "gpt2giga_"
-        case_sensitive = False
+    model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)
+
+
+class GigaChatCLI(GigachatSettings):
+    model_config = SettingsConfigDict(env_prefix="gigachat_", case_sensitive=False)
 
 
 class ProxyConfig(BaseSettings):
-    """Конфигурация прокси-сервера"""
+    """Конфигурация прокси-сервера gpt2giga"""
 
-    proxy_settings: ProxySettings = Field(default_factory=ProxySettings)
-    gigachat_settings: GigachatSettings = Field(default_factory=GigachatSettings)
+    proxy_settings: ProxySettings = Field(default_factory=ProxySettings, alias="proxy")
+    gigachat_settings: GigaChatCLI = Field(
+        default_factory=GigaChatCLI, alias="gigachat"
+    )
+    env_path: Optional[str] = Field(None, description="Path to .env file")
+
+    model_config = SettingsConfigDict(
+        cli_parse_args=True,
+        cli_prog_name="gpt2giga",
+        cli_kebab_case=True,
+        cli_ignore_unknown_args=True,
+    )

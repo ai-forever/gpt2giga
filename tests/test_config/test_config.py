@@ -3,7 +3,8 @@ import pytest
 from gpt2giga.config import ProxySettings, ProxyConfig
 
 
-def test_proxy_settings_defaults():
+def test_proxy_settings_defaults(monkeypatch):
+    monkeypatch.delenv("GPT2GIGA_HOST", raising=False)
     s = ProxySettings()
     assert s.host == "localhost"
     assert isinstance(s.port, int)

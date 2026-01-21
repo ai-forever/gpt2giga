@@ -8,7 +8,7 @@ def encode_file(file_path):
 
 
 client = OpenAI(base_url="http://localhost:8090", api_key="0")
-file_path = "path_to_file.pdf"
+file_path = "../../Day_2_v6.pdf"
 
 # Getting the base64 string
 base64_pdf = encode_file(file_path)

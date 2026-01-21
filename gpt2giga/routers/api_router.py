@@ -22,7 +22,7 @@ router = APIRouter(tags=["API"])
 async def show_available_models(request: Request):
     state = request.app.state
     response = await state.gigachat_client.aget_models()
-    models = [i.dict(by_alias=True) for i in response.data]
+    models = [i.model_dump(by_alias=True) for i in response.data]
     current_timestamp = int(time.time())
     for model in models:
         model["created"] = current_timestamp
@@ -36,7 +36,7 @@ async def show_available_models(request: Request):
 async def get_model(model: str, request: Request):
     state = request.app.state
     response = await state.gigachat_client.aget_model(model=model)
-    model = response.dict(by_alias=True)
+    model = response.model_dump(by_alias=True)
     model["created"] = int(time.time())
     return OpenAIModel(**model)
 
@@ -47,39 +47,25 @@ async def chat_completions(request: Request):
     data = await request.json()
     stream = data.get("stream", False)
     tools = "tools" in data or "functions" in data
-    is_response_api = "input" in data
     current_rquid = rquid_context.get()
     state = request.app.state
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
         state.logger.debug(f"Functions count: {len(data['functions'])}")
-    chat_messages, response_format = await state.request_transformer.send_to_gigachat(
-        data
-    )
+    chat_messages = await state.request_transformer.prepare_chat_completion(data)
     if not stream:
         response = await state.gigachat_client.achat(chat_messages)
-        if is_response_api:
-            processed = state.response_processor.process_response_api(
-                data, response, chat_messages.model, current_rquid
-            )
-        else:
-            processed = state.response_processor.process_response(
-                response, chat_messages.model, current_rquid, response_format
-            )
+        processed = state.response_processor.process_response(
+            response, data["model"], current_rquid, request_data=data
+        )
         return processed
     else:
-        if is_response_api:
-            return StreamingResponse(
-                stream_responses_generator(request, chat_messages, current_rquid),
-                media_type="text/event-stream",
-            )
-        else:
-            return StreamingResponse(
-                stream_chat_completion_generator(
-                    request, chat_messages, current_rquid, response_format
-                ),
-                media_type="text/event-stream",
-            )
+        return StreamingResponse(
+            stream_chat_completion_generator(
+                request, data["model"], chat_messages, current_rquid
+            ),
+            media_type="text/event-stream",
+        )
 
 
 @router.post("/embeddings")
@@ -91,7 +77,7 @@ async def embeddings(request: Request):
 
     if isinstance(inputs, list):
         new_inputs = []
-        if isinstance(inputs[0], int):  # List[int]:
+        if len(inputs) > 0 and isinstance(inputs[0], int):  # List[int]
             encoder = tiktoken.encoding_for_model(gpt_model)
             new_inputs = encoder.decode(inputs)
         else:
@@ -116,4 +102,23 @@ async def embeddings(request: Request):
 @router.post("/responses")
 @exceptions_handler
 async def responses(request: Request):
-    return await chat_completions(request)
+    data = await request.json()
+    stream = data.get("stream", False)
+    tools = "tools" in data or "functions" in data
+    current_rquid = rquid_context.get()
+    state = request.app.state
+    if tools:
+        data["functions"] = convert_tool_to_giga_functions(data)
+        state.logger.debug(f"Functions count: {len(data['functions'])}")
+    chat_messages = await state.request_transformer.prepare_response(data)
+    if not stream:
+        response = await state.gigachat_client.achat(chat_messages)
+        processed = state.response_processor.process_response_api(
+            data, response, data["model"], current_rquid
+        )
+        return processed
+    else:
+        return StreamingResponse(
+            stream_responses_generator(request, chat_messages, current_rquid),
+            media_type="text/event-stream",
+        )

@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
@@ -28,9 +26,7 @@ def make_app():
             return FakeModels()
 
         async def aget_model(self, model: str):
-            return SimpleNamespace(
-                dict=lambda **kw: {"id": model, "object": "model", "owned_by": "m1"}
-            )
+            return Model(id=model, object="model", owned_by="m1")
 
     app.state.gigachat_client = FakeClient()
     return app

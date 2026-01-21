@@ -4,21 +4,36 @@ FROM python:${PYTHON_VERSION}-slim AS builder
 
 WORKDIR /app
 
-RUN pip install poetry
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml README.md ./
-
 COPY gpt2giga/ gpt2giga/
 
+RUN uv build --wheel
 
-RUN poetry build
 
-FROM python:${PYTHON_VERSION}-slim
+FROM python:${PYTHON_VERSION}-slim AS runtime
 
 WORKDIR /app
 
-COPY --from=builder /app/dist/*.whl .
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
 
-RUN pip install *.whl && rm *.whl
+COPY --from=builder /app/dist/*.whl /tmp/
+
+RUN python -m venv "$VIRTUAL_ENV" \
+    && pip install --no-cache-dir /tmp/*.whl \
+    && rm -rf /tmp/*.whl \
+    && find "$VIRTUAL_ENV" -type d -name "__pycache__" -prune -exec rm -rf '{}' + \
+    && find "$VIRTUAL_ENV" -type f -name "*.pyc" -delete \
+    && find "$VIRTUAL_ENV" -type d \( -name "tests" -o -name "test" \) -prune -exec rm -rf '{}' + \
+    && pip uninstall -y pip setuptools wheel
 
 CMD ["gpt2giga"]

@@ -9,10 +9,8 @@ from gpt2giga.utils import (
 
 
 class FakeResponseProcessor:
-    def process_stream_chunk(
-        self, chunk, model, response_id=None, response_format=None
-    ):
-        return {"model": model, "delta": chunk.dict()["choices"][0]["delta"]}
+    def process_stream_chunk(self, chunk, model):
+        return {"model": model, "delta": chunk.model_dump()["choices"][0]["delta"]}
 
     def process_stream_chunk_response(
         self, chunk, sequence_number: int, response_id: str
@@ -20,7 +18,7 @@ class FakeResponseProcessor:
         return {
             "id": response_id,
             "sequence": sequence_number,
-            "delta": chunk.dict()["choices"][0]["delta"],
+            "delta": chunk.model_dump()["choices"][0]["delta"],
         }
 
 
@@ -74,7 +72,7 @@ async def test_stream_chat_completion_generator_exception_path():
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, chat, response_id="1"):
+    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
         lines.append(line)
     assert len(lines) == 2
     assert "Stream interrupted" in lines[0]

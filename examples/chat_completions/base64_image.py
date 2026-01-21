@@ -2,7 +2,7 @@ import base64
 
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8000", api_key="0")
+client = OpenAI(base_url="http://localhost:8090", api_key="0")
 
 
 def encode_image(image_path):
