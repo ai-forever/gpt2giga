@@ -1,7 +1,8 @@
 from typing import Optional, Literal
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from gigachat.settings import Settings as GigachatSettings
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProxySettings(BaseSettings):

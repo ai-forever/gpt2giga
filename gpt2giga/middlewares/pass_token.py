@@ -1,7 +1,8 @@
-from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi import Request
 from typing import Callable
+
+from fastapi import Request
 from gigachat import GigaChat
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from gpt2giga.utils import pass_token_to_gigachat
 
