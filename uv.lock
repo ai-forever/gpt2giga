@@ -988,16 +988,16 @@ wheels = [
 
 [[package]]
 name = "gigachat"
-version = "0.2.0b2"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/dc/dfc8d8cee6a49551e28690c3c9f463f68d63ae6ad9e733eb086db2089d55/gigachat-0.2.0b2.tar.gz", hash = "sha256:a9d5f76163955b65b71bebb26a7574d5f0d90034e3bbbe29a6eccba17b07bd54", size = 30904, upload-time = "2025-12-26T09:58:24.707Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/9d/b765e89b37742d8ea4a203adf691647d37d75b49255c463a647e585f4245/gigachat-0.2.0.tar.gz", hash = "sha256:d3eb936d5c812abaed30553492ab8de5917268f35f4638769f6f9bc1fcf04ff9", size = 32222, upload-time = "2026-01-22T10:23:09.154Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/d6/77241d9074dd80d8ca6f3f1993e759b46e6a8569cd10004a55b956f1cca0/gigachat-0.2.0b2-py3-none-any.whl", hash = "sha256:b21b2196b732393b8a48dea32551984867d34c6870ce561c414b7560664dc311", size = 41018, upload-time = "2025-12-26T09:58:23.306Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/44/e2d8f2078301e64cfbe942c45fac500012a9b60eb1ca6c367c7ff1689454/gigachat-0.2.0-py3-none-any.whl", hash = "sha256:745927730bf77632634c9db0cb6c19e06c3099a9d4a032207686b91316b8d935", size = 42309, upload-time = "2026-01-22T10:23:07.571Z" },
 ]
 
 [[package]]
@@ -1064,7 +1064,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.10.10,<4" },
     { name = "aioitertools", specifier = ">=0.13.0,<0.14" },
     { name = "fastapi", specifier = ">=0.128.0,<0.129.0" },
-    { name = "gigachat", specifier = "==0.2.0b2" },
+    { name = "gigachat", specifier = ">=0.2.0,<0.3.0" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=2.3.0,<3" },
     { name = "pillow", specifier = ">=12,<13" },
