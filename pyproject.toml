@@ -1,26 +1,25 @@
 [project]
 name = "gpt2giga"
-version = "0.1.0b2"
+version = "0.1.0"
 description = "Утилита для проксирования OpenAI-запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
-requires-python = ">=3.10,<4,<3.14"
+requires-python = ">=3.10,<4,<3.15"
 readme = "README.md"
 license = "MIT"
 dependencies = [
-    "asyncio>=3.4.3,<4",
     "python-dotenv>=1.0.1,<2",
     "aiohttp>=3.10.10,<4",
-    "tiktoken>=0.9.0,<0.10",
-    "pillow>=11.1.0,<12",
+    "tiktoken>=0.12.0,<0.13",
+    "pillow>=12,<13",
     "uvicorn>=0.37.0,<0.38",
     "openai>=2.3.0,<3",
-    "aioitertools>=0.12.0,<0.13",
+    "aioitertools>=0.13.0,<0.14",
     "loguru>=0.7.3,<0.8",
     "sse-starlette>=3.0.3,<4",
-    "pydantic-settings>=2.12.0",
-    "gigachat==0.2.0b2",
-    "fastapi>=0.127.0,<0.128.0",
+    "pydantic-settings>=2.12.0,<3",
+    "fastapi>=0.128.0,<0.129.0",
     "starlette>=0.49,<1",
+    "gigachat>=0.2.0,<0.3.0",
 ]
 
 [project.scripts]
