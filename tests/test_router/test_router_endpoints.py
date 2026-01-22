@@ -36,7 +36,7 @@ class FakeGigachat:
             }
         )
 
-    async def astream(self, chat):
+    def astream(self, chat):
         async def gen():
             yield MockResponse(
                 {"choices": [{"delta": {"content": "he"}}], "usage": None}
@@ -52,10 +52,10 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
-    async def prepare_chat_completion(self, data):
+    async def prepare_chat_completion(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
 
-    async def prepare_response(self, data):
+    async def prepare_response(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
 
 

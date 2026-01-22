@@ -6,6 +6,7 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
+
 from gpt2giga.logger import rquid_context
 from gpt2giga.utils import (
     exceptions_handler,
@@ -21,7 +22,8 @@ router = APIRouter(tags=["API"])
 @exceptions_handler
 async def show_available_models(request: Request):
     state = request.app.state
-    response = await state.gigachat_client.aget_models()
+    giga_client = getattr(request.state, "gigachat_client", state.gigachat_client)
+    response = await giga_client.aget_models()
     models = [i.model_dump(by_alias=True) for i in response.data]
     current_timestamp = int(time.time())
     for model in models:
@@ -35,7 +37,8 @@ async def show_available_models(request: Request):
 @exceptions_handler
 async def get_model(model: str, request: Request):
     state = request.app.state
-    response = await state.gigachat_client.aget_model(model=model)
+    giga_client = getattr(request.state, "gigachat_client", state.gigachat_client)
+    response = await giga_client.aget_model(model=model)
     model = response.model_dump(by_alias=True)
     model["created"] = int(time.time())
     return OpenAIModel(**model)
@@ -49,12 +52,15 @@ async def chat_completions(request: Request):
     tools = "tools" in data or "functions" in data
     current_rquid = rquid_context.get()
     state = request.app.state
+    giga_client = getattr(request.state, "gigachat_client", state.gigachat_client)
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
         state.logger.debug(f"Functions count: {len(data['functions'])}")
-    chat_messages = await state.request_transformer.prepare_chat_completion(data)
+    chat_messages = await state.request_transformer.prepare_chat_completion(
+        data, giga_client
+    )
     if not stream:
-        response = await state.gigachat_client.achat(chat_messages)
+        response = await giga_client.achat(chat_messages)
         processed = state.response_processor.process_response(
             response, data["model"], current_rquid, request_data=data
         )
@@ -62,7 +68,7 @@ async def chat_completions(request: Request):
     else:
         return StreamingResponse(
             stream_chat_completion_generator(
-                request, data["model"], chat_messages, current_rquid
+                request, data["model"], chat_messages, current_rquid, giga_client
             ),
             media_type="text/event-stream",
         )
@@ -92,7 +98,10 @@ async def embeddings(request: Request):
     else:
         new_inputs = [inputs]
 
-    embeddings = await request.app.state.gigachat_client.aembeddings(
+    giga_client = getattr(
+        request.state, "gigachat_client", request.app.state.gigachat_client
+    )
+    embeddings = await giga_client.aembeddings(
         texts=new_inputs, model=request.app.state.config.proxy_settings.embeddings
     )
 
@@ -107,18 +116,21 @@ async def responses(request: Request):
     tools = "tools" in data or "functions" in data
     current_rquid = rquid_context.get()
     state = request.app.state
+    giga_client = getattr(request.state, "gigachat_client", state.gigachat_client)
     if tools:
         data["functions"] = convert_tool_to_giga_functions(data)
         state.logger.debug(f"Functions count: {len(data['functions'])}")
-    chat_messages = await state.request_transformer.prepare_response(data)
+    chat_messages = await state.request_transformer.prepare_response(data, giga_client)
     if not stream:
-        response = await state.gigachat_client.achat(chat_messages)
+        response = await giga_client.achat(chat_messages)
         processed = state.response_processor.process_response_api(
             data, response, data["model"], current_rquid
         )
         return processed
     else:
         return StreamingResponse(
-            stream_responses_generator(request, chat_messages, current_rquid),
+            stream_responses_generator(
+                request, chat_messages, current_rquid, giga_client
+            ),
             media_type="text/event-stream",
         )

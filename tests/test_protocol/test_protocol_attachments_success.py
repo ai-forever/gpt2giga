@@ -20,7 +20,7 @@ class DummyClient:
 @pytest.mark.asyncio
 async def test_attachment_processor_success_with_pil(monkeypatch):
     client = DummyClient()
-    p = AttachmentProcessor(client, logger)
+    p = AttachmentProcessor(logger)
     # Используем data URL с корректной base64-строкой PNG 1x1
     img = Image.new("RGB", (1, 1))
     buf = io.BytesIO()
@@ -29,5 +29,5 @@ async def test_attachment_processor_success_with_pil(monkeypatch):
     import base64
 
     data_url = "data:image/png;base64," + base64.b64encode(b64).decode()
-    file_id = await p.upload_file(data_url)
+    file_id = await p.upload_file(client, data_url)
     assert file_id == "ok2"

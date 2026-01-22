@@ -10,7 +10,7 @@ class DummyClient:
 
 
 def test_attachment_processor_construction():
-    p = AttachmentProcessor(DummyClient(), logger)
+    p = AttachmentProcessor(logger)
     assert hasattr(p, "upload_file")
 
 

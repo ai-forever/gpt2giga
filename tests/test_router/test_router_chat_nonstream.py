@@ -35,10 +35,10 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
-    async def prepare_chat_completion(self, data):
+    async def prepare_chat_completion(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
 
-    async def prepare_response(self, data):
+    async def prepare_response(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
 
 

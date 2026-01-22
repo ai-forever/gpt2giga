@@ -1,6 +1,8 @@
 import argparse
 import os
+
 from dotenv import find_dotenv, load_dotenv
+
 from gpt2giga.config import ProxyConfig
 
 
