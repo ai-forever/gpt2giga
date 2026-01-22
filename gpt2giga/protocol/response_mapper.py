@@ -285,6 +285,7 @@ class ResponseProcessor:
                         "function": function_call,
                     }
                 ]
+                message.pop("function_call", None)
             else:
                 message["function_call"] = function_call
             message.pop("functions_state_id", None)
