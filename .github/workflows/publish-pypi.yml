@@ -5,7 +5,7 @@ on:
 
 jobs:
   pypi_release:
-    name: Builds Using Poetry and Publishes to PyPI
+    name: Build with uv and publish to PyPI
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -16,14 +16,27 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install poetry
-          poetry install
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
 
-      - name: Add PyPI token
-        run: poetry config pypi-token.pypi "${{ secrets.PYPI_API_KEY }}"
+      - name: Validate release tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]["version"])')"
+          echo "Release tag: ${GITHUB_REF_NAME} (version=${TAG_VERSION})"
+          echo "pyproject.toml version: ${PKG_VERSION}"
+          test "${TAG_VERSION}" = "${PKG_VERSION}"
+
+      - name: Build sdist and wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv pip install --system --upgrade pip build
+          python -m build
 
       - name: Publish to PyPI
-        run: poetry publish --build
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_KEY }}
