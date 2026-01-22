@@ -242,8 +242,9 @@ class RequestTransformer:
 
         return transformed
 
+    @staticmethod
     def _apply_json_schema_as_function(
-        self, transformed: Dict, schema_name: str, schema: Dict
+        transformed: Dict, schema_name: str, schema: Dict
     ) -> None:
         """Применяет JSON schema как function call для structured output"""
         function_def = {
