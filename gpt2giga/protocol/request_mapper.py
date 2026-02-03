@@ -337,7 +337,6 @@ class RequestTransformer:
                 schema = json_schema.get("schema")
                 self._apply_json_schema_as_function(transformed, schema_name, schema)
             else:
-                print(response_format)
                 transformed["response_format"] = {
                     "type": response_format.get("type"),
                     **response_format.get("json_schema", {}),
