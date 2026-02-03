@@ -17,6 +17,66 @@ class RequestTransformer:
     """Трансформер запросов из OpenAI в GigaChat формат"""
 
     @staticmethod
+    def _resolve_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Разрешает $ref ссылки и anyOf/oneOf в JSON schema.
+        GigaChat не поддерживает $ref/$defs и anyOf/oneOf, поэтому нужно
+        развернуть схему и упростить Optional типы.
+        """
+
+        def resolve(obj: Any, defs: Dict[str, Any]) -> Any:
+            if isinstance(obj, dict):
+                # Handle $ref
+                if "$ref" in obj:
+                    ref_path = obj["$ref"]
+                    # Parse reference like '#/$defs/Step'
+                    if ref_path.startswith("#/$defs/"):
+                        ref_name = ref_path.split("/")[-1]
+                        if ref_name in defs:
+                            # Return resolved definition (recursively resolve)
+                            resolved = defs[ref_name].copy()
+                            return resolve(resolved, defs)
+                    return obj
+
+                # Handle anyOf/oneOf (typically from Optional types)
+                # Pydantic generates: anyOf: [{actual_type}, {type: "null"}]
+                for union_key in ("anyOf", "oneOf"):
+                    if union_key in obj:
+                        variants = obj[union_key]
+                        # Find non-null variant
+                        non_null_variants = [
+                            v for v in variants if v.get("type") != "null"
+                        ]
+                        if non_null_variants:
+                            # Take the first non-null variant and merge with other props
+                            result = resolve(non_null_variants[0], defs)
+                            # Preserve other properties like 'default', 'title', 'description'
+                            for key, value in obj.items():
+                                if (
+                                    key not in (union_key, "$defs")
+                                    and key not in result
+                                ):
+                                    result[key] = resolve(value, defs)
+                            return result
+                        # If all are null, just return null type
+                        return {"type": "null"}
+
+                # Recursively process dict, skipping $defs
+                return {
+                    key: resolve(value, defs)
+                    for key, value in obj.items()
+                    if key != "$defs"
+                }
+
+            elif isinstance(obj, list):
+                return [resolve(item, defs) for item in obj]
+
+            return obj
+
+        defs = schema.get("$defs", {})
+        return resolve(schema, defs)
+
+    @staticmethod
     def _ensure_json_object_str(value: Any) -> str:
         """
         GigaChat требует, чтобы результат function/tool был валидным JSON object.
@@ -247,10 +307,13 @@ class RequestTransformer:
         transformed: Dict, schema_name: str, schema: Dict
     ) -> None:
         """Применяет JSON schema как function call для structured output"""
+        # Разрешаем $ref/$defs ссылки, т.к. GigaChat их не поддерживает
+        resolved_schema = RequestTransformer._resolve_schema_refs(schema)
+
         function_def = {
             "name": schema_name,
             "description": f"Output response in structured format: {schema_name}",
-            "parameters": schema,
+            "parameters": resolved_schema,
         }
 
         if "functions" not in transformed:
@@ -271,6 +334,7 @@ class RequestTransformer:
                 schema = json_schema.get("schema")
                 self._apply_json_schema_as_function(transformed, schema_name, schema)
             else:
+                print(response_format)
                 transformed["response_format"] = {
                     "type": response_format.get("type"),
                     **response_format.get("json_schema", {}),
