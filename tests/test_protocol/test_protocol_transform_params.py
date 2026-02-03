@@ -116,3 +116,153 @@ def test_transform_responses_parameters_text_json_schema():
     assert "functions" in out
     assert out["functions"][0]["name"] == "ResponseSchema"
     assert out["function_call"] == {"name": "ResponseSchema"}
+
+
+def test_resolve_schema_refs_nested_pydantic():
+    """Тест разрешения $ref/$defs для вложенных Pydantic моделей"""
+    # Схема с $ref и $defs (как генерирует Pydantic для вложенных моделей)
+    schema_with_refs = {
+        "$defs": {
+            "Step": {
+                "properties": {
+                    "explanation": {"title": "Explanation", "type": "string"},
+                    "output": {"title": "Output", "type": "string"},
+                },
+                "required": ["explanation", "output"],
+                "title": "Step",
+                "type": "object",
+            }
+        },
+        "properties": {
+            "steps": {
+                "items": {"$ref": "#/$defs/Step"},
+                "title": "Steps",
+                "type": "array",
+            },
+            "final_answer": {"title": "Final Answer", "type": "string"},
+        },
+        "required": ["steps", "final_answer"],
+        "title": "MathResponse",
+        "type": "object",
+    }
+
+    resolved = RequestTransformer._resolve_schema_refs(schema_with_refs)
+
+    # $defs должны быть удалены
+    assert "$defs" not in resolved
+    # $ref должен быть заменен на inline определение
+    assert "$ref" not in resolved["properties"]["steps"]["items"]
+    assert resolved["properties"]["steps"]["items"]["type"] == "object"
+    assert "explanation" in resolved["properties"]["steps"]["items"]["properties"]
+    assert "output" in resolved["properties"]["steps"]["items"]["properties"]
+
+
+def test_resolve_schema_refs_no_refs():
+    """Тест что схема без $ref не изменяется"""
+    schema = {
+        "type": "object",
+        "properties": {"name": {"type": "string"}},
+        "required": ["name"],
+    }
+    resolved = RequestTransformer._resolve_schema_refs(schema)
+    assert resolved == schema
+
+
+def test_apply_json_schema_resolves_refs():
+    """Тест что _apply_json_schema_as_function разрешает $ref"""
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    transformed = {}
+
+    schema_with_refs = {
+        "$defs": {
+            "Item": {
+                "type": "object",
+                "properties": {"value": {"type": "integer"}},
+            }
+        },
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/Item"},
+            }
+        },
+    }
+
+    rt._apply_json_schema_as_function(
+        transformed, schema_name="TestSchema", schema=schema_with_refs
+    )
+
+    params = transformed["functions"][0]["parameters"]
+    # Проверяем, что $defs удален и $ref разрешен
+    assert "$defs" not in params
+    assert "$ref" not in params["properties"]["items"]["items"]
+    assert params["properties"]["items"]["items"]["type"] == "object"
+
+
+def test_resolve_schema_refs_anyof_optional():
+    """Тест разрешения anyOf для Optional типов (Pydantic)"""
+    # Pydantic генерирует anyOf для Optional[List[X]]
+    schema_with_anyof = {
+        "$defs": {
+            "SubStep": {
+                "type": "object",
+                "properties": {
+                    "detail": {"type": "string"},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["detail", "confidence"],
+            }
+        },
+        "type": "object",
+        "properties": {
+            "substeps": {
+                "anyOf": [
+                    {"items": {"$ref": "#/$defs/SubStep"}, "type": "array"},
+                    {"type": "null"},
+                ],
+                "default": None,
+                "title": "Substeps",
+            }
+        },
+    }
+
+    resolved = RequestTransformer._resolve_schema_refs(schema_with_anyof)
+
+    # $defs должны быть удалены
+    assert "$defs" not in resolved
+    # anyOf должен быть заменен на первый не-null тип
+    substeps = resolved["properties"]["substeps"]
+    assert "anyOf" not in substeps
+    assert substeps["type"] == "array"
+    # $ref должен быть разрешен
+    assert "$ref" not in substeps["items"]
+    assert substeps["items"]["type"] == "object"
+    # Сохраненные свойства
+    assert substeps["default"] is None
+    assert substeps["title"] == "Substeps"
+
+
+def test_resolve_schema_refs_oneof():
+    """Тест разрешения oneOf"""
+    schema_with_oneof = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "oneOf": [
+                    {"type": "string"},
+                    {"type": "null"},
+                ],
+                "title": "Value",
+            }
+        },
+    }
+
+    resolved = RequestTransformer._resolve_schema_refs(schema_with_oneof)
+
+    # oneOf должен быть заменен на первый не-null тип
+    value = resolved["properties"]["value"]
+    assert "oneOf" not in value
+    assert value["type"] == "string"
+    assert value["title"] == "Value"
