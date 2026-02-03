@@ -236,22 +236,109 @@ async def stream_responses_generator(
         yield "data: [DONE]\n\n"
 
 
+def normalize_json_schema(schema: dict) -> dict:
+    """
+    Нормализует JSON Schema для совместимости с GigaChat.
+
+    GigaChat требует, чтобы у каждого объекта (type: "object") были properties.
+    Если properties отсутствуют, добавляем пустой объект.
+
+    GigaChat не поддерживает anyOf/oneOf с type: null (Optional типы).
+    Удаляем null варианты и упрощаем схему.
+
+    Рекурсивно обрабатывает вложенные схемы.
+    """
+
+    # TODO: please help
+    if not isinstance(schema, dict):
+        return schema
+
+    result = dict(schema)
+
+    # Обрабатываем anyOf, oneOf - GigaChat SDK не поддерживает эти конструкции
+    # Удаляем null типы и выбираем первый оставшийся вариант
+    for key in ("anyOf", "oneOf"):
+        if key in result and isinstance(result[key], list):
+            # Фильтруем null типы
+            filtered = [
+                item
+                for item in result[key]
+                if not (isinstance(item, dict) and item.get("type") == "null")
+            ]
+
+            # Удаляем anyOf/oneOf - GigaChat SDK его не поддерживает
+            del result[key]
+
+            if len(filtered) >= 1:
+                # Берём первый не-null вариант и разворачиваем на верхний уровень
+                # GigaChat SDK всё равно теряет anyOf, лучше явно выбрать первый тип
+                single = normalize_json_schema(filtered[0])
+                for k, v in single.items():
+                    if (
+                        k not in result
+                    ):  # Не перезаписываем существующие поля (description, default)
+                        result[k] = v
+
+    # Обрабатываем allOf (без удаления null)
+    if "allOf" in result and isinstance(result["allOf"], list):
+        result["allOf"] = [normalize_json_schema(item) for item in result["allOf"]]
+
+    # Если это объект без properties, добавляем пустые properties
+    schema_type = result.get("type")
+    if schema_type == "object" and "properties" not in result:
+        result["properties"] = {}
+
+    # Рекурсивно обрабатываем properties
+    if "properties" in result and isinstance(result["properties"], dict):
+        result["properties"] = {
+            key: normalize_json_schema(value)
+            for key, value in result["properties"].items()
+        }
+
+    # Обрабатываем items для массивов
+    if "items" in result:
+        if isinstance(result["items"], dict):
+            result["items"] = normalize_json_schema(result["items"])
+        elif isinstance(result["items"], list):
+            result["items"] = [normalize_json_schema(item) for item in result["items"]]
+
+    # Обрабатываем additionalProperties если это схема
+    if "additionalProperties" in result and isinstance(
+        result["additionalProperties"], dict
+    ):
+        result["additionalProperties"] = normalize_json_schema(
+            result["additionalProperties"]
+        )
+
+    # Обрабатываем $defs / definitions
+    for key in ("$defs", "definitions"):
+        if key in result and isinstance(result[key], dict):
+            result[key] = {
+                def_key: normalize_json_schema(def_value)
+                for def_key, def_value in result[key].items()
+            }
+
+    return result
+
+
 def convert_tool_to_giga_functions(data: dict):
     functions = []
     tools = data.get("tools", []) or data.get("functions", [])
     for tool in tools:
         if tool.get("function"):
             function = tool["function"]
+            normalized_params = normalize_json_schema(function["parameters"])
             giga_function = Function(
                 name=function["name"],
                 description=function["description"],
-                parameters=FunctionParameters(**function["parameters"]),
+                parameters=FunctionParameters(**normalized_params),
             )
         else:
+            normalized_params = normalize_json_schema(tool["parameters"])
             giga_function = Function(
                 name=tool["name"],
                 description=tool["description"],
-                parameters=FunctionParameters(**tool["parameters"]),
+                parameters=FunctionParameters(**normalized_params),
             )
         functions.append(giga_function)
     return functions

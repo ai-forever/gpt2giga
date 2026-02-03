@@ -11,6 +11,7 @@ from gigachat.models import (
 
 from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol.attachments import AttachmentProcessor
+from gpt2giga.utils import normalize_json_schema
 
 
 class RequestTransformer:
@@ -309,6 +310,8 @@ class RequestTransformer:
         """Применяет JSON schema как function call для structured output"""
         # Разрешаем $ref/$defs ссылки, т.к. GigaChat их не поддерживает
         resolved_schema = RequestTransformer._resolve_schema_refs(schema)
+        # Нормализуем схему: добавляем properties к объектам без properties
+        resolved_schema = normalize_json_schema(resolved_schema)
 
         function_def = {
             "name": schema_name,
