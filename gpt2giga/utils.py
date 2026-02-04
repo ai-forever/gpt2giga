@@ -179,26 +179,221 @@ async def stream_responses_generator(
     chat_messages: Chat,
     response_id: str,
     giga_client: Optional[GigaChat] = None,
+    request_data: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
     if not giga_client:
         giga_client = request.app.state.gigachat_client
     logger = getattr(request.app.state, "logger", None)
     rquid = rquid_context.get()
+    import time
+
+    created_at = int(time.time())
+    model = request_data.get("model", "unknown") if request_data else "unknown"
+    msg_id = f"msg_{response_id}"
+
+    # Helper to format SSE event
+    def sse_event(event_type: str, data: dict) -> str:
+        return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
+
+    # Build base response object for lifecycle events
+    def build_response_obj(status: str, output: list = None, usage: dict = None):
+        return {
+            "id": f"resp_{response_id}",
+            "object": "response",
+            "created_at": created_at,
+            "status": status,
+            "error": None,
+            "incomplete_details": None,
+            "instructions": request_data.get("instructions") if request_data else None,
+            "max_output_tokens": request_data.get("max_output_tokens")
+            if request_data
+            else None,
+            "model": model,
+            "output": output or [],
+            "parallel_tool_calls": True,
+            "previous_response_id": None,
+            "reasoning": {"effort": None, "summary": None},
+            "store": True,
+            "temperature": request_data.get("temperature", 1) if request_data else 1,
+            "text": {"format": {"type": "text"}},
+            "tool_choice": "auto",
+            "tools": [],
+            "top_p": request_data.get("top_p", 1) if request_data else 1,
+            "truncation": "disabled",
+            "usage": usage,
+            "user": None,
+            "metadata": {},
+        }
+
+    sequence_number = 0
 
     try:
+        # Emit response.created
+        yield sse_event(
+            "response.created",
+            {
+                "type": "response.created",
+                "response": build_response_obj("in_progress"),
+                "sequence_number": sequence_number,
+            },
+        )
+        sequence_number += 1
+
+        # Emit response.in_progress
+        yield sse_event(
+            "response.in_progress",
+            {
+                "type": "response.in_progress",
+                "response": build_response_obj("in_progress"),
+                "sequence_number": sequence_number,
+            },
+        )
+        sequence_number += 1
+
+        # Emit response.output_item.added
+        yield sse_event(
+            "response.output_item.added",
+            {
+                "type": "response.output_item.added",
+                "output_index": 0,
+                "item": {
+                    "id": msg_id,
+                    "status": "in_progress",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                },
+                "sequence_number": sequence_number,
+            },
+        )
+        sequence_number += 1
+
+        # Emit response.content_part.added
+        yield sse_event(
+            "response.content_part.added",
+            {
+                "type": "response.content_part.added",
+                "item_id": msg_id,
+                "output_index": 0,
+                "content_index": 0,
+                "part": {
+                    "type": "output_text",
+                    "text": "",
+                    "annotations": [],
+                },
+                "sequence_number": sequence_number,
+            },
+        )
+        sequence_number += 1
+
+        full_text = ""
+
         async for i, chunk in aio_enumerate(giga_client.astream(chat_messages)):
             if await request.is_disconnected():
                 if logger:
                     logger.info(f"[{rquid}] Client disconnected during streaming")
                 break
-            processed = (
-                request.app.state.response_processor.process_stream_chunk_response(
-                    chunk, sequence_number=i, response_id=response_id
-                )
-            )
-            yield f"data: {json.dumps(processed)}\n\n"
 
-        yield "data: [DONE]\n\n"
+            giga_dict = chunk.model_dump()
+            delta = giga_dict["choices"][0].get("delta", {})
+            delta_content = delta.get("content", "")
+
+            if delta_content:
+                full_text += delta_content
+                # Emit response.output_text.delta
+                yield sse_event(
+                    "response.output_text.delta",
+                    {
+                        "type": "response.output_text.delta",
+                        "item_id": msg_id,
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": delta_content,
+                        "sequence_number": sequence_number,
+                    },
+                )
+                sequence_number += 1
+
+        # Emit response.output_text.done
+        yield sse_event(
+            "response.output_text.done",
+            {
+                "type": "response.output_text.done",
+                "item_id": msg_id,
+                "output_index": 0,
+                "content_index": 0,
+                "text": full_text,
+                "sequence_number": sequence_number,
+            },
+        )
+        sequence_number += 1
+
+        # Emit response.content_part.done
+        yield sse_event(
+            "response.content_part.done",
+            {
+                "type": "response.content_part.done",
+                "item_id": msg_id,
+                "output_index": 0,
+                "content_index": 0,
+                "part": {
+                    "type": "output_text",
+                    "text": full_text,
+                    "annotations": [],
+                },
+                "sequence_number": sequence_number,
+            },
+        )
+        sequence_number += 1
+
+        # Emit response.output_item.done
+        yield sse_event(
+            "response.output_item.done",
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": {
+                    "id": msg_id,
+                    "status": "completed",
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": full_text,
+                            "annotations": [],
+                        }
+                    ],
+                },
+                "sequence_number": sequence_number,
+            },
+        )
+        sequence_number += 1
+
+        # Emit response.completed
+        final_output = [
+            {
+                "id": msg_id,
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": full_text,
+                        "annotations": [],
+                    }
+                ],
+            }
+        ]
+        yield sse_event(
+            "response.completed",
+            {
+                "type": "response.completed",
+                "response": build_response_obj("completed", output=final_output),
+                "sequence_number": sequence_number,
+            },
+        )
 
     except gigachat.exceptions.GigaChatException as e:
         error_type = type(e).__name__
@@ -208,14 +403,13 @@ async def stream_responses_generator(
                 f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
             )
         error_response = {
-            "error": {
-                "message": error_message,
-                "type": error_type,
-                "code": "stream_error",
-            }
+            "type": "error",
+            "code": "stream_error",
+            "message": error_message,
+            "param": None,
+            "sequence_number": sequence_number,
         }
-        yield f"data: {json.dumps(error_response)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_event("error", error_response)
 
     except Exception as e:
         error_type = type(e).__name__
@@ -226,14 +420,13 @@ async def stream_responses_generator(
                 f"[{rquid}] Unexpected streaming error: {error_type}: {error_message}\n{tb}"
             )
         error_response = {
-            "error": {
-                "message": f"Stream interrupted: {error_message}",
-                "type": error_type,
-                "code": "internal_error",
-            }
+            "type": "error",
+            "code": "internal_error",
+            "message": f"Stream interrupted: {error_message}",
+            "param": None,
+            "sequence_number": sequence_number,
         }
-        yield f"data: {json.dumps(error_response)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield sse_event("error", error_response)
 
 
 def normalize_json_schema(schema: dict) -> dict:

@@ -106,9 +106,14 @@ async def test_stream_responses_generator_exception_path():
     lines = []
     async for line in stream_responses_generator(req, chat, response_id="1"):
         lines.append(line)
-    assert len(lines) == 2
-    assert "Stream interrupted" in lines[0]
-    assert lines[1].strip() == "data: [DONE]"
+    # Now we expect: response.created, response.in_progress, output_item.added, content_part.added, then error
+    assert len(lines) == 5
+    assert "event: response.created" in lines[0]
+    assert "event: response.in_progress" in lines[1]
+    assert "event: response.output_item.added" in lines[2]
+    assert "event: response.content_part.added" in lines[3]
+    assert "Stream interrupted" in lines[4]
+    assert "event: error" in lines[4]
 
 
 @pytest.mark.asyncio
@@ -136,10 +141,15 @@ async def test_stream_responses_generator_gigachat_exception():
     lines = []
     async for line in stream_responses_generator(req, chat, response_id="1"):
         lines.append(line)
-    assert len(lines) == 2
-    assert "GigaChatException" in lines[0]
-    assert "stream_error" in lines[0]
-    assert lines[1].strip() == "data: [DONE]"
+    # Now we expect: response.created, response.in_progress, output_item.added, content_part.added, then error
+    assert len(lines) == 5
+    assert "event: response.created" in lines[0]
+    assert "event: response.in_progress" in lines[1]
+    assert "event: response.output_item.added" in lines[2]
+    assert "event: response.content_part.added" in lines[3]
+    assert "GigaChat" in lines[4]
+    assert "stream_error" in lines[4]
+    assert "event: error" in lines[4]
 
 
 @pytest.mark.asyncio
@@ -206,3 +216,81 @@ async def test_stream_chat_completion_error_response_format():
     assert "type" in error_data["error"]
     assert "code" in error_data["error"]
     assert error_data["error"]["code"] == "internal_error"
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_success():
+    """Test successful streaming with all proper SSE events"""
+    import json
+
+    req = FakeRequest(FakeClient())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(req, chat, response_id="test123"):
+        lines.append(line)
+
+    # Expected events:
+    # 1. response.created
+    # 2. response.in_progress
+    # 3. response.output_item.added
+    # 4. response.content_part.added
+    # 5. response.output_text.delta (for "A")
+    # 6. response.output_text.delta (for "B")
+    # 7. response.output_text.done
+    # 8. response.content_part.done
+    # 9. response.output_item.done
+    # 10. response.completed
+    assert len(lines) == 10
+
+    # Parse and verify each event
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    event_type, data = parse_sse(lines[0])
+    assert event_type == "response.created"
+    assert data["type"] == "response.created"
+    assert data["response"]["status"] == "in_progress"
+
+    event_type, data = parse_sse(lines[1])
+    assert event_type == "response.in_progress"
+    assert data["type"] == "response.in_progress"
+
+    event_type, data = parse_sse(lines[2])
+    assert event_type == "response.output_item.added"
+    assert data["type"] == "response.output_item.added"
+    assert data["item"]["role"] == "assistant"
+
+    event_type, data = parse_sse(lines[3])
+    assert event_type == "response.content_part.added"
+    assert data["type"] == "response.content_part.added"
+    assert data["part"]["type"] == "output_text"
+
+    # Delta events for "A" and "B"
+    event_type, data = parse_sse(lines[4])
+    assert event_type == "response.output_text.delta"
+    assert data["delta"] == "A"
+
+    event_type, data = parse_sse(lines[5])
+    assert event_type == "response.output_text.delta"
+    assert data["delta"] == "B"
+
+    # Finalization events
+    event_type, data = parse_sse(lines[6])
+    assert event_type == "response.output_text.done"
+    assert data["text"] == "AB"
+
+    event_type, data = parse_sse(lines[7])
+    assert event_type == "response.content_part.done"
+    assert data["part"]["text"] == "AB"
+
+    event_type, data = parse_sse(lines[8])
+    assert event_type == "response.output_item.done"
+    assert data["item"]["status"] == "completed"
+
+    event_type, data = parse_sse(lines[9])
+    assert event_type == "response.completed"
+    assert data["response"]["status"] == "completed"
+    assert data["response"]["output"][0]["content"][0]["text"] == "AB"
