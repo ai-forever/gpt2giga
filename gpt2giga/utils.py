@@ -520,19 +520,25 @@ def convert_tool_to_giga_functions(data: dict):
     for tool in tools:
         if tool.get("function"):
             function = tool["function"]
+            if "parameters" not in function:
+                # Skip tools without parameters (e.g., custom/freeform tools)
+                continue
             normalized_params = normalize_json_schema(function["parameters"])
             giga_function = Function(
                 name=function["name"],
-                description=function["description"],
+                description=function.get("description", ""),
                 parameters=FunctionParameters(**normalized_params),
             )
-        else:
+        elif "parameters" in tool:
             normalized_params = normalize_json_schema(tool["parameters"])
             giga_function = Function(
                 name=tool["name"],
-                description=tool["description"],
+                description=tool.get("description", ""),
                 parameters=FunctionParameters(**normalized_params),
             )
+        else:
+            # Skip tools without parameters (e.g., custom/freeform tools like apply_patch)
+            continue
         functions.append(giga_function)
     return functions
 

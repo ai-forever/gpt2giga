@@ -228,3 +228,53 @@ def test_convert_from_functions_list():
     out = convert_tool_to_giga_functions(data)
     assert len(out) == 1
     assert out[0].name == "fn2"
+
+
+def test_convert_skips_tools_without_parameters():
+    """Test that tools without parameters (e.g., custom/freeform tools) are skipped."""
+    data = {
+        "tools": [
+            {
+                "type": "custom",
+                "name": "apply_patch",
+                "description": "Freeform tool without parameters",
+                "format": {"type": "grammar", "syntax": "lark"},
+            },
+            {
+                "type": "function",
+                "name": "valid_tool",
+                "description": "Tool with parameters",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"arg": {"type": "string"}},
+                },
+            },
+        ]
+    }
+    out = convert_tool_to_giga_functions(data)
+    assert len(out) == 1
+    assert out[0].name == "valid_tool"
+
+
+def test_convert_skips_function_wrapper_without_parameters():
+    """Test that function wrappers without parameters are skipped."""
+    data = {
+        "tools": [
+            {
+                "function": {
+                    "name": "no_params_fn",
+                    "description": "Function without parameters",
+                }
+            },
+            {
+                "function": {
+                    "name": "valid_fn",
+                    "description": "Function with parameters",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            },
+        ]
+    }
+    out = convert_tool_to_giga_functions(data)
+    assert len(out) == 1
+    assert out[0].name == "valid_fn"

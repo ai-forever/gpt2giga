@@ -1,4 +1,3 @@
-import ast
 import json
 from typing import List, Dict, Tuple, Optional, Any
 
@@ -11,124 +10,20 @@ from gigachat.models import (
 
 from gpt2giga.config import ProxyConfig
 from gpt2giga.protocol.attachments import AttachmentProcessor
+from gpt2giga.protocol.content_utils import ensure_json_object_str
+from gpt2giga.protocol.message_utils import (
+    map_role,
+    merge_consecutive_messages,
+    collapse_user_messages,
+    ensure_system_first,
+    limit_attachments,
+)
+from gpt2giga.protocol.schema_utils import resolve_schema_refs
 from gpt2giga.utils import normalize_json_schema
 
 
 class RequestTransformer:
-    """Трансформер запросов из OpenAI в GigaChat формат"""
-
-    @staticmethod
-    def _resolve_schema_refs(schema: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Разрешает $ref ссылки и anyOf/oneOf в JSON schema.
-        GigaChat не поддерживает $ref/$defs и anyOf/oneOf, поэтому нужно
-        развернуть схему и упростить Optional типы.
-        """
-
-        def resolve(obj: Any, defs: Dict[str, Any]) -> Any:
-            if isinstance(obj, dict):
-                # Handle $ref
-                if "$ref" in obj:
-                    ref_path = obj["$ref"]
-                    # Parse reference like '#/$defs/Step'
-                    if ref_path.startswith("#/$defs/"):
-                        ref_name = ref_path.split("/")[-1]
-                        if ref_name in defs:
-                            # Return resolved definition (recursively resolve)
-                            resolved = defs[ref_name].copy()
-                            return resolve(resolved, defs)
-                    return obj
-
-                # Handle anyOf/oneOf (typically from Optional types)
-                # Pydantic generates: anyOf: [{actual_type}, {type: "null"}]
-                for union_key in ("anyOf", "oneOf"):
-                    if union_key in obj:
-                        variants = obj[union_key]
-                        # Find non-null variant
-                        non_null_variants = [
-                            v for v in variants if v.get("type") != "null"
-                        ]
-                        if non_null_variants:
-                            # Take the first non-null variant and merge with other props
-                            result = resolve(non_null_variants[0], defs)
-                            # Preserve other properties like 'default', 'title', 'description'
-                            for key, value in obj.items():
-                                if (
-                                    key not in (union_key, "$defs")
-                                    and key not in result
-                                ):
-                                    result[key] = resolve(value, defs)
-                            return result
-                        # If all are null, just return null type
-                        return {"type": "null"}
-
-                # Recursively process dict, skipping $defs
-                return {
-                    key: resolve(value, defs)
-                    for key, value in obj.items()
-                    if key != "$defs"
-                }
-
-            elif isinstance(obj, list):
-                return [resolve(item, defs) for item in obj]
-
-            return obj
-
-        defs = schema.get("$defs", {})
-        return resolve(schema, defs)
-
-    @staticmethod
-    def _ensure_json_object_str(value: Any) -> str:
-        """
-        GigaChat требует, чтобы результат function/tool был валидным JSON object.
-        При этом SDK `gigachat.models.Messages` ожидает `content: str`.
-
-        OpenAI-совместимые клиенты часто присылают:
-        - dict (ок)
-        - JSON-строку (нужно json.loads)
-        - двойную JSON-строку (нужно json.loads несколько раз)
-        - python-подобную строку (single quotes) — пробуем ast.literal_eval
-        """
-        if value is None:
-            return "{}"
-
-        if isinstance(value, bytes):
-            try:
-                value = value.decode("utf-8", errors="ignore")
-            except Exception:
-                return json.dumps({"result": str(value)}, ensure_ascii=False)
-
-        if isinstance(value, dict):
-            return json.dumps(value, ensure_ascii=False)
-
-        if isinstance(value, str):
-            s: Any = value.strip()
-            for _ in range(3):
-                if not isinstance(s, str):
-                    break
-                if s == "":
-                    return "{}"
-                try:
-                    s = json.loads(s)
-                    continue
-                except json.JSONDecodeError:
-                    break
-
-            if isinstance(s, dict):
-                return json.dumps(s, ensure_ascii=False)
-            if isinstance(s, (list, int, float, bool)) or s is None:
-                return json.dumps({"result": s}, ensure_ascii=False)
-
-            if isinstance(s, str):
-                try:
-                    lit = ast.literal_eval(s)
-                    if isinstance(lit, dict):
-                        return json.dumps(lit, ensure_ascii=False)
-                    return json.dumps({"result": lit}, ensure_ascii=False)
-                except Exception:
-                    return json.dumps({"result": s}, ensure_ascii=False)
-
-        return json.dumps({"result": value}, ensure_ascii=False)
+    """Transformer for converting OpenAI requests to GigaChat format"""
 
     def __init__(
         self,
@@ -140,40 +35,52 @@ class RequestTransformer:
         self.logger = logger
         self.attachment_processor = attachment_processor
 
+    def _map_role(self, role: str, is_first: bool) -> str:
+        """Maps a role to a valid GigaChat role."""
+        return map_role(role, is_first, self.logger)
+
+    def _merge_consecutive_messages(self, messages: List[Dict]) -> List[Dict]:
+        """Merges consecutive messages with the same role."""
+        return merge_consecutive_messages(messages)
+
+    def _limit_attachments(self, messages: List[Dict]) -> None:
+        """Limits the number of attachments in messages."""
+        limit_attachments(messages, max_total=10, logger=self.logger)
+
     async def transform_messages(
         self, messages: List[Dict], giga_client: Optional[GigaChat] = None
     ) -> List[Dict]:
-        """Трансформирует сообщения в формат GigaChat"""
+        """Transforms messages to GigaChat format"""
         transformed_messages = []
         attachment_count = 0
+        system_message = None
 
         for i, message in enumerate(messages):
             self.logger.debug(f"Processing message {i}: role={message.get('role')}")
 
-            # Преобразуем роли
-            if message["role"] == "developer":
-                message["role"] = "system"
-                # Удаляем неиспользуемые поля
-                message.pop("name", None)
-            elif message["role"] == "system" and i > 0:
-                message["role"] = "user"
-                # Удаляем неиспользуемые поля
-                message.pop("name", None)
-            elif message["role"] == "tool":
-                message["role"] = "function"
-                # Для function role желательно сохранять name (если пришел от клиента)
-                message["content"] = self._ensure_json_object_str(
-                    message.get("content")
-                )
+            original_role = message.get("role", "user")
+
+            # Map role to valid GigaChat role
+            # For system detection, we consider it "first" if we haven't seen a system yet
+            is_first_for_system = system_message is None
+            message["role"] = self._map_role(original_role, is_first_for_system)
+
+            # Track the first system message
+            if message["role"] == "system" and system_message is None:
+                system_message = message
+
+            # Handle tool/function role specifics
+            if original_role == "tool":
+                message["content"] = ensure_json_object_str(message.get("content"))
             else:
-                # Удаляем неиспользуемые поля
+                # Remove unused fields
                 message.pop("name", None)
 
-            # Обрабатываем контент
+            # Process content
             if message.get("content") is None:
                 message["content"] = ""
 
-            # Обрабатываем tool_calls
+            # Process tool_calls
             if "tool_calls" in message and message["tool_calls"]:
                 message["function_call"] = message["tool_calls"][0]["function"]
                 try:
@@ -183,7 +90,7 @@ class RequestTransformer:
                 except json.JSONDecodeError as e:
                     self.logger.warning(f"Failed to parse function call arguments: {e}")
 
-            # Обрабатываем составной контент (текст + изображения)
+            # Process compound content (text + images)
             if isinstance(message["content"], list):
                 texts, attachments = await self._process_content_parts(
                     message["content"], giga_client
@@ -194,16 +101,22 @@ class RequestTransformer:
 
             transformed_messages.append(message)
 
-        # Проверяем лимиты вложений
+        # Merge consecutive messages with the same role
+        transformed_messages = self._merge_consecutive_messages(transformed_messages)
+
+        # Ensure system message is first
+        transformed_messages = ensure_system_first(transformed_messages)
+
+        # Check attachment limits
         if attachment_count > 10:
-            self._limit_attachments(transformed_messages)
+            limit_attachments(transformed_messages, max_total=10, logger=self.logger)
 
         return transformed_messages
 
     async def _process_content_parts(
         self, content_parts: List[Dict], giga_client: Optional[GigaChat] = None
     ) -> Tuple[List[str], List[str]]:
-        """Обрабатывает части контента (текст и изображения)"""
+        """Processes content parts (text and images)"""
         texts = []
         attachments: List[str] = []
         max_attachments = 2
@@ -222,15 +135,10 @@ class RequestTransformer:
                 and processor is not None
                 and enable_images
                 and content_part.get("image_url")
-                and len(attachments)
-                < max_attachments  # Early cutoff to avoid extra work/logging/excess uploads
+                and len(attachments) < max_attachments
             ):
                 url = content_part["image_url"].get("url")
                 if url is not None:
-                    # If giga_client is not provided (e.g. tests), upload might fail if processor needs it
-                    # But we assume caller provides it now.
-                    # If giga_client is None, we might want to fallback or error?
-                    # Given AttachmentProcessor refactor, it MUST receive a client.
                     if giga_client:
                         file_id = await processor.upload_file(giga_client, url)
                         if file_id:
@@ -251,6 +159,7 @@ class RequestTransformer:
                         logger.info(f"Added attachment: {file_id}")
                 else:
                     logger.warning("giga_client not provided for file upload")
+
         if len(attachments) > max_attachments:
             logger.warning(
                 "GigaChat can only handle 2 images per message. Cutting off excess."
@@ -259,40 +168,28 @@ class RequestTransformer:
 
         return texts, attachments
 
-    def _limit_attachments(self, messages: List[Dict]):
-        """Ограничивает количество вложений в сообщениях"""
-        cur_attachment_count = 0
-        for message in reversed(messages):
-            message_attachments = len(message.get("attachments", []))
-            if cur_attachment_count + message_attachments > 10:
-                allowed = 10 - cur_attachment_count
-                message["attachments"] = message["attachments"][:allowed]
-                self.logger.warning(f"Limited attachments in message to {allowed}")
-                break
-            cur_attachment_count += message_attachments
-
     def _transform_common_parameters(self, data: Dict) -> Dict:
-        """Общая логика трансформации параметров для Chat Completions и Responses API"""
+        """Common parameter transformation logic for Chat Completions and Responses API"""
         transformed = data.copy()
 
-        # Обрабатываем модель
+        # Process model
         gpt_model = data.get("model", None)
         if not self.config.proxy_settings.pass_model and gpt_model:
             del transformed["model"]
 
-        # Обрабатываем температуру
+        # Process temperature
         temperature = transformed.pop("temperature", 0)
         if temperature == 0:
             transformed["top_p"] = 0
         elif temperature > 0:
             transformed["temperature"] = temperature
 
-        # Обрабатываем max_tokens
+        # Process max_tokens
         max_tokens = transformed.pop("max_output_tokens", None)
         if max_tokens:
             transformed["max_tokens"] = max_tokens
 
-        # Преобразуем tools в functions
+        # Convert tools to functions
         if "functions" not in transformed and "tools" in transformed:
             functions = []
             for tool in transformed["tools"]:
@@ -307,10 +204,10 @@ class RequestTransformer:
     def _apply_json_schema_as_function(
         transformed: Dict, schema_name: str, schema: Dict
     ) -> None:
-        """Применяет JSON schema как function call для structured output"""
-        # Разрешаем $ref/$defs ссылки, т.к. GigaChat их не поддерживает
-        resolved_schema = RequestTransformer._resolve_schema_refs(schema)
-        # Нормализуем схему: добавляем properties к объектам без properties
+        """Applies JSON schema as function call for structured output"""
+        # Resolve $ref/$defs references as GigaChat doesn't support them
+        resolved_schema = resolve_schema_refs(schema)
+        # Normalize schema: add properties to objects without properties
         resolved_schema = normalize_json_schema(resolved_schema)
 
         function_def = {
@@ -326,7 +223,7 @@ class RequestTransformer:
         transformed["function_call"] = {"name": schema_name}
 
     def transform_chat_parameters(self, data: Dict) -> Dict:
-        """Трансформирует параметры чата (Chat Completions API)"""
+        """Transforms chat parameters (Chat Completions API)"""
         transformed = self._transform_common_parameters(data)
 
         response_format: dict | None = transformed.pop("response_format", None)
@@ -345,7 +242,7 @@ class RequestTransformer:
         return transformed
 
     def transform_responses_parameters(self, data: Dict) -> Dict:
-        """Трансформирует параметры responses (Responses API)"""
+        """Transforms responses parameters (Responses API)"""
         transformed = self._transform_common_parameters(data)
 
         response_format_responses: dict | None = transformed.pop("text", None)
@@ -366,6 +263,7 @@ class RequestTransformer:
         return transformed
 
     def transform_response_format(self, data: Dict) -> List:
+        """Transforms response format for Responses API input"""
         message_payload = []
         if "instructions" in data:
             message_payload.append({"role": "system", "content": data["instructions"]})
@@ -386,9 +284,7 @@ class RequestTransformer:
                         {
                             "role": "function",
                             "name": fn_name,
-                            "content": self._ensure_json_object_str(
-                                message.get("output")
-                            ),
+                            "content": ensure_json_object_str(message.get("output")),
                         }
                     )
                     continue
@@ -403,9 +299,7 @@ class RequestTransformer:
                     if isinstance(content, list):
                         # Use a local list to avoid accumulating contents across messages
                         contents = []
-                        append = (
-                            contents.append
-                        )  # Micro-optimization for attribute access
+                        append = contents.append
                         for content_part in content:
                             ctype = content_part.get("type")
                             if ctype == "input_text":
@@ -432,6 +326,7 @@ class RequestTransformer:
 
     @staticmethod
     def mock_completion(message: dict) -> dict:
+        """Creates a mock completion message for function calls"""
         arguments = json.loads(message.get("arguments"))
         name = message.get("name")
         return Messages(
@@ -442,7 +337,7 @@ class RequestTransformer:
     async def _finalize_transformation(
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
-        """Общая логика трансформации сообщений и логгирования"""
+        """Common logic for message transformation and logging"""
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
@@ -451,7 +346,7 @@ class RequestTransformer:
         messages_objs = [
             Messages.model_validate(m) for m in transformed_data["messages"]
         ]
-        collapsed_objs = self._collapse_messages(messages_objs)
+        collapsed_objs = collapse_user_messages(messages_objs)
         transformed_data["messages"] = [
             m.model_dump(exclude_none=True) for m in collapsed_objs
         ]
@@ -464,14 +359,14 @@ class RequestTransformer:
     async def prepare_chat_completion(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
-        """Подготовка запроса для Chat Completions API"""
+        """Prepares request for Chat Completions API"""
         transformed_data = self.transform_chat_parameters(data)
         return await self._finalize_transformation(transformed_data, giga_client)
 
     async def prepare_response(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
-        """Подготовка запроса для Responses API"""
+        """Prepares request for Responses API"""
         transformed_data = self.transform_responses_parameters(data)
         transformed_data["messages"] = self.transform_response_format(transformed_data)
         return await self._finalize_transformation(transformed_data, giga_client)
@@ -481,8 +376,8 @@ class RequestTransformer:
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """
-        Совместимый алиас: исторически метод возвращал подготовленный payload для GigaChat.
-        Сейчас это делает `prepare_chat_completion`.
+        Backward-compatible alias: historically returned prepared payload for GigaChat.
+        Now delegates to `prepare_chat_completion`.
         """
         return await self.prepare_chat_completion(data, giga_client)
 
@@ -490,33 +385,7 @@ class RequestTransformer:
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """
-        Совместимый алиас для Responses API.
-        Сейчас это делает `prepare_response`.
+        Backward-compatible alias for Responses API.
+        Now delegates to `prepare_response`.
         """
         return await self.prepare_response(data, giga_client)
-
-    @staticmethod
-    def _collapse_messages(messages: List[Messages]) -> List[Messages]:
-        """Объединяет последовательные пользовательские сообщения"""
-        collapsed_messages: List[Messages] = []
-        prev_user_message = None
-        content_parts = []
-
-        for message in messages:
-            if message.role == "user" and prev_user_message is not None:
-                content_parts.append(message.content)
-            else:
-                if content_parts:
-                    prev_user_message.content = "\n".join(
-                        [prev_user_message.content] + content_parts
-                    )
-                    content_parts = []
-                collapsed_messages.append(message)
-                prev_user_message = message if message.role == "user" else None
-
-        if content_parts:
-            prev_user_message.content = "\n".join(
-                [prev_user_message.content] + content_parts
-            )
-
-        return collapsed_messages
