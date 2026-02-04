@@ -205,9 +205,9 @@ async def stream_responses_generator(
             "error": None,
             "incomplete_details": None,
             "instructions": request_data.get("instructions") if request_data else None,
-            "max_output_tokens": request_data.get("max_output_tokens")
-            if request_data
-            else None,
+            "max_output_tokens": (
+                request_data.get("max_output_tokens") if request_data else None
+            ),
             "model": model,
             "output": output or [],
             "parallel_tool_calls": True,
