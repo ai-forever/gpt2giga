@@ -130,7 +130,7 @@ async def responses(request: Request):
     else:
         return StreamingResponse(
             stream_responses_generator(
-                request, chat_messages, current_rquid, giga_client
+                request, chat_messages, current_rquid, giga_client, request_data=data
             ),
             media_type="text/event-stream",
         )

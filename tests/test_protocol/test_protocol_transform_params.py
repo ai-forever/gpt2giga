@@ -116,3 +116,36 @@ def test_transform_responses_parameters_text_json_schema():
     assert "functions" in out
     assert out["functions"][0]["name"] == "ResponseSchema"
     assert out["function_call"] == {"name": "ResponseSchema"}
+
+
+def test_apply_json_schema_resolves_refs():
+    """Тест что _apply_json_schema_as_function разрешает $ref"""
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    transformed = {}
+
+    schema_with_refs = {
+        "$defs": {
+            "Item": {
+                "type": "object",
+                "properties": {"value": {"type": "integer"}},
+            }
+        },
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {"$ref": "#/$defs/Item"},
+            }
+        },
+    }
+
+    rt._apply_json_schema_as_function(
+        transformed, schema_name="TestSchema", schema=schema_with_refs
+    )
+
+    params = transformed["functions"][0]["parameters"]
+    # Проверяем, что $defs удален и $ref разрешен
+    assert "$defs" not in params
+    assert "$ref" not in params["properties"]["items"]["items"]
+    assert params["properties"]["items"]["items"]["type"] == "object"

@@ -57,7 +57,10 @@ async def test_transform_messages_roles(request_transformer):
     messages = [
         {"role": "developer", "content": "dev"},
         {"role": "user", "content": "u1"},
-        {"role": "system", "content": "sys_later"},  # Should become user
+        {
+            "role": "system",
+            "content": "sys_later",
+        },  # Should become user and merge with previous
         {
             "role": "tool",
             "content": "tool_res",
@@ -67,15 +70,18 @@ async def test_transform_messages_roles(request_transformer):
 
     res = await request_transformer.transform_messages(messages)
 
+    # developer becomes system (first message)
     assert res[0]["role"] == "system"
     assert res[0]["content"] == "dev"
 
-    assert res[2]["role"] == "user"
-    assert res[2]["content"] == "sys_later"
+    # user + system (converted to user) are merged
+    assert res[1]["role"] == "user"
+    assert res[1]["content"] == "u1\nsys_later"
 
-    assert res[3]["role"] == "function"
+    # tool becomes function
+    assert res[2]["role"] == "function"
     # Tool/function results must be a JSON object for GigaChat
-    assert res[3]["content"] == '{"result": "tool_res"}'
+    assert res[2]["content"] == '{"result": "tool_res"}'
 
 
 @pytest.mark.asyncio
@@ -173,3 +179,107 @@ def test_limit_attachments(request_transformer):
 
     assert len(messages[1]["attachments"]) == 6
     assert len(messages[0]["attachments"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_unknown_role_becomes_user(request_transformer):
+    """Unknown roles should be mapped to 'user'."""
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "custom_role", "content": "custom content"},
+        {"role": "unknown", "content": "unknown content"},
+    ]
+
+    res = await request_transformer.transform_messages(messages)
+
+    assert res[0]["role"] == "system"
+    assert res[1]["role"] == "user"
+    # Two unknown roles become user and get merged
+    assert "custom content" in res[1]["content"]
+    assert "unknown content" in res[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_merges_consecutive_user(request_transformer):
+    """Consecutive user messages should be merged."""
+    messages = [
+        {"role": "user", "content": "first"},
+        {"role": "user", "content": "second"},
+        {"role": "user", "content": "third"},
+    ]
+
+    res = await request_transformer.transform_messages(messages)
+
+    assert len(res) == 1
+    assert res[0]["role"] == "user"
+    assert res[0]["content"] == "first\nsecond\nthird"
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_no_merge_with_function_call(request_transformer):
+    """Messages with function_call should not be merged."""
+    messages = [
+        {
+            "role": "assistant",
+            "content": "thinking",
+            "tool_calls": [{"function": {"name": "fn", "arguments": "{}"}}],
+        },
+        {"role": "assistant", "content": "more thinking"},
+    ]
+
+    res = await request_transformer.transform_messages(messages)
+
+    # Should not merge because first has function_call
+    assert len(res) == 2
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_system_moved_to_front(request_transformer):
+    """If system message is not first after transformation, move it."""
+    # This scenario: user message first, then developer (-> system)
+    # After role mapping, system should be moved to front
+    messages = [
+        {"role": "user", "content": "user first"},
+        {"role": "developer", "content": "dev instructions"},
+    ]
+
+    res = await request_transformer.transform_messages(messages)
+
+    # developer becomes system and should be moved to front
+    assert res[0]["role"] == "system"
+    assert res[0]["content"] == "dev instructions"
+    assert res[1]["role"] == "user"
+    assert res[1]["content"] == "user first"
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_multiple_system_first_wins(request_transformer):
+    """Only the first system message stays system, others become user."""
+    messages = [
+        {"role": "system", "content": "first system"},
+        {"role": "user", "content": "user"},
+        {"role": "developer", "content": "dev as system"},  # Should become user
+    ]
+
+    res = await request_transformer.transform_messages(messages)
+
+    assert res[0]["role"] == "system"
+    assert res[0]["content"] == "first system"
+    # user and dev (->user) get merged
+    assert res[1]["role"] == "user"
+    assert "user" in res[1]["content"]
+    assert "dev as system" in res[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_merges_attachments(request_transformer):
+    """Merged messages should combine their attachments."""
+    messages = [
+        {"role": "user", "content": "first", "attachments": ["att1", "att2"]},
+        {"role": "user", "content": "second", "attachments": ["att3"]},
+    ]
+
+    res = await request_transformer.transform_messages(messages)
+
+    assert len(res) == 1
+    assert res[0]["attachments"] == ["att1", "att2", "att3"]
