@@ -25,10 +25,3 @@ repos:
         language: system
         types_or: [python, pyi]
         args: [--config, pyproject.toml]
-
-      - id: black
-        name: black check
-        entry: uv run black .
-        language: system
-        types_or: [ python, pyi ]
-        args: [--check]

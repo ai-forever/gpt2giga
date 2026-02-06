@@ -280,6 +280,7 @@ class ResponseProcessor:
             if is_tool_call:
                 message["tool_calls"] = [
                     {
+                        "index": 0,  # Required for streaming tool calls
                         "id": f"call_{uuid.uuid4()}",
                         "type": "function",
                         "function": function_call,

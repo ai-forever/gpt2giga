@@ -108,3 +108,65 @@ def test_response_processor_stream_chunk_handles_delta():
     )
     out = rp.process_stream_chunk(giga_resp, gpt_model="gpt-x", response_id="1")
     assert out["object"] == "chat.completion.chunk"
+
+
+def test_response_processor_tool_calls_include_index():
+    """Test that tool_calls include index field required by OpenAI SDK for streaming"""
+    rp = ResponseProcessor(logger)
+    # Non-streaming response with function_call
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": {
+                            "name": "browser_action",
+                            "arguments": {"action": "click"},
+                        },
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+    )
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="test-1")
+    tool_calls = out["choices"][0]["message"]["tool_calls"]
+    assert len(tool_calls) == 1
+    assert "index" in tool_calls[0], (
+        "tool_calls must include 'index' field for OpenAI SDK compatibility"
+    )
+    assert tool_calls[0]["index"] == 0
+
+
+def test_response_processor_stream_tool_calls_include_index():
+    """Test that streaming tool_calls include index field required by OpenAI SDK"""
+    rp = ResponseProcessor(logger)
+    # Streaming response with function_call
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "role": "assistant",
+                        "content": "",
+                        "function_call": {
+                            "name": "task",
+                            "arguments": {"command": "/explore"},
+                        },
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+    )
+    out = rp.process_stream_chunk(
+        giga_resp, gpt_model="gpt-x", response_id="test-stream-1"
+    )
+    tool_calls = out["choices"][0]["delta"]["tool_calls"]
+    assert len(tool_calls) == 1
+    assert "index" in tool_calls[0], "streaming tool_calls must include 'index' field"
+    assert tool_calls[0]["index"] == 0
