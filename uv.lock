@@ -1022,7 +1022,7 @@ wheels = [
 
 [[package]]
 name = "gpt2giga"
-version = "0.1.1"
+version = "0.1.1.post1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
