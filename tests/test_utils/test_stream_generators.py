@@ -106,14 +106,13 @@ async def test_stream_responses_generator_exception_path():
     lines = []
     async for line in stream_responses_generator(req, chat, response_id="1"):
         lines.append(line)
-    # Now we expect: response.created, response.in_progress, output_item.added, content_part.added, then error
-    assert len(lines) == 5
+    # Now we expect: response.created, response.in_progress, then error
+    # (output_item.added and content_part.added are emitted lazily on first content)
+    assert len(lines) == 3
     assert "event: response.created" in lines[0]
     assert "event: response.in_progress" in lines[1]
-    assert "event: response.output_item.added" in lines[2]
-    assert "event: response.content_part.added" in lines[3]
-    assert "Stream interrupted" in lines[4]
-    assert "event: error" in lines[4]
+    assert "Stream interrupted" in lines[2]
+    assert "event: error" in lines[2]
 
 
 @pytest.mark.asyncio
@@ -141,15 +140,14 @@ async def test_stream_responses_generator_gigachat_exception():
     lines = []
     async for line in stream_responses_generator(req, chat, response_id="1"):
         lines.append(line)
-    # Now we expect: response.created, response.in_progress, output_item.added, content_part.added, then error
-    assert len(lines) == 5
+    # Now we expect: response.created, response.in_progress, then error
+    # (output_item.added and content_part.added are emitted lazily on first content)
+    assert len(lines) == 3
     assert "event: response.created" in lines[0]
     assert "event: response.in_progress" in lines[1]
-    assert "event: response.output_item.added" in lines[2]
-    assert "event: response.content_part.added" in lines[3]
-    assert "GigaChat" in lines[4]
-    assert "stream_error" in lines[4]
-    assert "event: error" in lines[4]
+    assert "GigaChat" in lines[2]
+    assert "stream_error" in lines[2]
+    assert "event: error" in lines[2]
 
 
 @pytest.mark.asyncio
@@ -294,3 +292,226 @@ async def test_stream_responses_generator_success():
     assert event_type == "response.completed"
     assert data["response"]["status"] == "completed"
     assert data["response"]["output"][0]["content"][0]["text"] == "AB"
+
+
+class FakeClientFunctionCall:
+    """Client that returns function call chunks"""
+
+    def astream(self, chat):
+        async def gen():
+            # First chunk with function name
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {
+                                "role": "assistant",
+                                "content": None,
+                                "function_call": {
+                                    "name": "get_weather",
+                                    "arguments": {"location": "Moscow"},
+                                },
+                                "functions_state_id": "state_123",
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            # Second chunk with finish_reason
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {},
+                            "finish_reason": "function_call",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
+class FakeClientFunctionCallStreamed:
+    """Client that returns function call with arguments streamed across multiple chunks"""
+
+    def astream(self, chat):
+        async def gen():
+            # First chunk with function name
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {
+                                "role": "assistant",
+                                "content": None,
+                                "function_call": {
+                                    "name": "search",
+                                    "arguments": '{"query":',
+                                },
+                                "functions_state_id": "state_456",
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            # Second chunk with more arguments
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {
+                                "function_call": {
+                                    "arguments": ' "test"}',
+                                },
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            # Final chunk
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {},
+                            "finish_reason": "function_call",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_function_call():
+    """Test streaming with function call (single chunk)"""
+    import json
+
+    req = FakeRequest(FakeClientFunctionCall())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(req, chat, response_id="fc_test"):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    # Expected events:
+    # 1. response.created
+    # 2. response.in_progress
+    # 3. response.output_item.added (function_call)
+    # 4. response.function_call_arguments.delta
+    # 5. response.function_call_arguments.done
+    # 6. response.output_item.done
+    # 7. response.completed
+    assert len(lines) == 7
+
+    event_type, data = parse_sse(lines[0])
+    assert event_type == "response.created"
+
+    event_type, data = parse_sse(lines[1])
+    assert event_type == "response.in_progress"
+
+    event_type, data = parse_sse(lines[2])
+    assert event_type == "response.output_item.added"
+    assert data["item"]["type"] == "function_call"
+    assert data["item"]["name"] == "get_weather"
+    assert data["item"]["status"] == "in_progress"
+
+    event_type, data = parse_sse(lines[3])
+    assert event_type == "response.function_call_arguments.delta"
+    assert "location" in data["delta"]
+
+    event_type, data = parse_sse(lines[4])
+    assert event_type == "response.function_call_arguments.done"
+    assert data["name"] == "get_weather"
+    assert "location" in data["arguments"]
+
+    event_type, data = parse_sse(lines[5])
+    assert event_type == "response.output_item.done"
+    assert data["item"]["type"] == "function_call"
+    assert data["item"]["status"] == "completed"
+    assert data["item"]["name"] == "get_weather"
+
+    event_type, data = parse_sse(lines[6])
+    assert event_type == "response.completed"
+    assert data["response"]["status"] == "completed"
+    assert data["response"]["output"][0]["type"] == "function_call"
+    assert data["response"]["output"][0]["name"] == "get_weather"
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_function_call_streamed_args():
+    """Test streaming with function call arguments split across multiple chunks"""
+    import json
+
+    req = FakeRequest(FakeClientFunctionCallStreamed())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(req, chat, response_id="fc_stream"):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    # Expected events:
+    # 1. response.created
+    # 2. response.in_progress
+    # 3. response.output_item.added (function_call)
+    # 4. response.function_call_arguments.delta (first part)
+    # 5. response.function_call_arguments.delta (second part)
+    # 6. response.function_call_arguments.done
+    # 7. response.output_item.done
+    # 8. response.completed
+    assert len(lines) == 8
+
+    # Verify delta events
+    event_type, data = parse_sse(lines[3])
+    assert event_type == "response.function_call_arguments.delta"
+    assert data["delta"] == '{"query":'
+
+    event_type, data = parse_sse(lines[4])
+    assert event_type == "response.function_call_arguments.delta"
+    assert data["delta"] == ' "test"}'
+
+    # Verify final arguments are concatenated
+    event_type, data = parse_sse(lines[5])
+    assert event_type == "response.function_call_arguments.done"
+    assert data["arguments"] == '{"query": "test"}'
+    assert data["name"] == "search"
+
+    # Verify completed output
+    event_type, data = parse_sse(lines[7])
+    assert event_type == "response.completed"
+    assert data["response"]["output"][0]["type"] == "function_call"
+    assert data["response"]["output"][0]["name"] == "search"
+    assert data["response"]["output"][0]["arguments"] == '{"query": "test"}'

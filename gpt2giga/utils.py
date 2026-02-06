@@ -190,6 +190,7 @@ async def stream_responses_generator(
     created_at = int(time.time())
     model = request_data.get("model", "unknown") if request_data else "unknown"
     msg_id = f"msg_{response_id}"
+    fc_id = f"fc_{response_id}"  # ID for function call item
 
     # Helper to format SSE event
     def sse_event(event_type: str, data: dict) -> str:
@@ -250,43 +251,12 @@ async def stream_responses_generator(
         )
         sequence_number += 1
 
-        # Emit response.output_item.added
-        yield sse_event(
-            "response.output_item.added",
-            {
-                "type": "response.output_item.added",
-                "output_index": 0,
-                "item": {
-                    "id": msg_id,
-                    "status": "in_progress",
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                },
-                "sequence_number": sequence_number,
-            },
-        )
-        sequence_number += 1
-
-        # Emit response.content_part.added
-        yield sse_event(
-            "response.content_part.added",
-            {
-                "type": "response.content_part.added",
-                "item_id": msg_id,
-                "output_index": 0,
-                "content_index": 0,
-                "part": {
-                    "type": "output_text",
-                    "text": "",
-                    "annotations": [],
-                },
-                "sequence_number": sequence_number,
-            },
-        )
-        sequence_number += 1
-
+        # Track response type and content
         full_text = ""
+        function_call_data = None  # Will hold {"name": ..., "arguments": ...}
+        functions_state_id = None
+        output_item_added = False
+        is_function_call = False
 
         async for i, chunk in aio_enumerate(giga_client.astream(chat_messages)):
             if await request.is_disconnected():
@@ -295,10 +265,110 @@ async def stream_responses_generator(
                 break
 
             giga_dict = chunk.model_dump()
-            delta = giga_dict["choices"][0].get("delta", {})
+            choice = giga_dict["choices"][0]
+            delta = choice.get("delta", {})
             delta_content = delta.get("content", "")
+            delta_function_call = delta.get("function_call")
 
-            if delta_content:
+            # Handle function call
+            if delta_function_call:
+                is_function_call = True
+                if functions_state_id is None:
+                    functions_state_id = delta.get("functions_state_id")
+
+                # Initialize function_call_data on first chunk
+                if function_call_data is None:
+                    function_call_data = {
+                        "name": delta_function_call.get("name", ""),
+                        "arguments": "",
+                    }
+                    # Emit output_item.added for function_call
+                    yield sse_event(
+                        "response.output_item.added",
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": 0,
+                            "item": {
+                                "id": fc_id,
+                                "type": "function_call",
+                                "status": "in_progress",
+                                "call_id": f"call_{response_id}",
+                                "name": function_call_data["name"],
+                                "arguments": "",
+                            },
+                            "sequence_number": sequence_number,
+                        },
+                    )
+                    sequence_number += 1
+                    output_item_added = True
+
+                # Update function name if provided
+                if delta_function_call.get("name"):
+                    function_call_data["name"] = delta_function_call["name"]
+
+                # Handle arguments - can be string or dict from GigaChat
+                args = delta_function_call.get("arguments")
+                if args is not None:
+                    if isinstance(args, dict):
+                        args_str = json.dumps(args, ensure_ascii=False)
+                    else:
+                        args_str = str(args)
+
+                    if args_str:
+                        # Emit function_call_arguments.delta
+                        yield sse_event(
+                            "response.function_call_arguments.delta",
+                            {
+                                "type": "response.function_call_arguments.delta",
+                                "item_id": fc_id,
+                                "output_index": 0,
+                                "delta": args_str,
+                                "sequence_number": sequence_number,
+                            },
+                        )
+                        sequence_number += 1
+                        function_call_data["arguments"] += args_str
+
+            # Handle text content
+            elif delta_content:
+                # Emit output_item.added for message if not yet done
+                if not output_item_added:
+                    yield sse_event(
+                        "response.output_item.added",
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": 0,
+                            "item": {
+                                "id": msg_id,
+                                "status": "in_progress",
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [],
+                            },
+                            "sequence_number": sequence_number,
+                        },
+                    )
+                    sequence_number += 1
+
+                    # Emit content_part.added
+                    yield sse_event(
+                        "response.content_part.added",
+                        {
+                            "type": "response.content_part.added",
+                            "item_id": msg_id,
+                            "output_index": 0,
+                            "content_index": 0,
+                            "part": {
+                                "type": "output_text",
+                                "text": "",
+                                "annotations": [],
+                            },
+                            "sequence_number": sequence_number,
+                        },
+                    )
+                    sequence_number += 1
+                    output_item_added = True
+
                 full_text += delta_content
                 # Emit response.output_text.delta
                 yield sse_event(
@@ -314,48 +384,160 @@ async def stream_responses_generator(
                 )
                 sequence_number += 1
 
-        # Emit response.output_text.done
-        yield sse_event(
-            "response.output_text.done",
-            {
-                "type": "response.output_text.done",
-                "item_id": msg_id,
-                "output_index": 0,
-                "content_index": 0,
-                "text": full_text,
-                "sequence_number": sequence_number,
-            },
-        )
-        sequence_number += 1
-
-        # Emit response.content_part.done
-        yield sse_event(
-            "response.content_part.done",
-            {
-                "type": "response.content_part.done",
-                "item_id": msg_id,
-                "output_index": 0,
-                "content_index": 0,
-                "part": {
-                    "type": "output_text",
-                    "text": full_text,
-                    "annotations": [],
+        # Finalize based on response type
+        if is_function_call and function_call_data:
+            # Emit function_call_arguments.done
+            yield sse_event(
+                "response.function_call_arguments.done",
+                {
+                    "type": "response.function_call_arguments.done",
+                    "item_id": fc_id,
+                    "output_index": 0,
+                    "name": function_call_data["name"],
+                    "arguments": function_call_data["arguments"],
+                    "sequence_number": sequence_number,
                 },
-                "sequence_number": sequence_number,
-            },
-        )
-        sequence_number += 1
+            )
+            sequence_number += 1
 
-        # Emit response.output_item.done
-        yield sse_event(
-            "response.output_item.done",
-            {
-                "type": "response.output_item.done",
-                "output_index": 0,
-                "item": {
-                    "id": msg_id,
+            # Emit output_item.done for function_call
+            yield sse_event(
+                "response.output_item.done",
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "id": fc_id,
+                        "type": "function_call",
+                        "status": "completed",
+                        "call_id": f"call_{response_id}",
+                        "name": function_call_data["name"],
+                        "arguments": function_call_data["arguments"],
+                    },
+                    "sequence_number": sequence_number,
+                },
+            )
+            sequence_number += 1
+
+            # Emit response.completed with function_call output
+            final_output = [
+                {
+                    "id": fc_id,
+                    "type": "function_call",
                     "status": "completed",
+                    "call_id": f"call_{response_id}",
+                    "name": function_call_data["name"],
+                    "arguments": function_call_data["arguments"],
+                }
+            ]
+            yield sse_event(
+                "response.completed",
+                {
+                    "type": "response.completed",
+                    "response": build_response_obj("completed", output=final_output),
+                    "sequence_number": sequence_number,
+                },
+            )
+        else:
+            # Handle text response (including empty response)
+            if not output_item_added:
+                # No content received, emit minimal events
+                yield sse_event(
+                    "response.output_item.added",
+                    {
+                        "type": "response.output_item.added",
+                        "output_index": 0,
+                        "item": {
+                            "id": msg_id,
+                            "status": "in_progress",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [],
+                        },
+                        "sequence_number": sequence_number,
+                    },
+                )
+                sequence_number += 1
+
+                yield sse_event(
+                    "response.content_part.added",
+                    {
+                        "type": "response.content_part.added",
+                        "item_id": msg_id,
+                        "output_index": 0,
+                        "content_index": 0,
+                        "part": {
+                            "type": "output_text",
+                            "text": "",
+                            "annotations": [],
+                        },
+                        "sequence_number": sequence_number,
+                    },
+                )
+                sequence_number += 1
+
+            # Emit response.output_text.done
+            yield sse_event(
+                "response.output_text.done",
+                {
+                    "type": "response.output_text.done",
+                    "item_id": msg_id,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "text": full_text,
+                    "sequence_number": sequence_number,
+                },
+            )
+            sequence_number += 1
+
+            # Emit response.content_part.done
+            yield sse_event(
+                "response.content_part.done",
+                {
+                    "type": "response.content_part.done",
+                    "item_id": msg_id,
+                    "output_index": 0,
+                    "content_index": 0,
+                    "part": {
+                        "type": "output_text",
+                        "text": full_text,
+                        "annotations": [],
+                    },
+                    "sequence_number": sequence_number,
+                },
+            )
+            sequence_number += 1
+
+            # Emit response.output_item.done
+            yield sse_event(
+                "response.output_item.done",
+                {
+                    "type": "response.output_item.done",
+                    "output_index": 0,
+                    "item": {
+                        "id": msg_id,
+                        "status": "completed",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": full_text,
+                                "annotations": [],
+                            }
+                        ],
+                    },
+                    "sequence_number": sequence_number,
+                },
+            )
+            sequence_number += 1
+
+            # Emit response.completed
+            final_output = [
+                {
+                    "id": msg_id,
                     "type": "message",
+                    "status": "completed",
                     "role": "assistant",
                     "content": [
                         {
@@ -364,36 +546,16 @@ async def stream_responses_generator(
                             "annotations": [],
                         }
                     ],
+                }
+            ]
+            yield sse_event(
+                "response.completed",
+                {
+                    "type": "response.completed",
+                    "response": build_response_obj("completed", output=final_output),
+                    "sequence_number": sequence_number,
                 },
-                "sequence_number": sequence_number,
-            },
-        )
-        sequence_number += 1
-
-        # Emit response.completed
-        final_output = [
-            {
-                "id": msg_id,
-                "type": "message",
-                "status": "completed",
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "output_text",
-                        "text": full_text,
-                        "annotations": [],
-                    }
-                ],
-            }
-        ]
-        yield sse_event(
-            "response.completed",
-            {
-                "type": "response.completed",
-                "response": build_response_obj("completed", output=final_output),
-                "sequence_number": sequence_number,
-            },
-        )
+            )
 
     except gigachat.exceptions.GigaChatException as e:
         error_type = type(e).__name__
