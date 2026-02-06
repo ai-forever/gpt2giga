@@ -278,3 +278,158 @@ def test_convert_skips_function_wrapper_without_parameters():
     out = convert_tool_to_giga_functions(data)
     assert len(out) == 1
     assert out[0].name == "valid_fn"
+
+
+def test_normalize_json_schema_array_type_with_null():
+    """Test: handles type: ['string', 'null'] (JSON Schema nullable syntax)"""
+    schema = {
+        "type": ["string", "null"],
+        "description": "Optional string parameter",
+    }
+    result = normalize_json_schema(schema)
+    # type should be converted to single string
+    assert result["type"] == "string"
+    assert result["description"] == "Optional string parameter"
+
+
+def test_normalize_json_schema_array_type_multiple():
+    """Test: handles type: ['string', 'integer', 'null'] - takes first non-null"""
+    schema = {
+        "type": ["string", "integer", "null"],
+    }
+    result = normalize_json_schema(schema)
+    assert result["type"] == "string"
+
+
+def test_normalize_json_schema_nested_array_type():
+    """Test: handles nested properties with array-style type"""
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": ["string", "null"], "description": "URL parameter"},
+            "coordinate": {"type": ["string", "null"]},
+            "size": {"type": ["string", "null"]},
+            "text": {"type": ["string", "null"]},
+            "path": {"type": ["string", "null"]},
+        },
+    }
+    result = normalize_json_schema(schema)
+    assert result["properties"]["url"]["type"] == "string"
+    assert result["properties"]["coordinate"]["type"] == "string"
+    assert result["properties"]["size"]["type"] == "string"
+    assert result["properties"]["text"]["type"] == "string"
+    assert result["properties"]["path"]["type"] == "string"
+
+
+def test_convert_tool_with_array_type_nullable():
+    """Test: convert_tool_to_giga_functions handles type: ['string', 'null']"""
+    data = {
+        "tools": [
+            {
+                "function": {
+                    "name": "browser_action",
+                    "description": "Browser action tool",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "enum": ["launch", "click"]},
+                            "url": {"type": ["string", "null"], "description": "URL"},
+                            "coordinate": {"type": ["string", "null"]},
+                        },
+                        "required": ["action", "url", "coordinate"],
+                    },
+                }
+            }
+        ]
+    }
+    out = convert_tool_to_giga_functions(data)
+    assert len(out) == 1
+    assert out[0].name == "browser_action"
+    params = (
+        out[0].parameters.model_dump()
+        if hasattr(out[0].parameters, "model_dump")
+        else dict(out[0].parameters)
+    )
+    # Verify types are converted to single strings
+    # Note: FunctionParameters uses 'type_' instead of 'type' (Python reserved word)
+    assert params["properties"]["url"]["type_"] == "string"
+    assert params["properties"]["coordinate"]["type_"] == "string"
+
+
+def test_convert_tool_with_ref_and_defs():
+    """Test: convert_tool_to_giga_functions resolves $ref/$defs references.
+
+    GigaChat doesn't support $ref/$defs, so they must be resolved/inlined.
+    This test reproduces the issue from:
+    https://github.com/..../issues/... (422 error: "Type properties.response.items.type is wrong")
+    """
+    data = {
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "final_result",
+                    "description": "The final response which ends this conversation",
+                    "parameters": {
+                        "properties": {
+                            "response": {
+                                "items": {"$ref": "#/$defs/FlightDetails"},
+                                "type": "array",
+                            }
+                        },
+                        "required": ["response"],
+                        "type": "object",
+                        "additionalProperties": False,
+                        "$defs": {
+                            "FlightDetails": {
+                                "description": "Details of the most suitable flight.",
+                                "properties": {
+                                    "flight_number": {"type": "string"},
+                                    "price": {"type": "integer"},
+                                    "origin": {
+                                        "description": "Three-letter airport code",
+                                        "type": "string",
+                                    },
+                                    "destination": {
+                                        "description": "Three-letter airport code",
+                                        "type": "string",
+                                    },
+                                    "date": {"format": "date", "type": "string"},
+                                },
+                                "required": [
+                                    "flight_number",
+                                    "price",
+                                    "origin",
+                                    "destination",
+                                    "date",
+                                ],
+                                "type": "object",
+                                "additionalProperties": False,
+                            }
+                        },
+                    },
+                    "strict": True,
+                },
+            }
+        ]
+    }
+    out = convert_tool_to_giga_functions(data)
+    assert len(out) == 1
+    assert out[0].name == "final_result"
+    params = (
+        out[0].parameters.model_dump()
+        if hasattr(out[0].parameters, "model_dump")
+        else dict(out[0].parameters)
+    )
+
+    # Verify $defs is removed
+    assert "$defs" not in params
+
+    # Verify $ref is resolved and inlined
+    response_items = params["properties"]["response"]["items"]
+    assert "$ref" not in response_items
+    # Inner items is a raw dict (not a Pydantic model), so 'type' not 'type_'
+    assert response_items["type"] == "object"
+    assert "flight_number" in response_items["properties"]
+    assert response_items["properties"]["flight_number"]["type"] == "string"
+    assert response_items["properties"]["price"]["type"] == "integer"

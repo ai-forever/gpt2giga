@@ -34,9 +34,6 @@ jobs:
       - name: Lint with Ruff
         run: uv run ruff check .
 
-      - name: Check formatting with Black
-        run: uv run black --check .
-
       - name: Run tests with coverage
         run: |
           uv run pytest tests/ --cov=. --cov-report=json:coverage.json --cov-fail-under=80

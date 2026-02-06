@@ -18,8 +18,7 @@ from gpt2giga.protocol.message_utils import (
     ensure_system_first,
     limit_attachments,
 )
-from gpt2giga.protocol.schema_utils import resolve_schema_refs
-from gpt2giga.utils import normalize_json_schema
+from gpt2giga.utils import normalize_json_schema, resolve_schema_refs
 
 
 class RequestTransformer:
