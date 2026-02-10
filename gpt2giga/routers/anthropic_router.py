@@ -234,6 +234,11 @@ def _build_anthropic_response(
 
     content_blocks: List[Dict] = []
 
+    # Add thinking block if GigaChat returned reasoning_content
+    reasoning = message.get("reasoning_content")
+    if reasoning:
+        content_blocks.append({"type": "thinking", "thinking": reasoning})
+
     if message.get("function_call"):
         fc = message["function_call"]
         args = fc.get("arguments", {})
@@ -316,6 +321,8 @@ async def _stream_anthropic_generator(
         full_text = ""
         function_call_data: Optional[Dict[str, str]] = None
         content_block_started = False
+        thinking_block_emitted = False
+        content_index = 0  # current content block index
         output_tokens = 0
 
         async for chunk in giga_client.astream(chat_messages):
@@ -329,6 +336,35 @@ async def _stream_anthropic_generator(
             delta = choice.get("delta", {})
             delta_content = delta.get("content", "")
             delta_fc = delta.get("function_call")
+            delta_reasoning = delta.get("reasoning_content", "")
+
+            # --- Reasoning / thinking ---
+            if delta_reasoning and not thinking_block_emitted:
+                yield sse(
+                    "content_block_start",
+                    {
+                        "type": "content_block_start",
+                        "index": content_index,
+                        "content_block": {"type": "thinking", "thinking": ""},
+                    },
+                )
+                yield sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": content_index,
+                        "delta": {
+                            "type": "thinking_delta",
+                            "thinking": delta_reasoning,
+                        },
+                    },
+                )
+                yield sse(
+                    "content_block_stop",
+                    {"type": "content_block_stop", "index": content_index},
+                )
+                content_index += 1
+                thinking_block_emitted = True
 
             # --- Function call (tool_use) ---
             if delta_fc:
@@ -343,7 +379,7 @@ async def _stream_anthropic_generator(
                         "content_block_start",
                         {
                             "type": "content_block_start",
-                            "index": 0,
+                            "index": content_index,
                             "content_block": {
                                 "type": "tool_use",
                                 "id": tool_id,
@@ -370,7 +406,7 @@ async def _stream_anthropic_generator(
                             "content_block_delta",
                             {
                                 "type": "content_block_delta",
-                                "index": 0,
+                                "index": content_index,
                                 "delta": {
                                     "type": "input_json_delta",
                                     "partial_json": args_str,
@@ -385,7 +421,7 @@ async def _stream_anthropic_generator(
                         "content_block_start",
                         {
                             "type": "content_block_start",
-                            "index": 0,
+                            "index": content_index,
                             "content_block": {"type": "text", "text": ""},
                         },
                     )
@@ -396,7 +432,7 @@ async def _stream_anthropic_generator(
                     "content_block_delta",
                     {
                         "type": "content_block_delta",
-                        "index": 0,
+                        "index": content_index,
                         "delta": {
                             "type": "text_delta",
                             "text": delta_content,
@@ -415,7 +451,7 @@ async def _stream_anthropic_generator(
         if content_block_started:
             yield sse(
                 "content_block_stop",
-                {"type": "content_block_stop", "index": 0},
+                {"type": "content_block_stop", "index": content_index},
             )
 
         yield sse(
@@ -501,6 +537,17 @@ async def messages(request: Request):
         openai_data["top_p"] = data["top_p"]
     if "stop_sequences" in data:
         openai_data["stop"] = data["stop_sequences"]
+
+    # Convert Anthropic thinking → GigaChat reasoning_effort
+    thinking = data.get("thinking")
+    if thinking and isinstance(thinking, dict) and thinking.get("type") == "enabled":
+        budget = thinking.get("budget_tokens", 10000)
+        if budget >= 8000:
+            openai_data["reasoning_effort"] = "high"
+        elif budget >= 3000:
+            openai_data["reasoning_effort"] = "medium"
+        else:
+            openai_data["reasoning_effort"] = "low"
 
     # Convert Anthropic tools → OpenAI → GigaChat functions
     if "tools" in data and data["tools"]:
