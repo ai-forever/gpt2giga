@@ -14,7 +14,7 @@
 3. [Начало работы](#начало-работы)
    1. [Запуск в Docker](#запуск-в-docker)
    2. [Локальный запуск](#локальный-запуск)
-4. [Использование с Anthropic SDK](#использование-с-anthropic-sdk)
+4. [Примеры](#примеры)
 5. [Параметры](#изменение-параметров-gpt2giga)
    1. [Аргументы командной строки](#аргументы-командной-строки)
    2. [Переменные окружения](#переменные-окружения)
@@ -145,76 +145,15 @@ sequenceDiagram
 Адрес и порт сервера, а также другие параметры, можно настроить с помощью аргументов командной строки или переменных окружения.
 Документация FastAPI доступна по адресу `http://localhost:<PORT>/docs`.
 
-## Использование с Anthropic SDK
+## Примеры
 
-gpt2giga поддерживает эндпоинт `/v1/messages`, совместимый с [Anthropic Messages API](https://docs.anthropic.com/en/api/messages).
-Это позволяет использовать Anthropic Python SDK для работы с GigaChat.
+Подробные runnable-примеры вынесены в папку [`examples/`](./examples/).
 
-### Базовый пример
-
-```python
-from anthropic import Anthropic
-
-client = Anthropic(base_url="http://localhost:8090/v1", api_key="any-key")
-
-message = client.messages.create(
-    model="GigaChat-2-Max",
-    max_tokens=1024,
-    messages=[
-        {"role": "user", "content": "Привет! Как дела?"},
-    ],
-)
-print(message.content[0].text)
-```
-
-### Стриминг
-
-```python
-with client.messages.stream(
-    model="GigaChat-2-Max",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "Расскажи сказку."}],
-) as stream:
-    for text in stream.text_stream:
-        print(text, end="", flush=True)
-```
-
-### Extended Thinking (Reasoning)
-
-Параметр `thinking` из Anthropic API транслируется в `reasoning_effort` для GigaChat.
-В ответе `reasoning_content` от GigaChat конвертируется в блок `thinking`.
-
-```python
-message = client.messages.create(
-    model="GigaChat-2-Max",
-    max_tokens=16000,
-    thinking={"type": "enabled", "budget_tokens": 10000},
-    messages=[{"role": "user", "content": "Реши задачу пошагово."}],
-)
-
-for block in message.content:
-    if block.type == "thinking":
-        print("Рассуждение:", block.thinking)
-    elif block.type == "text":
-        print("Ответ:", block.text)
-```
-
-### Поддерживаемые возможности Anthropic API
-
-| Возможность | Поддержка |
-|---|---|
-| Текстовые сообщения | ✅ |
-| Стриминг (SSE) | ✅ |
-| Системный промпт (`system`) | ✅ |
-| Многоходовые диалоги | ✅ |
-| Tool use / Function calling | ✅ |
-| Изображения (base64, URL) | ✅ |
-| Extended thinking (`thinking`) | ✅ → `reasoning_effort` |
-| `tool_choice` (auto, tool, none) | ✅ |
-| `stop_sequences` | ✅ |
-| `temperature`, `top_p` | ✅ |
-
-> Больше примеров — в папке [`examples/anthropic/`](./examples/anthropic/).
+- OpenAI Python SDK:
+  - Chat Completions API: [`examples/chat_completions/README.md`](./examples/chat_completions/README.md)
+  - Responses API: [`examples/responses/README.md`](./examples/responses/README.md)
+- Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
+- Индекс всех примеров: [`examples/README.md`](./examples/README.md)
 
 ## Изменение параметров gpt2giga
 
