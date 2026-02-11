@@ -1,4 +1,4 @@
-# Утилита для проксирования OpenAI-запросов в GigaChat
+# Утилита для проксирования OpenAI/Anthropic-запросов в GigaChat
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/gpt2giga/ci.yaml?&style=flat-square)](https://github.com/ai-forever/gpt2giga/actions/workflows/ci.yaml)
 [![GitHub License](https://img.shields.io/github/license/ai-forever/gpt2giga?style=flat-square)](https://opensource.org/licenses/MIT)
@@ -14,22 +14,23 @@
 3. [Начало работы](#начало-работы)
    1. [Запуск в Docker](#запуск-в-docker)
    2. [Локальный запуск](#локальный-запуск)
-4. [Параметры](#изменение-параметров-gpt2giga)
+4. [Примеры](#примеры)
+5. [Параметры](#изменение-параметров-gpt2giga)
    1. [Аргументы командной строки](#аргументы-командной-строки)
    2. [Переменные окружения](#переменные-окружения)
-5. [Авторизация с помощью заголовка](#авторизация-с-помощью-заголовка)
-6. [Использование HTTPS](#использование-https)
-7. [Использование API ключа](#использование-api-ключа)
-8. [Системные эндпоинты](#системные-эндпоинты)
-9. [Совместимые приложения](#совместимые-приложения)
+6. [Авторизация с помощью заголовка](#авторизация-с-помощью-заголовка)
+7. [Использование HTTPS](#использование-https)
+8. [Использование API ключа](#использование-api-ключа)
+9. [Системные эндпоинты](#системные-эндпоинты)
+10. [Совместимые приложения](#совместимые-приложения)
 
 
 ## Описание
-Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API, в GigaChat API.
+Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API или Anthropic Messages API, в GigaChat API.
 
-При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API, заданного в вашем приложении (например, `https://api.openai.com/v1/`).
+При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API (например, `https://api.openai.com/v1/`) или Anthropic API (например, `https://api.anthropic.com/v1/`), заданного в вашем приложении.
 Утилита обработает запрос и перенаправит его заданной [модели GigaChat](https://developers.sber.ru/docs/ru/gigachat/models).
-После получения ответа модели, она передаст его в приложение в формате OpenAI.
+После получения ответа модели, она передаст его в приложение в формате исходного API (OpenAI или Anthropic).
 
 Утилита работает как с запросами на генерацию, так и с запросами на создание эмбеддингов (эндпоинты `/embeddings` или `/v1/embeddings`).
 
@@ -41,10 +42,10 @@ sequenceDiagram
     participant gpt2giga
     participant GigaChat as GigaChat API
 
-    YourApp->>gpt2giga: OpenAI-запрос
+    YourApp->>gpt2giga: OpenAI / Anthropic запрос
     gpt2giga->>GigaChat: Запрос формата GigaChat API
     GigaChat->>gpt2giga: Ответ формата GigaChat API
-    gpt2giga->>YourApp: OpenAI-ответ
+    gpt2giga->>YourApp: OpenAI / Anthropic ответ
 ```
 
 ## Возможности gpt2giga
@@ -52,6 +53,7 @@ sequenceDiagram
 С помощью gpt2giga вы можете:
 
 - использовать возможности моделей OpenAI и полностью заменить ChatGPT на GigaChat;
+- **использовать Anthropic SDK** — эндпоинт `/v1/messages` совместим с Anthropic Messages API, включая стриминг, tool use и extended thinking;
 - вызывать функции через API, включая передачу и выполнение функций с аргументами;
 - использовать структурированный вывод (Structured Outputs) для получения гарантированного JSON-ответа;
 - обрабатывать ответ модели в режиме потоковой генерации токенов с помощью параметра `stream=true`;
@@ -80,19 +82,22 @@ sequenceDiagram
 
     ```dotenv
     GPT2GIGA_HOST=0.0.0.0
+    GPT2GIGA_PORT=8090
     GIGACHAT_CREDENTIALS="Authorization key GigaChat API"
     GIGACHAT_SCOPE=<your_api_scope>
     GIGACHAT_MODEL=GigaChat
     GIGACHAT_VERIFY_SSL_CERTS=False
     ```
 
-3. Выберите образ с нужной версией Python (3.10-3.14).
-```sh
-PYTHON_VERSION=3.10
-docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
-docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
-```
-Доступные образы можно увидеть на https://hub.docker.com/r/gigateam/gpt2giga или https://github.com/ai-forever/gpt2giga/pkgs/container/gpt2giga
+3. (Опционально) Выберите образ с нужной версией Python (3.10–3.14) и обновите `image:` в `docker-compose.yaml`.
+
+   ```sh
+   PYTHON_VERSION=3.10
+   docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
+   docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
+   ```
+
+   Доступные теги смотрите в реестрах: [Docker Hub](https://hub.docker.com/r/gigateam/gpt2giga) и [GHCR](https://github.com/ai-forever/gpt2giga/pkgs/container/gpt2giga).
 
 4. Запустите контейнер с помощью Docker Compose: `docker compose up -d`
 
@@ -136,8 +141,19 @@ docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
 
 4. В терминале выполните команду `gpt2giga`.
 
-Запустится прокси-сервер, по умолчанию доступный по адресу `localhost:8090`.
+Запустится прокси-сервер, по умолчанию доступный по адресу `localhost:8090` (если не задан `GPT2GIGA_PORT` или `--proxy.port`).
 Адрес и порт сервера, а также другие параметры, можно настроить с помощью аргументов командной строки или переменных окружения.
+Документация FastAPI доступна по адресу `http://localhost:<PORT>/docs`.
+
+## Примеры
+
+Подробные runnable-примеры вынесены в папку [`examples/`](./examples/).
+
+- OpenAI Python SDK:
+  - Chat Completions API: [`examples/chat_completions/README.md`](./examples/chat_completions/README.md)
+  - Responses API: [`examples/responses/README.md`](./examples/responses/README.md)
+- Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
+- Индекс всех примеров: [`examples/README.md`](./examples/README.md)
 
 ## Изменение параметров gpt2giga
 
@@ -145,34 +161,36 @@ docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
 
 ### Аргументы командной строки
 
-Утилита поддерживает аргументы 2 типов(настройки прокси и настройки GigaChat:
+Полный список параметров смотрите в `gpt2giga --help`.
+
+Утилита поддерживает аргументы 2 типов (настройки прокси и настройки GigaChat):
 - `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
 
-- `--proxy [JSON]` —  set proxy from JSON string (По умолчанию `{}`);
+- `--proxy [JSON]` — set proxy from JSON string (по умолчанию `{}`);
 - `--proxy.host <HOST>` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
 - `--proxy.port <PORT>` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
-- `--proxy.use-https <True/False>` — Использовать ли https. По умолчанию `False`;
+- `--proxy.use-https <true/false>` — использовать ли HTTPS. По умолчанию `False`;
 - `--proxy.https-key-file <PATH>` — Путь до key файла для https. По умолчанию `None`;
 - `--proxy.https-cert-file <PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `--proxy.pass-model` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
-- `--proxy.pass-token` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
+- `--proxy.pass-model <true/false>` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
+- `--proxy.pass-token <true/false>` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
 - `--proxy.embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
-- `--proxy.enable-images` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API
-- `--proxy.log-level` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
-- `--proxy.log-filename` — Имя лог файла. По умолчанию `gpt2giga.log`
-- `--proxy.log-max-size` — Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
-- `--proxy.enable-api-key-auth` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
+- `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
+- `--proxy.log-level` — уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`;
+- `--proxy.log-filename` — имя лог файла. По умолчанию `gpt2giga.log`;
+- `--proxy.log-max-size` — максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB);
+- `--proxy.enable-api-key-auth` — нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`;
 - `--proxy.api-key` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
 
 Далее идут стандартные настройки из библиотеки GigaChat:
-- `--gigachat [JSON]` —  set gigachat from JSON string (По умолчанию `{}`);
+- `--gigachat [JSON]` — set gigachat from JSON string (по умолчанию `{}`);
 - `--gigachat.base-url <BASE_URL>` — базовый URL для GigaChat API. По умолчанию берется значение переменной `GIGACHAT_BASE_URL` или поля `BASE_URL` внутри пакета;
 - `--gigachat.auth-url <AUTH_URL>` — базовый URL для Auth GigaChat API. По умолчанию берется значение переменной `GIGACHAT_AUTH_URL` или поля `AUTH_URL` внутри пакета;
-- `--gigachat.credentials <BASE_URL>` — Креды гигачат;
+- `--gigachat.credentials <CREDENTIALS>` — credentials (ключ/данные авторизации) для GigaChat;
 - `--gigachat.scope <GIGACHAT_SCOPE>` — Скоуп гигачат (API_CORP, API_PERS...);
 - `--gigachat.user <GIGACHAT_USER>` — Вариант авторизации через user/password;
 - `--gigachat.password <GIGACHAT_PASSWORD>` — Вариант авторизации через user/password;
-- `--gigachat.access_token <ACCESS_TOKEN>` — JWE токен;
+- `--gigachat.access-token <ACCESS_TOKEN>` — JWE токен;
 - `--gigachat.model <MODEL>` — модель для запросов в GigaChat. По умолчанию `GIGACHAT_MODEL`;
 - `--gigachat.profanity-check <True/False>` — Параметр цензуры. По умолчанию `None`;
 - `--gigachat.timeout <TIMEOUT>` — таймаут для запросов к GigaChat API. По умолчанию `30` секунд;
@@ -196,8 +214,8 @@ docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
 gpt2giga \
     --proxy.host 127.0.0.1 \
     --proxy.port 8080 \
-    --proxy.pass-model \
-    --proxy.pass-token \
+    --proxy.pass-model true \
+    --proxy.pass-token true \
     --gigachat.base-url https://gigachat.devices.sberbank.ru/api/v1 \
     --gigachat.model GigaChat-2-Max \
     --gigachat.timeout 300 \
@@ -208,7 +226,7 @@ gpt2giga \
 
 Для настройки параметров утилиты также можно использовать переменные окружения, заданные в файле `.env`.
 
-У настроек прокси префикс GPT2GIGA_, у настроек GigaChat: GIGACHAT_
+У настроек прокси префикс `GPT2GIGA_`, у настроек GigaChat: `GIGACHAT_`
 
 Список доступных переменных:
 
@@ -219,7 +237,6 @@ gpt2giga \
 - `GPT2GIGA_HTTPS_CERT_FILE=<PATH>` — Путь до cert файла https. По умолчанию `None`;
 - `GPT2GIGA_PASS_MODEL="False"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat;
 - `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
-- `GPT2GIGA_TIMEOUT="600"` — таймаут для запросов к GigaChat API (в секундах);
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов.
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
 - `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
@@ -235,11 +252,10 @@ gpt2giga \
 - `GIGACHAT_CREDENTIALS` и `GIGACHAT_SCOPE` — для авторизации с помощью ключа авторизации;
 - `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токена доступа, полученного в обмен на ключ;
 - `GIGACHAT_CA_BUNDLE_FILE` - путь к файлу сертификата корневого центра сертификации;
-- `GIGACHAT_MTLS_AUTH` — использовать аутентификацию по сертефикатам mTLS;
 - `GIGACHAT_CERT_FILE` - путь к клиентскому сертификату;
 - `GIGACHAT_KEY_FILE` - путь к закрытому ключу;
 - `GIGACHAT_KEY_FILE_PASSWORD` - пароль от закрытого ключа;
-- `GIGACHAT_VERIFY_SSL_CERTS` — для того, что бы проверять SSL сертификаты, по умолчанию `False`;
+- `GIGACHAT_VERIFY_SSL_CERTS` — для того, чтобы проверять SSL сертификаты, по умолчанию `True`;
 - `GIGACHAT_MAX_CONNECTIONS` - Максимальное количество одновременных подключений к GigaChat API;
 - `GIGACHAT_MAX_RETRIES` - Максимальное количество попыток повтора для временных ошибок. По умолчанию `0` (отключено);
 - `GIGACHAT_RETRY_BACKOFF_FACTOR` - Множитель задержки для повторных попыток. По умолчанию `0.5`;
@@ -251,7 +267,7 @@ gpt2giga \
 
 Утилита может авторизовать запросы в GigaChat API с помощью данных, полученных в заголовке `Authorization`.
 
-Для этого запустите gpt2giga с аргументом `--pass-token` или задайте переменную окружения `GPT2GIGA_PASS_TOKEN=True`.
+Для этого запустите gpt2giga с аргументом `--proxy.pass-token true` или задайте переменную окружения `GPT2GIGA_PASS_TOKEN=True`.
 Поддерживается авторизация с помощью ключа, токена доступа и логина и пароля.
 
 Возможные варианты содержимого заголовка `Authorization`:
@@ -284,7 +300,7 @@ GPT2GIGA_USE_HTTPS=True
 GPT2GIGA_HTTPS_KEY_FILE="Path to key.pem"
 GPT2GIGA_HTTPS_CERT_FILE="Path to cert.pem"
 ```
-После этого, в переменные окружения или в cli-args нужно добавить данные сертификаты.
+После этого укажите пути к сертификатам в переменных окружения или CLI-аргументах и включите HTTPS.
 
 ## Использование API ключа
 ```dotenv
@@ -324,7 +340,7 @@ completion = client.chat.completions.create(
 - `GET /logs/stream` - SSE стриминг логов;
 - `GET /logs/html` - HTML страница для удобства просмотра стрима логов
 
-При использовании можно зайти на страницу: http://localhost:8090/logs/html и:
+При использовании можно зайти на страницу: `http://localhost:8090/logs/html` и:
 1. Если используется API ключ [Использование API ключа](#использование-api-ключа), то введите ваш `GPT2GIGA_API_KEY`
 2. Иначе, введите любой символ
 
@@ -333,18 +349,30 @@ completion = client.chat.completions.create(
 
 Таблица содержит приложения, проверенные на совместную работу с gpt2giga.
 
-| Приложение                                             | Описание                                                                                                                                    |
-|--------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| [Aider](https://aider.chat/)                           | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](./integrations/aider) |
-| [n8n](https://n8n.io/)                                 | Платформа для создания nocode-агентов                                                                                                       |
-| [Cline](https://github.com/cline/cline)                | AI-ассистент разработчика                                                                                                                   |
-| [OpenHands](https://github.com/All-Hands-AI/OpenHands) | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands)    |
-| [KiloCode](https://kilocode.ai/)                       | AI-агент для написания кода, доступен в JetBrains/VSCode                                                                                    |
-| [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py) |
 
+| Название агента/фреймворка | URL                                                  | Описание                                                                                                                                    |
+|-----------------------|------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| OpenCode              | https://opencode.ai/                                 | AI-агент с открытым исходным кодом                                                                                                          |
+| KiloCode              | https://kilo.ai/                                     | AI-агент для написания кода, доступен в JetBrains/VSCode                                                                                    |
+| OpenHands             | https://openhands.dev/                               | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands)    |
+| Zed                   | https://zed.dev/                                     | AI-ассистент                                                                                                                                |
+| Cline                 | https://cline.bot/                                   | AI-ассистент разработчика                                                                                                                   |
+| OpenAI Codex          | https://github.com/openai/codex                      | CLI агент от OpenAI                                                                                                                         |
+| Aider                 | https://aider.chat/                                  | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](./integrations/aider) |
+| Langflow              | https://github.com/langflow-ai/langflow              | Low/No-code платформа для создания агентов                                                                                                  |
+| DeepAgentsCLI         | https://github.com/langchain-ai/deepagents           | Deep Agents — это платформа для работы с агентами, построенная на основе langchain и langgraph                                              |
+| CrewAI                | https://github.com/crewAIInc/crewAI                  | Фреймворк для оркестрации агентов                                                                                                           |
+| Qwen Agent            | https://github.com/QwenLM/Qwen-Agent                 | Фреймворк                                                                                                                                   |
+| PydanticAI            | https://github.com/pydantic/pydantic-ai              | GenAI Agent Framework, the Pydantic way                                                                                                     |
+| Camel                 | https://github.com/camel-ai/camel                    | Мультиагентный фреймворк                                                                                                                    |
+| smolagents            | https://github.com/huggingface/smolagents            | Фреймворк от hf                                                                                                                             |
+| Openclaw              | https://openclaw.ai/                                 | Personal AI assistant                                                                                                                       |
+| Claude Code           | https://code.claude.com/docs/en/overview             | CLI агент от Anthropic                                                                                                                       |
+| OpenAI Agents SDK     | https://github.com/openai/openai-agents-python       | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
+| Anthropic SDK         | https://github.com/anthropics/anthropic-sdk-python   | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
 ## История изменений
 
-Подробная информация об изменениях в каждой версии доступна в файле [CHANGELOG.md](CHANGELOG.md).
+Подробная информация об изменениях в каждой версии доступна в файле [CHANGELOG.md](CHANGELOG.md) или [CHANGELOG_en.md](CHANGELOG_en.md).
 
 ## Лицензия
 

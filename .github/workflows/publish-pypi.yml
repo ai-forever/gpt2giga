@@ -7,6 +7,8 @@ jobs:
   pypi_release:
     name: Build with uv and publish to PyPI
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,10 +35,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv pip install --system --upgrade pip build
-          python -m build
+          rm -rf dist
+          uv build
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_KEY }}
+        shell: bash
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_API_KEY }}
+        run: |
+          set -euo pipefail
+          uv publish --token "${PYPI_TOKEN}" dist/*
