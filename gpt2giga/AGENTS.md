@@ -27,6 +27,7 @@ Request flow:
 | `protocol/` | Request/response transformation layer (see below) |
 | `routers/` | FastAPI route handlers (see below) |
 | `middlewares/` | HTTP middleware chain (see below) |
+| `static/` | Static web assets (`log_viewer.js` — SSE-based log viewer UI) |
 
 ## Patterns & Conventions
 
@@ -84,14 +85,18 @@ This is the core transformation engine:
 | File | Endpoints |
 |---|---|
 | `api_router.py` | `GET /models`, `GET /models/{model}`, `POST /chat/completions`, `POST /embeddings`, `POST /responses` |
-| `system_router.py` | `GET /health`, `GET/POST /ping`, `GET /logs` |
+| `anthropic_router.py` | `POST /messages` — Anthropic Messages API compatibility layer |
+| `system_router.py` | `GET /health`, `GET/POST /ping`, `GET /logs`, `GET /logs/stream` |
+| `system_router.py` (logs_router) | `GET /logs/html` — HTML log viewer page |
 
 - Routes are registered twice: at root `/` and under `/v1/` prefix.
 - All API routes use `@exceptions_handler` decorator.
 - Streaming uses `StreamingResponse` with async generators from `utils.py`.
+- Anthropic router converts Anthropic Messages format → OpenAI → GigaChat → Anthropic response.
 
 ```
-✅ DO: Copy `chat_completions()` in api_router.py as template for new endpoints
+✅ DO: Copy `chat_completions()` in api_router.py as template for new OpenAI-compatible endpoints
+✅ DO: See `anthropic_router.py` for the Anthropic ↔ OpenAI ↔ GigaChat translation pattern
 ✅ DO: Use `getattr(request.state, "gigachat_client", state.gigachat_client)` for client access
 ```
 
@@ -149,6 +154,9 @@ rg -n "def (normalize_json_schema|resolve_schema_refs)" gpt2giga/utils.py
 
 # Find all Pydantic settings
 rg -n "class.*Settings|class.*Config" gpt2giga/config.py
+
+# Find Anthropic-specific logic
+rg -n "anthropic|messages" gpt2giga/routers/anthropic_router.py
 ```
 
 ## Common Gotchas

@@ -59,6 +59,8 @@ uv run pre-commit install
 | `integrations/` | Third-party integration guides | READMEs for aider, openhands |
 | `scripts/` | Utility scripts | `generate_badge.py` |
 | `.github/workflows/` | CI/CD pipelines | `ci.yaml`, `docker_image.yaml`, `publish-*.yml` |
+| `Dockerfile` | Multi-stage Docker build | Python 3.10 default, multi-arch |
+| `docker-compose.yaml` | Docker Compose setup | Uses `.env` file, port `8090` |
 
 ### Quick Find Commands
 
@@ -80,6 +82,9 @@ rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/config.py
 
 # Find OpenAI ↔ GigaChat transformation logic
 rg -n "class (RequestTransformer|ResponseProcessor|AttachmentProcessor)" gpt2giga/protocol/
+
+# Find Anthropic compatibility layer
+rg -n "anthropic" gpt2giga/routers/ examples/anthropic/
 ```
 
 ## Definition of Done (Pre-PR)

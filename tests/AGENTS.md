@@ -37,25 +37,34 @@ Tests mirror the source structure:
 
 | Test Directory/File | Source Module | What It Tests |
 |---|---|---|
-| `test_api_server/test_api_server.py` | `api_server.py` | App creation, factory, lifespan |
-| `test_api_server/test_api_server_lifespan.py` | `api_server.py` | Startup/shutdown lifecycle |
-| `test_cli/test_cli.py` | `cli.py` | CLI argument parsing |
-| `test_config/test_config.py` | `config.py` | Configuration loading |
-| `test_protocol/test_protocol.py` | `protocol/` | Request/response transformation |
-| `test_protocol/test_protocol_attachments.py` | `protocol/attachments.py` | Image upload, caching |
-| `test_protocol/test_protocol_response_format.py` | `protocol/response_mapper.py` | Response formatting |
-| `test_router/test_router.py` | `routers/` | Endpoint basics (health, ping) |
-| `test_router/test_router_chat_nonstream.py` | `routers/api_router.py` | Non-streaming chat |
-| `test_router/test_router_stream_chat.py` | `routers/api_router.py` | Streaming chat |
-| `test_router/test_router_models.py` | `routers/api_router.py` | Model listing |
-| `test_router/test_router_endpoints.py` | `routers/api_router.py` | Endpoint integration |
-| `test_utils/test_utils.py` | `utils.py` | Utility functions |
-| `test_utils/test_convert_tools.py` | `utils.py` | Tool conversion |
-| `test_utils/test_stream_generators.py` | `utils.py` | Stream generators |
-| `test_auth.py` | `auth.py` | API key verification |
-| `test_middleware.py` | `middlewares/` | Middleware chain |
-| `test_logger.py` | `logger.py` | Logging setup |
-| `test_embeddings_variants.py` | `routers/api_router.py` | Embeddings endpoint |
+| `test_api_server/test_api_server.py` | `api_server.py` | App creation, factory, CORS, router registration |
+| `test_api_server/test_api_server_lifespan.py` | `api_server.py` | Startup/shutdown lifecycle, state init |
+| `test_cli/test_cli.py` | `cli.py` | CLI argument parsing, env file loading, boolean flags |
+| `test_config/test_config.py` | `config.py` | Configuration loading, env var parsing, defaults |
+| `test_protocol/test_protocol.py` | `protocol/` | Core request/response transformation, message collapsing, tools→functions |
+| `test_protocol/test_protocol_attachments.py` | `protocol/attachments.py` | Image upload, caching (TTL, LRU), error handling |
+| `test_protocol/test_protocol_attachments_success.py` | `protocol/attachments.py` | Attachment success paths |
+| `test_protocol/test_protocol_messages_attachments.py` | `protocol/` | Message attachment handling |
+| `test_protocol/test_protocol_response_format.py` | `protocol/response_mapper.py` | Response format transformation |
+| `test_protocol/test_protocol_transform_params.py` | `protocol/request_mapper.py` | Parameter transformation |
+| `test_protocol/test_request_mapper_extra.py` | `protocol/request_mapper.py` | Request mapping edge cases |
+| `test_protocol/test_responseprocessor_exceptions.py` | `protocol/response_mapper.py` | Response processor error handling |
+| `test_router/test_router.py` | `routers/` | Endpoint basics (health, ping), 404/405 |
+| `test_router/test_router_chat_nonstream.py` | `routers/api_router.py` | Non-streaming chat completions |
+| `test_router/test_router_stream_chat.py` | `routers/api_router.py` | Streaming chat completions |
+| `test_router/test_router_models.py` | `routers/api_router.py` | Model listing endpoint |
+| `test_router/test_router_endpoints.py` | `routers/api_router.py` | Endpoint integration (embeddings, responses) |
+| `test_router/test_system_router_extra.py` | `routers/system_router.py` | System router edge cases |
+| `test_router/test_anthropic_router.py` | `routers/anthropic_router.py` | Anthropic Messages API (tools, streaming, thinking) |
+| `test_utils/test_utils.py` | `utils.py` | Utility functions, exception handler |
+| `test_utils/test_convert_tools.py` | `utils.py` | Tool conversion, JSON schema normalization |
+| `test_utils/test_stream_generators.py` | `utils.py` | Stream generators (chat, responses), SSE events |
+| `test_utils/test_utils_exceptions_branch.py` | `utils.py` | Exception handling branches |
+| `test_utils/test_utils_extra.py` | `utils.py` | Additional utility edge cases |
+| `test_auth.py` | `auth.py` | API key verification (Bearer, X-API-Key) |
+| `test_middleware.py` | `middlewares/` | Path normalization, token passing |
+| `test_logger.py` | `logger.py` | Logger setup, log levels |
+| `test_embeddings_variants.py` | `routers/api_router.py` | Embeddings (string, token IDs, list of lists) |
 
 ## Patterns & Conventions
 
