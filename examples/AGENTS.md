@@ -69,8 +69,8 @@ completion = client.chat.completions.create(
 ✅ DO: Use `model="GigaChat-2-Max"` as default model in examples
 ✅ DO: Copy `chat_completions/chat_completion.py` as starting template for new examples
 ✅ DO: Copy `chat_completions/function_calling.py` as template for tool-use examples
-❌ DON'T: Use real API keys in example code
-❌ DON'T: Hardcode non-localhost URLs (some legacy examples have internal IPs — don't copy those)
+❌ DON'T: Commit local env files like `examples/.env`
+❌ DON'T: Put real credentials into example code (keep secrets in your own `.env`, template: `.env.example` at repo root)
 ```
 
 ### Adding a New Example
@@ -91,9 +91,15 @@ completion = client.chat.completions.create(
 
 For each new feature, provide examples for **all applicable** API styles.
 
-## Running Examples
+## Setup & Run
 
 ```bash
+# Install deps (examples assume the repo is installed)
+uv sync --all-extras --dev
+
+# If you run OpenAI Agents examples
+uv sync --group integrations
+
 # Start the proxy server first
 uv run gpt2giga
 
@@ -127,7 +133,6 @@ rg -n "reasoning|thinking" examples/
 ## Common Gotchas
 
 - Examples are **not** part of test coverage (excluded in `pyproject.toml`).
-- Some legacy examples have hardcoded internal IP addresses — always use `localhost:8090` for new examples.
 - The `openai_agents.py` and `weather_agent.py` require the `integrations` dependency group: `uv sync --group integrations`.
 - Anthropic examples use the `anthropic` SDK (not `openai`) — requires `uv sync --group integrations`.
 - Each sub-directory has its own `README.md` with usage details.

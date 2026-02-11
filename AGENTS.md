@@ -2,11 +2,11 @@
 
 ## Project Snapshot
 
-- **Type:** Single Python package (not a monorepo)
-- **What:** Proxy server translating OpenAI API requests → GigaChat API
-- **Stack:** Python 3.10-3.14, FastAPI, GigaChat SDK, Pydantic Settings
-- **Package manager:** `uv` (lock: `uv.lock`, build: `hatchling`)
-- Sub-packages have their own `AGENTS.md` — see JIT Index below
+- **Repo type:** Single Python package (not a monorepo)
+- **What:** Proxy server translating OpenAI + Anthropic SDK requests → GigaChat API
+- **Stack:** Python 3.10–3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE
+- **Tooling:** `uv` (lock: `uv.lock`), Ruff, pytest, Docker
+- **Hierarchy:** Sub-folders have their own `AGENTS.md` (nearest-wins)
 
 ## Setup Commands
 
@@ -16,6 +16,9 @@ uv sync --all-extras --dev
 
 # Run proxy server locally
 uv run gpt2giga
+
+# Build wheel/sdist (used by Docker builder stage)
+uv build
 
 # Run tests (80% coverage enforced)
 uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
@@ -32,9 +35,9 @@ uv run pre-commit install
 
 ## Universal Conventions
 
-- **Formatter/Linter:** Ruff (check + format). No separate Black/isort — Ruff handles both.
+- **Formatter/Linter:** Ruff (`ruff check`, `ruff format`). (Black may exist for tooling, but Ruff is the project standard.)
 - **Commit style:** Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`)
-- **Python compat:** Must work on 3.10-3.14. Avoid `type[X]` syntax; use `Type[X]` from `typing`.
+- **Python compat:** Must work on 3.10–3.14. Avoid PEP-695-only syntax (`type Alias = ...`, `def f[T](...)`, etc.).
 - **Async-first:** All endpoint handlers and GigaChat calls are async.
 - **Docstrings:** Google style, imperative mood.
 - **Imports:** stdlib → third-party → local (`gpt2giga.*`), absolute imports only.
@@ -42,12 +45,12 @@ uv run pre-commit install
 
 ## Security & Secrets
 
-- **NEVER** commit credentials, tokens, or `.env` files.
-- Secrets go in `.env` (see `.env.example` for template).
+- **NEVER** commit credentials, tokens, or local env files (notably `.env`, `examples/.env`, `local/.env`).
+- Secrets go in `.env` (template: `.env.example`).
 - Env var prefixes: `GPT2GIGA_` for proxy settings, `GIGACHAT_` for GigaChat SDK.
 - API key auth is optional (`GPT2GIGA_ENABLE_API_KEY_AUTH`).
 
-## JIT Index
+## JIT Index (what to open, not what to paste)
 
 ### Source Structure
 
@@ -55,12 +58,13 @@ uv run pre-commit install
 |---|---|---|
 | `gpt2giga/` | Main source package | [gpt2giga/AGENTS.md](gpt2giga/AGENTS.md) |
 | `tests/` | Test suite | [tests/AGENTS.md](tests/AGENTS.md) |
-| `examples/` | Usage examples | [examples/AGENTS.md](examples/AGENTS.md) |
-| `integrations/` | Third-party integration guides | READMEs for aider, openhands |
-| `scripts/` | Utility scripts | `generate_badge.py` |
-| `.github/workflows/` | CI/CD pipelines | `ci.yaml`, `docker_image.yaml`, `publish-*.yml` |
-| `Dockerfile` | Multi-stage Docker build | Python 3.10 default, multi-arch |
-| `docker-compose.yaml` | Docker Compose setup | Uses `.env` file, port `8090` |
+| `examples/` | Runnable usage examples | [examples/AGENTS.md](examples/AGENTS.md) |
+| `integrations/` | Third-party integration docs | [integrations/AGENTS.md](integrations/AGENTS.md) |
+| `scripts/` | Utility scripts used by CI | [scripts/AGENTS.md](scripts/AGENTS.md) |
+| `.github/` | CI/CD + PR templates | [.github/AGENTS.md](.github/AGENTS.md) |
+| `local/` | Scratchpad experiments (not shipped) | [local/AGENTS.md](local/AGENTS.md) |
+| `Dockerfile` | Multi-stage Docker build | builder runs `uv build` |
+| `docker-compose.yaml` | Docker Compose setup | uses `.env`, default port `8090` |
 
 ### Quick Find Commands
 
@@ -71,7 +75,7 @@ rg -n "^class " gpt2giga/
 # Find an async endpoint handler
 rg -n "^async def " gpt2giga/routers/
 
-# Find error mapping or exception handling
+# Find error mapping / exception handling
 rg -n "ERROR_MAPPING|exceptions_handler" gpt2giga/
 
 # Find all test files
@@ -81,7 +85,7 @@ rg --files -g "test_*.py" tests/
 rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/config.py
 
 # Find OpenAI ↔ GigaChat transformation logic
-rg -n "class (RequestTransformer|ResponseProcessor|AttachmentProcessor)" gpt2giga/protocol/
+rg -n "class (RequestTransformer|ResponseProcessor|AttachmentProcessor)" gpt2giga/
 
 # Find Anthropic compatibility layer
 rg -n "anthropic" gpt2giga/routers/ examples/anthropic/

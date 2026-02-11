@@ -131,8 +131,8 @@ async def test_request_transformer_collapse_messages():
 - Use `DummyClient` pattern (see `test_protocol/test_protocol.py`) for lightweight stubs.
 
 ```
-❌ DON'T: Call real GigaChat API in tests — always mock
-❌ DON'T: Use `conftest.py` shared fixtures (none exist currently) — tests are self-contained
+❌ DON'T: Put “tests” under `local/` (e.g. `local/concurrency_test.py`) — CI only runs `tests/`
+❌ DON'T: Turn the unit test suite into live API experiments (keep experiments in `local/gigachat_so_testing.py`, mock in `tests/`)
 ```
 
 ### Markers
