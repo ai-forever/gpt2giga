@@ -1,4 +1,4 @@
-# Утилита для проксирования OpenAI-запросов в GigaChat
+# Утилита для проксирования OpenAI/Anthropic-запросов в GigaChat
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/gpt2giga/ci.yaml?&style=flat-square)](https://github.com/ai-forever/gpt2giga/actions/workflows/ci.yaml)
 [![GitHub License](https://img.shields.io/github/license/ai-forever/gpt2giga?style=flat-square)](https://opensource.org/licenses/MIT)
@@ -14,22 +14,23 @@
 3. [Начало работы](#начало-работы)
    1. [Запуск в Docker](#запуск-в-docker)
    2. [Локальный запуск](#локальный-запуск)
-4. [Параметры](#изменение-параметров-gpt2giga)
+4. [Использование с Anthropic SDK](#использование-с-anthropic-sdk)
+5. [Параметры](#изменение-параметров-gpt2giga)
    1. [Аргументы командной строки](#аргументы-командной-строки)
    2. [Переменные окружения](#переменные-окружения)
-5. [Авторизация с помощью заголовка](#авторизация-с-помощью-заголовка)
-6. [Использование HTTPS](#использование-https)
-7. [Использование API ключа](#использование-api-ключа)
-8. [Системные эндпоинты](#системные-эндпоинты)
-9. [Совместимые приложения](#совместимые-приложения)
+6. [Авторизация с помощью заголовка](#авторизация-с-помощью-заголовка)
+7. [Использование HTTPS](#использование-https)
+8. [Использование API ключа](#использование-api-ключа)
+9. [Системные эндпоинты](#системные-эндпоинты)
+10. [Совместимые приложения](#совместимые-приложения)
 
 
 ## Описание
-Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API, в GigaChat API.
+Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API или Anthropic Messages API, в GigaChat API.
 
-При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API, заданного в вашем приложении (например, `https://api.openai.com/v1/`).
+При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API (например, `https://api.openai.com/v1/`) или Anthropic API (например, `https://api.anthropic.com/v1/`), заданного в вашем приложении.
 Утилита обработает запрос и перенаправит его заданной [модели GigaChat](https://developers.sber.ru/docs/ru/gigachat/models).
-После получения ответа модели, она передаст его в приложение в формате OpenAI.
+После получения ответа модели, она передаст его в приложение в формате исходного API (OpenAI или Anthropic).
 
 Утилита работает как с запросами на генерацию, так и с запросами на создание эмбеддингов (эндпоинты `/embeddings` или `/v1/embeddings`).
 
@@ -41,10 +42,10 @@ sequenceDiagram
     participant gpt2giga
     participant GigaChat as GigaChat API
 
-    YourApp->>gpt2giga: OpenAI-запрос
+    YourApp->>gpt2giga: OpenAI / Anthropic запрос
     gpt2giga->>GigaChat: Запрос формата GigaChat API
     GigaChat->>gpt2giga: Ответ формата GigaChat API
-    gpt2giga->>YourApp: OpenAI-ответ
+    gpt2giga->>YourApp: OpenAI / Anthropic ответ
 ```
 
 ## Возможности gpt2giga
@@ -52,6 +53,7 @@ sequenceDiagram
 С помощью gpt2giga вы можете:
 
 - использовать возможности моделей OpenAI и полностью заменить ChatGPT на GigaChat;
+- **использовать Anthropic SDK** — эндпоинт `/v1/messages` совместим с Anthropic Messages API, включая стриминг, tool use и extended thinking;
 - вызывать функции через API, включая передачу и выполнение функций с аргументами;
 - использовать структурированный вывод (Structured Outputs) для получения гарантированного JSON-ответа;
 - обрабатывать ответ модели в режиме потоковой генерации токенов с помощью параметра `stream=true`;
@@ -138,6 +140,77 @@ docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
 
 Запустится прокси-сервер, по умолчанию доступный по адресу `localhost:8090`.
 Адрес и порт сервера, а также другие параметры, можно настроить с помощью аргументов командной строки или переменных окружения.
+
+## Использование с Anthropic SDK
+
+gpt2giga поддерживает эндпоинт `/v1/messages`, совместимый с [Anthropic Messages API](https://docs.anthropic.com/en/api/messages).
+Это позволяет использовать Anthropic Python SDK для работы с GigaChat.
+
+### Базовый пример
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(base_url="http://localhost:8090/v1", api_key="any-key")
+
+message = client.messages.create(
+    model="GigaChat-2-Max",
+    max_tokens=1024,
+    messages=[
+        {"role": "user", "content": "Привет! Как дела?"},
+    ],
+)
+print(message.content[0].text)
+```
+
+### Стриминг
+
+```python
+with client.messages.stream(
+    model="GigaChat-2-Max",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Расскажи сказку."}],
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+```
+
+### Extended Thinking (Reasoning)
+
+Параметр `thinking` из Anthropic API транслируется в `reasoning_effort` для GigaChat.
+В ответе `reasoning_content` от GigaChat конвертируется в блок `thinking`.
+
+```python
+message = client.messages.create(
+    model="GigaChat-2-Max",
+    max_tokens=16000,
+    thinking={"type": "enabled", "budget_tokens": 10000},
+    messages=[{"role": "user", "content": "Реши задачу пошагово."}],
+)
+
+for block in message.content:
+    if block.type == "thinking":
+        print("Рассуждение:", block.thinking)
+    elif block.type == "text":
+        print("Ответ:", block.text)
+```
+
+### Поддерживаемые возможности Anthropic API
+
+| Возможность | Поддержка |
+|---|---|
+| Текстовые сообщения | ✅ |
+| Стриминг (SSE) | ✅ |
+| Системный промпт (`system`) | ✅ |
+| Многоходовые диалоги | ✅ |
+| Tool use / Function calling | ✅ |
+| Изображения (base64, URL) | ✅ |
+| Extended thinking (`thinking`) | ✅ → `reasoning_effort` |
+| `tool_choice` (auto, tool, none) | ✅ |
+| `stop_sequences` | ✅ |
+| `temperature`, `top_p` | ✅ |
+
+> Больше примеров — в папке [`examples/anthropic/`](./examples/anthropic/).
 
 ## Изменение параметров gpt2giga
 
@@ -341,6 +414,7 @@ completion = client.chat.completions.create(
 | [OpenHands](https://github.com/All-Hands-AI/OpenHands) | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands)    |
 | [KiloCode](https://kilocode.ai/)                       | AI-агент для написания кода, доступен в JetBrains/VSCode                                                                                    |
 | [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py) |
+| [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-python) | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                          |
 
 ## История изменений
 
