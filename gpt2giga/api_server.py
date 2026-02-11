@@ -13,7 +13,7 @@ from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-from gpt2giga.routers import api_router, logs_router
+from gpt2giga.routers import anthropic_router, api_router, logs_router
 from gpt2giga.routers import system_router
 
 
@@ -71,7 +71,7 @@ def create_app(config=None) -> FastAPI:
     # /api/v1/embeddings -> /v1/embeddings/
     app.add_middleware(
         PathNormalizationMiddleware,
-        valid_roots=["v1", "chat", "models", "embeddings", "responses"],
+        valid_roots=["v1", "chat", "models", "embeddings", "responses", "messages"],
     )
     app.add_middleware(RquidMiddleware)
 
@@ -87,6 +87,10 @@ def create_app(config=None) -> FastAPI:
     )
     app.include_router(api_router, dependencies=dependencies)
     app.include_router(api_router, prefix="/v1", tags=["V1"], dependencies=dependencies)
+    app.include_router(
+        anthropic_router, prefix="/v1", tags=["V1 Anthropic"], dependencies=dependencies
+    )
+    app.include_router(anthropic_router, dependencies=dependencies)
     app.include_router(system_router, dependencies=dependencies)
     app.include_router(logs_router)
     return app
