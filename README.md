@@ -372,7 +372,7 @@ completion = client.chat.completions.create(
 | Anthropic SDK         | https://github.com/anthropics/anthropic-sdk-python   | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
 ## История изменений
 
-Подробная информация об изменениях в каждой версии доступна в файле [CHANGELOG.md](CHANGELOG.md).
+Подробная информация об изменениях в каждой версии доступна в файле [CHANGELOG.md](CHANGELOG.md) или [CHANGELOG_en.md](CHANGELOG_en.md).
 
 ## Лицензия
 
