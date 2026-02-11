@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga"
-version = "0.1.1.post1"
+version = "0.1.2"
 description = "Утилита для проксирования OpenAI-запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
@@ -20,6 +20,7 @@ dependencies = [
     "fastapi>=0.128.0,<0.129.0",
     "starlette>=0.49,<1",
     "gigachat>=0.2.0,<0.3.0",
+    "anthropic>=0.79.0",
 ]
 
 [project.scripts]
@@ -73,5 +74,5 @@ dev = [
     "codeflash (>=0.18.3,<0.19.0)",
 ]
 integrations = [
-    "openai-agents (>=0.8.0,<0.9.0)"
+    "openai-agents (>=0.8.0,<0.9.0)",
 ]

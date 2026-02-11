@@ -30,5 +30,6 @@ response = client.chat.completions.parse(
 
 message = response.choices[0].message
 if message.parsed:
-    print(message.parsed.steps)
+    for step in message.parsed.steps:
+        print(step)
     print("answer: ", message.parsed.final_answer)
