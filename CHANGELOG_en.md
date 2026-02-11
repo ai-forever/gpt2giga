@@ -5,7 +5,7 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.2b1] - 2026-02-09
+## [0.1.2] - 2026-02-09
 
 ### Added
 - **Anthropic Messages API**: New `POST /v1/messages` endpoint for Anthropic Messages API compatibility
