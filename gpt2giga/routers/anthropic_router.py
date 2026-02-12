@@ -16,7 +16,11 @@ from gigachat import GigaChat
 
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.content_utils import ensure_json_object_str
-from gpt2giga.utils import convert_tool_to_giga_functions, exceptions_handler
+from gpt2giga.utils import (
+    convert_tool_to_giga_functions,
+    exceptions_handler,
+    read_request_json,
+)
 
 router = APIRouter(tags=["Anthropic"])
 
@@ -510,7 +514,7 @@ async def messages(request: Request):
     Accept requests in Anthropic format, translate them to GigaChat,
     and return responses in Anthropic format.
     """
-    data = await request.json()
+    data = await read_request_json(request)
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
     state = request.app.state

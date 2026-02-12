@@ -20,8 +20,10 @@ def v1_test():
 def test_path_norm_redirect():
     client = TestClient(app)
     resp = client.get("/abc/v1/test")
-    # Проверяем перенаправление
+    # Раньше тут был HTTP redirect (307), теперь путь переписывается без редиректа,
+    # чтобы не терять body у POST запросов.
     assert resp.status_code == 200
+    assert resp.history == []
 
 
 def test_path_norm_preserves_query_params():

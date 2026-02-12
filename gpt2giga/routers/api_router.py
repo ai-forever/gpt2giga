@@ -10,6 +10,7 @@ from openai.types import Model as OpenAIModel
 from gpt2giga.logger import rquid_context
 from gpt2giga.utils import (
     exceptions_handler,
+    read_request_json,
     stream_responses_generator,
     stream_chat_completion_generator,
     convert_tool_to_giga_functions,
@@ -47,7 +48,7 @@ async def get_model(model: str, request: Request):
 @router.post("/chat/completions")
 @exceptions_handler
 async def chat_completions(request: Request):
-    data = await request.json()
+    data = await read_request_json(request)
     stream = data.get("stream", False)
     tools = "tools" in data or "functions" in data
     current_rquid = rquid_context.get()
@@ -77,7 +78,7 @@ async def chat_completions(request: Request):
 @router.post("/embeddings")
 @exceptions_handler
 async def embeddings(request: Request):
-    data = await request.json()
+    data = await read_request_json(request)
     inputs = data.get("input", [])
     gpt_model = data.get("model", None)
 
@@ -111,7 +112,7 @@ async def embeddings(request: Request):
 @router.post("/responses")
 @exceptions_handler
 async def responses(request: Request):
-    data = await request.json()
+    data = await read_request_json(request)
     stream = data.get("stream", False)
     tools = "tools" in data or "functions" in data
     current_rquid = rquid_context.get()

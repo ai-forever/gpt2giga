@@ -3,7 +3,6 @@ from typing import Callable
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import RedirectResponse
 
 
 class PathNormalizationMiddleware(BaseHTTPMiddleware):
@@ -26,9 +25,11 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
 
         if match and not path.startswith(f"/{match.group(1)}"):
             new_path = f"/{match.group(1)}{match.group(2)}"
-            query = request.url.query
-            if query:
-                new_path += f"?{query}"
-            return RedirectResponse(url=new_path)
+            # IMPORTANT:
+            # Do not redirect (307) here: some clients may re-issue the request
+            # without the original body, which leads to JSONDecodeError in
+            # downstream handlers. Instead, rewrite the ASGI scope path in-place.
+            request.scope["path"] = new_path
+            request.scope["raw_path"] = new_path.encode("utf-8")
 
         return await call_next(request)
