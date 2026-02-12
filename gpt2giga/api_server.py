@@ -15,6 +15,7 @@ from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.routers import anthropic_router, api_router, logs_router
 from gpt2giga.routers import system_router
+from gpt2giga.utils import _get_app_version
 
 
 @asynccontextmanager
@@ -54,7 +55,11 @@ async def lifespan(app: FastAPI):
 
 
 def create_app(config=None) -> FastAPI:
-    app = FastAPI(lifespan=lifespan, title="Gpt2Giga converter proxy")
+    app = FastAPI(
+        lifespan=lifespan,
+        title="Gpt2Giga converter proxy",
+        version=_get_app_version(),
+    )
     if config is None:
         config = load_config()
 
@@ -108,7 +113,7 @@ def run():
     app = create_app(config)
     app.state.logger = logger
 
-    logger.info("Starting Gpt2Giga proxy server...")
+    logger.info(f"Starting Gpt2Giga proxy server, version: {_get_app_version()}")
     logger.info(f"Proxy settings: {proxy_settings}")
     logger.info(
         f"GigaChat settings: {config.gigachat_settings.model_dump(exclude={'password', 'credentials', 'access_token'})}"

@@ -1,6 +1,7 @@
 import json
 import traceback
 from functools import wraps
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from typing import AsyncGenerator, Optional
 
 import gigachat
@@ -12,7 +13,6 @@ from gigachat.settings import SCOPE
 from starlette.requests import Request
 
 from gpt2giga.logger import rquid_context
-
 
 ERROR_MAPPING = {
     gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),
@@ -32,6 +32,15 @@ ERROR_MAPPING = {
     gigachat.exceptions.UnprocessableEntityError: (422, "invalid_request_error", None),
     gigachat.exceptions.ServerError: (500, "server_error", None),
 }
+
+
+def _get_app_version() -> str:
+    """Return package version for OpenAPI metadata."""
+    try:
+        return pkg_version("gpt2giga")
+    except PackageNotFoundError:
+        # Running from source without installed metadata.
+        return "0.0.0"
 
 
 def exceptions_handler(func):
