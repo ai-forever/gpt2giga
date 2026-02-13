@@ -8,6 +8,11 @@ from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 
 from gpt2giga.logger import rquid_context
+from gpt2giga.openapi_docs import (
+    chat_completions_openapi_extra,
+    embeddings_openapi_extra,
+    responses_openapi_extra,
+)
 from gpt2giga.utils import (
     exceptions_handler,
     read_request_json,
@@ -45,7 +50,7 @@ async def get_model(model: str, request: Request):
     return OpenAIModel(**model)
 
 
-@router.post("/chat/completions")
+@router.post("/chat/completions", openapi_extra=chat_completions_openapi_extra())
 @exceptions_handler
 async def chat_completions(request: Request):
     data = await read_request_json(request)
@@ -75,7 +80,7 @@ async def chat_completions(request: Request):
         )
 
 
-@router.post("/embeddings")
+@router.post("/embeddings", openapi_extra=embeddings_openapi_extra())
 @exceptions_handler
 async def embeddings(request: Request):
     data = await read_request_json(request)
@@ -109,7 +114,7 @@ async def embeddings(request: Request):
     return embeddings
 
 
-@router.post("/responses")
+@router.post("/responses", openapi_extra=responses_openapi_extra())
 @exceptions_handler
 async def responses(request: Request):
     data = await read_request_json(request)

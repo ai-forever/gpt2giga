@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from gigachat import GigaChat
 
 from gpt2giga.logger import rquid_context
+from gpt2giga.openapi_docs import anthropic_messages_openapi_extra
 from gpt2giga.protocol.content_utils import ensure_json_object_str
 from gpt2giga.utils import (
     convert_tool_to_giga_functions,
@@ -506,7 +507,7 @@ async def _stream_anthropic_generator(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/messages")
+@router.post("/messages", openapi_extra=anthropic_messages_openapi_extra())
 @exceptions_handler
 async def messages(request: Request):
     """Anthropic Messages API compatible endpoint.
