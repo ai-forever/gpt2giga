@@ -1,6 +1,7 @@
 import json
 import traceback
 from functools import wraps
+from importlib.metadata import PackageNotFoundError, version as pkg_version
 from typing import AsyncGenerator, Optional
 
 import gigachat
@@ -12,7 +13,6 @@ from gigachat.settings import SCOPE
 from starlette.requests import Request
 
 from gpt2giga.logger import rquid_context
-
 
 ERROR_MAPPING = {
     gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),
@@ -32,6 +32,15 @@ ERROR_MAPPING = {
     gigachat.exceptions.UnprocessableEntityError: (422, "invalid_request_error", None),
     gigachat.exceptions.ServerError: (500, "server_error", None),
 }
+
+
+def _get_app_version() -> str:
+    """Return package version for OpenAPI metadata."""
+    try:
+        return pkg_version("gpt2giga")
+    except PackageNotFoundError:
+        # Running from source without installed metadata.
+        return "0.0.0"
 
 
 def exceptions_handler(func):
@@ -111,6 +120,57 @@ def exceptions_handler(func):
             )
 
     return wrapper
+
+
+async def read_request_json(request: Request) -> dict:
+    """Read and parse JSON request body.
+
+    Returns:
+        Parsed JSON body as dict.
+
+    Raises:
+        HTTPException: If body is empty or invalid JSON.
+    """
+    body = await request.body()
+    if not body or not body.strip():
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": "Request body is empty (expected JSON).",
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "invalid_json",
+                }
+            },
+        )
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": f"Invalid JSON body: {e.msg}",
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "invalid_json",
+                }
+            },
+        )
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": "Invalid JSON body: expected an object at the top level.",
+                    "type": "invalid_request_error",
+                    "param": None,
+                    "code": "invalid_json",
+                }
+            },
+        )
+    return data
 
 
 async def stream_chat_completion_generator(
