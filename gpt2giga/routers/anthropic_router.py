@@ -503,8 +503,101 @@ async def _stream_anthropic_generator(
 
 
 # ---------------------------------------------------------------------------
-# Endpoint
+# Token counting helpers
 # ---------------------------------------------------------------------------
+
+
+def _extract_text_from_openai_messages(messages: List[Dict]) -> List[str]:
+    """Extract text strings from OpenAI-formatted messages for token counting.
+
+    Concatenate all textual content from each message into a flat list of strings.
+    """
+    texts: List[str] = []
+    for msg in messages:
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            if content:
+                texts.append(content)
+        elif isinstance(content, list):
+            # Multimodal content blocks (text parts only)
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text = part.get("text", "")
+                    if text:
+                        texts.append(text)
+        # Include tool/function call names and arguments as countable text
+        for tc in msg.get("tool_calls", []):
+            func = tc.get("function", {})
+            name = func.get("name", "")
+            args = func.get("arguments", "")
+            if name:
+                texts.append(name)
+            if args:
+                texts.append(args)
+    return texts
+
+
+def _extract_tool_definitions_text(tools: List[Dict]) -> List[str]:
+    """Extract text from Anthropic tool definitions for token counting.
+
+    Tool schemas consume tokens in the input context.
+    """
+    texts: List[str] = []
+    for tool in tools:
+        parts: List[str] = []
+        name = tool.get("name", "")
+        if name:
+            parts.append(name)
+        desc = tool.get("description", "")
+        if desc:
+            parts.append(desc)
+        schema = tool.get("input_schema")
+        if schema:
+            parts.append(json.dumps(schema, ensure_ascii=False))
+        if parts:
+            texts.append(" ".join(parts))
+    return texts
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/messages/count_tokens")
+@exceptions_handler
+async def count_tokens(request: Request):
+    """Anthropic Messages count_tokens API compatible endpoint.
+
+    Count the number of tokens in a message request without creating a message.
+    Uses GigaChat atokens_count for the actual counting.
+    """
+    data = await read_request_json(request)
+    state = request.app.state
+    giga_client = getattr(request.state, "gigachat_client", state.gigachat_client)
+
+    model = data.get("model", "unknown")
+
+    # Convert Anthropic messages → OpenAI messages (reuse existing conversion)
+    openai_messages = _convert_anthropic_messages_to_openai(
+        data.get("system"), data.get("messages", [])
+    )
+
+    # Extract all text content for token counting
+    texts = _extract_text_from_openai_messages(openai_messages)
+
+    # Include tool definitions in token count (they consume input tokens)
+    if "tools" in data and data["tools"]:
+        texts.extend(_extract_tool_definitions_text(data["tools"]))
+
+    if not texts:
+        return {"input_tokens": 0}
+
+    # Call GigaChat token counting
+    token_counts = await giga_client.atokens_count(texts, model=model)
+    total_tokens = sum(tc.tokens for tc in token_counts)
+
+    return {"input_tokens": total_tokens}
 
 
 @router.post("/messages", openapi_extra=anthropic_messages_openapi_extra())
