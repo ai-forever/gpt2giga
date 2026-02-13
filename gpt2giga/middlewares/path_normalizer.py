@@ -14,7 +14,14 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, valid_roots=None):
         super().__init__(app)
         # Valid entrypoints
-        self.valid_roots = valid_roots or ["v1", "chat", "models", "embeddings"]
+        self.valid_roots = valid_roots or [
+            "v1",
+            "chat",
+            "models",
+            "embeddings",
+            "messages",
+            "responses",
+        ]
         pattern = r".*/(" + "|".join(map(re.escape, self.valid_roots)) + r")(/.*|$)"
         self._pattern = re.compile(pattern)
 
