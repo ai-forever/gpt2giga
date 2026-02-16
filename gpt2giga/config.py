@@ -1,11 +1,14 @@
 from typing import Optional, Literal
 
 from gigachat.settings import Settings as GigachatSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProxySettings(BaseSettings):
+    mode: Literal["DEV", "PROD"] = Field(
+        default="DEV", description="Режим запуска приложения: DEV или PROD"
+    )
     host: str = Field(default="localhost", description="Хост для запуска сервера")
     port: int = Field(default=8090, description="Порт для запуска сервера")
     use_https: bool = Field(default=False, description="Использовать ли https")
@@ -23,6 +26,18 @@ class ProxySettings(BaseSettings):
     )
     embeddings: str = Field(
         default="EmbeddingsGigaR", description="Модель для эмбеддингов"
+    )
+    cors_allow_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Разрешенные CORS origins",
+    )
+    cors_allow_methods: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Разрешенные CORS методы",
+    )
+    cors_allow_headers: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Разрешенные CORS заголовки",
     )
     enable_images: bool = Field(
         default=True, description="Включить загрузку изображений"
@@ -44,6 +59,13 @@ class ProxySettings(BaseSettings):
         description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
         repr=False,
     )
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def normalize_mode(cls, value):
+        if isinstance(value, str):
+            return value.strip().upper()
+        return value
 
     model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)
 

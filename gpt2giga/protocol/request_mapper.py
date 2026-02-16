@@ -351,7 +351,10 @@ class RequestTransformer:
         ]
 
         self.logger.debug("Sending request to GigaChat API")
-        self.logger.debug(f"Request: {transformed_data}")
+        if self.config.proxy_settings.mode == "PROD":
+            self.logger.debug("Request payload omitted in PROD mode")
+        else:
+            self.logger.debug(f"Request: {transformed_data}")
 
         return transformed_data
 

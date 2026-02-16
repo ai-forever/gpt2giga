@@ -81,6 +81,7 @@ sequenceDiagram
    GigaChat API поддерживает различные способы авторизации, которые отличаются в зависимости от типа вашей учетной записи. Пример с `Authorization key`.
 
     ```dotenv
+    GPT2GIGA_MODE=PROD
     GPT2GIGA_HOST=0.0.0.0
     GPT2GIGA_PORT=8090
     GIGACHAT_CREDENTIALS="Authorization key GigaChat API"
@@ -234,6 +235,7 @@ gpt2giga \
 Список доступных переменных:
 
 - `GPT2GIGA_HOST="localhost"` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
+- `GPT2GIGA_MODE="DEV"` — режим запуска (`DEV` или `PROD`). В `PROD` отключаются `/docs`, `/redoc`, `/openapi.json`;
 - `GPT2GIGA_PORT="8090"` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
 - `GPT2GIGA_USE_HTTPS="False"` — Использовать ли https. По умолчанию `False`;
 - `GPT2GIGA_HTTPS_KEY_FILE=<PATH>` — Путь до key файла для https. По умолчанию `None`;

@@ -1,3 +1,4 @@
+import asyncio
 import json
 import socket
 import sys
@@ -256,6 +257,10 @@ async def stream_chat_completion_generator(
         }
         yield f"data: {json.dumps(error_response)}\n\n"
         yield "data: [DONE]\n\n"
+
+    except asyncio.CancelledError:
+        # Preserve cooperative cancellation for graceful server shutdown.
+        raise
 
     except Exception as e:
         error_type = type(e).__name__
@@ -674,6 +679,10 @@ async def stream_responses_generator(
             "sequence_number": sequence_number,
         }
         yield sse_event("error", error_response)
+
+    except asyncio.CancelledError:
+        # Preserve cooperative cancellation for graceful server shutdown.
+        raise
 
     except Exception as e:
         error_type = type(e).__name__

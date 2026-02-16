@@ -46,7 +46,9 @@ async def lifespan(app: FastAPI):
     app.state.request_transformer = RequestTransformer(
         config, app.state.logger, attachment_processor
     )
-    app.state.response_processor = ResponseProcessor(app.state.logger)
+    app.state.response_processor = ResponseProcessor(
+        app.state.logger, mode=config.proxy_settings.mode
+    )
 
     logger.info("Application startup complete")
     yield
@@ -63,23 +65,45 @@ async def lifespan(app: FastAPI):
 
 
 def create_app(config=None) -> FastAPI:
+    if config is None:
+        config = load_config()
+    is_prod_mode = config.proxy_settings.mode == "PROD"
+    auth_required = config.proxy_settings.enable_api_key_auth or is_prod_mode
+    if auth_required and not config.proxy_settings.api_key:
+        raise RuntimeError(
+            "API key must be configured when auth is enabled or MODE=PROD "
+            "(set GPT2GIGA_API_KEY / --proxy.api-key)."
+        )
+
+    allow_origins = config.proxy_settings.cors_allow_origins
+    allow_methods = config.proxy_settings.cors_allow_methods
+    allow_headers = config.proxy_settings.cors_allow_headers
+    allow_credentials = True
+    if is_prod_mode:
+        # In PROD, deny wildcard CORS and disable credentials to reduce browser abuse.
+        allow_origins = [origin for origin in allow_origins if origin != "*"]
+        allow_methods = [method for method in allow_methods if method != "*"]
+        allow_headers = [header for header in allow_headers if header != "*"]
+        allow_credentials = False
+
     app = FastAPI(
         lifespan=lifespan,
         title="Gpt2Giga converter proxy",
         version=_get_app_version(),
         redirect_slashes=False,
+        docs_url=None if is_prod_mode else "/docs",
+        redoc_url=None if is_prod_mode else "/redoc",
+        openapi_url=None if is_prod_mode else "/openapi.json",
     )
-    if config is None:
-        config = load_config()
 
     app.state.config = config
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=allow_origins,
+        allow_credentials=allow_credentials,
+        allow_methods=allow_methods,
+        allow_headers=allow_headers,
     )
     # /some_prefix/another_prefix/v1/... -> /v1/...
     # /api/v1/embeddings -> /v1/embeddings/
@@ -94,11 +118,11 @@ def create_app(config=None) -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     async def docs_redirect():
+        if is_prod_mode:
+            return {"status": "ok", "mode": "PROD"}
         return RedirectResponse(url="/docs")
 
-    dependencies = (
-        [Depends(verify_api_key)] if config.proxy_settings.enable_api_key_auth else []
-    )
+    dependencies = [Depends(verify_api_key)] if auth_required else []
     app.include_router(api_router, dependencies=dependencies)
     app.include_router(api_router, prefix="/v1", tags=["V1"], dependencies=dependencies)
     app.include_router(
@@ -106,7 +130,8 @@ def create_app(config=None) -> FastAPI:
     )
     app.include_router(anthropic_router, dependencies=dependencies)
     app.include_router(system_router, dependencies=dependencies)
-    app.include_router(logs_router)
+    if not is_prod_mode:
+        app.include_router(logs_router, dependencies=dependencies)
     return app
 
 

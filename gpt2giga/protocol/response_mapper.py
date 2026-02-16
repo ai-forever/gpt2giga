@@ -10,8 +10,17 @@ from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEv
 class ResponseProcessor:
     """Обработчик ответов от GigaChat в формат OpenAI"""
 
-    def __init__(self, logger):
+    def __init__(self, logger=None, mode: str = "DEV"):
+        if logger is None:
+            from loguru import logger as default_logger
+
+            logger = default_logger
         self.logger = logger
+        self._mode = mode.upper() if isinstance(mode, str) else "DEV"
+
+    @property
+    def _is_prod_mode(self) -> bool:
+        return self._mode == "PROD"
 
     def process_response(
         self,
@@ -46,7 +55,10 @@ class ResponseProcessor:
         }
 
         self.logger.debug("Processed chat completion response")
-        self.logger.debug(f"Response: {result}")
+        if self._is_prod_mode:
+            self.logger.debug("Response payload omitted in PROD mode")
+        else:
+            self.logger.debug(f"Response: {result}")
         return result
 
     def process_response_api(
@@ -90,7 +102,10 @@ class ResponseProcessor:
             "usage": self._build_response_usage(giga_dict.get("usage")),
         }
         self.logger.debug("Processed responses API response")
-        self.logger.debug(f"Response: {result}")
+        if self._is_prod_mode:
+            self.logger.debug("Response payload omitted in PROD mode")
+        else:
+            self.logger.debug(f"Response: {result}")
 
         return result
 
@@ -190,7 +205,10 @@ class ResponseProcessor:
             "system_fingerprint": f"fp_{response_id}",
         }
 
-        self.logger.debug(f"Processed stream chunk: {result}")
+        if self._is_prod_mode:
+            self.logger.debug("Processed stream chunk (payload omitted in PROD mode)")
+        else:
+            self.logger.debug(f"Processed stream chunk: {result}")
         return result
 
     def process_stream_chunk_response(

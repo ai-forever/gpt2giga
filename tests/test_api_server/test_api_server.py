@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from gpt2giga.api_server import create_app, _check_port_available
+from gpt2giga.config import ProxyConfig, ProxySettings
 
 
 def test_root_redirect():
@@ -61,6 +62,14 @@ def test_redirect_slashes_disabled():
     """FastAPI app must be created with redirect_slashes=False."""
     app = create_app()
     assert app.router.redirect_slashes is False
+
+
+def test_docs_disabled_in_prod_mode():
+    """In PROD mode OpenAPI docs endpoints must be disabled."""
+    app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD")))
+    client = TestClient(app)
+    assert client.get("/docs").status_code == 404
+    assert client.get("/openapi.json").status_code == 404
 
 
 def test_run_server(monkeypatch):
