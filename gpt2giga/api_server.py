@@ -9,6 +9,7 @@ from starlette.responses import RedirectResponse
 
 from gpt2giga.auth import verify_api_key
 from gpt2giga.cli import load_config
+from gpt2giga.constants import SECURITY_FIELDS
 from gpt2giga.logger import setup_logger
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
@@ -171,7 +172,7 @@ def run():
         )
 
     logger.info(f"Starting Gpt2Giga proxy server, version: {get_app_version()}")
-    logger.info(f"Proxy settings: {proxy_settings.model_dump(exclude={'api_key'})}")
+    logger.info(f"Proxy settings: {proxy_settings.model_dump(exclude=SECURITY_FIELDS)}")
     logger.info(f"Security posture: {proxy_settings.security.summary()}")
     logger.info(
         f"GigaChat settings: {config.gigachat_settings.model_dump(exclude={'password', 'credentials', 'access_token', 'key_file_password'})}"

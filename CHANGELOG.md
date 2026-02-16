@@ -5,6 +5,46 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.1.3] - 2026-02-16
+
+### Добавлено
+- **Режим DEV/PROD**: Добавлена поддержка режимов разработки и продакшена
+- **Настраиваемый CORS**: Добавлена возможность конфигурации CORS через переменные окружения
+- **Graceful shutdown**: Добавлено корректное завершение работы сервера
+- **Gitleaks**: Добавлен gitleaks в pre-commit для проверки секретов
+- **OpenAPI для count_tokens**: Добавлена OpenAPI документация для эндпоинта count_tokens
+
+### Изменено
+- **Рефакторинг структуры**: Разделение больших файлов на модули:
+  - `gpt2giga/common/` — общие утилиты (exceptions, json_schema, streaming, tools)
+  - `gpt2giga/models/` — модели конфигурации и безопасности
+  - `gpt2giga/protocol/attachment/` — обработка вложений
+  - `gpt2giga/protocol/request/` — трансформация запросов
+  - `gpt2giga/protocol/response/` — обработка ответов
+- **Улучшено логирование**: Политика редактирования логов, отключено логирование полных payload'ов
+
+### Исправлено
+- **Безопасность CLI**: Исправлены проблемы с аргументами командной строки
+- **Привязка портов**: Исправлены проблемы с привязкой портов и редиректами
+- **SSRF защита**: Усилена защита от SSRF в обработке вложений
+- **Аутентификация**: Переход на `secrets.compare_digest` для сравнения ключей
+- **Лимиты вложений**: Добавлены лимиты для вложений
+
+## [0.1.2.post1] - 2026-02-13
+
+### Добавлено
+- **OpenAPI документация**: Добавлена полная OpenAPI документация для всех эндпоинтов
+- **Count tokens для Anthropic**: Добавлен эндпоинт `/v1/messages/count_tokens` для подсчёта токенов в формате Anthropic
+- **Пример count_tokens**: Добавлен пример `examples/anthropic/count_tokens.py`
+- **Версия при инициализации**: Отображение версии при запуске сервера
+
+### Изменено
+- **Path normalizer**: Улучшен нормализатор путей для responses и messages
+
+### Исправлено
+- **Ошибка 405**: Исправлена ошибка 405 при некоторых запросах
+- **Безопасное чтение запросов**: Улучшена обработка чтения тела запроса
+
 ## [0.1.2] - 2026-02-11
 
 ### Добавлено
@@ -122,7 +162,9 @@
 
 ---
 
-[0.1.2b1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.1...v0.1.2b1
+[0.1.3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2.post1...v0.1.3
+[0.1.2.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2...v0.1.2.post1
+[0.1.2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.0...v0.1.1
 [0.1.0b2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.0b...v0.1.0b2
 [0.1.0b]: https://github.com/ai-forever/gpt2giga/compare/v0.0.15.post1...v0.1.0b

@@ -8,6 +8,22 @@ DEFAULT_MAX_TEXT_FILE_SIZE_BYTES = 40 * 1024 * 1024
 DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES = 80 * 1024 * 1024
 DEFAULT_MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
 
+SECURITY_FIELDS = frozenset(
+    {
+        "api_key",
+        "enable_api_key_auth",
+        "cors_allow_origins",
+        "cors_allow_methods",
+        "cors_allow_headers",
+        "logs_ip_allowlist",
+        "log_redact_sensitive",
+        "max_request_body_bytes",
+        "max_audio_file_size_bytes",
+        "max_image_file_size_bytes",
+        "max_text_file_size_bytes",
+        "max_audio_image_total_size_bytes",
+    }
+)
 
 SUPPORTED_TEXT_MIME_TYPES = frozenset(
     {

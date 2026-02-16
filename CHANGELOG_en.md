@@ -5,6 +5,46 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-02-16
+
+### Added
+- **DEV/PROD Mode**: Added support for development and production modes
+- **Configurable CORS**: Added CORS configuration via environment variables
+- **Graceful shutdown**: Added graceful server shutdown handling
+- **Gitleaks**: Added gitleaks to pre-commit for secret detection
+- **OpenAPI for count_tokens**: Added OpenAPI documentation for count_tokens endpoint
+
+### Changed
+- **Structure Refactoring**: Split large files into modules:
+  - `gpt2giga/common/` — common utilities (exceptions, json_schema, streaming, tools)
+  - `gpt2giga/models/` — configuration and security models
+  - `gpt2giga/protocol/attachment/` — attachment processing
+  - `gpt2giga/protocol/request/` — request transformation
+  - `gpt2giga/protocol/response/` — response processing
+- **Improved Logging**: Log redaction policy, disabled full payload logging
+
+### Fixed
+- **CLI Security**: Fixed command-line argument issues
+- **Port Bindings**: Fixed port binding and redirect issues
+- **SSRF Protection**: Hardened SSRF protection in attachment handling
+- **Authentication**: Switched to `secrets.compare_digest` for key comparison
+- **Attachment Limits**: Added limits for attachments
+
+## [0.1.2.post1] - 2026-02-13
+
+### Added
+- **OpenAPI Documentation**: Added full OpenAPI documentation for all endpoints
+- **Count tokens for Anthropic**: Added `/v1/messages/count_tokens` endpoint for token counting in Anthropic format
+- **count_tokens Example**: Added `examples/anthropic/count_tokens.py` example
+- **Version on Initialize**: Display version on server startup
+
+### Changed
+- **Path Normalizer**: Improved path normalizer for responses and messages
+
+### Fixed
+- **405 Error**: Fixed 405 error on certain requests
+- **Safe Request Reading**: Improved request body reading handling
+
 ## [0.1.2] - 2026-02-09
 
 ### Added
@@ -122,7 +162,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[0.1.2b1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.1...v0.1.2b1
+[0.1.3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2.post1...v0.1.3
+[0.1.2.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2...v0.1.2.post1
+[0.1.2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.0...v0.1.1
 [0.1.0b2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.0b...v0.1.0b2
 [0.1.0b]: https://github.com/ai-forever/gpt2giga/compare/v0.0.15.post1...v0.1.0b
