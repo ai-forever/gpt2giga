@@ -84,7 +84,7 @@ async def test_attachment_processor_async_httpx(monkeypatch):
             self.is_closed = True
 
     monkeypatch.setattr(
-        "gpt2giga.protocol.attachments.httpx.AsyncClient", FakeAsyncClient
+        "gpt2giga.protocol.attachment.attachments.httpx.AsyncClient", FakeAsyncClient
     )
 
     client = DummyClient()
@@ -196,7 +196,7 @@ async def test_attachment_processor_http_error(monkeypatch):
             self.is_closed = True
 
     monkeypatch.setattr(
-        "gpt2giga.protocol.attachments.httpx.AsyncClient", FakeAsyncClient
+        "gpt2giga.protocol.attachment.attachments.httpx.AsyncClient", FakeAsyncClient
     )
 
     client = DummyClient()
@@ -242,7 +242,7 @@ async def test_attachment_processor_remote_content_length_limit(monkeypatch):
             self.is_closed = True
 
     monkeypatch.setattr(
-        "gpt2giga.protocol.attachments.httpx.AsyncClient", FakeAsyncClient
+        "gpt2giga.protocol.attachment.attachments.httpx.AsyncClient", FakeAsyncClient
     )
 
     client = DummyClient()
@@ -290,7 +290,7 @@ async def test_attachment_processor_rejects_unsupported_remote_content_type(
             self.is_closed = True
 
     monkeypatch.setattr(
-        "gpt2giga.protocol.attachments.httpx.AsyncClient", FakeAsyncClient
+        "gpt2giga.protocol.attachment.attachments.httpx.AsyncClient", FakeAsyncClient
     )
 
     client = DummyClient()

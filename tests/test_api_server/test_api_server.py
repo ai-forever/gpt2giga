@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
 
-from gpt2giga.api_server import create_app, _check_port_available
+from gpt2giga.api_server import create_app
+from gpt2giga.common.app_meta import check_port_available
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 
 
@@ -137,7 +138,7 @@ def test_run_server(monkeypatch):
     import uvicorn
 
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr("gpt2giga.api_server._check_port_available", lambda h, p: True)
+    monkeypatch.setattr("gpt2giga.api_server.check_port_available", lambda h, p: True)
 
     gpt2giga.api_server.run()
 
@@ -148,7 +149,7 @@ def test_run_server_port_in_use(monkeypatch):
     import gpt2giga.api_server
     import uvicorn
 
-    monkeypatch.setattr("gpt2giga.api_server._check_port_available", lambda h, p: False)
+    monkeypatch.setattr("gpt2giga.api_server.check_port_available", lambda h, p: False)
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
 
     def fake_exit(code):
@@ -162,7 +163,7 @@ def test_run_server_port_in_use(monkeypatch):
 
 def test_check_port_available_free():
     """Port 0 (OS picks a free port) should be available."""
-    assert _check_port_available("127.0.0.1", 0) is True
+    assert check_port_available("127.0.0.1", 0) is True
 
 
 def test_check_port_available_in_use():
@@ -173,4 +174,4 @@ def test_check_port_available_in_use():
         s.bind(("127.0.0.1", 0))
         _, port = s.getsockname()
         s.listen(1)
-        assert _check_port_available("127.0.0.1", port) is False
+        assert check_port_available("127.0.0.1", port) is False

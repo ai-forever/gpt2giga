@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import gigachat.exceptions
 import pytest
 
-from gpt2giga.utils import (
+from gpt2giga.common.streaming import (
     stream_chat_completion_generator,
     stream_responses_generator,
 )
