@@ -12,11 +12,12 @@ from gpt2giga.cli import load_config
 from gpt2giga.logger import setup_logger
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.routers import anthropic_router, api_router, logs_api_router, logs_router
 from gpt2giga.routers import system_router
-from gpt2giga.utils import _get_app_version, _check_port_available
+from gpt2giga.common.app_meta import check_port_available, get_app_version
 
 
 @asynccontextmanager
@@ -99,7 +100,7 @@ def create_app(config=None) -> FastAPI:
     app = FastAPI(
         lifespan=lifespan,
         title="Gpt2Giga converter proxy",
-        version=_get_app_version(),
+        version=get_app_version(),
         redirect_slashes=False,
         docs_url=None if is_prod_mode else "/docs",
         redoc_url=None if is_prod_mode else "/redoc",
@@ -122,6 +123,10 @@ def create_app(config=None) -> FastAPI:
         valid_roots=["v1", "chat", "models", "embeddings", "responses", "messages"],
     )
     app.add_middleware(RquidMiddleware)
+    app.add_middleware(
+        RequestValidationMiddleware,
+        max_body_bytes=config.proxy_settings.max_request_body_bytes,
+    )
 
     if config.proxy_settings.pass_token:
         app.add_middleware(PassTokenMiddleware)
@@ -165,13 +170,14 @@ def run():
             "Consider using INFO or higher."
         )
 
-    logger.info(f"Starting Gpt2Giga proxy server, version: {_get_app_version()}")
+    logger.info(f"Starting Gpt2Giga proxy server, version: {get_app_version()}")
     logger.info(f"Proxy settings: {proxy_settings.model_dump(exclude={'api_key'})}")
+    logger.info(f"Security posture: {proxy_settings.security.summary()}")
     logger.info(
         f"GigaChat settings: {config.gigachat_settings.model_dump(exclude={'password', 'credentials', 'access_token', 'key_file_password'})}"
     )
 
-    if not _check_port_available(proxy_settings.host, proxy_settings.port):
+    if not check_port_available(proxy_settings.host, proxy_settings.port):
         logger.error(
             f"Port {proxy_settings.port} is already in use on {proxy_settings.host}. "
             f"Possible zombie process — try: fuser -k {proxy_settings.port}/tcp"

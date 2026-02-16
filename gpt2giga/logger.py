@@ -1,5 +1,6 @@
 # logger.py
 import contextvars
+import json
 import sys
 
 from loguru import logger
@@ -22,6 +23,21 @@ def get_rquid() -> str:
     return rquid_context.get()
 
 
+def _format_structured_extra(extra: dict) -> str:
+    """Format structured extra fields into a compact suffix string.
+
+    Skips internal keys (``rquid``) so that only user-bound fields appear.
+    Returns an empty string when there are no extra fields to show.
+    """
+    filtered = {k: v for k, v in extra.items() if k != "rquid" and v is not None}
+    if not filtered:
+        return ""
+    try:
+        return " | " + json.dumps(filtered, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return ""
+
+
 def setup_logger(
     log_level="INFO",
     log_file="app.log",
@@ -31,18 +47,21 @@ def setup_logger(
     """Configure Loguru logger with file rotation, contextual rquid, and redaction."""
     logger.remove()  # Remove default logger
     log_level = log_level.upper()
-    # Custom format that automatically includes rquid
-    format_str = (
-        "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-        "<level>{level: <8}</level> | "
-        "<cyan>{extra[rquid]}</cyan> | "
-        "<level>{message}</level>"
-    )
+
+    # Custom format that includes rquid and optional structured extra fields.
+    def _format(record):
+        extra_str = _format_structured_extra(record["extra"])
+        return (
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+            "<level>{level: <8}</level> | "
+            "<cyan>{extra[rquid]}</cyan> | "
+            "<level>{message}</level>" + extra_str + "\n"
+        )
 
     logger.add(
         sys.stdout,
         level=log_level,
-        format=format_str,
+        format=_format,
         enqueue=True,
     )
 
@@ -52,7 +71,7 @@ def setup_logger(
         rotation=max_bytes,  # rotate by size
         retention="7 days",
         enqueue=True,
-        format=format_str,
+        format=_format,
     )
 
     _do_redact = enable_redaction

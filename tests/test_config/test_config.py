@@ -1,6 +1,6 @@
 import pytest
 
-from gpt2giga.config import ProxySettings, ProxyConfig
+from gpt2giga.models.config import ProxySettings, ProxyConfig
 
 
 def test_proxy_settings_defaults(monkeypatch):

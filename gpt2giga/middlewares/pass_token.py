@@ -4,7 +4,7 @@ from fastapi import Request
 from gigachat import GigaChat
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from gpt2giga.utils import pass_token_to_gigachat
+from gpt2giga.common.gigachat_auth import pass_token_to_gigachat
 
 
 class PassTokenMiddleware(BaseHTTPMiddleware):

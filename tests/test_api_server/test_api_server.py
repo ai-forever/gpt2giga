@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
 
 from gpt2giga.api_server import create_app, _check_port_available
-from gpt2giga.config import ProxyConfig, ProxySettings
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 
 
 def test_root_redirect():

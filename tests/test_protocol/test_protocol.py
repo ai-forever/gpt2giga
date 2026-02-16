@@ -1,5 +1,5 @@
 import pytest
-from gpt2giga.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from loguru import logger
 

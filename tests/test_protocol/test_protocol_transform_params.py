@@ -1,6 +1,6 @@
 from loguru import logger
 
-from gpt2giga.config import ProxyConfig, ProxySettings
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer
 
 

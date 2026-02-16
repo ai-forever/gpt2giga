@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig
 from gpt2giga.routers import api_router
 
 

@@ -1,7 +1,9 @@
+import warnings
+from functools import cached_property
 from typing import Optional, Literal
 
 from gigachat.settings import Settings as GigachatSettings
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gpt2giga.constants import (
@@ -10,6 +12,7 @@ from gpt2giga.constants import (
     DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES,
     DEFAULT_MAX_TEXT_FILE_SIZE_BYTES,
 )
+from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
 
 
 class ProxySettings(BaseSettings):
@@ -48,6 +51,10 @@ class ProxySettings(BaseSettings):
     )
     enable_images: bool = Field(
         default=True, description="Включить загрузку изображений"
+    )
+    max_request_body_bytes: int = Field(
+        default=DEFAULT_MAX_REQUEST_BODY_BYTES,
+        description="Глобальный лимит размера HTTP-тела запроса в байтах (до парсинга JSON)",
     )
     max_audio_file_size_bytes: int = Field(
         default=DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
@@ -97,6 +104,54 @@ class ProxySettings(BaseSettings):
         if isinstance(value, str):
             return value.strip().upper()
         return value
+
+    @model_validator(mode="after")
+    def _validate_prod_security(self):
+        """Emit warnings when PROD mode has insecure defaults."""
+        if self.mode != "PROD":
+            return self
+        if "*" in self.cors_allow_origins:
+            warnings.warn(
+                "PROD mode with wildcard CORS origins ('*') is insecure. "
+                "Set GPT2GIGA_CORS_ALLOW_ORIGINS to a list of trusted origins.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if not self.enable_api_key_auth and not self.api_key:
+            warnings.warn(
+                "PROD mode without API-key auth is insecure. "
+                "Set GPT2GIGA_ENABLE_API_KEY_AUTH=True and GPT2GIGA_API_KEY.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if not self.log_redact_sensitive:
+            warnings.warn(
+                "PROD mode with log_redact_sensitive=False may leak secrets to logs.",
+                UserWarning,
+                stacklevel=2,
+            )
+        return self
+
+    @cached_property
+    def security(self):
+        """Build a consolidated SecuritySettings view for convenient access."""
+        from gpt2giga.models.security import SecuritySettings
+
+        return SecuritySettings(
+            mode=self.mode,
+            enable_api_key_auth=self.enable_api_key_auth,
+            api_key=self.api_key,
+            cors_allow_origins=self.cors_allow_origins,
+            cors_allow_methods=self.cors_allow_methods,
+            cors_allow_headers=self.cors_allow_headers,
+            logs_ip_allowlist=self.logs_ip_allowlist,
+            log_redact_sensitive=self.log_redact_sensitive,
+            max_request_body_bytes=self.max_request_body_bytes,
+            max_audio_file_size_bytes=self.max_audio_file_size_bytes,
+            max_image_file_size_bytes=self.max_image_file_size_bytes,
+            max_text_file_size_bytes=self.max_text_file_size_bytes,
+            max_audio_image_total_size_bytes=self.max_audio_image_total_size_bytes,
+        )
 
     model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)
 

@@ -1,7 +1,7 @@
 import warnings
 
 from gpt2giga.cli import load_config, _warn_sensitive_cli_args
-from gpt2giga.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig
 
 
 def test_load_config_basic(monkeypatch):

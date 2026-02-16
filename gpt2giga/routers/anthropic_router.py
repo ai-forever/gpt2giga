@@ -17,11 +17,9 @@ from gigachat import GigaChat
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_docs import anthropic_messages_openapi_extra
 from gpt2giga.protocol.content_utils import ensure_json_object_str
-from gpt2giga.utils import (
-    convert_tool_to_giga_functions,
-    exceptions_handler,
-    read_request_json,
-)
+from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.request_json import read_request_json
+from gpt2giga.common.tools import convert_tool_to_giga_functions
 
 router = APIRouter(tags=["Anthropic"])
 

@@ -7,7 +7,8 @@ from sse_starlette import EventSourceResponse
 from starlette.requests import Request
 from starlette.responses import Response, PlainTextResponse, HTMLResponse
 
-from gpt2giga.utils import exceptions_handler, verify_logs_ip_allowlist
+from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.logs_access import verify_logs_ip_allowlist
 
 router = APIRouter(tags=["System"])
 logs_api_router = APIRouter(tags=["System logs"])

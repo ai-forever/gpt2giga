@@ -2,7 +2,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig
 from gpt2giga.routers import logs_api_router, logs_router, system_router
 
 
