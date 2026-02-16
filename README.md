@@ -163,6 +163,7 @@ sequenceDiagram
 
 Полный список параметров смотрите в `gpt2giga --help`.
 
+> **⚠️ Безопасность:** Не передавайте секреты (`--proxy.api-key`, `--gigachat.credentials`, `--gigachat.password`, `--gigachat.access-token`, `--gigachat.key-file-password`) через аргументы командной строки — они видны всем пользователям через `ps aux`. Используйте переменные окружения или `.env` файл (см. раздел ниже).
 Утилита поддерживает аргументы 2 типов (настройки прокси и настройки GigaChat):
 - `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
 
@@ -181,6 +182,8 @@ sequenceDiagram
 - `--proxy.log-max-size` — максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB);
 - `--proxy.enable-api-key-auth` — нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`;
 - `--proxy.api-key` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
+
+> **⚠️ Безопасность:** Не передавайте секреты (`--proxy.api-key`, `--gigachat.credentials`, `--gigachat.password`, `--gigachat.access-token`, `--gigachat.key-file-password`) через аргументы командной строки — они видны всем пользователям через `ps aux`. Используйте переменные окружения или `.env` файл (см. раздел ниже).
 
 Далее идут стандартные настройки из библиотеки GigaChat:
 - `--gigachat [JSON]` — set gigachat from JSON string (по умолчанию `{}`);

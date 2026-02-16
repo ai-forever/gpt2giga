@@ -1,3 +1,4 @@
+import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -15,7 +16,7 @@ from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.routers import anthropic_router, api_router, logs_router
 from gpt2giga.routers import system_router
-from gpt2giga.utils import _get_app_version
+from gpt2giga.utils import _get_app_version, _check_port_available
 
 
 @asynccontextmanager
@@ -51,6 +52,13 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Application shutdown initiated")
+    gigachat_client = getattr(app.state, "gigachat_client", None)
+    if gigachat_client:
+        try:
+            await gigachat_client.aclose()
+            logger.info("GigaChat client closed")
+        except Exception as exc:
+            logger.warning(f"Error closing GigaChat client: {exc}")
     await attachment_processor.close()
 
 
@@ -59,6 +67,7 @@ def create_app(config=None) -> FastAPI:
         lifespan=lifespan,
         title="Gpt2Giga converter proxy",
         version=_get_app_version(),
+        redirect_slashes=False,
     )
     if config is None:
         config = load_config()
@@ -114,10 +123,18 @@ def run():
     app.state.logger = logger
 
     logger.info(f"Starting Gpt2Giga proxy server, version: {_get_app_version()}")
-    logger.info(f"Proxy settings: {proxy_settings}")
+    logger.info(f"Proxy settings: {proxy_settings.model_dump(exclude={'api_key'})}")
     logger.info(
-        f"GigaChat settings: {config.gigachat_settings.model_dump(exclude={'password', 'credentials', 'access_token'})}"
+        f"GigaChat settings: {config.gigachat_settings.model_dump(exclude={'password', 'credentials', 'access_token', 'key_file_password'})}"
     )
+
+    if not _check_port_available(proxy_settings.host, proxy_settings.port):
+        logger.error(
+            f"Port {proxy_settings.port} is already in use on {proxy_settings.host}. "
+            f"Possible zombie process — try: fuser -k {proxy_settings.port}/tcp"
+        )
+        sys.exit(1)
+
     uvicorn.run(
         app,
         host=proxy_settings.host,

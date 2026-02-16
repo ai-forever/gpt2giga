@@ -42,6 +42,7 @@ class ProxySettings(BaseSettings):
     api_key: Optional[str] = Field(
         default=None,
         description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
+        repr=False,
     )
 
     model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)

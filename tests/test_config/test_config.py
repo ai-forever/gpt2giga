@@ -34,3 +34,19 @@ def test_proxy_settings_invalid_port(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_PORT", "not_an_int")
     with pytest.raises(Exception):
         ProxySettings()
+
+
+def test_api_key_hidden_from_repr():
+    """api_key value must not appear in ProxySettings repr (visible in logs)."""
+    s = ProxySettings(api_key="super-secret-key-12345")
+    text = repr(s)
+    assert "super-secret-key-12345" not in text
+    assert "api_key=" not in text
+
+
+def test_api_key_hidden_from_model_dump_exclude():
+    """model_dump(exclude={'api_key'}) must not contain the key."""
+    s = ProxySettings(api_key="super-secret-key-12345")
+    dumped = s.model_dump(exclude={"api_key"})
+    assert "api_key" not in dumped
+    assert "super-secret-key-12345" not in str(dumped)
