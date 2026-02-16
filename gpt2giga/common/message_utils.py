@@ -28,14 +28,11 @@ def map_role(role: str, is_first: bool, logger=None) -> str:
     Returns:
         Valid GigaChat role
     """
-    # First apply known mappings
     mapped_role = ROLE_MAPPING.get(role, role)
 
-    # System role can only be first
     if mapped_role == "system" and not is_first:
         return "user"
 
-    # If still not a valid role, default to user
     if mapped_role not in VALID_ROLES:
         if logger:
             logger.debug(f"Unknown role '{role}' mapped to 'user'")
@@ -53,7 +50,6 @@ def merge_consecutive_messages(messages: List[Dict]) -> List[Dict]:
 
     Args:
         messages: List of message dictionaries
-        logger: Optional logger for debug messages
 
     Returns:
         List of messages with consecutive same-role messages merged
@@ -61,14 +57,13 @@ def merge_consecutive_messages(messages: List[Dict]) -> List[Dict]:
     if not messages:
         return messages
 
-    merged = []
+    merged: List[Dict] = []
     for message in messages:
         if not merged:
             merged.append(message)
             continue
 
         last = merged[-1]
-        # Merge if same role and both have string content (not function calls)
         if (
             last["role"] == message["role"]
             and "function_call" not in last
@@ -76,11 +71,9 @@ def merge_consecutive_messages(messages: List[Dict]) -> List[Dict]:
             and isinstance(last.get("content", ""), str)
             and isinstance(message.get("content", ""), str)
         ):
-            # Concatenate content
             last["content"] = (
                 last.get("content", "") + "\n" + message.get("content", "")
             ).strip()
-            # Merge attachments if present
             if "attachments" in message:
                 if "attachments" not in last:
                     last["attachments"] = []
@@ -103,7 +96,7 @@ def collapse_user_messages(messages: List[Messages]) -> List[Messages]:
     """
     collapsed_messages: List[Messages] = []
     prev_user_message = None
-    content_parts = []
+    content_parts: List[str] = []
 
     for message in messages:
         if message.role == "user" and prev_user_message is not None:
@@ -117,7 +110,7 @@ def collapse_user_messages(messages: List[Messages]) -> List[Messages]:
             collapsed_messages.append(message)
             prev_user_message = message if message.role == "user" else None
 
-    if content_parts:
+    if content_parts and prev_user_message is not None:
         prev_user_message.content = "\n".join(
             [prev_user_message.content] + content_parts
         )
