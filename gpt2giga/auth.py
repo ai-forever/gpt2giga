@@ -1,3 +1,4 @@
+import secrets
 from typing import Annotated
 
 from fastapi import HTTPException, Security
@@ -53,7 +54,7 @@ def verify_api_key(
     if not expected_key:
         raise HTTPException(status_code=500, detail="API key not configured")
 
-    if provided_key != expected_key:
+    if not secrets.compare_digest(provided_key, expected_key):
         raise HTTPException(status_code=HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
     return provided_key

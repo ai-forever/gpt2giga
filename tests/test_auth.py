@@ -1,3 +1,6 @@
+import secrets
+from unittest.mock import patch
+
 import pytest
 from types import SimpleNamespace
 
@@ -51,4 +54,31 @@ def test_verify_api_key_invalid():
     req = make_request({"authorization": "Bearer wrong"}, cfg)
     with pytest.raises(HTTPException) as ex:
         verify_api_key(req)
+    assert ex.value.status_code == 401
+
+
+def test_verify_api_key_uses_constant_time_comparison():
+    """Verify that API key comparison uses secrets.compare_digest (constant-time)."""
+    cfg = ProxyConfig()
+    cfg.proxy_settings.api_key = "secret"
+    req = make_request({"authorization": "Bearer secret"}, cfg)
+    with patch(
+        "gpt2giga.auth.secrets.compare_digest", wraps=secrets.compare_digest
+    ) as mock_cmp:
+        result = verify_api_key(req)
+        mock_cmp.assert_called_once_with("secret", "secret")
+    assert result == "secret"
+
+
+def test_verify_api_key_constant_time_rejects_wrong_key():
+    """Verify that constant-time comparison correctly rejects invalid keys."""
+    cfg = ProxyConfig()
+    cfg.proxy_settings.api_key = "correct-key"
+    req = make_request({"authorization": "Bearer wrong-key"}, cfg)
+    with patch(
+        "gpt2giga.auth.secrets.compare_digest", wraps=secrets.compare_digest
+    ) as mock_cmp:
+        with pytest.raises(HTTPException) as ex:
+            verify_api_key(req)
+        mock_cmp.assert_called_once_with("wrong-key", "correct-key")
     assert ex.value.status_code == 401

@@ -84,10 +84,12 @@ sequenceDiagram
     GPT2GIGA_MODE=PROD
     GPT2GIGA_HOST=0.0.0.0
     GPT2GIGA_PORT=8090
-    GIGACHAT_CREDENTIALS="Authorization key GigaChat API"
+    GPT2GIGA_ENABLE_API_KEY_AUTH=True
+    GPT2GIGA_API_KEY="<your_strong_api_key>"
+    GIGACHAT_CREDENTIALS="<your_gigachat_credentials>"
     GIGACHAT_SCOPE=<your_api_scope>
     GIGACHAT_MODEL=GigaChat
-    GIGACHAT_VERIFY_SSL_CERTS=False
+    GIGACHAT_VERIFY_SSL_CERTS=True
     ```
 
 3. (Опционально) Выберите образ с нужной версией Python (3.10–3.14) и обновите `image:` в `docker-compose.yaml`.
@@ -354,7 +356,31 @@ completion = client.chat.completions.create(
 1. Если используется API ключ [Использование API ключа](#использование-api-ключа), то введите ваш `GPT2GIGA_API_KEY`
 2. Иначе, введите любой символ
 
-После этого, воспользуйтесь утилитой и будут выведены логи
+После этого, воспользуйтесь утилитой и будут выведены логи.
+
+> **⚠️ Безопасность:** Эндпоинты `/logs*` предназначены только для разработки. В `PROD` режиме (`GPT2GIGA_MODE=PROD`) они автоматически отключены. Не открывайте log-эндпоинты наружу без аутентификации.
+## Production hardening checklist
+
+Перед развертыванием gpt2giga в production-среде убедитесь, что выполнены следующие шаги:
+
+### Обязательные
+
+- [ ] **Режим PROD**: установите `GPT2GIGA_MODE=PROD`. В этом режиме автоматически отключаются `/docs`, `/redoc`, `/openapi.json` и все `/logs*`-эндпоинты; CORS ужесточается (нет wildcard `*`, `allow_credentials=False`).
+- [ ] **API key аутентификация**: установите `GPT2GIGA_ENABLE_API_KEY_AUTH=True` и задайте надёжный `GPT2GIGA_API_KEY` (минимум 32 символа, случайная строка).
+- [ ] **TLS-сертификаты GigaChat**: установите `GIGACHAT_VERIFY_SSL_CERTS=True`. Не отключайте проверку SSL в production.
+- [ ] **HTTPS**: включите `GPT2GIGA_USE_HTTPS=True` и укажите пути к TLS-сертификатам (`GPT2GIGA_HTTPS_KEY_FILE`, `GPT2GIGA_HTTPS_CERT_FILE`), либо разместите прокси за reverse proxy (nginx, Caddy, Traefik) с TLS-терминацией.
+- [ ] **CORS origins**: ограничьте `GPT2GIGA_CORS_ALLOW_ORIGINS` конкретными доменами вместо `["*"]`.
+- [ ] **Секреты**: храните `GIGACHAT_CREDENTIALS`, `GPT2GIGA_API_KEY` и другие секреты в переменных окружения или secrets manager.
+- [ ] **Не передавайте секреты через CLI**: используйте `.env` или переменные окружения вместо `--proxy.api-key` и `--gigachat.credentials` (аргументы видны в `ps aux`).
+
+### Рекомендуемые
+
+- [ ] **Reverse proxy**: разместите gpt2giga за reverse proxy (nginx, Caddy и др.) для rate limiting, TLS-терминации и дополнительной фильтрации.
+- [ ] **Уровень логов**: установите `GPT2GIGA_LOG_LEVEL=WARNING` или `INFO` (не `DEBUG`) для production — уровень `DEBUG` может содержать чувствительные данные в логах.
+- [ ] **Network isolation**: запускайте gpt2giga в изолированной сети, чтобы исключить доступ к внутренним сервисам через SSRF.
+- [ ] **Мониторинг**: настройте мониторинг `/health` и `/ping` эндпоинтов.
+- [ ] **Ротация секретов**: регулярно обновляйте `GPT2GIGA_API_KEY` и `GIGACHAT_CREDENTIALS`.
+
 ## Совместимые приложения
 
 Таблица содержит приложения, проверенные на совместную работу с gpt2giga.
