@@ -13,13 +13,13 @@ from gpt2giga.openapi_docs import (
     embeddings_openapi_extra,
     responses_openapi_extra,
 )
-from gpt2giga.utils import (
-    exceptions_handler,
-    read_request_json,
-    stream_responses_generator,
+from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.request_json import read_request_json
+from gpt2giga.common.streaming import (
     stream_chat_completion_generator,
-    convert_tool_to_giga_functions,
+    stream_responses_generator,
 )
+from gpt2giga.common.tools import convert_tool_to_giga_functions
 
 router = APIRouter(tags=["API"])
 

@@ -6,8 +6,6 @@ We intentionally keep runtime request handling unchanged (routes still accept
 required fields and common optional parameters.
 """
 
-from __future__ import annotations
-
 from typing import Any, Dict
 
 

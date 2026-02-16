@@ -1,6 +1,6 @@
 import pytest
 from gpt2giga.protocol.request_mapper import RequestTransformer
-from gpt2giga.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig
 from unittest.mock import MagicMock, AsyncMock
 
 

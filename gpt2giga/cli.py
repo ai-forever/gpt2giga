@@ -3,11 +3,14 @@ import os
 
 from dotenv import find_dotenv, load_dotenv
 
-from gpt2giga.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig
+from gpt2giga.common.app_meta import warn_sensitive_cli_args
 
 
 def load_config() -> ProxyConfig:
-    """Загружает конфигурацию из аргументов командной строки и переменных окружения"""
+    """Загружает конфигурацию из аргументов командной строки и переменных окружения."""
+    warn_sensitive_cli_args()
+
     # Сначала проверяем --env-path, чтобы загрузить переменные окружения
     # Используем argparse только для этого, игнорируя остальные аргументы
     parser = argparse.ArgumentParser(add_help=False)

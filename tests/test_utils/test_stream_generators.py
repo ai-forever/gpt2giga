@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -70,6 +71,15 @@ class FakeClientGigaChatError:
         return gen()
 
 
+class FakeClientCancelled:
+    def astream(self, chat):
+        async def gen():
+            raise asyncio.CancelledError()
+            yield  # pragma: no cover
+
+        return gen()
+
+
 class FakeAppState:
     def __init__(self, client, logger=None):
         self.gigachat_client = client
@@ -132,6 +142,16 @@ async def test_stream_chat_completion_generator_gigachat_exception():
 
 
 @pytest.mark.asyncio
+async def test_stream_chat_completion_generator_propagates_cancellation():
+    req = FakeRequest(FakeClientCancelled())
+    chat = SimpleNamespace(model="giga")
+    gen = stream_chat_completion_generator(req, "1", chat, response_id="1")
+
+    with pytest.raises(asyncio.CancelledError):
+        await anext(gen)
+
+
+@pytest.mark.asyncio
 async def test_stream_responses_generator_gigachat_exception():
     """Тест обработки GigaChatException в responses generator"""
     logger = MagicMock()
@@ -148,6 +168,21 @@ async def test_stream_responses_generator_gigachat_exception():
     assert "GigaChat" in lines[2]
     assert "stream_error" in lines[2]
     assert "event: error" in lines[2]
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_propagates_cancellation():
+    req = FakeRequest(FakeClientCancelled())
+    chat = SimpleNamespace(model="giga")
+    gen = stream_responses_generator(req, chat, response_id="1")
+
+    first = await anext(gen)
+    second = await anext(gen)
+    assert "event: response.created" in first
+    assert "event: response.in_progress" in second
+
+    with pytest.raises(asyncio.CancelledError):
+        await anext(gen)
 
 
 @pytest.mark.asyncio

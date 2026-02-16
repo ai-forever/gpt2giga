@@ -1,17 +1,26 @@
 import json
 import time
 import uuid
-from typing import Optional, Dict, Literal
+from typing import Dict, Literal, Optional
 
 from gigachat.models import ChatCompletion, ChatCompletionChunk
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
 
 class ResponseProcessor:
-    """Обработчик ответов от GigaChat в формат OpenAI"""
+    """Обработчик ответов от GigaChat в формат OpenAI."""
 
-    def __init__(self, logger):
+    def __init__(self, logger=None, mode: str = "DEV"):
+        if logger is None:
+            from loguru import logger as default_logger
+
+            logger = default_logger
         self.logger = logger
+        self._mode = mode.upper() if isinstance(mode, str) else "DEV"
+
+    @property
+    def _is_prod_mode(self) -> bool:
+        return self._mode == "PROD"
 
     def process_response(
         self,
@@ -20,7 +29,7 @@ class ResponseProcessor:
         response_id: str,
         request_data: Optional[Dict] = None,
     ) -> dict:
-        """Обрабатывает обычный ответ от GigaChat"""
+        """Обрабатывает обычный ответ от GigaChat."""
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
@@ -45,8 +54,22 @@ class ResponseProcessor:
             "system_fingerprint": f"fp_{response_id}",
         }
 
-        self.logger.debug("Processed chat completion response")
-        self.logger.debug(f"Response: {result}")
+        if self._is_prod_mode:
+            self.logger.bind(event="chat_completion_response").debug(
+                "Processed chat completion response (payload omitted in PROD)"
+            )
+        else:
+            choice_count = len(result.get("choices", []))
+            usage = result.get("usage") or {}
+            self.logger.bind(
+                event="chat_completion_response",
+                response_id=result.get("id"),
+                choice_count=choice_count,
+                total_tokens=usage.get("total_tokens"),
+            ).debug(
+                f"Processed chat completion: {choice_count} choices, "
+                f"tokens={usage.get('total_tokens')}"
+            )
         return result
 
     def process_response_api(
@@ -89,8 +112,22 @@ class ResponseProcessor:
             "text": response_text,
             "usage": self._build_response_usage(giga_dict.get("usage")),
         }
-        self.logger.debug("Processed responses API response")
-        self.logger.debug(f"Response: {result}")
+        if self._is_prod_mode:
+            self.logger.bind(event="responses_api_response").debug(
+                "Processed responses API response (payload omitted in PROD)"
+            )
+        else:
+            output_count = len(result.get("output", []))
+            usage = result.get("usage") or {}
+            self.logger.bind(
+                event="responses_api_response",
+                response_id=result.get("id"),
+                output_count=output_count,
+                total_tokens=usage.get("total_tokens"),
+            ).debug(
+                f"Processed responses API: {output_count} outputs, "
+                f"tokens={usage.get('total_tokens')}"
+            )
 
         return result
 
@@ -106,7 +143,7 @@ class ResponseProcessor:
         try:
             if is_tool_call and not is_structured_output:
                 return [data["choices"][0][message_key]["output"]]
-            elif is_tool_call and is_structured_output:
+            if is_tool_call and is_structured_output:
                 output_item = data["choices"][0][message_key]["output"]
                 arguments = output_item.get("arguments", "{}")
                 return [
@@ -123,21 +160,20 @@ class ResponseProcessor:
                         ],
                     }
                 ]
-            else:
-                return [
-                    {
-                        "type": "message",
-                        "id": f"msg_{response_id}",
-                        "status": "completed",
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": data["choices"][0][message_key]["content"],
-                            }
-                        ],
-                    }
-                ]
+            return [
+                {
+                    "type": "message",
+                    "id": f"msg_{response_id}",
+                    "status": "completed",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": data["choices"][0][message_key]["content"],
+                        }
+                    ],
+                }
+            ]
         except Exception:
             return [
                 {
@@ -161,7 +197,7 @@ class ResponseProcessor:
         response_id: str,
         request_data: Optional[Dict] = None,
     ) -> dict:
-        """Обрабатывает стриминговый чанк от GigaChat"""
+        """Обрабатывает стриминговый чанк от GigaChat."""
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
@@ -190,7 +226,15 @@ class ResponseProcessor:
             "system_fingerprint": f"fp_{response_id}",
         }
 
-        self.logger.debug(f"Processed stream chunk: {result}")
+        if self._is_prod_mode:
+            self.logger.bind(event="stream_chunk").debug(
+                "Processed stream chunk (payload omitted in PROD)"
+            )
+        else:
+            self.logger.bind(
+                event="stream_chunk",
+                response_id=result.get("id"),
+            ).debug("Processed stream chunk")
         return result
 
     def process_stream_chunk_response(
@@ -231,7 +275,7 @@ class ResponseProcessor:
         is_stream: bool = False,
         is_structured_output: bool = False,
     ):
-        """Обрабатывает отдельный choice"""
+        """Обрабатывает отдельный choice."""
         message_key = "delta" if is_stream else "message"
 
         choice["index"] = 0
@@ -254,8 +298,6 @@ class ResponseProcessor:
 
                     message["content"] = content
                     message.pop("function_call", None)
-                    # For streaming, we might need to handle incremental updates if GigaChat streams function args.
-                    # But here we assume we are just converting structure.
 
         elif is_tool_call:
             choice["finish_reason"] = "tool_calls"
@@ -267,7 +309,7 @@ class ResponseProcessor:
                 self._process_function_call(message, is_tool_call)
 
     def _process_function_call(self, message: Dict, is_tool_call: bool):
-        """Обрабатывает function call"""
+        """Обрабатывает function call."""
         try:
             arguments = json.dumps(
                 message["function_call"]["arguments"],
@@ -296,7 +338,7 @@ class ResponseProcessor:
     def _process_choice_responses(
         self, choice: Dict, response_id: str, is_stream: bool = False
     ):
-        """Обрабатывает отдельный choice"""
+        """Обрабатывает отдельный choice (Responses API)."""
         message_key = "delta" if is_stream else "message"
 
         choice["index"] = 0
@@ -310,7 +352,7 @@ class ResponseProcessor:
                 self._process_function_call_responses(message, response_id)
 
     def _process_function_call_responses(self, message: Dict, response_id: str):
-        """Обрабатывает function call"""
+        """Обрабатывает function call (Responses API)."""
         try:
             arguments = json.dumps(
                 message["function_call"]["arguments"],
@@ -330,7 +372,7 @@ class ResponseProcessor:
 
     @staticmethod
     def _build_usage(usage_data: Optional[Dict]) -> Optional[Dict]:
-        """Строит объект usage"""
+        """Строит объект usage."""
         if not usage_data:
             return None
 
