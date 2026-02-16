@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.config import ProxyConfig
-from gpt2giga.routers import system_router, logs_router
+from gpt2giga.routers import logs_api_router, logs_router, system_router
 
 
 @pytest.fixture
@@ -16,6 +16,7 @@ def temp_log_file(tmp_path):
 def make_app():
     app = FastAPI()
     app.include_router(system_router)
+    app.include_router(logs_api_router)
     app.include_router(logs_router)
     app.state.config = ProxyConfig()
     return app

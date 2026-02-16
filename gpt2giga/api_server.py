@@ -14,7 +14,7 @@ from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-from gpt2giga.routers import anthropic_router, api_router, logs_router
+from gpt2giga.routers import anthropic_router, api_router, logs_api_router, logs_router
 from gpt2giga.routers import system_router
 from gpt2giga.utils import _get_app_version, _check_port_available
 
@@ -84,6 +84,10 @@ def create_app(config=None) -> FastAPI:
         allow_origins = [origin for origin in allow_origins if origin != "*"]
         allow_methods = [method for method in allow_methods if method != "*"]
         allow_headers = [header for header in allow_headers if header != "*"]
+        if not allow_methods:
+            allow_methods = ["GET", "POST", "OPTIONS"]
+        if not allow_headers:
+            allow_headers = ["authorization", "content-type", "x-api-key"]
         allow_credentials = False
 
     app = FastAPI(
@@ -131,6 +135,7 @@ def create_app(config=None) -> FastAPI:
     app.include_router(anthropic_router, dependencies=dependencies)
     app.include_router(system_router, dependencies=dependencies)
     if not is_prod_mode:
+        app.include_router(logs_api_router, dependencies=dependencies)
         app.include_router(logs_router, dependencies=dependencies)
     return app
 

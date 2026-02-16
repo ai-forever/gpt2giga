@@ -10,6 +10,7 @@ from starlette.responses import Response, PlainTextResponse, HTMLResponse
 from gpt2giga.utils import exceptions_handler
 
 router = APIRouter(tags=["System"])
+logs_api_router = APIRouter(tags=["System logs"])
 
 logs_router = APIRouter(tags=["HTML logs"])
 
@@ -28,7 +29,7 @@ async def ping() -> Response:
     return await health()
 
 
-@router.get("/logs", response_class=PlainTextResponse)
+@logs_api_router.get("/logs", response_class=PlainTextResponse)
 @exceptions_handler
 async def get_logs(request: Request, lines: int = Query(100, ge=1, le=5000)):
     """
@@ -47,7 +48,7 @@ async def get_logs(request: Request, lines: int = Query(100, ge=1, le=5000)):
         return PlainTextResponse(f"Error: {str(e)}", status_code=500)
 
 
-@router.get("/logs/stream")
+@logs_api_router.get("/logs/stream")
 @exceptions_handler
 async def stream_logs(request: Request):
     """
