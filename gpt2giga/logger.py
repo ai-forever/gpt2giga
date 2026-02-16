@@ -3,9 +3,18 @@ import contextvars
 import sys
 
 from loguru import logger
+from .constants import _JSON_KV_RE, _KV_EQ_RE, _BEARER_RE
 
 # Context variable for rquid
 rquid_context = contextvars.ContextVar("rquid", default="-")
+
+
+def redact_sensitive(message: str) -> str:
+    """Replace values of sensitive keys in a log message with '***'."""
+    message = _JSON_KV_RE.sub(r"\1\2\1: \3***\3", message)
+    message = _KV_EQ_RE.sub(r"\1=***", message)
+    message = _BEARER_RE.sub(r"\1***", message)
+    return message
 
 
 def get_rquid() -> str:
@@ -13,10 +22,13 @@ def get_rquid() -> str:
     return rquid_context.get()
 
 
-def setup_logger(log_level="INFO", log_file="app.log", max_bytes=10_000_000):
-    """
-    Configure Loguru logger with file rotation and contextual rquid.
-    """
+def setup_logger(
+    log_level="INFO",
+    log_file="app.log",
+    max_bytes=10_000_000,
+    enable_redaction=True,
+):
+    """Configure Loguru logger with file rotation, contextual rquid, and redaction."""
     logger.remove()  # Remove default logger
     log_level = log_level.upper()
     # Custom format that automatically includes rquid
@@ -43,11 +55,15 @@ def setup_logger(log_level="INFO", log_file="app.log", max_bytes=10_000_000):
         format=format_str,
     )
 
-    # Patch to automatically bind rquid from contextvar
-    class RquidFilter:
+    _do_redact = enable_redaction
+
+    class RquidAndRedactPatcher:
+        """Bind rquid context and optionally redact sensitive data."""
+
         def __call__(self, record):
             record["extra"]["rquid"] = get_rquid()
-            return True
+            if _do_redact:
+                record["message"] = redact_sensitive(record["message"])
 
-    logger.configure(patcher=RquidFilter())
+    logger.configure(patcher=RquidAndRedactPatcher())
     return logger

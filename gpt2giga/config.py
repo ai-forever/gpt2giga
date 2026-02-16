@@ -73,6 +73,14 @@ class ProxySettings(BaseSettings):
     log_max_size: int = Field(
         default=10 * 1024 * 1024, description="максимальный размер файла в байтах"
     )
+    log_redact_sensitive: bool = Field(
+        default=True,
+        description="Маскировать чувствительные поля (api_key, token, password и др.) в логах",
+    )
+    logs_ip_allowlist: list[str] = Field(
+        default_factory=list,
+        description="IP-адреса, которым разрешён доступ к /logs* (пусто = без ограничений)",
+    )
     enable_api_key_auth: bool = Field(
         default=False,
         description="Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ)",

@@ -10,6 +10,16 @@
       color: #0f0;
       padding: 20px;
     }
+    #warning-banner {
+      background-color: #b30000;
+      color: #fff;
+      padding: 10px 15px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+      font-family: sans-serif;
+      font-size: 14px;
+      line-height: 1.4;
+    }
     #controls {
       margin-bottom: 15px;
     }
@@ -34,6 +44,11 @@
   </style>
 </head>
 <body>
+  <div id="warning-banner">
+    WARNING: Logs may contain sensitive information (request payloads, internal addresses, user data).
+    Do not share this page or its contents publicly. This viewer is disabled in PROD mode.
+  </div>
+
   <div id="controls">
     <label for="apiKey">API Key:</label>
     <input type="text" id="apiKey" placeholder="Enter your API key" />

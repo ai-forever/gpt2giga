@@ -3,7 +3,6 @@ import json
 import socket
 import sys
 import traceback
-import warnings
 from functools import wraps
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 from typing import AsyncGenerator, Optional
@@ -15,8 +14,10 @@ from gigachat import GigaChat
 from gigachat.models import Chat, Function, FunctionParameters
 from gigachat.settings import SCOPE
 from starlette.requests import Request
+from starlette.status import HTTP_403_FORBIDDEN
 
 from gpt2giga.logger import rquid_context
+from gpt2giga.constants import _SENSITIVE_CLI_ARGS
 
 ERROR_MAPPING = {
     gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),
@@ -37,16 +38,6 @@ ERROR_MAPPING = {
     gigachat.exceptions.ServerError: (500, "server_error", None),
 }
 
-_SENSITIVE_CLI_ARGS = frozenset(
-    {
-        "--proxy.api-key",
-        "--gigachat.credentials",
-        "--gigachat.password",
-        "--gigachat.access-token",
-        "--gigachat.key-file-password",
-    }
-)
-
 
 def _warn_sensitive_cli_args() -> None:
     """Emit a warning when secret values are passed as CLI arguments.
@@ -56,14 +47,16 @@ def _warn_sensitive_cli_args() -> None:
     """
     found = [arg for arg in sys.argv if arg.split("=")[0] in _SENSITIVE_CLI_ARGS]
     if found:
-        warnings.warn(
+        message = (
             "Security warning: sensitive arguments detected in CLI: "
             f"{', '.join(found)}. "
             "CLI arguments are visible to all users via 'ps aux'. "
-            "Use environment variables or .env file instead.",
-            UserWarning,
-            stacklevel=2,
+            "Use environment variables or .env file instead."
         )
+        from loguru import logger
+
+        rquid = rquid_context.get()
+        logger.warning(f"[{rquid}] {message}")
 
 
 def _get_app_version() -> str:
@@ -912,3 +905,30 @@ def pass_token_to_gigachat(giga: GigaChat, token: str) -> GigaChat:
         giga._settings.access_token = token.replace("giga-auth-", "", 1)
 
     return giga
+
+
+def _get_client_ip(request: Request) -> str:
+    """Extract client IP from X-Forwarded-For or request.client."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return ""
+
+
+def verify_logs_ip_allowlist(request: Request) -> None:
+    """Deny access if client IP is not in the configured allowlist."""
+    allowlist = getattr(
+        getattr(getattr(request.app.state, "config", None), "proxy_settings", None),
+        "logs_ip_allowlist",
+        None,
+    )
+    if not allowlist:
+        return
+    client_ip = _get_client_ip(request)
+    if client_ip not in allowlist:
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN,
+            detail="Access denied: IP not in logs allowlist",
+        )

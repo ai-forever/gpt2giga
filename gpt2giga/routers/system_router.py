@@ -7,7 +7,7 @@ from sse_starlette import EventSourceResponse
 from starlette.requests import Request
 from starlette.responses import Response, PlainTextResponse, HTMLResponse
 
-from gpt2giga.utils import exceptions_handler
+from gpt2giga.utils import exceptions_handler, verify_logs_ip_allowlist
 
 router = APIRouter(tags=["System"])
 logs_api_router = APIRouter(tags=["System logs"])
@@ -35,6 +35,7 @@ async def get_logs(request: Request, lines: int = Query(100, ge=1, le=5000)):
     """
     Return the last N lines from the log file.
     """
+    verify_logs_ip_allowlist(request)
     filename = request.app.state.config.proxy_settings.log_filename
     if not os.path.exists(filename):
         return PlainTextResponse("Log file not found.", status_code=404)
@@ -54,6 +55,7 @@ async def stream_logs(request: Request):
     """
     Stream live logs using Server-Sent Events (SSE).
     """
+    verify_logs_ip_allowlist(request)
 
     async def log_generator():
         filename = request.app.state.config.proxy_settings.log_filename
@@ -96,7 +98,8 @@ async def stream_logs(request: Request):
 
 
 @logs_router.get("/logs/html", response_class=HTMLResponse)
-async def root():
+async def root(request: Request):
     """Serve the simple log viewer."""
+    verify_logs_ip_allowlist(request)
     html_path = Path(__file__).parent.parent / "templates" / "log_viewer.html"
     return HTMLResponse(html_path.read_text())

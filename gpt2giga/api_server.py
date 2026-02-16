@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
             log_level=config.proxy_settings.log_level,
             log_file=config.proxy_settings.log_filename,
             max_bytes=config.proxy_settings.log_max_size,
+            enable_redaction=config.proxy_settings.log_redact_sensitive,
         )
 
     app.state.config = config
@@ -152,10 +153,17 @@ def run():
         log_level=proxy_settings.log_level,
         log_file=proxy_settings.log_filename,
         max_bytes=proxy_settings.log_max_size,
+        enable_redaction=proxy_settings.log_redact_sensitive,
     )
 
     app = create_app(config)
     app.state.logger = logger
+
+    if proxy_settings.mode == "PROD" and proxy_settings.log_level == "DEBUG":
+        logger.warning(
+            "DEBUG log level in PROD mode may expose sensitive data. "
+            "Consider using INFO or higher."
+        )
 
     logger.info(f"Starting Gpt2Giga proxy server, version: {_get_app_version()}")
     logger.info(f"Proxy settings: {proxy_settings.model_dump(exclude={'api_key'})}")
