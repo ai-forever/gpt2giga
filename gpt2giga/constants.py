@@ -18,7 +18,7 @@ SUPPORTED_TEXT_MIME_TYPES = frozenset(
 )
 
 SUPPORTED_IMAGE_MIME_TYPES = frozenset(
-    {"image/jpeg", "image/png", "image/tiff", "image/bmp"}
+    {"image/jpeg", "image/png", "image/tiff", "image/bmp", "image/jpg"}
 )
 
 SUPPORTED_AUDIO_MIME_TYPES = frozenset(
