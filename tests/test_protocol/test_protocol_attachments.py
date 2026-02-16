@@ -1,4 +1,5 @@
 import base64
+import ipaddress
 import time
 
 import httpx
@@ -88,6 +89,11 @@ async def test_attachment_processor_async_httpx(monkeypatch):
 
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)
+
+    async def fake_resolve(host: str, port: int):
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(p, "_resolve_host_ips", fake_resolve)
     result = await p.upload_file(client, "http://example.com/image.jpg")
     assert result == "f1"
 
@@ -195,6 +201,11 @@ async def test_attachment_processor_http_error(monkeypatch):
 
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)
+
+    async def fake_resolve(host: str, port: int):
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(p, "_resolve_host_ips", fake_resolve)
     result = await p.upload_file(client, "http://example.com/image.jpg")
     assert result is None  # Ошибка должна вернуть None
 
@@ -236,6 +247,11 @@ async def test_attachment_processor_remote_content_length_limit(monkeypatch):
 
     client = DummyClient()
     p = AttachmentProcessor(logger=logger, max_image_file_size_bytes=50)
+
+    async def fake_resolve(host: str, port: int):
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(p, "_resolve_host_ips", fake_resolve)
     with pytest.raises(HTTPException) as exc:
         await p.upload_file(client, "http://example.com/image.jpg")
     assert exc.value.status_code == 413
@@ -280,7 +296,52 @@ async def test_attachment_processor_rejects_unsupported_remote_content_type(
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)
 
+    async def fake_resolve(host: str, port: int):
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(p, "_resolve_host_ips", fake_resolve)
+
     with pytest.raises(HTTPException) as exc:
         await p.upload_file(client, "http://example.com/unknown.bin")
     assert exc.value.status_code == 415
+    assert client.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_attachment_processor_blocks_localhost_url():
+    client = DummyClient()
+    p = AttachmentProcessor(logger=logger)
+    with pytest.raises(HTTPException) as exc:
+        await p.upload_file(client, "http://localhost/image.jpg")
+    assert exc.value.status_code == 400
+    assert client.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_attachment_processor_blocks_loopback_ip_url():
+    client = DummyClient()
+    p = AttachmentProcessor(logger=logger)
+    with pytest.raises(HTTPException) as exc:
+        await p.upload_file(client, "http://127.0.0.1/image.jpg")
+    assert exc.value.status_code == 400
+    assert client.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_attachment_processor_blocks_metadata_ip_url():
+    client = DummyClient()
+    p = AttachmentProcessor(logger=logger)
+    with pytest.raises(HTTPException) as exc:
+        await p.upload_file(client, "http://169.254.169.254/latest/meta-data/")
+    assert exc.value.status_code == 400
+    assert client.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_attachment_processor_blocks_private_ip_url():
+    client = DummyClient()
+    p = AttachmentProcessor(logger=logger)
+    with pytest.raises(HTTPException) as exc:
+        await p.upload_file(client, "http://10.0.0.1/image.jpg")
+    assert exc.value.status_code == 400
     assert client.calls == 0

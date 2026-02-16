@@ -103,6 +103,35 @@ def test_prod_mode_cors_is_hardened():
     assert "*" not in cors.kwargs["allow_origins"]
 
 
+def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypatch):
+    class FakeGigaChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aclose(self):
+            return None
+
+    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+
+    log_file = tmp_path / "gpt2giga.log"
+    log_file.write_text("INFO: log line\n")
+
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            mode="DEV",
+            enable_api_key_auth=True,
+            api_key="k",
+            log_filename=str(log_file),
+        )
+    )
+    app = create_app(config=cfg)
+    client = TestClient(app)
+
+    assert client.get("/logs").status_code == 401
+    assert client.get("/logs/stream").status_code == 401
+    assert client.get("/logs/html").status_code == 401
+
+
 def test_run_server(monkeypatch):
     import gpt2giga.api_server
     import uvicorn

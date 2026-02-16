@@ -1,10 +1,14 @@
 import base64
 import hashlib
+import ipaddress
 import re
+import socket
 import time
 import uuid
+from urllib.parse import urlsplit, urlunsplit, urljoin
 from typing import Optional, NamedTuple, Literal
 
+import anyio
 import httpx
 from fastapi import HTTPException
 from gigachat import GigaChat
@@ -42,6 +46,7 @@ class AttachmentProcessor:
 
     DEFAULT_MAX_CACHE_SIZE = 1000
     DEFAULT_CACHE_TTL_SECONDS = 3600
+    DEFAULT_MAX_REDIRECTS = 5
     DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES = CONST_DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES
     DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES = CONST_DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES
     DEFAULT_MAX_TEXT_FILE_SIZE_BYTES = CONST_DEFAULT_MAX_TEXT_FILE_SIZE_BYTES
@@ -76,7 +81,8 @@ class AttachmentProcessor:
             self._http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0, connect=10.0),
                 limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-                follow_redirects=True,
+                # Redirects are handled manually to validate every hop (SSRF hardening).
+                follow_redirects=False,
             )
         return self._http_client
 
@@ -229,6 +235,101 @@ class AttachmentProcessor:
             },
         )
 
+    @staticmethod
+    def _raise_disallowed_url(message: str) -> None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": f"Disallowed attachment URL: {message}",
+                    "type": "invalid_request_error",
+                    "param": "attachments",
+                    "code": "invalid_url",
+                }
+            },
+        )
+
+    @staticmethod
+    def _is_disallowed_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        # Block common SSRF targets and non-global ranges.
+        return bool(
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        )
+
+    async def _resolve_host_ips(
+        self, host: str, port: int
+    ) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+        """Resolve host to IP addresses in a thread (avoid blocking event loop)."""
+
+        def _resolve() -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+            ips: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+            for family, _socktype, _proto, _canonname, sockaddr in infos:
+                if family == socket.AF_INET:
+                    ips.append(ipaddress.ip_address(sockaddr[0]))
+                elif family == socket.AF_INET6:
+                    ips.append(ipaddress.ip_address(sockaddr[0]))
+            return ips
+
+        return await anyio.to_thread.run_sync(_resolve)
+
+    async def _validate_remote_url(self, raw_url: str) -> str:
+        """Validate a remote URL to mitigate SSRF."""
+        try:
+            parts = urlsplit(raw_url)
+        except Exception as exc:  # pragma: no cover (defensive)
+            self._raise_disallowed_url(f"invalid URL: {type(exc).__name__}")
+            raise
+
+        scheme = (parts.scheme or "").lower()
+        if scheme not in {"http", "https"}:
+            self._raise_disallowed_url(f"unsupported scheme: {parts.scheme or 'empty'}")
+
+        # Reject credentials in URL (userinfo).
+        if parts.username is not None or parts.password is not None:
+            self._raise_disallowed_url("userinfo is not allowed")
+
+        host = parts.hostname
+        if not host:
+            self._raise_disallowed_url("missing hostname")
+
+        normalized_host = host.strip().lower()
+        if normalized_host in {"localhost"}:
+            self._raise_disallowed_url("hostname is localhost")
+
+        port = parts.port or (443 if scheme == "https" else 80)
+
+        # If host is an IP-literal, validate it directly. Otherwise resolve and validate all A/AAAA.
+        try:
+            ip = ipaddress.ip_address(normalized_host)
+        except ValueError:
+            try:
+                resolved_ips = await self._resolve_host_ips(normalized_host, port)
+            except OSError as exc:
+                # Let downstream HTTP client error out, but make it explicit for the caller.
+                self._raise_disallowed_url(f"cannot resolve host: {type(exc).__name__}")
+            if not resolved_ips:
+                self._raise_disallowed_url("host resolved to no IPs")
+            for resolved_ip in resolved_ips:
+                if self._is_disallowed_ip(resolved_ip):
+                    self._raise_disallowed_url(
+                        f"host resolves to disallowed IP: {resolved_ip}"
+                    )
+        else:
+            if self._is_disallowed_ip(ip):
+                self._raise_disallowed_url(f"disallowed IP: {ip}")
+
+        # Normalize URL (drop fragment).
+        normalized = urlunsplit(
+            (scheme, parts.netloc, parts.path or "/", parts.query or "", "")
+        )
+        return normalized
+
     async def upload_file_with_meta(
         self,
         giga_client: GigaChat,
@@ -282,10 +383,35 @@ class AttachmentProcessor:
                     )
                 self.logger.info("Decoded base64 file")
             else:
-                self.logger.info(f"Downloading image from URL: {image_url[:100]}...")
+                validated_url = await self._validate_remote_url(image_url)
+                self.logger.info(
+                    f"Downloading image from URL: {validated_url[:100]}..."
+                )
                 client = await self._get_http_client()
-                async with client.stream("GET", image_url) as response:
+                current_url = validated_url
+                response = None
+                stream_cm = None
+                for _redirect_i in range(self.DEFAULT_MAX_REDIRECTS + 1):
+                    stream_cm = client.stream("GET", current_url)
+                    response = await stream_cm.__aenter__()
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location")
+                        await stream_cm.__aexit__(None, None, None)
+                        stream_cm = None
+                        response = None
+                        if not location:
+                            self._raise_disallowed_url(
+                                "redirect without Location header"
+                            )
+                        next_url = urljoin(current_url, location)
+                        current_url = await self._validate_remote_url(next_url)
+                        continue
                     response.raise_for_status()
+                    break
+                else:
+                    self._raise_disallowed_url("too many redirects")
+
+                try:
                     content_type = self._extract_main_content_type(
                         response.headers.get("content-type", "")
                     )
@@ -332,6 +458,9 @@ class AttachmentProcessor:
                             )
                         chunks.append(chunk)
                     content_bytes = b"".join(chunks)
+                finally:
+                    if stream_cm is not None:
+                        await stream_cm.__aexit__(None, None, None)
 
             ext = content_type.split("/")[-1] or "jpg"
             filename = filename or f"{uuid.uuid4()}.{ext}"
