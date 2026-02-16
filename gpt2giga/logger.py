@@ -28,12 +28,18 @@ def _format_structured_extra(extra: dict) -> str:
 
     Skips internal keys (``rquid``) so that only user-bound fields appear.
     Returns an empty string when there are no extra fields to show.
+
+    Note: Curly braces in the JSON output are escaped (doubled) to prevent
+    Loguru's format_map from interpreting them as format placeholders.
     """
     filtered = {k: v for k, v in extra.items() if k != "rquid" and v is not None}
     if not filtered:
         return ""
     try:
-        return " | " + json.dumps(filtered, ensure_ascii=False, default=str)
+        json_str = json.dumps(filtered, ensure_ascii=False, default=str)
+        # Escape curly braces to prevent Loguru format_map interpretation
+        json_str = json_str.replace("{", "{{").replace("}", "}}")
+        return " | " + json_str
     except (TypeError, ValueError):
         return ""
 
