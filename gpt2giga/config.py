@@ -4,6 +4,13 @@ from gigachat.settings import Settings as GigachatSettings
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from gpt2giga.constants import (
+    DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
+    DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES,
+    DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES,
+    DEFAULT_MAX_TEXT_FILE_SIZE_BYTES,
+)
+
 
 class ProxySettings(BaseSettings):
     mode: Literal["DEV", "PROD"] = Field(
@@ -41,6 +48,22 @@ class ProxySettings(BaseSettings):
     )
     enable_images: bool = Field(
         default=True, description="Включить загрузку изображений"
+    )
+    max_audio_file_size_bytes: int = Field(
+        default=DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
+        description="Максимальный размер одного аудиофайла в байтах",
+    )
+    max_image_file_size_bytes: int = Field(
+        default=DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES,
+        description="Максимальный размер одного изображения в байтах",
+    )
+    max_text_file_size_bytes: int = Field(
+        default=DEFAULT_MAX_TEXT_FILE_SIZE_BYTES,
+        description="Максимальный размер одного текстового файла в байтах",
+    )
+    max_audio_image_total_size_bytes: int = Field(
+        default=DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES,
+        description="Максимальный суммарный размер аудио и изображений в одном запросе, в байтах",
     )
 
     log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = Field(

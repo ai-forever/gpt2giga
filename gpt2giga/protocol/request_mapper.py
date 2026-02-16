@@ -9,6 +9,7 @@ from gigachat.models import (
 )
 
 from gpt2giga.config import ProxyConfig
+from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.protocol.attachments import AttachmentProcessor
 from gpt2giga.protocol.content_utils import ensure_json_object_str
 from gpt2giga.protocol.message_utils import (
@@ -54,6 +55,8 @@ class RequestTransformer:
         attachment_count = 0
         system_message = None
 
+        size_totals = {"audio_image_total": 0}
+
         for i, message in enumerate(messages):
             self.logger.debug(f"Processing message {i}: role={message.get('role')}")
 
@@ -92,7 +95,7 @@ class RequestTransformer:
             # Process compound content (text + images)
             if isinstance(message["content"], list):
                 texts, attachments = await self._process_content_parts(
-                    message["content"], giga_client
+                    message["content"], giga_client, size_totals
                 )
                 message["content"] = "\n".join(texts)
                 message["attachments"] = attachments
@@ -113,7 +116,10 @@ class RequestTransformer:
         return transformed_messages
 
     async def _process_content_parts(
-        self, content_parts: List[Dict], giga_client: Optional[GigaChat] = None
+        self,
+        content_parts: List[Dict],
+        giga_client: Optional[GigaChat] = None,
+        size_totals: Optional[Dict[str, int]] = None,
     ) -> Tuple[List[str], List[str]]:
         """Processes content parts (text and images)"""
         texts = []
@@ -123,6 +129,11 @@ class RequestTransformer:
         # Cache references used in loop to minimize attribute lookups
         processor = self.attachment_processor
         enable_images = getattr(self.config.proxy_settings, "enable_images", False)
+        max_audio_image_total = getattr(
+            self.config.proxy_settings,
+            "max_audio_image_total_size_bytes",
+            DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES,
+        )
         logger = self.logger
 
         for content_part in content_parts:
@@ -139,10 +150,37 @@ class RequestTransformer:
                 url = content_part["image_url"].get("url")
                 if url is not None:
                     if giga_client:
-                        file_id = await processor.upload_file(giga_client, url)
-                        if file_id:
-                            attachments.append(file_id)
-                            logger.info(f"Added attachment: {file_id}")
+                        if hasattr(processor, "upload_file_with_meta"):
+                            remaining = max_audio_image_total
+                            if size_totals is not None:
+                                remaining = max(
+                                    0,
+                                    max_audio_image_total
+                                    - size_totals.get("audio_image_total", 0),
+                                )
+                            upload_result = await processor.upload_file_with_meta(
+                                giga_client,
+                                url,
+                                max_audio_image_total_remaining=remaining,
+                            )
+                            if upload_result:
+                                attachments.append(upload_result.file_id)
+                                if (
+                                    upload_result.file_kind in {"audio", "image"}
+                                    and size_totals is not None
+                                ):
+                                    size_totals["audio_image_total"] = (
+                                        size_totals.get("audio_image_total", 0)
+                                        + upload_result.file_size_bytes
+                                    )
+                                logger.info(
+                                    f"Added attachment: {upload_result.file_id}"
+                                )
+                        else:
+                            file_id = await processor.upload_file(giga_client, url)
+                            if file_id:
+                                attachments.append(file_id)
+                                logger.info(f"Added attachment: {file_id}")
                     else:
                         logger.warning("giga_client not provided for image upload")
 
@@ -150,12 +188,38 @@ class RequestTransformer:
                 filename = content_part["file"].get("filename")
                 file_data = content_part["file"].get("file_data")
                 if giga_client:
-                    file_id = await processor.upload_file(
-                        giga_client, file_data, filename
-                    )
-                    if file_id:
-                        attachments.append(file_id)
-                        logger.info(f"Added attachment: {file_id}")
+                    if hasattr(processor, "upload_file_with_meta"):
+                        remaining = max_audio_image_total
+                        if size_totals is not None:
+                            remaining = max(
+                                0,
+                                max_audio_image_total
+                                - size_totals.get("audio_image_total", 0),
+                            )
+                        upload_result = await processor.upload_file_with_meta(
+                            giga_client,
+                            file_data,
+                            filename,
+                            max_audio_image_total_remaining=remaining,
+                        )
+                        if upload_result:
+                            attachments.append(upload_result.file_id)
+                            if (
+                                upload_result.file_kind in {"audio", "image"}
+                                and size_totals is not None
+                            ):
+                                size_totals["audio_image_total"] = (
+                                    size_totals.get("audio_image_total", 0)
+                                    + upload_result.file_size_bytes
+                                )
+                            logger.info(f"Added attachment: {upload_result.file_id}")
+                    else:
+                        file_id = await processor.upload_file(
+                            giga_client, file_data, filename
+                        )
+                        if file_id:
+                            attachments.append(file_id)
+                            logger.info(f"Added attachment: {file_id}")
                 else:
                     logger.warning("giga_client not provided for file upload")
 
