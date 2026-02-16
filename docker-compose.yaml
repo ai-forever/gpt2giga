@@ -1,11 +1,12 @@
 services:
   gpt2giga:
-    image: gigateam/gpt2giga:python3.10
+    image: ghcr.io/ai-forever/gpt2giga:latest
+    pull_policy: always
     build:
       context: .
       dockerfile: Dockerfile
-      args: 
-      - PYTHON_VERSION=3.10
+      args:
+      - PYTHON_VERSION=3.13
     container_name: gpt2giga
     ports:
       - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
