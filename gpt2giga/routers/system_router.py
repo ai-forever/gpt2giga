@@ -68,7 +68,7 @@ async def stream_logs(request: Request):
             with open(filename, "r", encoding="utf-8", errors="ignore") as f:
                 f.seek(0, os.SEEK_END)
                 file_position = f.tell()
-        except Exception:
+        except OSError:
             yield {"event": "error", "data": "Error accessing log file."}
             return
 
@@ -84,7 +84,10 @@ async def stream_logs(request: Request):
                         yield {"event": "message", "data": line.strip()}
                     else:
                         await asyncio.sleep(0.5)  # wait briefly for new lines
-            except Exception:
+            except asyncio.CancelledError:
+                # Let cancellation propagate so server shutdown is not blocked.
+                raise
+            except OSError:
                 # If file becomes inaccessible, just wait and retry
                 await asyncio.sleep(0.5)
 
