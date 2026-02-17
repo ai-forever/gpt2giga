@@ -11,6 +11,13 @@ repos:
         args:
           - --fix=lf
       - id: trailing-whitespace
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+        args:
+          - --config=.gitleaks.toml
+        exclude: ^tests/
   - repo: local
     hooks:
       - id: ruff

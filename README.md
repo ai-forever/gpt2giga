@@ -61,7 +61,7 @@ sequenceDiagram
 - работать в асинхронном режиме с множеством потоков запросов от нескольких клиентов;
 - общение в openai-формате с файлом;
 - использовать эндпоинт `/responses` (OpenAI Responses API) для совместимости с новыми клиентами;
-- отображать подробные сведения о запросах и ответах при включенном логирования `DEBUG`, `INFO` ...;
+- отображать подробные сведения о запросах и ответах при включенном логировании `DEBUG`, `INFO` ...;
 - задавать параметры работы как с помощью аргументов командной строки, так и с помощью переменных окружения (`.env`).
 
 ## Начало работы
@@ -81,12 +81,15 @@ sequenceDiagram
    GigaChat API поддерживает различные способы авторизации, которые отличаются в зависимости от типа вашей учетной записи. Пример с `Authorization key`.
 
     ```dotenv
+    GPT2GIGA_MODE=PROD
     GPT2GIGA_HOST=0.0.0.0
     GPT2GIGA_PORT=8090
-    GIGACHAT_CREDENTIALS="Authorization key GigaChat API"
+    GPT2GIGA_ENABLE_API_KEY_AUTH=True
+    GPT2GIGA_API_KEY="<your_strong_api_key>"
+    GIGACHAT_CREDENTIALS="<your_gigachat_credentials>"
     GIGACHAT_SCOPE=<your_api_scope>
     GIGACHAT_MODEL=GigaChat
-    GIGACHAT_VERIFY_SSL_CERTS=False
+    GIGACHAT_VERIFY_SSL_CERTS=True
     ```
 
 3. (Опционально) Выберите образ с нужной версией Python (3.10–3.14) и обновите `image:` в `docker-compose.yaml`.
@@ -99,7 +102,16 @@ sequenceDiagram
 
    Доступные теги смотрите в реестрах: [Docker Hub](https://hub.docker.com/r/gigateam/gpt2giga) и [GHCR](https://github.com/ai-forever/gpt2giga/pkgs/container/gpt2giga).
 
-4. Запустите контейнер с помощью Docker Compose: `docker compose up -d`
+4. Запустите контейнер с помощью Docker Compose:
+
+   - PROD:
+     ```sh
+     docker compose --profile PROD up -d
+     ```
+   - DEV:
+     ```sh
+     docker compose --profile DEV up -d
+     ```
 
 ### Локальный запуск
 
@@ -163,6 +175,7 @@ sequenceDiagram
 
 Полный список параметров смотрите в `gpt2giga --help`.
 
+> **⚠️ Безопасность:** Не передавайте секреты (`--proxy.api-key`, `--gigachat.credentials`, `--gigachat.password`, `--gigachat.access-token`, `--gigachat.key-file-password`) через аргументы командной строки — они видны всем пользователям через `ps aux`. Используйте переменные окружения или `.env` файл (см. раздел ниже).
 Утилита поддерживает аргументы 2 типов (настройки прокси и настройки GigaChat):
 - `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
 
@@ -181,6 +194,8 @@ sequenceDiagram
 - `--proxy.log-max-size` — максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB);
 - `--proxy.enable-api-key-auth` — нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`;
 - `--proxy.api-key` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
+
+> **⚠️ Безопасность:** Не передавайте секреты (`--proxy.api-key`, `--gigachat.credentials`, `--gigachat.password`, `--gigachat.access-token`, `--gigachat.key-file-password`) через аргументы командной строки — они видны всем пользователям через `ps aux`. Используйте переменные окружения или `.env` файл (см. раздел ниже).
 
 Далее идут стандартные настройки из библиотеки GigaChat:
 - `--gigachat [JSON]` — set gigachat from JSON string (по умолчанию `{}`);
@@ -231,6 +246,9 @@ gpt2giga \
 Список доступных переменных:
 
 - `GPT2GIGA_HOST="localhost"` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
+- `GPT2GIGA_MODE="DEV"` — режим запуска (`DEV` или `PROD`). В `PROD` отключаются `/docs`, `/redoc`, `/openapi.json`;
+  в `PROD` также обязательно требуется `GPT2GIGA_API_KEY`, отключаются `/logs`, `/logs/stream`, `/logs/html`;
+  и автоматически ужесточается CORS (нет wildcard `*`, `allow_credentials=False`);
 - `GPT2GIGA_PORT="8090"` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
 - `GPT2GIGA_USE_HTTPS="False"` — Использовать ли https. По умолчанию `False`;
 - `GPT2GIGA_HTTPS_KEY_FILE=<PATH>` — Путь до key файла для https. По умолчанию `None`;
@@ -244,6 +262,9 @@ gpt2giga \
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
 - `GPT2GIGA_ENABLE_API_KEY_AUTH="False"` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
 - `GPT2GIGA_API_KEY=""` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
+- `GPT2GIGA_CORS_ALLOW_ORIGINS='["*"]'` — список разрешенных Origin (JSON массив);
+- `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
+- `GPT2GIGA_CORS_ALLOW_HEADERS='["*"]'` — список разрешенных заголовков (JSON массив).
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
@@ -344,32 +365,58 @@ completion = client.chat.completions.create(
 1. Если используется API ключ [Использование API ключа](#использование-api-ключа), то введите ваш `GPT2GIGA_API_KEY`
 2. Иначе, введите любой символ
 
-После этого, воспользуйтесь утилитой и будут выведены логи
+После этого, воспользуйтесь утилитой и будут выведены логи.
+
+> **⚠️ Безопасность:** Эндпоинты `/logs*` предназначены только для разработки. В `PROD` режиме (`GPT2GIGA_MODE=PROD`) они автоматически отключены. Не открывайте log-эндпоинты наружу без аутентификации.
+## Production hardening checklist
+
+Перед развертыванием gpt2giga в production-среде убедитесь, что выполнены следующие шаги:
+
+### Обязательные
+
+- [ ] **Режим PROD**: установите `GPT2GIGA_MODE=PROD`. В этом режиме автоматически отключаются `/docs`, `/redoc`, `/openapi.json` и все `/logs*`-эндпоинты; CORS ужесточается (нет wildcard `*`, `allow_credentials=False`).
+- [ ] **API key аутентификация**: установите `GPT2GIGA_ENABLE_API_KEY_AUTH=True` и задайте надёжный `GPT2GIGA_API_KEY` (минимум 32 символа, случайная строка).
+- [ ] **TLS-сертификаты GigaChat**: установите `GIGACHAT_VERIFY_SSL_CERTS=True`. Не отключайте проверку SSL в production.
+- [ ] **HTTPS**: включите `GPT2GIGA_USE_HTTPS=True` и укажите пути к TLS-сертификатам (`GPT2GIGA_HTTPS_KEY_FILE`, `GPT2GIGA_HTTPS_CERT_FILE`), либо разместите прокси за reverse proxy (nginx, Caddy, Traefik) с TLS-терминацией.
+- [ ] **CORS origins**: ограничьте `GPT2GIGA_CORS_ALLOW_ORIGINS` конкретными доменами вместо `["*"]`.
+- [ ] **Секреты**: храните `GIGACHAT_CREDENTIALS`, `GPT2GIGA_API_KEY` и другие секреты в переменных окружения или secrets manager.
+- [ ] **Не передавайте секреты через CLI**: используйте `.env` или переменные окружения вместо `--proxy.api-key` и `--gigachat.credentials` (аргументы видны в `ps aux`).
+
+### Рекомендуемые
+
+- [ ] **Reverse proxy**: разместите gpt2giga за reverse proxy (nginx, Caddy и др.) для rate limiting, TLS-терминации и дополнительной фильтрации.
+- [ ] **Уровень логов**: установите `GPT2GIGA_LOG_LEVEL=WARNING` или `INFO` (не `DEBUG`) для production — уровень `DEBUG` может содержать чувствительные данные в логах.
+- [ ] **Network isolation**: запускайте gpt2giga в изолированной сети, чтобы исключить доступ к внутренним сервисам через SSRF.
+- [ ] **Мониторинг**: настройте мониторинг `/health` и `/ping` эндпоинтов.
+- [ ] **Ротация секретов**: регулярно обновляйте `GPT2GIGA_API_KEY` и `GIGACHAT_CREDENTIALS`.
+
 ## Совместимые приложения
 
 Таблица содержит приложения, проверенные на совместную работу с gpt2giga.
 
 
-| Название агента/фреймворка | URL                                                  | Описание                                                                                                                                    |
-|-----------------------|------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| OpenCode              | https://opencode.ai/                                 | AI-агент с открытым исходным кодом                                                                                                          |
-| KiloCode              | https://kilo.ai/                                     | AI-агент для написания кода, доступен в JetBrains/VSCode                                                                                    |
-| OpenHands             | https://openhands.dev/                               | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands)    |
-| Zed                   | https://zed.dev/                                     | AI-ассистент                                                                                                                                |
-| Cline                 | https://cline.bot/                                   | AI-ассистент разработчика                                                                                                                   |
-| OpenAI Codex          | https://github.com/openai/codex                      | CLI агент от OpenAI                                                                                                                         |
-| Aider                 | https://aider.chat/                                  | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](./integrations/aider) |
-| Langflow              | https://github.com/langflow-ai/langflow              | Low/No-code платформа для создания агентов                                                                                                  |
-| DeepAgentsCLI         | https://github.com/langchain-ai/deepagents           | Deep Agents — это платформа для работы с агентами, построенная на основе langchain и langgraph                                              |
-| CrewAI                | https://github.com/crewAIInc/crewAI                  | Фреймворк для оркестрации агентов                                                                                                           |
-| Qwen Agent            | https://github.com/QwenLM/Qwen-Agent                 | Фреймворк                                                                                                                                   |
-| PydanticAI            | https://github.com/pydantic/pydantic-ai              | GenAI Agent Framework, the Pydantic way                                                                                                     |
-| Camel                 | https://github.com/camel-ai/camel                    | Мультиагентный фреймворк                                                                                                                    |
-| smolagents            | https://github.com/huggingface/smolagents            | Фреймворк от hf                                                                                                                             |
-| Openclaw              | https://openclaw.ai/                                 | Personal AI assistant                                                                                                                       |
-| Claude Code           | https://code.claude.com/docs/en/overview             | CLI агент от Anthropic                                                                                                                       |
-| OpenAI Agents SDK     | https://github.com/openai/openai-agents-python       | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
-| Anthropic SDK         | https://github.com/anthropics/anthropic-sdk-python   | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
+| Название агента/фреймворка | URL                                                | Описание                                                                                                                                    |
+|----------------------------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| OpenCode                   | https://opencode.ai/                               | AI-агент с открытым исходным кодом                                                                                                          |
+| KiloCode                   | https://kilo.ai/                                   | AI-агент для написания кода, доступен в JetBrains/VSCode                                                                                    |
+| OpenHands                  | https://openhands.dev/                             | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands)    |
+| Zed                        | https://zed.dev/                                   | AI-ассистент                                                                                                                                |
+| Cline                      | https://cline.bot/                                 | AI-ассистент разработчика                                                                                                                   |
+| OpenAI Codex               | https://github.com/openai/codex                    | CLI агент от OpenAI                                                                                                                         |
+| Aider                      | https://aider.chat/                                | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](./integrations/aider) |
+| Langflow                   | https://github.com/langflow-ai/langflow            | Low/No-code платформа для создания агентов                                                                                                  |
+| DeepAgentsCLI              | https://github.com/langchain-ai/deepagents         | Deep Agents — это платформа для работы с агентами, построенная на основе langchain и langgraph                                              |
+| CrewAI                     | https://github.com/crewAIInc/crewAI                | Фреймворк для оркестрации агентов                                                                                                           |
+| Qwen Agent                 | https://github.com/QwenLM/Qwen-Agent               | Фреймворк                                                                                                                                   |
+| PydanticAI                 | https://github.com/pydantic/pydantic-ai            | GenAI Agent Framework, the Pydantic way                                                                                                     |
+| Camel                      | https://github.com/camel-ai/camel                  | Мультиагентный фреймворк                                                                                                                    |
+| smolagents                 | https://github.com/huggingface/smolagents          | Фреймворк от hf                                                                                                                             |
+| Openclaw                   | https://openclaw.ai/                               | Personal AI assistant                                                                                                                       |
+| Claude Code                | https://code.claude.com/docs/en/overview           | CLI агент от Anthropic                                                                                                                      |
+| OpenAI Agents SDK          | https://github.com/openai/openai-agents-python     | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
+| Anthropic SDK              | https://github.com/anthropics/anthropic-sdk-python | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
+| Cursor                     | https://cursor.com/                                | Cursor — это редактор на основе искусственного интеллекта и агент для программирования                                                      |
+
 ## История изменений
 
 Подробная информация об изменениях в каждой версии доступна в файле [CHANGELOG.md](CHANGELOG.md) или [CHANGELOG_en.md](CHANGELOG_en.md).

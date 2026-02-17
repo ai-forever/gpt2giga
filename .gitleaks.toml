@@ -1,0 +1,11 @@
+title = "gpt2giga gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore test fixtures with fake secrets"
+paths = [
+  '''(^|/)tests$''',
+  '''(^|/)tests/''',
+]
