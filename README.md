@@ -102,7 +102,16 @@ sequenceDiagram
 
    Доступные теги смотрите в реестрах: [Docker Hub](https://hub.docker.com/r/gigateam/gpt2giga) и [GHCR](https://github.com/ai-forever/gpt2giga/pkgs/container/gpt2giga).
 
-4. Запустите контейнер с помощью Docker Compose: `docker compose up -d`
+4. Запустите контейнер с помощью Docker Compose:
+
+   - PROD:
+     ```sh
+     docker compose --profile PROD up -d
+     ```
+   - DEV:
+     ```sh
+     docker compose --profile DEV up -d
+     ```
 
 ### Локальный запуск
 
