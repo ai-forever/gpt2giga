@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graceful shutdown**: Added graceful server shutdown handling
 - **Gitleaks**: Added gitleaks to pre-commit for secret detection
 - **OpenAPI for count_tokens**: Added OpenAPI documentation for count_tokens endpoint
+- - **Profiles in Docker**: Added profiles DEV and PROD in `docker-compose.yaml`
 
 ### Changed
 - **Structure Refactoring**: Split large files into modules:
@@ -29,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SSRF Protection**: Hardened SSRF protection in attachment handling
 - **Authentication**: Switched to `secrets.compare_digest` for key comparison
 - **Attachment Limits**: Added limits for attachments
+- **Mapping for reversed tool name**: Fixed bug with function name `web_search`, which can break function_call
 
 ## [0.1.2.post1] - 2026-02-13
 
