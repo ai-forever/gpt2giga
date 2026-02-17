@@ -6,12 +6,14 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from gpt2giga.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.routers.anthropic_router import (
     _build_anthropic_response,
     _convert_anthropic_messages_to_openai,
     _convert_anthropic_tools_to_openai,
+    _extract_text_from_openai_messages,
+    _extract_tool_definitions_text,
     _map_stop_reason,
     router,
 )
@@ -28,6 +30,14 @@ class MockResponse:
 
     def model_dump(self):
         return self.data
+
+
+class FakeTokensCount:
+    """Mimics gigachat.models.tokens_count.TokensCount."""
+
+    def __init__(self, tokens, characters=0):
+        self.tokens = tokens
+        self.characters = characters
 
 
 class FakeGigachat:
@@ -50,6 +60,9 @@ class FakeGigachat:
 
     async def achat(self, chat):
         return MockResponse(self._response)
+
+    async def atokens_count(self, input_, model=None):
+        return [FakeTokensCount(tokens=len(s.split())) for s in input_]
 
     def astream(self, chat):
         async def gen():
@@ -160,6 +173,54 @@ class FakeGigachatFunctionCall:
                                 "function_call": {
                                     "name": "get_weather",
                                     "arguments": {"location": "SF"},
+                                }
+                            }
+                        }
+                    ],
+                    "usage": None,
+                }
+            )
+
+        return gen()
+
+
+class FakeGigachatFunctionCallReservedWebSearch:
+    """Fake that returns an aliased reserved tool name from GigaChat."""
+
+    async def achat(self, chat):
+        return MockResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "function_call": {
+                                "name": "__gpt2giga_user_search_web",
+                                "arguments": {"query": "SF"},
+                            },
+                        },
+                        "finish_reason": "function_call",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 15,
+                    "completion_tokens": 8,
+                    "total_tokens": 23,
+                },
+            }
+        )
+
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "function_call": {
+                                    "name": "__gpt2giga_user_search_web",
+                                    "arguments": {"query": "SF"},
                                 }
                             }
                         }
@@ -545,6 +606,28 @@ class TestBuildAnthropicResponse:
         assert result["content"][0]["name"] == "search"
         assert result["content"][0]["input"] == {"q": "test"}
 
+    def test_function_call_unmaps_reserved_web_search(self):
+        giga = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "function_call": {
+                            "name": "__gpt2giga_user_search_web",
+                            "arguments": {"query": "test"},
+                        },
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+        result = _build_anthropic_response(giga, "claude-test", "rq456")
+        assert result["stop_reason"] == "tool_use"
+        assert result["content"][0]["type"] == "tool_use"
+        assert result["content"][0]["name"] == "web_search"
+
     def test_function_call_string_arguments(self):
         giga = {
             "choices": [
@@ -696,6 +779,31 @@ class TestMessagesEndpoint:
         assert body["content"][0]["type"] == "tool_use"
         assert body["content"][0]["name"] == "get_weather"
 
+    def test_non_stream_unmaps_reserved_web_search(self):
+        app = make_app(FakeGigachatFunctionCallReservedWebSearch())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "Search?"}],
+            "tools": [
+                {
+                    "name": "web_search",
+                    "description": "Search web",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["stop_reason"] == "tool_use"
+        assert body["content"][0]["type"] == "tool_use"
+        assert body["content"][0]["name"] == "web_search"
+
     def test_non_stream_with_tool_choice_specific(self):
         app = make_app(FakeGigachatFunctionCall())
         client = TestClient(app)
@@ -836,6 +944,40 @@ class TestMessagesEndpoint:
             parsed = json.loads(d)
             if parsed.get("type") == "message_delta":
                 assert parsed["delta"]["stop_reason"] == "tool_use"
+                break
+
+    def test_stream_unmaps_reserved_web_search(self):
+        app = make_app(FakeGigachatFunctionCallReservedWebSearch())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Search?"}],
+            "tools": [
+                {
+                    "name": "web_search",
+                    "description": "Search web",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+
+        data_lines = []
+        for line in resp.text.strip().split("\n"):
+            if line.startswith("data: "):
+                data_lines.append(line.replace("data: ", ""))
+
+        for d in data_lines:
+            parsed = json.loads(d)
+            if parsed.get("type") == "content_block_start":
+                assert parsed["content_block"]["type"] == "tool_use"
+                assert parsed["content_block"]["name"] == "web_search"
                 break
 
     def test_multi_turn_conversation(self):
@@ -991,3 +1133,202 @@ class TestConvertAssistantTextOnly:
         assert "tool_calls" not in result[0]
         assert "Hello" in result[0]["content"]
         assert "World" in result[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for token counting helpers
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTextFromOpenaiMessages:
+    def test_string_content(self):
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello world"},
+        ]
+        texts = _extract_text_from_openai_messages(messages)
+        assert texts == ["You are helpful.", "Hello world"]
+
+    def test_empty_content_skipped(self):
+        messages = [{"role": "user", "content": ""}]
+        texts = _extract_text_from_openai_messages(messages)
+        assert texts == []
+
+    def test_list_content_extracts_text_parts(self):
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Part 1"},
+                    {"type": "image_url", "image_url": {"url": "http://img"}},
+                    {"type": "text", "text": "Part 2"},
+                ],
+            }
+        ]
+        texts = _extract_text_from_openai_messages(messages)
+        assert texts == ["Part 1", "Part 2"]
+
+    def test_tool_calls_extracted(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": "Checking weather",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": '{"location": "SF"}',
+                        },
+                    }
+                ],
+            }
+        ]
+        texts = _extract_text_from_openai_messages(messages)
+        assert "Checking weather" in texts
+        assert "get_weather" in texts
+        assert '{"location": "SF"}' in texts
+
+    def test_no_messages(self):
+        assert _extract_text_from_openai_messages([]) == []
+
+    def test_missing_content_key(self):
+        messages = [{"role": "user"}]
+        texts = _extract_text_from_openai_messages(messages)
+        assert texts == []
+
+
+class TestExtractToolDefinitionsText:
+    def test_basic_tool(self):
+        tools = [
+            {
+                "name": "get_weather",
+                "description": "Get current weather",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                },
+            }
+        ]
+        texts = _extract_tool_definitions_text(tools)
+        assert len(texts) == 1
+        assert "get_weather" in texts[0]
+        assert "Get current weather" in texts[0]
+        assert "location" in texts[0]
+
+    def test_tool_without_schema(self):
+        tools = [{"name": "noop", "description": "Does nothing"}]
+        texts = _extract_tool_definitions_text(tools)
+        assert len(texts) == 1
+        assert "noop" in texts[0]
+        assert "Does nothing" in texts[0]
+
+    def test_empty_tools(self):
+        assert _extract_tool_definitions_text([]) == []
+
+    def test_multiple_tools(self):
+        tools = [
+            {"name": "a", "description": "Tool A"},
+            {"name": "b", "description": "Tool B"},
+        ]
+        texts = _extract_tool_definitions_text(tools)
+        assert len(texts) == 2
+
+
+# ---------------------------------------------------------------------------
+# Integration tests for count_tokens endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestCountTokensEndpoint:
+    def test_basic_count(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": "Hello world"}],
+        }
+        resp = client.post("/messages/count_tokens", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "input_tokens" in body
+        assert isinstance(body["input_tokens"], int)
+        assert body["input_tokens"] > 0
+
+    def test_count_with_system(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "system": "You are a helpful assistant.",
+            "messages": [{"role": "user", "content": "Hi"}],
+        }
+        resp = client.post("/messages/count_tokens", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["input_tokens"] > 0
+
+    def test_count_with_tools(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": "Weather?"}],
+            "tools": [
+                {
+                    "name": "get_weather",
+                    "description": "Get current weather",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"location": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+        resp = client.post("/messages/count_tokens", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        # Should count both message tokens and tool definition tokens
+        assert body["input_tokens"] > 0
+
+    def test_count_empty_messages(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "messages": [],
+        }
+        resp = client.post("/messages/count_tokens", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["input_tokens"] == 0
+
+    def test_count_multi_turn(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "messages": [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "How are you?"},
+            ],
+        }
+        resp = client.post("/messages/count_tokens", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["input_tokens"] > 0
+
+    def test_count_with_beta_query_param(self):
+        """Verify endpoint works with ?beta=true query param."""
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        resp = client.post("/messages/count_tokens?beta=true", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "input_tokens" in body

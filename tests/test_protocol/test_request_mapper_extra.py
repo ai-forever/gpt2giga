@@ -1,7 +1,8 @@
 import pytest
-from gpt2giga.protocol.request_mapper import RequestTransformer
-from gpt2giga.config import ProxyConfig
+from gpt2giga.protocol import RequestTransformer
+from gpt2giga.models.config import ProxyConfig
 from unittest.mock import MagicMock, AsyncMock
+from types import SimpleNamespace
 
 
 @pytest.fixture
@@ -12,7 +13,13 @@ def mock_logger():
 @pytest.fixture
 def mock_attachment_processor():
     ap = AsyncMock()
-    ap.upload_file.return_value = "file_id_123"
+    # Current implementation prefers upload_file_with_meta() when available.
+    ap.upload_file_with_meta.return_value = SimpleNamespace(
+        file_id="file_id_123",
+        file_kind="text",
+        file_size_bytes=1,
+    )
+    ap.upload_file.return_value = "file_id_legacy"
     return ap
 
 

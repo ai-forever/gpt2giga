@@ -1,18 +1,14 @@
 import pytest
 
-from gpt2giga.utils import exceptions_handler
+from gpt2giga.common.exceptions import exceptions_handler
 
 
 class DummyError(Exception):
     pass
 
 
-def dummy_func_good():
-    return 42
-
-
 @exceptions_handler
-def dummy_func_error():
+async def dummy_func_error():
     raise DummyError("test error")
 
 

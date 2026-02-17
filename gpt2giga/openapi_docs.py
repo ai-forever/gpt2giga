@@ -6,8 +6,6 @@ We intentionally keep runtime request handling unchanged (routes still accept
 required fields and common optional parameters.
 """
 
-from __future__ import annotations
-
 from typing import Any, Dict
 
 
@@ -405,6 +403,81 @@ def responses_openapi_extra() -> Dict[str, Any]:
         minimal_example=minimal_example,
         full_example=full_example,
         extra_examples=extra_examples,
+        description=description,
+    )
+
+
+def anthropic_count_tokens_openapi_extra() -> Dict[str, Any]:
+    """OpenAPI extras for `POST /messages/count_tokens` (Anthropic token counting)."""
+    minimal_schema: Dict[str, Any] = {
+        "title": "AnthropicCountTokensRequestMinimal",
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+            "model": {"type": "string", "description": "Model id."},
+            "messages": {
+                "type": "array",
+                "description": "Anthropic messages array.",
+                "items": {"type": "object", "additionalProperties": True},
+            },
+        },
+        "additionalProperties": True,
+    }
+
+    full_schema: Dict[str, Any] = {
+        "title": "AnthropicCountTokensRequestFull",
+        "type": "object",
+        "required": ["model", "messages"],
+        "properties": {
+            **minimal_schema["properties"],
+            "system": {
+                "description": "System prompt (string or content blocks).",
+                "oneOf": [
+                    {"type": "string"},
+                    {"type": "array", "items": {"type": "object"}},
+                ],
+            },
+            "tools": {
+                "type": "array",
+                "description": "Anthropic tools (input_schema). Included in token count.",
+                "items": {"type": "object", "additionalProperties": True},
+            },
+        },
+        "additionalProperties": True,
+    }
+
+    minimal_example = {
+        "model": "GigaChat-2-Max",
+        "messages": [{"role": "user", "content": "Hello"}],
+    }
+    full_example = {
+        "model": "GigaChat-2-Max",
+        "system": "You are a helpful assistant.",
+        "messages": [{"role": "user", "content": "Count these tokens please"}],
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get weather by city.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            }
+        ],
+    }
+
+    description = (
+        "**Required**: `model`, `messages`.\n\n"
+        "**Notes**:\n"
+        "- Returns `{input_tokens: <count>}` without creating a message.\n"
+        "- Tool definitions are included in the token count if provided."
+    )
+    return _request_body_oneof(
+        minimal_schema=minimal_schema,
+        full_schema=full_schema,
+        minimal_example=minimal_example,
+        full_example=full_example,
         description=description,
     )
 

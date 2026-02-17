@@ -1,5 +1,6 @@
 from types import SimpleNamespace
-from gpt2giga.utils import pass_token_to_gigachat, convert_tool_to_giga_functions
+from gpt2giga.common.gigachat_auth import pass_token_to_gigachat
+from gpt2giga.common.tools import convert_tool_to_giga_functions
 from gigachat.models import Function
 
 
