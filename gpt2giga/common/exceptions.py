@@ -1,8 +1,10 @@
+import asyncio
 import json
 from functools import wraps
 
 import gigachat
 from fastapi import HTTPException
+from fastapi.responses import JSONResponse
 
 from gpt2giga.logger import rquid_context
 
@@ -32,6 +34,13 @@ def exceptions_handler(func):
     async def wrapper(*args, **kwargs):
         try:
             return await func(*args, **kwargs)
+        except asyncio.CancelledError:
+            # Allow FastAPI/Starlette to handle client disconnects and cancellations cleanly,
+            # especially for streaming endpoints.
+            raise
+        except HTTPException:
+            # Preserve FastAPI/Starlette semantics (status codes, details, headers).
+            raise
         except gigachat.exceptions.GigaChatException as e:
             # Log the exception with context
             from loguru import logger
@@ -100,6 +109,22 @@ def exceptions_handler(func):
                 detail={
                     "error": "Unexpected GigaChatException",
                     "args": e.args,
+                },
+            )
+        except Exception as e:
+            from loguru import logger
+
+            rquid = rquid_context.get()
+            logger.exception(f"[{rquid}] Unhandled exception: {type(e).__name__}: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": {
+                        "message": str(e),
+                        "type": "server_error",
+                        "param": None,
+                        "code": None,
+                    }
                 },
             )
 
