@@ -5,6 +5,7 @@ from gigachat import GigaChat
 from gigachat.models import FunctionCall, Messages, MessagesRole
 
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
+from gpt2giga.common.tools import map_tool_name_to_gigachat
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
 from gpt2giga.common.content_utils import ensure_json_object_str
@@ -70,6 +71,8 @@ class RequestTransformer:
             # Handle tool/function role specifics
             if original_role == "tool":
                 message["content"] = ensure_json_object_str(message.get("content"))
+                if message.get("name"):
+                    message["name"] = map_tool_name_to_gigachat(message["name"])
             else:
                 # Remove unused fields
                 message.pop("name", None)
@@ -81,12 +84,27 @@ class RequestTransformer:
             # Process tool_calls
             if "tool_calls" in message and message["tool_calls"]:
                 message["function_call"] = message["tool_calls"][0]["function"]
+                if (
+                    isinstance(message.get("function_call"), dict)
+                    and message["function_call"].get("name")
+                ):
+                    message["function_call"]["name"] = map_tool_name_to_gigachat(
+                        message["function_call"]["name"]
+                    )
                 try:
                     message["function_call"]["arguments"] = json.loads(
                         message["function_call"]["arguments"]
                     )
                 except json.JSONDecodeError as e:
                     self.logger.warning(f"Failed to parse function call arguments: {e}")
+            elif (
+                message.get("function_call")
+                and isinstance(message["function_call"], dict)
+                and message["function_call"].get("name")
+            ):
+                message["function_call"]["name"] = map_tool_name_to_gigachat(
+                    message["function_call"]["name"]
+                )
 
             # Process compound content (text + images/files)
             if isinstance(message["content"], list):
@@ -252,6 +270,19 @@ class RequestTransformer:
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
+        # Map reserved tool names to safe aliases for GigaChat
+        function_call = transformed.get("function_call")
+        if isinstance(function_call, dict) and function_call.get("name"):
+            function_call["name"] = map_tool_name_to_gigachat(function_call["name"])
+
+        functions_list = transformed.get("functions")
+        if isinstance(functions_list, list):
+            for fn in functions_list:
+                if isinstance(fn, dict) and fn.get("name"):
+                    fn["name"] = map_tool_name_to_gigachat(fn["name"])
+                elif hasattr(fn, "name") and getattr(fn, "name", None):
+                    setattr(fn, "name", map_tool_name_to_gigachat(getattr(fn, "name")))
+
         return transformed
 
     @staticmethod
@@ -331,6 +362,7 @@ class RequestTransformer:
                 message_type = message.get("type")
                 if message_type == "function_call_output":
                     fn_name = message.get("name") or last_function_name
+                    fn_name = map_tool_name_to_gigachat(fn_name) if fn_name else fn_name
                     message_payload.append(
                         {
                             "role": "function",
@@ -378,7 +410,7 @@ class RequestTransformer:
     def mock_completion(message: dict) -> dict:
         """Creates a mock completion message for function calls."""
         arguments = json.loads(message.get("arguments"))
-        name = message.get("name")
+        name = map_tool_name_to_gigachat(message.get("name"))
         return Messages(
             role=MessagesRole.ASSISTANT,
             function_call=FunctionCall(name=name, arguments=arguments),
