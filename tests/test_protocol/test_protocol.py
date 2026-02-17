@@ -91,6 +91,31 @@ def test_response_processor_process_function_call():
     assert choice["message"]["tool_calls"][0]["type"] == "function"
 
 
+def test_response_processor_unmaps_reserved_tool_name_web_search():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": {
+                            "name": "__gpt2giga_user_search_web",
+                            "arguments": {"query": "hi"},
+                        },
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+    tool_calls = out["choices"][0]["message"]["tool_calls"]
+    assert tool_calls[0]["function"]["name"] == "web_search"
+
+
 def test_response_processor_stream_chunk_handles_delta():
     rp = ResponseProcessor(logger)
     giga_resp = MockResponse(

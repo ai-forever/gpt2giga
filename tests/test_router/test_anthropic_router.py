@@ -184,6 +184,54 @@ class FakeGigachatFunctionCall:
         return gen()
 
 
+class FakeGigachatFunctionCallReservedWebSearch:
+    """Fake that returns an aliased reserved tool name from GigaChat."""
+
+    async def achat(self, chat):
+        return MockResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "function_call": {
+                                "name": "__gpt2giga_user_search_web",
+                                "arguments": {"query": "SF"},
+                            },
+                        },
+                        "finish_reason": "function_call",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 15,
+                    "completion_tokens": 8,
+                    "total_tokens": 23,
+                },
+            }
+        )
+
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "function_call": {
+                                    "name": "__gpt2giga_user_search_web",
+                                    "arguments": {"query": "SF"},
+                                }
+                            }
+                        }
+                    ],
+                    "usage": None,
+                }
+            )
+
+        return gen()
+
+
 class FakeRequestTransformer:
     async def prepare_chat_completion(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
@@ -558,6 +606,28 @@ class TestBuildAnthropicResponse:
         assert result["content"][0]["name"] == "search"
         assert result["content"][0]["input"] == {"q": "test"}
 
+    def test_function_call_unmaps_reserved_web_search(self):
+        giga = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "function_call": {
+                            "name": "__gpt2giga_user_search_web",
+                            "arguments": {"query": "test"},
+                        },
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+        result = _build_anthropic_response(giga, "claude-test", "rq456")
+        assert result["stop_reason"] == "tool_use"
+        assert result["content"][0]["type"] == "tool_use"
+        assert result["content"][0]["name"] == "web_search"
+
     def test_function_call_string_arguments(self):
         giga = {
             "choices": [
@@ -709,6 +779,31 @@ class TestMessagesEndpoint:
         assert body["content"][0]["type"] == "tool_use"
         assert body["content"][0]["name"] == "get_weather"
 
+    def test_non_stream_unmaps_reserved_web_search(self):
+        app = make_app(FakeGigachatFunctionCallReservedWebSearch())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "Search?"}],
+            "tools": [
+                {
+                    "name": "web_search",
+                    "description": "Search web",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["stop_reason"] == "tool_use"
+        assert body["content"][0]["type"] == "tool_use"
+        assert body["content"][0]["name"] == "web_search"
+
     def test_non_stream_with_tool_choice_specific(self):
         app = make_app(FakeGigachatFunctionCall())
         client = TestClient(app)
@@ -849,6 +944,40 @@ class TestMessagesEndpoint:
             parsed = json.loads(d)
             if parsed.get("type") == "message_delta":
                 assert parsed["delta"]["stop_reason"] == "tool_use"
+                break
+
+    def test_stream_unmaps_reserved_web_search(self):
+        app = make_app(FakeGigachatFunctionCallReservedWebSearch())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Search?"}],
+            "tools": [
+                {
+                    "name": "web_search",
+                    "description": "Search web",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+
+        data_lines = []
+        for line in resp.text.strip().split("\n"):
+            if line.startswith("data: "):
+                data_lines.append(line.replace("data: ", ""))
+
+        for d in data_lines:
+            parsed = json.loads(d)
+            if parsed.get("type") == "content_block_start":
+                assert parsed["content_block"]["type"] == "tool_use"
+                assert parsed["content_block"]["name"] == "web_search"
                 break
 
     def test_multi_turn_conversation(self):

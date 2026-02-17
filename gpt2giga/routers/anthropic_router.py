@@ -23,6 +23,7 @@ from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.common.tools import map_tool_name_from_gigachat
 
 router = APIRouter(tags=["Anthropic"])
 
@@ -258,7 +259,7 @@ def _build_anthropic_response(
             {
                 "type": "tool_use",
                 "id": f"toolu_{uuid.uuid4().hex[:24]}",
-                "name": fc.get("name", ""),
+                "name": map_tool_name_from_gigachat(fc.get("name", "")),
                 "input": args,
             }
         )
@@ -377,7 +378,7 @@ async def _stream_anthropic_generator(
                 if function_call_data is None:
                     tool_id = f"toolu_{uuid.uuid4().hex[:24]}"
                     function_call_data = {
-                        "name": delta_fc.get("name", ""),
+                        "name": map_tool_name_from_gigachat(delta_fc.get("name", "")),
                         "arguments": "",
                         "tool_id": tool_id,
                     }
@@ -397,7 +398,9 @@ async def _stream_anthropic_generator(
                     content_block_started = True
 
                 if delta_fc.get("name"):
-                    function_call_data["name"] = delta_fc["name"]
+                    function_call_data["name"] = map_tool_name_from_gigachat(
+                        delta_fc["name"]
+                    )
 
                 args = delta_fc.get("arguments")
                 if args is not None:

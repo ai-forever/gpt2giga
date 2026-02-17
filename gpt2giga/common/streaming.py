@@ -10,6 +10,7 @@ from gigachat.models import Chat
 from starlette.requests import Request
 
 from gpt2giga.logger import rquid_context
+from gpt2giga.common.tools import map_tool_name_from_gigachat
 
 
 async def stream_chat_completion_generator(
@@ -174,8 +175,11 @@ async def stream_responses_generator(
                     functions_state_id = delta.get("functions_state_id")
 
                 if function_call_data is None:
+                    tool_name = map_tool_name_from_gigachat(
+                        delta_function_call.get("name", "")
+                    )
                     function_call_data = {
-                        "name": delta_function_call.get("name", ""),
+                        "name": tool_name,
                         "arguments": "",
                     }
                     yield sse_event(
@@ -198,7 +202,9 @@ async def stream_responses_generator(
                     output_item_added = True
 
                 if delta_function_call.get("name"):
-                    function_call_data["name"] = delta_function_call["name"]
+                    function_call_data["name"] = map_tool_name_from_gigachat(
+                        delta_function_call["name"]
+                    )
 
                 args = delta_function_call.get("arguments")
                 if args is not None:

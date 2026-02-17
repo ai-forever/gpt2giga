@@ -440,6 +440,51 @@ class FakeClientFunctionCallStreamed:
         return gen()
 
 
+class FakeClientFunctionCallReservedWebSearch:
+    """Client that returns a reserved tool name (aliased on GigaChat side)."""
+
+    def astream(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {
+                                "role": "assistant",
+                                "content": None,
+                                "function_call": {
+                                    "name": "__gpt2giga_user_search_web",
+                                    "arguments": {"query": "Moscow"},
+                                },
+                                "functions_state_id": "state_999",
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {},
+                            "finish_reason": "function_call",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
 @pytest.mark.asyncio
 async def test_stream_responses_generator_function_call():
     """Test streaming with function call (single chunk)"""
@@ -550,3 +595,36 @@ async def test_stream_responses_generator_function_call_streamed_args():
     assert data["response"]["output"][0]["type"] == "function_call"
     assert data["response"]["output"][0]["name"] == "search"
     assert data["response"]["output"][0]["arguments"] == '{"query": "test"}'
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_unmaps_reserved_web_search_name():
+    """Reserved tool name coming from GigaChat must be mapped back for client."""
+    import json
+
+    req = FakeRequest(FakeClientFunctionCallReservedWebSearch())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(req, chat, response_id="fc_web_search"):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    # response.output_item.added contains the name
+    event_type, data = parse_sse(lines[2])
+    assert event_type == "response.output_item.added"
+    assert data["item"]["name"] == "web_search"
+
+    # done event must also contain unmapped name
+    event_type, data = parse_sse(lines[4])
+    assert event_type == "response.function_call_arguments.done"
+    assert data["name"] == "web_search"
+
+    # final output must contain unmapped name
+    event_type, data = parse_sse(lines[6])
+    assert event_type == "response.completed"
+    assert data["response"]["output"][0]["name"] == "web_search"

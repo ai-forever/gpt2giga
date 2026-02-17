@@ -6,6 +6,8 @@ from typing import Dict, Literal, Optional
 from gigachat.models import ChatCompletion, ChatCompletionChunk
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
+from gpt2giga.common.tools import map_tool_name_from_gigachat
+
 
 class ResponseProcessor:
     """Обработчик ответов от GigaChat в формат OpenAI."""
@@ -315,8 +317,9 @@ class ResponseProcessor:
                 message["function_call"]["arguments"],
                 ensure_ascii=False,
             )
+            tool_name = map_tool_name_from_gigachat(message["function_call"]["name"])
             function_call = {
-                "name": message["function_call"]["name"],
+                "name": tool_name,
                 "arguments": arguments,
             }
             if is_tool_call:
@@ -361,7 +364,7 @@ class ResponseProcessor:
             message["output"] = ResponseFunctionToolCall(
                 arguments=arguments,
                 call_id=f"call_{response_id}",
-                name=message["function_call"]["name"],
+                name=map_tool_name_from_gigachat(message["function_call"]["name"]),
                 id=f"fc_{message['functions_state_id']}",
                 status="completed",
                 type="function_call",
