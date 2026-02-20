@@ -1,7 +1,7 @@
 [project]
 name = "gpt2giga"
-version = "0.1.3"
-description = "Утилита для проксирования OpenAI-запросов в GigaChat"
+version = "0.1.3.post1"
+description = "Утилита для проксирования OpenAI и Anthropic запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
 readme = "README.md"
