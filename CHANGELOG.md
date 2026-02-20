@@ -5,6 +5,16 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.1.3.post1] - 2026-02-20
+
+### Добавлено
+- **Traefik**: Добавлена интеграция Traefik
+- **MITMProxy**: Добавлен mitmproxy в `docker-compose-observability.yaml`
+- **Reasoning toggle**: Добавлена переменная окружения `GPT2GIGA_ENABLE_REASONING`
+
+### Изменено
+- **Docker Compose профили**: Профиль `dev` установлен как профиль по умолчанию
+
 ## [0.1.3] - 2026-02-16
 
 ### Добавлено
@@ -164,6 +174,7 @@
 
 ---
 
+[0.1.3.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3...v0.1.3.post1
 [0.1.3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2.post1...v0.1.3
 [0.1.2.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2...v0.1.2.post1
 [0.1.2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.1...v0.1.2
