@@ -1,0 +1,24 @@
+api:
+  dashboard: true
+
+entryPoints:
+  dashboard:
+    address: :8080
+  http:
+    address: :80
+  https:
+    address: :443
+  gpt2giga:
+    address: :8090
+  gpt2gigapro:
+    address: :8091
+  gpt2gigamax:
+    address: :8092
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: gpt2giga
+  file:
+    directory: /etc/traefik/rules
+    watch: true
