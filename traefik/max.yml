@@ -1,0 +1,12 @@
+http:
+  routers:
+    gpt2giga-max:
+      entryPoints:
+        - gpt2gigamax
+      service: gpt2giga-max
+      rule: PathPrefix(`/`)
+  services:
+    gpt2giga-max:
+      loadbalancer:
+        servers:
+          - url: http://gpt2giga_max:8090
