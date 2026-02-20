@@ -55,7 +55,7 @@ services:
       - 8091:8091
       - 8092:8092
     environment:
-      HOST: 192.168.0.101
+      HOST: ${HOST:-localhost}
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
