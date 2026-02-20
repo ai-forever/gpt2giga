@@ -4,6 +4,9 @@ from gpt2giga.api_server import create_app
 
 
 def test_app_lifespan_initializes_state(monkeypatch):
+    monkeypatch.delenv("GPT2GIGA_ENABLE_API_KEY_AUTH", raising=False)
+    monkeypatch.delenv("GPT2GIGA_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_API_KEY", raising=False)
     app = create_app()
 
     class Dummy:

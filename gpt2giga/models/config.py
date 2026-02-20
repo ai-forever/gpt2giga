@@ -52,6 +52,13 @@ class ProxySettings(BaseSettings):
     enable_images: bool = Field(
         default=True, description="Включить загрузку изображений"
     )
+    enable_reasoning: bool = Field(
+        default=False,
+        description=(
+            "Включить reasoning по умолчанию: добавляет reasoning_effort='high' "
+            "в payload к GigaChat, если клиент не указал reasoning_effort явно"
+        ),
+    )
     max_request_body_bytes: int = Field(
         default=DEFAULT_MAX_REQUEST_BODY_BYTES,
         description="Глобальный лимит размера HTTP-тела запроса в байтах (до парсинга JSON)",

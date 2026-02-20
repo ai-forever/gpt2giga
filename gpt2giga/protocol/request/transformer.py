@@ -84,10 +84,9 @@ class RequestTransformer:
             # Process tool_calls
             if "tool_calls" in message and message["tool_calls"]:
                 message["function_call"] = message["tool_calls"][0]["function"]
-                if (
-                    isinstance(message.get("function_call"), dict)
-                    and message["function_call"].get("name")
-                ):
+                if isinstance(message.get("function_call"), dict) and message[
+                    "function_call"
+                ].get("name"):
                     message["function_call"]["name"] = map_tool_name_to_gigachat(
                         message["function_call"]["name"]
                     )
@@ -247,6 +246,9 @@ class RequestTransformer:
     def _transform_common_parameters(self, data: Dict) -> Dict:
         """Common parameter transformation logic for Chat Completions and Responses API."""
         transformed = data.copy()
+
+        if getattr(self.config.proxy_settings, "enable_reasoning", False):
+            transformed.setdefault("reasoning_effort", "high")
 
         gpt_model = data.get("model", None)
         if not self.config.proxy_settings.pass_model and gpt_model:
