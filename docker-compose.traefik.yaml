@@ -55,21 +55,11 @@ services:
       - 8091:8091
       - 8092:8092
     environment:
-      TRAEFIK_API: "true"
-      TRAEFIK_API_DASHBOARD: "true"
       HOST: 192.168.0.101
-      TRAEFIK_ENTRYPOINTS_DASHBOARD_ADDRESS: :8080
-      TRAEFIK_ENTRYPOINTS_HTTP_ADDRESS: :80
-      TRAEFIK_ENTRYPOINTS_HTTPS_ADDRESS: :443
-      TRAEFIK_ENTRYPOINTS_GPT2GIGA_ADDRESS: :8090
-      TRAEFIK_ENTRYPOINTS_GPT2GIGAPRO_ADDRESS: :8091
-      TRAEFIK_ENTRYPOINTS_GPT2GIGAMAX_ADDRESS: :8092
-      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
-      TRAEFIK_PROVIDERS_DOCKER_NETWORK: gpt2giga
-      TRAEFIK_PROVIDERS_FILE_DIRECTORY: /etc/traefik/rules
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/:/etc/traefik/rules/:ro
     depends_on:
       - gpt2giga
