@@ -1,0 +1,54 @@
+x-gpt2giga-common: &gpt2giga-common
+  image: ghcr.io/ai-forever/gpt2giga:latest
+  restart: unless-stopped
+  env_file:
+    - .env
+
+x-mitmproxy-common: &mitmproxy-common
+  restart: always
+  container_name: mitmproxy
+  image: mitmproxy/mitmproxy:latest
+  volumes:
+    - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
+  command: mitmweb --web-host 0.0.0.0 --web-port 8081 --ssl-insecure
+  stdin_open: true
+  tty: true
+services:
+  gpt2giga-prod:
+    <<: *gpt2giga-common
+    profiles: ["PROD"]
+    pull_policy: always
+    container_name: gpt2giga
+    environment:
+      GPT2GIGA_MODE: "PROD"
+    ports:
+      - "127.0.0.1:${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
+
+  gpt2giga-dev:
+    <<: *gpt2giga-common
+    profiles: ["DEV"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: "3.13"
+    container_name: gpt2giga
+    environment:
+      GPT2GIGA_MODE: "DEV"
+    ports:
+      - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
+
+
+  mitmproxy-prod:
+    <<: *mitmproxy-common
+    profiles: ["PROD"]
+    ports:
+      - "8080:8080"
+      - "127.0.0.1:8081:8081"
+
+  mitmproxy-dev:
+    <<: *mitmproxy-common
+    profiles: [ "DEV" ]
+    ports:
+      - "8080:8080"
+      - "8081:8081"
