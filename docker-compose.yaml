@@ -1,6 +1,13 @@
 x-gpt2giga-common: &gpt2giga-common
   image: ghcr.io/ai-forever/gpt2giga:latest
   restart: unless-stopped
+  pull_policy: always
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      PYTHON_VERSION: "3.13"
+  container_name: gpt2giga
   env_file:
     - .env
 
@@ -8,8 +15,6 @@ services:
   gpt2giga-prod:
     <<: *gpt2giga-common
     profiles: ["PROD"]
-    pull_policy: always
-    container_name: gpt2giga
     environment:
       GPT2GIGA_MODE: "PROD"
     ports:
@@ -17,13 +22,7 @@ services:
 
   gpt2giga-dev:
     <<: *gpt2giga-common
-    profiles: ["DEV"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        PYTHON_VERSION: "3.13"
-    container_name: gpt2giga
+    profiles: ["", "DEV"]
     environment:
       GPT2GIGA_MODE: "DEV"
     ports:

@@ -5,6 +5,16 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3.post1] - 2026-02-20
+
+### Added
+- **Traefik**: Added Traefik integration
+- **MITMProxy**: Added mitmproxy to `docker-compose-observability.yaml`
+- **Reasoning toggle**: Added `GPT2GIGA_ENABLE_REASONING` environment variable
+
+### Changed
+- **Docker Compose profiles**: Set `dev` as the default profile
+
 ## [0.1.3] - 2026-02-16
 
 ### Added
@@ -13,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graceful shutdown**: Added graceful server shutdown handling
 - **Gitleaks**: Added gitleaks to pre-commit for secret detection
 - **OpenAPI for count_tokens**: Added OpenAPI documentation for count_tokens endpoint
-- - **Profiles in Docker**: Added profiles DEV and PROD in `docker-compose.yaml`
+- **Profiles in Docker**: Added profiles DEV and PROD in `docker-compose.yaml`
 
 ### Changed
 - **Structure Refactoring**: Split large files into modules:
@@ -164,6 +174,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.3.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3...v0.1.3.post1
 [0.1.3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2.post1...v0.1.3
 [0.1.2.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2...v0.1.2.post1
 [0.1.2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.1...v0.1.2

@@ -1,0 +1,73 @@
+x-gpt2giga-common: &gpt2giga-common
+  image: ghcr.io/ai-forever/gpt2giga:latest
+  restart: unless-stopped
+  env_file:
+    - .env
+  build:
+    context: .
+    dockerfile: Dockerfile
+
+services:
+  gpt2giga:
+    <<: *gpt2giga-common
+    pull_policy: always
+    container_name: gpt2giga
+    environment:
+      GIGACHAT_MODEL: GigaChat
+    networks:
+      gpt2giga:
+        aliases:
+          - gpt2giga
+
+  gpt2giga-pro:
+    <<: *gpt2giga-common
+    pull_policy: always
+    container_name: gpt2giga_pro
+    environment:
+      GIGACHAT_MODEL: GigaChat-Pro
+    networks:
+      gpt2giga:
+        aliases:
+          - gpt2giga-pro
+
+  gpt2giga-max:
+    <<: *gpt2giga-common
+    pull_policy: always
+    container_name: gpt2giga_max
+    environment:
+      GIGACHAT_MODEL: GigaChat-Max
+    networks:
+      gpt2giga:
+        aliases:
+          - gpt2giga-max
+
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - 80:80
+      - 443:443
+      - 8080:8080
+      - 8090:8090
+      - 8091:8091
+      - 8092:8092
+    environment:
+      HOST: ${HOST:-localhost}
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/:/etc/traefik/rules/:ro
+    depends_on:
+      - gpt2giga
+      - gpt2giga-pro
+      - gpt2giga-max
+    networks:
+      gpt2giga:
+        aliases:
+          - traefik
+networks:
+  gpt2giga:

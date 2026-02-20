@@ -1,0 +1,41 @@
+http:
+  routers:
+    gpt2giga:
+      entryPoints:
+        - gpt2giga
+      service: gpt2giga
+      rule: Host(`{{ env "HOST" }}`)
+
+    gpt2giga-pro:
+      entryPoints:
+        - gpt2gigapro
+      service: gpt2giga-pro
+      rule: Host(`{{ env "HOST" }}`)
+
+    gpt2giga-max:
+      entryPoints:
+        - gpt2gigamax
+      service: gpt2giga-max
+      rule: Host(`{{ env "HOST" }}`)
+
+    dashboard:
+      entryPoints:
+        - dashboard
+      service: api@internal
+      rule: PathPrefix(`/api`) || PathPrefix(`/dashboard`)
+
+  services:
+    gpt2giga:
+      loadbalancer:
+        servers:
+          - url: http://gpt2giga:8090
+
+    gpt2giga-pro:
+      loadbalancer:
+        servers:
+          - url: http://gpt2giga_pro:8090
+
+    gpt2giga-max:
+      loadbalancer:
+        servers:
+          - url: http://gpt2giga_max:8090

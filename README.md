@@ -13,7 +13,8 @@
 2. [Возможности gpt2giga](#возможности-gpt2giga)
 3. [Начало работы](#начало-работы)
    1. [Запуск в Docker](#запуск-в-docker)
-   2. [Локальный запуск](#локальный-запуск)
+   2. [Запуск в Docker с Traefik](#запуск-в-docker-с-traefik)
+   3. [Локальный запуск](#локальный-запуск)
 4. [Примеры](#примеры)
 5. [Параметры](#изменение-параметров-gpt2giga)
    1. [Аргументы командной строки](#аргументы-командной-строки)
@@ -92,7 +93,11 @@ sequenceDiagram
     GIGACHAT_VERIFY_SSL_CERTS=True
     ```
 
-3. (Опционально) Выберите образ с нужной версией Python (3.10–3.14) и обновите `image:` в `docker-compose.yaml`.
+3. (Опционально) Используйте образ/сборку с нужной версией Python (3.10–3.14).
+
+   В `docker-compose.yaml` по умолчанию задан `image: ghcr.io/ai-forever/gpt2giga:latest` и `build.args.PYTHON_VERSION`. При необходимости:
+   - обновите `build.args.PYTHON_VERSION` (если собираете образ локально);
+   - или замените `image:` на нужный тег из реестра.
 
    ```sh
    PYTHON_VERSION=3.10
@@ -112,6 +117,24 @@ sequenceDiagram
      ```sh
      docker compose --profile DEV up -d
      ```
+
+   > В профиле `PROD` порт по умолчанию пробрасывается только на `127.0.0.1` (см. `docker-compose.yaml`). Для доступа извне используйте reverse proxy (nginx/Traefik/Caddy) или измените bind-адрес в `ports:`.
+
+### Запуск в Docker с Traefik
+
+В репозитории есть готовый стек `Traefik + несколько инстансов gpt2giga` в файле [`docker-compose.traefik.yaml`](./docker-compose.traefik.yaml):
+- `gpt2giga` (модель по умолчанию `GigaChat`) → `http://localhost:8090`
+- `gpt2giga-pro` (модель по умолчанию `GigaChat-Pro`) → `http://localhost:8091`
+- `gpt2giga-max` (модель по умолчанию `GigaChat-Max`) → `http://localhost:8092`
+- Traefik Dashboard → `http://localhost:8080/dashboard/`
+
+1. Запустите стек:
+
+   ```sh
+   docker compose -f docker-compose.traefik.yaml up -d
+   ```
+
+> Важно: роутинг в Traefik в этой конфигурации завязан на HTTP `Host` (см. `traefik/rules.yml`). Если вы обращаетесь по IP (например, `127.0.0.1`), задайте `HOST=127.0.0.1` или отправляйте корректный заголовок `Host:`.
 
 ### Локальный запуск
 
@@ -189,6 +212,7 @@ sequenceDiagram
 - `--proxy.pass-token <true/false>` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
 - `--proxy.embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
 - `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
+- `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `--proxy.log-level` — уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`;
 - `--proxy.log-filename` — имя лог файла. По умолчанию `gpt2giga.log`;
 - `--proxy.log-max-size` — максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB);
@@ -257,6 +281,7 @@ gpt2giga \
 - `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов.
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
+- `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
 - `GPT2GIGA_LOG_FILENAME="gpt2giga.log"` — Имя лог файла. По умолчанию `gpt2giga.log`
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
@@ -322,6 +347,9 @@ GPT2GIGA_HTTPS_KEY_FILE="Path to key.pem"
 GPT2GIGA_HTTPS_CERT_FILE="Path to cert.pem"
 ```
 После этого укажите пути к сертификатам в переменных окружения или CLI-аргументах и включите HTTPS.
+
+Альтернатива: разместите `gpt2giga` за reverse proxy с TLS-терминацией:
+- пример стека с Traefik: [`docker-compose.traefik.yaml`](./docker-compose.traefik.yaml) и правила в `traefik/` (при необходимости добавьте ACME/сертификаты под свой домен).
 
 ## Использование API ключа
 ```dotenv
