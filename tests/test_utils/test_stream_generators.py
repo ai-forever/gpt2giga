@@ -605,7 +605,9 @@ async def test_stream_responses_generator_unmaps_reserved_web_search_name():
     req = FakeRequest(FakeClientFunctionCallReservedWebSearch())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_responses_generator(req, chat, response_id="fc_web_search"):
+    async for line in stream_responses_generator(
+        req, chat, response_id="fc_web_search"
+    ):
         lines.append(line)
 
     def parse_sse(line):
