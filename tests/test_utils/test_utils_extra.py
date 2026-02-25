@@ -1,5 +1,10 @@
 from types import SimpleNamespace
-from gpt2giga.common.gigachat_auth import pass_token_to_gigachat
+from unittest.mock import MagicMock
+
+from gpt2giga.common.gigachat_auth import (
+    create_gigachat_client_for_request,
+    pass_token_to_gigachat,
+)
 from gpt2giga.common.tools import convert_tool_to_giga_functions
 from gigachat.models import Function
 
@@ -45,7 +50,8 @@ def test_pass_token_giga_cred_with_scope():
     assert res._settings.scope == "MY_SCOPE"
 
 
-def test_pass_token_giga_auth():
+def test_pass_token_giga_auth_ignored():
+    """pass_token_to_gigachat does not handle giga-auth-; use create_gigachat_client_for_request (issue #74)."""
     giga = SimpleNamespace(
         _settings=SimpleNamespace(
             user=None, password=None, credentials=None, access_token=None
@@ -53,7 +59,32 @@ def test_pass_token_giga_auth():
     )
     token = "giga-auth-sometoken"
     res = pass_token_to_gigachat(giga, token)
-    assert res._settings.access_token == "sometoken"
+    assert res._settings.access_token is None
+
+
+def test_create_gigachat_client_for_request_giga_auth_uses_constructor():
+    """giga-auth- must create GigaChat with access_token in constructor (issue #74)."""
+    settings = SimpleNamespace(
+        model_dump=lambda: {
+            "base_url": "https://api.example/v1",
+            "verify_ssl_certs": True,
+            "credentials": "secret",
+            "access_token": None,
+        }
+    )
+    with MagicMock() as mock_giga_class:
+        from gpt2giga.common import gigachat_auth
+
+        orig = gigachat_auth.GigaChat
+        gigachat_auth.GigaChat = mock_giga_class
+        try:
+            create_gigachat_client_for_request(settings, "giga-auth-my-access-token")
+        finally:
+            gigachat_auth.GigaChat = orig
+    mock_giga_class.assert_called_once()
+    call_kw = mock_giga_class.call_args.kwargs
+    assert call_kw.get("access_token") == "my-access-token"
+    assert "credentials" not in call_kw
 
 
 def test_pass_token_unknown_prefix():

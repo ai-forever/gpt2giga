@@ -5,6 +5,7 @@ from gpt2giga.models.config import ProxySettings, ProxyConfig
 
 def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_HOST", raising=False)
+    monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
     s = ProxySettings()
     assert s.mode == "DEV"
     assert s.host == "localhost"

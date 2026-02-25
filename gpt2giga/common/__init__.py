@@ -4,7 +4,10 @@ from gpt2giga.common.app_meta import (
     warn_sensitive_cli_args as _warn_sensitive_cli_args,
 )
 from gpt2giga.common.exceptions import ERROR_MAPPING, exceptions_handler
-from gpt2giga.common.gigachat_auth import pass_token_to_gigachat
+from gpt2giga.common.gigachat_auth import (
+    create_gigachat_client_for_request,
+    pass_token_to_gigachat,
+)
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
 from gpt2giga.common.logs_access import verify_logs_ip_allowlist
 from gpt2giga.common.request_json import read_request_json
@@ -26,6 +29,7 @@ __all__ = [
     "resolve_schema_refs",
     "normalize_json_schema",
     "convert_tool_to_giga_functions",
+    "create_gigachat_client_for_request",
     "pass_token_to_gigachat",
     "verify_logs_ip_allowlist",
 ]
