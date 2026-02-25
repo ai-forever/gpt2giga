@@ -2,9 +2,8 @@ from gigachat.models import Function, FunctionParameters
 
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
 
-
 _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
-    # У GigaChat есть встроенный tool под названием "web_search". 
+    # У GigaChat есть встроенный tool под названием "web_search".
     # Если пользователь передает custom tool с таким же названием, это может вызвать конфликт на стороне GigaChat.
     "web_search": "__gpt2giga_user_search_web",
 }

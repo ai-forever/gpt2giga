@@ -14,16 +14,16 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from gigachat import GigaChat
 
-from gpt2giga.logger import rquid_context
-from gpt2giga.openapi_docs import (
-    anthropic_count_tokens_openapi_extra,
-    anthropic_messages_openapi_extra,
-)
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.tools import convert_tool_to_giga_functions
 from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.logger import rquid_context
+from gpt2giga.openapi_docs import (
+    anthropic_count_tokens_openapi_extra,
+    anthropic_messages_openapi_extra,
+)
 
 router = APIRouter(tags=["Anthropic"])
 

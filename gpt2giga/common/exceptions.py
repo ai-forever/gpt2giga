@@ -8,7 +8,6 @@ from fastapi.responses import JSONResponse
 
 from gpt2giga.logger import rquid_context
 
-
 ERROR_MAPPING = {
     gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),
     gigachat.exceptions.AuthenticationError: (
