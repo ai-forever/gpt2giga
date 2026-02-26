@@ -52,7 +52,7 @@ def test_pass_token_middleware(monkeypatch):
 
     class FakeGigaChat:
         def __init__(self, **kwargs):
-            self._settings = SimpleNamespace()
+            self._settings = SimpleNamespace(**kwargs)
 
     # Mock settings
     config = SimpleNamespace(
@@ -88,12 +88,13 @@ def test_pass_token_middleware(monkeypatch):
     assert resp.json()["access_token"] == "mytoken"
 
     # Test error handling
-    # Mock pass_token_to_gigachat to raise exception
-    def broken_pass(*args):
+    # Mock create_gigachat_client_for_request to raise exception
+    def broken_create(*args, **kwargs):
         raise ValueError("Boom")
 
     monkeypatch.setattr(
-        "gpt2giga.middlewares.pass_token.pass_token_to_gigachat", broken_pass
+        "gpt2giga.middlewares.pass_token.create_gigachat_client_for_request",
+        broken_create,
     )
 
     resp = client.get("/check", headers={"Authorization": "Bearer giga-auth-fail"})

@@ -4,6 +4,7 @@ import json
 import sys
 
 from loguru import logger
+
 from .constants import _JSON_KV_RE, _KV_EQ_RE, _BEARER_RE
 
 # Context variable for rquid

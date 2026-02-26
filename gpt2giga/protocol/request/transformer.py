@@ -4,11 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from gigachat import GigaChat
 from gigachat.models import FunctionCall, Messages, MessagesRole
 
-from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
-from gpt2giga.common.tools import map_tool_name_to_gigachat
-from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
 from gpt2giga.common.content_utils import ensure_json_object_str
+from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
 from gpt2giga.common.message_utils import (
     collapse_user_messages,
     ensure_system_first,
@@ -16,7 +13,10 @@ from gpt2giga.common.message_utils import (
     map_role,
     merge_consecutive_messages,
 )
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.common.tools import map_tool_name_to_gigachat
+from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
+from gpt2giga.models.config import ProxyConfig
+from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
 
 
 class RequestTransformer:
