@@ -138,17 +138,25 @@ def create_app(config=None) -> FastAPI:
             return {"status": "ok", "mode": "PROD"}
         return RedirectResponse(url="/docs")
 
-    dependencies = [Depends(verify_api_key)] if auth_required else []
-    app.include_router(api_router, dependencies=dependencies)
-    app.include_router(api_router, prefix="/v1", tags=["V1"], dependencies=dependencies)
+    api_dependencies = [Depends(verify_api_key)] if auth_required else []
+    app.include_router(api_router, dependencies=api_dependencies)
     app.include_router(
-        anthropic_router, prefix="/v1", tags=["V1 Anthropic"], dependencies=dependencies
+        api_router,
+        prefix="/v1",
+        tags=["V1"],
+        dependencies=api_dependencies,
     )
-    app.include_router(anthropic_router, dependencies=dependencies)
-    app.include_router(system_router, dependencies=dependencies)
+    app.include_router(
+        anthropic_router,
+        prefix="/v1",
+        tags=["V1 Anthropic"],
+        dependencies=api_dependencies,
+    )
+    app.include_router(anthropic_router, dependencies=api_dependencies)
+    app.include_router(system_router)
     if not is_prod_mode:
-        app.include_router(logs_api_router, dependencies=dependencies)
-        app.include_router(logs_router, dependencies=dependencies)
+        app.include_router(logs_api_router, dependencies=api_dependencies)
+        app.include_router(logs_router, dependencies=api_dependencies)
     return app
 
 
