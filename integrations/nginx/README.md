@@ -1,6 +1,22 @@
 # Развёртывание gpt2giga за nginx (Ubuntu)
 
-Краткая инструкция по установке прокси gpt2giga на сервер Ubuntu с nginx, Docker и TLS-сертификатом (Let's Encrypt).
+Краткая пошаговая инструкция: как поднять прокси **gpt2giga** на сервере Ubuntu с **nginx**, **Docker** и TLS-сертификатом **Let's Encrypt**. В итоге API будет доступен по HTTPS (по IP или домену).
+
+**Что понадобится:** сервер Ubuntu с доступом по SSH, (опционально) домен или внешний IP для сертификата.
+
+---
+
+## Содержание
+
+1. [Подготовка сервера](#1-подготовка-сервера)
+2. [Файрвол (UFW)](#2-файрвол-ufw)
+3. [Nginx](#3-nginx)
+4. [Docker](#4-docker)
+5. [Certbot (Let's Encrypt)](#5-certbot-сертификаты-lets-encrypt)
+6. [Получение TLS-сертификата](#6-получение-tls-сертификата)
+7. [Настройка nginx](#7-настройка-nginx)
+8. [Запуск gpt2giga (Docker)](#8-запуск-gpt2giga-docker)
+9. [Проверка](#9-проверка)
 
 ---
 
@@ -9,6 +25,7 @@
 Клонируйте репозиторий и установите базовые пакеты:
 
 ```bash
+sudo -i # Для Cloud.ru
 sudo apt update
 sudo apt install -y git
 git clone https://github.com/ai-forever/gpt2giga.git
@@ -29,6 +46,12 @@ sudo ufw allow 443/tcp
 sudo ufw enable
 sudo ufw status
 ```
+
+### 2.1 Файрвол на Cloud.ru
+
+Если сервер в Cloud.ru, порты настраиваются через **группы безопасности** в панели, а не только через UFW. Откройте входящий трафик на порты 22 (SSH), 80 (HTTP) и 443 (HTTPS), как на скриншоте:
+
+![Настройка портов в Cloud.ru](./cloud.png)
 
 ---
 
@@ -70,8 +93,6 @@ docker --version  && docker compose version
 
 ## 5. Certbot (сертификаты Let's Encrypt)
 
-### Вариант A: через Snap (рекомендуется)
-
 ```bash
 sudo apt update
 sudo apt install -y snapd
@@ -86,9 +107,9 @@ certbot --version
 
 ## 6. Получение TLS-сертификата
 
-Сертификат выдаётся на внешний IP сервера (для доступа по IP, без домена).
+Сертификат можно получить на **внешний IP** сервера (доступ по HTTPS по IP, без домена).
 
-Узнайте внешний IP и остановите nginx (порт 80 нужен certbot):
+Узнайте внешний IP и **временно остановите nginx** — certbot в режиме `--standalone` сам займёт порт 80:
 
 ```bash
 PUBLIC_IP="$(curl -s https://api.ipify.org)"
@@ -116,60 +137,67 @@ sudo ls -la /etc/letsencrypt/live/gpt2giga-ip/
 
 ## 7. Настройка nginx
 
-Скопируйте конфиг из репозитория в sites-available и создайте симлинк:
+Команды выполняйте **из корня репозитория** gpt2giga.
+
+Скопируйте конфиг в nginx и включите сайт:
 
 ```bash
-# Выполняйте из корня репозитория gpt2giga
 sudo cp integrations/nginx/gpt2giga.conf /etc/nginx/sites-available/gpt2giga
 sudo ln -sf /etc/nginx/sites-available/gpt2giga /etc/nginx/sites-enabled/gpt2giga
 sudo rm -f /etc/nginx/sites-enabled/default
 ```
 
-Проверьте конфиг и перезагрузите nginx:
+Если вы использовали другое имя сертификата (не `gpt2giga-ip`), отредактируйте пути к сертификатам в конфиге:
+
+```bash
+sudo vim /etc/nginx/sites-available/gpt2giga
+```
+
+Проверьте конфиг и перезапустите nginx:
 
 ```bash
 sudo systemctl enable --now nginx
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-При необходимости отредактируйте конфиг (пути к сертификатам уже указаны под `gpt2giga-ip`):
-
-```bash
-sudo vim /etc/nginx/sites-available/gpt2giga
-```
-
 ---
 
 ## 8. Запуск gpt2giga (Docker)
 
-В корне репозитория создайте `.env` из примера и заполните переменные (GigaChat, режим PROD, API-ключ и т.д.):
+В корне репозитория создайте `.env` из примера и заполните переменные (учётные данные GigaChat, режим PROD, API-ключ прокси и т.д.):
 
 ```bash
 cp .env.example .env
-vim .env
-# Отредактируйте .env (GIGACHAT_*, GPT2GIGA_*)
+vim .env   # заполните GIGACHAT_*, GPT2GIGA_*
 ```
 
-Запустите стек с профилем PROD (включая observability при необходимости):
+**Вариант с observability** (mitmweb для отладки трафика):
 
 ```bash
 docker compose -f docker-compose-observability.yaml --profile PROD up -d
+```
+
+**Без observability** (только прокси):
+
+```bash
+docker compose --profile PROD up -d
 ```
 
 ---
 
 ## 9. Проверка
 
-Откройте в браузере (подставьте свой `PUBLIC_IP`):
+Подставьте в адреса ниже **свой внешний IP** (тот же, что использовали для сертификата):
 
-`echo "$PUBLIC_IP"`
-- **Прокси (gpt2giga):** `https://PUBLIC_IP/`
-- **Observability (mitmweb):** `https://PUBLIC_IP/observability/`
+| Сервис | URL |
+|--------|-----|
+| Прокси gpt2giga | `https://ВАШ_IP/` |
+| Observability (если включён) | `https://ВАШ_IP/observability/` |
 
-Проверка здоровья API:
+Проверка здоровья API с сервера или с вашей машины:
 
 ```bash
-curl -k https://PUBLIC_IP/health
+curl -k https://ВАШ_IP/health
 ```
 
 Ожидаемый ответ: `{"status":"ok","mode":"PROD"}`.
@@ -178,6 +206,6 @@ curl -k https://PUBLIC_IP/health
 
 ## Полезные замечания
 
-- Конфиг nginx (`gpt2giga.conf`) рассчитан на сертификат `gpt2giga-ip` и проксирование на `127.0.0.1:8090` (gpt2giga) и `127.0.0.1:8081` (observability).
-- Шаблон переменных окружения: `integrations/nginx/.env.example` (или корневой `.env.example`).
-- Для production обязательно задайте `GPT2GIGA_MODE=PROD`, включите API-key и ограничьте CORS — см. комментарии в `.env.example`.
+- **Nginx:** конфиг `gpt2giga.conf` проксирует на `127.0.0.1:8090` (gpt2giga) и `127.0.0.1:8081` (mitmweb). Пути к сертификатам заданы под имя `gpt2giga-ip`.
+- **Переменные окружения:** шаблон — корневой `.env.example`.
+- **Production:** задайте `GPT2GIGA_MODE=PROD`, при необходимости включите API-key и ограничьте CORS — подсказки есть в `.env.example`.
