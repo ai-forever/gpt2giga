@@ -5,6 +5,20 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.1.4] - 2026-02-26
+
+### Добавлено
+- **Nginx**: Добавлен конфиг `gpt2giga.conf` и README для развёртывания за nginx
+- **Docker Compose**: Обновлён compose (#77) — mitmproxy в `docker-compose-observability.yaml`, пароль для mitmproxy
+- **Роутер логов**: Вынесен отдельный `logs_router.py`, разделение system router на два
+
+### Изменено
+- Обновлён `.env.example`
+- Обновлён README для nginx
+
+### Исправлено
+- **Giga-auth**: Исправлено поведение giga-auth (#74)
+
 ## [0.1.3.post1] - 2026-02-20
 
 ### Добавлено
@@ -174,6 +188,7 @@
 
 ---
 
+[0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4
 [0.1.3.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3...v0.1.3.post1
 [0.1.3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2.post1...v0.1.3
 [0.1.2.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2...v0.1.2.post1
