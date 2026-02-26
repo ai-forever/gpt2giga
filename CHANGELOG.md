@@ -8,7 +8,7 @@
 ## [0.1.4] - 2026-02-26
 
 ### Добавлено
-- **Nginx**: Добавлен конфиг `gpt2giga.conf` и README для развёртывания за nginx
+- **Nginx**: Добавлен конфиг `gpt2giga.conf` и README для развёртывания nginx `integrations/nginx/`
 - **Docker Compose**: Обновлён compose (#77) — mitmproxy в `docker-compose-observability.yaml`, пароль для mitmproxy
 - **Роутер логов**: Вынесен отдельный `logs_router.py`, разделение system router на два
 
