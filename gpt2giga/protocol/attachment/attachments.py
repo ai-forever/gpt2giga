@@ -5,8 +5,8 @@ import re
 import socket
 import time
 import uuid
-from urllib.parse import urlsplit, urlunsplit, urljoin
 from typing import Optional, NamedTuple, Literal
+from urllib.parse import urlsplit, urlunsplit, urljoin
 
 import anyio
 import httpx

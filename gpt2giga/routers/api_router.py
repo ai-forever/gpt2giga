@@ -7,12 +7,6 @@ from fastapi.responses import StreamingResponse
 from openai.pagination import AsyncPage
 from openai.types import Model as OpenAIModel
 
-from gpt2giga.logger import rquid_context
-from gpt2giga.openapi_docs import (
-    chat_completions_openapi_extra,
-    embeddings_openapi_extra,
-    responses_openapi_extra,
-)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
@@ -20,6 +14,12 @@ from gpt2giga.common.streaming import (
     stream_responses_generator,
 )
 from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.logger import rquid_context
+from gpt2giga.openapi_docs import (
+    chat_completions_openapi_extra,
+    embeddings_openapi_extra,
+    responses_openapi_extra,
+)
 
 router = APIRouter(tags=["API"])
 

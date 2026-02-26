@@ -9,8 +9,8 @@ from gigachat import GigaChat
 from gigachat.models import Chat
 from starlette.requests import Request
 
-from gpt2giga.logger import rquid_context
 from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.logger import rquid_context
 
 
 async def stream_chat_completion_generator(

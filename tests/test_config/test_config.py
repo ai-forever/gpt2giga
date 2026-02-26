@@ -5,11 +5,13 @@ from gpt2giga.models.config import ProxySettings, ProxyConfig
 
 def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_HOST", raising=False)
+    monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
     s = ProxySettings()
     assert s.mode == "DEV"
     assert s.host == "localhost"
     assert isinstance(s.port, int)
     assert isinstance(s.log_level, str)
+    assert s.enable_reasoning is False
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024

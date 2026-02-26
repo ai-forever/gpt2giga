@@ -74,9 +74,10 @@ def test_docs_disabled_in_prod_mode():
     assert client.get("/openapi.json").status_code == 404
 
 
-def test_prod_mode_requires_api_key():
+def test_prod_mode_requires_api_key(monkeypatch):
     import pytest
 
+    monkeypatch.delenv("GPT2GIGA_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="API key must be configured"):
         create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD")))
 

@@ -109,3 +109,5 @@ _SENSITIVE_CLI_ARGS = frozenset(
         "--gigachat.key-file-password",
     }
 )
+
+_AUTH_KEYS = ("credentials", "user", "password", "access_token", "key_file_password")

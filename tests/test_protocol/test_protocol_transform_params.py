@@ -64,6 +64,20 @@ def test_transform_responses_parameters_uses_common():
     assert "functions" in out
 
 
+def test_enable_reasoning_adds_reasoning_effort_high_by_default():
+    cfg = ProxyConfig(proxy=ProxySettings(enable_reasoning=True))
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x"})
+    assert out.get("reasoning_effort") == "high"
+
+
+def test_enable_reasoning_does_not_override_explicit_reasoning_effort():
+    cfg = ProxyConfig(proxy=ProxySettings(enable_reasoning=True))
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x", "reasoning_effort": "low"})
+    assert out.get("reasoning_effort") == "low"
+
+
 def test_apply_json_schema_as_function():
     """Тест метода _apply_json_schema_as_function"""
     cfg = ProxyConfig()

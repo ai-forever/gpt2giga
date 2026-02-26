@@ -9,6 +9,7 @@ from starlette.responses import RedirectResponse
 
 from gpt2giga.auth import verify_api_key
 from gpt2giga.cli import load_config
+from gpt2giga.common.app_meta import check_port_available, get_app_version
 from gpt2giga.constants import SECURITY_FIELDS
 from gpt2giga.logger import setup_logger
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
@@ -18,7 +19,6 @@ from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.routers import anthropic_router, api_router, logs_api_router, logs_router
 from gpt2giga.routers import system_router
-from gpt2giga.common.app_meta import check_port_available, get_app_version
 
 
 @asynccontextmanager
