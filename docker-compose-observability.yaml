@@ -10,9 +10,17 @@ x-mitmproxy-common: &mitmproxy-common
   image: mitmproxy/mitmproxy:latest
   volumes:
     - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
-  command: mitmweb --web-host 0.0.0.0 --web-port 8081 --ssl-insecure
+  command: >
+    mitmweb
+    --web-host 0.0.0.0
+    --web-port 8081
+    --ssl-insecure
+    --set web_password=${MITMPROXY_PASSWORD}
+  env_file:
+    .env
   stdin_open: true
   tty: true
+
 services:
   gpt2giga-prod:
     <<: *gpt2giga-common
