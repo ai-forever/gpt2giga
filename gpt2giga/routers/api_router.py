@@ -1,5 +1,7 @@
+import functools
 import time
 
+import anyio
 import tiktoken
 from fastapi import APIRouter
 from fastapi import Request
@@ -90,14 +92,18 @@ async def embeddings(request: Request):
     if isinstance(inputs, list):
         new_inputs = []
         if len(inputs) > 0 and isinstance(inputs[0], int):  # List[int]
-            encoder = tiktoken.encoding_for_model(gpt_model)
+            encoder = await anyio.to_thread.run_sync(
+                functools.partial(tiktoken.encoding_for_model, gpt_model)
+            )
             new_inputs = encoder.decode(inputs)
         else:
             encoder = None
             for row in inputs:
                 if isinstance(row, list):  # List[List[int]]
                     if encoder is None:
-                        encoder = tiktoken.encoding_for_model(gpt_model)
+                        encoder = await anyio.to_thread.run_sync(
+                            functools.partial(tiktoken.encoding_for_model, gpt_model)
+                        )
                     new_inputs.append(encoder.decode(row))
                 else:
                     new_inputs.append(row)
