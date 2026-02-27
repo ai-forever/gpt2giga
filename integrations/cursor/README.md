@@ -9,32 +9,11 @@
 ### Предварительные требования
 
 - Установленный [Cursor](https://cursor.com/)
-- Запущенный прокси-сервер `gpt2giga`
-- Учётные данные GigaChat (`GIGACHAT_CREDENTIALS`)
+- Подписка на Cursor уровня Pro и выше
+- Запущенный прокси-сервер `gpt2giga` на сервере (смотри [nginx](../nginx/README.md))
 
 ---
-
-## 1. Запуск gpt2giga
-
-Настройте переменные окружения в файле `.env`:
-
-```ini
-GIGACHAT_CREDENTIALS=<ваш_ключ_авторизации>
-GIGACHAT_SCOPE=GIGACHAT_API_PERS
-GIGACHAT_MODEL=GigaChat-2-Max
-```
-
-Запустите прокси-сервер:
-
-```shell
-gpt2giga
-```
-
-По умолчанию сервер будет доступен по адресу `http://localhost:8090`.
-
----
-
-## 2. Настройка Cursor
+## 1. Настройка Cursor
 
 ### Добавление кастомной модели
 
@@ -45,11 +24,18 @@ gpt2giga
 ### Настройка OpenAI API
 
 1. В разделе **Models** нажмите на кнопку **OpenAI API Key**.
-2. Введите любое значение API-ключа (например, `0`). Ключ OpenAI не используется — все запросы проксируются через `gpt2giga`.
+2. Введите значение API-ключа (например, `0`). Ключ OpenAI не используется — все запросы проксируются через `gpt2giga`.
 3. Включите переключатель **Override OpenAI Base URL**.
-4. Введите адрес прокси-сервера: `http://localhost:8090/v1`.
+4. Введите адрес прокси-сервера.
 
-> **Примечание:** Cursor добавляет `/v1` автоматически к некоторым запросам. Если при использовании `http://localhost:8090/v1` возникают ошибки, попробуйте указать `http://localhost:8090`.
+Когда `gpt2giga` развёрнут на удалённом сервере (например, за nginx с TLS), укажите в **Override OpenAI Base URL** адрес сервера:
+
+```
+https://ваш-сервер.example.com/
+```
+
+Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
+> **Примечание:** Cursor добавляет `/v1` автоматически к некоторым запросам.
 
 ### Проверка подключения
 
@@ -57,25 +43,13 @@ gpt2giga
 
 ---
 
-## 3. Использование удалённого сервера
-
-Если `gpt2giga` развёрнут на удалённом сервере (например, за nginx с TLS), укажите в **Override OpenAI Base URL** адрес сервера:
-
-```
-https://ваш-сервер.example.com/v1
-```
-
-Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
-
----
-
-## 4. Использование с API-ключом gpt2giga
+## 2. Использование с API-ключом gpt2giga
 
 Если на прокси-сервере включена авторизация по API-ключу (`GPT2GIGA_ENABLE_API_KEY_AUTH=True`), введите значение `GPT2GIGA_API_KEY` в поле **OpenAI API Key** в настройках Cursor.
 
 ---
 
-## 5. Передача авторизации через заголовок
+## 3. Передача авторизации через заголовок
 
 Если вы хотите передавать учётные данные GigaChat напрямую через Cursor (без конфигурации `.env`), запустите `gpt2giga` с флагом `--proxy.pass-token true` и укажите в поле **OpenAI API Key** в Cursor один из вариантов:
 
@@ -87,11 +61,11 @@ https://ваш-сервер.example.com/v1
 
 ## Доступные модели
 
-| Модель в Cursor | Модель GigaChat |
-|---|---|
-| `GigaChat-2-Max` | GigaChat-2-Max |
-| `GigaChat-2-Pro` | GigaChat-2-Pro |
-| `GigaChat-2` | GigaChat-2 |
+| Модель в Cursor  | Модель GigaChat |
+|------------------|-----------------|
+| `GigaChat-2-Max` | GigaChat-2-Max  |
+| `GigaChat-2-Pro` | GigaChat-2-Pro  |
+| `GigaChat-2`     | GigaChat-2      |
 
 При включённом `--proxy.pass-model true` имя модели, указанное в Cursor, передаётся напрямую в GigaChat API.
 
