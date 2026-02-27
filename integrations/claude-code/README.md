@@ -10,7 +10,6 @@
 
 - Установленный [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)
 - Запущенный прокси-сервер `gpt2giga`
-- Учётные данные GigaChat (`GIGACHAT_CREDENTIALS`)
 
 ---
 
@@ -49,7 +48,7 @@ export ANTHROPIC_API_KEY=0
 ### Запуск
 
 ```shell
-claude
+claude --model GigaChat-2-Max
 ```
 
 Claude Code будет отправлять запросы через `gpt2giga` в GigaChat API.
@@ -106,11 +105,11 @@ exec claude "$@"
 
 Claude Code выбирает модель самостоятельно. `gpt2giga` перенаправляет все запросы в модель GigaChat, заданную через `GIGACHAT_MODEL` в `.env` или через аргумент `--gigachat.model`.
 
-| Модель GigaChat | Описание |
-|---|---|
+| Модель GigaChat  | Описание                                        |
+|------------------|-------------------------------------------------|
 | `GigaChat-2-Max` | Максимальная версия — рекомендована для агентов |
-| `GigaChat-2-Pro` | Промежуточная версия |
-| `GigaChat-2` | Базовая версия |
+| `GigaChat-2-Pro` | Промежуточная версия                            |
+| `GigaChat-2`     | Базовая версия                                  |
 
 ---
 
