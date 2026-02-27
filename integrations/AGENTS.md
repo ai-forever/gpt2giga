@@ -31,7 +31,11 @@ Examples:
 
 - **Aider integration**: `integrations/aider/README.md`, `integrations/aider/.aider.model.metadata.json`, `integrations/aider/.env.example`
 - **OpenHands integration**: `integrations/openhands/README.md`
-- **Project config / env**: `.env.example`, `gpt2giga/config.py`
+- **Cursor integration**: `integrations/cursor/README.md`
+- **Codex integration**: `integrations/codex/README.md`
+- **Claude Code integration**: `integrations/claude-code/README.md`
+- **nginx reverse proxy**: `integrations/nginx/README.md`, `integrations/nginx/gpt2giga.conf`
+- **Project config / env**: `.env.example`, `gpt2giga/models/config.py`
 
 ## JIT Index Hints
 

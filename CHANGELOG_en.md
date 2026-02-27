@@ -5,6 +5,19 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4.post1] - 2026-02-27
+
+### Added
+- **Cursor integration**: Added `integrations/cursor/README.md` — guide for using GigaChat in Cursor as a custom model
+- **Codex integration**: Added `integrations/codex/README.md` — OpenAI Codex setup via `config.toml` with custom gpt2giga provider
+- **Claude Code integration**: Added `integrations/claude-code/README.md` — Claude Code setup via `ANTHROPIC_BASE_URL`
+- **AGENTS.md documentation**: Updated all `AGENTS.md` files to match the current codebase structure
+
+### Changed
+- **Async I/O**: Moved blocking I/O operations in route handlers to worker threads via `anyio.to_thread.run_sync`:
+  - `logs_router.py` — log file reading and HTML template loading
+  - `api_router.py` — `tiktoken.encoding_for_model()` initialization
+
 ## [0.1.4] - 2026-02-26
 
 ### Added

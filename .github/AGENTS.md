@@ -33,6 +33,7 @@ Examples:
 - **Docker Hub build/push**: `.github/workflows/docker_image.yaml`
 - **GHCR multi-python images**: `.github/workflows/publish-ghcr.yml`
 - **PyPI release publishing**: `.github/workflows/publish-pypi.yml`
+- **Codeflash optimization**: `.github/workflows/codeflash.yaml`
 - **PR checklist**: `.github/PULL_REQUEST_TEMPLATE.md`
 - **Bug report template**: `.github/ISSUE_TEMPLATE/bug_report.md`
 
