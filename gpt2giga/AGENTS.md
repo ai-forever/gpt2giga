@@ -2,7 +2,7 @@
 
 ## Package Identity
 
-- **What:** FastAPI proxy server that translates OpenAI API → GigaChat API
+- **What:** FastAPI proxy server that translates OpenAI API and Anthropic Messages API → GigaChat API
 - **Framework:** FastAPI + Uvicorn, async-first
 - **Entry point:** `gpt2giga/__init__.py` → `run()` in `api_server.py`
 
@@ -23,7 +23,7 @@ uv run ruff check gpt2giga/ && uv run ruff format gpt2giga/
 
 ```
 Request flow:
-  Client (OpenAI SDK) → Middlewares → Router → RequestTransformer → GigaChat SDK
+  Client (OpenAI/Anthropic SDK) → Middlewares → Router → RequestTransformer → GigaChat SDK
   GigaChat SDK → ResponseProcessor → Router → Client
 ```
 
@@ -33,14 +33,34 @@ Request flow:
 |---|---|
 | `api_server.py` | App factory (`create_app()`), lifespan, `run()` |
 | `cli.py` | CLI argument parsing, config loading |
-| `config.py` | Pydantic Settings: `ProxyConfig`, `ProxySettings`, `GigaChatCLI` |
+| `models/config.py` | Pydantic Settings: `ProxyConfig`, `ProxySettings`, `GigaChatCLI` |
+| `models/security.py` | `SecuritySettings` — consolidated security posture view-model |
 | `auth.py` | API key verification (`verify_api_key` dependency) |
 | `logger.py` | Loguru setup, `rquid_context` context var |
-| `utils.py` | Error handling decorator, stream generators, schema normalization, tool conversion |
+| `constants.py` | Size limits, MIME types, sensitive key patterns |
+| `openapi_docs.py` | OpenAPI schema extras for custom endpoints |
+| `common/` | Shared utilities (re-exported via `common/__init__.py`; see below) |
 | `protocol/` | Request/response transformation layer (see below) |
 | `routers/` | FastAPI route handlers (see below) |
 | `middlewares/` | HTTP middleware chain (see below) |
 | `templates/` | HTML log viewer template (`templates/log_viewer.html`) |
+
+### Common Utilities (`common/`)
+
+All utilities are in `common/` submodules, re-exported via `common/__init__.py`:
+
+| File | Key exports |
+|---|---|
+| `common/exceptions.py` | `exceptions_handler` decorator, `ERROR_MAPPING` |
+| `common/streaming.py` | `stream_chat_completion_generator()`, `stream_responses_generator()` |
+| `common/json_schema.py` | `resolve_schema_refs()`, `normalize_json_schema()` |
+| `common/tools.py` | `convert_tool_to_giga_functions()`, tool name mapping |
+| `common/gigachat_auth.py` | `pass_token_to_gigachat()`, `create_gigachat_client_for_request()` |
+| `common/message_utils.py` | `map_role()`, `merge_consecutive_messages()`, `collapse_user_messages()` |
+| `common/content_utils.py` | `ensure_json_object_str()` |
+| `common/app_meta.py` | `warn_sensitive_cli_args()`, `get_app_version()`, `check_port_available()` |
+| `common/request_json.py` | `read_request_json()` |
+| `common/logs_access.py` | `verify_logs_ip_allowlist()` |
 
 ## Patterns & Conventions
 
@@ -53,19 +73,19 @@ Request flow:
 ```
 ✅ DO: Access shared state via `request.app.state.gigachat_client`
 ✅ DO: See `api_server.py` create_app() for middleware registration order
-❌ DON'T: Copy “single-file script” patterns from `local/*.py` into `gpt2giga/` (the `local/` folder is a scratchpad)
+❌ DON'T: Copy "single-file script" patterns from scratch experiments into `gpt2giga/`
 ```
 
 ### Error Handling
 
-- **`@exceptions_handler` decorator** in `utils.py` wraps all router handlers.
+- **`@exceptions_handler` decorator** in `common/exceptions.py` wraps all router handlers.
 - Maps `gigachat.exceptions.*` to OpenAI-style HTTP errors via `ERROR_MAPPING` dict.
 - Logs errors with `rquid` (request ID) for traceability.
 
 ```
 ✅ DO: Decorate every router handler with `@exceptions_handler`
-✅ DO: See `utils.py` ERROR_MAPPING for the exception → status code mapping
-❌ DON'T: Add ad-hoc exception mapping in random scripts (see `local/check_ai.py` for experimentation; keep production mapping in `gpt2giga/utils.py`)
+✅ DO: See `common/exceptions.py` ERROR_MAPPING for the exception → status code mapping
+❌ DON'T: Add ad-hoc exception mapping outside `gpt2giga/common/exceptions.py`
 ```
 
 ### Protocol Layer (`protocol/`)
@@ -74,23 +94,23 @@ This is the core transformation engine:
 
 | File | Class | Purpose |
 |---|---|---|
-| `request_mapper.py` | `RequestTransformer` | OpenAI request → GigaChat `Chat` object |
-| `response_mapper.py` | `ResponseProcessor` | GigaChat response → OpenAI response format |
-| `attachments.py` | `AttachmentProcessor` | Image/document upload, LRU cache with TTL |
-| `content_utils.py` | — | Content parsing/extraction utilities |
-| `message_utils.py` | — | Message merging, role mapping, ordering |
+| `protocol/request/transformer.py` | `RequestTransformer` | OpenAI request → GigaChat `Chat` object |
+| `protocol/response/processor.py` | `ResponseProcessor` | GigaChat response → OpenAI response format |
+| `protocol/attachment/attachments.py` | `AttachmentProcessor` | Image/document upload, LRU cache with TTL |
+
+Classes are re-exported via `protocol/__init__.py`.
 
 **Key transformations:**
 - Role mapping: `developer` → `system`/`user`, `tool` → `function`
-- Message merging: consecutive same-role messages are collapsed
-- Schema normalization: resolves `$ref`/`$defs`, strips `anyOf`/`oneOf` with null
-- Tool conversion: OpenAI `tools` format → GigaChat `functions` format
+- Message merging: consecutive same-role messages are collapsed (via `common/message_utils.py`)
+- Schema normalization: resolves `$ref`/`$defs`, strips `anyOf`/`oneOf` with null (via `common/json_schema.py`)
+- Tool conversion: OpenAI `tools` format → GigaChat `functions` format (via `common/tools.py`)
 
 ```
-✅ DO: Follow `request_mapper.py` prepare_chat_completion() for new request transformations
-✅ DO: Follow `response_mapper.py` process_response() for new response transformations
-✅ DO: Use normalize_json_schema() from utils.py for any JSON schema handling
-❌ DON'T: Duplicate protocol logic in routers; keep transformations in `gpt2giga/protocol/*` (contrast with experimental code in `local/*.py`)
+✅ DO: Follow `protocol/request/transformer.py` prepare_chat_completion() for new request transformations
+✅ DO: Follow `protocol/response/processor.py` process_response() for new response transformations
+✅ DO: Use normalize_json_schema() from common/json_schema.py for any JSON schema handling
+❌ DON'T: Duplicate protocol logic in routers; keep transformations in `gpt2giga/protocol/`
 ```
 
 ### Routers (`routers/`)
@@ -98,14 +118,14 @@ This is the core transformation engine:
 | File | Endpoints |
 |---|---|
 | `api_router.py` | `GET /models`, `GET /models/{model}`, `POST /chat/completions`, `POST /embeddings`, `POST /responses` |
-| `anthropic_router.py` | `POST /messages` — Anthropic Messages API compatibility layer |
-| `system_router.py` | `GET /health`, `GET/POST /ping`, `GET /logs`, `GET /logs/stream` |
-| `system_router.py` (logs_router) | `GET /logs/html` — HTML log viewer page |
+| `anthropic_router.py` | `POST /messages`, `POST /messages/count_tokens` — Anthropic Messages API compatibility layer |
+| `system_router.py` | `GET /health`, `GET/POST /ping` |
+| `logs_router.py` | `GET /logs/{last_n_lines}`, `GET /logs/stream`, `GET /logs/html` — log viewing and streaming |
 
 - Routes are registered twice: at root `/` and under `/v1/` prefix.
-- System routes (`/health`, `/ping`, `/logs*`) are registered only once at root.
+- System routes (`/health`, `/ping`) and log routes (`/logs*`) are registered only once at root.
 - All API routes use `@exceptions_handler` decorator.
-- Streaming uses `StreamingResponse` with async generators from `utils.py`.
+- Streaming uses `StreamingResponse` with async generators from `common/streaming.py`.
 - Anthropic router converts Anthropic Messages format → OpenAI → GigaChat → Anthropic response.
 
 ```
@@ -119,10 +139,11 @@ This is the core transformation engine:
 
 Applied in order (last added = first executed):
 
-1. **`PassTokenMiddleware`** — passes auth token from request to GigaChat (conditional)
-2. **`RquidMiddleware`** — sets unique request ID in `contextvars`
-3. **`PathNormalizationMiddleware`** — normalizes `/api/v1/...` → `/v1/...`
-4. **`CORSMiddleware`** — allows all origins
+1. **`PassTokenMiddleware`** (`pass_token.py`) — passes auth token from request to GigaChat (conditional, only if `pass_token=True`)
+2. **`RequestValidationMiddleware`** (`request_validation.py`) — enforces request body size limits
+3. **`RquidMiddleware`** (`rquid_context.py`) — sets unique request ID in `contextvars`
+4. **`PathNormalizationMiddleware`** (`path_normalizer.py`) — normalizes `/api/v1/...` → `/v1/...`
+5. **`CORSMiddleware`** — allows configurable origins/methods/headers
 
 ```
 ✅ DO: Inherit from BaseHTTPMiddleware (Starlette) for new middleware
@@ -132,20 +153,21 @@ Applied in order (last added = first executed):
 
 ### Streaming
 
-- `stream_chat_completion_generator()` — SSE stream for `/chat/completions`
-- `stream_responses_generator()` — SSE stream for `/responses`
+- `stream_chat_completion_generator()` in `common/streaming.py` — SSE stream for `/chat/completions`
+- `stream_responses_generator()` in `common/streaming.py` — SSE stream for `/responses`
 - Both are async generators yielding `data: {json}\n\n` strings.
 - Handle client disconnections gracefully.
 
 ### Configuration
 
-- `ProxyConfig` (root) nests `ProxySettings` + `GigaChatCLI`.
+- `ProxyConfig` (root) nests `ProxySettings` + `GigaChatCLI` — defined in `models/config.py`.
+- `SecuritySettings` in `models/security.py` — read-only security posture view.
 - Env var prefixes: `GPT2GIGA_` and `GIGACHAT_`.
 - CLI args via `pydantic-settings` with `cli_parse_args=True`.
 - See `.env.example` at repo root for all available settings.
 
 ```
-✅ DO: Add new proxy settings to ProxySettings in config.py
+✅ DO: Add new proxy settings to ProxySettings in models/config.py
 ✅ DO: Use Field(default=..., description="...") for every setting
 ```
 
@@ -154,11 +176,13 @@ Applied in order (last added = first executed):
 - **App wiring + middleware order**: `gpt2giga/api_server.py`
 - **OpenAI-compatible endpoints**: `gpt2giga/routers/api_router.py`
 - **Anthropic Messages API**: `gpt2giga/routers/anthropic_router.py`
-- **System/log endpoints + HTML viewer**: `gpt2giga/routers/system_router.py`, `gpt2giga/templates/log_viewer.html`
-- **Protocol mapping**: `gpt2giga/protocol/request_mapper.py`, `gpt2giga/protocol/response_mapper.py`
-- **Attachments caching + upload**: `gpt2giga/protocol/attachments.py`
+- **System endpoints (health, ping)**: `gpt2giga/routers/system_router.py`
+- **Log endpoints + HTML viewer**: `gpt2giga/routers/logs_router.py`, `gpt2giga/templates/log_viewer.html`
+- **Protocol mapping**: `gpt2giga/protocol/request/transformer.py`, `gpt2giga/protocol/response/processor.py`
+- **Attachments caching + upload**: `gpt2giga/protocol/attachment/attachments.py`
 - **Auth + API key dependency**: `gpt2giga/auth.py`
-- **Settings/env parsing**: `gpt2giga/config.py`, `.env.example`
+- **Settings/env parsing**: `gpt2giga/models/config.py`, `.env.example`
+- **Security posture**: `gpt2giga/models/security.py`
 
 ## JIT Search Hints
 
@@ -173,16 +197,19 @@ rg -n "class.*Middleware" gpt2giga/middlewares/
 rg -n "def (prepare_|process_|transform_)" gpt2giga/protocol/
 
 # Find streaming generators
-rg -n "async def stream_" gpt2giga/utils.py
+rg -n "async def stream_" gpt2giga/common/streaming.py
 
 # Find schema normalization logic
-rg -n "def (normalize_json_schema|resolve_schema_refs)" gpt2giga/utils.py
+rg -n "def (normalize_json_schema|resolve_schema_refs)" gpt2giga/common/json_schema.py
 
 # Find all Pydantic settings
-rg -n "class.*Settings|class.*Config" gpt2giga/config.py
+rg -n "class.*Settings|class.*Config" gpt2giga/models/config.py
 
 # Find Anthropic-specific logic
 rg -n "anthropic|messages" gpt2giga/routers/anthropic_router.py
+
+# Find error mapping / exception handling
+rg -n "ERROR_MAPPING|exceptions_handler" gpt2giga/common/exceptions.py
 ```
 
 ## Common Gotchas

@@ -82,7 +82,7 @@ rg -n "ERROR_MAPPING|exceptions_handler" gpt2giga/
 rg --files -g "test_*.py" tests/
 
 # Find env var usage
-rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/config.py
+rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
 
 # Find OpenAI ↔ GigaChat transformation logic
 rg -n "class (RequestTransformer|ResponseProcessor|AttachmentProcessor)" gpt2giga/
