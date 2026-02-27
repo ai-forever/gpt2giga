@@ -82,7 +82,7 @@ rg -n "ERROR_MAPPING|exceptions_handler" gpt2giga/
 rg --files -g "test_*.py" tests/
 
 # Find env var usage
-rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/config.py
+rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
 
 # Find OpenAI ↔ GigaChat transformation logic
 rg -n "class (RequestTransformer|ResponseProcessor|AttachmentProcessor)" gpt2giga/
@@ -101,3 +101,12 @@ uv run ruff check . && uv run ruff format --check . && uv run pytest tests/ --co
 - No lint warnings
 - PR template checklist completed
 - `uv.lock` updated if dependencies changed
+
+## Cursor Cloud specific instructions
+
+- **Service:** Single stateless FastAPI proxy (default port `8090`). No databases or auxiliary services required.
+- **uv must be installed first:** The VM does not ship with `uv`. The update script installs it automatically via `curl -LsSf https://astral.sh/uv/install.sh | sh`.
+- **Running the server:** `uv run gpt2giga` starts on `localhost:8090`. Without valid `GIGACHAT_CREDENTIALS` the proxy still boots and accepts requests, but upstream calls return an SSL/auth error — this is expected.
+- **Tests are fully mocked:** `uv run pytest tests/ --cov=. --cov-fail-under=80` runs all 246 tests without any external services or credentials.
+- **Lint/format/test commands:** See "Setup Commands" and "Definition of Done" sections above.
+- **Pre-commit hooks:** `uv run pre-commit install` sets up hooks (ruff check, ruff format, gitleaks). These run automatically on `git commit`.

@@ -26,7 +26,6 @@
 | `responses/function_calling.py` | Responses API with tools |
 | `responses/structured_output.py` | Responses API with structured output |
 | `responses/structured_output_nested.py` | Nested structured output |
-| `responses/structured_output_pydantic_complex.py` | Complex nested Pydantic models |
 | `responses/json_schema.py` | JSON schema response format |
 | `responses/base64_image.py` | Responses API with base64 image |
 | `responses/image_url.py` | Responses API with image URL |
@@ -37,13 +36,13 @@
 | `anthropic/system_prompt.py` | System prompt usage |
 | `anthropic/function_calling.py` | Tool use / function calling |
 | `anthropic/reasoning.py` | Extended thinking (`thinking` → `reasoning_effort`) |
+| `anthropic/count_tokens.py` | Token counting via `/messages/count_tokens` |
 | `anthropic/image_url.py` | Image URL input |
 | `anthropic/base64_image.py` | Base64 image input |
 | **Root examples** | **Standalone** |
 | `embeddings.py` | Embeddings endpoint usage |
 | `models.py` | Model listing and retrieval |
 | `openai_agents.py` | OpenAI Agents SDK integration (multi-agent triage) |
-| `weather_agent.py` | Agent with async weather tool |
 
 ## Patterns & Conventions
 
@@ -133,6 +132,6 @@ rg -n "reasoning|thinking" examples/
 ## Common Gotchas
 
 - Examples are **not** part of test coverage (excluded in `pyproject.toml`).
-- The `openai_agents.py` and `weather_agent.py` require the `integrations` dependency group: `uv sync --group integrations`.
-- Anthropic examples use the `anthropic` SDK (not `openai`) — requires `uv sync --group integrations`.
+- The `openai_agents.py` example requires the `integrations` dependency group: `uv sync --group integrations`.
+- Anthropic examples use the `anthropic` SDK (not `openai`) — `anthropic` is a direct project dependency, no extra install needed.
 - Each sub-directory has its own `README.md` with usage details.
