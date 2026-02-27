@@ -11,10 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Nginx**: Added `gpt2giga.conf` config and README for deployment behind nginx
 - **Docker Compose**: Updated compose (#77) — mitmproxy in `docker-compose-observability.yaml`, password for mitmproxy
 - **Logs router**: Extracted `logs_router.py`, split system router in two
+- **Cursor integration**: Added `integrations/cursor/README.md` — guide for using GigaChat in Cursor as a custom model
+- **Codex integration**: Added `integrations/codex/README.md` — OpenAI Codex setup via `config.toml` with custom gpt2giga provider
+- **Claude Code integration**: Added `integrations/claude-code/README.md` — Claude Code setup via `ANTHROPIC_BASE_URL`
+- **AGENTS.md documentation**: Updated all `AGENTS.md` files to match the current codebase structure
 
 ### Changed
 - Updated `.env.example`
 - Updated README for nginx
+- **Async I/O**: Moved blocking I/O operations in route handlers to worker threads via `anyio.to_thread.run_sync`:
+  - `logs_router.py` — log file reading and HTML template loading
+  - `api_router.py` — `tiktoken.encoding_for_model()` initialization
 
 ### Fixed
 - **Giga-auth**: Fixed giga-auth behaviour (#74)
