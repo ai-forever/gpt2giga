@@ -1,5 +1,6 @@
 import functools
 import time
+from typing import Optional
 
 import anyio
 import tiktoken
@@ -50,6 +51,27 @@ async def get_model(model: str, request: Request):
     model = response.model_dump(by_alias=True)
     model["created"] = int(time.time())
     return OpenAIModel(**model)
+
+
+def _model_info_entry(model_id: str) -> dict:
+    return {
+        "model_name": model_id,
+        "litellm_params": {"model": model_id},
+        "model_info": {"id": model_id},
+    }
+
+
+@router.get("/model/info")
+@exceptions_handler
+async def get_model_info(request: Request, model: Optional[str] = None):
+    giga_client = getattr(
+        request.state, "gigachat_client", request.app.state.gigachat_client
+    )
+    if model:
+        response = await giga_client.aget_model(model=model)
+        return _model_info_entry(response.id_)
+    response = await giga_client.aget_models()
+    return {"data": [_model_info_entry(m.id_) for m in response.data]}
 
 
 @router.post("/chat/completions", openapi_extra=chat_completions_openapi_extra())
