@@ -3,6 +3,12 @@ name: Docker Image CI
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'Dockerfile'
+      - 'gpt2giga/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/docker_image.yaml'
 
 env:
   REGISTRY: docker.io

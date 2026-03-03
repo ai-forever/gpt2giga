@@ -4,6 +4,12 @@ on:
   push:
     branches: [ "main" ]
     tags: [ "v*.*.*" ]
+    paths:
+      - 'Dockerfile'
+      - 'gpt2giga/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/publish-ghcr.yml'
   workflow_dispatch:
 
 permissions:

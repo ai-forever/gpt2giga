@@ -3,9 +3,21 @@ name: CI
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'gpt2giga/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ci.yaml'
   pull_request:
     branches: [ main ]
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'gpt2giga/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ci.yaml'
 
 jobs:
   test:
