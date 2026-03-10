@@ -427,11 +427,11 @@ completion = client.chat.completions.create(
 |----------------------------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
 | OpenCode                   | https://opencode.ai/                               | AI-агент с открытым исходным кодом                                                                                                          |
 | KiloCode                   | https://kilo.ai/                                   | AI-агент для написания кода, доступен в JetBrains/VSCode                                                                                    |
-| OpenHands                  | https://openhands.dev/                             | AI-ассистент для разработки<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands)    |
+| OpenHands                  | https://openhands.dev/                             | AI-ассистент для разработки.<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands/README.md) |
 | Zed                        | https://zed.dev/                                   | AI-ассистент                                                                                                                                |
 | Cline                      | https://cline.bot/                                 | AI-ассистент разработчика                                                                                                                   |
-| OpenAI Codex               | https://github.com/openai/codex                    | CLI агент от OpenAI                                                                                                                         |
-| Aider                      | https://aider.chat/                                | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](./integrations/aider) |
+| OpenAI Codex               | https://github.com/openai/codex                    | CLI-агент от OpenAI.<br /> Подробнее о запуске и настройке Codex для работы с gpt2giga — в [README](./integrations/codex/README.md)         |
+| Aider                      | https://aider.chat/                                | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](./integrations/aider/README.md) |
 | Langflow                   | https://github.com/langflow-ai/langflow            | Low/No-code платформа для создания агентов                                                                                                  |
 | DeepAgentsCLI              | https://github.com/langchain-ai/deepagents         | Deep Agents — это платформа для работы с агентами, построенная на основе langchain и langgraph                                              |
 | CrewAI                     | https://github.com/crewAIInc/crewAI                | Фреймворк для оркестрации агентов                                                                                                           |
@@ -440,10 +440,10 @@ completion = client.chat.completions.create(
 | Camel                      | https://github.com/camel-ai/camel                  | Мультиагентный фреймворк                                                                                                                    |
 | smolagents                 | https://github.com/huggingface/smolagents          | Фреймворк от hf                                                                                                                             |
 | Openclaw                   | https://openclaw.ai/                               | Personal AI assistant                                                                                                                       |
-| Claude Code                | https://code.claude.com/docs/en/overview           | CLI агент от Anthropic                                                                                                                      |
+| Claude Code                | https://code.claude.com/docs/en/overview           | CLI-агент от Anthropic.<br /> Подробнее о запуске и настройке Claude Code для работы с gpt2giga — в [README](./integrations/claude-code/README.md) |
 | OpenAI Agents SDK          | https://github.com/openai/openai-agents-python     | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
 | Anthropic SDK              | https://github.com/anthropics/anthropic-sdk-python | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
-| Cursor                     | https://cursor.com/                                | Cursor — это редактор на основе искусственного интеллекта и агент для программирования                                                      |
+| Cursor                     | https://cursor.com/                                | Редактор с ИИ и агентом для программирования.<br /> Подробнее о запуске и настройке Cursor для работы с gpt2giga — в [README](./integrations/cursor/README.md) |
 
 ## История изменений
 
