@@ -5,6 +5,16 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.1.5] - 2026-03-10
+### Добавлено
+- **Model info endpoint**: Добавлен `GET /model/info` для совместимости с автодополнением в Kilo Code и клиентами в стиле LiteLLM
+
+### Изменено
+- **GitHub Actions**: Workflow `ci.yaml`, `docker_image.yaml` и `publish-ghcr.yml` теперь запускаются только при изменениях релевантных файлов
+
+### Исправлено
+- **CI для Pull Request**: Тестовый workflow больше не запускается для draft PR
+
 ## [0.1.4.post1] - 2026-02-27
 ### Добавлено
 - **Интеграция Cursor**: Добавлен `integrations/cursor/README.md` — инструкция по использованию GigaChat в Cursor через кастомную модель
@@ -200,6 +210,7 @@
 
 ---
 
+[0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4
 [0.1.3.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3...v0.1.3.post1
 [0.1.3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2.post1...v0.1.3

@@ -5,6 +5,17 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-03-10
+
+### Added
+- **Model info endpoint**: Added `GET /model/info` for compatibility with Kilo Code autocomplete and LiteLLM-style clients
+
+### Changed
+- **GitHub Actions**: `ci.yaml`, `docker_image.yaml`, and `publish-ghcr.yml` now run only when relevant files change
+
+### Fixed
+- **Pull Request CI**: The test workflow no longer runs for draft PRs
+
 ## [0.1.4.post1] - 2026-02-27
 
 ### Added
@@ -201,6 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4
 [0.1.3.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3...v0.1.3.post1
 [0.1.3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.2.post1...v0.1.3
