@@ -135,6 +135,41 @@ def test_response_processor_stream_chunk_handles_delta():
     assert out["object"] == "chat.completion.chunk"
 
 
+def test_response_processor_process_response_api_includes_reasoning_item():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Paris",
+                        "reasoning_content": "This is a simple geography fact.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+    out = rp.process_response_api(
+        {
+            "model": "gpt-x",
+            "input": "Capital of France",
+            "reasoning": {"effort": "high", "summary": "auto"},
+        },
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="resp-1",
+    )
+    assert out["reasoning"] == {"effort": "high", "summary": "auto"}
+    assert out["output"][0]["type"] == "reasoning"
+    assert out["output"][0]["summary"][0]["type"] == "summary_text"
+    assert out["output"][0]["summary"][0]["text"] == "This is a simple geography fact."
+    assert out["output"][1]["type"] == "message"
+    assert out["output"][1]["content"][0]["text"] == "Paris"
+
+
 def test_response_processor_tool_calls_include_index():
     """Test that tool_calls include index field required by OpenAI SDK for streaming"""
     rp = ResponseProcessor(logger)

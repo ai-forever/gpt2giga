@@ -96,6 +96,16 @@ async def stream_responses_generator(
     msg_id = f"msg_{response_id}"
     fc_id = f"fc_{response_id}"  # ID for function call item
 
+    def build_reasoning_config() -> dict:
+        reasoning_data = request_data.get("reasoning") if request_data else None
+        if isinstance(reasoning_data, dict):
+            return {
+                "effort": reasoning_data.get("effort"),
+                "summary": reasoning_data.get("summary"),
+            }
+        effort = request_data.get("reasoning_effort") if request_data else None
+        return {"effort": effort, "summary": None}
+
     def sse_event(event_type: str, data: dict) -> str:
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
@@ -115,7 +125,7 @@ async def stream_responses_generator(
             "output": output or [],
             "parallel_tool_calls": True,
             "previous_response_id": None,
-            "reasoning": {"effort": None, "summary": None},
+            "reasoning": build_reasoning_config(),
             "store": True,
             "temperature": request_data.get("temperature", 1) if request_data else 1,
             "text": {"format": {"type": "text"}},
