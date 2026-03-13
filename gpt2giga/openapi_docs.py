@@ -346,6 +346,11 @@ def responses_openapi_extra() -> Dict[str, Any]:
                 "description": "Responses API text.format (incl. json_schema).",
                 "additionalProperties": True,
             },
+            "reasoning": {
+                "type": "object",
+                "description": "Responses API reasoning options (maps `effort` to `reasoning_effort`).",
+                "additionalProperties": True,
+            },
             "temperature": {"type": "number", "description": "Sampling temperature."},
             "top_p": {"type": "number", "description": "Nucleus sampling parameter."},
             "max_output_tokens": {
@@ -388,7 +393,15 @@ def responses_openapi_extra() -> Dict[str, Any]:
                 "input": "Stream it.",
                 "stream": True,
             },
-        }
+        },
+        "reasoning": {
+            "summary": "Reasoning response",
+            "value": {
+                "model": "GigaChat-2-Max",
+                "input": "What is the capital of France?",
+                "reasoning": {"effort": "high"},
+            },
+        },
     }
 
     description = (

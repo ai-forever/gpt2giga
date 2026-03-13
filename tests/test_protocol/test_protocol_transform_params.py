@@ -78,6 +78,16 @@ def test_enable_reasoning_does_not_override_explicit_reasoning_effort():
     assert out.get("reasoning_effort") == "low"
 
 
+def test_transform_responses_parameters_maps_reasoning_object_to_reasoning_effort():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_responses_parameters(
+        {"model": "gpt-x", "reasoning": {"effort": "high"}}
+    )
+    assert out.get("reasoning_effort") == "high"
+    assert "reasoning" not in out
+
+
 def test_apply_json_schema_as_function():
     """Тест метода _apply_json_schema_as_function"""
     cfg = ProxyConfig()
