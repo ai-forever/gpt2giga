@@ -247,6 +247,12 @@ class RequestTransformer:
         """Common parameter transformation logic for Chat Completions and Responses API."""
         transformed = data.copy()
 
+        reasoning = transformed.pop("reasoning", None)
+        if isinstance(reasoning, dict):
+            effort = reasoning.get("effort")
+            if effort is not None:
+                transformed["reasoning_effort"] = effort
+
         if getattr(self.config.proxy_settings, "enable_reasoning", False):
             transformed.setdefault("reasoning_effort", "high")
 

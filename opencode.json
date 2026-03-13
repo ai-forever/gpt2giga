@@ -1,0 +1,67 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "GigaChat-Lite": {
+      "name": "GigaChat-lite",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "GigaChat-2": {
+          "name": "GigaChat-2",
+          "modalities": {
+            "input": [
+              "text"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        }
+      },
+      "options": {
+        "baseURL": "http://localhost:8090"
+      }
+    },
+    "GigaChat-Pro": {
+      "name": "GigaChat-pro",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "GigaChat-2-Pro": {
+          "name": "GigaChat-2-Pro",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        }
+      },
+      "options": {
+        "baseURL": "http://localhost:8091"
+      }
+    },
+    "GigaChat-Max": {
+      "name": "GigaChat-Max",
+      "npm": "@ai-sdk/openai-compatible",
+      "models": {
+        "GigaChat-2-Max": {
+          "name": "GigaChat-2-Max",
+          "modalities": {
+            "input": [
+              "text",
+              "image"
+            ],
+            "output": [
+              "text"
+            ]
+          }
+        }
+      },
+      "options": {
+        "baseURL": "http://localhost:8092"
+      }
+    }
+  }
+}
