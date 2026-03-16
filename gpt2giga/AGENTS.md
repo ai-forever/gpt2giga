@@ -38,10 +38,11 @@ Request flow:
 | `auth.py` | API key verification (`verify_api_key` dependency) |
 | `logger.py` | Loguru setup, `rquid_context` context var |
 | `constants.py` | Size limits, MIME types, sensitive key patterns |
-| `openapi_docs.py` | OpenAPI schema extras for custom endpoints |
+| `openapi_docs.py` | Compatibility wrapper re-exporting OpenAPI schema helpers |
+| `openapi_specs/` | Actual OpenAPI schema builders split by API family |
 | `common/` | Shared utilities (re-exported via `common/__init__.py`; see below) |
 | `protocol/` | Request/response transformation layer (see below) |
-| `routers/` | FastAPI route handlers (see below) |
+| `routers/` | FastAPI route handlers and shared router helpers (see below) |
 | `middlewares/` | HTTP middleware chain (see below) |
 | `templates/` | HTML log viewer template (`templates/log_viewer.html`) |
 
@@ -117,8 +118,10 @@ Classes are re-exported via `protocol/__init__.py`.
 
 | File | Endpoints |
 |---|---|
-| `api_router.py` | `GET /models`, `GET /models/{model}`, `POST /chat/completions`, `POST /embeddings`, `POST /responses` |
-| `anthropic_router.py` | `POST /messages`, `POST /messages/count_tokens` — Anthropic Messages API compatibility layer |
+| `api_router.py` | Compatibility wrapper for the OpenAI-compatible router package |
+| `routers/api/` | Split OpenAI-compatible endpoints: models, chat/responses, files, batches |
+| `anthropic_router.py` | Compatibility wrapper for the Anthropic router package |
+| `routers/anthropic/` | Split Anthropic messages flow: conversion, messages, streaming, batches |
 | `system_router.py` | `GET /health`, `GET/POST /ping` |
 | `logs_router.py` | `GET /logs/{last_n_lines}`, `GET /logs/stream`, `GET /logs/html` — log viewing and streaming |
 
@@ -127,11 +130,13 @@ Classes are re-exported via `protocol/__init__.py`.
 - All API routes use `@exceptions_handler` decorator.
 - Streaming uses `StreamingResponse` with async generators from `common/streaming.py`.
 - Anthropic router converts Anthropic Messages format → OpenAI → GigaChat → Anthropic response.
+- Add new route logic to the split packages first; keep the wrapper modules import-stable and thin.
 
 ```
-✅ DO: Copy `chat_completions()` in api_router.py as template for new OpenAI-compatible endpoints
-✅ DO: See `anthropic_router.py` for the Anthropic ↔ OpenAI ↔ GigaChat translation pattern
+✅ DO: Add new OpenAI-compatible endpoints under `routers/api/`
+✅ DO: Add new Anthropic compatibility logic under `routers/anthropic/`
 ✅ DO: Use `getattr(request.state, "gigachat_client", state.gigachat_client)` for client access
+✅ DO: Keep compatibility re-exports in `api_router.py` / `anthropic_router.py` when moving code
 ❌ DON'T: Add new API endpoints directly into `gpt2giga/api_server.py` (keep endpoints in `gpt2giga/routers/*`)
 ```
 
@@ -174,8 +179,8 @@ Applied in order (last added = first executed):
 ## Touch Points / Key Files
 
 - **App wiring + middleware order**: `gpt2giga/api_server.py`
-- **OpenAI-compatible endpoints**: `gpt2giga/routers/api_router.py`
-- **Anthropic Messages API**: `gpt2giga/routers/anthropic_router.py`
+- **OpenAI-compatible endpoints**: `gpt2giga/routers/api/`, `gpt2giga/routers/api_router.py`
+- **Anthropic Messages API**: `gpt2giga/routers/anthropic/`, `gpt2giga/routers/anthropic_router.py`
 - **System endpoints (health, ping)**: `gpt2giga/routers/system_router.py`
 - **Log endpoints + HTML viewer**: `gpt2giga/routers/logs_router.py`, `gpt2giga/templates/log_viewer.html`
 - **Protocol mapping**: `gpt2giga/protocol/request/transformer.py`, `gpt2giga/protocol/response/processor.py`
@@ -183,6 +188,7 @@ Applied in order (last added = first executed):
 - **Auth + API key dependency**: `gpt2giga/auth.py`
 - **Settings/env parsing**: `gpt2giga/models/config.py`, `.env.example`
 - **Security posture**: `gpt2giga/models/security.py`
+- **OpenAPI schema builders**: `gpt2giga/openapi_specs/`, `gpt2giga/openapi_docs.py`
 
 ## JIT Search Hints
 
@@ -206,10 +212,16 @@ rg -n "def (normalize_json_schema|resolve_schema_refs)" gpt2giga/common/json_sch
 rg -n "class.*Settings|class.*Config" gpt2giga/models/config.py
 
 # Find Anthropic-specific logic
-rg -n "anthropic|messages" gpt2giga/routers/anthropic_router.py
+rg -n "anthropic|messages" gpt2giga/routers/anthropic/ gpt2giga/routers/anthropic_router.py
 
 # Find error mapping / exception handling
 rg -n "ERROR_MAPPING|exceptions_handler" gpt2giga/common/exceptions.py
+
+# Find OpenAI-compatible route implementations
+rg -n "@router\.(get|post|delete)" gpt2giga/routers/api/
+
+# Find OpenAPI schema builders
+rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs/ gpt2giga/openapi_docs.py
 ```
 
 ## Common Gotchas

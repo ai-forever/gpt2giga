@@ -66,6 +66,12 @@ uv run pre-commit install
 | `Dockerfile` | Multi-stage Docker build | builder runs `uv build` |
 | `docker-compose.yaml` | Docker Compose setup | uses `.env`, default port `8090` |
 
+### Refactor Notes
+
+- Large compatibility entrypoints such as `gpt2giga/routers/api_router.py`, `gpt2giga/routers/anthropic_router.py`, and `gpt2giga/openapi_docs.py` are thin wrappers now.
+- Put new endpoint logic in `gpt2giga/routers/api/` or `gpt2giga/routers/anthropic/` instead of growing the wrapper modules.
+- Put new OpenAPI schema builders in `gpt2giga/openapi_specs/` and re-export them through `gpt2giga/openapi_docs.py` only when you need a stable import path.
+
 ### Quick Find Commands
 
 ```bash
@@ -88,7 +94,10 @@ rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
 rg -n "class (RequestTransformer|ResponseProcessor|AttachmentProcessor)" gpt2giga/
 
 # Find Anthropic compatibility layer
-rg -n "anthropic" gpt2giga/routers/ examples/anthropic/
+rg -n "anthropic" gpt2giga/routers/anthropic/ gpt2giga/routers/anthropic_router.py examples/anthropic/
+
+# Find OpenAPI schema builders
+rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs/ gpt2giga/openapi_docs.py
 ```
 
 ## Definition of Done (Pre-PR)
