@@ -48,6 +48,10 @@
       "models": {
         "GigaChat-2-Max": {
           "name": "GigaChat-2-Max",
+          "limit": {
+            "context": 128000,
+            "output": 128000
+          },
           "modalities": {
             "input": [
               "text",

@@ -59,3 +59,22 @@ services:
       - .env
     stdin_open: true
     tty: true
+
+  qdrant:
+    # Use the official Qdrant Docker image
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    # Map the container ports to host ports
+    ports:
+      # Port 6333 is for the HTTP API and Web UI
+      - "6333:6333"
+      # Port 6334 is for gRPC API (used by some client libraries)
+      - "6334:6334"
+    # Mount a local directory to persist Qdrant data
+    volumes:
+      - qdrant_data:/qdrant/storage:z
+    restart: always
+
+  # Define the volume for persistent storage
+volumes:
+  qdrant_data:
