@@ -9,6 +9,7 @@ from gigachat import GigaChat
 from gigachat.models import Chat
 from starlette.requests import Request
 
+from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 
@@ -21,7 +22,7 @@ async def stream_chat_completion_generator(
     giga_client: Optional[GigaChat] = None,
 ) -> AsyncGenerator[str, None]:
     if not giga_client:
-        giga_client = request.app.state.gigachat_client
+        giga_client = get_gigachat_client(request)
     logger = getattr(request.app.state, "logger", None)
     rquid = rquid_context.get()
 
@@ -86,7 +87,7 @@ async def stream_responses_generator(
     request_data: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
     if not giga_client:
-        giga_client = request.app.state.gigachat_client
+        giga_client = get_gigachat_client(request)
     logger = getattr(request.app.state, "logger", None)
     rquid = rquid_context.get()
     import time

@@ -7,7 +7,7 @@ from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.routers.api_router import router
+from gpt2giga.routers.openai import router
 
 
 class MockResponse:
@@ -97,7 +97,7 @@ def make_app(monkeypatch=None):
 
         fake_tk = SimpleNamespace(encoding_for_model=lambda m: FakeEnc())
         monkeypatch.setattr(
-            sys.modules["gpt2giga.routers.api_router"], "tiktoken", fake_tk
+            sys.modules["gpt2giga.protocol.batches"], "tiktoken", fake_tk
         )
     return app
 

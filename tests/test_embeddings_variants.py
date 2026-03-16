@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.models.config import ProxyConfig
-from gpt2giga.routers import api_router
+from gpt2giga.routers.openai import router as openai_router
 
 
 class FakeClient:
@@ -15,7 +15,7 @@ class FakeClient:
 
 def make_app(monkeypatch=None):
     app = FastAPI()
-    app.include_router(api_router)
+    app.include_router(openai_router)
     app.state.gigachat_client = FakeClient()
     app.state.config = ProxyConfig()
     if monkeypatch:
@@ -26,7 +26,7 @@ def make_app(monkeypatch=None):
 
         fake_tk = SimpleNamespace(encoding_for_model=lambda m: FakeEnc())
         monkeypatch.setattr(
-            sys.modules["gpt2giga.routers.api_router"], "tiktoken", fake_tk
+            sys.modules["gpt2giga.protocol.batches"], "tiktoken", fake_tk
         )
     return app
 
