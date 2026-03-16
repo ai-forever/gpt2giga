@@ -13,6 +13,8 @@
 | `examples/chat_completions/` | OpenAI Chat Completions examples |
 | `examples/responses/` | OpenAI Responses API examples |
 | `examples/anthropic/` | Anthropic Messages API examples |
+| `examples/files.py` | OpenAI Files API example |
+| `examples/batches.py` | OpenAI Batches API example |
 | `examples/embeddings.py` | Embeddings usage |
 | `examples/models.py` | Model listing/retrieval |
 | `examples/openai_agents.py` | OpenAI Agents SDK example |
@@ -27,6 +29,7 @@
 - `responses/reasoning.py`: Responses API reasoning example
 - `responses/structured_output.py`: structured outputs
 - `anthropic/messages.py`: basic Messages API call
+- `anthropic/message_batches.py`: Anthropic Message Batches API
 - `anthropic/messages_stream.py`: streaming Messages API
 - `anthropic/count_tokens.py`: token counting endpoint
 

@@ -21,16 +21,28 @@
 # Chat Completions
 uv run python examples/chat_completions/chat_completion.py
 
+# Files API
+uv run python examples/files.py
+
+# Batches API
+uv run python examples/batches.py
+
 # Responses API
 uv run python examples/responses/single_prompt.py
 
 # Anthropic Messages API
 uv run python examples/anthropic/messages.py
+
+# Anthropic Message Batches API
+uv run python examples/anthropic/message_batches.py
 ```
 
 ## Дополнительно
 
 - `examples/embeddings.py`: эмбеддинги (`/embeddings` или `/v1/embeddings`)
 - `examples/models.py`: список моделей
+- `examples/files.py`: OpenAI Files API
+- `examples/batches.py`: OpenAI Batches API
+- `examples/anthropic/message_batches.py`: Anthropic Message Batches API
 - `examples/openai_agents.py`, `examples/weather_agent.py`: интеграции с OpenAI Agents SDK (потребуются доп. зависимости, см. `examples/AGENTS.md`)
 

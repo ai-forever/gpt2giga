@@ -35,12 +35,14 @@ Anthropic SDK не входит в обязательные зависимост
 ```bash
 uv run python examples/anthropic/messages.py
 uv run python examples/anthropic/messages_stream.py
+uv run python examples/anthropic/message_batches.py
 ```
 
 ## Что есть в папке
 
 - `messages.py`: базовый запрос (не стрим)
 - `messages_stream.py`: streaming
+- `message_batches.py`: Message Batches API
 - `multi_turn.py`: многоходовый диалог
 - `system_prompt.py`: системный промпт
 - `function_calling.py`: tool use / function calling
