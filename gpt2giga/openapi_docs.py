@@ -420,6 +420,119 @@ def responses_openapi_extra() -> Dict[str, Any]:
     )
 
 
+def files_openapi_extra() -> Dict[str, Any]:
+    """OpenAPI extras for `POST /files`."""
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["file", "purpose"],
+                        "properties": {
+                            "file": {
+                                "type": "string",
+                                "format": "binary",
+                                "description": "File to upload.",
+                            },
+                            "purpose": {
+                                "type": "string",
+                                "description": "OpenAI file purpose.",
+                                "example": "batch",
+                            },
+                        },
+                    }
+                }
+            },
+            "description": (
+                "**Required**: `file`, `purpose`.\n\n"
+                "**Notes**:\n"
+                "- `purpose` is accepted in OpenAI format and mapped to the closest "
+                "GigaChat equivalent."
+            ),
+        }
+    }
+
+
+def batches_openapi_extra() -> Dict[str, Any]:
+    """OpenAPI extras for `POST /batches`."""
+    minimal_schema: Dict[str, Any] = {
+        "title": "BatchCreateRequestMinimal",
+        "type": "object",
+        "required": ["completion_window", "endpoint", "input_file_id"],
+        "properties": {
+            "completion_window": {
+                "type": "string",
+                "enum": ["24h"],
+                "description": "Currently only `24h` is supported.",
+            },
+            "endpoint": {
+                "type": "string",
+                "enum": [
+                    "/v1/chat/completions",
+                    "/v1/responses",
+                    "/v1/embeddings",
+                ],
+                "description": "OpenAI endpoint to batch.",
+            },
+            "input_file_id": {
+                "type": "string",
+                "description": "Uploaded input file id.",
+            },
+        },
+        "additionalProperties": True,
+    }
+
+    full_schema: Dict[str, Any] = {
+        "title": "BatchCreateRequestFull",
+        "type": "object",
+        "required": ["completion_window", "endpoint", "input_file_id"],
+        "properties": {
+            **minimal_schema["properties"],
+            "metadata": {
+                "type": "object",
+                "description": "Optional metadata preserved on the proxy response.",
+                "additionalProperties": True,
+            },
+            "output_expires_after": {
+                "type": "object",
+                "description": "Accepted for compatibility and ignored upstream.",
+                "additionalProperties": True,
+            },
+        },
+        "additionalProperties": True,
+    }
+
+    minimal_example = {
+        "completion_window": "24h",
+        "endpoint": "/v1/chat/completions",
+        "input_file_id": "file-abc123",
+    }
+    full_example = {
+        "completion_window": "24h",
+        "endpoint": "/v1/chat/completions",
+        "input_file_id": "file-abc123",
+        "metadata": {"source": "nightly-job"},
+    }
+
+    description = (
+        "**Required**: `completion_window`, `endpoint`, `input_file_id`.\n\n"
+        "**Notes**:\n"
+        "- Input JSONL is accepted in OpenAI batch format and translated before "
+        "submission to GigaChat.\n"
+        "- Supported endpoints: `/v1/chat/completions`, `/v1/responses`, "
+        "and `/v1/embeddings`."
+    )
+    return _request_body_oneof(
+        minimal_schema=minimal_schema,
+        full_schema=full_schema,
+        minimal_example=minimal_example,
+        full_example=full_example,
+        description=description,
+    )
+
+
 def anthropic_count_tokens_openapi_extra() -> Dict[str, Any]:
     """OpenAPI extras for `POST /messages/count_tokens` (Anthropic token counting)."""
     minimal_schema: Dict[str, Any] = {

@@ -26,7 +26,7 @@ def make_app(monkeypatch=None):
 
         fake_tk = SimpleNamespace(encoding_for_model=lambda m: FakeEnc())
         monkeypatch.setattr(
-            sys.modules["gpt2giga.routers.api_router"], "tiktoken", fake_tk
+            sys.modules["gpt2giga.protocol.batches"], "tiktoken", fake_tk
         )
     return app
 

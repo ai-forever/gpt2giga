@@ -121,7 +121,16 @@ def create_app(config=None) -> FastAPI:
     # /api/v1/embeddings -> /v1/embeddings/
     app.add_middleware(
         PathNormalizationMiddleware,
-        valid_roots=["v1", "chat", "models", "embeddings", "responses", "messages"],
+        valid_roots=[
+            "v1",
+            "chat",
+            "models",
+            "embeddings",
+            "responses",
+            "messages",
+            "files",
+            "batches",
+        ],
     )
     app.add_middleware(RquidMiddleware)
     app.add_middleware(
