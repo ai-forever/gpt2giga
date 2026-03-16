@@ -50,6 +50,7 @@ services:
       --web-port 8081
       --ssl-insecure
       --set web_password=${MITMPROXY_PASSWORD}
+      --set stream_lange_bodies=1
     ports:
       - "8080:8080"
       - "8081:8081"
