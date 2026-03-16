@@ -4,7 +4,7 @@ from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.routers.api import router
+from gpt2giga.routers.openai import router
 
 
 class MockResponse:

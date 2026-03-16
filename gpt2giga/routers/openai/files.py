@@ -4,18 +4,18 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
+from gpt2giga.app_state import get_file_store, get_gigachat_client
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_form import read_request_multipart
-from gpt2giga.openapi_specs import files_openapi_extra
+from gpt2giga.openapi_specs.openai import files_openapi_extra
 from gpt2giga.protocol.batches import map_openai_file_purpose
-from gpt2giga.routers.api.helpers import (
+from gpt2giga.routers.openai.helpers import (
     _load_batch_output_content,
     _paginate_items,
     _serialize_file_object,
 )
-from gpt2giga.routers.state import get_file_store, get_gigachat_client
 
-router = APIRouter(tags=["API"])
+router = APIRouter(tags=["OpenAI"])
 
 
 @router.post("/files", openapi_extra=files_openapi_extra())

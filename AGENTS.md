@@ -68,7 +68,7 @@ uv run pre-commit install
 
 ### Refactor Notes
 
-- Router implementations live directly in `gpt2giga/routers/api/` and `gpt2giga/routers/anthropic/`.
+- Router implementations live directly in `gpt2giga/routers/openai/` and `gpt2giga/routers/anthropic/`.
 - OpenAPI schema builders live directly in `gpt2giga/openapi_specs/`.
 - When splitting large files further, prefer package-level `__init__.py` exports over bringing back one-file compatibility wrappers.
 

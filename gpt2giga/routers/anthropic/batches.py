@@ -15,17 +15,13 @@ from gpt2giga.protocol.batches import (
     parse_jsonl,
     transform_batch_input_file,
 )
-from gpt2giga.routers.anthropic.conversion import (
+from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
+from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
-from gpt2giga.routers.anthropic.responses import (
+from gpt2giga.protocol.anthropic.response import (
     _anthropic_http_exception,
     _build_anthropic_response,
-)
-from gpt2giga.routers.state import (
-    get_batch_store,
-    get_file_store,
-    get_gigachat_client,
 )
 
 router = APIRouter(tags=["Anthropic"])

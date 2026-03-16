@@ -3,7 +3,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.models.config import ProxyConfig
-from gpt2giga.routers import logs_api_router, logs_router, system_router
+from gpt2giga.routers.logs_router import logs_api_router, logs_router
+from gpt2giga.routers.system_router import system_router
 
 
 @pytest.fixture

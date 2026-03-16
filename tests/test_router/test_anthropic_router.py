@@ -9,15 +9,17 @@ from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.routers.anthropic import (
-    _build_anthropic_response,
+from gpt2giga.protocol.anthropic.request import (
     _convert_anthropic_messages_to_openai,
     _convert_anthropic_tools_to_openai,
     _extract_text_from_openai_messages,
     _extract_tool_definitions_text,
-    _map_stop_reason,
-    router,
 )
+from gpt2giga.protocol.anthropic.response import (
+    _build_anthropic_response,
+    _map_stop_reason,
+)
+from gpt2giga.routers.anthropic import router
 
 
 # ---------------------------------------------------------------------------

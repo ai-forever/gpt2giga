@@ -17,8 +17,10 @@ from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-from gpt2giga.routers import anthropic_router, api_router, logs_api_router, logs_router
-from gpt2giga.routers import system_router
+from gpt2giga.routers.anthropic import router as anthropic_router
+from gpt2giga.routers.logs_router import logs_api_router, logs_router
+from gpt2giga.routers.openai import router as openai_router
+from gpt2giga.routers.system_router import system_router
 
 
 @asynccontextmanager
@@ -148,9 +150,9 @@ def create_app(config=None) -> FastAPI:
         return RedirectResponse(url="/docs")
 
     api_dependencies = [Depends(verify_api_key)] if auth_required else []
-    app.include_router(api_router, dependencies=api_dependencies)
+    app.include_router(openai_router, dependencies=api_dependencies)
     app.include_router(
-        api_router,
+        openai_router,
         prefix="/v1",
         tags=["V1"],
         dependencies=api_dependencies,

@@ -41,7 +41,7 @@ Request flow:
 | `openapi_specs/` | Actual OpenAPI schema builders split by API family |
 | `common/` | Shared utilities (re-exported via `common/__init__.py`; see below) |
 | `protocol/` | Request/response transformation layer (see below) |
-| `routers/` | FastAPI route handlers and shared router helpers (see below) |
+| `routers/` | FastAPI route handlers grouped by API family (see below) |
 | `middlewares/` | HTTP middleware chain (see below) |
 | `templates/` | HTML log viewer template (`templates/log_viewer.html`) |
 
@@ -117,8 +117,9 @@ Classes are re-exported via `protocol/__init__.py`.
 
 | File | Endpoints |
 |---|---|
-| `routers/api/` | Split OpenAI-compatible endpoints: models, chat/responses, files, batches |
-| `routers/anthropic/` | Split Anthropic messages flow: conversion, messages, streaming, batches |
+| `routers/openai/` | Split OpenAI-compatible endpoints: models, chat completions, responses, embeddings, files, batches |
+| `routers/anthropic/` | Anthropic HTTP endpoints: messages and batches |
+| `protocol/anthropic/` | Anthropic request/response/streaming translation helpers |
 | `system_router.py` | `GET /health`, `GET/POST /ping` |
 | `logs_router.py` | `GET /logs/{last_n_lines}`, `GET /logs/stream`, `GET /logs/html` — log viewing and streaming |
 
@@ -130,9 +131,9 @@ Classes are re-exported via `protocol/__init__.py`.
 - Add new route logic to the split packages directly.
 
 ```
-✅ DO: Add new OpenAI-compatible endpoints under `routers/api/`
+✅ DO: Add new OpenAI-compatible endpoints under `routers/openai/`
 ✅ DO: Add new Anthropic compatibility logic under `routers/anthropic/`
-✅ DO: Use `getattr(request.state, "gigachat_client", state.gigachat_client)` for client access
+✅ DO: Keep protocol translation helpers out of `routers/` when they are reusable outside a single endpoint module
 ❌ DON'T: Add new API endpoints directly into `gpt2giga/api_server.py` (keep endpoints in `gpt2giga/routers/*`)
 ```
 
@@ -175,8 +176,9 @@ Applied in order (last added = first executed):
 ## Touch Points / Key Files
 
 - **App wiring + middleware order**: `gpt2giga/api_server.py`
-- **OpenAI-compatible endpoints**: `gpt2giga/routers/api/`
+- **OpenAI-compatible endpoints**: `gpt2giga/routers/openai/`
 - **Anthropic Messages API**: `gpt2giga/routers/anthropic/`
+- **Anthropic protocol translation**: `gpt2giga/protocol/anthropic/`
 - **System endpoints (health, ping)**: `gpt2giga/routers/system_router.py`
 - **Log endpoints + HTML viewer**: `gpt2giga/routers/logs_router.py`, `gpt2giga/templates/log_viewer.html`
 - **Protocol mapping**: `gpt2giga/protocol/request/transformer.py`, `gpt2giga/protocol/response/processor.py`
@@ -214,7 +216,7 @@ rg -n "anthropic|messages" gpt2giga/routers/anthropic/
 rg -n "ERROR_MAPPING|exceptions_handler" gpt2giga/common/exceptions.py
 
 # Find OpenAI-compatible route implementations
-rg -n "@router\.(get|post|delete)" gpt2giga/routers/api/
+rg -n "@router\.(get|post|delete)" gpt2giga/routers/openai/
 
 # Find OpenAPI schema builders
 rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs/
