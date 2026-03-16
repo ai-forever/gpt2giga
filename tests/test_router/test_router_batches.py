@@ -273,3 +273,24 @@ def test_batches_endpoints_translate_openai_flow():
     assert transformed_line["custom_id"] == "req-1"
     assert transformed_line["response"]["body"]["object"] == "chat.completion"
     assert transformed_line["response"]["body"]["model"] == "gpt-x"
+
+
+def test_openapi_includes_examples_for_files_and_batches():
+    app = make_app()
+
+    schema = app.openapi()
+
+    files_examples = schema["paths"]["/files"]["post"]["requestBody"]["content"][
+        "multipart/form-data"
+    ]["examples"]
+    assert "batch_input" in files_examples
+    assert files_examples["batch_input"]["value"]["purpose"] == "batch"
+    assert "assistant_asset" in files_examples
+
+    batch_examples = schema["paths"]["/batches"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["examples"]
+    assert "minimal" in batch_examples
+    assert "responses_batch" in batch_examples
+    assert batch_examples["responses_batch"]["value"]["endpoint"] == "/v1/responses"
+    assert "embeddings_batch" in batch_examples

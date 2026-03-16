@@ -387,7 +387,23 @@ def files_openapi_extra() -> Dict[str, Any]:
                                 "example": "batch",
                             },
                         },
-                    }
+                    },
+                    "examples": {
+                        "batch_input": {
+                            "summary": "Upload a batch input file",
+                            "value": {
+                                "purpose": "batch",
+                                "file": "(binary JSONL file, for example batch.jsonl)",
+                            },
+                        },
+                        "assistant_asset": {
+                            "summary": "Upload an assistants file",
+                            "value": {
+                                "purpose": "assistants",
+                                "file": "(binary file, for example handbook.pdf)",
+                            },
+                        },
+                    },
                 }
             },
             "description": (
@@ -457,6 +473,25 @@ def batches_openapi_extra() -> Dict[str, Any]:
         "- Supported endpoints: `/v1/chat/completions`, `/v1/responses`, "
         "and `/v1/embeddings`."
     )
+    extra_examples = {
+        "responses_batch": {
+            "summary": "Batch over the Responses API",
+            "value": {
+                "completion_window": "24h",
+                "endpoint": "/v1/responses",
+                "input_file_id": "file-resp123",
+                "metadata": {"source": "bulk-summarization"},
+            },
+        },
+        "embeddings_batch": {
+            "summary": "Batch over the Embeddings API",
+            "value": {
+                "completion_window": "24h",
+                "endpoint": "/v1/embeddings",
+                "input_file_id": "file-embed123",
+            },
+        },
+    }
     return _request_body_oneof(
         minimal_schema=minimal_schema,
         full_schema=full_schema,
@@ -471,5 +506,6 @@ def batches_openapi_extra() -> Dict[str, Any]:
             "input_file_id": "file-abc123",
             "metadata": {"source": "nightly-job"},
         },
+        extra_examples=extra_examples,
         description=description,
     )

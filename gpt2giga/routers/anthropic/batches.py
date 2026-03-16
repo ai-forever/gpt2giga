@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query, Request, Response
 
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
+from gpt2giga.openapi_specs.anthropic import anthropic_message_batches_openapi_extra
 from gpt2giga.protocol.batches import (
     extract_batch_result_body,
     get_batch_target,
@@ -246,7 +247,9 @@ def _build_anthropic_batch_results(
     return ("\n".join(result_lines) + ("\n" if result_lines else "")).encode("utf-8")
 
 
-@router.post("/messages/batches")
+@router.post(
+    "/messages/batches", openapi_extra=anthropic_message_batches_openapi_extra()
+)
 @exceptions_handler
 async def create_message_batch(request: Request):
     """Anthropic Message Batches API compatible create endpoint."""

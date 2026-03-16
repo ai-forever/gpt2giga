@@ -1561,3 +1561,16 @@ class TestMessageBatchesEndpoint:
         delete = client.delete("/messages/batches/batch-1")
         assert delete.status_code == 501
         assert delete.json()["error"]["type"] == "api_error"
+
+    def test_openapi_includes_examples_for_message_batches(self):
+        app = make_app(FakeGigachatBatches())
+
+        schema = app.openapi()
+        batch_examples = schema["paths"]["/messages/batches"]["post"]["requestBody"][
+            "content"
+        ]["application/json"]["examples"]
+
+        assert "minimal" in batch_examples
+        assert batch_examples["minimal"]["value"]["requests"][0]["custom_id"] == "req-1"
+        assert "full" in batch_examples
+        assert "multiple_requests" in batch_examples

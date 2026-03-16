@@ -174,3 +174,191 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
         },
         description=description,
     )
+
+
+def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
+    """OpenAPI extras for POST /messages/batches."""
+    minimal_schema: Dict[str, Any] = {
+        "title": "AnthropicMessageBatchesRequestMinimal",
+        "type": "object",
+        "required": ["requests"],
+        "properties": {
+            "requests": {
+                "type": "array",
+                "description": "Anthropic batch requests to process asynchronously.",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["custom_id", "params"],
+                    "properties": {
+                        "custom_id": {
+                            "type": "string",
+                            "description": "Client-defined identifier for this request.",
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "Anthropic Messages API payload for this item.",
+                            "additionalProperties": True,
+                        },
+                    },
+                    "additionalProperties": True,
+                },
+            }
+        },
+        "additionalProperties": True,
+    }
+
+    full_schema: Dict[str, Any] = {
+        "title": "AnthropicMessageBatchesRequestFull",
+        "type": "object",
+        "required": ["requests"],
+        "properties": {
+            "requests": {
+                "type": "array",
+                "description": "Anthropic batch requests to process asynchronously.",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["custom_id", "params"],
+                    "properties": {
+                        "custom_id": {
+                            "type": "string",
+                            "description": "Client-defined identifier for this request.",
+                        },
+                        "params": {
+                            "type": "object",
+                            "description": "Anthropic Messages API payload for this item.",
+                            "properties": {
+                                "model": {
+                                    "type": "string",
+                                    "description": "Model id.",
+                                },
+                                "max_tokens": {
+                                    "type": "integer",
+                                    "description": "Maximum output tokens.",
+                                },
+                                "system": {
+                                    "description": "System prompt (string or content blocks).",
+                                    "oneOf": [
+                                        {"type": "string"},
+                                        {"type": "array", "items": {"type": "object"}},
+                                    ],
+                                },
+                                "messages": {
+                                    "type": "array",
+                                    "description": "Anthropic messages array.",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": True,
+                                    },
+                                },
+                                "tools": {
+                                    "type": "array",
+                                    "description": "Anthropic tools (input_schema).",
+                                    "items": {
+                                        "type": "object",
+                                        "additionalProperties": True,
+                                    },
+                                },
+                            },
+                            "additionalProperties": True,
+                        },
+                    },
+                    "additionalProperties": True,
+                },
+            }
+        },
+        "additionalProperties": True,
+    }
+
+    description = (
+        "**Required**: `requests`.\n\n"
+        "**Notes**:\n"
+        "- Each request item must include a unique `custom_id` and a non-streaming "
+        "Messages API `params` object.\n"
+        "- Batch items are translated to the OpenAI-compatible batch pipeline before "
+        "submission to GigaChat."
+    )
+    return _request_body_oneof(
+        minimal_schema=minimal_schema,
+        full_schema=full_schema,
+        minimal_example={
+            "requests": [
+                {
+                    "custom_id": "req-1",
+                    "params": {
+                        "model": "GigaChat-2-Max",
+                        "max_tokens": 128,
+                        "messages": [{"role": "user", "content": "Hello batch"}],
+                    },
+                }
+            ]
+        },
+        full_example={
+            "requests": [
+                {
+                    "custom_id": "req-tools-1",
+                    "params": {
+                        "model": "GigaChat-2-Max",
+                        "system": "You are a research assistant.",
+                        "max_tokens": 256,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "Summarize yesterday's deployment notes.",
+                            }
+                        ],
+                        "tools": [
+                            {
+                                "name": "lookup_release_notes",
+                                "description": "Find release notes by date.",
+                                "input_schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "date": {"type": "string"},
+                                    },
+                                    "required": ["date"],
+                                },
+                            }
+                        ],
+                    },
+                }
+            ]
+        },
+        extra_examples={
+            "multiple_requests": {
+                "summary": "Multiple batch requests",
+                "value": {
+                    "requests": [
+                        {
+                            "custom_id": "req-1",
+                            "params": {
+                                "model": "GigaChat-2-Max",
+                                "max_tokens": 128,
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": "Draft a release note title.",
+                                    }
+                                ],
+                            },
+                        },
+                        {
+                            "custom_id": "req-2",
+                            "params": {
+                                "model": "GigaChat-2-Max",
+                                "max_tokens": 128,
+                                "messages": [
+                                    {
+                                        "role": "user",
+                                        "content": "Draft a one-line summary.",
+                                    }
+                                ],
+                            },
+                        },
+                    ]
+                },
+            }
+        },
+        description=description,
+    )
