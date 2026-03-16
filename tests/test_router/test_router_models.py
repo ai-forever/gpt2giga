@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
-from gpt2giga.routers.api_router import router
+from gpt2giga.routers.api import router
 
 
 def make_app():

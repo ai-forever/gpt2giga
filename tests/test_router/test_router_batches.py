@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.routers.api_router import router
+from gpt2giga.routers.api import router
 
 
 class FakeUploadedFile(BaseModel):

@@ -50,12 +50,12 @@ Tests mirror the source structure:
 | `test_protocol/test_request_mapper_extra.py` | `protocol/request_mapper.py` | Request mapping edge cases |
 | `test_protocol/test_responseprocessor_exceptions.py` | `protocol/response_mapper.py` | Response processor error handling |
 | `test_router/test_router.py` | `routers/` | Endpoint basics (health, ping), 404/405 |
-| `test_router/test_router_chat_nonstream.py` | `routers/api_router.py` | Non-streaming chat completions |
-| `test_router/test_router_stream_chat.py` | `routers/api_router.py` | Streaming chat completions |
-| `test_router/test_router_models.py` | `routers/api_router.py` | Model listing endpoint |
-| `test_router/test_router_endpoints.py` | `routers/api_router.py` | Endpoint integration (embeddings, responses) |
+| `test_router/test_router_chat_nonstream.py` | `routers/api/` | Non-streaming chat completions |
+| `test_router/test_router_stream_chat.py` | `routers/api/` | Streaming chat completions |
+| `test_router/test_router_models.py` | `routers/api/` | Model listing endpoint |
+| `test_router/test_router_endpoints.py` | `routers/api/` | Endpoint integration (embeddings, responses) |
 | `test_router/test_system_router_extra.py` | `routers/system_router.py` | System router edge cases |
-| `test_router/test_anthropic_router.py` | `routers/anthropic_router.py` | Anthropic Messages API (tools, streaming, thinking) |
+| `test_router/test_anthropic_router.py` | `routers/anthropic/` | Anthropic Messages API (tools, streaming, thinking) |
 | `test_utils/test_utils.py` | `utils.py` | Utility functions, exception handler |
 | `test_utils/test_convert_tools.py` | `utils.py` | Tool conversion, JSON schema normalization |
 | `test_utils/test_stream_generators.py` | `utils.py` | Stream generators (chat, responses), SSE events |
@@ -64,7 +64,7 @@ Tests mirror the source structure:
 | `test_auth.py` | `auth.py` | API key verification (Bearer, X-API-Key) |
 | `test_middleware.py` | `middlewares/` | Path normalization, token passing |
 | `test_logger.py` | `logger.py` | Logger setup, log levels |
-| `test_embeddings_variants.py` | `routers/api_router.py` | Embeddings (string, token IDs, list of lists) |
+| `test_embeddings_variants.py` | `routers/api/` | Embeddings (string, token IDs, list of lists) |
 
 ## Patterns & Conventions
 

@@ -68,9 +68,9 @@ uv run pre-commit install
 
 ### Refactor Notes
 
-- Large compatibility entrypoints such as `gpt2giga/routers/api_router.py`, `gpt2giga/routers/anthropic_router.py`, and `gpt2giga/openapi_docs.py` are thin wrappers now.
-- Put new endpoint logic in `gpt2giga/routers/api/` or `gpt2giga/routers/anthropic/` instead of growing the wrapper modules.
-- Put new OpenAPI schema builders in `gpt2giga/openapi_specs/` and re-export them through `gpt2giga/openapi_docs.py` only when you need a stable import path.
+- Router implementations live directly in `gpt2giga/routers/api/` and `gpt2giga/routers/anthropic/`.
+- OpenAPI schema builders live directly in `gpt2giga/openapi_specs/`.
+- When splitting large files further, prefer package-level `__init__.py` exports over bringing back one-file compatibility wrappers.
 
 ### Quick Find Commands
 
@@ -94,10 +94,10 @@ rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
 rg -n "class (RequestTransformer|ResponseProcessor|AttachmentProcessor)" gpt2giga/
 
 # Find Anthropic compatibility layer
-rg -n "anthropic" gpt2giga/routers/anthropic/ gpt2giga/routers/anthropic_router.py examples/anthropic/
+rg -n "anthropic" gpt2giga/routers/anthropic/ examples/anthropic/
 
 # Find OpenAPI schema builders
-rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs/ gpt2giga/openapi_docs.py
+rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs/
 ```
 
 ## Definition of Done (Pre-PR)
