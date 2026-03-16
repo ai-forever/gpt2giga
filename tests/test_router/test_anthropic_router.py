@@ -1,5 +1,6 @@
 """Tests for Anthropic Messages API router."""
 
+import base64
 import json
 
 from fastapi import FastAPI
@@ -232,9 +233,113 @@ class FakeGigachatFunctionCallReservedWebSearch:
         return gen()
 
 
+class FakeBatchRequestCounts:
+    def __init__(self, total, completed=None, failed=None):
+        self.total = total
+        self.completed = completed
+        self.failed = failed
+
+
+class FakeBatch:
+    def __init__(
+        self,
+        batch_id,
+        *,
+        status,
+        request_counts,
+        output_file_id=None,
+        created_at=123,
+        updated_at=124,
+    ):
+        self.id_ = batch_id
+        self.status = status
+        self.request_counts = request_counts
+        self.output_file_id = output_file_id
+        self.created_at = created_at
+        self.updated_at = updated_at
+
+
+class FakeBatches:
+    def __init__(self, batches):
+        self.batches = batches
+
+
+class FakeFileContent:
+    def __init__(self, content):
+        self.content = content
+
+
+class FakeGigachatBatches(FakeGigachat):
+    def __init__(self):
+        super().__init__()
+        self.batches = {}
+        self.files = {}
+        self.last_batch_content = None
+        self.last_batch_method = None
+
+    async def acreate_batch(self, content, method):
+        self.last_batch_content = content
+        self.last_batch_method = method
+        output_payload = [
+            {
+                "custom_id": "req-1",
+                "result": {
+                    "choices": [
+                        {
+                            "message": {"role": "assistant", "content": "Batch hello"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 3,
+                        "completion_tokens": 2,
+                        "total_tokens": 5,
+                    },
+                },
+            },
+            {
+                "custom_id": "req-2",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": "Bad batch input",
+                },
+            },
+        ]
+        self.files["file-output-1"] = FakeFileContent(
+            base64.b64encode(
+                ("\n".join(json.dumps(row) for row in output_payload) + "\n").encode(
+                    "utf-8"
+                )
+            ).decode("utf-8")
+        )
+        batch = FakeBatch(
+            "batch-1",
+            status="completed",
+            request_counts=FakeBatchRequestCounts(total=2, completed=1, failed=1),
+            output_file_id="file-output-1",
+        )
+        self.batches[batch.id_] = batch
+        return batch
+
+    async def aget_batches(self, batch_id=None):
+        if batch_id is None:
+            return FakeBatches(list(self.batches.values()))
+        batch = self.batches.get(batch_id)
+        return FakeBatches([batch] if batch else [])
+
+    async def aget_file_content(self, file_id):
+        return self.files[file_id]
+
+
 class FakeRequestTransformer:
     async def prepare_chat_completion(self, data, giga_client=None):
-        return {"model": data.get("model", "giga")}
+        return {
+            "model": data.get("model", "giga"),
+            "messages": data.get("messages", []),
+            "reasoning_effort": data.get("reasoning_effort"),
+            "functions": data.get("functions"),
+            "function_call": data.get("function_call"),
+        }
 
 
 def make_app(gigachat=None):
@@ -1332,3 +1437,125 @@ class TestCountTokensEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert "input_tokens" in body
+
+
+class TestMessageBatchesEndpoint:
+    def test_batch_lifecycle_and_results(self):
+        app = make_app(FakeGigachatBatches())
+        giga_client = app.state.gigachat_client
+        client = TestClient(app)
+
+        payload = {
+            "requests": [
+                {
+                    "custom_id": "req-1",
+                    "params": {
+                        "model": "claude-test",
+                        "max_tokens": 64,
+                        "messages": [{"role": "user", "content": "Hello batch"}],
+                    },
+                },
+                {
+                    "custom_id": "req-2",
+                    "params": {
+                        "model": "claude-test",
+                        "max_tokens": 64,
+                        "messages": [{"role": "user", "content": "This one errors"}],
+                    },
+                },
+            ]
+        }
+
+        created = client.post("/messages/batches", json=payload)
+        assert created.status_code == 200
+        body = created.json()
+        assert body["type"] == "message_batch"
+        assert body["processing_status"] == "ended"
+        assert body["results_url"] == "/v1/messages/batches/batch-1/results"
+        assert giga_client.last_batch_method == "chat_completions"
+
+        translated_lines = [
+            json.loads(line)
+            for line in giga_client.last_batch_content.decode("utf-8").splitlines()
+        ]
+        assert translated_lines[0]["custom_id"] == "req-1"
+        assert translated_lines[0]["body"]["messages"][0]["content"] == "Hello batch"
+
+        listed = client.get("/messages/batches")
+        assert listed.status_code == 200
+        listed_body = listed.json()
+        assert listed_body["data"][0]["id"] == "batch-1"
+        assert listed_body["first_id"] == "batch-1"
+        assert listed_body["last_id"] == "batch-1"
+
+        retrieved = client.get("/messages/batches/batch-1")
+        assert retrieved.status_code == 200
+        assert retrieved.json()["request_counts"] == {
+            "canceled": 0,
+            "errored": 1,
+            "expired": 0,
+            "processing": 0,
+            "succeeded": 1,
+        }
+
+        results = client.get("/messages/batches/batch-1/results")
+        assert results.status_code == 200
+        lines = [json.loads(line) for line in results.text.strip().splitlines()]
+        assert lines[0]["custom_id"] == "req-1"
+        assert lines[0]["result"]["type"] == "succeeded"
+        assert lines[0]["result"]["message"]["type"] == "message"
+        assert lines[0]["result"]["message"]["content"][0]["text"] == "Batch hello"
+        assert lines[1]["custom_id"] == "req-2"
+        assert lines[1]["result"]["type"] == "errored"
+        assert lines[1]["result"]["error"]["type"] == "error"
+        assert lines[1]["result"]["error"]["error"]["message"] == "Bad batch input"
+
+    def test_batch_create_rejects_streaming_requests(self):
+        app = make_app(FakeGigachatBatches())
+        client = TestClient(app)
+
+        payload = {
+            "requests": [
+                {
+                    "custom_id": "req-1",
+                    "params": {
+                        "model": "claude-test",
+                        "max_tokens": 64,
+                        "stream": True,
+                        "messages": [{"role": "user", "content": "Hello batch"}],
+                    },
+                }
+            ]
+        }
+
+        response = client.post("/messages/batches", json=payload)
+        assert response.status_code == 400
+        assert response.json()["error"]["type"] == "invalid_request_error"
+
+    def test_batch_cancel_and_delete_surface_not_implemented(self):
+        app = make_app(FakeGigachatBatches())
+        client = TestClient(app)
+
+        client.post(
+            "/messages/batches",
+            json={
+                "requests": [
+                    {
+                        "custom_id": "req-1",
+                        "params": {
+                            "model": "claude-test",
+                            "max_tokens": 64,
+                            "messages": [{"role": "user", "content": "Hello batch"}],
+                        },
+                    }
+                ]
+            },
+        )
+
+        cancel = client.post("/messages/batches/batch-1/cancel")
+        assert cancel.status_code == 501
+        assert cancel.json()["error"]["type"] == "api_error"
+
+        delete = client.delete("/messages/batches/batch-1")
+        assert delete.status_code == 501
+        assert delete.json()["error"]["type"] == "api_error"
