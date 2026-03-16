@@ -10,6 +10,7 @@ x-mitmproxy-common: &mitmproxy-common
   image: mitmproxy/mitmproxy:latest
   volumes:
     - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
+    - ./scripts/sse_event.py:/app/sse_event.py:ro
   command: >
     mitmweb
     --web-host 0.0.0.0
@@ -17,6 +18,10 @@ x-mitmproxy-common: &mitmproxy-common
     --ssl-insecure
     --set web_password=${MITMPROXY_PASSWORD}
     --set stream_lange_bodies=1
+    --set connection_strategy=lazy
+    --set http2=false
+    --set anticomp=true
+    -s /app/sse_event.py
   env_file:
     .env
   stdin_open: true
