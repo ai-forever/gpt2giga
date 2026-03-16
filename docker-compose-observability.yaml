@@ -17,10 +17,6 @@ x-mitmproxy-common: &mitmproxy-common
     --web-port 8081
     --ssl-insecure
     --set web_password=${MITMPROXY_PASSWORD}
-    --set stream_lange_bodies=1
-    --set connection_strategy=lazy
-    --set http2=false
-    --set anticomp=true
     -s /app/sse_event.py
   env_file:
     .env

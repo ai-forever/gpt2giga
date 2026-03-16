@@ -50,12 +50,13 @@ services:
       --web-port 8081
       --ssl-insecure
       --set web_password=${MITMPROXY_PASSWORD}
-      --set stream_lange_bodies=1
+      -s /app/sse_event.py
     ports:
       - "8080:8080"
       - "8081:8081"
     volumes:
       - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
+      - ./scripts/sse_event.py:/app/sse_event.py:ro
     env_file:
       - .env
     stdin_open: true
