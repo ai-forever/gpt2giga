@@ -50,6 +50,9 @@ services:
       --web-port 8081
       --ssl-insecure
       --set web_password=${MITMPROXY_PASSWORD}
+      --set connection_strategy=lazy
+      --set http2=false 
+      --set anticomp=true
       -s /app/sse_event.py
     ports:
       - "8080:8080"
