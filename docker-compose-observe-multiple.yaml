@@ -1,6 +1,11 @@
 x-gpt2giga-common: &gpt2giga-common
   image: ghcr.io/ai-forever/gpt2giga:latest
   restart: unless-stopped
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      PYTHON_VERSION: "3.13"
   env_file:
     - .env
   depends_on:
@@ -51,7 +56,7 @@ services:
       --ssl-insecure
       --set web_password=${MITMPROXY_PASSWORD}
       --set connection_strategy=lazy
-      --set http2=false 
+      --set http2=false
       --set anticomp=true
       -s /app/sse_event.py
     ports:
