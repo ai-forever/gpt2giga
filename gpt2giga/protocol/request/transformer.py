@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from gigachat import GigaChat
 from gigachat.models import FunctionCall, Messages, MessagesRole
+from fastapi import HTTPException
 
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
@@ -12,6 +13,12 @@ from gpt2giga.common.message_utils import (
     limit_attachments,
     map_role,
     merge_consecutive_messages,
+)
+from gpt2giga.common.tool_call_history import (
+    build_tool_call_index,
+    invalid_tool_result_error,
+    normalize_tool_call,
+    tool_result_message,
 )
 from gpt2giga.common.tools import map_tool_name_to_gigachat
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
@@ -27,10 +34,12 @@ class RequestTransformer:
         config: ProxyConfig,
         logger,
         attachment_processor: Optional[AttachmentProcessor] = None,
+        tool_call_store: Optional[Dict[str, Any]] = None,
     ):
         self.config = config
         self.logger = logger
         self.attachment_processor = attachment_processor
+        self.tool_call_store = tool_call_store
 
     def _map_role(self, role: str, is_first: bool) -> str:
         """Maps a role to a valid GigaChat role."""
@@ -48,6 +57,7 @@ class RequestTransformer:
         self, messages: List[Dict], giga_client: Optional[GigaChat] = None
     ) -> List[Dict]:
         """Transforms messages to GigaChat format."""
+        messages = self._rebuild_tool_messages(messages)
         transformed_messages = []
         attachment_count = 0
         system_message = None
@@ -69,7 +79,7 @@ class RequestTransformer:
                 system_message = message
 
             # Handle tool/function role specifics
-            if original_role == "tool":
+            if original_role in {"tool", "function"}:
                 message["content"] = ensure_json_object_str(message.get("content"))
                 if message.get("name"):
                     message["name"] = map_tool_name_to_gigachat(message["name"])
@@ -83,19 +93,21 @@ class RequestTransformer:
 
             # Process tool_calls
             if "tool_calls" in message and message["tool_calls"]:
-                message["function_call"] = message["tool_calls"][0]["function"]
-                if isinstance(message.get("function_call"), dict) and message[
-                    "function_call"
-                ].get("name"):
-                    message["function_call"]["name"] = map_tool_name_to_gigachat(
-                        message["function_call"]["name"]
-                    )
-                try:
-                    message["function_call"]["arguments"] = json.loads(
-                        message["function_call"]["arguments"]
-                    )
-                except json.JSONDecodeError as e:
-                    self.logger.warning(f"Failed to parse function call arguments: {e}")
+                raw_function_call = message["tool_calls"][0].get("function", {})
+                arguments = raw_function_call.get("arguments", "{}")
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError as e:
+                        self.logger.warning(f"Failed to parse function call arguments: {e}")
+                first_tool_call = {
+                    "name": raw_function_call.get("name"),
+                    "arguments": arguments,
+                }
+                message["function_call"] = {
+                    "name": map_tool_name_to_gigachat(first_tool_call["name"]),
+                    "arguments": first_tool_call["arguments"],
+                }
             elif (
                 message.get("function_call")
                 and isinstance(message["function_call"], dict)
@@ -127,6 +139,79 @@ class RequestTransformer:
             limit_attachments(transformed_messages, max_total=10, logger=self.logger)
 
         return transformed_messages
+
+    def _rebuild_tool_messages(self, messages: List[Dict]) -> List[Dict]:
+        """Rebuild OpenAI tool-call history into GigaChat-compatible message pairs."""
+        rebuilt_messages: List[Dict] = []
+        pending_tool_calls: List[Dict[str, Any]] = []
+        pending_tool_call_index: Dict[str, Dict[str, Any]] = {}
+
+        for message in messages:
+            tool_calls = message.get("tool_calls") or []
+            if tool_calls:
+                normalized_tool_calls = [
+                    normalize_tool_call(tool_call) for tool_call in tool_calls
+                ]
+                pending_tool_call_index.update(build_tool_call_index(normalized_tool_calls))
+                pending_tool_calls.extend(normalized_tool_calls)
+                assistant_text = message.get("content")
+                if assistant_text not in (None, ""):
+                    assistant_message = dict(message)
+                    assistant_message.pop("tool_calls", None)
+                    rebuilt_messages.append(assistant_message)
+                continue
+
+            if message.get("role") != "tool":
+                rebuilt_messages.append(message)
+                continue
+
+            tool_call_id = message.get("tool_call_id")
+            if not pending_tool_calls and not tool_call_id:
+                rebuilt_messages.append(message)
+                continue
+            if tool_call_id:
+                tool_call = pending_tool_call_index.pop(tool_call_id, None)
+                if tool_call is None:
+                    raise invalid_tool_result_error(tool_call_id)
+                pending_tool_calls = [
+                    call for call in pending_tool_calls if call.get("id") != tool_call_id
+                ]
+            else:
+                if not pending_tool_calls:
+                    raise invalid_tool_result_error(tool_call_id)
+                tool_call = pending_tool_calls.pop(0)
+                pending_tool_call_index.pop(tool_call.get("id"), None)
+
+            rebuilt_messages.extend(
+                tool_result_message(tool_call=tool_call, content=message.get("content"))
+            )
+
+        for pending_tool_call in pending_tool_calls:
+            rebuilt_messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": pending_tool_call.get("id"),
+                            "type": "function",
+                            "function": {
+                                "name": pending_tool_call.get("name"),
+                                "arguments": json.dumps(
+                                    pending_tool_call.get("arguments", {}),
+                                    ensure_ascii=False,
+                                )
+                                if not isinstance(
+                                    pending_tool_call.get("arguments"), str
+                                )
+                                else pending_tool_call.get("arguments"),
+                            },
+                        }
+                    ],
+                }
+            )
+
+        return rebuilt_messages
 
     async def _process_content_parts(
         self,
@@ -365,11 +450,80 @@ class RequestTransformer:
             message_payload.append({"role": "user", "content": input_})
 
         elif isinstance(input_, list):
-            last_function_name: Optional[str] = None
+            pending_function_calls: List[Dict[str, Any]] = []
+            function_call_index: Dict[str, Dict[str, Any]] = {}
+            previous_response_id = data.get("previous_response_id")
+            if (
+                previous_response_id
+                and self.tool_call_store
+                and previous_response_id in self.tool_call_store
+            ):
+                stored_session = self.tool_call_store[previous_response_id]
+                stored_tool_calls = stored_session.get("assistant_tool_call_message", {}).get(
+                    "tool_calls", []
+                )
+                for tool_call in stored_tool_calls:
+                    normalized_tool_call = normalize_tool_call(tool_call)
+                    if normalized_tool_call.get("id"):
+                        function_call_index[normalized_tool_call["id"]] = normalized_tool_call
+                    pending_function_calls.append(normalized_tool_call)
+
             for message in input_:
                 message_type = message.get("type")
+                if message_type == "function_call":
+                    normalized_function_call = normalize_tool_call(message)
+                    call_id = message.get("call_id")
+                    if call_id:
+                        normalized_function_call["id"] = call_id
+                    if normalized_function_call.get("id"):
+                        if normalized_function_call["id"] in function_call_index:
+                            raise HTTPException(
+                                status_code=400,
+                                detail={
+                                    "error": {
+                                        "message": f"Duplicate function call id: {normalized_function_call['id']}",
+                                        "type": "invalid_request_error",
+                                        "param": "call_id",
+                                        "code": None,
+                                    }
+                                },
+                            )
+                        function_call_index[
+                            normalized_function_call["id"]
+                        ] = normalized_function_call
+                    pending_function_calls.append(normalized_function_call)
+                    message_payload.append(
+                        self.mock_completion(
+                            {
+                                "name": normalized_function_call.get("name"),
+                                "arguments": json.dumps(
+                                    normalized_function_call.get("arguments", {}),
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        )
+                    )
+                    continue
                 if message_type == "function_call_output":
-                    fn_name = message.get("name") or last_function_name
+                    call_id = message.get("call_id")
+                    matched_function_call = None
+                    if call_id:
+                        matched_function_call = function_call_index.get(call_id)
+                    elif pending_function_calls:
+                        matched_function_call = pending_function_calls[0]
+                    if matched_function_call is None:
+                        raise invalid_tool_result_error(call_id)
+
+                    if call_id:
+                        pending_function_calls = [
+                            call
+                            for call in pending_function_calls
+                            if call.get("id") != call_id
+                        ]
+                    else:
+                        pending_function_calls.pop(0)
+
+                    fn_name = message.get("name") or matched_function_call.get("name")
                     fn_name = map_tool_name_to_gigachat(fn_name) if fn_name else fn_name
                     message_payload.append(
                         {
@@ -378,10 +532,6 @@ class RequestTransformer:
                             "content": ensure_json_object_str(message.get("output")),
                         }
                     )
-                    continue
-                if message_type == "function_call":
-                    last_function_name = message.get("name") or last_function_name
-                    message_payload.append(self.mock_completion(message))
                     continue
 
                 role = message.get("role")

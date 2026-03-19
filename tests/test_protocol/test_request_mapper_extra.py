@@ -170,6 +170,53 @@ def test_transform_response_format_complex(request_transformer):
     assert res[3]["content"] == '{"res": 1}'
 
 
+def test_transform_response_format_multiple_function_outputs_by_call_id(
+    request_transformer,
+):
+    data = {
+        "instructions": "sys",
+        "input": [
+            {"type": "function_call", "call_id": "call_1", "name": "fn1", "arguments": "{}"},
+            {"type": "function_call", "call_id": "call_2", "name": "fn2", "arguments": "{}"},
+            {"type": "function_call_output", "call_id": "call_2", "output": {"res": 2}},
+            {"type": "function_call_output", "call_id": "call_1", "output": {"res": 1}},
+        ],
+    }
+
+    res = request_transformer.transform_response_format(data)
+
+    assert [message["role"] for message in res] == [
+        "system",
+        "assistant",
+        "assistant",
+        "function",
+        "function",
+    ]
+    assert res[3]["name"] == "fn2"
+    assert res[3]["content"] == '{"res": 2}'
+    assert res[4]["name"] == "fn1"
+    assert res[4]["content"] == '{"res": 1}'
+
+
+def test_transform_response_format_raises_for_unknown_call_id(request_transformer):
+    data = {
+        "input": [
+            {
+                "type": "function_call_output",
+                "call_id": "missing",
+                "output": {"res": 1},
+            }
+        ]
+    }
+
+    with pytest.raises(Exception) as exc_info:
+        request_transformer.transform_response_format(data)
+
+    assert "Tool result does not match any assistant tool call in history" in str(
+        exc_info.value
+    )
+
+
 def test_limit_attachments(request_transformer):
     # Setup messages with many attachments
     messages = [
@@ -238,6 +285,55 @@ async def test_transform_messages_no_merge_with_function_call(request_transforme
 
     # Should not merge because first has function_call
     assert len(res) == 2
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_rebuilds_multiple_tool_results(request_transformer):
+    messages = [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {"id": "call_1", "function": {"name": "fn1", "arguments": "{}"}},
+                {"id": "call_2", "function": {"name": "fn2", "arguments": '{"x": 1}'}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": {"ok": 1}, "name": "fn1"},
+        {"role": "tool", "tool_call_id": "call_2", "content": {"ok": 2}, "name": "fn2"},
+    ]
+
+    res = await request_transformer.transform_messages(messages)
+
+    assert [msg["role"] for msg in res] == [
+        "assistant",
+        "function",
+        "assistant",
+        "function",
+    ]
+    assert res[0]["function_call"]["name"] == "fn1"
+    assert res[1]["name"] == "fn1"
+    assert res[1]["content"] == '{"ok": 1}'
+    assert res[2]["function_call"]["name"] == "fn2"
+    assert res[3]["name"] == "fn2"
+    assert res[3]["content"] == '{"ok": 2}'
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_raises_for_unknown_tool_result(request_transformer):
+    with pytest.raises(Exception) as exc_info:
+        await request_transformer.transform_messages(
+            [
+                {
+                    "role": "tool",
+                    "tool_call_id": "missing_call",
+                    "content": {"ok": 1},
+                    "name": "fn1",
+                }
+            ]
+        )
+
+    assert "Tool result does not match any assistant tool call in history" in str(
+        exc_info.value
+    )
 
 
 @pytest.mark.asyncio

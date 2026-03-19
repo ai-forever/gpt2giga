@@ -23,3 +23,11 @@ def get_file_store(request: Request) -> dict:
     if not hasattr(app_state, "file_metadata_store"):
         app_state.file_metadata_store = {}
     return app_state.file_metadata_store
+
+
+def get_tool_call_store(request: Request) -> dict:
+    """Return the in-memory tool-call session store."""
+    app_state = request.app.state
+    if not hasattr(app_state, "tool_call_session_store"):
+        app_state.tool_call_session_store = {}
+    return app_state.tool_call_session_store
