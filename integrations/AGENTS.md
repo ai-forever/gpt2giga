@@ -14,6 +14,7 @@
 | `integrations/claude-code/README.md` | Claude Code setup |
 | `integrations/codex/README.md` | OpenAI Codex setup |
 | `integrations/cursor/README.md` | Cursor setup |
+| `integrations/qwen-code/README.md` | Qwen Code setup |
 | `integrations/openhands/README.md` | OpenHands setup |
 | `integrations/nginx/README.md` | nginx reverse-proxy guide |
 | `integrations/nginx/gpt2giga.conf` | nginx config sample |
