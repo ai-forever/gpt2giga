@@ -11,8 +11,8 @@
 ## Быстрые ссылки
 
 - OpenAI Python SDK:
-  - Chat Completions API: [`examples/chat_completions/README.md`](./chat_completions/README.md)
-  - Responses API: [`examples/responses/README.md`](./responses/README.md)
+  - Chat Completions API: [`examples/chat_completions/README.md`](openai/chat_completions/README.md)
+  - Responses API: [`examples/responses/README.md`](openai/responses/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./anthropic/README.md)
 
 ## Запуск примеров (из корня репозитория)

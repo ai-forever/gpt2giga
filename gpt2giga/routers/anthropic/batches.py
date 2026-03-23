@@ -254,6 +254,15 @@ def _build_anthropic_batch_results(
 async def create_message_batch(request: Request):
     """Anthropic Message Batches API compatible create endpoint."""
     data = await read_request_json(request)
+    completion_window = data.get("completion_window", "24h")
+    if completion_window is None:
+        completion_window = "24h"
+    if completion_window != "24h":
+        return _anthropic_http_exception(
+            400,
+            "invalid_request_error",
+            'Only `completion_window="24h"` is supported.',
+        )
     requests_data = data.get("requests")
     if not isinstance(requests_data, list) or not requests_data:
         return _anthropic_http_exception(
@@ -333,6 +342,7 @@ async def create_message_batch(request: Request):
 
     metadata = {
         "api_format": "anthropic_messages",
+        "completion_window": completion_window,
         "requests": stored_requests,
         "output_file_id": batch.output_file_id,
     }

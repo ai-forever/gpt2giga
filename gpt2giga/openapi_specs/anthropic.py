@@ -183,6 +183,10 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
         "type": "object",
         "required": ["requests"],
         "properties": {
+            "completion_window": {
+                "type": "string",
+                "description": 'Optional completion window. Only `"24h"` is supported.',
+            },
             "requests": {
                 "type": "array",
                 "description": "Anthropic batch requests to process asynchronously.",
@@ -203,7 +207,7 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
                     },
                     "additionalProperties": True,
                 },
-            }
+            },
         },
         "additionalProperties": True,
     }
@@ -213,6 +217,10 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
         "type": "object",
         "required": ["requests"],
         "properties": {
+            "completion_window": {
+                "type": "string",
+                "description": 'Optional completion window. Only `"24h"` is supported.',
+            },
             "requests": {
                 "type": "array",
                 "description": "Anthropic batch requests to process asynchronously.",
@@ -266,7 +274,7 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
                     },
                     "additionalProperties": True,
                 },
-            }
+            },
         },
         "additionalProperties": True,
     }
@@ -274,6 +282,7 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
     description = (
         "**Required**: `requests`.\n\n"
         "**Notes**:\n"
+        "- If provided, `completion_window` must be `24h`.\n"
         "- Each request item must include a unique `custom_id` and a non-streaming "
         "Messages API `params` object.\n"
         "- Batch items are translated to the OpenAI-compatible batch pipeline before "
@@ -283,6 +292,7 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
         minimal_schema=minimal_schema,
         full_schema=full_schema,
         minimal_example={
+            "completion_window": "24h",
             "requests": [
                 {
                     "custom_id": "req-1",
@@ -292,9 +302,10 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
                         "messages": [{"role": "user", "content": "Hello batch"}],
                     },
                 }
-            ]
+            ],
         },
         full_example={
+            "completion_window": "24h",
             "requests": [
                 {
                     "custom_id": "req-tools-1",
@@ -323,7 +334,7 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
                         ],
                     },
                 }
-            ]
+            ],
         },
         extra_examples={
             "multiple_requests": {

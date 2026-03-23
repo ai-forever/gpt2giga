@@ -1534,6 +1534,53 @@ class TestMessageBatchesEndpoint:
         assert response.status_code == 400
         assert response.json()["error"]["type"] == "invalid_request_error"
 
+    def test_batch_create_accepts_24h_completion_window(self):
+        app = make_app(FakeGigachatBatches())
+        client = TestClient(app)
+
+        payload = {
+            "completion_window": "24h",
+            "requests": [
+                {
+                    "custom_id": "req-1",
+                    "params": {
+                        "model": "claude-test",
+                        "max_tokens": 64,
+                        "messages": [{"role": "user", "content": "Hello batch"}],
+                    },
+                }
+            ],
+        }
+
+        response = client.post("/messages/batches", json=payload)
+
+        assert response.status_code == 200
+        assert response.json()["type"] == "message_batch"
+
+    def test_batch_create_rejects_unsupported_completion_window(self):
+        app = make_app(FakeGigachatBatches())
+        client = TestClient(app)
+
+        payload = {
+            "completion_window": "1h",
+            "requests": [
+                {
+                    "custom_id": "req-1",
+                    "params": {
+                        "model": "claude-test",
+                        "max_tokens": 64,
+                        "messages": [{"role": "user", "content": "Hello batch"}],
+                    },
+                }
+            ],
+        }
+
+        response = client.post("/messages/batches", json=payload)
+
+        assert response.status_code == 400
+        assert response.json()["error"]["type"] == "invalid_request_error"
+        assert "completion_window" in response.json()["error"]["message"]
+
     def test_batch_cancel_and_delete_surface_not_implemented(self):
         app = make_app(FakeGigachatBatches())
         client = TestClient(app)

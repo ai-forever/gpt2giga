@@ -56,11 +56,13 @@ class FakeGigaChat:
         self.batches = {}
         self.last_batch_content = None
         self.last_batch_method = None
+        self.last_uploaded_content_type = None
         self._created_at = 100
 
     async def aupload_file(self, file, purpose):
-        filename, content, _content_type = file
+        filename, content, content_type = file
         file_id = f"file-{len(self.files) + 1}"
+        self.last_uploaded_content_type = content_type
         uploaded = FakeUploadedFile(
             id=file_id,
             object="file",
@@ -208,6 +210,27 @@ def test_files_endpoints_roundtrip():
     assert deleted.json() == {"id": file_id, "deleted": True, "object": "file"}
 
 
+def test_files_endpoint_infers_json_content_type_for_jsonl_uploads():
+    app = make_app()
+    giga_client = app.state.gigachat_client
+    client = TestClient(app)
+
+    response = client.post(
+        "/files",
+        data={"purpose": "batch"},
+        files={
+            "file": (
+                "input.jsonl",
+                b'{"hello":"world"}\n',
+                "application/octet-stream",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert giga_client.last_uploaded_content_type == "application/json"
+
+
 def test_batches_endpoints_translate_openai_flow():
     app = make_app()
     giga_client = app.state.gigachat_client
@@ -273,6 +296,43 @@ def test_batches_endpoints_translate_openai_flow():
     assert transformed_line["custom_id"] == "req-1"
     assert transformed_line["response"]["body"]["object"] == "chat.completion"
     assert transformed_line["response"]["body"]["model"] == "gpt-x"
+
+
+def test_batches_create_defaults_completion_window_to_24h():
+    app = make_app()
+    client = TestClient(app)
+
+    input_line = {
+        "custom_id": "req-1",
+        "method": "POST",
+        "url": "/v1/chat/completions",
+        "body": {
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    }
+    upload = client.post(
+        "/files",
+        data={"purpose": "batch"},
+        files={
+            "file": (
+                "batch.jsonl",
+                (json.dumps(input_line) + "\n").encode("utf-8"),
+                "application/json",
+            )
+        },
+    )
+
+    created = client.post(
+        "/batches",
+        json={
+            "endpoint": "/v1/chat/completions",
+            "input_file_id": upload.json()["id"],
+        },
+    )
+
+    assert created.status_code == 200
+    assert created.json()["completion_window"] == "24h"
 
 
 def test_openapi_includes_examples_for_files_and_batches():

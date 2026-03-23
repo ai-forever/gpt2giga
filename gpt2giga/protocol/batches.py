@@ -100,6 +100,20 @@ def infer_openai_file_purpose(
     return "user_data"
 
 
+def _resolve_batch_model(body: Dict[str, Any], giga_client: Any) -> Optional[str]:
+    """Resolve the model to include in transformed batch rows."""
+    request_model = body.get("model")
+    if isinstance(request_model, str) and request_model.strip():
+        return request_model
+
+    settings = getattr(giga_client, "_settings", None)
+    configured_model = getattr(settings, "model", None)
+    if isinstance(configured_model, str) and configured_model.strip():
+        return configured_model
+
+    return None
+
+
 async def transform_embedding_body(
     data: Dict[str, Any], embeddings_model: str
 ) -> Dict[str, Any]:
@@ -148,10 +162,16 @@ async def transform_batch_input_file(
             transformed_body = await request_transformer.prepare_chat_completion(
                 body, giga_client
             )
+            batch_model = _resolve_batch_model(body, giga_client)
+            if batch_model and "model" not in transformed_body:
+                transformed_body["model"] = batch_model
         elif target.kind == "responses":
             transformed_body = await request_transformer.prepare_response(
                 body, giga_client
             )
+            batch_model = _resolve_batch_model(body, giga_client)
+            if batch_model and "model" not in transformed_body:
+                transformed_body["model"] = batch_model
         else:
             transformed_body = await transform_embedding_body(body, embeddings_model)
 

@@ -186,8 +186,8 @@ sequenceDiagram
 Подробные runnable-примеры вынесены в папку [`examples/`](./examples/).
 
 - OpenAI Python SDK:
-  - Chat Completions API: [`examples/chat_completions/README.md`](./examples/chat_completions/README.md)
-  - Responses API: [`examples/responses/README.md`](./examples/responses/README.md)
+  - Chat Completions API: [`examples/chat_completions/README.md`](examples/openai/chat_completions/README.md)
+  - Responses API: [`examples/responses/README.md`](examples/openai/responses/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
 - Индекс всех примеров: [`examples/README.md`](./examples/README.md)
 

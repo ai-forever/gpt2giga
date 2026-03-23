@@ -1,9 +1,42 @@
+import mimetypes
 from email.parser import BytesParser
 from email.policy import default
+from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import HTTPException
 from starlette.requests import Request
+
+
+_CONTENT_TYPE_OVERRIDES = {
+    ".jsonl": "application/json",
+}
+
+
+def _guess_content_type(filename: str | None) -> str | None:
+    """Guess a supported content type from a filename."""
+    if not filename:
+        return None
+
+    guessed_type, _ = mimetypes.guess_type(filename)
+    if guessed_type:
+        return guessed_type
+
+    return _CONTENT_TYPE_OVERRIDES.get(Path(filename).suffix.lower())
+
+
+def _normalize_file_content_type(content_type: str | None, filename: str | None) -> str:
+    """Prefer a filename-derived MIME type when the upload uses a generic one."""
+    normalized_content_type = (content_type or "").split(";", maxsplit=1)[0].strip()
+    inferred_content_type = _guess_content_type(filename)
+
+    if inferred_content_type and normalized_content_type in {
+        "",
+        "application/octet-stream",
+    }:
+        return inferred_content_type
+
+    return normalized_content_type or "application/octet-stream"
 
 
 async def read_request_multipart(request: Request) -> Dict[str, Any]:
@@ -71,7 +104,9 @@ async def read_request_multipart(request: Request) -> Dict[str, Any]:
         files[field_name] = {
             "filename": filename,
             "content": payload,
-            "content_type": part.get_content_type(),
+            "content_type": _normalize_file_content_type(
+                part.get_content_type(), filename
+            ),
         }
 
     return {"form": form, "files": files}
