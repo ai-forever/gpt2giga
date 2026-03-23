@@ -28,7 +28,7 @@ services:
     container_name: gpt2giga_pro
     environment:
       GIGACHAT_MODEL: GigaChat-2-Pro
-      GPT2GIGA_PORT: 8090
+      GPT2GIGA_PORT: 8091
       HTTP_PROXY: http://mitmproxy:8080
       HTTPS_PROXY: http://mitmproxy:8080
     ports:
@@ -39,7 +39,7 @@ services:
     container_name: gpt2giga_max
     environment:
       GIGACHAT_MODEL: GigaChat-2-Max
-      GPT2GIGA_PORT: 8090
+      GPT2GIGA_PORT: 8092
       HTTP_PROXY: http://mitmproxy:8080
       HTTPS_PROXY: http://mitmproxy:8080
     ports:
@@ -54,7 +54,7 @@ services:
       --web-host 0.0.0.0
       --web-port 8081
       --ssl-insecure
-      --set web_password=${MITMPROXY_PASSWORD}
+      --set web_password=${MITMPROXY_PASSWORD:-}
       --set connection_strategy=lazy
       --set http2=false
       --set anticomp=true

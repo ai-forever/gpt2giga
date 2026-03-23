@@ -16,7 +16,7 @@ x-mitmproxy-common: &mitmproxy-common
     --web-host 0.0.0.0
     --web-port 8081
     --ssl-insecure
-    --set web_password=${MITMPROXY_PASSWORD}
+    --set web_password=${MITMPROXY_PASSWORD:-}
     --set connection_strategy=lazy
     --set http2=false
     --set anticomp=true
@@ -33,6 +33,8 @@ services:
     pull_policy: always
     container_name: gpt2giga
     environment:
+      HTTP_PROXY: http://mitmproxy:8080
+      HTTPS_PROXY: http://mitmproxy:8080
       GPT2GIGA_MODE: "PROD"
     ports:
       - "127.0.0.1:${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
@@ -47,6 +49,8 @@ services:
         PYTHON_VERSION: "3.13"
     container_name: gpt2giga
     environment:
+      HTTP_PROXY: http://mitmproxy:8080
+      HTTPS_PROXY: http://mitmproxy:8080
       GPT2GIGA_MODE: "DEV"
     ports:
       - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"

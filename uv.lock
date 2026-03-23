@@ -850,21 +850,21 @@ wheels = [
 
 [[package]]
 name = "gigachat"
-version = "0.2.0"
+version = "0.2.1a1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/9d/b765e89b37742d8ea4a203adf691647d37d75b49255c463a647e585f4245/gigachat-0.2.0.tar.gz", hash = "sha256:d3eb936d5c812abaed30553492ab8de5917268f35f4638769f6f9bc1fcf04ff9", size = 32222, upload-time = "2026-01-22T10:23:09.154Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/d8/54cfe0d2f094981673c534e50e403cd6b7e7f9a443efca8b0bb75be91d70/gigachat-0.2.1a1.tar.gz", hash = "sha256:24b9578fbf99040db2ba0493749a712dfd0311dc289f87c1c06eaae925702e50", size = 38979, upload-time = "2026-03-23T14:11:24.163Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ab/44/e2d8f2078301e64cfbe942c45fac500012a9b60eb1ca6c367c7ff1689454/gigachat-0.2.0-py3-none-any.whl", hash = "sha256:745927730bf77632634c9db0cb6c19e06c3099a9d4a032207686b91316b8d935", size = 42309, upload-time = "2026-01-22T10:23:07.571Z" },
+    { url = "https://files.pythonhosted.org/packages/7b/94/2e93036d2bf3bc96df16fa2fb0916c9a2383de792635821210adb06d4978/gigachat-0.2.1a1-py3-none-any.whl", hash = "sha256:f261ae97a7a3a264b4abd3db546da731da82fe4f33b45076eed77858048544c1", size = 51281, upload-time = "2026-03-23T14:11:22.676Z" },
 ]
 
 [[package]]
 name = "gpt2giga"
-version = "0.1.6"
+version = "0.1.6a1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -905,7 +905,7 @@ requires-dist = [
     { name = "aioitertools", specifier = ">=0.13.0,<0.14" },
     { name = "anthropic", specifier = ">=0.79.0" },
     { name = "fastapi", specifier = ">=0.133.0,<1" },
-    { name = "gigachat", specifier = ">=0.2.0,<0.3.0" },
+    { name = "gigachat", specifier = "==0.2.1a1" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=2.3.0,<3" },
     { name = "pillow", specifier = ">=12.1.1,<13" },
