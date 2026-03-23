@@ -38,12 +38,7 @@ jobs:
             -e GPT2GIGA_HOST=0.0.0.0 \
             gpt2giga:smoke
 
-          cleanup() {
-            docker logs gpt2giga-smoke || true
-            docker stop gpt2giga-smoke || true
-          }
-
-          trap cleanup EXIT
+          trap 'docker logs gpt2giga-smoke || true; docker stop gpt2giga-smoke || true' EXIT
 
           for _ in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:18090/health >/dev/null; then
