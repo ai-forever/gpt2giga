@@ -23,6 +23,7 @@ uv run pytest tests/ --cov=. --cov-fail-under=80
 | `.github/workflows/publish-ghcr.yml` | Publishes GHCR images for Python `3.10`–`3.14`; `latest` tracks Python `3.13` |
 | `.github/workflows/publish-pypi.yml` | Builds with `uv` and publishes to PyPI on release |
 | `.github/workflows/codeflash.yaml` | Runs Codeflash optimization on PRs touching `gpt2giga/**` |
+| `.github/workflows/stale-issues.yaml` | Marks inactive issues as stale and closes them after a grace period |
 | `.github/PULL_REQUEST_TEMPLATE.md` | PR checklist |
 | `.github/ISSUE_TEMPLATE/bug_report.md` | Bug report template |
 
