@@ -247,6 +247,16 @@ class RequestTransformer:
         """Common parameter transformation logic for Chat Completions and Responses API."""
         transformed = data.copy()
 
+        extra_body = transformed.pop("extra_body", None)
+        additional_fields = transformed.get("additional_fields")
+        if isinstance(extra_body, dict):
+            if isinstance(additional_fields, dict):
+                transformed["additional_fields"] = {**extra_body, **additional_fields}
+            elif additional_fields is None:
+                transformed["additional_fields"] = extra_body
+        elif extra_body is not None and additional_fields is None:
+            transformed["additional_fields"] = extra_body
+
         reasoning = transformed.pop("reasoning", None)
         if isinstance(reasoning, dict):
             effort = reasoning.get("effort")
