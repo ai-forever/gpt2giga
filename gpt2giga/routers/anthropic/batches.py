@@ -2,7 +2,7 @@
 
 import base64
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request, Response
@@ -33,7 +33,7 @@ def _rfc3339_from_timestamp(timestamp: Optional[int]) -> Optional[str]:
     if timestamp is None:
         return None
     return (
-        datetime.fromtimestamp(timestamp, tz=UTC)
+        datetime.fromtimestamp(timestamp, tz=timezone.utc)
         .isoformat(timespec="seconds")
         .replace("+00:00", "Z")
     )
@@ -80,7 +80,7 @@ def _build_anthropic_batch_object(batch: Any, metadata: Dict[str, Any]) -> Dict:
     expires_at = None
     if created_at is not None:
         expires_at = (
-            (datetime.fromtimestamp(created_at, tz=UTC) + timedelta(hours=24))
+            (datetime.fromtimestamp(created_at, tz=timezone.utc) + timedelta(hours=24))
             .isoformat(timespec="seconds")
             .replace("+00:00", "Z")
         )
