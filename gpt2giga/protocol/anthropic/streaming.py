@@ -21,13 +21,14 @@ async def _stream_anthropic_generator(
     giga_client: GigaChat,
 ) -> AsyncGenerator[str, None]:
     """SSE generator producing Anthropic Messages streaming events."""
-    logger = getattr(request.app.state, "logger", None)
-    rquid = rquid_context.get()
 
     def sse(event_type: str, data: dict) -> str:
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
     try:
+        logger = getattr(request.app.state, "logger", None)
+        rquid = rquid_context.get()
+
         yield sse(
             "message_start",
             {
@@ -213,7 +214,7 @@ async def _stream_anthropic_generator(
                 "type": "error",
                 "error": {
                     "type": "api_error",
-                    "message": f"Stream interrupted: {exc}",
+                    "message": "Stream interrupted",
                 },
             },
         )

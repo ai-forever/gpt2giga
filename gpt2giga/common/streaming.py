@@ -21,12 +21,12 @@ async def stream_chat_completion_generator(
     response_id: str,
     giga_client: Optional[GigaChat] = None,
 ) -> AsyncGenerator[str, None]:
-    if not giga_client:
-        giga_client = get_gigachat_client(request)
-    logger = getattr(request.app.state, "logger", None)
-    rquid = rquid_context.get()
-
     try:
+        if giga_client is None:
+            giga_client = get_gigachat_client(request)
+        logger = getattr(request.app.state, "logger", None)
+        rquid = rquid_context.get()
+
         async for chunk in giga_client.astream(chat_messages):
             if await request.is_disconnected():
                 if logger:
@@ -62,15 +62,14 @@ async def stream_chat_completion_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        error_message = str(e)
         tb = traceback.format_exc()
         if logger:
             logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {error_message}\n{tb}"
+                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
             )
         error_response = {
             "error": {
-                "message": f"Stream interrupted: {error_message}",
+                "message": "Stream interrupted",
                 "type": error_type,
                 "code": "internal_error",
             }
@@ -86,10 +85,6 @@ async def stream_responses_generator(
     giga_client: Optional[GigaChat] = None,
     request_data: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
-    if not giga_client:
-        giga_client = get_gigachat_client(request)
-    logger = getattr(request.app.state, "logger", None)
-    rquid = rquid_context.get()
     import time
 
     created_at = int(time.time())
@@ -142,6 +137,11 @@ async def stream_responses_generator(
     sequence_number = 0
 
     try:
+        if giga_client is None:
+            giga_client = get_gigachat_client(request)
+        logger = getattr(request.app.state, "logger", None)
+        rquid = rquid_context.get()
+
         yield sse_event(
             "response.created",
             {
@@ -473,16 +473,15 @@ async def stream_responses_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        error_message = str(e)
         tb = traceback.format_exc()
         if logger:
             logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {error_message}\n{tb}"
+                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
             )
         error_response = {
             "type": "error",
             "code": "internal_error",
-            "message": f"Stream interrupted: {error_message}",
+            "message": "Stream interrupted",
             "param": None,
             "sequence_number": sequence_number,
         }

@@ -37,7 +37,9 @@ class SSECapture:
 
                     payload = line[5:].strip()
                     if payload == "[DONE]":
-                        flow.metadata["llm_full_response"] = "".join(flow.metadata["llm_tokens"])
+                        flow.metadata["llm_full_response"] = "".join(
+                            flow.metadata["llm_tokens"]
+                        )
                         continue
 
                     try:
@@ -45,9 +47,7 @@ class SSECapture:
 
                         # OpenAI-style streaming
                         delta = (
-                            data.get("choices", [{}])[0]
-                            .get("delta", {})
-                            .get("content")
+                            data.get("choices", [{}])[0].get("delta", {}).get("content")
                         )
                         if delta:
                             flow.metadata["llm_tokens"].append(delta)
@@ -61,8 +61,8 @@ class SSECapture:
                         )
                         if msg:
                             flow.metadata["llm_tokens"].append(msg)
-                    except Exception:
-                        pass
+                    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                        ctx.log.debug(f"skipping non-JSON SSE payload: {exc}")
 
                 return chunk
 
