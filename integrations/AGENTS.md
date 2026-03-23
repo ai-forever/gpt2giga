@@ -16,6 +16,7 @@
 | `integrations/cursor/README.md` | Cursor setup |
 | `integrations/qwen-code/README.md` | Qwen Code setup |
 | `integrations/openhands/README.md` | OpenHands setup |
+| `integrations/xcode/README.md` | Xcode setup |
 | `integrations/nginx/README.md` | nginx reverse-proxy guide |
 | `integrations/nginx/gpt2giga.conf` | nginx config sample |
 | `integrations/nginx/cloud.png` | nginx guide asset |
