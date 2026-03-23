@@ -21,11 +21,13 @@ async def stream_chat_completion_generator(
     response_id: str,
     giga_client: Optional[GigaChat] = None,
 ) -> AsyncGenerator[str, None]:
+    logger = None
+    rquid = rquid_context.get()
+
     try:
         if giga_client is None:
             giga_client = get_gigachat_client(request)
         logger = getattr(request.app.state, "logger", None)
-        rquid = rquid_context.get()
 
         async for chunk in giga_client.astream(chat_messages):
             if await request.is_disconnected():
@@ -87,6 +89,8 @@ async def stream_responses_generator(
 ) -> AsyncGenerator[str, None]:
     import time
 
+    logger = None
+    rquid = rquid_context.get()
     created_at = int(time.time())
     model = request_data.get("model", "unknown") if request_data else "unknown"
     msg_id = f"msg_{response_id}"
@@ -140,7 +144,6 @@ async def stream_responses_generator(
         if giga_client is None:
             giga_client = get_gigachat_client(request)
         logger = getattr(request.app.state, "logger", None)
-        rquid = rquid_context.get()
 
         yield sse_event(
             "response.created",
