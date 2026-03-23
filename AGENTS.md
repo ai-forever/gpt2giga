@@ -56,14 +56,11 @@ uv run pre-commit install
 | `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
-| `traefik/` | Traefik config | Used by `docker-compose.traefik.yaml` |
+| `traefik/` | Traefik config | Used by `compose/traefik.yaml` |
 | `badges/` | Generated assets | Coverage badge written by CI |
 | `Dockerfile` | Container build | `uv build`-based package install |
 | `Dockerfile.mitmproxy` | Debug container image | mitmproxy/SSE debugging support |
-| `docker-compose.yaml` | Main compose entrypoint | `DEV` and `PROD` profiles |
-| `docker-compose.traefik.yaml` | Multi-instance routing stack | Traefik + three model variants |
-| `docker-compose-observability.yaml` | Observability stack asset | Deployment support file |
-| `docker-compose-observe-multiple.yaml` | Multi-instance observability asset | Deployment support file |
+| `compose/` | Docker Compose manifests | `base`, `traefik`, `observability`, and related stacks |
 
 ## Current Architecture Notes
 
