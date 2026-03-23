@@ -2,12 +2,12 @@ x-gpt2giga-common: &gpt2giga-common
   image: ghcr.io/ai-forever/gpt2giga:latest
   restart: unless-stopped
   build:
-    context: .
+    context: ..
     dockerfile: Dockerfile
     args:
       PYTHON_VERSION: "3.13"
   env_file:
-    - .env
+    - ../.env
   depends_on:
     - mitmproxy
 
@@ -64,27 +64,8 @@ services:
       - "8081:8081"
     volumes:
       - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
-      - ./scripts/sse_event.py:/app/sse_event.py:ro
+      - ../scripts/sse_event.py:/app/sse_event.py:ro
     env_file:
-      - .env
+      - ../.env
     stdin_open: true
     tty: true
-
-  qdrant:
-    # Use the official Qdrant Docker image
-    image: qdrant/qdrant:latest
-    container_name: qdrant
-    # Map the container ports to host ports
-    ports:
-      # Port 6333 is for the HTTP API and Web UI
-      - "6333:6333"
-      # Port 6334 is for gRPC API (used by some client libraries)
-      - "6334:6334"
-    # Mount a local directory to persist Qdrant data
-    volumes:
-      - qdrant_data:/qdrant/storage:z
-    restart: always
-
-  # Define the volume for persistent storage
-volumes:
-  qdrant_data:

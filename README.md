@@ -24,6 +24,7 @@
 8. [Использование API ключа](#использование-api-ключа)
 9. [Системные эндпоинты](#системные-эндпоинты)
 10. [Совместимые приложения](#совместимые-приложения)
+11. [Вклад и PR-шаблоны](#вклад-и-pr-шаблоны)
 
 
 ## Описание
@@ -95,7 +96,7 @@ sequenceDiagram
 
 3. (Опционально) Используйте образ/сборку с нужной версией Python (3.10–3.14).
 
-   В `docker-compose.yaml` по умолчанию задан `image: ghcr.io/ai-forever/gpt2giga:latest` и `build.args.PYTHON_VERSION`. При необходимости:
+   Все Docker Compose-стеки лежат в папке `compose/`. В `compose/base.yaml` по умолчанию задан `image: ghcr.io/ai-forever/gpt2giga:latest` и `build.args.PYTHON_VERSION`. При необходимости:
    - обновите `build.args.PYTHON_VERSION` (если собираете образ локально);
    - или замените `image:` на нужный тег из реестра.
 
@@ -111,18 +112,18 @@ sequenceDiagram
 
    - PROD:
      ```sh
-     docker compose --profile PROD up -d
+     docker compose -f compose/base.yaml --profile PROD up -d
      ```
    - DEV:
      ```sh
-     docker compose --profile DEV up -d
+     docker compose -f compose/base.yaml --profile DEV up -d
      ```
 
-   > В профиле `PROD` порт по умолчанию пробрасывается только на `127.0.0.1` (см. `docker-compose.yaml`). Для доступа извне используйте reverse proxy (nginx/Traefik/Caddy) или измените bind-адрес в `ports:`.
+   > В профиле `PROD` порт по умолчанию пробрасывается только на `127.0.0.1` (см. `compose/base.yaml`). Для доступа извне используйте reverse proxy (nginx/Traefik/Caddy) или измените bind-адрес в `ports:`.
 
 ### Запуск в Docker с Traefik
 
-В репозитории есть готовый стек `Traefik + несколько инстансов gpt2giga` в файле [`docker-compose.traefik.yaml`](./docker-compose.traefik.yaml):
+В репозитории есть готовый стек `Traefik + несколько инстансов gpt2giga` в файле [`compose/traefik.yaml`](./compose/traefik.yaml):
 - `gpt2giga` (модель по умолчанию `GigaChat`) → `http://localhost:8090`
 - `gpt2giga-pro` (модель по умолчанию `GigaChat-Pro`) → `http://localhost:8091`
 - `gpt2giga-max` (модель по умолчанию `GigaChat-Max`) → `http://localhost:8092`
@@ -131,7 +132,7 @@ sequenceDiagram
 1. Запустите стек:
 
    ```sh
-   docker compose -f docker-compose.traefik.yaml up -d
+   docker compose -f compose/traefik.yaml up -d
    ```
 
 > Важно: роутинг в Traefik в этой конфигурации завязан на HTTP `Host` (см. `traefik/rules.yml`). Если вы обращаетесь по IP (например, `127.0.0.1`), задайте `HOST=127.0.0.1` или отправляйте корректный заголовок `Host:`.
@@ -349,7 +350,7 @@ GPT2GIGA_HTTPS_CERT_FILE="Path to cert.pem"
 После этого укажите пути к сертификатам в переменных окружения или CLI-аргументах и включите HTTPS.
 
 Альтернатива: разместите `gpt2giga` за reverse proxy с TLS-терминацией:
-- пример стека с Traefik: [`docker-compose.traefik.yaml`](./docker-compose.traefik.yaml) и правила в `traefik/` (при необходимости добавьте ACME/сертификаты под свой домен).
+- пример стека с Traefik: [`compose/traefik.yaml`](./compose/traefik.yaml) и правила в `traefik/` (при необходимости добавьте ACME/сертификаты под свой домен).
 
 ## Использование API ключа
 ```dotenv
@@ -444,6 +445,19 @@ completion = client.chat.completions.create(
 | OpenAI Agents SDK          | https://github.com/openai/openai-agents-python     | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
 | Anthropic SDK              | https://github.com/anthropics/anthropic-sdk-python | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
 | Cursor                     | https://cursor.com/                                | Редактор с ИИ и агентом для программирования.<br /> Подробнее о запуске и настройке Cursor для работы с gpt2giga — в [README](./integrations/cursor/README.md) |
+
+## Вклад и PR-шаблоны
+
+Основной PR-шаблон по умолчанию находится в [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md).
+Русскоязычный вариант расположен в [`.github/PULL_REQUEST_TEMPLATE/ru.md`](./.github/PULL_REQUEST_TEMPLATE/ru.md).
+
+Чтобы открыть pull request с русским шаблоном, используйте параметр GitHub `template=ru.md` в URL сравнения веток:
+
+```text
+https://github.com/ai-forever/gpt2giga/compare/main...your-branch?quick_pull=1&template=ru.md
+```
+
+Замените `your-branch` на имя вашей ветки. Если базовая ветка отличается от `main`, замените и ее в URL.
 
 ## История изменений
 

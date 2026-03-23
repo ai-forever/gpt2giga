@@ -1,0 +1,17 @@
+services:
+  app:
+    build:
+      context: ..
+    ports:
+      - "8000:8000"
+    volumes:
+      - ..:/app
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ../nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - app

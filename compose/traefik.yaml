@@ -2,9 +2,9 @@ x-gpt2giga-common: &gpt2giga-common
   image: ghcr.io/ai-forever/gpt2giga:latest
   restart: unless-stopped
   env_file:
-    - .env
+    - ../.env
   build:
-    context: .
+    context: ..
     dockerfile: Dockerfile
 
 services:
@@ -59,8 +59,8 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ./traefik/:/etc/traefik/rules/:ro
+      - ../traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ../traefik/:/etc/traefik/rules/:ro
     depends_on:
       - gpt2giga
       - gpt2giga-pro
