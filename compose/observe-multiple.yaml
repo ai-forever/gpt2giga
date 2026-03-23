@@ -1,0 +1,71 @@
+x-gpt2giga-common: &gpt2giga-common
+  image: ghcr.io/ai-forever/gpt2giga:latest
+  restart: unless-stopped
+  build:
+    context: ..
+    dockerfile: Dockerfile
+    args:
+      PYTHON_VERSION: "3.13"
+  env_file:
+    - ../.env
+  depends_on:
+    - mitmproxy
+
+services:
+  gpt2giga-lite:
+    <<: *gpt2giga-common
+    container_name: gpt2giga_lite
+    environment:
+      GIGACHAT_MODEL: GigaChat-2
+      GPT2GIGA_PORT: 8090
+      HTTP_PROXY: http://mitmproxy:8080
+      HTTPS_PROXY: http://mitmproxy:8080
+    ports:
+      - "8090:8090"
+
+  gpt2giga-pro:
+    <<: *gpt2giga-common
+    container_name: gpt2giga_pro
+    environment:
+      GIGACHAT_MODEL: GigaChat-2-Pro
+      GPT2GIGA_PORT: 8090
+      HTTP_PROXY: http://mitmproxy:8080
+      HTTPS_PROXY: http://mitmproxy:8080
+    ports:
+      - "8091:8090"
+
+  gpt2giga-max:
+    <<: *gpt2giga-common
+    container_name: gpt2giga_max
+    environment:
+      GIGACHAT_MODEL: GigaChat-2-Max
+      GPT2GIGA_PORT: 8090
+      HTTP_PROXY: http://mitmproxy:8080
+      HTTPS_PROXY: http://mitmproxy:8080
+    ports:
+      - "8092:8090"
+
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    container_name: mitmproxy
+    restart: unless-stopped
+    command: >
+      mitmweb
+      --web-host 0.0.0.0
+      --web-port 8081
+      --ssl-insecure
+      --set web_password=${MITMPROXY_PASSWORD}
+      --set connection_strategy=lazy
+      --set http2=false
+      --set anticomp=true
+      -s /app/sse_event.py
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    volumes:
+      - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
+      - ../scripts/sse_event.py:/app/sse_event.py:ro
+    env_file:
+      - ../.env
+    stdin_open: true
+    tty: true
