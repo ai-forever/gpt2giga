@@ -16,7 +16,6 @@ eggs/
 .eggs/
 .local/
 local/
-examples/
 .ipynb_checkpoints/
 
 lib/
