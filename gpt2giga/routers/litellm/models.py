@@ -1,9 +1,6 @@
-import time
 from typing import Optional
 
 from fastapi import APIRouter, Request
-from openai.pagination import AsyncPage
-from openai.types import Model as OpenAIModel
 
 from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.common.exceptions import exceptions_handler

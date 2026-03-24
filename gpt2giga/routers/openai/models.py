@@ -1,7 +1,6 @@
 """Model discovery endpoints."""
 
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Request
 from openai.pagination import AsyncPage
