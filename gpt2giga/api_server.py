@@ -18,6 +18,7 @@ from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.routers.anthropic import router as anthropic_router
+from gpt2giga.routers.litellm import router as litellm_router
 from gpt2giga.routers.logs_router import logs_api_router, logs_router
 from gpt2giga.routers.openai import router as openai_router
 from gpt2giga.routers.system_router import system_router
@@ -130,6 +131,7 @@ def create_app(config=None) -> FastAPI:
             "embeddings",
             "responses",
             "messages",
+            "model",
             "files",
             "batches",
         ],
@@ -164,6 +166,13 @@ def create_app(config=None) -> FastAPI:
         dependencies=api_dependencies,
     )
     app.include_router(anthropic_router, dependencies=api_dependencies)
+    app.include_router(
+        litellm_router,
+        prefix="/v1",
+        tags=["V1 LiteLLM"],
+        dependencies=api_dependencies,
+    )
+    app.include_router(litellm_router, dependencies=api_dependencies)
     app.include_router(system_router)
     if not is_prod_mode:
         app.include_router(logs_api_router, dependencies=api_dependencies)

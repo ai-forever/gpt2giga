@@ -30,6 +30,9 @@ class FakeGigaChat:
     async def aget_models(self):
         return SimpleNamespace(data=[FakeModel()], object_="list")
 
+    async def aget_model(self, model: str):
+        return SimpleNamespace(id_=model)
+
     async def achat(self, chat):
         return MockResponse(
             {
@@ -94,6 +97,17 @@ def test_ci_smoke_v1_models(monkeypatch):
     body = response.json()
     assert body["object"] == "list"
     assert body["data"][0]["id"] == "GigaChat"
+
+
+def test_ci_smoke_litellm_model_info(monkeypatch):
+    app = make_app(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.get("/v1/model/info")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"][0]["model_name"] == "GigaChat"
 
 
 def test_ci_smoke_openai_chat(monkeypatch):

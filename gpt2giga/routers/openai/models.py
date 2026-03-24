@@ -39,23 +39,3 @@ async def get_model(model: str, request: Request):
     model_data = response.model_dump(by_alias=True)
     model_data["created"] = int(time.time())
     return OpenAIModel(**model_data)
-
-
-def _model_info_entry(model_id: str) -> dict:
-    return {
-        "model_name": model_id,
-        "litellm_params": {"model": model_id},
-        "model_info": {"id": model_id},
-    }
-
-
-@router.get("/model/info")
-@exceptions_handler
-async def get_model_info(request: Request, model: Optional[str] = None):
-    """Return LiteLLM-style model info."""
-    giga_client = get_gigachat_client(request)
-    if model:
-        response = await giga_client.aget_model(model=model)
-        return _model_info_entry(response.id_)
-    response = await giga_client.aget_models()
-    return {"data": [_model_info_entry(model_info.id_) for model_info in response.data]}
