@@ -26,7 +26,23 @@ jobs:
 
     - name: Get version
       id: get_version
-      run: echo "VERSION=$(grep '^version =' pyproject.toml | head -n1 | cut -d'\"' -f2)" >> "$GITHUB_OUTPUT"
+      shell: bash
+      run: |
+        VERSION="$(python3 - <<'PY'
+        import tomllib
+        from pathlib import Path
+
+        pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+        print(pyproject["project"]["version"])
+        PY
+        )"
+
+        if [ -z "$VERSION" ]; then
+          echo "::error::Unable to determine project version from pyproject.toml"
+          exit 1
+        fi
+
+        echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
