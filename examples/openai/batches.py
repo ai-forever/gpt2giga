@@ -1,7 +1,6 @@
 """OpenAI Batches API example."""
 
 import json
-import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
