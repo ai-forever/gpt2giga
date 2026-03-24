@@ -8,7 +8,7 @@
 2. Запустите любой пример:
 
 ```bash
-uv run python examples/chat_completions/chat_completion.py
+uv run python examples/openai/chat_completions/chat_completion.py
 ```
 
 ## Про `base_url`

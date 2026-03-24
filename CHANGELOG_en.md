@@ -5,6 +5,28 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6a1] - 2026-03-24
+
+### Added
+- **OpenAI Files API**: added `/files`, `/files/{file_id}`, and `/files/{file_id}/content` endpoints plus the `examples/openai/files.py` example
+- **OpenAI Batches API**: added `/batches` and `/batches/{batch_id}` endpoints plus the `examples/openai/batches.py` example
+- **Anthropic Message Batches API**: added `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}`, and `/v1/messages/batches/{message_batch_id}/results` plus the `examples/anthropic/message_batches.py` example
+- **New integrations**: added setup guides for Qwen Code and Xcode
+- **CI and automation**: added `actionlint`, `CodeQL`, `dependency-review`, `docker-smoke`, `nightly-smoke`, `pr-labeler`, `release-drafter`, `stale-issues`, and Dependabot configuration
+
+### Changed
+- **Examples**: moved OpenAI examples under `examples/openai/` and aligned README/AGENTS docs with the new layout
+- **OpenAPI**: split OpenAI and Anthropic schema builders into `gpt2giga/openapi_specs/`
+- **LiteLLM router**: moved `/model/info` handling into the dedicated `gpt2giga/routers/litellm/` package
+- **Docker Compose**: standardized compose files under `compose/` (`base.yaml`, `observability.yaml`, `nginx.yaml`, `observe-multiple.yaml`, `traefik.yaml`)
+- **GitHub templates**: added Russian-language issue and pull request templates
+
+### Fixed
+- **Path normalization**: fixed normalization for `/v1`, `files`, `batches`, `messages`, and `model/info`
+- **OpenAI payload mapping**: `extra_body` now maps correctly to `additional_fields`
+- **Batches**: fixed `completion_window` handling and Python 3.10 datetime behavior
+- **Examples**: refreshed runnable OpenAI and Anthropic examples after the directory reorganization
+
 ## [0.1.5] - 2026-03-10
 
 ### Added
@@ -33,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Nginx**: Added `gpt2giga.conf` config and README for deployment behind nginx
-- **Docker Compose**: Updated compose (#77) — mitmproxy in `docker-compose-observability.yaml`, password for mitmproxy
+- **Docker Compose**: Updated compose (#77) — mitmproxy in `compose/observability.yaml`, password for mitmproxy
 - **Logs router**: Extracted `logs_router.py`, split system router in two
 
 ### Changed
@@ -47,13 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Traefik**: Added Traefik integration
-- **MITMProxy**: Added mitmproxy to `docker-compose-observability.yaml`
+- **MITMProxy**: Added mitmproxy to `compose/observability.yaml`
 - **Reasoning toggle**: Added `GPT2GIGA_ENABLE_REASONING` environment variable
 
 ### Changed
-- **Docker Compose profiles**: Set `dev` as the default profile
+- **Docker Compose profiles**: Set `dev` as the default profile in `compose/base.yaml`
 
-## [0.1.3] - 2026-02-16
+## [0.1.3] - 2026-02-17
 
 ### Added
 - **DEV/PROD Mode**: Added support for development and production modes
@@ -61,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Graceful shutdown**: Added graceful server shutdown handling
 - **Gitleaks**: Added gitleaks to pre-commit for secret detection
 - **OpenAPI for count_tokens**: Added OpenAPI documentation for count_tokens endpoint
-- **Profiles in Docker**: Added profiles DEV and PROD in `docker-compose.yaml`
+- **Profiles in Docker**: Added profiles DEV and PROD in `compose/base.yaml`
 
 ### Changed
 - **Structure Refactoring**: Split large files into modules:
@@ -95,7 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **405 Error**: Fixed 405 error on certain requests
 - **Safe Request Reading**: Improved request body reading handling
 
-## [0.1.2] - 2026-02-09
+## [0.1.2] - 2026-02-11
 
 ### Added
 - **Anthropic Messages API**: New `POST /v1/messages` endpoint for Anthropic Messages API compatibility
@@ -172,7 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI/CD**: Fixed SSL error in GitHub Actions.
 - **Security**: Fixed vulnerabilities in dependencies.
 
-## [0.0.15.post1] - 2025-01-21
+## [0.0.15.post1] - 2025-12-22
 
 ### Added
 - API key authorization with support for various methods (query parameter, x-api-key header, Bearer token)
@@ -192,7 +214,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed validation error for developer role
 - Fixed Python versions in workflows
 
-## [0.0.14] - 2024-12
+## [0.0.14] - 2025-10-28
 
 ### Added
 - mTLS authentication support
@@ -201,7 +223,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated README documentation
 
-## [0.0.13] - 2024-11
+## [0.0.13] - 2025-09-19
 
 ### Added
 - Basic proxy server functionality
@@ -212,6 +234,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...HEAD
 [0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4...v0.1.4.post1
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4

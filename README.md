@@ -60,6 +60,9 @@ sequenceDiagram
 - использовать структурированный вывод (Structured Outputs) для получения гарантированного JSON-ответа;
 - обрабатывать ответ модели в режиме потоковой генерации токенов с помощью параметра `stream=true`;
 - перенаправлять запросы на создание эмбеддингов (поддерживаются эндпоинты `/embeddings` и `/v1/embeddings`);
+- использовать OpenAI-совместимые Files API и Batches API (`/files`, `/batches`);
+- использовать Anthropic Message Batches API (`/v1/messages/batches`);
+- отдавать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
 - работать в асинхронном режиме с множеством потоков запросов от нескольких клиентов;
 - общение в openai-формате с файлом;
 - использовать эндпоинт `/responses` (OpenAI Responses API) для совместимости с новыми клиентами;
@@ -186,8 +189,9 @@ sequenceDiagram
 Подробные runnable-примеры вынесены в папку [`examples/`](./examples/).
 
 - OpenAI Python SDK:
-  - Chat Completions API: [`examples/chat_completions/README.md`](examples/openai/chat_completions/README.md)
-  - Responses API: [`examples/responses/README.md`](examples/openai/responses/README.md)
+  - Chat Completions API: [`examples/openai/chat_completions/README.md`](examples/openai/chat_completions/README.md)
+  - Responses API: [`examples/openai/responses/README.md`](examples/openai/responses/README.md)
+  - Files / Batches / embeddings / models: [`examples/README.md`](./examples/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
 - Индекс всех примеров: [`examples/README.md`](./examples/README.md)
 
@@ -445,6 +449,8 @@ completion = client.chat.completions.create(
 | OpenAI Agents SDK          | https://github.com/openai/openai-agents-python     | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
 | Anthropic SDK              | https://github.com/anthropics/anthropic-sdk-python | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
 | Cursor                     | https://cursor.com/                                | Редактор с ИИ и агентом для программирования.<br /> Подробнее о запуске и настройке Cursor для работы с gpt2giga — в [README](./integrations/cursor/README.md) |
+| Qwen Code                  | https://github.com/QwenLM/qwen-code                | CLI-агент для написания кода.<br /> Подробнее о запуске и настройке Qwen Code для работы с gpt2giga — в [README](./integrations/qwen-code/README.md) |
+| Xcode                      | https://developer.apple.com/xcode/                 | Coding Intelligence и внешние агентные инструменты Apple.<br /> Подробнее о подключении Xcode к gpt2giga — в [README](./integrations/xcode/README.md) |
 
 ## Вклад и PR-шаблоны
 

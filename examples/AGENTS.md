@@ -10,14 +10,15 @@
 
 | Path | Purpose |
 |---|---|
-| `examples/chat_completions/` | OpenAI Chat Completions examples |
-| `examples/responses/` | OpenAI Responses API examples |
+| `examples/openai/chat_completions/` | OpenAI Chat Completions examples |
+| `examples/openai/responses/` | OpenAI Responses API examples |
 | `examples/anthropic/` | Anthropic Messages API examples |
-| `examples/files.py` | OpenAI Files API example |
-| `examples/batches.py` | OpenAI Batches API example |
-| `examples/embeddings.py` | Embeddings usage |
-| `examples/models.py` | Model listing/retrieval |
+| `examples/openai/files.py` | OpenAI Files API example |
+| `examples/openai/batches.py` | OpenAI Batches API example |
+| `examples/openai/embeddings.py` | Embeddings usage |
+| `examples/openai/models.py` | Model listing/retrieval |
 | `examples/openai_agents.py` | OpenAI Agents SDK example |
+| `examples/responses/parallel_tool_call.py` | Additional Responses API example |
 | `examples/README.md` | Example index |
 
 ### Notable Example Files
@@ -55,8 +56,8 @@ uv sync --group integrations
 uv run gpt2giga
 
 # Run an example
-uv run python examples/chat_completions/chat_completion.py
-uv run python examples/responses/single_prompt.py
+uv run python examples/openai/chat_completions/chat_completion.py
+uv run python examples/openai/responses/single_prompt.py
 uv run python examples/anthropic/messages.py
 ```
 
@@ -80,5 +81,6 @@ rg -n "image_url|base64|document" examples
 
 - `examples/openai_agents.py` needs the `integrations` dependency group.
 - Anthropic examples use the `anthropic` SDK directly, not the OpenAI client.
+- OpenAI examples were moved under `examples/openai/`; keep README links and run commands aligned with that layout.
 - Examples are excluded from coverage and are not the canonical place to implement application logic.
 - Each API-style folder has its own `README.md`; update those alongside code examples when behavior changes.

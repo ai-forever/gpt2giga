@@ -52,7 +52,7 @@ uv run pre-commit install
 |---|---|---|
 | `gpt2giga/` | Main application package | Routers, protocol transforms, config, middleware |
 | `tests/` | Test suite | Mirrors source areas and router/protocol behavior |
-| `examples/` | Runnable SDK examples | OpenAI, Responses, Anthropic, embeddings, agents |
+| `examples/` | Runnable SDK examples | OpenAI chat/responses/files/batches, Anthropic, embeddings, agents |
 | `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
@@ -66,6 +66,7 @@ uv run pre-commit install
 
 - OpenAI-compatible endpoints live in `gpt2giga/routers/openai/`.
 - Anthropic-compatible endpoints live in `gpt2giga/routers/anthropic/`.
+- LiteLLM-compatible model-info endpoints live in `gpt2giga/routers/litellm/`.
 - Shared request/response translation lives in `gpt2giga/protocol/`.
 - Shared HTTP helpers live in `gpt2giga/common/`.
 - Request/app-scoped stores for files and batches live in `gpt2giga/app_state.py`.

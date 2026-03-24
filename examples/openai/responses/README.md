@@ -8,7 +8,7 @@
 2. Запустите любой пример:
 
 ```bash
-uv run python examples/responses/single_prompt.py
+uv run python examples/openai/responses/single_prompt.py
 ```
 
 ## Про `base_url`
