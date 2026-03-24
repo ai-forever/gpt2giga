@@ -23,7 +23,9 @@ router = APIRouter(tags=["OpenAI"])
 async def create_batch(request: Request):
     """Create a batch job."""
     data = await read_request_json(request)
-    completion_window = data.get("completion_window")
+    completion_window = data.get("completion_window", "24h")
+    if completion_window is None:
+        completion_window = "24h"
     input_file_id = data.get("input_file_id")
     if completion_window != "24h":
         raise HTTPException(
