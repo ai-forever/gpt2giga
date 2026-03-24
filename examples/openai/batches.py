@@ -1,6 +1,7 @@
 """OpenAI Batches API example."""
 
 import json
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -55,7 +56,6 @@ with TemporaryDirectory() as tmp_dir:
         metadata={"source": "examples/batches.py"},
     )
     print("Created batch:", batch.id, batch.status, batch.output_file_id)
-
     retrieved = client.batches.retrieve(batch.id)
     print("Retrieved batch:", retrieved.id, retrieved.status, retrieved.output_file_id)
 
@@ -65,6 +65,6 @@ with TemporaryDirectory() as tmp_dir:
     if retrieved.output_file_id:
         output_content = client.files.content(retrieved.output_file_id)
         print("Batch output file content:")
-        print(output_content)
+        print(output_content.text)
     else:
         print("Batch output is not ready yet.")
