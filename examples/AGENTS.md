@@ -2,136 +2,85 @@
 
 ## Package Identity
 
-- **What:** Runnable usage examples demonstrating gpt2giga proxy capabilities
-- **Audience:** Users integrating with gpt2giga via the OpenAI Python SDK
-- **Prerequisite:** A running gpt2giga proxy server (default `http://localhost:8090`)
+- **What:** Runnable examples for using `gpt2giga` through OpenAI and Anthropic-compatible SDKs
+- **Audience:** Users validating proxy behavior or copying starter integrations
+- **Default target:** `http://localhost:8090`
 
-## Directory Structure
+## Directory Layout
 
-| Directory/File | What It Demonstrates |
+| Path | Purpose |
 |---|---|
-| **`chat_completions/`** | **OpenAI Chat Completions API** |
-| `chat_completions/chat_completion.py` | Basic streaming chat completion |
-| `chat_completions/chat_reasoning.py` | Reasoning / chain-of-thought modes |
-| `chat_completions/function_calling.py` | Tool/function calling |
-| `chat_completions/structured_output.py` | JSON schema structured output |
-| `chat_completions/structured_output_nested.py` | Nested structured output |
-| `chat_completions/json_schema.py` | Raw JSON schema response format |
-| `chat_completions/base64_image.py` | Base64-encoded image input |
-| `chat_completions/image_url.py` | Image URL input |
-| `chat_completions/documents.py` | Document processing |
-| **`responses/`** | **OpenAI Responses API** |
-| `responses/single_prompt.py` | Simple Responses API call |
-| `responses/with_instructions.py` | Responses API with system instructions |
-| `responses/function_calling.py` | Responses API with tools |
-| `responses/structured_output.py` | Responses API with structured output |
-| `responses/structured_output_nested.py` | Nested structured output |
-| `responses/json_schema.py` | JSON schema response format |
-| `responses/base64_image.py` | Responses API with base64 image |
-| `responses/image_url.py` | Responses API with image URL |
-| **`anthropic/`** | **Anthropic Messages API** |
-| `anthropic/messages.py` | Basic non-streaming request |
-| `anthropic/messages_stream.py` | Streaming messages |
-| `anthropic/multi_turn.py` | Multi-turn conversation |
-| `anthropic/system_prompt.py` | System prompt usage |
-| `anthropic/function_calling.py` | Tool use / function calling |
-| `anthropic/reasoning.py` | Extended thinking (`thinking` → `reasoning_effort`) |
-| `anthropic/count_tokens.py` | Token counting via `/messages/count_tokens` |
-| `anthropic/image_url.py` | Image URL input |
-| `anthropic/base64_image.py` | Base64 image input |
-| **Root examples** | **Standalone** |
-| `embeddings.py` | Embeddings endpoint usage |
-| `models.py` | Model listing and retrieval |
-| `openai_agents.py` | OpenAI Agents SDK integration (multi-agent triage) |
+| `examples/openai/chat_completions/` | OpenAI Chat Completions examples |
+| `examples/openai/responses/` | OpenAI Responses API examples |
+| `examples/anthropic/` | Anthropic Messages API examples |
+| `examples/openai/files.py` | OpenAI Files API example |
+| `examples/openai/batches.py` | OpenAI Batches API example |
+| `examples/openai/embeddings.py` | Embeddings usage |
+| `examples/openai/models.py` | Model listing/retrieval |
+| `examples/openai_agents.py` | OpenAI Agents SDK example |
+| `examples/responses/parallel_tool_call.py` | Additional Responses API example |
+| `examples/README.md` | Example index |
+
+### Notable Example Files
+
+- `chat_completions/chat_completion.py`: basic streaming chat
+- `chat_completions/chat_reasoning.py`: reasoning mode
+- `chat_completions/function_calling.py`: tool calling
+- `chat_completions/documents.py`: document/file-style input
+- `responses/reasoning.py`: Responses API reasoning example
+- `responses/structured_output.py`: structured outputs
+- `anthropic/messages.py`: basic Messages API call
+- `anthropic/message_batches.py`: Anthropic Message Batches API
+- `anthropic/messages_stream.py`: streaming Messages API
+- `anthropic/count_tokens.py`: token counting endpoint
 
 ## Patterns & Conventions
 
-### Standard Example Template
-
-Every example follows this pattern:
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8090", api_key="0")
-
-# API call here
-completion = client.chat.completions.create(
-    model="GigaChat-2-Max",
-    messages=[{"role": "user", "content": "..."}],
-)
-```
-
-```
-✅ DO: Use `base_url="http://localhost:8090"` (default proxy port)
-✅ DO: Use `api_key="0"` as placeholder (proxy doesn't require real OpenAI key)
-✅ DO: Use `model="GigaChat-2-Max"` as default model in examples
-✅ DO: Copy `chat_completions/chat_completion.py` as starting template for new examples
-✅ DO: Copy `chat_completions/function_calling.py` as template for tool-use examples
-❌ DON'T: Commit local env files like `examples/.env`
-❌ DON'T: Put real credentials into example code (keep secrets in your own `.env`, template: `.env.example` at repo root)
-```
-
-### Adding a New Example
-
-1. Choose the right directory: `chat_completions/` for Chat API, `responses/` for Responses API, `anthropic/` for Anthropic Messages API, root for standalone.
-2. Name the file descriptively: `<feature_being_demonstrated>.py`.
-3. Keep it self-contained — no imports from `gpt2giga` source (examples use only `openai` or `anthropic` SDK).
-4. Add a brief comment at the top explaining what the example demonstrates.
-5. Print the result so users can see output.
-
-### Three API Styles
-
-| API | Directory | Endpoint | SDK |
-|---|---|---|---|
-| Chat Completions API | `chat_completions/` | `POST /chat/completions` | `openai` |
-| Responses API | `responses/` | `POST /responses` | `openai` |
-| Anthropic Messages API | `anthropic/` | `POST /messages` | `anthropic` |
-
-For each new feature, provide examples for **all applicable** API styles.
+- Keep examples self-contained and runnable with repo dependencies.
+- Use real SDK clients (`openai`, `anthropic`, `openai-agents`) rather than importing internal `gpt2giga` modules.
+- Default to `api_key="0"` or another placeholder unless the example is specifically about proxy API-key auth.
+- Prefer `GigaChat-2-Max` in examples unless the example is about model selection.
+- Print or stream visible output so users can confirm behavior quickly.
+- Keep comments short and focused on what the example demonstrates.
 
 ## Setup & Run
 
 ```bash
-# Install deps (examples assume the repo is installed)
+# Install repo dependencies
 uv sync --all-extras --dev
 
-# If you run OpenAI Agents examples
+# For the OpenAI Agents example
 uv sync --group integrations
 
-# Start the proxy server first
+# Start the proxy in another terminal
 uv run gpt2giga
 
-# In another terminal, run an example
-uv run python examples/chat_completions/chat_completion.py
-uv run python examples/embeddings.py
+# Run an example
+uv run python examples/openai/chat_completions/chat_completion.py
+uv run python examples/openai/responses/single_prompt.py
+uv run python examples/anthropic/messages.py
 ```
 
-## JIT Search Hints
+## Quick Find Commands
 
 ```bash
-# Find all examples using streaming
-rg -n "stream=True" examples/
+# Find streaming examples
+rg -n "stream=True" examples
 
-# Find all examples using tools/functions
-rg -n "tools|functions" examples/
+# Find tool/function calling examples
+rg -n "tools|tool_choice|function" examples
 
-# Find all examples using structured output
-rg -n "response_format|json_schema" examples/
+# Find reasoning examples
+rg -n "reasoning|thinking" examples
 
-# Find all examples using images
-rg -l "base64|image_url" examples/
-
-# Find Anthropic-specific examples
-rg -l "anthropic" examples/anthropic/
-
-# Find examples using reasoning/thinking
-rg -n "reasoning|thinking" examples/
+# Find image/document examples
+rg -n "image_url|base64|document" examples
 ```
 
 ## Common Gotchas
 
-- Examples are **not** part of test coverage (excluded in `pyproject.toml`).
-- The `openai_agents.py` example requires the `integrations` dependency group: `uv sync --group integrations`.
-- Anthropic examples use the `anthropic` SDK (not `openai`) — `anthropic` is a direct project dependency, no extra install needed.
-- Each sub-directory has its own `README.md` with usage details.
+- `examples/openai_agents.py` needs the `integrations` dependency group.
+- Anthropic examples use the `anthropic` SDK directly, not the OpenAI client.
+- OpenAI examples were moved under `examples/openai/`; keep README links and run commands aligned with that layout.
+- Examples are excluded from coverage and are not the canonical place to implement application logic.
+- Each API-style folder has its own `README.md`; update those alongside code examples when behavior changes.

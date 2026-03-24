@@ -329,6 +329,39 @@ async def test_stream_responses_generator_success():
     assert data["response"]["output"][0]["content"][0]["text"] == "AB"
 
 
+@pytest.mark.asyncio
+async def test_stream_responses_generator_preserves_reasoning_config():
+    import json
+
+    req = FakeRequest(FakeClient())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(
+        req,
+        chat,
+        response_id="reasoning123",
+        request_data={
+            "model": "gpt-x",
+            "reasoning": {"effort": "high", "summary": "auto"},
+        },
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    event_type, data = parse_sse(lines[0])
+    assert event_type == "response.created"
+    assert data["response"]["reasoning"] == {"effort": "high", "summary": "auto"}
+
+    event_type, data = parse_sse(lines[-1])
+    assert event_type == "response.completed"
+    assert data["response"]["reasoning"] == {"effort": "high", "summary": "auto"}
+
+
 class FakeClientFunctionCall:
     """Client that returns function call chunks"""
 

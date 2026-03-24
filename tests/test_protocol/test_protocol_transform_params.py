@@ -45,6 +45,47 @@ def test_transform_common_parameters_pass_model_true():
     assert out.get("model") == "gpt-x"
 
 
+def test_transform_chat_parameters_maps_extra_body_to_additional_fields():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters(
+        {"model": "gpt-x", "extra_body": {"profanity_check": False}}
+    )
+    assert out.get("additional_fields") == {"profanity_check": False}
+    assert "extra_body" not in out
+
+
+def test_transform_responses_parameters_maps_extra_body_to_additional_fields():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "extra_body": {"custom_flag": "on"},
+        }
+    )
+    assert out.get("additional_fields") == {"custom_flag": "on"}
+    assert "extra_body" not in out
+
+
+def test_transform_common_parameters_merges_extra_body_with_additional_fields():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters(
+        {
+            "model": "gpt-x",
+            "extra_body": {"temperature": 0.2, "custom_flag": "from-extra-body"},
+            "additional_fields": {"custom_flag": "from-additional-fields"},
+        }
+    )
+    assert out.get("additional_fields") == {
+        "temperature": 0.2,
+        "custom_flag": "from-additional-fields",
+    }
+    assert "extra_body" not in out
+
+
 def test_transform_responses_parameters_uses_common():
     """Тест что transform_responses_parameters использует общую логику"""
     cfg = ProxyConfig()
@@ -76,6 +117,16 @@ def test_enable_reasoning_does_not_override_explicit_reasoning_effort():
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"model": "gpt-x", "reasoning_effort": "low"})
     assert out.get("reasoning_effort") == "low"
+
+
+def test_transform_responses_parameters_maps_reasoning_object_to_reasoning_effort():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_responses_parameters(
+        {"model": "gpt-x", "reasoning": {"effort": "high"}}
+    )
+    assert out.get("reasoning_effort") == "high"
+    assert "reasoning" not in out
 
 
 def test_apply_json_schema_as_function():

@@ -39,6 +39,23 @@ def test_v1_prefix_router_is_registered(monkeypatch):
         assert response.status_code != 404
 
 
+def test_v1_litellm_router_is_registered(monkeypatch):
+    class FakeGigaChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aget_models(self):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(data=[], object_="list")
+
+    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+
+    with TestClient(create_app()) as client:
+        response = client.get("/v1/model/info")
+        assert response.status_code != 404
+
+
 def test_v1_models_no_307_redirect(monkeypatch):
     """GET /v1/models must return 200, not 307 redirect."""
 

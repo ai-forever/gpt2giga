@@ -1,50 +1,52 @@
-# AGENTS.md — scripts/ (utility scripts)
+# AGENTS.md — scripts/
 
 ## Package Identity
 
-- **What:** Small maintenance scripts used by CI and local workflows
-- **Primary use today:** Coverage badge generation for README (`badges/coverage.svg`)
+- **What:** Small helper scripts for CI and local debugging
+- **Current contents:** Coverage badge generation and mitmproxy SSE capture
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `scripts/generate_badge.py` | Generate `badges/coverage.svg` from a numeric coverage percentage |
+| `scripts/sse_event.py` | mitmproxy addon for inspecting SSE chunks and reconstructing streamed responses |
 
 ## Setup & Run
 
 ```bash
-# Run the badge generator (CI uses this pattern)
+# Generate/update the coverage badge
 uv run python scripts/generate_badge.py 87.5 badges/coverage.svg
+
+# Use the mitmproxy addon manually
+mitmproxy -s scripts/sse_event.py
 ```
 
 ## Patterns & Conventions
 
-- Keep scripts **pure and standalone** (stdlib only when possible).
-- Prefer **simple CLI interfaces** (positional args) with clear usage in the module docstring.
-- Scripts can be used by GitHub Actions; avoid interactive prompts.
+- Keep scripts small, standalone, and safe for automation.
+- Prefer stdlib-only implementations unless there is a strong reason not to.
+- Scripts used by CI must stay non-interactive.
+- If workflow behavior depends on a script, update the matching workflow in `.github/workflows/` in the same change.
 
-Examples:
-
-- ✅ DO: Follow the style of `scripts/generate_badge.py` (small, documented CLI)
-- ✅ DO: Keep CI wiring in `.github/workflows/ci.yaml`
-- ❌ DON'T: Make scripts depend on `local/` artifacts (e.g. `local/gigachat-0.1.43-py3-none-any.whl`)
-- ❌ DON'T: Require network access from scripts run in CI (keep CI stable)
-
-## Touch Points / Key Files
-
-- **Coverage badge generator**: `scripts/generate_badge.py`
-- **CI job invoking script**: `.github/workflows/ci.yaml`
-- **Badge output location**: `badges/coverage.svg`
-
-## JIT Index Hints
+## Quick Find Commands
 
 ```bash
-# Find script invocations from workflows
-rg -n "scripts/generate_badge\\.py|badges/coverage\\.svg" .github/workflows/
+# Find workflow references to scripts
+rg -n "scripts/" .github/workflows
+
+# Find badge output references
+rg -n "coverage.svg|generate_badge" .github/workflows README.md
 ```
 
 ## Common Gotchas
 
-- CI passes coverage as a number; keep the script tolerant of floats (see `.github/workflows/ci.yaml` badge step).
+- `generate_badge.py` takes a numeric percentage, not a path to `coverage.json`; keep docs/workflows aligned with how CI calls it.
+- `sse_event.py` depends on `mitmproxy` objects but `mitmproxy` is not a core project dependency; treat it as an optional debugging helper.
 
-## Pre-PR Checks
+## Pre-PR Check
 
 ```bash
-uv run ruff check scripts/ && uv run ruff format --check scripts/
+uv run ruff check scripts
+uv run ruff format --check scripts
 ```
-

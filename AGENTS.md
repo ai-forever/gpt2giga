@@ -2,111 +2,113 @@
 
 ## Project Snapshot
 
-- **Repo type:** Single Python package (not a monorepo)
-- **What:** Proxy server translating OpenAI + Anthropic SDK requests → GigaChat API
-- **Stack:** Python 3.10–3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE
-- **Tooling:** `uv` (lock: `uv.lock`), Ruff, pytest, Docker
-- **Hierarchy:** Sub-folders have their own `AGENTS.md` (nearest-wins)
+- **Repo type:** Single Python package with examples, docs, CI workflows, and deployment assets
+- **What:** FastAPI proxy that translates OpenAI and Anthropic-compatible requests into GigaChat API calls
+- **Stack:** Python 3.10–3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE, Docker
+- **Tooling:** `uv`, Ruff, pytest, Docker, GitHub Actions
+- **Hierarchy:** Subfolders with their own `AGENTS.md` override this file
 
 ## Setup Commands
 
 ```bash
-# Install all deps (dev included)
+# Install runtime + dev dependencies
 uv sync --all-extras --dev
 
-# Run proxy server locally
+# Run the proxy locally
 uv run gpt2giga
 
-# Build wheel/sdist (used by Docker builder stage)
+# Build wheel + sdist
 uv build
 
-# Run tests (80% coverage enforced)
+# Run full quality gate
+uv run ruff check .
+uv run ruff format --check .
 uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 
-# Lint
-uv run ruff check .
-
-# Format
-uv run ruff format .
-
-# Pre-commit hooks (install once)
+# Install pre-commit hooks
 uv run pre-commit install
 ```
 
 ## Universal Conventions
 
-- **Formatter/Linter:** Ruff (`ruff check`, `ruff format`). (Black may exist for tooling, but Ruff is the project standard.)
-- **Commit style:** Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`)
-- **Python compat:** Must work on 3.10–3.14. Avoid PEP-695-only syntax (`type Alias = ...`, `def f[T](...)`, etc.).
-- **Async-first:** All endpoint handlers and GigaChat calls are async.
-- **Docstrings:** Google style, imperative mood.
-- **Imports:** stdlib → third-party → local (`gpt2giga.*`), absolute imports only.
-- **PR template:** `.github/PULL_REQUEST_TEMPLATE.md` — follow the checklist.
+- **Formatter/Linter:** Ruff is the project standard. Keep `ruff check` and `ruff format` green.
+- **Commit style:** Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`.
+- **Python compat:** Code must remain compatible with Python `3.10` through `3.14`.
+- **Async-first:** Endpoint handlers and upstream GigaChat interactions are async.
+- **Imports:** stdlib → third-party → local (`gpt2giga.*`), using absolute imports.
+- **Docstrings:** Google style, imperative mood, concise.
+- **PR checklist:** Follow `.github/PULL_REQUEST_TEMPLATE.md`.
 
 ## Security & Secrets
 
-- **NEVER** commit credentials, tokens, or local env files (notably `.env`, `examples/.env`, `local/.env`).
-- Secrets go in `.env` (template: `.env.example`).
-- Env var prefixes: `GPT2GIGA_` for proxy settings, `GIGACHAT_` for GigaChat SDK.
-- API key auth is optional (`GPT2GIGA_ENABLE_API_KEY_AUTH`).
+- **Never commit secrets** such as `.env`, credentials, API keys, or local cert/key material.
+- Proxy settings use the `GPT2GIGA_` prefix; GigaChat SDK settings use `GIGACHAT_`.
+- `MODE=PROD` requires an API key and disables `/docs`, `/redoc`, `/openapi.json`, and `/logs*`.
+- Prefer `.env` or environment variables for secrets; do not pass secrets via CLI flags.
 
-## JIT Index (what to open, not what to paste)
+## Repo Map
 
-### Source Structure
-
-| Path | Purpose | Details |
+| Path | Purpose | Notes |
 |---|---|---|
-| `gpt2giga/` | Main source package | [gpt2giga/AGENTS.md](gpt2giga/AGENTS.md) |
-| `tests/` | Test suite | [tests/AGENTS.md](tests/AGENTS.md) |
-| `examples/` | Runnable usage examples | [examples/AGENTS.md](examples/AGENTS.md) |
-| `integrations/` | Third-party integration docs | [integrations/AGENTS.md](integrations/AGENTS.md) |
-| `scripts/` | Utility scripts used by CI | [scripts/AGENTS.md](scripts/AGENTS.md) |
-| `.github/` | CI/CD + PR templates | [.github/AGENTS.md](.github/AGENTS.md) |
-| `local/` | Scratchpad experiments (not shipped) | [local/AGENTS.md](local/AGENTS.md) |
-| `Dockerfile` | Multi-stage Docker build | builder runs `uv build` |
-| `docker-compose.yaml` | Docker Compose setup | uses `.env`, default port `8090` |
+| `gpt2giga/` | Main application package | Routers, protocol transforms, config, middleware |
+| `tests/` | Test suite | Mirrors source areas and router/protocol behavior |
+| `examples/` | Runnable SDK examples | OpenAI chat/responses/files/batches, Anthropic, embeddings, agents |
+| `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
+| `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
+| `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
+| `traefik/` | Traefik config | Used by `compose/traefik.yaml` |
+| `badges/` | Generated assets | Coverage badge written by CI |
+| `Dockerfile` | Container build | `uv build`-based package install |
+| `Dockerfile.mitmproxy` | Debug container image | mitmproxy/SSE debugging support |
+| `compose/` | Docker Compose manifests | `base`, `traefik`, `observability`, and related stacks |
 
-### Quick Find Commands
+## Current Architecture Notes
+
+- OpenAI-compatible endpoints live in `gpt2giga/routers/openai/`.
+- Anthropic-compatible endpoints live in `gpt2giga/routers/anthropic/`.
+- LiteLLM-compatible model-info endpoints live in `gpt2giga/routers/litellm/`.
+- Shared request/response translation lives in `gpt2giga/protocol/`.
+- Shared HTTP helpers live in `gpt2giga/common/`.
+- Request/app-scoped stores for files and batches live in `gpt2giga/app_state.py`.
+- OpenAPI schema builders live in `gpt2giga/openapi_specs/`.
+
+## Quick Find Commands
 
 ```bash
-# Find a class definition
-rg -n "^class " gpt2giga/
+# Find route handlers
+rg -n "@router\.(get|post|delete)" gpt2giga/routers
 
-# Find an async endpoint handler
-rg -n "^async def " gpt2giga/routers/
-
-# Find error mapping / exception handling
-rg -n "ERROR_MAPPING|exceptions_handler" gpt2giga/
-
-# Find all test files
-rg --files -g "test_*.py" tests/
-
-# Find env var usage
+# Find config/env settings
 rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
 
-# Find OpenAI ↔ GigaChat transformation logic
-rg -n "class (RequestTransformer|ResponseProcessor|AttachmentProcessor)" gpt2giga/
+# Find middleware classes
+rg -n "class .*Middleware" gpt2giga/middlewares
 
-# Find Anthropic compatibility layer
-rg -n "anthropic" gpt2giga/routers/ examples/anthropic/
+# Find batch/file support
+rg -n "batch|file" gpt2giga/routers gpt2giga/protocol gpt2giga/app_state.py
+
+# Find tests for a feature
+rg -n "batch|file|anthropic|responses" tests
+
+# Find workflow usage of scripts
+rg -n "scripts/" .github/workflows
 ```
 
-## Definition of Done (Pre-PR)
+## Definition Of Done
 
 ```bash
-uv run ruff check . && uv run ruff format --check . && uv run pytest tests/ --cov=. --cov-fail-under=80
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/ --cov=. --cov-fail-under=80
 ```
 
-- All tests pass, coverage ≥ 80%
-- No lint warnings
-- PR template checklist completed
-- `uv.lock` updated if dependencies changed
+- Tests pass and coverage stays at or above `80%`
+- Ruff passes without warnings
+- Docs/config changes stay aligned with the real file layout
+- `uv.lock` is updated if dependencies change
 
-## Cursor Cloud specific instructions
+## Environment Notes
 
-- **Service:** Single stateless FastAPI proxy (default port `8090`). No databases or auxiliary services required.
-- **uv must be installed first:** The VM does not ship with `uv`. The update script installs it automatically via `curl -LsSf https://astral.sh/uv/install.sh | sh`.
-- **Running the server:** `uv run gpt2giga` starts on `localhost:8090`. Without valid `GIGACHAT_CREDENTIALS` the proxy still boots and accepts requests, but upstream calls return an SSL/auth error — this is expected.
-- **Tests are fully mocked:** `uv run pytest tests/ --cov=. --cov-fail-under=80` runs all 246 tests without any external services or credentials.
-- **Lint/format/test commands:** See "Setup Commands" and "Definition of Done" sections above.
-- **Pre-commit hooks:** `uv run pre-commit install` sets up hooks (ruff check, ruff format, gitleaks). These run automatically on `git commit`.
+- Default local server address is `http://localhost:8090`.
+- Docker Compose uses `.env` and supports `DEV` and `PROD` profiles.
+- The repo also includes Traefik and observability compose variants; keep docs/config references aligned with those files when changing deployment behavior.

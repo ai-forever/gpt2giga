@@ -98,22 +98,19 @@ class ResponseProcessor:
         if text_param and isinstance(text_param, dict):
             response_text = text_param
 
-        result = {
-            "id": f"resp_{response_id}",
-            "object": "response",
-            "created_at": int(time.time()),
-            "status": "completed",
-            "instructions": data.get("instructions"),
-            "model": gpt_model,
-            "output": self._create_output_responses(
+        result = self._build_responses_api_result(
+            request_data=data,
+            gpt_model=gpt_model,
+            response_id=response_id,
+            output=self._create_output_responses(
                 giga_dict,
                 is_tool_call,
                 response_id,
                 is_structured_output=is_structured_output,
             ),
-            "text": response_text,
-            "usage": self._build_response_usage(giga_dict.get("usage")),
-        }
+            usage=self._build_response_usage(giga_dict.get("usage")),
+            response_text=response_text,
+        )
         if self._is_prod_mode:
             self.logger.bind(event="responses_api_response").debug(
                 "Processed responses API response (payload omitted in PROD)"
@@ -134,6 +131,97 @@ class ResponseProcessor:
         return result
 
     @staticmethod
+    def _create_reasoning_item(reasoning_text: Optional[str], response_id: str) -> list:
+        if not reasoning_text:
+            return []
+        return [
+            {
+                "id": f"rs_{response_id}",
+                "type": "reasoning",
+                "summary": [
+                    {
+                        "type": "summary_text",
+                        "text": reasoning_text,
+                    }
+                ],
+            }
+        ]
+
+    @staticmethod
+    def _build_reasoning_config(
+        request_data: Optional[Dict],
+    ) -> dict[str, Optional[str]]:
+        reasoning_data = (
+            request_data.get("reasoning") if isinstance(request_data, dict) else None
+        )
+        if isinstance(reasoning_data, dict):
+            return {
+                "effort": reasoning_data.get("effort"),
+                "summary": reasoning_data.get("summary"),
+            }
+
+        effort = (
+            request_data.get("reasoning_effort")
+            if isinstance(request_data, dict)
+            else None
+        )
+        return {"effort": effort, "summary": None}
+
+    @classmethod
+    def _build_responses_api_result(
+        cls,
+        request_data: Optional[Dict],
+        gpt_model: str,
+        response_id: str,
+        output: list,
+        usage: Optional[Dict],
+        response_text: dict,
+    ) -> dict:
+        request_data = request_data or {}
+        return {
+            "id": f"resp_{response_id}",
+            "object": "response",
+            "created_at": int(time.time()),
+            "status": "completed",
+            "error": None,
+            "incomplete_details": None,
+            "instructions": request_data.get("instructions"),
+            "max_output_tokens": request_data.get("max_output_tokens"),
+            "model": gpt_model,
+            "output": output,
+            "parallel_tool_calls": request_data.get("parallel_tool_calls", True),
+            "previous_response_id": request_data.get("previous_response_id"),
+            "reasoning": cls._build_reasoning_config(request_data),
+            "store": request_data.get("store", True),
+            "temperature": request_data.get("temperature", 1),
+            "text": response_text,
+            "tool_choice": request_data.get("tool_choice", "auto"),
+            "tools": request_data.get("tools", []),
+            "top_p": request_data.get("top_p", 1),
+            "truncation": request_data.get("truncation", "disabled"),
+            "usage": usage,
+            "user": request_data.get("user"),
+            "metadata": request_data.get("metadata", {}),
+        }
+
+    @staticmethod
+    def _create_message_item(text: Optional[str], response_id: str) -> dict:
+        return {
+            "type": "message",
+            "id": f"msg_{response_id}",
+            "status": "completed",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": text,
+                    "annotations": [],
+                    "logprobs": [],
+                }
+            ],
+        }
+
+    @staticmethod
     def _create_output_responses(
         data: dict,
         is_tool_call: bool = False,
@@ -142,54 +230,30 @@ class ResponseProcessor:
         is_structured_output: bool = False,
     ) -> list:
         response_id = str(uuid.uuid4()) if response_id is None else response_id
+        choice = data["choices"][0]
+        message = choice.get(message_key, {})
+        reasoning_items = ResponseProcessor._create_reasoning_item(
+            message.get("reasoning_content"), response_id
+        )
         try:
             if is_tool_call and not is_structured_output:
-                return [data["choices"][0][message_key]["output"]]
+                return reasoning_items + [message["output"]]
             if is_tool_call and is_structured_output:
-                output_item = data["choices"][0][message_key]["output"]
+                output_item = message["output"]
                 arguments = output_item.get("arguments", "{}")
-                return [
-                    {
-                        "type": "message",
-                        "id": f"msg_{response_id}",
-                        "status": "completed",
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": arguments,
-                            }
-                        ],
-                    }
+                return reasoning_items + [
+                    ResponseProcessor._create_message_item(arguments, response_id)
                 ]
-            return [
-                {
-                    "type": "message",
-                    "id": f"msg_{response_id}",
-                    "status": "completed",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": data["choices"][0][message_key]["content"],
-                        }
-                    ],
-                }
+            return reasoning_items + [
+                ResponseProcessor._create_message_item(
+                    message.get("content"), response_id
+                )
             ]
         except Exception:
-            return [
-                {
-                    "type": "message",
-                    "id": f"msg_{response_id}",
-                    "status": "completed",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": data["choices"][0][message_key]["content"],
-                        }
-                    ],
-                }
+            return reasoning_items + [
+                ResponseProcessor._create_message_item(
+                    message.get("content"), response_id
+                )
             ]
 
     def process_stream_chunk(

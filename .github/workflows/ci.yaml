@@ -23,7 +23,7 @@ jobs:
   test:
     name: Test on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
@@ -90,8 +90,8 @@ jobs:
       - name: Generate badge
         run: |
           COVERAGE=$(jq '.totals.percent_covered' coverage.json)
-          echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
-          uv run python scripts/generate_badge.py $COVERAGE badges/coverage.svg
+          echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
+          uv run python scripts/generate_badge.py "$COVERAGE" badges/coverage.svg
 
       - name: Upload badge artifact
         uses: actions/upload-artifact@v4
@@ -101,15 +101,16 @@ jobs:
 
       - name: Commit coverage badge to branch (if internal)
         if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push'
+        env:
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
-          BRANCH=${{ github.head_ref || github.ref_name }}
-          echo "Pushing coverage badge to branch: $BRANCH"
+          echo "Pushing coverage badge to branch: $BRANCH_NAME"
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add badges/coverage.svg
-          git commit -m "Update coverage badge for $BRANCH" || echo "No changes to commit"
-          git push origin HEAD:$BRANCH
+          git commit -m "Update coverage badge for $BRANCH_NAME" || echo "No changes to commit"
+          git push origin "HEAD:$BRANCH_NAME"
 
       - name: Comment coverage badge on PR
         if: github.event_name == 'pull_request'

@@ -9,6 +9,7 @@ from gigachat import GigaChat
 from gigachat.models import Chat
 from starlette.requests import Request
 
+from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 
@@ -20,12 +21,14 @@ async def stream_chat_completion_generator(
     response_id: str,
     giga_client: Optional[GigaChat] = None,
 ) -> AsyncGenerator[str, None]:
-    if not giga_client:
-        giga_client = request.app.state.gigachat_client
-    logger = getattr(request.app.state, "logger", None)
+    logger = None
     rquid = rquid_context.get()
 
     try:
+        if giga_client is None:
+            giga_client = get_gigachat_client(request)
+        logger = getattr(request.app.state, "logger", None)
+
         async for chunk in giga_client.astream(chat_messages):
             if await request.is_disconnected():
                 if logger:
@@ -61,15 +64,14 @@ async def stream_chat_completion_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        error_message = str(e)
         tb = traceback.format_exc()
         if logger:
             logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {error_message}\n{tb}"
+                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
             )
         error_response = {
             "error": {
-                "message": f"Stream interrupted: {error_message}",
+                "message": "Stream interrupted",
                 "type": error_type,
                 "code": "internal_error",
             }
@@ -85,16 +87,24 @@ async def stream_responses_generator(
     giga_client: Optional[GigaChat] = None,
     request_data: Optional[dict] = None,
 ) -> AsyncGenerator[str, None]:
-    if not giga_client:
-        giga_client = request.app.state.gigachat_client
-    logger = getattr(request.app.state, "logger", None)
-    rquid = rquid_context.get()
     import time
 
+    logger = None
+    rquid = rquid_context.get()
     created_at = int(time.time())
     model = request_data.get("model", "unknown") if request_data else "unknown"
     msg_id = f"msg_{response_id}"
     fc_id = f"fc_{response_id}"  # ID for function call item
+
+    def build_reasoning_config() -> dict:
+        reasoning_data = request_data.get("reasoning") if request_data else None
+        if isinstance(reasoning_data, dict):
+            return {
+                "effort": reasoning_data.get("effort"),
+                "summary": reasoning_data.get("summary"),
+            }
+        effort = request_data.get("reasoning_effort") if request_data else None
+        return {"effort": effort, "summary": None}
 
     def sse_event(event_type: str, data: dict) -> str:
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
@@ -115,7 +125,7 @@ async def stream_responses_generator(
             "output": output or [],
             "parallel_tool_calls": True,
             "previous_response_id": None,
-            "reasoning": {"effort": None, "summary": None},
+            "reasoning": build_reasoning_config(),
             "store": True,
             "temperature": request_data.get("temperature", 1) if request_data else 1,
             "text": {"format": {"type": "text"}},
@@ -131,6 +141,10 @@ async def stream_responses_generator(
     sequence_number = 0
 
     try:
+        if giga_client is None:
+            giga_client = get_gigachat_client(request)
+        logger = getattr(request.app.state, "logger", None)
+
         yield sse_event(
             "response.created",
             {
@@ -462,16 +476,15 @@ async def stream_responses_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        error_message = str(e)
         tb = traceback.format_exc()
         if logger:
             logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {error_message}\n{tb}"
+                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
             )
         error_response = {
             "type": "error",
             "code": "internal_error",
-            "message": f"Stream interrupted: {error_message}",
+            "message": "Stream interrupted",
             "param": None,
             "sequence_number": sequence_number,
         }

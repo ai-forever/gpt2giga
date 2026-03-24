@@ -1,4 +1,3 @@
-import re
 from typing import Callable
 
 from fastapi import Request
@@ -22,16 +21,11 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
             "messages",
             "responses",
         ]
-        pattern = r".*/(" + "|".join(map(re.escape, self.valid_roots)) + r")(/.*|$)"
-        self._pattern = re.compile(pattern)
 
     async def dispatch(self, request: Request, call_next: Callable):
         path = request.url.path
-
-        match = self._pattern.match(path)
-
-        if match and not path.startswith(f"/{match.group(1)}"):
-            new_path = f"/{match.group(1)}{match.group(2)}"
+        new_path = self._normalize_path(path)
+        if new_path is not None:
             # IMPORTANT:
             # Do not redirect (307) here: some clients may re-issue the request
             # without the original body, which leads to JSONDecodeError in
@@ -40,3 +34,18 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
             request.scope["raw_path"] = new_path.encode("utf-8")
 
         return await call_next(request)
+
+    def _normalize_path(self, path: str) -> str | None:
+        """Rewrite paths to start at the first recognized API root segment."""
+        segments = [segment for segment in path.split("/") if segment]
+        if not segments:
+            return None
+
+        for index, segment in enumerate(segments):
+            if segment not in self.valid_roots:
+                continue
+            if index == 0:
+                return None
+            return "/" + "/".join(segments[index:])
+
+        return None

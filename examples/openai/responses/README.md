@@ -8,7 +8,7 @@
 2. Запустите любой пример:
 
 ```bash
-uv run python examples/responses/single_prompt.py
+uv run python examples/openai/responses/single_prompt.py
 ```
 
 ## Про `base_url`
@@ -25,6 +25,7 @@ uv run python examples/responses/single_prompt.py
 ## Файлы
 
 - `single_prompt.py`: минимальный пример
+- `reasoning.py`: reasoning в стиле Responses API
 - `with_instructions.py`: instructions/system
 - `function_calling.py`: tool use / function calling
 - `structured_output.py`, `structured_output_nested.py`: Structured Outputs

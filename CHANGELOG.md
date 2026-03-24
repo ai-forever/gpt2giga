@@ -5,6 +5,27 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.1.6a1] - 2026-03-24
+### Добавлено
+- **OpenAI Files API**: добавлены эндпоинты `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`
+- **OpenAI Batches API**: добавлены эндпоинты `/batches` и `/batches/{batch_id}` вместе с примером `examples/openai/batches.py`
+- **Anthropic Message Batches API**: добавлены эндпоинты `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}` и `/v1/messages/batches/{message_batch_id}/results`, а также пример `examples/anthropic/message_batches.py`
+- **Новые интеграции**: добавлены инструкции для Qwen Code и Xcode
+- **CI и автоматизация**: добавлены `actionlint`, `CodeQL`, `dependency-review`, `docker-smoke`, `nightly-smoke`, `pr-labeler`, `release-drafter`, `stale-issues` и Dependabot-конфигурация
+
+### Изменено
+- **Примеры**: OpenAI-примеры перенесены в `examples/openai/`, README и AGENTS выровнены под новую структуру
+- **OpenAPI**: схемы OpenAI и Anthropic вынесены в `gpt2giga/openapi_specs/`
+- **LiteLLM router**: обработчик `/model/info` вынесен в отдельный пакет `gpt2giga/routers/litellm/`
+- **Docker Compose**: структура compose-файлов выровнена под каталог `compose/` (`base.yaml`, `observability.yaml`, `nginx.yaml`, `observe-multiple.yaml`, `traefik.yaml`)
+- **GitHub templates**: добавлены русскоязычные шаблоны issue и pull request
+
+### Исправлено
+- **Path normalization**: исправлена нормализация путей для `/v1`, `files`, `batches`, `messages` и `model/info`
+- **OpenAI payload mapping**: `extra_body` теперь корректно маппится в `additional_fields`
+- **Batches**: исправлены `completion_window` и обработка дат для Python 3.10
+- **Examples**: обновлены runnable-примеры OpenAI и Anthropic после реорганизации каталогов
+
 ## [0.1.5] - 2026-03-10
 ### Добавлено
 - **Model info endpoint**: Добавлен `GET /model/info` для совместимости с автодополнением в Kilo Code и клиентами в стиле LiteLLM
@@ -31,7 +52,7 @@
 
 ### Добавлено
 - **Nginx**: Добавлен конфиг `gpt2giga.conf` и README для развёртывания nginx `integrations/nginx/`
-- **Docker Compose**: Обновлён compose (#77) — mitmproxy в `docker-compose-observability.yaml`, пароль для mitmproxy
+- **Docker Compose**: Обновлён compose (#77) — mitmproxy в `compose/observability.yaml`, пароль для mitmproxy
 - **Роутер логов**: Вынесен отдельный `logs_router.py`, разделение system router на два
 
 ### Изменено
@@ -45,13 +66,13 @@
 
 ### Добавлено
 - **Traefik**: Добавлена интеграция Traefik
-- **MITMProxy**: Добавлен mitmproxy в `docker-compose-observability.yaml`
+- **MITMProxy**: Добавлен mitmproxy в `compose/observability.yaml`
 - **Reasoning toggle**: Добавлена переменная окружения `GPT2GIGA_ENABLE_REASONING`
 
 ### Изменено
-- **Docker Compose профили**: Профиль `dev` установлен как профиль по умолчанию
+- **Docker Compose профили**: Профиль `dev` установлен как профиль по умолчанию в `compose/base.yaml`
 
-## [0.1.3] - 2026-02-16
+## [0.1.3] - 2026-02-17
 
 ### Добавлено
 - **Режим DEV/PROD**: Добавлена поддержка режимов разработки и продакшена
@@ -59,7 +80,7 @@
 - **Graceful shutdown**: Добавлено корректное завершение работы сервера
 - **Gitleaks**: Добавлен gitleaks в pre-commit для проверки секретов
 - **OpenAPI для count_tokens**: Добавлена OpenAPI документация для эндпоинта count_tokens
-- **Профили в Docker**: Добавлены профили DEV и PROD в `docker-compose.yaml`
+- **Профили в Docker**: Добавлены профили DEV и PROD в `compose/base.yaml`
 
 ### Изменено
 - **Рефакторинг структуры**: Разделение больших файлов на модули:
@@ -170,7 +191,7 @@
 - **CI/CD**: Исправлена ошибка SSL в GitHub Actions.
 - **Безопасность**: Устранены уязвимости в зависимостях.
 
-## [0.0.15.post1] - 2025-01-21
+## [0.0.15.post1] - 2025-12-22
 
 ### Добавлено
 - Авторизация по API-ключу с поддержкой различных способов передачи (query параметр, заголовок x-api-key, Bearer token)
@@ -190,7 +211,7 @@
 - Исправлена ошибка валидации для роли developer
 - Исправлены версии Python в workflows
 
-## [0.0.14] - 2024-12
+## [0.0.14] - 2025-10-28
 
 ### Добавлено
 - Поддержка mTLS аутентификации
@@ -199,7 +220,7 @@
 ### Изменено
 - Обновлена документация README
 
-## [0.0.13] - 2024-11
+## [0.0.13] - 2025-09-19
 
 ### Добавлено
 - Базовая функциональность прокси-сервера
@@ -210,6 +231,7 @@
 
 ---
 
+[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...HEAD
 [0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4...v0.1.4.post1
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4

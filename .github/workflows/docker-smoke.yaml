@@ -1,0 +1,51 @@
+name: Docker smoke test
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'compose/**'
+      - 'gpt2giga/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/docker-smoke.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    name: Build and boot Docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build --build-arg PYTHON_VERSION=3.13 -t gpt2giga:smoke .
+
+      - name: Start container and verify health
+        run: |
+          docker run -d --rm \
+            --name gpt2giga-smoke \
+            -p 18090:8090 \
+            -e GPT2GIGA_MODE=DEV \
+            -e GPT2GIGA_HOST=0.0.0.0 \
+            gpt2giga:smoke
+
+          trap 'docker logs gpt2giga-smoke || true; docker stop gpt2giga-smoke || true' EXIT
+
+          for _ in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:18090/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "Container did not become healthy in time"
+          exit 1

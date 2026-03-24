@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.routers import api_router, system_router
+from gpt2giga.routers.openai import router as openai_router
+from gpt2giga.routers.system_router import system_router
 
 app = FastAPI()
-app.include_router(api_router)
+app.include_router(openai_router)
 app.include_router(system_router)
 
 

@@ -7,7 +7,7 @@ from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.routers.api_router import router
+from gpt2giga.routers.openai import router
 
 
 class MockResponse:
@@ -51,6 +51,29 @@ class FakeGigachat:
         return {"data": [{"embedding": [0.1, 0.2], "index": 0}], "model": model}
 
 
+class FakeGigachatReasoning:
+    async def achat(self, chat):
+        return MockResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "The capital of France is Paris.",
+                            "reasoning_content": "This is a straightforward geography question.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        )
+
+
 class FakeRequestTransformer:
     async def prepare_chat_completion(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
@@ -74,7 +97,7 @@ def make_app(monkeypatch=None):
 
         fake_tk = SimpleNamespace(encoding_for_model=lambda m: FakeEnc())
         monkeypatch.setattr(
-            sys.modules["gpt2giga.routers.api_router"], "tiktoken", fake_tk
+            sys.modules["gpt2giga.protocol.batches"], "tiktoken", fake_tk
         )
     return app
 
@@ -87,6 +110,28 @@ def test_responses_non_stream():
     body = resp.json()
     assert body["object"] == "response"
     assert body["status"] == "completed"
+
+
+def test_responses_non_stream_includes_reasoning_item():
+    app = make_app()
+    app.state.gigachat_client = FakeGigachatReasoning()
+    client = TestClient(app)
+    resp = client.post(
+        "/responses",
+        json={
+            "input": "What is the capital of France?",
+            "model": "gpt-x",
+            "reasoning": {"effort": "high", "summary": "auto"},
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["reasoning"] == {"effort": "high", "summary": "auto"}
+    assert body["output"][0]["type"] == "reasoning"
+    assert body["output"][0]["summary"][0]["text"] == (
+        "This is a straightforward geography question."
+    )
+    assert body["output"][1]["content"][0]["text"] == "The capital of France is Paris."
 
 
 def test_embeddings_with_token_ids(monkeypatch):

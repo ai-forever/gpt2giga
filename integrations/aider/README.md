@@ -21,7 +21,7 @@ aider --openai-api-base http://localhost:8090 --model gpt-4o --openai-api-key 12
 После этого запустите `gpt2giga` со следующими флагами:
 
 ```shell
-gpt2giga --pass-token --pass-model
+gpt2giga --proxy.pass-token true --proxy.pass-model true
 ```
 
 Теперь вы можете запустить Aider командой:

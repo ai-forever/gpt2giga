@@ -3,13 +3,13 @@ x-gpt2giga-common: &gpt2giga-common
   restart: unless-stopped
   pull_policy: always
   build:
-    context: .
+    context: ..
     dockerfile: Dockerfile
     args:
       PYTHON_VERSION: "3.13"
   container_name: gpt2giga
   env_file:
-    - .env
+    - ../.env
 
 services:
   gpt2giga-prod:

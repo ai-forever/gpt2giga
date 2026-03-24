@@ -16,7 +16,6 @@ eggs/
 .eggs/
 .local/
 local/
-examples/
 .ipynb_checkpoints/
 
 lib/
@@ -179,3 +178,5 @@ cython_debug/
 
 .idea
 .vscode
+.kilocode
+.opencode

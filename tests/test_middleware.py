@@ -46,6 +46,24 @@ def test_path_norm_no_redirect_for_unknown_root():
     assert resp.status_code == 404
 
 
+def test_path_norm_keeps_messages_batches_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["v1", "messages", "batches"],
+    )
+
+    @test_app.post("/v1/messages/batches")
+    def create_batch():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+    resp = client.post("/proxy/v1/messages/batches", json={"requests": []})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
 def test_pass_token_middleware(monkeypatch):
     test_app = FastAPI()
     test_app.add_middleware(PassTokenMiddleware)
