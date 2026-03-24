@@ -41,7 +41,7 @@ with TemporaryDirectory() as tmp_dir:
 
     content = client.files.content(uploaded.id)
     print("Stored file content:")
-    print(content)
+    print(content.text)
 
     deleted = client.files.delete(uploaded.id)
     print("Deleted:", deleted.id, deleted.deleted)
