@@ -1,0 +1,34 @@
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+categories:
+  - title: OpenAI compatibility
+    labels:
+      - openai
+  - title: Anthropic compatibility
+    labels:
+      - anthropic
+  - title: Protocol and translation
+    labels:
+      - protocol
+  - title: Docker and deployment
+    labels:
+      - docker
+  - title: CI and automation
+    labels:
+      - ci
+  - title: Tests
+    labels:
+      - tests
+  - title: Dependency updates
+    labels:
+      - dependencies
+  - title: Documentation
+    labels:
+      - docs
+
+change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
+change-title-escapes: '\<*_&'
+no-changes-template: "- No categorized changes yet."

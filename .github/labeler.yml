@@ -1,0 +1,63 @@
+openai:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/routers/openai/**'
+          - 'gpt2giga/openapi_specs/openai.py'
+          - 'examples/chat_completions/**'
+          - 'examples/responses/**'
+          - 'examples/models.py'
+          - 'examples/files.py'
+          - 'examples/batches.py'
+          - 'examples/embeddings.py'
+          - 'examples/openai_agents.py'
+          - 'examples/weather_agent.py'
+
+anthropic:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/routers/anthropic/**'
+          - 'gpt2giga/openapi_specs/anthropic.py'
+          - 'examples/anthropic/**'
+
+protocol:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/protocol/**'
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Dockerfile'
+          - 'Dockerfile.mitmproxy'
+          - '.dockerignore'
+          - 'compose/**'
+          - 'traefik/**'
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/dependabot.yml'
+          - '.github/labeler.yml'
+          - '.github/release-drafter.yml'
+          - '.github/AGENTS.md'
+
+docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'README.md'
+          - 'integrations/**'
+          - 'examples/**/*.md'
+          - '.github/PULL_REQUEST_TEMPLATE.md'
+          - '.github/ISSUE_TEMPLATE/**'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tests/**'
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'pyproject.toml'
+          - 'uv.lock'

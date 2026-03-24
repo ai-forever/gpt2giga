@@ -1,0 +1,20 @@
+name: Update release draft
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-release-draft:
+    name: Refresh release notes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Update release draft
+        uses: release-drafter/release-drafter@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
