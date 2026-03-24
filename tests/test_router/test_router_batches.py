@@ -98,8 +98,8 @@ class FakeGigaChat:
             content=base64.b64encode(self.files[file_id]["content"]).decode("utf-8")
         )
 
-    async def acreate_batch(self, content, method):
-        self.last_batch_content = content
+    async def acreate_batch(self, file, method):
+        self.last_batch_content = file
         self.last_batch_method = method
         output_file_id = "file-output-1"
         if output_file_id not in self.files:
@@ -274,9 +274,11 @@ def test_batches_endpoints_translate_openai_flow():
     assert giga_client.last_batch_method == "chat_completions"
 
     translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
-    assert translated_line["custom_id"] == "req-1"
-    assert translated_line["body"]["translated"] == "chat"
-    assert translated_line["body"]["messages"][0]["content"] == "hello"
+    assert translated_line["id"] == "req-1"
+    assert translated_line["request"]["translated"] == "chat"
+    assert translated_line["request"]["messages"][0]["content"] == "hello"
+    assert "custom_id" not in translated_line
+    assert "body" not in translated_line
 
     retrieved = client.get("/batches/batch-1")
     assert retrieved.status_code == 200

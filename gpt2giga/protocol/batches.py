@@ -135,7 +135,7 @@ async def transform_batch_input_file(
     giga_client: Any,
     embeddings_model: str,
 ) -> bytes:
-    """Transform OpenAI JSONL batch input into a GigaChat-friendly JSONL file."""
+    """Transform OpenAI JSONL batch input into GigaChat `{id, request}` JSONL."""
     transformed_lines = []
     for line_number, row in enumerate(parse_jsonl(content), start=1):
         body = row.get("body")
@@ -182,10 +182,7 @@ async def transform_batch_input_file(
             json.dumps(
                 {
                     "id": custom_id,
-                    "custom_id": custom_id,
-                    "method": method,
-                    "url": target.endpoint,
-                    "body": transformed_body,
+                    "request": transformed_body,
                 },
                 ensure_ascii=False,
             )

@@ -279,12 +279,12 @@ class FakeGigachatBatches(FakeGigachat):
         self.last_batch_content = None
         self.last_batch_method = None
 
-    async def acreate_batch(self, content, method):
-        self.last_batch_content = content
+    async def acreate_batch(self, file, method):
+        self.last_batch_content = file
         self.last_batch_method = method
         output_payload = [
             {
-                "custom_id": "req-1",
+                "id": "req-1",
                 "result": {
                     "choices": [
                         {
@@ -300,10 +300,10 @@ class FakeGigachatBatches(FakeGigachat):
                 },
             },
             {
-                "custom_id": "req-2",
+                "id": "req-2",
                 "error": {
-                    "type": "invalid_request_error",
                     "message": "Bad batch input",
+                    "status": 400,
                 },
             },
         ]
@@ -1480,8 +1480,10 @@ class TestMessageBatchesEndpoint:
             json.loads(line)
             for line in giga_client.last_batch_content.decode("utf-8").splitlines()
         ]
-        assert translated_lines[0]["custom_id"] == "req-1"
-        assert translated_lines[0]["body"]["messages"][0]["content"] == "Hello batch"
+        assert translated_lines[0]["id"] == "req-1"
+        assert translated_lines[0]["request"]["messages"][0]["content"] == "Hello batch"
+        assert "custom_id" not in translated_lines[0]
+        assert "body" not in translated_lines[0]
 
         listed = client.get("/messages/batches")
         assert listed.status_code == 200
