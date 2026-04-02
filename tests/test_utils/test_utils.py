@@ -40,3 +40,17 @@ async def test_exceptions_handler_converts_gigachat_response_error(monkeypatch):
         await boom()
     assert ex.value.status_code == 400
     assert ex.value.detail["url"].startswith("http://example.com")
+
+
+@pytest.mark.asyncio
+async def test_exceptions_handler_sanitizes_surrogates_in_error_message():
+    @exceptions_handler
+    async def boom():
+        raise DummyError("broken \udcd0 text")
+
+    response = await boom()
+
+    assert response.status_code == 500
+    assert response.body == (
+        b'{"error":{"message":"broken \\\\udcd0 text","type":"server_error","param":null,"code":null}}'
+    )

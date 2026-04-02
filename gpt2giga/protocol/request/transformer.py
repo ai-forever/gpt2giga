@@ -15,6 +15,7 @@ from gpt2giga.common.message_utils import (
 )
 from gpt2giga.common.tools import map_tool_name_to_gigachat
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
+from gpt2giga.logger import sanitize_for_utf8
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
 
@@ -466,7 +467,7 @@ class RequestTransformer:
                 f"{msg_count} messages, functions={has_functions}"
             )
 
-        return transformed_data
+        return sanitize_for_utf8(transformed_data)
 
     async def prepare_chat_completion(
         self, data: dict, giga_client: Optional[GigaChat] = None

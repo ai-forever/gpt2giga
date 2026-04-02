@@ -1005,6 +1005,18 @@ class TestMessagesEndpoint:
         assert "message_delta" in events
         assert "message_stop" in events
 
+        data_lines = [
+            line.replace("data: ", "") for line in lines if line.startswith("data: ")
+        ]
+        for data in data_lines:
+            parsed = json.loads(data)
+            if parsed.get("type") == "message_delta":
+                assert parsed["usage"]["input_tokens"] == 10
+                assert parsed["usage"]["output_tokens"] == 2
+                break
+        else:
+            raise AssertionError("message_delta event not found")
+
     def test_stream_function_call(self):
         app = make_app(FakeGigachatFunctionCall())
         client = TestClient(app)

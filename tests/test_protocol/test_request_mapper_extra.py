@@ -241,6 +241,18 @@ async def test_transform_messages_no_merge_with_function_call(request_transforme
 
 
 @pytest.mark.asyncio
+async def test_prepare_chat_completion_sanitizes_surrogates(request_transformer):
+    data = {
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": "bad \udcd0 text"}],
+    }
+
+    res = await request_transformer.prepare_chat_completion(data)
+
+    assert res["messages"][0]["content"] == r"bad \udcd0 text"
+
+
+@pytest.mark.asyncio
 async def test_transform_messages_system_moved_to_front(request_transformer):
     """If system message is not first after transformation, move it."""
     # This scenario: user message first, then developer (-> system)
