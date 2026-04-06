@@ -81,7 +81,7 @@ sequenceDiagram
 | `GET /models` | Да | Да | Список доступных моделей GigaChat в OpenAI-совместимом виде |
 | `GET /models/{model}` | Да | Да | Информация по конкретной модели |
 | `POST /embeddings` | Да | Да | Создание эмбеддингов через модель из настроек прокси |
-| `POST /responses` | Да | Да | OpenAI Responses API для новых клиентов |
+| `POST /responses` | Да | Да | OpenAI Responses API для новых клиентов, включая native `previous_response_id` / `conversation.id`, structured outputs и best-effort built-in tools |
 | `POST /files` | Да | Да | Загрузка файлов |
 | `GET /files` | Да | Да | Список файлов |
 | `GET /files/{file_id}` | Да | Да | Метаданные файла |
