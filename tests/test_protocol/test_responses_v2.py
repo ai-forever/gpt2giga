@@ -119,18 +119,26 @@ async def test_prepare_response_v2_maps_multimodal_and_replayed_tool_items():
         "text": "hello",
         "files": [{"id": "file-1"}, {"id": "img-1"}],
     }
+    assert len(messages) == 5
     assert messages[1]["role"] == "assistant"
     assert messages[1]["tools_state_id"] == "call-1"
     assert messages[1]["content"][0]["function_call"]["name"] == "sum"
-    assert messages[2]["role"] == "user"
+    assert messages[2]["role"] == "tool"
     assert messages[2]["tools_state_id"] == "call-1"
     assert messages[2]["content"][0]["function_result"]["name"] == "sum"
+    assert messages[3]["role"] == "assistant"
+    assert messages[3]["tools_state_id"] == "call-2"
+    assert messages[3]["content"][0] == {"text": "done"}
     assert (
         messages[3]["content"][1]["function_call"]["name"]
         == "__gpt2giga_user_search_web"
     )
-    assert messages[4]["role"] == "user"
+    assert messages[4]["role"] == "tool"
     assert messages[4]["tools_state_id"] == "call-2"
+    assert (
+        messages[4]["content"][0]["function_result"]["name"]
+        == "__gpt2giga_user_search_web"
+    )
 
 
 @pytest.mark.asyncio

@@ -891,18 +891,17 @@ class RequestTransformer:
                 tool_state_id = (
                     item.get("call_id") or item.get("id") or last_tools_state_id
                 )
+                function_result_part = {
+                    "function_result": {
+                        "name": map_tool_name_to_gigachat(name),
+                        "result": self._normalize_function_result_value(
+                            item.get("output"),
+                        ),
+                    }
+                }
                 message = {
-                    "role": "user",
-                    "content": [
-                        {
-                            "function_result": {
-                                "name": map_tool_name_to_gigachat(name),
-                                "result": self._normalize_function_result_value(
-                                    item.get("output"),
-                                ),
-                            }
-                        }
-                    ],
+                    "role": "tool",
+                    "content": [function_result_part],
                 }
                 if tool_state_id:
                     message["tools_state_id"] = str(tool_state_id)
@@ -943,21 +942,21 @@ class RequestTransformer:
                 name = item.get("name") or last_function_name
                 if not isinstance(name, str) or not name:
                     continue
-                message = {
-                    "role": "user",
-                    "content": [
-                        {
-                            "function_result": {
-                                "name": map_tool_name_to_gigachat(name),
-                                "result": self._normalize_function_result_value(
-                                    item.get("content"),
-                                ),
-                            }
-                        }
-                    ],
+                tool_state_id = item.get("tool_call_id")
+                function_result_part = {
+                    "function_result": {
+                        "name": map_tool_name_to_gigachat(name),
+                        "result": self._normalize_function_result_value(
+                            item.get("content"),
+                        ),
+                    }
                 }
-                if item.get("tool_call_id"):
-                    message["tools_state_id"] = str(item["tool_call_id"])
+                message = {
+                    "role": "tool",
+                    "content": [function_result_part],
+                }
+                if tool_state_id:
+                    message["tools_state_id"] = str(tool_state_id)
                 messages.append(message)
                 continue
 
@@ -1014,6 +1013,7 @@ class RequestTransformer:
                 or item.get("tool_state_id")
                 or item.get("call_id")
                 or item.get("id")
+                or last_tools_state_id
             )
             if isinstance(tools_state_id, str) and tools_state_id:
                 message["tools_state_id"] = tools_state_id
