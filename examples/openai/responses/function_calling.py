@@ -44,9 +44,8 @@ for item in response.output:
     if item.type == "function_call":
         if item.name == "get_horoscope":
             # 3. Execute the function logic for get_horoscope
-            horoscope = get_horoscope(json.loads(item.arguments))
-
-            # 4. Provide function call results to the model
+            arguments = json.loads(item.arguments)
+            horoscope = get_horoscope(arguments["sign"])
             input_list.append(
                 {
                     "type": "function_call_output",

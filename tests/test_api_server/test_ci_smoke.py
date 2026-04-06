@@ -10,12 +10,12 @@ class MockResponse:
     def __init__(self, data):
         self.data = data
 
-    def model_dump(self):
+    def model_dump(self, *args, **kwargs):
         return self.data
 
 
 class FakeModel:
-    def model_dump(self, by_alias=True):
+    def model_dump(self, *args, **kwargs):
         return {
             "id": "GigaChat",
             "object": "model",

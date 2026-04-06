@@ -15,7 +15,7 @@ from gpt2giga.protocol import ResponseProcessor
 
 
 def make_chunk(data):
-    return SimpleNamespace(model_dump=lambda: data)
+    return SimpleNamespace(model_dump=lambda *args, **kwargs: data)
 
 
 class FakeClient:

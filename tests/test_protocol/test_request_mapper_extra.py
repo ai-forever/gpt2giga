@@ -13,7 +13,7 @@ def mock_logger():
 @pytest.fixture
 def mock_attachment_processor():
     ap = AsyncMock()
-    # Current implementation prefers upload_file_with_meta() when available.
+    # Current implementation uploads via upload_file_with_meta().
     ap.upload_file_with_meta.return_value = SimpleNamespace(
         file_id="file_id_123",
         file_kind="text",
