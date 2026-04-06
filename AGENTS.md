@@ -68,9 +68,12 @@ uv run pre-commit install
 - Anthropic-compatible endpoints live in `gpt2giga/routers/anthropic/`.
 - LiteLLM-compatible model-info endpoints live in `gpt2giga/routers/litellm/`.
 - Shared request/response translation lives in `gpt2giga/protocol/`.
+- Request transformation is split across `gpt2giga/protocol/request/transformer.py`, `_base.py`, `_messages.py`, and `_responses_v2.py`.
+- Response transformation is split across `gpt2giga/protocol/response/processor.py`, `_common.py`, and `_responses.py`.
 - Shared HTTP helpers live in `gpt2giga/common/`.
 - Request/app-scoped stores for files and batches live in `gpt2giga/app_state.py`.
 - OpenAPI schema builders live in `gpt2giga/openapi_specs/`.
+- Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2`; do not add legacy `send_to_gigachat*` aliases back.
 
 ## Quick Find Commands
 
@@ -86,6 +89,9 @@ rg -n "class .*Middleware" gpt2giga/middlewares
 
 # Find batch/file support
 rg -n "batch|file" gpt2giga/routers gpt2giga/protocol gpt2giga/app_state.py
+
+# Find split request/response transformer internals
+rg --files gpt2giga/protocol/request gpt2giga/protocol/response
 
 # Find tests for a feature
 rg -n "batch|file|anthropic|responses" tests
