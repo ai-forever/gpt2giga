@@ -151,17 +151,13 @@ class RequestTransformerBaseMixin:
             return value
 
     @staticmethod
-    def _normalize_function_result_value(value: Any) -> Dict[str, Any] | str:
+    def _normalize_function_result_value(value: Any) -> Dict[str, Any]:
         if isinstance(value, dict):
             return value
         if isinstance(value, str):
             try:
                 decoded = json.loads(value)
             except json.JSONDecodeError:
-                return value
-            return (
-                decoded
-                if isinstance(decoded, dict)
-                else json.dumps(decoded, ensure_ascii=False)
-            )
-        return json.dumps(value, ensure_ascii=False)
+                return {"output": value}
+            return decoded if isinstance(decoded, dict) else {"output": decoded}
+        return {"output": value}

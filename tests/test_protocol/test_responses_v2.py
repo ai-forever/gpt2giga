@@ -142,6 +142,44 @@ async def test_prepare_response_v2_maps_multimodal_and_replayed_tool_items():
 
 
 @pytest.mark.asyncio
+async def test_prepare_response_v2_wraps_plain_tool_outputs_in_json_object():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    chat = await transformer.prepare_response_v2(
+        {
+            "model": "gpt-x",
+            "input": [
+                {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "arguments": '{"cmd": "pwd"}',
+                    "call_id": "call-1",
+                },
+                {
+                    "type": "function_call_output",
+                    "name": "exec_command",
+                    "output": "Command output",
+                    "call_id": "call-1",
+                },
+                {
+                    "role": "tool",
+                    "name": "exec_command",
+                    "content": "More output",
+                    "tool_call_id": "call-2",
+                },
+            ],
+        }
+    )
+
+    messages = chat.model_dump(exclude_none=True, by_alias=True)["messages"]
+    assert messages[1]["content"][0]["function_result"]["result"] == {
+        "output": "Command output"
+    }
+    assert messages[2]["content"][0]["function_result"]["result"] == {
+        "output": "More output"
+    }
+
+
+@pytest.mark.asyncio
 async def test_prepare_response_v2_resolves_previous_response_id():
     transformer = RequestTransformer(ProxyConfig(), logger)
     chat = await transformer.prepare_response_v2(
