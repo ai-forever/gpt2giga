@@ -15,15 +15,15 @@ services:
     container_name: gpt2giga_max
     environment:
       GIGACHAT_MODEL: GigaChat-2-Max
-      GPT2GIGA_PORT: 17000
+      GPT2GIGA_PORT: 8090
     ports:
-      - "17000:17000"
+      - "8090:8090"
 
   gpt2giga-ultra:
     <<: *gpt2giga-common
     container_name: gpt2giga_ultra
     environment:
       GIGACHAT_MODEL: GigaChat-3-Ultra
-      GPT2GIGA_PORT: 17001
+      GPT2GIGA_PORT: 8091
     ports:
-      - "17001:17001"
+      - "8091:8091"
