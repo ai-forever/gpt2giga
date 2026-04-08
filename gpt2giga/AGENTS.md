@@ -52,10 +52,13 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `routers/openai/batches.py` | `/batches` |
 | `routers/anthropic/messages.py` | `/messages` and `/messages/count_tokens` |
 | `routers/anthropic/batches.py` | `/messages/batches` |
+| `routers/gemini/content.py` | `/v1beta/models/*:generateContent`, `countTokens`, embeddings |
+| `routers/gemini/models.py` | `/v1beta/models` and `/v1beta/models/{model}` |
 | `routers/system_router.py` | `/health`, `/ping` |
 | `routers/logs_router.py` | `/logs/{last_n_lines}`, `/logs/stream`, `/logs/html` |
 
 - OpenAI and Anthropic routers are mounted both at root and `/v1`.
+- Gemini routes are mounted under `/v1beta`.
 - System routes are root-only.
 - Log routes are disabled in `PROD`.
 
@@ -75,6 +78,9 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `protocol/anthropic/request.py` | Anthropic request → OpenAI-style intermediary |
 | `protocol/anthropic/response.py` | OpenAI/GigaChat result → Anthropic response |
 | `protocol/anthropic/streaming.py` | Anthropic SSE/event translation |
+| `protocol/gemini/request.py` | Gemini request → OpenAI-style intermediary |
+| `protocol/gemini/response.py` | OpenAI/GigaChat result → Gemini response/error |
+| `protocol/gemini/streaming.py` | Gemini SSE/data-only translation |
 
 ## Common Utilities
 

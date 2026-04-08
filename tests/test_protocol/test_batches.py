@@ -28,7 +28,7 @@ async def test_transform_batch_input_file_keeps_request_model_when_pass_model_fa
     )
 
     row = json.loads(result.decode("utf-8").strip())
-    assert row["body"]["model"] == "GigaChat-2-Pro"
+    assert row["request"]["model"] == "GigaChat-2-Pro"
 
 
 @pytest.mark.asyncio
@@ -46,7 +46,7 @@ async def test_transform_batch_input_file_uses_client_default_model_when_missing
     )
 
     row = json.loads(result.decode("utf-8").strip())
-    assert row["body"]["model"] == "GigaChat-2-Max"
+    assert row["request"]["model"] == "GigaChat-2-Max"
 
 
 def test_resolve_batch_model_prefers_request_model():

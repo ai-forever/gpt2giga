@@ -305,7 +305,7 @@ def _transform_chat_batch_result(
         return raw_body
     model = request_body.get("model", "GigaChat")
     return response_processor.process_response(
-        SimpleNamespace(model_dump=lambda: raw_body),
+        SimpleNamespace(model_dump=lambda **_: raw_body),
         model,
         str(response_id),
         request_data=request_body,
@@ -325,7 +325,7 @@ def _transform_responses_batch_result(
     model = request_body.get("model", "GigaChat")
     return response_processor.process_response_api(
         request_body,
-        SimpleNamespace(model_dump=lambda: raw_body),
+        SimpleNamespace(model_dump=lambda **_: raw_body),
         model,
         str(response_id),
     )

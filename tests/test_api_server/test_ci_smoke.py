@@ -148,3 +148,32 @@ def test_ci_smoke_anthropic_messages(monkeypatch):
     assert body["type"] == "message"
     assert body["role"] == "assistant"
     assert body["content"][0]["text"] == "Hello!"
+
+
+def test_ci_smoke_gemini_generate_content(monkeypatch):
+    app = make_app(monkeypatch)
+
+    with TestClient(app) as client:
+        install_fake_transformer(app)
+        response = client.post(
+            "/v1beta/models/gemini-test:generateContent",
+            json={
+                "contents": [{"role": "user", "parts": [{"text": "Hello"}]}],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidates"][0]["content"]["parts"][0]["text"] == "Hello!"
+
+
+def test_ci_smoke_gemini_auth_uses_x_goog_api_key(monkeypatch):
+    app = make_app(monkeypatch)
+    app.state.config.proxy_settings.enable_api_key_auth = True
+    app.state.config.proxy_settings.api_key = "secret"
+    app = create_app(config=app.state.config)
+
+    with TestClient(app) as client:
+        response = client.get("/v1beta/models", headers={"x-goog-api-key": "secret"})
+
+    assert response.status_code != 401

@@ -64,6 +64,24 @@ def test_path_norm_keeps_messages_batches_prefix():
     assert resp.json() == {"ok": True}
 
 
+def test_path_norm_keeps_v1beta_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["v1", "v1beta", "models"],
+    )
+
+    @test_app.get("/v1beta/models")
+    def list_models():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+    resp = client.get("/proxy/v1beta/models")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
 def test_pass_token_middleware(monkeypatch):
     test_app = FastAPI()
     test_app.add_middleware(PassTokenMiddleware)
@@ -81,6 +99,7 @@ def test_pass_token_middleware(monkeypatch):
 
     # Ensure middleware stays offline by stubbing GigaChat construction in gigachat module
     monkeypatch.setattr("gigachat.GigaChat", FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.common.gigachat_auth.GigaChat", FakeGigaChat)
 
     # Base (app-scoped) GigaChat client
     test_app.state.gigachat_client = FakeGigaChat()
