@@ -1,0 +1,29 @@
+x-gpt2giga-common: &gpt2giga-common
+  image: ghcr.io/ai-forever/gpt2giga:latest
+  restart: unless-stopped
+  build:
+    context: ..
+    dockerfile: Dockerfile
+    args:
+      PYTHON_VERSION: "3.13"
+  env_file:
+    - ../.env
+
+services:
+  gpt2giga-max:
+    <<: *gpt2giga-common
+    container_name: gpt2giga_max
+    environment:
+      GIGACHAT_MODEL: GigaChat-2-Max
+      GPT2GIGA_PORT: 8090
+    ports:
+      - "8090:8090"
+
+  gpt2giga-ultra:
+    <<: *gpt2giga-common
+    container_name: gpt2giga_ultra
+    environment:
+      GIGACHAT_MODEL: GigaChat-3-Ultra
+      GPT2GIGA_PORT: 8091
+    ports:
+      - "8091:8091"

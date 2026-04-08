@@ -54,20 +54,72 @@ sequenceDiagram
 
 С помощью gpt2giga вы можете:
 
-- использовать возможности моделей OpenAI и полностью заменить ChatGPT на GigaChat;
-- **использовать Anthropic SDK** — эндпоинт `/v1/messages` совместим с Anthropic Messages API, включая стриминг, tool use и extended thinking;
-- вызывать функции через API, включая передачу и выполнение функций с аргументами;
-- использовать структурированный вывод (Structured Outputs) для получения гарантированного JSON-ответа;
-- обрабатывать ответ модели в режиме потоковой генерации токенов с помощью параметра `stream=true`;
-- перенаправлять запросы на создание эмбеддингов (поддерживаются эндпоинты `/embeddings` и `/v1/embeddings`);
-- использовать OpenAI-совместимые Files API и Batches API (`/files`, `/batches`);
-- использовать Anthropic Message Batches API (`/v1/messages/batches`);
-- отдавать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
-- работать в асинхронном режиме с множеством потоков запросов от нескольких клиентов;
-- общение в openai-формате с файлом;
-- использовать эндпоинт `/responses` (OpenAI Responses API) для совместимости с новыми клиентами;
-- отображать подробные сведения о запросах и ответах при включенном логировании `DEBUG`, `INFO` ...;
-- задавать параметры работы как с помощью аргументов командной строки, так и с помощью переменных окружения (`.env`).
+- использовать OpenAI-совместимые и Anthropic-совместимые клиенты поверх GigaChat без переписывания основного клиентского кода;
+- работать через **OpenAI Chat Completions API** и **OpenAI Responses API**;
+- использовать **Anthropic Messages API**, включая стриминг, tool use и extended thinking;
+- вызывать функции и инструменты через API, включая передачу аргументов в OpenAI- и Anthropic-совместимом формате;
+- использовать structured outputs для получения JSON-ответов;
+- обрабатывать ответы модели в потоковом режиме с помощью `stream=true`;
+- создавать эмбеддинги через `/embeddings` и `/v1/embeddings`;
+- использовать OpenAI-совместимые **Files API** и **Batches API**;
+- использовать **Anthropic Message Batches API**;
+- получать список моделей и информацию о конкретной модели через OpenAI-совместимый **Models API**;
+- использовать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
+- работать с несколькими клиентами и множеством запросов в асинхронном режиме;
+- настраивать прокси через `.env`, переменные окружения и аргументы командной строки;
+- включать логирование, HTTPS и API-key авторизацию для локальной разработки и production-сценариев.
+
+### Поддерживаемые API routes
+
+Ниже перечислены основные route-группы официальных OpenAI и Anthropic API и отмечено, что из этого поддерживается в gpt2giga. Все перечисленные маршруты в gpt2giga доступны как без префикса, так и с префиксом `/v1`, например `/chat/completions` и `/v1/chat/completions`.
+
+#### OpenAI API
+
+| Route / группа | Официальный OpenAI API | В gpt2giga | Что поддерживается |
+|---|---|---|---|
+| `POST /chat/completions` | Да | Да | Основной чатовый эндпоинт, включая `stream=true`, tools/function calling, structured outputs, работу с вложениями |
+| `GET /models` | Да | Да | Список доступных моделей GigaChat в OpenAI-совместимом виде |
+| `GET /models/{model}` | Да | Да | Информация по конкретной модели |
+| `POST /embeddings` | Да | Да | Создание эмбеддингов через модель из настроек прокси |
+| `POST /responses` | Да | Да | OpenAI Responses API для новых клиентов, включая native `previous_response_id` / `conversation.id`, structured outputs и best-effort built-in tools |
+| `POST /files` | Да | Да | Загрузка файлов |
+| `GET /files` | Да | Да | Список файлов |
+| `GET /files/{file_id}` | Да | Да | Метаданные файла |
+| `DELETE /files/{file_id}` | Да | Да | Удаление файла |
+| `GET /files/{file_id}/content` | Да | Да | Получение содержимого файла |
+| `POST /batches` | Да | Да | Создание batch-задачи |
+| `GET /batches` | Да | Да | Список batch-задач |
+| `GET /batches/{batch_id}` | Да | Да | Получение batch-задачи |
+| `GET/POST /chat/completions` stored-completions routes | Да | Нет | Маршруты для хранения, выборки и обновления сохранённых chat completions не реализованы |
+| `POST /completions` | Да | Нет | Legacy Completions API не реализован |
+| `POST /images*` | Да | Нет | Генерация и редактирование изображений не реализованы |
+| `POST /audio*` | Да | Нет | Speech / transcription / translation не реализованы |
+| `POST /moderations` | Да | Нет | Moderations API не реализован |
+| `POST /uploads*` | Да | Нет | Uploads API не реализован |
+| `POST /fine_tuning*` | Да | Нет | Fine-tuning API не реализован |
+| `POST /assistants*`, `POST /threads*`, `POST /runs*` | Да | Нет | Assistants/Threads/Runs API не реализованы |
+| `POST /vector_stores*` | Да | Нет | Vector Stores API не реализован |
+| `Realtime API` | Да | Нет | Realtime/WebSocket API не реализован |
+
+#### Anthropic API
+
+| Route / группа | Официальный Anthropic API | В gpt2giga | Что поддерживается |
+|---|---|---|---|
+| `POST /messages` | Да | Да | Основной Messages API, включая стриминг |
+| `POST /messages/count_tokens` | Да | Да | Подсчёт токенов для Messages API |
+| `POST /messages/batches` | Да | Да | Создание message batch |
+| `GET /messages/batches` | Да | Да | Список message batches |
+| `GET /messages/batches/{message_batch_id}` | Да | Да | Получение message batch |
+| `GET /messages/batches/{message_batch_id}/results` | Да | Да | Получение результатов батча |
+| `POST /messages/batches/{message_batch_id}/cancel` | Да | Частично | Route есть, но сейчас возвращает `501`, так как backend GigaChat не поддерживает отмену batch |
+| `DELETE /messages/batches/{message_batch_id}` | Да | Частично | Route есть, но сейчас возвращает `501`, так как backend GigaChat не поддерживает удаление batch |
+| Другие route Anthropic API | Частично | Нет | В проекте нет отдельной реализации дополнительных route вне Messages API и Message Batches API |
+
+### Коротко по покрытию
+
+- **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`, `files`, `batches`.
+- **Anthropic:** поддерживается `Messages API`, `count_tokens` и `Message Batches API`.
+- **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic API, включая fine-tuning, images, audio, vector stores, assistants и realtime.
 
 ## Начало работы
 
@@ -164,6 +216,8 @@ sequenceDiagram
    ```
 
    После установки пакета вы сможете использовать команду `gpt2giga`, которая позволяет запускать и настраивать прокси-сервер.
+
+   Некоторые клиенты, включая Codex, могут периодически присылать probe-запросы с `Upgrade: websocket` и `GET /responses` перед основным `POST /responses`. Это ожидаемое поведение клиента: `gpt2giga` не реализует Realtime/WebSocket API, поэтому `GET /responses` может логироваться как `405 Method Not Allowed`, но на обычную работу `POST /responses` это не влияет.
 
 2. Переименуйте файл [`.env.example`](./.env.example) в `.env` и сохраните его в корне своего проекта:
 

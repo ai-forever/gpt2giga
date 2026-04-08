@@ -1,8 +1,9 @@
 import logging
+from pathlib import Path
 
 import loguru
 
-from gpt2giga.logger import setup_logger, redact_sensitive
+from gpt2giga.logger import redact_sensitive, sanitize_for_utf8, setup_logger
 
 
 def test_init_logger_info_level():
@@ -92,3 +93,20 @@ def test_setup_logger_with_redaction_disabled(tmp_path):
     log_file = str(tmp_path / "test.log")
     logger = setup_logger("DEBUG", log_file=log_file, enable_redaction=False)
     assert isinstance(logger, loguru._logger.Logger)
+
+
+def test_sanitize_for_utf8_escapes_lone_surrogates():
+    value = "bad surrogate \udcd0"
+    assert sanitize_for_utf8(value) == r"bad surrogate \udcd0"
+
+
+def test_setup_logger_logs_surrogate_messages(tmp_path):
+    log_file = Path(tmp_path) / "test.log"
+    logger = setup_logger("DEBUG", log_file=str(log_file), enable_redaction=False)
+
+    logger.bind(payload="payload \udcd0").error("message \udcd0")
+    logger.complete()
+
+    contents = log_file.read_text(encoding="utf-8")
+    assert r"message \udcd0" in contents
+    assert r'"payload": "payload \\udcd0"' in contents

@@ -13,6 +13,13 @@ def test_root_redirect():
     assert response.status_code == 200
 
 
+def test_root_head_allowed():
+    app = create_app()
+    client = TestClient(app)
+    response = client.head("/")
+    assert response.status_code == 200
+
+
 def test_cors_headers_present():
     app = create_app()
     client = TestClient(app)

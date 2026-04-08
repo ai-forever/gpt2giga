@@ -145,7 +145,7 @@ def create_app(config=None) -> FastAPI:
     if config.proxy_settings.pass_token:
         app.add_middleware(PassTokenMiddleware)
 
-    @app.get("/", include_in_schema=False)
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     async def docs_redirect():
         if is_prod_mode:
             return {"status": "ok", "mode": "PROD"}

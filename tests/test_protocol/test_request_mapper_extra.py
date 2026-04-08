@@ -13,7 +13,7 @@ def mock_logger():
 @pytest.fixture
 def mock_attachment_processor():
     ap = AsyncMock()
-    # Current implementation prefers upload_file_with_meta() when available.
+    # Current implementation uploads via upload_file_with_meta().
     ap.upload_file_with_meta.return_value = SimpleNamespace(
         file_id="file_id_123",
         file_kind="text",
@@ -238,6 +238,18 @@ async def test_transform_messages_no_merge_with_function_call(request_transforme
 
     # Should not merge because first has function_call
     assert len(res) == 2
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_sanitizes_surrogates(request_transformer):
+    data = {
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": "bad \udcd0 text"}],
+    }
+
+    res = await request_transformer.prepare_chat_completion(data)
+
+    assert res["messages"][0]["content"] == r"bad \udcd0 text"
 
 
 @pytest.mark.asyncio

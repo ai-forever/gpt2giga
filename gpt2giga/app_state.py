@@ -24,3 +24,11 @@ def get_file_store(request: Request) -> dict:
     if not hasattr(app_state, "file_metadata_store"):
         app_state.file_metadata_store = {}
     return app_state.file_metadata_store
+
+
+def get_response_store(request: Request) -> dict:
+    """Return the in-memory responses metadata store."""
+    app_state = request.app.state
+    if not hasattr(app_state, "response_metadata_store"):
+        app_state.response_metadata_store = {}
+    return app_state.response_metadata_store

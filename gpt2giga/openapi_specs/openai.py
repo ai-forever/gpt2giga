@@ -307,12 +307,27 @@ def responses_openapi_extra() -> Dict[str, Any]:
             },
             "tools": {
                 "type": "array",
-                "description": "OpenAI tools format (type=function).",
+                "description": "OpenAI tools format. Functions and built-in `web_search*`, `code_interpreter`, `image_generation` are supported best-effort.",
                 "items": {"type": "object", "additionalProperties": True},
             },
             "tool_choice": {
                 "description": "Tool choice (best effort).",
                 "oneOf": [{"type": "string"}, {"type": "object"}],
+            },
+            "previous_response_id": {
+                "type": "string",
+                "description": "Continue an in-memory Responses conversation using a previous response id.",
+            },
+            "conversation": {
+                "type": "object",
+                "description": "Directly target an existing GigaChat thread via `conversation.id`.",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Existing conversation/thread id.",
+                    }
+                },
+                "additionalProperties": True,
             },
             "metadata": {
                 "type": "object",
@@ -346,6 +361,7 @@ def responses_openapi_extra() -> Dict[str, Any]:
         "**Required**: `model`, `input`.\n\n"
         "**Notes**:\n"
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
+        "- `previous_response_id` and `conversation.id` continue an in-memory thread; continuity does not survive proxy restarts.\n"
         "- Unknown optional parameters are accepted on a best-effort basis."
     )
     return _request_body_oneof(

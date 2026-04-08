@@ -6,6 +6,7 @@ import gigachat
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
+from gpt2giga.logger import sanitize_for_utf8
 from gpt2giga.logger import rquid_context
 
 ERROR_MAPPING = {
@@ -45,14 +46,17 @@ def exceptions_handler(func):
             from loguru import logger
 
             rquid = rquid_context.get()
-            logger.error(f"[{rquid}] GigaChatException: {type(e).__name__}: {e}")
+            safe_message = sanitize_for_utf8(str(e))
+            logger.error(
+                f"[{rquid}] GigaChatException: {type(e).__name__}: {safe_message}"
+            )
             for exc_class, (status, error_type, code) in ERROR_MAPPING.items():
                 if isinstance(e, exc_class):
                     raise HTTPException(
                         status_code=status,
                         detail={
                             "error": {
-                                "message": str(e),
+                                "message": safe_message,
                                 "type": error_type,
                                 "param": None,
                                 "code": code,
@@ -71,6 +75,7 @@ def exceptions_handler(func):
                         error_detail = message
                         if isinstance(error_detail, bytes):
                             error_detail = error_detail.decode("utf-8", errors="ignore")
+                    error_detail = sanitize_for_utf8(error_detail)
                     raise HTTPException(
                         status_code=status_code,
                         detail={
@@ -86,6 +91,7 @@ def exceptions_handler(func):
                         error_detail = message
                         if isinstance(error_detail, bytes):
                             error_detail = error_detail.decode("utf-8", errors="ignore")
+                    error_detail = sanitize_for_utf8(error_detail)
                     raise HTTPException(
                         status_code=status_code,
                         detail={
@@ -114,12 +120,15 @@ def exceptions_handler(func):
             from loguru import logger
 
             rquid = rquid_context.get()
-            logger.exception(f"[{rquid}] Unhandled exception: {type(e).__name__}: {e}")
+            safe_message = sanitize_for_utf8(str(e))
+            logger.exception(
+                f"[{rquid}] Unhandled exception: {type(e).__name__}: {safe_message}"
+            )
             return JSONResponse(
                 status_code=500,
                 content={
                     "error": {
-                        "message": str(e),
+                        "message": safe_message,
                         "type": "server_error",
                         "param": None,
                         "code": None,

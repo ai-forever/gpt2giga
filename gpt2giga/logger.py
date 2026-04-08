@@ -2,6 +2,7 @@
 import contextvars
 import json
 import sys
+from collections.abc import Mapping, Sequence
 
 from loguru import logger
 
@@ -19,6 +20,25 @@ def redact_sensitive(message: str) -> str:
     return message
 
 
+def sanitize_for_utf8(value):
+    """Return a UTF-8-safe representation of ``value``.
+
+    Lone surrogate code points can appear in upstream payloads or exception
+    messages. Converting them with ``backslashreplace`` preserves debugging
+    information while keeping logs and JSON serialization UTF-8 encodable.
+    """
+    if isinstance(value, str):
+        return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
+    if isinstance(value, Mapping):
+        return {
+            sanitize_for_utf8(key): sanitize_for_utf8(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return type(value)(sanitize_for_utf8(item) for item in value)
+    return value
+
+
 def get_rquid() -> str:
     """Retrieve current request's RQUID from contextvar."""
     return rquid_context.get()
@@ -33,7 +53,11 @@ def _format_structured_extra(extra: dict) -> str:
     Note: Curly braces in the JSON output are escaped (doubled) to prevent
     Loguru's format_map from interpreting them as format placeholders.
     """
-    filtered = {k: v for k, v in extra.items() if k != "rquid" and v is not None}
+    filtered = {
+        sanitize_for_utf8(k): sanitize_for_utf8(v)
+        for k, v in extra.items()
+        if k != "rquid" and v is not None
+    }
     if not filtered:
         return ""
     try:
@@ -88,6 +112,7 @@ def setup_logger(
 
         def __call__(self, record):
             record["extra"]["rquid"] = get_rquid()
+            record["message"] = sanitize_for_utf8(record["message"])
             if _do_redact:
                 record["message"] = redact_sensitive(record["message"])
 
