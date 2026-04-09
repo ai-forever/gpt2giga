@@ -1,4 +1,4 @@
-from gpt2giga.api_server import run
+from gpt2giga.app.run import run
 
 __all__ = ["run"]
 
