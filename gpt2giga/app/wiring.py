@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 
 from gpt2giga.features.chat import ChatService
-from gpt2giga.features.responses.service import ResponsesService
+from gpt2giga.features.responses import ResponsesService
 from gpt2giga.providers.gigachat import (
     AttachmentProcessor,
     GigaChatChatMapper,
