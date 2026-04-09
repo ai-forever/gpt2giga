@@ -11,6 +11,7 @@ from gpt2giga.api.gemini.openapi import (
     gemini_generate_content_openapi_extra,
 )
 from gpt2giga.core.logging.setup import rquid_context
+from gpt2giga.features.embeddings import get_embeddings_service_from_state
 from gpt2giga.protocol.gemini import (
     GeminiAPIError,
     build_batch_embed_contents_response,
@@ -150,10 +151,10 @@ async def batch_embed_contents(model: str, request: Request):
             message="`requests` must be a non-empty array.",
         )
 
+    embeddings_service = get_embeddings_service_from_state(request.app.state)
     giga_client = get_gigachat_client(request)
     texts = extract_embed_texts(requests_payload, model)
-    embeddings_model = request.app.state.config.proxy_settings.embeddings
-    result = await giga_client.aembeddings(texts=texts, model=embeddings_model)
+    result = await embeddings_service.embed_texts(texts, giga_client=giga_client)
     return build_batch_embed_contents_response(result)
 
 
@@ -183,8 +184,8 @@ async def embed_content(model: str, request: Request):
     batch_like = {
         "requests": [{"model": model_resource_name(model), "content": content}]
     }
+    embeddings_service = get_embeddings_service_from_state(request.app.state)
     giga_client = get_gigachat_client(request)
     texts = extract_embed_texts(batch_like["requests"], model)
-    embeddings_model = request.app.state.config.proxy_settings.embeddings
-    result = await giga_client.aembeddings(texts=texts, model=embeddings_model)
+    result = await embeddings_service.embed_texts(texts, giga_client=giga_client)
     return build_single_embed_content_response(result)

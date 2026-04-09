@@ -38,12 +38,16 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `core/app_meta.py` | App version, port checks, and CLI secret warnings |
 | `features/chat/service.py` | Chat-completions orchestration between HTTP routes and provider mapping |
 | `features/chat/stream.py` | Chat-completions SSE streaming flow |
+| `features/embeddings/service.py` | Embeddings orchestration shared by OpenAI and Gemini embedding routes |
+| `features/models/service.py` | Shared model-discovery orchestration for OpenAI, Gemini, and LiteLLM routes |
 | `features/responses/service.py` | Responses API orchestration between HTTP routes and provider mapping |
 | `features/responses/stream.py` | Responses API SSE streaming flow |
 | `features/responses/store.py` | In-memory Responses API metadata store accessors |
 | `providers/gigachat/client.py` | GigaChat client lifecycle, factory resolution, and request-scoped access |
 | `providers/gigachat/auth.py` | Pass-token auth handoff and request-level GigaChat client construction |
 | `providers/gigachat/chat_mapper.py` | Chat feature entrypoint for GigaChat request/response mapping |
+| `providers/gigachat/embeddings_mapper.py` | Embeddings request normalization for the configured GigaChat embeddings model |
+| `providers/gigachat/models_mapper.py` | Internal model-descriptor mapping for model-discovery routes |
 | `providers/gigachat/request_mapper.py` | Primary GigaChat request-mapping entrypoint for chat and responses |
 | `providers/gigachat/response_mapper.py` | Primary GigaChat response-mapping entrypoint for chat and responses |
 | `api_server.py` | Compatibility wrapper over the new `app/*` modules |
@@ -91,11 +95,17 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `features/chat/contracts.py` | Internal chat feature contracts and provider/client protocols |
 | `features/chat/service.py` | Chat service entrypoint used by OpenAI chat routes |
 | `features/chat/stream.py` | Chat SSE generation and streaming error handling |
+| `features/embeddings/contracts.py` | Internal embeddings feature contracts and upstream protocols |
+| `features/embeddings/service.py` | Embeddings service entrypoint used by OpenAI and Gemini embedding routes |
+| `features/models/contracts.py` | Internal model-discovery contracts and normalized model descriptors |
+| `features/models/service.py` | Model-discovery service entrypoint used by OpenAI, Gemini, and LiteLLM routes |
 | `features/responses/contracts.py` | Internal Responses API contracts and upstream protocols |
 | `features/responses/service.py` | Responses API service entrypoint used by OpenAI responses routes |
 | `features/responses/stream.py` | Responses API SSE generation and streaming error handling |
 | `features/responses/store.py` | Responses API metadata-store accessors over app state |
 | `providers/gigachat/chat_mapper.py` | Chat feature adapter over provider request/response mappers |
+| `providers/gigachat/embeddings_mapper.py` | Embeddings input normalization and configured-model routing |
+| `providers/gigachat/models_mapper.py` | Provider model catalog normalization into internal descriptors |
 | `providers/gigachat/request_mapper.py` | Public `RequestTransformer` implementation for chat/responses request mapping |
 | `providers/gigachat/request_mapping_base.py` | Shared request parameter, schema, and validation helpers |
 | `providers/gigachat/chat_request_mapper.py` | Message role/content normalization and attachment handling |
@@ -129,6 +139,8 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 
 - Keep GigaChat-specific request/response mapping in `providers/gigachat/*_mapper.py`; use `protocol/` as compatibility or transport-adapter surface.
 - Keep chat-completions orchestration in `features/chat/service.py`; `api/openai/chat.py` should stay thin.
+- Keep embeddings orchestration in `features/embeddings/service.py`; `api/openai/embeddings.py` and Gemini embedding routes should stay thin.
+- Keep model-discovery orchestration in `features/models/service.py`; `api/openai/models.py`, `api/gemini/models.py`, and `api/litellm/models.py` should stay thin.
 - Keep Responses API orchestration in `features/responses/service.py`; `api/openai/responses.py` should stay thin.
 - Keep GigaChat SDK lifecycle/auth logic in `providers/gigachat/`, not in `common/` or route modules.
 - Keep `RequestTransformer` and `ResponseProcessor` as the public import surface; add new GigaChat mapping logic under `providers/gigachat/` instead of growing `protocol/` wrappers.

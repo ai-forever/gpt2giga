@@ -1,13 +1,12 @@
 import base64
-import functools
 import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
-import anyio
-import tiktoken
 from fastapi import HTTPException
+
+from gpt2giga.providers.gigachat.embeddings_mapper import transform_embedding_body
 
 
 @dataclass(frozen=True)
@@ -112,19 +111,6 @@ def _resolve_batch_model(body: Dict[str, Any], giga_client: Any) -> Optional[str
         return configured_model
 
     return None
-
-
-async def transform_embedding_body(
-    data: Dict[str, Any], embeddings_model: str
-) -> Dict[str, Any]:
-    """Transform an OpenAI embeddings request into a GigaChat embeddings payload."""
-    inputs = data.get("input", [])
-    openai_model = data.get("model")
-    normalized_inputs = await _normalize_embedding_inputs(inputs, openai_model)
-    return {
-        "input": normalized_inputs,
-        "model": embeddings_model,
-    }
 
 
 async def transform_batch_input_file(
@@ -384,26 +370,3 @@ def parse_jsonl(content: bytes) -> List[Dict[str, Any]]:
             raise _batch_line_error(line_number, "Each JSONL line must be an object.")
         rows.append(parsed)
     return rows
-
-
-async def _normalize_embedding_inputs(inputs: Any, model: Optional[str]) -> List[str]:
-    if isinstance(inputs, list):
-        new_inputs: List[str] = []
-        if inputs and isinstance(inputs[0], int):
-            encoder = await anyio.to_thread.run_sync(
-                functools.partial(tiktoken.encoding_for_model, model)
-            )
-            new_inputs = [encoder.decode(inputs)]
-        else:
-            encoder = None
-            for row in inputs:
-                if isinstance(row, list):
-                    if encoder is None:
-                        encoder = await anyio.to_thread.run_sync(
-                            functools.partial(tiktoken.encoding_for_model, model)
-                        )
-                    new_inputs.append(encoder.decode(row))
-                else:
-                    new_inputs.append(row)
-        return new_inputs
-    return [inputs]

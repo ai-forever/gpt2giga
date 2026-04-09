@@ -3,10 +3,14 @@
 from fastapi import FastAPI
 
 from gpt2giga.features.chat import ChatService
+from gpt2giga.features.embeddings import EmbeddingsService
+from gpt2giga.features.models import ModelsService
 from gpt2giga.features.responses import ResponsesService
 from gpt2giga.providers.gigachat import (
     AttachmentProcessor,
     GigaChatChatMapper,
+    GigaChatEmbeddingsMapper,
+    GigaChatModelsMapper,
     RequestTransformer,
     ResponseProcessor,
 )
@@ -41,6 +45,16 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
         response_processor=app.state.response_processor,
     )
     app.state.chat_service = ChatService(app.state.chat_mapper)
+    app.state.embeddings_mapper = GigaChatEmbeddingsMapper()
+    app.state.embeddings_service = EmbeddingsService(
+        app.state.embeddings_mapper,
+        embeddings_model=config.proxy_settings.embeddings,
+    )
+    app.state.models_mapper = GigaChatModelsMapper()
+    app.state.models_service = ModelsService(
+        app.state.models_mapper,
+        embeddings_model=config.proxy_settings.embeddings,
+    )
     app.state.responses_service = ResponsesService(
         app.state.request_transformer,
         app.state.response_processor,

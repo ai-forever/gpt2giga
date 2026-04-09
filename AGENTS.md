@@ -68,8 +68,10 @@ uv run pre-commit install
 - OpenAI-compatible endpoints live in `gpt2giga/api/openai/`.
 - Anthropic-compatible endpoints live in `gpt2giga/api/anthropic/`.
 - LiteLLM-compatible model-info endpoints live in `gpt2giga/api/litellm/`.
+- Capability-level orchestration for chat, responses, embeddings, and model discovery lives in `gpt2giga/features/`.
 - `gpt2giga/protocol/` remains a compatibility layer for request/response facades plus non-GigaChat transport adapters.
 - GigaChat client/auth helpers and provider-specific request/response mappers live in `gpt2giga/providers/gigachat/`.
+- Simple provider mappings for embeddings and model discovery live in `gpt2giga/providers/gigachat/embeddings_mapper.py` and `gpt2giga/providers/gigachat/models_mapper.py`.
 - Request transformation is split across `gpt2giga/providers/gigachat/request_mapper.py`, `request_mapping_base.py`, `chat_request_mapper.py`, and `responses_request_mapper.py`.
 - Response transformation is split across `gpt2giga/providers/gigachat/response_mapper.py`, `response_mapping_common.py`, and `responses_response_mapper.py`.
 - Shared HTTP helpers live in `gpt2giga/common/`.

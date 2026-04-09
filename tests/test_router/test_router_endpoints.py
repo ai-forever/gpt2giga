@@ -171,7 +171,9 @@ def make_app(monkeypatch=None):
             "FakeTokenizer", (), {"encoding_for_model": lambda self, m: FakeEnc()}
         )()
         monkeypatch.setattr(
-            sys.modules["gpt2giga.protocol.batches"], "tiktoken", fake_tk
+            sys.modules["gpt2giga.providers.gigachat.embeddings_mapper"],
+            "tiktoken",
+            fake_tk,
         )
     return app
 
