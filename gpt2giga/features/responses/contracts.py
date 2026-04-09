@@ -1,0 +1,48 @@
+"""Internal contracts for the responses feature."""
+
+from __future__ import annotations
+
+from typing import Any, AsyncIterator, MutableMapping, Optional, Protocol, TypeAlias
+
+from gigachat import GigaChat
+
+ResponsesRequestData: TypeAlias = dict[str, Any]
+PreparedResponsesRequest: TypeAlias = Any
+ResponsesResponseData: TypeAlias = dict[str, Any]
+ResponsesMetadataStore: TypeAlias = MutableMapping[str, Any]
+
+
+class ResponsesUpstreamClient(Protocol):
+    """Minimal upstream client surface required by the responses feature."""
+
+    async def achat_v2(self, chat: PreparedResponsesRequest) -> Any:
+        """Run a non-streaming Responses API request."""
+
+    def astream_v2(self, chat: PreparedResponsesRequest) -> AsyncIterator[Any]:
+        """Run a streaming Responses API request."""
+
+
+class ResponsesRequestPreparer(Protocol):
+    """Provider request-mapping surface for Responses API requests."""
+
+    async def prepare_response_v2(
+        self,
+        data: ResponsesRequestData,
+        giga_client: Optional[GigaChat] = None,
+        response_store: Optional[ResponsesMetadataStore] = None,
+    ) -> PreparedResponsesRequest:
+        """Map the feature request into a provider-specific payload."""
+
+
+class ResponsesResultProcessor(Protocol):
+    """Provider response-mapping surface for Responses API responses."""
+
+    def process_response_api_v2(
+        self,
+        data: ResponsesRequestData,
+        giga_resp: Any,
+        gpt_model: str,
+        response_id: str,
+        response_store: Optional[ResponsesMetadataStore] = None,
+    ) -> ResponsesResponseData:
+        """Map a provider response into the external Responses API contract."""

@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 
 from gpt2giga.features.chat import ChatService
+from gpt2giga.features.responses.service import ResponsesService
 from gpt2giga.providers.gigachat import (
     AttachmentProcessor,
     GigaChatChatMapper,
@@ -40,6 +41,10 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
         response_processor=app.state.response_processor,
     )
     app.state.chat_service = ChatService(app.state.chat_mapper)
+    app.state.responses_service = ResponsesService(
+        app.state.request_transformer,
+        app.state.response_processor,
+    )
 
 
 async def close_runtime_services(app: FastAPI, *, logger) -> None:
