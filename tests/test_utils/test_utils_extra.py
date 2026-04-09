@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from gpt2giga.common.gigachat_auth import (
+from gpt2giga.providers.gigachat.auth import (
     create_gigachat_client_for_request,
     pass_token_to_gigachat,
 )
@@ -73,7 +73,7 @@ def test_create_gigachat_client_for_request_giga_auth_uses_constructor():
         }
     )
     with MagicMock() as mock_giga_class:
-        from gpt2giga.common import gigachat_auth
+        from gpt2giga.providers.gigachat import auth as gigachat_auth
 
         orig = gigachat_auth.GigaChat
         gigachat_auth.GigaChat = mock_giga_class

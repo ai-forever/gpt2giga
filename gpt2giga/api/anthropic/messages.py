@@ -5,7 +5,6 @@ from typing import Dict, List
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.api.anthropic.openapi import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
@@ -21,6 +20,7 @@ from gpt2giga.protocol.anthropic.request import (
 )
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
 from gpt2giga.protocol.anthropic.streaming import _stream_anthropic_generator
+from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Anthropic"])
 

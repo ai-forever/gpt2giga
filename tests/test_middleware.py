@@ -99,7 +99,7 @@ def test_pass_token_middleware(monkeypatch):
 
     # Ensure middleware stays offline by stubbing GigaChat construction in gigachat module
     monkeypatch.setattr("gigachat.GigaChat", FakeGigaChat)
-    monkeypatch.setattr("gpt2giga.common.gigachat_auth.GigaChat", FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.providers.gigachat.auth.GigaChat", FakeGigaChat)
 
     # Base (app-scoped) GigaChat client
     test_app.state.gigachat_client = FakeGigaChat()

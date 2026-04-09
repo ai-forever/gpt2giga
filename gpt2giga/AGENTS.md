@@ -36,8 +36,10 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `core/logging/setup.py` | Logger setup, redaction, UTF-8 sanitization, and RQUID context |
 | `core/constants.py` | Shared limits, MIME/ext allowlists, and redaction constants |
 | `core/app_meta.py` | App version, port checks, and CLI secret warnings |
+| `providers/gigachat/client.py` | GigaChat client lifecycle, factory resolution, and request-scoped access |
+| `providers/gigachat/auth.py` | Pass-token auth handoff and request-level GigaChat client construction |
 | `api_server.py` | Compatibility wrapper over the new `app/*` modules |
-| `app_state.py` | Request/app-scoped accessors for GigaChat client, batch store, file store |
+| `app_state.py` | Request/app-scoped metadata stores for batches, files, and responses |
 | `cli.py` | Compatibility wrapper for `app/cli.py` |
 | `api/dependencies/auth.py` | API-key verification dependencies |
 | `api/middleware/*` | HTTP middleware for auth-adjacent request processing |
@@ -97,7 +99,6 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 ## Common Utilities
 
 - `common/exceptions.py`: `@exceptions_handler` and exception normalization
-- `common/gigachat_auth.py`: per-request GigaChat auth/token handoff
 - `common/request_json.py` and `common/request_form.py`: safe request parsing
 - `common/streaming.py`: SSE generators for chat and responses
 - `common/tools.py`: tool/function conversion helpers
@@ -109,11 +110,12 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 ## Patterns & Conventions
 
 - Keep reusable translation logic in `protocol/` or `common/`, not duplicated in API handlers.
+- Keep GigaChat SDK lifecycle/auth logic in `providers/gigachat/`, not in `common/` or route modules.
 - Keep `RequestTransformer` and `ResponseProcessor` as the public import surface; grow the underscored helper modules instead of turning the facade files back into mega-modules.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
 - Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - Decorate router handlers with `@exceptions_handler`.
-- Use `request.app.state` and helpers in `app_state.py` for shared state instead of globals.
+- Use `request.app.state`, `app_state.py` metadata stores, and `providers/gigachat/client.py` helpers instead of globals.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
 - Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
@@ -147,6 +149,9 @@ rg --files gpt2giga/protocol/request gpt2giga/protocol/response
 
 # Find batch/file state usage
 rg -n "get_batch_store|get_file_store|batch_metadata_store|file_metadata_store" gpt2giga
+
+# Find GigaChat provider lifecycle/auth helpers
+rg -n "create_app_gigachat_client|close_app_gigachat_client|create_gigachat_client_for_request|pass_token_to_gigachat" gpt2giga/providers/gigachat
 
 # Find OpenAPI schema helpers
 rg -n "openapi_extra|_request_body_oneof" gpt2giga/api

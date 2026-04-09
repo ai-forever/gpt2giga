@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request, Response
 
-from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
+from gpt2giga.app_state import get_batch_store, get_file_store
 from gpt2giga.api.anthropic.openapi import anthropic_message_batches_openapi_extra
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
@@ -24,6 +24,7 @@ from gpt2giga.protocol.anthropic.response import (
     _anthropic_http_exception,
     _build_anthropic_response,
 )
+from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Anthropic"])
 

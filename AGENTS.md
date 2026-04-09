@@ -69,10 +69,11 @@ uv run pre-commit install
 - Anthropic-compatible endpoints live in `gpt2giga/api/anthropic/`.
 - LiteLLM-compatible model-info endpoints live in `gpt2giga/api/litellm/`.
 - Shared request/response translation lives in `gpt2giga/protocol/`.
+- GigaChat client/auth helpers live in `gpt2giga/providers/gigachat/`.
 - Request transformation is split across `gpt2giga/protocol/request/transformer.py`, `_base.py`, `_messages.py`, and `_responses_v2.py`.
 - Response transformation is split across `gpt2giga/protocol/response/processor.py`, `_common.py`, and `_responses.py`.
 - Shared HTTP helpers live in `gpt2giga/common/`.
-- Request/app-scoped stores for files and batches live in `gpt2giga/app_state.py`.
+- Request/app-scoped metadata stores for files, batches, and responses live in `gpt2giga/app_state.py`.
 - OpenAPI schema builders live next to provider routers in `gpt2giga/api/*/openapi.py`, with shared helpers in `gpt2giga/api/_openapi.py`.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2`; do not add legacy `send_to_gigachat*` aliases back.
 
@@ -90,6 +91,9 @@ rg -n "class .*Middleware" gpt2giga/api/middleware
 
 # Find batch/file support
 rg -n "batch|file" gpt2giga/api gpt2giga/protocol gpt2giga/app_state.py
+
+# Find GigaChat provider helpers
+rg -n "gigachat_client|pass_token|GigaChat" gpt2giga/providers/gigachat
 
 # Find split request/response transformer internals
 rg --files gpt2giga/protocol/request gpt2giga/protocol/response

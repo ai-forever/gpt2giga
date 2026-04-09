@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.api.gemini.openapi import (
     gemini_batch_embed_contents_openapi_extra,
     gemini_count_tokens_openapi_extra,
@@ -26,6 +25,7 @@ from gpt2giga.protocol.gemini import (
     read_gemini_request_json,
     stream_gemini_generate_content,
 )
+from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Gemini"])
 

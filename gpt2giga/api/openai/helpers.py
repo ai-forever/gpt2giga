@@ -4,9 +4,10 @@ from typing import Optional
 
 from fastapi import Request
 
-from gpt2giga.app_state import get_batch_store, get_gigachat_client
-from gpt2giga.protocol.batches import infer_openai_file_purpose
 from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.app_state import get_batch_store
+from gpt2giga.protocol.batches import infer_openai_file_purpose
+from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 
 def _paginate_items(

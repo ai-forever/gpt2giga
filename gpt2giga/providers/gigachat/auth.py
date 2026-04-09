@@ -1,3 +1,5 @@
+"""GigaChat authentication and request-scoped client helpers."""
+
 from typing import Any
 
 from gigachat import GigaChat
@@ -7,7 +9,7 @@ from gpt2giga.core.constants import _AUTH_KEYS
 
 
 def pass_token_to_gigachat(gigachat_client: GigaChat, token: str) -> GigaChat:
-    """Mutate GigaChat _settings for giga-cred- and giga-user- tokens."""
+    """Apply a pass-through token to an existing GigaChat client settings object."""
     gigachat_client._settings.credentials = None
     gigachat_client._settings.user = None
     gigachat_client._settings.password = None
@@ -23,17 +25,13 @@ def pass_token_to_gigachat(gigachat_client: GigaChat, token: str) -> GigaChat:
 
 
 def create_gigachat_client_for_request(settings: Any, token: str) -> GigaChat:
-    """Create a request-scoped GigaChat client for the given token.
-
-    For giga-auth- the client is created with access_token in the constructor (required
-    by the SDK). For giga-cred- and giga-user- a client is created from settings and
-    then _settings is mutated via pass_token_to_gigachat.
-    """
+    """Build a request-scoped GigaChat client for a pass-through auth token."""
     if token.startswith("giga-auth-"):
         kwargs = dict(settings.model_dump())
         for key in _AUTH_KEYS:
             kwargs.pop(key, None)
         kwargs["access_token"] = token.replace("giga-auth-", "", 1)
         return GigaChat(**kwargs)
+
     gigachat_client = GigaChat(**settings.model_dump())
     return pass_token_to_gigachat(gigachat_client, token)

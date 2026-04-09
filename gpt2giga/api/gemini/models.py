@@ -6,12 +6,12 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.protocol.gemini import (
     build_gemini_model,
     gemini_exceptions_handler,
     normalize_model_name,
 )
+from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Gemini"])
 

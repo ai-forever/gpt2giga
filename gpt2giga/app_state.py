@@ -3,13 +3,6 @@
 from fastapi import Request
 
 
-def get_gigachat_client(request: Request):
-    """Return the request-scoped GigaChat client when present."""
-    app_state = request.app.state
-    request_state = getattr(request, "state", None)
-    return getattr(request_state, "gigachat_client", app_state.gigachat_client)
-
-
 def get_batch_store(request: Request) -> dict:
     """Return the in-memory batch metadata store."""
     app_state = request.app.state

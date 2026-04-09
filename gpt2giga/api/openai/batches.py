@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
+from gpt2giga.app_state import get_batch_store, get_file_store
 from gpt2giga.api.openai.helpers import _paginate_items
 from gpt2giga.api.openai.openapi import batches_openapi_extra
 from gpt2giga.common.exceptions import exceptions_handler
@@ -14,6 +14,7 @@ from gpt2giga.protocol.batches import (
     get_batch_target,
     transform_batch_input_file,
 )
+from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["OpenAI"])
 
