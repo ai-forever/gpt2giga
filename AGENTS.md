@@ -52,7 +52,7 @@ uv run pre-commit install
 | Path | Purpose | Notes |
 |---|---|---|
 | `gpt2giga/` | Main application package | Routers, protocol transforms, config, middleware |
-| `tests/` | Test suite | Mirrors source areas and router/protocol behavior |
+| `tests/` | Test suite | Organized into `unit/`, `integration/`, and `smoke/` to mirror layers and external APIs |
 | `examples/` | Runnable SDK examples | OpenAI chat/responses/files/batches, Anthropic, embeddings, agents |
 | `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |

@@ -4,5 +4,5 @@ client = OpenAI(base_url="http://localhost:8090", api_key="sk-1234")
 response = client.models.list()
 print(response)
 
-response = client.models.retrieve("GigaChat-3")  # 404
+response = client.models.retrieve("GigaChat-4")  # 404
 print(response)

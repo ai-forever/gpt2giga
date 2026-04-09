@@ -31,4 +31,4 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Run smoke tests
-        run: uv run pytest tests/test_api_server/test_ci_smoke.py
+        run: uv run pytest tests/smoke/test_ci_smoke.py
