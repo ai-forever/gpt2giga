@@ -28,9 +28,10 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 |---|---|
 | `app/factory.py` | FastAPI app factory, middleware registration, router mounting |
 | `app/lifespan.py` | Startup/shutdown orchestration and runtime service lifecycle |
-| `app/wiring.py` | App-scoped runtime wiring for GigaChat client, transformers, and feature services |
+| `app/wiring.py` | App-scoped runtime wiring for typed `app.state.services/stores/providers` |
 | `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
 | `app/cli.py` | Config loading and env-path handling |
+| `app/dependencies.py` | Typed runtime containers and accessors for config, services, stores, and providers |
 | `core/config/settings.py` | Primary `ProxySettings`, `GigaChatCLI`, and `ProxyConfig` implementation |
 | `core/config/security.py` | Consolidated security posture model and limits |
 | `core/logging/setup.py` | Logger setup, redaction, UTF-8 sanitization, and RQUID context |
@@ -159,7 +160,8 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
 - Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - Decorate router handlers with `@exceptions_handler`.
-- Use `request.app.state`, feature-owned `*/store.py` accessors, `app_state.py` compatibility wrappers, and `providers/gigachat/client.py` helpers instead of globals.
+- Use `app/dependencies.py` accessors plus typed `app.state.services`, `app.state.stores`, and `app.state.providers` instead of scattering new runtime fields across flat `app.state.*`.
+- Keep `app_state.py` as a compatibility layer for feature store accessors; do not move new runtime wiring back into it.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
 - Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
@@ -203,7 +205,7 @@ rg -n "openapi_extra|_request_body_oneof" gpt2giga/api
 
 ## Common Gotchas
 
-- Files and batch metadata are stored in-memory via `app.state`; they are not persisted across process restarts.
+- Files and batch metadata are stored in-memory via `app.state.stores`; flat store aliases on `app.state.*` are compatibility shims.
 - `MODE=PROD` implicitly requires an API key and disables docs/log routes.
 - `PathNormalizationMiddleware` supports both root and `/v1` style paths; endpoint changes should preserve that behavior unless intentionally breaking it.
 - `PassTokenMiddleware` only applies when `proxy.pass_token` is enabled.

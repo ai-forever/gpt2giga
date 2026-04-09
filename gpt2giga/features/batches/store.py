@@ -6,12 +6,12 @@ from typing import Any
 
 from fastapi import Request
 
+from gpt2giga.app.dependencies import get_runtime_stores
+
 
 def get_batch_store_from_state(state: Any) -> dict:
     """Return the in-memory batches metadata store from app state."""
-    if not hasattr(state, "batch_metadata_store"):
-        state.batch_metadata_store = {}
-    return state.batch_metadata_store
+    return get_runtime_stores(state).batches
 
 
 def get_batch_store(request: Request) -> dict:

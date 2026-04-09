@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.api_server import create_app
+from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.api.openai import router as openai_router
@@ -60,18 +61,18 @@ class FakeRequestTransformer:
 def make_streaming_app():
     app = FastAPI()
     app.include_router(openai_router)
-    app.state.gigachat_client = FakeStreamingGigaChat()
-    app.state.response_processor = ResponseProcessor()
-    app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    ensure_runtime_dependencies(app.state, config=ProxyConfig())
+    app.state.providers.gigachat_client = FakeStreamingGigaChat()
+    app.state.providers.response_processor = ResponseProcessor()
+    app.state.providers.request_transformer = FakeRequestTransformer()
     return app
 
 
 def make_upload_app():
     app = FastAPI()
     app.include_router(openai_router)
-    app.state.gigachat_client = FakeUploadGigaChat()
-    app.state.config = ProxyConfig()
+    ensure_runtime_dependencies(app.state, config=ProxyConfig())
+    app.state.providers.gigachat_client = FakeUploadGigaChat()
     return app
 
 
@@ -103,8 +104,11 @@ def test_starlette_1_lifespan_and_app_state_smoke(monkeypatch):
     with TestClient(app) as client:
         response = client.get("/health")
         assert response.status_code == 200
-        assert app.state.gigachat_client is giga_client
+        assert app.state.providers.gigachat_client is giga_client
         assert hasattr(app.state, "config")
+        assert hasattr(app.state, "services")
+        assert hasattr(app.state, "stores")
+        assert hasattr(app.state, "providers")
 
     assert giga_client.closed is True
 
@@ -146,7 +150,7 @@ def test_starlette_1_logs_sse_error_smoke(tmp_path):
 
 def test_starlette_1_multipart_upload_smoke():
     app = make_upload_app()
-    giga_client = app.state.gigachat_client
+    giga_client = app.state.providers.gigachat_client
     client = TestClient(app)
 
     response = client.post(
@@ -158,4 +162,4 @@ def test_starlette_1_multipart_upload_smoke():
     assert response.status_code == 200
     assert response.json()["id"] == "file-1"
     assert giga_client.uploads[0][1] == "general"
-    assert app.state.file_metadata_store["file-1"]["purpose"] == "batch"
+    assert app.state.stores.files["file-1"]["purpose"] == "batch"

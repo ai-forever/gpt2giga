@@ -3,6 +3,7 @@ import sys
 import uvicorn
 from gigachat import GigaChat
 
+from gpt2giga.app.dependencies import set_runtime_provider
 from gpt2giga.app.factory import create_app as _create_app
 from gpt2giga.app.run import run as _run
 from gpt2giga.cli import load_config
@@ -18,7 +19,7 @@ def create_app(config=None):
         logger_factory=setup_logger,
         app_version_getter=get_app_version,
     )
-    app.state.gigachat_factory_getter = lambda: GigaChat
+    set_runtime_provider(app.state, "gigachat_factory_getter", lambda: GigaChat)
     return app
 
 

@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from gpt2giga.app.dependencies import (
+    get_config_from_state,
+    get_runtime_providers,
+    get_runtime_services,
+    set_runtime_provider,
+    set_runtime_service,
+)
 from gpt2giga.features.models.contracts import (
     ModelDescriptor,
     ModelListData,
@@ -64,25 +71,28 @@ class ModelsService:
 
 def get_models_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped models service, creating it lazily if needed."""
-    service = getattr(state, "models_service", None)
+    services = get_runtime_services(state)
+    service = services.models
     if service is not None:
         return service
 
-    mapper = getattr(state, "models_mapper", None)
+    providers = get_runtime_providers(state)
+    mapper = providers.models_mapper
     if mapper is None:
         mapper = GigaChatModelsMapper()
-        state.models_mapper = mapper
+        set_runtime_provider(state, "models_mapper", mapper)
 
     config = getattr(state, "config", None)
     embeddings_model = ""
     if config is not None:
-        embeddings_model = getattr(config.proxy_settings, "embeddings", "")
+        embeddings_model = getattr(
+            get_config_from_state(state).proxy_settings, "embeddings", ""
+        )
     service = ModelsService(
         mapper,
         embeddings_model=embeddings_model,
     )
-    state.models_service = service
-    return service
+    return set_runtime_service(state, "models", service)
 
 
 def _normalize_model_id(model: str) -> str:

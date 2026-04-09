@@ -75,6 +75,7 @@ uv run pre-commit install
 - Request transformation is split across `gpt2giga/providers/gigachat/request_mapper.py`, `request_mapping_base.py`, `chat_request_mapper.py`, and `responses_request_mapper.py`.
 - Response transformation is split across `gpt2giga/providers/gigachat/response_mapper.py`, `response_mapping_common.py`, and `responses_response_mapper.py`.
 - Shared HTTP helpers live in `gpt2giga/common/`.
+- Typed runtime dependencies live in `gpt2giga/app/dependencies.py`, with `app.state` organized around `config`, `logger`, `services`, `stores`, and `providers`; flat `app.state.*` aliases remain compatibility shims.
 - Request/app-scoped metadata stores for files, batches, and responses live in feature-owned store modules under `gpt2giga/features/*/store.py`; `gpt2giga/app_state.py` remains a compatibility wrapper.
 - OpenAPI schema builders live next to provider routers in `gpt2giga/api/*/openapi.py`, with shared helpers in `gpt2giga/api/_openapi.py`.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2`; do not add legacy `send_to_gigachat*` aliases back.

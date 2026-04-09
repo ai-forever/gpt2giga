@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from gpt2giga.api.openai.openapi import files_openapi_extra
+from gpt2giga.app.dependencies import get_response_processor_from_state
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_form import read_request_multipart
 from gpt2giga.features.batches.store import get_batch_store
@@ -35,9 +36,8 @@ async def create_file(request: Request):
             },
         )
 
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    files_service = get_files_service_from_state(state)
+    files_service = get_files_service_from_state(request.app.state)
     return await files_service.create_file(
         purpose=purpose,
         upload=upload,
@@ -56,9 +56,8 @@ async def list_files(
     purpose: Optional[str] = Query(default=None),
 ):
     """List uploaded files."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    files_service = get_files_service_from_state(state)
+    files_service = get_files_service_from_state(request.app.state)
     return await files_service.list_files(
         giga_client=giga_client,
         file_store=get_file_store(request),
@@ -73,9 +72,8 @@ async def list_files(
 @exceptions_handler
 async def retrieve_file(file_id: str, request: Request):
     """Return file metadata."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    files_service = get_files_service_from_state(state)
+    files_service = get_files_service_from_state(request.app.state)
     return await files_service.retrieve_file(
         file_id,
         giga_client=giga_client,
@@ -87,9 +85,8 @@ async def retrieve_file(file_id: str, request: Request):
 @exceptions_handler
 async def delete_file(file_id: str, request: Request):
     """Delete a file."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    files_service = get_files_service_from_state(state)
+    files_service = get_files_service_from_state(request.app.state)
     return await files_service.delete_file(
         file_id,
         giga_client=giga_client,
@@ -101,13 +98,13 @@ async def delete_file(file_id: str, request: Request):
 @exceptions_handler
 async def get_file_content(file_id: str, request: Request):
     """Return the raw file content."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    files_service = get_files_service_from_state(state)
+    app_state = request.app.state
+    files_service = get_files_service_from_state(app_state)
     content = await files_service.get_file_content(
         file_id,
         giga_client=giga_client,
         batch_store=get_batch_store(request),
-        response_processor=getattr(state, "response_processor", None),
+        response_processor=get_response_processor_from_state(app_state),
     )
     return Response(content=content, media_type="application/octet-stream")

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, Request, Response
 
 from gpt2giga.api.anthropic.openapi import anthropic_message_batches_openapi_extra
+from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.features.batches import get_batches_service_from_state
@@ -315,15 +316,14 @@ async def create_message_batch(request: Request):
                 "url": "/v1/chat/completions",
                 "body": _build_openai_data_from_anthropic_request(
                     params,
-                    request.app.state.logger,
+                    get_logger_from_state(request.app.state),
                 ),
             }
         )
         stored_requests.append({"custom_id": custom_id, "params": params})
 
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches_service = get_batches_service_from_state(state)
+    batches_service = get_batches_service_from_state(request.app.state)
     record = await batches_service.create_batch_from_rows(
         openai_rows,
         endpoint="/v1/chat/completions",
@@ -348,9 +348,8 @@ async def list_message_batches(
     limit: int = Query(default=20, ge=1, le=1000),
 ):
     """Anthropic Message Batches API compatible list endpoint."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches_service = get_batches_service_from_state(state)
+    batches_service = get_batches_service_from_state(request.app.state)
     records = await batches_service.list_anthropic_batches(
         giga_client=giga_client,
         batch_store=get_batch_store(request),
@@ -379,9 +378,8 @@ async def list_message_batches(
 @exceptions_handler
 async def retrieve_message_batch(message_batch_id: str, request: Request):
     """Anthropic Message Batches API compatible retrieve endpoint."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches_service = get_batches_service_from_state(state)
+    batches_service = get_batches_service_from_state(request.app.state)
     record = await batches_service.get_anthropic_batch(
         message_batch_id,
         giga_client=giga_client,
@@ -439,9 +437,8 @@ async def delete_message_batch(message_batch_id: str, request: Request):
 @exceptions_handler
 async def get_message_batch_results(message_batch_id: str, request: Request):
     """Anthropic Message Batches API compatible results endpoint."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches_service = get_batches_service_from_state(state)
+    batches_service = get_batches_service_from_state(request.app.state)
     record = await batches_service.get_anthropic_batch(
         message_batch_id,
         giga_client=giga_client,

@@ -9,6 +9,7 @@ import gigachat
 from fastapi import Request
 from gigachat import GigaChat
 
+from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.protocol.gemini.response import (
@@ -26,7 +27,7 @@ async def stream_gemini_generate_content(
     request_data: Optional[dict[str, Any]] = None,
 ) -> AsyncGenerator[str, None]:
     """Yield Gemini-compatible SSE chunks from a GigaChat stream."""
-    logger = getattr(request.app.state, "logger", None)
+    logger = get_logger_from_state(request.app.state)
     rquid = rquid_context.get()
     structured_output = _is_structured_output_request(request_data)
 

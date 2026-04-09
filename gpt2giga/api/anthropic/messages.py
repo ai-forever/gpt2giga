@@ -9,6 +9,10 @@ from gpt2giga.api.anthropic.openapi import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
 )
+from gpt2giga.app.dependencies import (
+    get_logger_from_state,
+    get_request_transformer_from_state,
+)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.logging.setup import rquid_context
@@ -58,14 +62,16 @@ async def messages(request: Request):
     data = await read_request_json(request)
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
-    state = request.app.state
     giga_client = get_gigachat_client(request)
 
     model = data.get("model", "unknown")
-    openai_data: Dict = _build_openai_data_from_anthropic_request(data, state.logger)
-    chat_messages = await state.request_transformer.prepare_chat_completion(
-        openai_data, giga_client
+    app_state = request.app.state
+    openai_data: Dict = _build_openai_data_from_anthropic_request(
+        data, get_logger_from_state(app_state)
     )
+    chat_messages = await get_request_transformer_from_state(
+        app_state
+    ).prepare_chat_completion(openai_data, giga_client)
 
     if not stream:
         response = await giga_client.achat(chat_messages)

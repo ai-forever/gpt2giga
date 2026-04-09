@@ -12,6 +12,10 @@ from gigachat import GigaChat
 from gigachat.models import Chat, ChatV2
 from starlette.requests import Request
 
+from gpt2giga.app.dependencies import (
+    get_logger_from_state,
+    get_response_processor_from_state,
+)
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.responses.store import get_response_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
@@ -31,11 +35,9 @@ async def stream_responses_generator(
 
     logger = None
     rquid = rquid_context.get()
-    processor = response_processor or getattr(
-        request.app.state, "response_processor", None
+    processor = response_processor or get_response_processor_from_state(
+        request.app.state
     )
-    if processor is None:
-        raise RuntimeError("Responses response processor is not configured.")
     response_store = (
         response_store if response_store is not None else get_response_store(request)
     )
@@ -219,7 +221,7 @@ async def stream_responses_generator(
     try:
         if giga_client is None:
             giga_client = get_gigachat_client(request)
-        logger = getattr(request.app.state, "logger", None)
+        logger = get_logger_from_state(request.app.state)
 
         yield emit("response.created", {"response": current_response("in_progress")})
         yield emit(

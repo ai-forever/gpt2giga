@@ -5,33 +5,41 @@ from typing import Any
 from fastapi import FastAPI, Request
 from gigachat import GigaChat
 
+from gpt2giga.app.dependencies import get_runtime_providers, sync_runtime_aliases
+
 
 def get_gigachat_client(request: Request) -> Any:
     """Return the request-scoped GigaChat client when present."""
-    app_state = request.app.state
     request_state = getattr(request, "state", None)
-    return getattr(request_state, "gigachat_client", app_state.gigachat_client)
+    request_client = getattr(request_state, "gigachat_client", None)
+    if request_client is not None:
+        return request_client
+    return get_runtime_providers(request.app.state).gigachat_client
 
 
 def _resolve_gigachat_factory(app: FastAPI):
     """Resolve the configured GigaChat client factory for this app instance."""
-    factory_getter = getattr(app.state, "gigachat_factory_getter", None)
+    providers = get_runtime_providers(app.state)
+    factory_getter = providers.gigachat_factory_getter
     if callable(factory_getter):
         return factory_getter()
-    return getattr(app.state, "gigachat_factory", GigaChat)
+    return providers.gigachat_factory or GigaChat
 
 
 def create_app_gigachat_client(app: FastAPI, *, settings) -> Any:
     """Create and store the app-scoped GigaChat client."""
     gigachat_factory = _resolve_gigachat_factory(app)
     gigachat_client = gigachat_factory(**settings.model_dump())
-    app.state.gigachat_client = gigachat_client
+    providers = get_runtime_providers(app.state)
+    providers.gigachat_client = gigachat_client
+    sync_runtime_aliases(app.state)
     return gigachat_client
 
 
 async def close_app_gigachat_client(app: FastAPI, *, logger) -> None:
     """Close the app-scoped GigaChat client when it supports async shutdown."""
-    gigachat_client = getattr(app.state, "gigachat_client", None)
+    providers = get_runtime_providers(app.state)
+    gigachat_client = providers.gigachat_client
     if gigachat_client is None:
         return
 
@@ -40,3 +48,6 @@ async def close_app_gigachat_client(app: FastAPI, *, logger) -> None:
         logger.info("GigaChat client closed")
     except Exception as exc:
         logger.warning(f"Error closing GigaChat client: {exc}")
+    finally:
+        providers.gigachat_client = None
+        app.state.gigachat_client = None

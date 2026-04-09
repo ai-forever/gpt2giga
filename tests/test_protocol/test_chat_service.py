@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from gpt2giga.app.dependencies import RuntimeProviders, RuntimeServices
 from gpt2giga.features.chat.service import ChatService, get_chat_service_from_state
 
 
@@ -100,3 +101,30 @@ async def test_get_chat_service_from_state_builds_from_legacy_runtime_services()
     assert transformer.calls == [(data, giga_client)]
     assert result["id"] == "resp-legacy"
     assert result["payload"] == {"messages": data["messages"], "model": "gpt-x"}
+
+
+@pytest.mark.asyncio
+async def test_get_chat_service_from_state_builds_from_typed_runtime_dependencies():
+    transformer = LegacyRequestTransformer()
+    response_processor = LegacyResponseProcessor()
+    state = SimpleNamespace(
+        services=RuntimeServices(),
+        providers=RuntimeProviders(
+            request_transformer=transformer,
+            response_processor=response_processor,
+        ),
+    )
+    giga_client = FakeClient()
+    data = {"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]}
+
+    service = get_chat_service_from_state(state)
+    result = await service.create_completion(
+        data,
+        giga_client=giga_client,
+        response_id="resp-typed",
+    )
+
+    assert state.services.chat is service
+    assert state.providers.chat_mapper is service.mapper
+    assert transformer.calls == [(data, giga_client)]
+    assert result["id"] == "resp-typed"

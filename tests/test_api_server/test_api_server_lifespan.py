@@ -19,11 +19,15 @@ def test_app_lifespan_initializes_state(monkeypatch):
     # Подменяем клиента GigaChat при старте lifespan
     monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: Dummy())
 
-    client = TestClient(app)
-    # Триггерим lifespan
-    resp = client.get("/health")
-    assert resp.status_code == 200
-    assert hasattr(app.state, "config")
+    with TestClient(app) as client:
+        # Триггерим lifespan
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert hasattr(app.state, "config")
+        assert hasattr(app.state, "services")
+        assert hasattr(app.state, "stores")
+        assert hasattr(app.state, "providers")
+        assert app.state.providers.gigachat_client is not None
 
 
 def test_lifespan_closes_gigachat_client(monkeypatch):

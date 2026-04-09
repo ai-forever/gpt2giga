@@ -7,6 +7,7 @@ from sse_starlette import EventSourceResponse
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse
 
+from gpt2giga.app.dependencies import get_config_from_state, get_logger_from_state
 from gpt2giga.common import exceptions_handler, verify_logs_ip_allowlist
 
 logs_api_router = APIRouter(tags=["System logs"])
@@ -56,7 +57,7 @@ def _read_line_at(filename: str, position: int) -> tuple[str | None, int]:
 async def get_logs(request: Request, lines: int = Query(100, ge=1, le=5000)):
     """Return the last N lines from the log file."""
     verify_logs_ip_allowlist(request)
-    filename = request.app.state.config.proxy_settings.log_filename
+    filename = get_config_from_state(request.app.state).proxy_settings.log_filename
 
     try:
         content = await anyio.to_thread.run_sync(_read_last_lines, filename, lines)
@@ -64,7 +65,9 @@ async def get_logs(request: Request, lines: int = Query(100, ge=1, le=5000)):
             return PlainTextResponse("Log file not found.", status_code=404)
         return PlainTextResponse(content)
     except Exception as e:
-        request.app.state.logger.exception("Error reading log file")
+        logger = get_logger_from_state(request.app.state)
+        if logger is not None:
+            logger.exception("Error reading log file")
         return PlainTextResponse(f"Error: {str(e)}", status_code=500)
 
 
@@ -75,7 +78,7 @@ async def stream_logs(request: Request):
     verify_logs_ip_allowlist(request)
 
     async def log_generator():
-        filename = request.app.state.config.proxy_settings.log_filename
+        filename = get_config_from_state(request.app.state).proxy_settings.log_filename
 
         file_position = await anyio.to_thread.run_sync(_seek_to_end, filename)
         if file_position is None:

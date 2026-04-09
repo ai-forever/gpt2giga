@@ -8,6 +8,12 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from gpt2giga.app.dependencies import (
+    get_config_from_state,
+    get_request_transformer_from_state,
+    get_runtime_services,
+    set_runtime_service,
+)
 from gpt2giga.features.batches.contracts import (
     BatchCreateData,
     BatchMetadata,
@@ -299,24 +305,18 @@ class BatchesService:
 
 def get_batches_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped batches service, creating it lazily if needed."""
-    service = getattr(state, "batches_service", None)
+    services = get_runtime_services(state)
+    service = services.batches
     if service is not None:
         return service
 
-    request_transformer = getattr(state, "request_transformer", None)
-    if request_transformer is None:
-        raise RuntimeError("Batch request transformer is not configured.")
-
-    config = getattr(state, "config", None)
-    if config is None:
-        raise RuntimeError("Application config is not configured.")
-
+    request_transformer = get_request_transformer_from_state(state)
+    config = get_config_from_state(state)
     service = BatchesService(
         request_transformer,
         embeddings_model=config.proxy_settings.embeddings,
     )
-    state.batches_service = service
-    return service
+    return set_runtime_service(state, "batches", service)
 
 
 def _paginate_items(

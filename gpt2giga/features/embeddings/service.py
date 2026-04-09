@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from gpt2giga.app.dependencies import (
+    get_config_from_state,
+    get_runtime_providers,
+    get_runtime_services,
+    set_runtime_provider,
+    set_runtime_service,
+)
 from gpt2giga.features.embeddings.contracts import (
     EmbeddingsProviderMapper,
     EmbeddingsRequestData,
@@ -55,20 +62,18 @@ class EmbeddingsService:
 
 def get_embeddings_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped embeddings service, creating it lazily if needed."""
-    service = getattr(state, "embeddings_service", None)
+    services = get_runtime_services(state)
+    service = services.embeddings
     if service is not None:
         return service
 
-    mapper = getattr(state, "embeddings_mapper", None)
+    providers = get_runtime_providers(state)
+    mapper = providers.embeddings_mapper
     if mapper is None:
         mapper = GigaChatEmbeddingsMapper()
-        state.embeddings_mapper = mapper
+        set_runtime_provider(state, "embeddings_mapper", mapper)
 
-    config = getattr(state, "config", None)
-    if config is None:
-        raise RuntimeError("Application config is not configured.")
-
+    config = get_config_from_state(state)
     embeddings_model = config.proxy_settings.embeddings
     service = EmbeddingsService(mapper, embeddings_model=embeddings_model)
-    state.embeddings_service = service
-    return service
+    return set_runtime_service(state, "embeddings", service)

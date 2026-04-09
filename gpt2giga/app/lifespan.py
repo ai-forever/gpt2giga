@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from gpt2giga.app.cli import load_config
+from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.wiring import close_runtime_services, wire_runtime_services
 from gpt2giga.core.logging.setup import setup_logger
 
@@ -27,9 +28,7 @@ async def lifespan(app: FastAPI):
             enable_redaction=config.proxy_settings.log_redact_sensitive,
         )
 
-    app.state.config = config
-    app.state.logger = logger
-
+    ensure_runtime_dependencies(app.state, config=config, logger=logger)
     wire_runtime_services(app, config=config, logger=logger)
     logger.info("Application startup complete")
 

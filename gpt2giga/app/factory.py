@@ -15,6 +15,7 @@ from gpt2giga.api.middleware.rquid_context import RquidMiddleware
 from gpt2giga.api.openai import router as openai_router
 from gpt2giga.api.system import logs_api_router, logs_router, system_router
 from gpt2giga.app.cli import load_config
+from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
 from gpt2giga.core.app_meta import get_app_version
 from gpt2giga.protocol.gemini.response import GeminiAPIError, gemini_error_response
@@ -171,7 +172,7 @@ def create_app(
         openapi_url=None if is_prod_mode else "/openapi.json",
     )
 
-    app.state.config = config
+    ensure_runtime_dependencies(app.state, config=config)
     app.state.config_loader = config_loader
     if logger_factory is not None:
         app.state.logger_factory = logger_factory

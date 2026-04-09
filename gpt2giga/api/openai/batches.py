@@ -20,9 +20,8 @@ router = APIRouter(tags=["OpenAI"])
 async def create_batch(request: Request):
     """Create a batch job."""
     data = await read_request_json(request)
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches_service = get_batches_service_from_state(state)
+    batches_service = get_batches_service_from_state(request.app.state)
     return await batches_service.create_batch(
         data,
         giga_client=giga_client,
@@ -39,9 +38,8 @@ async def list_batches(
     limit: Optional[int] = Query(default=None),
 ):
     """List batch jobs."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches_service = get_batches_service_from_state(state)
+    batches_service = get_batches_service_from_state(request.app.state)
     return await batches_service.list_batches(
         giga_client=giga_client,
         batch_store=get_batch_store(request),
@@ -55,9 +53,8 @@ async def list_batches(
 @exceptions_handler
 async def retrieve_batch(batch_id: str, request: Request):
     """Return batch metadata."""
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches_service = get_batches_service_from_state(state)
+    batches_service = get_batches_service_from_state(request.app.state)
     return await batches_service.retrieve_batch(
         batch_id,
         giga_client=giga_client,

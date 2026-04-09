@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from gpt2giga.app.dependencies import RuntimeProviders, RuntimeServices
 from gpt2giga.features.responses.service import (
     ResponsesService,
     get_responses_service_from_state,
@@ -109,6 +110,34 @@ async def test_get_responses_service_from_state_builds_from_legacy_runtime_servi
     assert result["payload"]["model"] == "gpt-x"
 
 
+@pytest.mark.asyncio
+async def test_get_responses_service_from_state_builds_from_typed_runtime_dependencies():
+    request_preparer = FakeRequestPreparer()
+    response_processor = FakeResponseProcessor()
+    state = SimpleNamespace(
+        services=RuntimeServices(),
+        providers=RuntimeProviders(
+            request_transformer=request_preparer,
+            response_processor=response_processor,
+        ),
+    )
+    giga_client = FakeClient()
+    response_store = {}
+    data = {"model": "gpt-x", "input": "hi"}
+
+    service = get_responses_service_from_state(state)
+    result = await service.create_response(
+        data,
+        giga_client=giga_client,
+        response_id="resp-typed",
+        response_store=response_store,
+    )
+
+    assert state.services.responses is service
+    assert request_preparer.prepared_with == (data, giga_client, response_store)
+    assert result["id"] == "resp_resp-typed"
+
+
 def test_get_response_store_from_state_creates_and_reuses_store():
     state = SimpleNamespace()
 
@@ -117,3 +146,4 @@ def test_get_response_store_from_state_creates_and_reuses_store():
 
     assert first is second
     assert state.response_metadata_store is first
+    assert state.stores.responses is first

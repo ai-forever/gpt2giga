@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any, AsyncGenerator
 
+from gpt2giga.app.dependencies import (
+    get_runtime_providers,
+    get_runtime_services,
+    set_runtime_provider,
+    set_runtime_service,
+)
 from gpt2giga.features.chat.contracts import (
     ChatProviderMapper,
     ChatRequestData,
@@ -70,18 +76,19 @@ class ChatService:
 
 def get_chat_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped chat service, creating it lazily if needed."""
-    service = getattr(state, "chat_service", None)
+    services = get_runtime_services(state)
+    service = services.chat
     if service is not None:
         return service
 
-    mapper = getattr(state, "chat_mapper", None)
+    providers = get_runtime_providers(state)
+    mapper = providers.chat_mapper
     if mapper is None:
         mapper = GigaChatChatMapper(
-            request_transformer=getattr(state, "request_transformer", None),
-            response_processor=getattr(state, "response_processor", None),
+            request_transformer=providers.request_transformer,
+            response_processor=providers.response_processor,
         )
-        state.chat_mapper = mapper
+        set_runtime_provider(state, "chat_mapper", mapper)
 
     service = ChatService(mapper)
-    state.chat_service = service
-    return service
+    return set_runtime_service(state, "chat", service)

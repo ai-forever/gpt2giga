@@ -11,6 +11,8 @@ from fastapi.security import (
 from starlette.requests import Request
 from starlette.status import HTTP_401_UNAUTHORIZED
 
+from gpt2giga.app.dependencies import get_config_from_state
+
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 gemini_api_key_header = APIKeyHeader(name="x-goog-api-key", auto_error=False)
 api_key_query = APIKeyQuery(
@@ -65,7 +67,7 @@ def _verify_provided_key(request: Request, provided_key: str | None) -> str:
             status_code=HTTP_401_UNAUTHORIZED, detail="API key required"
         )
 
-    config = request.app.state.config
+    config = get_config_from_state(request.app.state)
     expected_key = getattr(config.proxy_settings, "api_key", None)
     if not expected_key:
         raise HTTPException(status_code=500, detail="API key not configured")

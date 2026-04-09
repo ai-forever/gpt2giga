@@ -6,6 +6,12 @@ from typing import Any, AsyncGenerator
 
 from starlette.requests import Request
 
+from gpt2giga.app.dependencies import (
+    get_response_processor_from_state,
+    get_request_transformer_from_state,
+    get_runtime_services,
+    set_runtime_service,
+)
 from gpt2giga.features.responses.contracts import (
     PreparedResponsesRequest,
     ResponsesMetadataStore,
@@ -101,18 +107,12 @@ class ResponsesService:
 
 def get_responses_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped responses service, creating it lazily if needed."""
-    service = getattr(state, "responses_service", None)
+    services = get_runtime_services(state)
+    service = services.responses
     if service is not None:
         return service
 
-    request_preparer = getattr(state, "request_transformer", None)
-    if request_preparer is None:
-        raise RuntimeError("Responses request transformer is not configured.")
-
-    response_processor = getattr(state, "response_processor", None)
-    if response_processor is None:
-        raise RuntimeError("Responses response processor is not configured.")
-
+    request_preparer = get_request_transformer_from_state(state)
+    response_processor = get_response_processor_from_state(state)
     service = ResponsesService(request_preparer, response_processor)
-    state.responses_service = service
-    return service
+    return set_runtime_service(state, "responses", service)

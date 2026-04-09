@@ -9,6 +9,7 @@ import gigachat
 from fastapi import Request
 from gigachat import GigaChat
 
+from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.core.logging.setup import rquid_context
 
@@ -28,7 +29,7 @@ async def _stream_anthropic_generator(
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
     try:
-        logger = getattr(request.app.state, "logger", None)
+        logger = get_logger_from_state(request.app.state)
 
         function_call_data: Optional[Dict[str, str]] = None
         content_block_started = False

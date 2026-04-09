@@ -4,6 +4,11 @@ from gigachat import GigaChat
 from gigachat.models import Chat
 from starlette.requests import Request
 
+from gpt2giga.app.dependencies import (
+    get_response_processor_from_state,
+    get_runtime_providers,
+    set_runtime_provider,
+)
 from gpt2giga.features.chat.stream import (
     stream_chat_completion_generator as _stream_chat_completion_generator,
 )
@@ -20,11 +25,13 @@ async def stream_chat_completion_generator(
     response_id: str,
     giga_client: Optional[GigaChat] = None,
 ) -> AsyncGenerator[str, None]:
-    mapper = getattr(request.app.state, "chat_mapper", None)
+    app_state = request.app.state
+    mapper = get_runtime_providers(app_state).chat_mapper
     if mapper is None:
         mapper = GigaChatChatMapper(
-            response_processor=getattr(request.app.state, "response_processor", None),
+            response_processor=get_response_processor_from_state(app_state),
         )
+        set_runtime_provider(app_state, "chat_mapper", mapper)
 
     async for line in _stream_chat_completion_generator(
         request,

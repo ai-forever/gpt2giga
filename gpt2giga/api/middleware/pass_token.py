@@ -3,17 +3,19 @@ from typing import Callable
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from gpt2giga.app.dependencies import get_config_from_state, get_logger_from_state
 from gpt2giga.providers.gigachat.auth import create_gigachat_client_for_request
+from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 
 class PassTokenMiddleware(BaseHTTPMiddleware):
     """Middleware to automatically pass token from Authorization header to GigaChat client."""
 
     async def dispatch(self, request: Request, call_next: Callable):
-        state = request.app.state
-        proxy_config = getattr(state.config, "proxy_settings", None)
+        app_state = request.app.state
+        proxy_config = get_config_from_state(app_state).proxy_settings
 
-        request.state.gigachat_client = getattr(state, "gigachat_client", None)
+        request.state.gigachat_client = get_gigachat_client(request)
 
         if (
             request.state.gigachat_client is not None
@@ -26,10 +28,13 @@ class PassTokenMiddleware(BaseHTTPMiddleware):
 
                 try:
                     request.state.gigachat_client = create_gigachat_client_for_request(
-                        state.config.gigachat_settings, token
+                        get_config_from_state(app_state).gigachat_settings,
+                        token,
                     )
                 except Exception as e:
-                    state.logger.warning(f"Failed to pass token to GigaChat: {e}")
+                    logger = get_logger_from_state(app_state)
+                    if logger is not None:
+                        logger.warning(f"Failed to pass token to GigaChat: {e}")
 
         response = await call_next(request)
         return response

@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.api.openai.helpers import populate_giga_functions
 from gpt2giga.api.openai.openapi import chat_completions_openapi_extra
+from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.logging.setup import rquid_context
@@ -20,11 +21,11 @@ async def chat_completions(request: Request):
     """Create a chat completion."""
     data = await read_request_json(request)
     current_rquid = rquid_context.get()
-    state = request.app.state
     giga_client = get_gigachat_client(request)
-    chat_service = get_chat_service_from_state(state)
+    app_state = request.app.state
+    chat_service = get_chat_service_from_state(app_state)
 
-    populate_giga_functions(data, getattr(state, "logger", None))
+    populate_giga_functions(data, get_logger_from_state(app_state))
     if not data.get("stream", False):
         return await chat_service.create_completion(
             data,

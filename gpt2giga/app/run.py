@@ -5,6 +5,7 @@ import sys
 import uvicorn
 
 from gpt2giga.app.cli import load_config
+from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.factory import create_app
 from gpt2giga.core.app_meta import check_port_available, get_app_version
 from gpt2giga.core.constants import SECURITY_FIELDS
@@ -33,7 +34,7 @@ def run(
     )
 
     app = app_factory(config=config)
-    app.state.logger = logger
+    ensure_runtime_dependencies(app.state, logger=logger)
 
     if proxy_settings.mode == "PROD" and proxy_settings.log_level == "DEBUG":
         logger.warning(

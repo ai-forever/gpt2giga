@@ -11,6 +11,7 @@ import gigachat
 from gigachat import GigaChat
 from starlette.requests import Request
 
+from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.contracts import ChatProviderMapper
 from gpt2giga.providers.gigachat.client import get_gigachat_client
@@ -32,7 +33,7 @@ async def stream_chat_completion_generator(
     try:
         if giga_client is None:
             giga_client = get_gigachat_client(request)
-        logger = getattr(request.app.state, "logger", None)
+        logger = get_logger_from_state(request.app.state)
 
         async for chunk in giga_client.astream(chat_messages):
             if await request.is_disconnected():
