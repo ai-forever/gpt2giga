@@ -4,16 +4,12 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
-from gpt2giga.app_state import get_file_store
-from gpt2giga.api.openai.helpers import (
-    _load_batch_output_content,
-    _paginate_items,
-    _serialize_file_object,
-)
 from gpt2giga.api.openai.openapi import files_openapi_extra
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_form import read_request_multipart
-from gpt2giga.protocol.batches import map_openai_file_purpose
+from gpt2giga.features.batches.store import get_batch_store
+from gpt2giga.features.files import get_files_service_from_state
+from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["OpenAI"])
@@ -39,19 +35,15 @@ async def create_file(request: Request):
             },
         )
 
+    state = request.app.state
     giga_client = get_gigachat_client(request)
-    uploaded = await giga_client.aupload_file(
-        (upload["filename"], upload["content"], upload["content_type"]),
-        purpose=map_openai_file_purpose(purpose),
+    files_service = get_files_service_from_state(state)
+    return await files_service.create_file(
+        purpose=purpose,
+        upload=upload,
+        giga_client=giga_client,
+        file_store=get_file_store(request),
     )
-
-    file_store = get_file_store(request)
-    file_store[uploaded.id_] = {
-        "purpose": purpose,
-        "filename": upload["filename"],
-        "status": "processed",
-    }
-    return _serialize_file_object(uploaded, file_store[uploaded.id_])
 
 
 @router.get("/files")
@@ -64,50 +56,58 @@ async def list_files(
     purpose: Optional[str] = Query(default=None),
 ):
     """List uploaded files."""
+    state = request.app.state
     giga_client = get_gigachat_client(request)
-    files = await giga_client.aget_files()
-    file_store = get_file_store(request)
-    data = [
-        _serialize_file_object(file_obj, file_store.get(file_obj.id_))
-        for file_obj in files.data
-    ]
-    if purpose:
-        data = [item for item in data if item["purpose"] == purpose]
-    if order == "desc":
-        data = sorted(data, key=lambda item: item.get("created_at") or 0, reverse=True)
-    elif order == "asc":
-        data = sorted(data, key=lambda item: item.get("created_at") or 0)
-    paged, has_more = _paginate_items(data, after, limit)
-    return {"data": paged, "has_more": has_more, "object": "list"}
+    files_service = get_files_service_from_state(state)
+    return await files_service.list_files(
+        giga_client=giga_client,
+        file_store=get_file_store(request),
+        after=after,
+        limit=limit,
+        order=order,
+        purpose=purpose,
+    )
 
 
 @router.get("/files/{file_id}")
 @exceptions_handler
 async def retrieve_file(file_id: str, request: Request):
     """Return file metadata."""
+    state = request.app.state
     giga_client = get_gigachat_client(request)
-    file_store = get_file_store(request)
-    file_obj = await giga_client.aget_file(file=file_id)
-    return _serialize_file_object(file_obj, file_store.get(file_id))
+    files_service = get_files_service_from_state(state)
+    return await files_service.retrieve_file(
+        file_id,
+        giga_client=giga_client,
+        file_store=get_file_store(request),
+    )
 
 
 @router.delete("/files/{file_id}")
 @exceptions_handler
 async def delete_file(file_id: str, request: Request):
     """Delete a file."""
+    state = request.app.state
     giga_client = get_gigachat_client(request)
-    deleted = await giga_client.adelete_file(file=file_id)
-    get_file_store(request).pop(file_id, None)
-    return {
-        "id": deleted.id_,
-        "deleted": deleted.deleted,
-        "object": "file",
-    }
+    files_service = get_files_service_from_state(state)
+    return await files_service.delete_file(
+        file_id,
+        giga_client=giga_client,
+        file_store=get_file_store(request),
+    )
 
 
 @router.get("/files/{file_id}/content")
 @exceptions_handler
 async def get_file_content(file_id: str, request: Request):
     """Return the raw file content."""
-    content = await _load_batch_output_content(request, file_id)
+    state = request.app.state
+    giga_client = get_gigachat_client(request)
+    files_service = get_files_service_from_state(state)
+    content = await files_service.get_file_content(
+        file_id,
+        giga_client=giga_client,
+        batch_store=get_batch_store(request),
+        response_processor=getattr(state, "response_processor", None),
+    )
     return Response(content=content, media_type="application/octet-stream")

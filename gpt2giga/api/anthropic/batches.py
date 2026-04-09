@@ -7,16 +7,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request, Response
 
-from gpt2giga.app_state import get_batch_store, get_file_store
 from gpt2giga.api.anthropic.openapi import anthropic_message_batches_openapi_extra
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
-from gpt2giga.protocol.batches import (
-    extract_batch_result_body,
-    get_batch_target,
-    parse_jsonl,
-    transform_batch_input_file,
-)
+from gpt2giga.features.batches import get_batches_service_from_state
+from gpt2giga.features.batches.store import get_batch_store
+from gpt2giga.features.files.store import get_file_store
+from gpt2giga.protocol.batches import extract_batch_result_body, parse_jsonl
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
@@ -324,33 +321,22 @@ async def create_message_batch(request: Request):
         )
         stored_requests.append({"custom_id": custom_id, "params": params})
 
-    target = get_batch_target("/v1/chat/completions")
-    raw_input = (
-        "\n".join(json.dumps(row, ensure_ascii=False) for row in openai_rows) + "\n"
-    ).encode("utf-8")
+    state = request.app.state
     giga_client = get_gigachat_client(request)
-    transformed_content = await transform_batch_input_file(
-        raw_input,
-        target=target,
-        request_transformer=request.app.state.request_transformer,
+    batches_service = get_batches_service_from_state(state)
+    record = await batches_service.create_batch_from_rows(
+        openai_rows,
+        endpoint="/v1/chat/completions",
+        completion_window=completion_window,
+        metadata={
+            "api_format": "anthropic_messages",
+            "requests": stored_requests,
+        },
         giga_client=giga_client,
-        embeddings_model=request.app.state.config.proxy_settings.embeddings,
+        batch_store=get_batch_store(request),
+        file_store=get_file_store(request),
     )
-    batch = await giga_client.acreate_batch(
-        transformed_content,
-        method=target.method,
-    )
-
-    metadata = {
-        "api_format": "anthropic_messages",
-        "completion_window": completion_window,
-        "requests": stored_requests,
-        "output_file_id": batch.output_file_id,
-    }
-    get_batch_store(request)[batch.id_] = metadata
-    if batch.output_file_id:
-        get_file_store(request)[batch.output_file_id] = {"purpose": "batch_output"}
-    return _build_anthropic_batch_object(batch, metadata)
+    return _build_anthropic_batch_object(record["batch"], record["metadata"])
 
 
 @router.get("/messages/batches")
@@ -362,26 +348,18 @@ async def list_message_batches(
     limit: int = Query(default=20, ge=1, le=1000),
 ):
     """Anthropic Message Batches API compatible list endpoint."""
+    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batch_store = get_batch_store(request)
-    file_store = get_file_store(request)
-    batches = await giga_client.aget_batches()
-
-    data = []
-    sorted_batches = sorted(
-        batches.batches,
-        key=lambda batch: getattr(batch, "created_at", 0),
-        reverse=True,
+    batches_service = get_batches_service_from_state(state)
+    records = await batches_service.list_anthropic_batches(
+        giga_client=giga_client,
+        batch_store=get_batch_store(request),
+        file_store=get_file_store(request),
     )
-    for batch in sorted_batches:
-        metadata = batch_store.get(batch.id_)
-        if not metadata or metadata.get("api_format") != "anthropic_messages":
-            continue
-        metadata["output_file_id"] = batch.output_file_id
-        batch_store[batch.id_] = metadata
-        if batch.output_file_id:
-            file_store[batch.output_file_id] = {"purpose": "batch_output"}
-        data.append(_build_anthropic_batch_object(batch, metadata))
+    data = [
+        _build_anthropic_batch_object(record["batch"], record["metadata"])
+        for record in records
+    ]
 
     paged, has_more = _paginate_anthropic_batches(
         data,
@@ -401,30 +379,22 @@ async def list_message_batches(
 @exceptions_handler
 async def retrieve_message_batch(message_batch_id: str, request: Request):
     """Anthropic Message Batches API compatible retrieve endpoint."""
-    batch_store = get_batch_store(request)
-    metadata = batch_store.get(message_batch_id)
-    if not metadata or metadata.get("api_format") != "anthropic_messages":
-        return _anthropic_http_exception(
-            404,
-            "not_found_error",
-            f"Message batch `{message_batch_id}` not found.",
-        )
-
+    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches = await giga_client.aget_batches(batch_id=message_batch_id)
-    if not batches.batches:
+    batches_service = get_batches_service_from_state(state)
+    record = await batches_service.get_anthropic_batch(
+        message_batch_id,
+        giga_client=giga_client,
+        batch_store=get_batch_store(request),
+        file_store=get_file_store(request),
+    )
+    if record is None:
         return _anthropic_http_exception(
             404,
             "not_found_error",
             f"Message batch `{message_batch_id}` not found.",
         )
-
-    batch = batches.batches[0]
-    metadata["output_file_id"] = batch.output_file_id
-    batch_store[message_batch_id] = metadata
-    if batch.output_file_id:
-        get_file_store(request)[batch.output_file_id] = {"purpose": "batch_output"}
-    return _build_anthropic_batch_object(batch, metadata)
+    return _build_anthropic_batch_object(record["batch"], record["metadata"])
 
 
 @router.post("/messages/batches/{message_batch_id}/cancel")
@@ -469,27 +439,23 @@ async def delete_message_batch(message_batch_id: str, request: Request):
 @exceptions_handler
 async def get_message_batch_results(message_batch_id: str, request: Request):
     """Anthropic Message Batches API compatible results endpoint."""
-    batch_store = get_batch_store(request)
-    metadata = batch_store.get(message_batch_id)
-    if not metadata or metadata.get("api_format") != "anthropic_messages":
-        return _anthropic_http_exception(
-            404,
-            "not_found_error",
-            f"Message batch `{message_batch_id}` not found.",
-        )
-
+    state = request.app.state
     giga_client = get_gigachat_client(request)
-    batches = await giga_client.aget_batches(batch_id=message_batch_id)
-    if not batches.batches:
+    batches_service = get_batches_service_from_state(state)
+    record = await batches_service.get_anthropic_batch(
+        message_batch_id,
+        giga_client=giga_client,
+        batch_store=get_batch_store(request),
+        file_store=get_file_store(request),
+    )
+    if record is None:
         return _anthropic_http_exception(
             404,
             "not_found_error",
             f"Message batch `{message_batch_id}` not found.",
         )
-
-    batch = batches.batches[0]
-    metadata["output_file_id"] = batch.output_file_id
-    batch_store[message_batch_id] = metadata
+    batch = record["batch"]
+    metadata = record["metadata"]
     if getattr(batch, "status", None) != "completed" or not batch.output_file_id:
         return _anthropic_http_exception(
             409,

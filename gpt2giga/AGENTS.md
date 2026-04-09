@@ -39,7 +39,11 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `features/chat/service.py` | Chat-completions orchestration between HTTP routes and provider mapping |
 | `features/chat/stream.py` | Chat-completions SSE streaming flow |
 | `features/embeddings/service.py` | Embeddings orchestration shared by OpenAI and Gemini embedding routes |
+| `features/files/service.py` | Files orchestration shared by OpenAI file routes and batch-output loading |
+| `features/files/store.py` | In-memory files metadata store accessors |
 | `features/models/service.py` | Shared model-discovery orchestration for OpenAI, Gemini, and LiteLLM routes |
+| `features/batches/service.py` | Batch orchestration shared by OpenAI and Anthropic batch routes |
+| `features/batches/store.py` | In-memory batches metadata store accessors |
 | `features/responses/service.py` | Responses API orchestration between HTTP routes and provider mapping |
 | `features/responses/stream.py` | Responses API SSE streaming flow |
 | `features/responses/store.py` | In-memory Responses API metadata store accessors |
@@ -51,7 +55,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `providers/gigachat/request_mapper.py` | Primary GigaChat request-mapping entrypoint for chat and responses |
 | `providers/gigachat/response_mapper.py` | Primary GigaChat response-mapping entrypoint for chat and responses |
 | `api_server.py` | Compatibility wrapper over the new `app/*` modules |
-| `app_state.py` | Request/app-scoped metadata stores for batches, files, and responses |
+| `app_state.py` | Compatibility wrappers over feature-owned metadata stores |
 | `cli.py` | Compatibility wrapper for `app/cli.py` |
 | `api/dependencies/auth.py` | API-key verification dependencies |
 | `api/middleware/*` | HTTP middleware for auth-adjacent request processing |
@@ -97,8 +101,14 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `features/chat/stream.py` | Chat SSE generation and streaming error handling |
 | `features/embeddings/contracts.py` | Internal embeddings feature contracts and upstream protocols |
 | `features/embeddings/service.py` | Embeddings service entrypoint used by OpenAI and Gemini embedding routes |
+| `features/files/contracts.py` | Internal files feature contracts and upstream/store protocols |
+| `features/files/service.py` | Files service entrypoint used by OpenAI file routes |
+| `features/files/store.py` | Files metadata-store accessors over app state |
 | `features/models/contracts.py` | Internal model-discovery contracts and normalized model descriptors |
 | `features/models/service.py` | Model-discovery service entrypoint used by OpenAI, Gemini, and LiteLLM routes |
+| `features/batches/contracts.py` | Internal batches feature contracts and upstream/store protocols |
+| `features/batches/service.py` | Batch service entrypoint used by OpenAI and Anthropic batch routes |
+| `features/batches/store.py` | Batches metadata-store accessors over app state |
 | `features/responses/contracts.py` | Internal Responses API contracts and upstream protocols |
 | `features/responses/service.py` | Responses API service entrypoint used by OpenAI responses routes |
 | `features/responses/stream.py` | Responses API SSE generation and streaming error handling |
@@ -139,6 +149,8 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 
 - Keep GigaChat-specific request/response mapping in `providers/gigachat/*_mapper.py`; use `protocol/` as compatibility or transport-adapter surface.
 - Keep chat-completions orchestration in `features/chat/service.py`; `api/openai/chat.py` should stay thin.
+- Keep files orchestration in `features/files/service.py`; `api/openai/files.py` should stay thin.
+- Keep batch orchestration in `features/batches/service.py`; `api/openai/batches.py` and `api/anthropic/batches.py` should stay thin.
 - Keep embeddings orchestration in `features/embeddings/service.py`; `api/openai/embeddings.py` and Gemini embedding routes should stay thin.
 - Keep model-discovery orchestration in `features/models/service.py`; `api/openai/models.py`, `api/gemini/models.py`, and `api/litellm/models.py` should stay thin.
 - Keep Responses API orchestration in `features/responses/service.py`; `api/openai/responses.py` should stay thin.
@@ -147,7 +159,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
 - Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - Decorate router handlers with `@exceptions_handler`.
-- Use `request.app.state`, `app_state.py` metadata stores, and `providers/gigachat/client.py` helpers instead of globals.
+- Use `request.app.state`, feature-owned `*/store.py` accessors, `app_state.py` compatibility wrappers, and `providers/gigachat/client.py` helpers instead of globals.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
 - Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
