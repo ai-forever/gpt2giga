@@ -1,4 +1,4 @@
-# Утилита для проксирования OpenAI/Anthropic-запросов в GigaChat
+# Утилита для проксирования OpenAI/Anthropic/Gemini-запросов в GigaChat
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/gpt2giga/ci.yaml?&style=flat-square)](https://github.com/ai-forever/gpt2giga/actions/workflows/ci.yaml)
 [![GitHub License](https://img.shields.io/github/license/ai-forever/gpt2giga?style=flat-square)](https://opensource.org/licenses/MIT)
@@ -28,11 +28,11 @@
 
 
 ## Описание
-Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API или Anthropic Messages API, в GigaChat API.
+Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API, Anthropic Messages API или Gemini Developer API, в GigaChat API.
 
-При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API (например, `https://api.openai.com/v1/`) или Anthropic API (например, `https://api.anthropic.com/v1/`), заданного в вашем приложении.
+При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API (например, `https://api.openai.com/v1/`), Anthropic API (например, `https://api.anthropic.com/v1/`) или Gemini Developer API (например, `https://generativelanguage.googleapis.com/v1beta/`), заданного в вашем приложении.
 Утилита обработает запрос и перенаправит его заданной [модели GigaChat](https://developers.sber.ru/docs/ru/gigachat/models).
-После получения ответа модели, она передаст его в приложение в формате исходного API (OpenAI или Anthropic).
+После получения ответа модели, она передаст его в приложение в формате исходного API (OpenAI, Anthropic или Gemini).
 
 Утилита работает как с запросами на генерацию, так и с запросами на создание эмбеддингов (эндпоинты `/embeddings` или `/v1/embeddings`).
 
@@ -44,10 +44,10 @@ sequenceDiagram
     participant gpt2giga
     participant GigaChat as GigaChat API
 
-    YourApp->>gpt2giga: OpenAI / Anthropic запрос
+    YourApp->>gpt2giga: OpenAI / Anthropic / Gemini запрос
     gpt2giga->>GigaChat: Запрос формата GigaChat API
     GigaChat->>gpt2giga: Ответ формата GigaChat API
-    gpt2giga->>YourApp: OpenAI / Anthropic ответ
+    gpt2giga->>YourApp: OpenAI / Anthropic / Gemini ответ
 ```
 
 ## Возможности gpt2giga
@@ -55,8 +55,10 @@ sequenceDiagram
 С помощью gpt2giga вы можете:
 
 - использовать OpenAI-совместимые и Anthropic-совместимые клиенты поверх GigaChat без переписывания основного клиентского кода;
+- использовать Gemini Developer API-совместимые клиенты поверх GigaChat через `/v1beta`;
 - работать через **OpenAI Chat Completions API** и **OpenAI Responses API**;
 - использовать **Anthropic Messages API**, включая стриминг, tool use и extended thinking;
+- использовать **Gemini Developer API**, включая `generateContent`, `streamGenerateContent`, `countTokens` и embeddings;
 - вызывать функции и инструменты через API, включая передачу аргументов в OpenAI- и Anthropic-совместимом формате;
 - использовать structured outputs для получения JSON-ответов;
 - обрабатывать ответы модели в потоковом режиме с помощью `stream=true`;
@@ -64,6 +66,7 @@ sequenceDiagram
 - использовать OpenAI-совместимые **Files API** и **Batches API**;
 - использовать **Anthropic Message Batches API**;
 - получать список моделей и информацию о конкретной модели через OpenAI-совместимый **Models API**;
+- получать список моделей и информацию о конкретной модели через Gemini-совместимый **Models API**;
 - использовать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
 - работать с несколькими клиентами и множеством запросов в асинхронном режиме;
 - настраивать прокси через `.env`, переменные окружения и аргументы командной строки;
@@ -71,7 +74,11 @@ sequenceDiagram
 
 ### Поддерживаемые API routes
 
-Ниже перечислены основные route-группы официальных OpenAI и Anthropic API и отмечено, что из этого поддерживается в gpt2giga. Все перечисленные маршруты в gpt2giga доступны как без префикса, так и с префиксом `/v1`, например `/chat/completions` и `/v1/chat/completions`.
+Ниже перечислены основные route-группы официальных OpenAI, Anthropic и Gemini API и отмечено, что из этого поддерживается в gpt2giga.
+
+- OpenAI-совместимые маршруты доступны как без префикса, так и с префиксом `/v1`, например `/chat/completions` и `/v1/chat/completions`.
+- Anthropic-совместимые маршруты доступны под своими путями `/messages*`.
+- Gemini Developer API-совместимые маршруты доступны под префиксом `/v1beta`.
 
 #### OpenAI API
 
@@ -115,11 +122,26 @@ sequenceDiagram
 | `DELETE /messages/batches/{message_batch_id}` | Да | Частично | Route есть, но сейчас возвращает `501`, так как backend GigaChat не поддерживает удаление batch |
 | Другие route Anthropic API | Частично | Нет | В проекте нет отдельной реализации дополнительных route вне Messages API и Message Batches API |
 
+#### Gemini Developer API
+
+| Route / группа | Официальный Gemini API | В gpt2giga | Что поддерживается |
+|---|---|---|---|
+| `GET /v1beta/models` | Да | Да | Список доступных моделей GigaChat в Gemini-совместимом виде |
+| `GET /v1beta/models/{model}` | Да | Да | Информация по конкретной модели |
+| `POST /v1beta/models/{model}:generateContent` | Да | Да | Генерация текста, multi-turn contents, function calling, structured output |
+| `POST /v1beta/models/{model}:streamGenerateContent` | Да | Да | Data-only SSE стриминг в Gemini-совместимом формате |
+| `POST /v1beta/models/{model}:countTokens` | Да | Да | Подсчёт токенов для `contents` и `generateContentRequest` |
+| `POST /v1beta/models/{model}:batchEmbedContents` | Да | Да | Эмбеддинги через модель, настроенную на стороне прокси |
+| `POST /v1beta/models/{model}:embedContent` | Да | Да | Single-input алиас для embeddings |
+| Files API / Batch API / built-in Google tools | Частично | Нет | Files API, Gemini Batch API, file-backed parts и built-in Google tools сейчас не реализованы |
+| Другие route Gemini API | Частично | Нет | В проекте нет отдельной реализации дополнительных route вне перечисленных выше |
+
 ### Коротко по покрытию
 
 - **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`, `files`, `batches`.
 - **Anthropic:** поддерживается `Messages API`, `count_tokens` и `Message Batches API`.
-- **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic API, включая fine-tuning, images, audio, vector stores, assistants и realtime.
+- **Gemini:** поддерживается основной текстовый и embeddings-сценарий через `/v1beta`: `models`, `generateContent`, `streamGenerateContent`, `countTokens`, `batchEmbedContents`, `embedContent`.
+- **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic/Gemini API, включая fine-tuning, images, audio, vector stores, assistants, Gemini Files/Batch API и realtime.
 
 ## Начало работы
 
@@ -247,6 +269,7 @@ sequenceDiagram
   - Responses API: [`examples/openai/responses/README.md`](examples/openai/responses/README.md)
   - Files / Batches / embeddings / models: [`examples/README.md`](./examples/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
+- Gemini Python SDK (`google-genai`): [`examples/gemini/README.md`](./examples/gemini/README.md)
 - Индекс всех примеров: [`examples/README.md`](./examples/README.md)
 
 ## Изменение параметров gpt2giga
@@ -366,7 +389,7 @@ gpt2giga \
 - `GIGACHAT_RETRY_BACKOFF_FACTOR` - Множитель задержки для повторных попыток. По умолчанию `0.5`;
 - `GIGACHAT_TOKEN_EXPIRY_BUFFER_MS` - Буфер времени (мс) до истечения токена для запуска обновления. По умолчанию `60000` (60 секунд).
 
-После запуска сервер будет перенаправлять все запросы, адресованные OpenAI API, в GigaChat API.
+После запуска сервер будет перенаправлять поддерживаемые OpenAI-, Anthropic- и Gemini-совместимые запросы в GigaChat API.
 
 ## Авторизация с помощью заголовка
 
@@ -416,8 +439,12 @@ GPT2GIGA_ENABLE_API_KEY_AUTH=True
 GPT2GIGA_API_KEY=123
 ```
 
-После этого, в сервисе будет добавлена авторизация по токену. Возможны разные варианты выполнения запросов, например:
-Авторизация по запросу:
+После этого сервис будет требовать API-ключ на пользовательских эндпоинтах. Поддерживаются разные варианты передачи ключа:
+
+- `x-api-key` и `Authorization: Bearer ...` для OpenAI- и Anthropic-совместимых клиентов;
+- `x-goog-api-key` и query-параметр `key` для Gemini Developer API-совместимых клиентов.
+
+Авторизация по query-параметру:
 ```bash
 curl -L http://localhost:8090/models?x-api-key=123
 ```
@@ -429,6 +456,17 @@ curl -H "x-api-key:123" -L http://localhost:8090/models
 ```bash
  curl -H "Authorization: Bearer 123" -L http://localhost:8090/models
 ```
+
+Gemini-совместимая авторизация заголовком:
+```bash
+curl -H "x-goog-api-key:123" -L http://localhost:8090/v1beta/models
+```
+
+Gemini-совместимая авторизация query-параметром:
+```bash
+curl -L "http://localhost:8090/v1beta/models?key=123"
+```
+
 ```python
 from openai import OpenAI
 
@@ -439,6 +477,21 @@ completion = client.chat.completions.create(
     messages=[
         {"role": "user", "content": "Кто ты?"},
     ],
+)
+```
+
+```python
+from google import genai
+from google.genai import types
+
+client = genai.Client(
+    api_key="123",
+    http_options=types.HttpOptions(base_url="http://localhost:8090"),
+)
+
+response = client.models.generate_content(
+    model="GigaChat-2-Max",
+    contents="Кто ты?",
 )
 ```
 ## Системные эндпоинты
@@ -502,6 +555,7 @@ completion = client.chat.completions.create(
 | Claude Code                | https://code.claude.com/docs/en/overview           | CLI-агент от Anthropic.<br /> Подробнее о запуске и настройке Claude Code для работы с gpt2giga — в [README](./integrations/claude-code/README.md) |
 | OpenAI Agents SDK          | https://github.com/openai/openai-agents-python     | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
 | Anthropic SDK              | https://github.com/anthropics/anthropic-sdk-python | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
+| Google GenAI SDK           | https://github.com/googleapis/python-genai         | Официальный Python SDK для Gemini Developer API. Примеры использования через gpt2giga — в [examples/gemini/](./examples/gemini/)           |
 | Cursor                     | https://cursor.com/                                | Редактор с ИИ и агентом для программирования.<br /> Подробнее о запуске и настройке Cursor для работы с gpt2giga — в [README](./integrations/cursor/README.md) |
 | Qwen Code                  | https://github.com/QwenLM/qwen-code                | CLI-агент для написания кода.<br /> Подробнее о запуске и настройке Qwen Code для работы с gpt2giga — в [README](./integrations/qwen-code/README.md) |
 | Xcode                      | https://developer.apple.com/xcode/                 | Coding Intelligence и внешние агентные инструменты Apple.<br /> Подробнее о подключении Xcode к gpt2giga — в [README](./integrations/xcode/README.md) |

@@ -4,7 +4,7 @@
 
 - **What:** Source package for the `gpt2giga` proxy server
 - **Framework:** FastAPI + Starlette + Uvicorn, async-first
-- **CLI entrypoint:** `gpt2giga/__init__.py` exports `run()` from `api_server.py`
+- **CLI entrypoint:** `gpt2giga/__init__.py` exports `run()` from `app/run.py`
 
 ## Setup & Run
 
@@ -26,9 +26,14 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 
 | Path | Role |
 |---|---|
-| `api_server.py` | App factory, lifespan, middleware registration, router mounting, `run()` |
+| `app/factory.py` | FastAPI app factory, middleware registration, router mounting |
+| `app/lifespan.py` | Startup/shutdown orchestration and runtime service lifecycle |
+| `app/wiring.py` | App-scoped runtime wiring for GigaChat client and transformers |
+| `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
+| `app/cli.py` | Config loading and env-path handling |
+| `api_server.py` | Compatibility wrapper over the new `app/*` modules |
 | `app_state.py` | Request/app-scoped accessors for GigaChat client, batch store, file store |
-| `cli.py` | Config loading and env-path handling |
+| `cli.py` | Compatibility wrapper for `app/cli.py` |
 | `auth.py` | API-key verification dependency |
 | `logger.py` | Log setup and sensitive-data redaction |
 | `constants.py` | Size limits, security field lists, shared constants |
@@ -102,12 +107,12 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 - Decorate router handlers with `@exceptions_handler`.
 - Use `request.app.state` and helpers in `app_state.py` for shared state instead of globals.
 - New config belongs in `ProxySettings` or `GigaChatCLI` with a `Field(...)` description.
-- Middleware order matters; revalidate behavior if changing `api_server.py`.
+- Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
 
 ## Middleware Order
 
-Applied via `api_server.py`:
+Applied via `app/factory.py`:
 
 1. `CORSMiddleware`
 2. `PathNormalizationMiddleware`
