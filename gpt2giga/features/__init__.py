@@ -1,0 +1,1 @@
+"""Capability-oriented application features."""
