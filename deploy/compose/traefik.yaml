@@ -2,9 +2,9 @@ x-gpt2giga-common: &gpt2giga-common
   image: ghcr.io/ai-forever/gpt2giga:latest
   restart: unless-stopped
   env_file:
-    - ../.env
+    - ../../.env
   build:
-    context: ..
+    context: ../..
     dockerfile: Dockerfile
 
 services:

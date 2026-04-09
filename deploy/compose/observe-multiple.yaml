@@ -2,12 +2,12 @@ x-gpt2giga-common: &gpt2giga-common
   image: ghcr.io/ai-forever/gpt2giga:latest
   restart: unless-stopped
   build:
-    context: ..
+    context: ../..
     dockerfile: Dockerfile
     args:
       PYTHON_VERSION: "3.13"
   env_file:
-    - ../.env
+    - ../../.env
   depends_on:
     - mitmproxy
 
@@ -64,8 +64,8 @@ services:
       - "8081:8081"
     volumes:
       - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
-      - ../scripts/sse_event.py:/app/sse_event.py:ro
+      - ../../scripts/sse_event.py:/app/sse_event.py:ro
     env_file:
-      - ../.env
+      - ../../.env
     stdin_open: true
     tty: true

@@ -2,7 +2,7 @@ x-gpt2giga-common: &gpt2giga-common
   image: ghcr.io/ai-forever/gpt2giga:latest
   restart: unless-stopped
   env_file:
-    - ../.env
+    - ../../.env
 
 x-mitmproxy-common: &mitmproxy-common
   restart: always
@@ -10,7 +10,7 @@ x-mitmproxy-common: &mitmproxy-common
   image: mitmproxy/mitmproxy:latest
   volumes:
     - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
-    - ../scripts/sse_event.py:/app/sse_event.py:ro
+    - ../../scripts/sse_event.py:/app/sse_event.py:ro
   command: >
     mitmweb
     --web-host 0.0.0.0
@@ -22,7 +22,7 @@ x-mitmproxy-common: &mitmproxy-common
     --set anticomp=true
     -s /app/sse_event.py
   env_file:
-    - ../.env
+    - ../../.env
   stdin_open: true
   tty: true
 
@@ -43,7 +43,7 @@ services:
     <<: *gpt2giga-common
     profiles: ["DEV"]
     build:
-      context: ..
+      context: ../..
       dockerfile: Dockerfile
       args:
         PYTHON_VERSION: "3.13"

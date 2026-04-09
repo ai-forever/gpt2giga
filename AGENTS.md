@@ -56,12 +56,11 @@ uv run pre-commit install
 | `examples/` | Runnable SDK examples | OpenAI chat/responses/files/batches, Anthropic, embeddings, agents |
 | `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
+| `deploy/` | Deployment assets | Compose stacks in `deploy/compose/` + Traefik config in `deploy/traefik/` |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
-| `traefik/` | Traefik config | Used by `compose/traefik.yaml` |
 | `badges/` | Generated assets | Coverage badge written by CI |
 | `Dockerfile` | Container build | `uv build`-based package install |
 | `Dockerfile.mitmproxy` | Debug container image | mitmproxy/SSE debugging support |
-| `compose/` | Docker Compose manifests | `base`, `traefik`, `observability`, and related stacks |
 
 ## Current Architecture Notes
 

@@ -6,7 +6,7 @@ on:
     paths:
       - 'Dockerfile'
       - '.dockerignore'
-      - 'compose/**'
+      - 'deploy/compose/**'
       - 'gpt2giga/**'
       - 'pyproject.toml'
       - 'uv.lock'

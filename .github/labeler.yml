@@ -22,8 +22,8 @@ docker:
           - 'Dockerfile'
           - 'Dockerfile.mitmproxy'
           - '.dockerignore'
-          - 'compose/**'
-          - 'traefik/**'
+          - 'deploy/compose/**'
+          - 'deploy/traefik/**'
 
 ci:
   - changed-files:
