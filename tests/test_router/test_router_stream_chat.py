@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.routers.openai import router
+from gpt2giga.api.openai import router
 
 
 class FakeGigachat:

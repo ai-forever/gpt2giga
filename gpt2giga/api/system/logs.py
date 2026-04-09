@@ -112,7 +112,9 @@ async def root(request: Request):
 
     global _LOG_VIEWER_HTML  # noqa: PLW0603
     if _LOG_VIEWER_HTML is None:
-        html_path = Path(__file__).parent.parent / "templates" / "log_viewer.html"
+        html_path = (
+            Path(__file__).resolve().parents[2] / "templates" / "log_viewer.html"
+        )
         _LOG_VIEWER_HTML = await anyio.to_thread.run_sync(html_path.read_text)
 
     return HTMLResponse(_LOG_VIEWER_HTML)

@@ -9,7 +9,7 @@ from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import stream_responses_generator
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.openapi_specs.openai import responses_openapi_extra
-from gpt2giga.routers.openai.helpers import populate_giga_functions
+from gpt2giga.api.openai.helpers import populate_giga_functions
 
 router = APIRouter(tags=["OpenAI"])
 

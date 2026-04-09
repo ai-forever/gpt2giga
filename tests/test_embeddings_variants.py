@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.models.config import ProxyConfig
-from gpt2giga.routers.openai import router as openai_router
+from gpt2giga.api.openai import router as openai_router
 
 
 class FakeClient:

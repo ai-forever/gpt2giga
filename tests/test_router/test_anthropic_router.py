@@ -19,7 +19,7 @@ from gpt2giga.protocol.anthropic.response import (
     _build_anthropic_response,
     _map_stop_reason,
 )
-from gpt2giga.routers.anthropic import router
+from gpt2giga.api.anthropic import router
 
 
 # ---------------------------------------------------------------------------

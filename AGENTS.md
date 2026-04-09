@@ -34,6 +34,7 @@ uv run pre-commit install
 - **Formatter/Linter:** Ruff is the project standard. Keep `ruff check` and `ruff format` green.
 - **Commit style:** Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`.
 - **Python compat:** Code must remain compatible with Python `3.10` through `3.14`.
+- **Starlette baseline:** Runtime targets `Starlette 1.x`. Use `lifespan`, `APIRouter`, and `add_middleware`; do not add removed decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - **Async-first:** Endpoint handlers and upstream GigaChat interactions are async.
 - **Imports:** stdlib → third-party → local (`gpt2giga.*`), using absolute imports.
 - **Docstrings:** Google style, imperative mood, concise.
@@ -64,9 +65,9 @@ uv run pre-commit install
 
 ## Current Architecture Notes
 
-- OpenAI-compatible endpoints live in `gpt2giga/routers/openai/`.
-- Anthropic-compatible endpoints live in `gpt2giga/routers/anthropic/`.
-- LiteLLM-compatible model-info endpoints live in `gpt2giga/routers/litellm/`.
+- OpenAI-compatible endpoints live in `gpt2giga/api/openai/`.
+- Anthropic-compatible endpoints live in `gpt2giga/api/anthropic/`.
+- LiteLLM-compatible model-info endpoints live in `gpt2giga/api/litellm/`.
 - Shared request/response translation lives in `gpt2giga/protocol/`.
 - Request transformation is split across `gpt2giga/protocol/request/transformer.py`, `_base.py`, `_messages.py`, and `_responses_v2.py`.
 - Response transformation is split across `gpt2giga/protocol/response/processor.py`, `_common.py`, and `_responses.py`.
@@ -79,7 +80,7 @@ uv run pre-commit install
 
 ```bash
 # Find route handlers
-rg -n "@router\.(get|post|delete)" gpt2giga/routers
+rg -n "@router\.(get|post|delete)" gpt2giga/api
 
 # Find config/env settings
 rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
@@ -88,7 +89,7 @@ rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
 rg -n "class .*Middleware" gpt2giga/api/middleware
 
 # Find batch/file support
-rg -n "batch|file" gpt2giga/routers gpt2giga/protocol gpt2giga/app_state.py
+rg -n "batch|file" gpt2giga/api gpt2giga/protocol gpt2giga/app_state.py
 
 # Find split request/response transformer internals
 rg --files gpt2giga/protocol/request gpt2giga/protocol/response

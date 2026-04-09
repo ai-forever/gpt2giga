@@ -13,7 +13,7 @@ from gpt2giga.protocol.batches import (
     get_batch_target,
     transform_batch_input_file,
 )
-from gpt2giga.routers.openai.helpers import _paginate_items
+from gpt2giga.api.openai.helpers import _paginate_items
 
 router = APIRouter(tags=["OpenAI"])
 

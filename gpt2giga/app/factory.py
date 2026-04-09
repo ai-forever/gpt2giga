@@ -4,21 +4,20 @@ from fastapi import Depends, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
+from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.dependencies.auth import verify_api_key, verify_api_key_gemini
+from gpt2giga.api.gemini import router as gemini_router
+from gpt2giga.api.litellm import router as litellm_router
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
 from gpt2giga.api.middleware.rquid_context import RquidMiddleware
+from gpt2giga.api.openai import router as openai_router
+from gpt2giga.api.system import logs_api_router, logs_router, system_router
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.lifespan import lifespan
 from gpt2giga.core.app_meta import get_app_version
 from gpt2giga.protocol.gemini.response import GeminiAPIError, gemini_error_response
-from gpt2giga.routers.anthropic import router as anthropic_router
-from gpt2giga.routers.gemini import router as gemini_router
-from gpt2giga.routers.litellm import router as litellm_router
-from gpt2giga.routers.logs_router import logs_api_router, logs_router
-from gpt2giga.routers.openai import router as openai_router
-from gpt2giga.routers.system_router import system_router
 
 
 def _build_cors_options(config) -> tuple[list[str], list[str], list[str], bool]:

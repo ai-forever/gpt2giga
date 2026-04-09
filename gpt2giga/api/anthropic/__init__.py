@@ -2,8 +2,8 @@
 
 from fastapi import APIRouter
 
-from gpt2giga.routers.anthropic.batches import router as batches_router
-from gpt2giga.routers.anthropic.messages import router as messages_router
+from gpt2giga.api.anthropic.batches import router as batches_router
+from gpt2giga.api.anthropic.messages import router as messages_router
 
 router = APIRouter(tags=["Anthropic"])
 router.include_router(messages_router)

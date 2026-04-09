@@ -54,8 +54,8 @@ uv run pytest -m integration
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.routers.openai import router as openai_router
-from gpt2giga.routers.system_router import system_router
+from gpt2giga.api.openai import router as openai_router
+from gpt2giga.api.system import system_router
 
 app = FastAPI()
 app.include_router(openai_router)

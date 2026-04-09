@@ -9,7 +9,7 @@ from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_form import read_request_multipart
 from gpt2giga.openapi_specs.openai import files_openapi_extra
 from gpt2giga.protocol.batches import map_openai_file_purpose
-from gpt2giga.routers.openai.helpers import (
+from gpt2giga.api.openai.helpers import (
     _load_batch_output_content,
     _paginate_items,
     _serialize_file_object,

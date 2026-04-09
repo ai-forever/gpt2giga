@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.models.config import ProxyConfig
-from gpt2giga.routers.gemini import router
+from gpt2giga.api.gemini import router
 
 
 class MockResponse:

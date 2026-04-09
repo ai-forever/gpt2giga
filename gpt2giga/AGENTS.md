@@ -47,26 +47,26 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `models/security.py` | Compatibility wrapper for `core/config/security.py` |
 | `common/` | Shared exception handling, auth helpers, request parsing, streaming, schema/tool utilities |
 | `protocol/` | Request, response, attachment, batch, and Anthropic translation logic |
-| `routers/` | OpenAI-compatible, Anthropic-compatible, system, and logs endpoints |
+| `api/` | HTTP transport adapters: provider endpoints, middleware, dependencies, and system routes |
 | `openapi_specs/` | OpenAPI schema fragments for OpenAI and Anthropic endpoints |
 | `templates/log_viewer.html` | HTML log viewer for `/logs/html` |
 
-## Router Layout
+## API Layout
 
 | Path | Endpoints |
 |---|---|
-| `routers/openai/chat_completions.py` | `/chat/completions` |
-| `routers/openai/responses.py` | `/responses` |
-| `routers/openai/embeddings.py` | `/embeddings` |
-| `routers/openai/models.py` | `/models` |
-| `routers/openai/files.py` | `/files` and `/files/{file_id}/content` |
-| `routers/openai/batches.py` | `/batches` |
-| `routers/anthropic/messages.py` | `/messages` and `/messages/count_tokens` |
-| `routers/anthropic/batches.py` | `/messages/batches` |
-| `routers/gemini/content.py` | `/v1beta/models/*:generateContent`, `countTokens`, embeddings |
-| `routers/gemini/models.py` | `/v1beta/models` and `/v1beta/models/{model}` |
-| `routers/system_router.py` | `/health`, `/ping` |
-| `routers/logs_router.py` | `/logs/{last_n_lines}`, `/logs/stream`, `/logs/html` |
+| `api/openai/chat_completions.py` | `/chat/completions` |
+| `api/openai/responses.py` | `/responses` |
+| `api/openai/embeddings.py` | `/embeddings` |
+| `api/openai/models.py` | `/models` |
+| `api/openai/files.py` | `/files` and `/files/{file_id}/content` |
+| `api/openai/batches.py` | `/batches` |
+| `api/anthropic/messages.py` | `/messages` and `/messages/count_tokens` |
+| `api/anthropic/batches.py` | `/messages/batches` |
+| `api/gemini/content.py` | `/v1beta/models/*:generateContent`, `countTokens`, embeddings |
+| `api/gemini/models.py` | `/v1beta/models` and `/v1beta/models/{model}` |
+| `api/system/health.py` | `/health`, `/ping` |
+| `api/system/logs.py` | `/logs`, `/logs/stream`, `/logs/html` |
 
 - OpenAI and Anthropic routers are mounted both at root and `/v1`.
 - Gemini routes are mounted under `/v1beta`.
@@ -107,9 +107,10 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 
 ## Patterns & Conventions
 
-- Keep reusable translation logic in `protocol/` or `common/`, not duplicated in routers.
+- Keep reusable translation logic in `protocol/` or `common/`, not duplicated in API handlers.
 - Keep `RequestTransformer` and `ResponseProcessor` as the public import surface; grow the underscored helper modules instead of turning the facade files back into mega-modules.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
+- Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - Decorate router handlers with `@exceptions_handler`.
 - Use `request.app.state` and helpers in `app_state.py` for shared state instead of globals.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
@@ -132,7 +133,7 @@ Remember that Starlette executes middleware in reverse registration order on req
 
 ```bash
 # Find route handlers
-rg -n "@router\.(get|post|delete)" gpt2giga/routers
+rg -n "@router\.(get|post|delete)" gpt2giga/api
 
 # Find middleware classes
 rg -n "class .*Middleware" gpt2giga/api/middleware
@@ -147,7 +148,7 @@ rg --files gpt2giga/protocol/request gpt2giga/protocol/response
 rg -n "get_batch_store|get_file_store|batch_metadata_store|file_metadata_store" gpt2giga
 
 # Find OpenAPI schema helpers
-rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs gpt2giga/routers
+rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs gpt2giga/api
 ```
 
 ## Common Gotchas
