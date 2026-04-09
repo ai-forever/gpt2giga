@@ -10,26 +10,28 @@ from gpt2giga.api.gemini.openapi import (
     gemini_count_tokens_openapi_extra,
     gemini_generate_content_openapi_extra,
 )
+from gpt2giga.api.gemini.request import (
+    GeminiAPIError,
+    build_openai_data_from_gemini_request,
+    extract_embed_texts,
+    extract_text_for_token_count,
+    model_resource_name,
+    normalize_model_name,
+    read_gemini_request_json,
+)
+from gpt2giga.api.gemini.response import (
+    build_batch_embed_contents_response,
+    build_generate_content_response,
+    build_single_embed_content_response,
+    gemini_exceptions_handler,
+)
+from gpt2giga.api.gemini.streaming import stream_gemini_generate_content
 from gpt2giga.app.dependencies import (
     get_logger_from_state,
     get_request_transformer_from_state,
 )
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.embeddings import get_embeddings_service_from_state
-from gpt2giga.protocol.gemini import (
-    GeminiAPIError,
-    build_batch_embed_contents_response,
-    build_generate_content_response,
-    build_openai_data_from_gemini_request,
-    build_single_embed_content_response,
-    extract_embed_texts,
-    extract_text_for_token_count,
-    gemini_exceptions_handler,
-    model_resource_name,
-    normalize_model_name,
-    read_gemini_request_json,
-    stream_gemini_generate_content,
-)
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Gemini"])

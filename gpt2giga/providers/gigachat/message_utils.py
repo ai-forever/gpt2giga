@@ -11,23 +11,7 @@ ROLE_MAPPING: Dict[str, str] = {
 
 
 def map_role(role: str, is_first: bool, logger=None) -> str:
-    """
-    Maps a role to a valid GigaChat role.
-
-    GigaChat only supports: system, user, assistant, function
-    - system must be the first message only
-    - developer -> system (if first) or user (if not first)
-    - tool -> function
-    - unknown roles -> user
-
-    Args:
-        role: Original role from OpenAI format
-        is_first: Whether this is the first message (system allowed only here)
-        logger: Optional logger for debug messages
-
-    Returns:
-        Valid GigaChat role
-    """
+    """Map an external role to a valid GigaChat role."""
     mapped_role = ROLE_MAPPING.get(role, role)
 
     if mapped_role == "system" and not is_first:
@@ -42,18 +26,7 @@ def map_role(role: str, is_first: bool, logger=None) -> str:
 
 
 def merge_consecutive_messages(messages: List[Dict]) -> List[Dict]:
-    """
-    Merges consecutive messages with the same role.
-
-    GigaChat works better when consecutive same-role messages are concatenated.
-    This also helps avoid issues with message ordering.
-
-    Args:
-        messages: List of message dictionaries
-
-    Returns:
-        List of messages with consecutive same-role messages merged
-    """
+    """Merge adjacent messages with the same role."""
     if not messages:
         return messages
 
@@ -85,15 +58,7 @@ def merge_consecutive_messages(messages: List[Dict]) -> List[Dict]:
 
 
 def collapse_user_messages(messages: List[Messages]) -> List[Messages]:
-    """
-    Collapses consecutive user messages into one.
-
-    Args:
-        messages: List of Messages objects
-
-    Returns:
-        List of Messages with consecutive user messages collapsed
-    """
+    """Collapse consecutive user messages into one."""
     collapsed_messages: List[Messages] = []
     prev_user_message = None
     content_parts: List[str] = []
@@ -119,46 +84,28 @@ def collapse_user_messages(messages: List[Messages]) -> List[Messages]:
 
 
 def ensure_system_first(messages: List[Dict]) -> List[Dict]:
-    """
-    Ensures system message is first in the list (if present).
-
-    Args:
-        messages: List of message dictionaries
-
-    Returns:
-        Messages with system message moved to front if needed
-    """
+    """Move the first system message to the front when needed."""
     if not messages or messages[0].get("role") == "system":
         return messages
 
-    for i, msg in enumerate(messages):
-        if msg.get("role") == "system":
-            system_msg = messages.pop(i)
-            messages.insert(0, system_msg)
+    for index, message in enumerate(messages):
+        if message.get("role") == "system":
+            system_message = messages.pop(index)
+            messages.insert(0, system_message)
             break
 
     return messages
 
 
 def limit_attachments(messages: List[Dict], max_total: int = 10, logger=None) -> None:
-    """
-    Limits the total number of attachments across all messages.
-
-    Processes messages in reverse order (newest first) to preserve
-    the most recent attachments.
-
-    Args:
-        messages: List of message dictionaries (modified in place)
-        max_total: Maximum total attachments allowed
-        logger: Optional logger for warnings
-    """
-    cur_attachment_count = 0
+    """Trim attachments from oldest messages once the total limit is exceeded."""
+    current_attachment_count = 0
     for message in reversed(messages):
         message_attachments = len(message.get("attachments", []))
-        if cur_attachment_count + message_attachments > max_total:
-            allowed = max_total - cur_attachment_count
+        if current_attachment_count + message_attachments > max_total:
+            allowed = max_total - current_attachment_count
             message["attachments"] = message["attachments"][:allowed]
             if logger:
                 logger.warning(f"Limited attachments in message to {allowed}")
             break
-        cur_attachment_count += message_attachments
+        current_attachment_count += message_attachments

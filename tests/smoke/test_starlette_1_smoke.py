@@ -3,12 +3,12 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.api_server import create_app
+from gpt2giga.app.factory import create_app
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
-from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.api.openai import router as openai_router
 from gpt2giga.api.system import logs_api_router
+from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.providers.gigachat import ResponseProcessor
 
 
 class FakeLifespanGigaChat:
@@ -96,7 +96,7 @@ def test_starlette_1_cors_preflight_smoke():
 def test_starlette_1_lifespan_and_app_state_smoke(monkeypatch):
     giga_client = FakeLifespanGigaChat()
     monkeypatch.setattr(
-        "gpt2giga.api_server.GigaChat",
+        "gpt2giga.providers.gigachat.client.GigaChat",
         lambda **kwargs: giga_client,
     )
 

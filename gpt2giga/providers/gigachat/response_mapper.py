@@ -7,13 +7,13 @@ from typing import Dict, Optional
 
 from gigachat.models import ChatCompletion, ChatCompletionChunk
 
-from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.providers.gigachat.response_mapping_common import (
     ResponseProcessorCommonMixin,
 )
 from gpt2giga.providers.gigachat.responses_response_mapper import (
     ResponseProcessorResponsesMixin,
 )
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
 class ResponseProcessor(

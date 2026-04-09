@@ -5,8 +5,8 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request
 
 from gpt2giga.api.openai.openapi import batches_openapi_extra
-from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.request_json import read_request_json
+from gpt2giga.core.errors import exceptions_handler
+from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.features.batches import get_batches_service_from_state
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.files.store import get_file_store

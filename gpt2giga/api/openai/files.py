@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from gpt2giga.api.openai.openapi import files_openapi_extra
 from gpt2giga.app.dependencies import get_response_processor_from_state
-from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.request_form import read_request_multipart
+from gpt2giga.core.errors import exceptions_handler
+from gpt2giga.core.http.form_body import read_request_multipart
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.files import get_files_service_from_state
 from gpt2giga.features.files.store import get_file_store

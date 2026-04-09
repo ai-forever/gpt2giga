@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 from loguru import logger
 
-from gpt2giga.protocol import AttachmentProcessor
+from gpt2giga.providers.gigachat import AttachmentProcessor
 
 
 class DummyFile:

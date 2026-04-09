@@ -7,19 +7,19 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.protocol.anthropic.request import (
+from gpt2giga.api.anthropic.request import (
     _convert_anthropic_messages_to_openai,
     _convert_anthropic_tools_to_openai,
     _extract_text_from_openai_messages,
     _extract_tool_definitions_text,
 )
-from gpt2giga.protocol.anthropic.response import (
+from gpt2giga.api.anthropic.response import (
     _build_anthropic_response,
     _map_stop_reason,
 )
 from gpt2giga.api.anthropic import router
+from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.providers.gigachat import ResponseProcessor
 
 
 # ---------------------------------------------------------------------------

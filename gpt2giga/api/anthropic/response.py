@@ -2,12 +2,12 @@
 
 import json
 import uuid
-from typing import Dict, List, Optional
+from typing import Optional
 
 from fastapi.responses import JSONResponse
 
-from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.core.logging.setup import rquid_context
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
 def _map_stop_reason(finish_reason: Optional[str]) -> str:
@@ -22,17 +22,17 @@ def _map_stop_reason(finish_reason: Optional[str]) -> str:
 
 
 def _build_anthropic_response(
-    giga_dict: Dict,
+    giga_dict: dict,
     model: str,
     response_id: str,
-) -> Dict:
+) -> dict:
     """Build Anthropic Messages API response from a GigaChat response."""
     choice = giga_dict["choices"][0]
     message = choice.get("message", {})
     finish_reason = choice.get("finish_reason", "stop")
     usage = giga_dict.get("usage", {})
 
-    content_blocks: List[Dict] = []
+    content_blocks: list[dict] = []
     reasoning = message.get("reasoning_content")
     if reasoning:
         content_blocks.append({"type": "thinking", "thinking": reasoning})

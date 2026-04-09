@@ -15,13 +15,13 @@ from gigachat.models import (
     ChatV2UserInfo,
 )
 
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
-from gpt2giga.common.tools import (
+from gpt2giga.core.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
+from gpt2giga.core.logging.setup import sanitize_for_utf8
+from gpt2giga.core.schema.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.providers.gigachat.tool_mapping import (
     convert_tool_to_giga_functions,
     map_tool_name_to_gigachat,
 )
-from gpt2giga.core.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
-from gpt2giga.core.logging.setup import sanitize_for_utf8
 
 
 class RequestTransformerResponsesV2Mixin:

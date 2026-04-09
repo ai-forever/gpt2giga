@@ -1,8 +1,8 @@
 from loguru import logger as loguru_logger
 
-from gpt2giga.cli import load_config
-from gpt2giga.common.app_meta import warn_sensitive_cli_args
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.app.cli import load_config
+from gpt2giga.core.app_meta import warn_sensitive_cli_args
+from gpt2giga.core.config.settings import ProxyConfig
 
 
 def test_load_config_basic(monkeypatch):

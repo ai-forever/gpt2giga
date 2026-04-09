@@ -57,17 +57,23 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `providers/gigachat/request_mapper.py` | Primary GigaChat request-mapping entrypoint for chat and responses |
 | `providers/gigachat/response_mapper.py` | Primary GigaChat response-mapping entrypoint for chat and responses |
 | `providers/gigachat/streaming.py` | GigaChat stream iteration, error wrapping, and chunk normalization |
-| `api_server.py` | Compatibility wrapper over the new `app/*` modules |
-| `app_state.py` | Compatibility wrappers over feature-owned metadata stores |
-| `cli.py` | Compatibility wrapper for `app/cli.py` |
+| `providers/gigachat/tool_mapping.py` | GigaChat tool/function conversion and reserved-name remapping |
+| `providers/gigachat/message_utils.py` | GigaChat-specific role/message normalization helpers |
+| `providers/gigachat/content_utils.py` | Tool-result serialization helpers for provider message payloads |
+| `core/errors.py` | Shared exception normalization decorator and GigaChat error mapping |
+| `core/http/json_body.py` | Shared JSON request parsing helpers |
+| `core/http/form_body.py` | Shared multipart/form-data parsing helpers |
+| `core/schema/json_schema.py` | JSON Schema normalization and `$ref` resolution |
+| `app/factory.py` | FastAPI app factory, router mounting, and middleware wiring hooks |
 | `api/dependencies/auth.py` | API-key verification dependencies |
 | `api/middleware/*` | HTTP middleware for auth-adjacent request processing |
-| `logger.py` | Compatibility wrapper for `core/logging/setup.py` |
-| `constants.py` | Compatibility wrapper for `core/constants.py` |
-| `models/config.py` | Compatibility wrapper for `core/config/settings.py` |
-| `models/security.py` | Compatibility wrapper for `core/config/security.py` |
-| `common/` | Shared exception handling, auth helpers, request parsing, streaming, schema/tool utilities |
-| `protocol/` | Compatibility facades plus batch and non-GigaChat transport translation logic |
+| `features/batches/transforms.py` | Batch target mapping plus JSONL input/output transformation helpers |
+| `api/anthropic/request.py` | Anthropic request translation into the shared OpenAI-style intermediary |
+| `api/anthropic/response.py` | Anthropic response/error shaping |
+| `api/anthropic/streaming.py` | Anthropic SSE event translation |
+| `api/gemini/request.py` | Gemini request parsing and translation into the shared intermediary |
+| `api/gemini/response.py` | Gemini response/error shaping |
+| `api/gemini/streaming.py` | Gemini SSE/data-only translation |
 | `api/` | HTTP transport adapters: provider endpoints, middleware, dependencies, and system routes |
 | `api/*/openapi.py` | Provider-specific OpenAPI schema fragments colocated with routers |
 | `api/_openapi.py` | Shared OpenAPI request-body helper |
@@ -95,7 +101,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - System routes are root-only.
 - Log routes are disabled in `PROD`.
 
-## Provider And Protocol Layout
+## Provider And Transport Layout
 
 | Path | Purpose |
 |---|---|
@@ -129,30 +135,30 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `providers/gigachat/responses_response_mapper.py` | Responses API and Responses v2 output shaping helpers |
 | `providers/gigachat/streaming.py` | Provider-owned stream iteration, GigaChat error wrapping, and chunk parsing |
 | `providers/gigachat/attachments.py` | Image/audio/text attachment handling, upload, and cleanup |
-| `protocol/request/transformer.py` | Compatibility wrapper that re-exports `RequestTransformer` |
-| `protocol/response/processor.py` | Compatibility wrapper that re-exports `ResponseProcessor` |
-| `protocol/batches.py` | Batch target mapping and JSONL transformations |
-| `protocol/anthropic/request.py` | Anthropic request → OpenAI-style intermediary |
-| `protocol/anthropic/response.py` | OpenAI/GigaChat result → Anthropic response |
-| `protocol/anthropic/streaming.py` | Anthropic SSE/event translation |
-| `protocol/gemini/request.py` | Gemini request → OpenAI-style intermediary |
-| `protocol/gemini/response.py` | OpenAI/GigaChat result → Gemini response/error |
-| `protocol/gemini/streaming.py` | Gemini SSE/data-only translation |
+| `providers/gigachat/tool_mapping.py` | Tool/function conversion and reserved-name remapping |
+| `providers/gigachat/message_utils.py` | Role normalization, message merging, and attachment limiting |
+| `providers/gigachat/content_utils.py` | Provider-safe serialization for tool results |
+| `features/batches/transforms.py` | Shared OpenAI batch target mapping and JSONL transforms |
+| `api/anthropic/request.py` | Anthropic request → OpenAI-style intermediary |
+| `api/anthropic/response.py` | OpenAI/GigaChat result → Anthropic response |
+| `api/anthropic/streaming.py` | Anthropic SSE/event translation |
+| `api/gemini/request.py` | Gemini request → OpenAI-style intermediary |
+| `api/gemini/response.py` | OpenAI/GigaChat result → Gemini response/error |
+| `api/gemini/streaming.py` | Gemini SSE/data-only translation |
 
-## Common Utilities
+## Shared Utilities
 
-- `common/exceptions.py`: `@exceptions_handler` and exception normalization
-- `common/request_json.py` and `common/request_form.py`: safe request parsing
-- `common/streaming.py`: compatibility wrappers over feature streaming entrypoints
-- `common/tools.py`: tool/function conversion helpers
-- `common/json_schema.py`: JSON Schema normalization and `$ref` resolution
-- `common/message_utils.py`: shared role/message normalization helpers still used by provider request mapping
-- `common/logs_access.py`: `/logs*` allowlist checks
-- `common/app_meta.py`: compatibility wrapper over `core/app_meta.py`
+- `core/errors.py`: `@exceptions_handler` and exception normalization
+- `core/http/json_body.py` and `core/http/form_body.py`: safe request parsing
+- `core/schema/json_schema.py`: JSON Schema normalization and `$ref` resolution
+- `core/app_meta.py`: app version, port checks, and CLI secret warnings
+- `providers/gigachat/tool_mapping.py`: tool/function conversion helpers
+- `providers/gigachat/message_utils.py`: provider-facing role/message normalization helpers
+- `api/system/logs.py`: `/logs*` allowlist checks
 
 ## Patterns & Conventions
 
-- Keep GigaChat-specific request/response mapping in `providers/gigachat/*_mapper.py`; use `protocol/` as compatibility or transport-adapter surface.
+- Keep GigaChat-specific request/response mapping in `providers/gigachat/*_mapper.py`; keep Anthropic/Gemini transport translation next to those routers in `api/<provider>/`.
 - Keep chat-completions orchestration in `features/chat/service.py`; `api/openai/chat.py` should stay thin.
 - Keep files orchestration in `features/files/service.py`; `api/openai/files.py` should stay thin.
 - Keep batch orchestration in `features/batches/service.py`; `api/openai/batches.py` and `api/anthropic/batches.py` should stay thin.
@@ -160,13 +166,12 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Keep model-discovery orchestration in `features/models/service.py`; `api/openai/models.py`, `api/gemini/models.py`, and `api/litellm/models.py` should stay thin.
 - Keep Responses API orchestration in `features/responses/service.py`; `api/openai/responses.py` should stay thin.
 - Keep OpenAI SSE formatting in `api/openai/streaming.py`; keep GigaChat stream iteration and chunk parsing in `providers/gigachat/streaming.py`.
-- Keep GigaChat SDK lifecycle/auth logic in `providers/gigachat/`, not in `common/` or route modules.
-- Keep `RequestTransformer` and `ResponseProcessor` as the public import surface; add new GigaChat mapping logic under `providers/gigachat/` instead of growing `protocol/` wrappers.
+- Keep GigaChat SDK lifecycle/auth logic in `providers/gigachat/`, not in shared utility buckets or route modules.
+- Keep `RequestTransformer`, `ResponseProcessor`, and `AttachmentProcessor` imported from `providers/gigachat/`; add new GigaChat mapping logic there instead of reintroducing legacy wrapper layers.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
 - Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - Decorate router handlers with `@exceptions_handler`.
 - Use `app/dependencies.py` accessors plus typed `app.state.services`, `app.state.stores`, and `app.state.providers` instead of scattering new runtime fields across flat `app.state.*`.
-- Keep `app_state.py` as a compatibility layer for feature store accessors; do not move new runtime wiring back into it.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
 - Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
@@ -193,10 +198,10 @@ rg -n "@router\.(get|post|delete)" gpt2giga/api
 rg -n "class .*Middleware" gpt2giga/api/middleware
 
 # Find request/response transformation methods
-rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/providers/gigachat gpt2giga/protocol
+rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/providers/gigachat gpt2giga/api/anthropic gpt2giga/api/gemini gpt2giga/features/batches
 
 # Find request/response mapper modules
-rg --files gpt2giga/providers/gigachat gpt2giga/protocol/request gpt2giga/protocol/response
+rg --files gpt2giga/providers/gigachat gpt2giga/api/anthropic gpt2giga/api/gemini
 
 # Find batch/file state usage
 rg -n "get_batch_store|get_file_store|batch_metadata_store|file_metadata_store" gpt2giga

@@ -6,21 +6,21 @@ from typing import Any, Dict, List, Optional
 from gigachat import GigaChat
 from gigachat.models import FunctionCall, Messages, MessagesRole
 
-from gpt2giga.common.content_utils import ensure_json_object_str
-from gpt2giga.common.message_utils import collapse_user_messages
-from gpt2giga.common.tools import map_tool_name_to_gigachat
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.core.logging.setup import sanitize_for_utf8
 from gpt2giga.providers.gigachat.attachments import AttachmentProcessor
 from gpt2giga.providers.gigachat.chat_request_mapper import (
     RequestTransformerMessagesMixin,
 )
+from gpt2giga.providers.gigachat.content_utils import ensure_json_object_str
+from gpt2giga.providers.gigachat.message_utils import collapse_user_messages
 from gpt2giga.providers.gigachat.request_mapping_base import (
     RequestTransformerBaseMixin,
 )
 from gpt2giga.providers.gigachat.responses_request_mapper import (
     RequestTransformerResponsesV2Mixin,
 )
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_to_gigachat
 
 
 class RequestTransformer(

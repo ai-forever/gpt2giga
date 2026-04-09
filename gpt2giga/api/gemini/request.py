@@ -7,7 +7,7 @@ from typing import Any, Iterable, Optional
 
 from fastapi import Request
 
-from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.providers.gigachat.tool_mapping import convert_tool_to_giga_functions
 
 
 class GeminiAPIError(Exception):
@@ -325,7 +325,8 @@ def _convert_gemini_tools_to_openai(tools: list[Any]) -> list[dict[str, Any]]:
         declarations = tool.get("functionDeclarations")
         if declarations is None:
             unsupported = next(
-                (key for key in tool if key != "functionDeclarations"), None
+                (key for key in tool if key != "functionDeclarations"),
+                None,
             )
             raise GeminiAPIError(
                 status_code=400,

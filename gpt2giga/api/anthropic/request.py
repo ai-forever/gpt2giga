@@ -2,15 +2,15 @@
 
 import json
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
-from gpt2giga.common.content_utils import ensure_json_object_str
-from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.providers.gigachat.content_utils import ensure_json_object_str
+from gpt2giga.providers.gigachat.tool_mapping import convert_tool_to_giga_functions
 
 
-def _convert_anthropic_tools_to_openai(tools: List[Dict]) -> List[Dict]:
+def _convert_anthropic_tools_to_openai(tools: list[dict]) -> list[dict]:
     """Convert Anthropic tool definitions to OpenAI format."""
-    openai_tools: List[Dict] = []
+    openai_tools: list[dict] = []
     for tool in tools:
         openai_tools.append(
             {
@@ -29,11 +29,11 @@ def _convert_anthropic_tools_to_openai(tools: List[Dict]) -> List[Dict]:
 
 def _convert_anthropic_messages_to_openai(
     system: Optional[Any],
-    messages: List[Dict],
-) -> List[Dict]:
+    messages: list[dict],
+) -> list[dict]:
     """Convert Anthropic messages to OpenAI messages format."""
-    openai_messages: List[Dict] = []
-    tool_use_names: Dict[str, str] = {}
+    openai_messages: list[dict] = []
+    tool_use_names: dict[str, str] = {}
 
     if system:
         if isinstance(system, str):
@@ -47,9 +47,9 @@ def _convert_anthropic_messages_to_openai(
             if texts:
                 openai_messages.append({"role": "system", "content": "\n".join(texts)})
 
-    for msg in messages:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
+    for message in messages:
+        role = message.get("role", "user")
+        content = message.get("content", "")
 
         if isinstance(content, str):
             openai_messages.append({"role": role, "content": content})
@@ -73,12 +73,12 @@ def _convert_anthropic_messages_to_openai(
 
 
 def _convert_assistant_blocks(
-    content_blocks: List[Dict],
-    openai_messages: List[Dict],
+    content_blocks: list[dict],
+    openai_messages: list[dict],
 ) -> None:
     """Convert Anthropic assistant content blocks to OpenAI format."""
-    text_parts: List[str] = []
-    tool_uses: List[Dict] = []
+    text_parts: list[str] = []
+    tool_uses: list[dict] = []
 
     for block in content_blocks:
         block_type = block.get("type")
@@ -114,14 +114,14 @@ def _convert_assistant_blocks(
 
 
 def _convert_user_blocks(
-    content_blocks: List[Dict],
-    openai_messages: List[Dict],
-    tool_use_names: Optional[Dict[str, str]] = None,
+    content_blocks: list[dict],
+    openai_messages: list[dict],
+    tool_use_names: Optional[dict[str, str]] = None,
 ) -> None:
     """Convert Anthropic user content blocks to OpenAI format."""
-    text_parts: List[str] = []
-    openai_content_parts: List[Dict] = []
-    tool_results: List[Dict] = []
+    text_parts: list[str] = []
+    openai_content_parts: list[dict] = []
+    tool_results: list[dict] = []
     has_images = False
 
     for block in content_blocks:
@@ -179,11 +179,11 @@ def _convert_user_blocks(
 
 
 def _build_openai_data_from_anthropic_request(
-    data: Dict[str, Any],
+    data: dict[str, Any],
     logger: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Translate an Anthropic Messages request into an OpenAI-style payload."""
-    openai_data: Dict[str, Any] = {
+    openai_data: dict[str, Any] = {
         "model": data.get("model", "unknown"),
         "messages": _convert_anthropic_messages_to_openai(
             data.get("system"), data.get("messages", [])
@@ -227,11 +227,11 @@ def _build_openai_data_from_anthropic_request(
     return openai_data
 
 
-def _extract_text_from_openai_messages(messages: List[Dict]) -> List[str]:
+def _extract_text_from_openai_messages(messages: list[dict]) -> list[str]:
     """Extract text strings from OpenAI-formatted messages for token counting."""
-    texts: List[str] = []
-    for msg in messages:
-        content = msg.get("content", "")
+    texts: list[str] = []
+    for message in messages:
+        content = message.get("content", "")
         if isinstance(content, str):
             if content:
                 texts.append(content)
@@ -241,7 +241,7 @@ def _extract_text_from_openai_messages(messages: List[Dict]) -> List[str]:
                     text = part.get("text", "")
                     if text:
                         texts.append(text)
-        for tool_call in msg.get("tool_calls", []):
+        for tool_call in message.get("tool_calls", []):
             function = tool_call.get("function", {})
             name = function.get("name", "")
             arguments = function.get("arguments", "")
@@ -252,11 +252,11 @@ def _extract_text_from_openai_messages(messages: List[Dict]) -> List[str]:
     return texts
 
 
-def _extract_tool_definitions_text(tools: List[Dict]) -> List[str]:
+def _extract_tool_definitions_text(tools: list[dict]) -> list[str]:
     """Extract text from Anthropic tool definitions for token counting."""
-    texts: List[str] = []
+    texts: list[str] = []
     for tool in tools:
-        parts: List[str] = []
+        parts: list[str] = []
         name = tool.get("name", "")
         if name:
             parts.append(name)

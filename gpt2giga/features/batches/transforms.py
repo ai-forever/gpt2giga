@@ -2,7 +2,7 @@ import base64
 import json
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from fastapi import HTTPException
 
@@ -99,7 +99,7 @@ def infer_openai_file_purpose(
     return "user_data"
 
 
-def _resolve_batch_model(body: Dict[str, Any], giga_client: Any) -> Optional[str]:
+def _resolve_batch_model(body: dict[str, Any], giga_client: Any) -> Optional[str]:
     """Resolve the model to include in transformed batch rows."""
     request_model = body.get("model")
     if isinstance(request_model, str) and request_model.strip():
@@ -178,12 +178,14 @@ async def transform_batch_input_file(
     )
 
 
-def build_openai_batch_object(batch: Any, metadata: Dict[str, Any]) -> Dict[str, Any]:
+def build_openai_batch_object(batch: Any, metadata: dict[str, Any]) -> dict[str, Any]:
     """Build an OpenAI-compatible batch object."""
     target = _BATCH_TARGETS.get(
         metadata.get("endpoint"),
         BatchTarget(
-            endpoint="/v1/chat/completions", method="chat_completions", kind="chat"
+            endpoint="/v1/chat/completions",
+            method="chat_completions",
+            kind="chat",
         ),
     )
     status = _BATCH_STATUS_MAP.get(getattr(batch, "status", None), "in_progress")
@@ -223,7 +225,7 @@ def build_openai_batch_object(batch: Any, metadata: Dict[str, Any]) -> Dict[str,
 async def transform_batch_output_file(
     output_content_b64: str,
     *,
-    batch_metadata: Dict[str, Any],
+    batch_metadata: dict[str, Any],
     input_content_b64: str,
     response_processor: Any,
 ) -> bytes:
@@ -283,7 +285,7 @@ def _transform_chat_batch_result(
     raw_body: Any,
     response_processor: Any,
     response_id: str,
-    request_body: Dict[str, Any],
+    request_body: dict[str, Any],
 ) -> Any:
     if isinstance(raw_body, dict) and raw_body.get("object") == "chat.completion":
         return raw_body
@@ -302,7 +304,7 @@ def _transform_responses_batch_result(
     raw_body: Any,
     response_processor: Any,
     response_id: str,
-    request_body: Dict[str, Any],
+    request_body: dict[str, Any],
 ) -> Any:
     if isinstance(raw_body, dict) and raw_body.get("object") == "response":
         return raw_body
@@ -317,7 +319,7 @@ def _transform_responses_batch_result(
     )
 
 
-def extract_batch_result_body(row: Dict[str, Any]) -> Any:
+def extract_batch_result_body(row: dict[str, Any]) -> Any:
     """Extract the response payload body from a raw batch output row."""
     response = row.get("response")
     if isinstance(response, dict):
@@ -329,7 +331,7 @@ def extract_batch_result_body(row: Dict[str, Any]) -> Any:
     return row
 
 
-def _extract_batch_status_code(row: Dict[str, Any]) -> int:
+def _extract_batch_status_code(row: dict[str, Any]) -> int:
     response = row.get("response")
     if isinstance(response, dict):
         return int(response.get("status_code", 200))
@@ -350,9 +352,9 @@ def _batch_line_error(line_number: int, message: str) -> HTTPException:
     )
 
 
-def parse_jsonl(content: bytes) -> List[Dict[str, Any]]:
+def parse_jsonl(content: bytes) -> list[dict[str, Any]]:
     """Parse a UTF-8 JSONL payload into a list of objects."""
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     try:
         decoded = content.decode("utf-8")
     except UnicodeDecodeError as exc:

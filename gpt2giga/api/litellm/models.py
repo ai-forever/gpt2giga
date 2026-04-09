@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Request
 
-from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.features.models import get_models_service_from_state
 from gpt2giga.features.models.contracts import ModelDescriptor
 from gpt2giga.providers.gigachat.client import get_gigachat_client

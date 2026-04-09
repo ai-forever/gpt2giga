@@ -4,7 +4,7 @@ import pytest
 from PIL import Image
 from loguru import logger
 
-from gpt2giga.protocol import AttachmentProcessor
+from gpt2giga.providers.gigachat import AttachmentProcessor
 
 
 class DummyFile:

@@ -3,8 +3,8 @@
 from fastapi import APIRouter, Request
 
 from gpt2giga.api.openai.openapi import embeddings_openapi_extra
-from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.request_json import read_request_json
+from gpt2giga.core.errors import exceptions_handler
+from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.features.embeddings import get_embeddings_service_from_state
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 

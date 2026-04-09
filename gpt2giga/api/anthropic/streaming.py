@@ -3,21 +3,21 @@
 import json
 import traceback
 import uuid
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import gigachat
 from fastapi import Request
 from gigachat import GigaChat
 
 from gpt2giga.app.dependencies import get_logger_from_state
-from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.core.logging.setup import rquid_context
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
 async def _stream_anthropic_generator(
     request: Request,
     model: str,
-    chat_messages: Dict[str, Any],
+    chat_messages: dict[str, Any],
     response_id: str,
     giga_client: GigaChat,
 ) -> AsyncGenerator[str, None]:
@@ -31,7 +31,7 @@ async def _stream_anthropic_generator(
     try:
         logger = get_logger_from_state(request.app.state)
 
-        function_call_data: Optional[Dict[str, str]] = None
+        function_call_data: Optional[dict[str, str]] = None
         content_block_started = False
         thinking_block_emitted = False
         content_index = 0

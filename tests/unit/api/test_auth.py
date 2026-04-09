@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from fastapi import HTTPException
 
 from gpt2giga.api.dependencies.auth import verify_api_key
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.core.config.settings import ProxyConfig
 
 
 def make_request(headers: dict, config: ProxyConfig):

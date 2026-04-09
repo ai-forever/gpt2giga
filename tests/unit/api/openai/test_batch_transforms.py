@@ -4,13 +4,13 @@ from types import SimpleNamespace
 import pytest
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol import RequestTransformer
-from gpt2giga.protocol.batches import (
+from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.features.batches.transforms import (
     _resolve_batch_model,
     get_batch_target,
     transform_batch_input_file,
 )
+from gpt2giga.providers.gigachat import RequestTransformer
 
 
 @pytest.mark.asyncio

@@ -7,11 +7,9 @@ import gigachat.exceptions
 import pytest
 from loguru import logger
 
-from gpt2giga.common.streaming import (
-    stream_chat_completion_generator,
-    stream_responses_generator,
-)
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.features.chat.stream import stream_chat_completion_generator
+from gpt2giga.features.responses.stream import stream_responses_generator
+from gpt2giga.providers.gigachat import GigaChatChatMapper, ResponseProcessor
 
 
 def make_chunk(data):
@@ -153,6 +151,12 @@ class FakeRequest:
         return self._disconnected
 
 
+def make_chat_mapper(logger_=None):
+    return GigaChatChatMapper(
+        response_processor=ResponseProcessor(logger=logger or logger_)
+    )
+
+
 def parse_sse(line):
     parts = line.strip().split("\n")
     event_type = parts[0].replace("event: ", "")
@@ -165,7 +169,13 @@ async def test_stream_chat_completion_generator_exception_path():
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
+    async for line in stream_chat_completion_generator(
+        req,
+        "1",
+        chat,
+        response_id="1",
+        mapper=make_chat_mapper(),
+    ):
         lines.append(line)
     assert len(lines) == 2
     assert "Stream interrupted" in lines[0]
@@ -192,7 +202,13 @@ async def test_stream_chat_completion_generator_gigachat_exception():
     req = FakeRequest(FakeClientGigaChatError(), logger_=mock_logger)
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
+    async for line in stream_chat_completion_generator(
+        req,
+        "1",
+        chat,
+        response_id="1",
+        mapper=make_chat_mapper(mock_logger),
+    ):
         lines.append(line)
     assert len(lines) == 2
     assert "GigaChatException" in lines[0]
@@ -204,7 +220,13 @@ async def test_stream_chat_completion_generator_gigachat_exception():
 async def test_stream_chat_completion_generator_propagates_cancellation():
     req = FakeRequest(FakeClientCancelled())
     chat = SimpleNamespace(model="giga")
-    gen = stream_chat_completion_generator(req, "1", chat, response_id="1")
+    gen = stream_chat_completion_generator(
+        req,
+        "1",
+        chat,
+        response_id="1",
+        mapper=make_chat_mapper(),
+    )
 
     with pytest.raises(asyncio.CancelledError):
         await anext(gen)
@@ -274,7 +296,13 @@ async def test_stream_chat_completion_generator_success_with_disconnect():
     req = DisconnectAfterFirstRequest(FakeClientWithChunks())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
+    async for line in stream_chat_completion_generator(
+        req,
+        "1",
+        chat,
+        response_id="1",
+        mapper=make_chat_mapper(req.app.state.logger),
+    ):
         lines.append(line)
     assert len(lines) == 2
     assert lines[1].strip() == "data: [DONE]"
@@ -285,7 +313,13 @@ async def test_stream_chat_completion_error_response_format():
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
+    async for line in stream_chat_completion_generator(
+        req,
+        "1",
+        chat,
+        response_id="1",
+        mapper=make_chat_mapper(),
+    ):
         lines.append(line)
 
     error_line = lines[0].replace("data: ", "").strip()

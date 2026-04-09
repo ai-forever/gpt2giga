@@ -7,7 +7,7 @@ from typing import Any, Dict, Literal, Optional
 
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
-from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
 class ResponseProcessorResponsesMixin:

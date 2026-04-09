@@ -6,7 +6,7 @@ import pytest
 from loguru import logger
 
 from gpt2giga.features.files.service import FilesService, get_files_service_from_state
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.providers.gigachat import ResponseProcessor
 
 
 class FakeUploadedFile:

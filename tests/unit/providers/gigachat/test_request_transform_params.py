@@ -1,7 +1,7 @@
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig, ProxySettings
-from gpt2giga.protocol import RequestTransformer
+from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
+from gpt2giga.providers.gigachat import RequestTransformer
 
 
 def test_transform_chat_parameters_temperature_and_top_p():

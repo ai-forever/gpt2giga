@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
-from gpt2giga.api_server import create_app
-from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.app.factory import create_app
+from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
 class MockResponse:
@@ -70,7 +70,10 @@ def make_app(monkeypatch):
     config = ProxyConfig(
         proxy=ProxySettings(mode="DEV", log_filename="/tmp/gpt2giga-ci-smoke.log")
     )
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: FakeGigaChat())
+    monkeypatch.setattr(
+        "gpt2giga.providers.gigachat.client.GigaChat",
+        lambda **kw: FakeGigaChat(),
+    )
     return create_app(config=config)
 
 

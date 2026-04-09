@@ -9,21 +9,21 @@ from gpt2giga.api.anthropic.openapi import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
 )
-from gpt2giga.app.dependencies import (
-    get_logger_from_state,
-    get_request_transformer_from_state,
-)
-from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.request_json import read_request_json
-from gpt2giga.core.logging.setup import rquid_context
-from gpt2giga.protocol.anthropic.request import (
+from gpt2giga.api.anthropic.request import (
     _build_openai_data_from_anthropic_request,
     _convert_anthropic_messages_to_openai,
     _extract_text_from_openai_messages,
     _extract_tool_definitions_text,
 )
-from gpt2giga.protocol.anthropic.response import _build_anthropic_response
-from gpt2giga.protocol.anthropic.streaming import _stream_anthropic_generator
+from gpt2giga.api.anthropic.response import _build_anthropic_response
+from gpt2giga.api.anthropic.streaming import _stream_anthropic_generator
+from gpt2giga.app.dependencies import (
+    get_logger_from_state,
+    get_request_transformer_from_state,
+)
+from gpt2giga.core.errors import exceptions_handler
+from gpt2giga.core.http.json_body import read_request_json
+from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Anthropic"])

@@ -5,7 +5,7 @@ from gpt2giga.providers.gigachat.auth import (
     create_gigachat_client_for_request,
     pass_token_to_gigachat,
 )
-from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.providers.gigachat.tool_mapping import convert_tool_to_giga_functions
 from gigachat.models import Function
 
 

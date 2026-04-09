@@ -5,13 +5,13 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
-from gpt2giga.common.message_utils import (
+from gpt2giga.core.schema.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.providers.gigachat.message_utils import (
     limit_attachments,
     map_role,
     merge_consecutive_messages,
 )
-from gpt2giga.common.tools import map_tool_name_to_gigachat
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_to_gigachat
 
 
 class RequestTransformerBaseMixin:

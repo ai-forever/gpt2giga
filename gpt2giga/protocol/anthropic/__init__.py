@@ -1,1 +1,0 @@
-"""Anthropic protocol translation modules."""

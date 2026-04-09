@@ -1,6 +1,6 @@
 from loguru import logger
 
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.providers.gigachat import ResponseProcessor
 
 
 class MockResponse:

@@ -4,8 +4,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.providers.gigachat import ResponseProcessor
 from gpt2giga.api.openai import router
 
 

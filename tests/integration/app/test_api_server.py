@@ -1,9 +1,10 @@
 from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
 
-from gpt2giga.api_server import create_app
-from gpt2giga.common.app_meta import check_port_available
-from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.app.factory import create_app
+from gpt2giga.app.run import run as run_app
+from gpt2giga.core.app_meta import check_port_available
+from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
 def test_root_redirect():
@@ -37,7 +38,7 @@ def test_v1_prefix_router_is_registered(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
     with TestClient(create_app()) as client:
         # Используем контекстный менеджер, чтобы lifespan сработал и инициализировал state
@@ -56,7 +57,7 @@ def test_v1_litellm_router_is_registered(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
     with TestClient(create_app()) as client:
         response = client.get("/v1/model/info")
@@ -73,7 +74,7 @@ def test_v1beta_gemini_router_is_registered(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
     with TestClient(create_app()) as client:
         response = client.get("/v1beta/models")
@@ -92,7 +93,7 @@ def test_v1_models_no_307_redirect(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
     with TestClient(create_app()) as client:
         response = client.get("/v1/models", follow_redirects=False)
@@ -172,7 +173,7 @@ def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypa
         async def aclose(self):
             return None
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
     log_file = tmp_path / "gpt2giga.log"
     log_file.write_text("INFO: log line\n")
@@ -194,31 +195,25 @@ def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypa
 
 
 def test_run_server(monkeypatch):
-    import gpt2giga.api_server
-    import uvicorn
-
-    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
-    monkeypatch.setattr("gpt2giga.api_server.check_port_available", lambda h, p: True)
-
-    gpt2giga.api_server.run()
+    run_app(
+        uvicorn_runner=lambda *args, **kwargs: None,
+        port_checker=lambda h, p: True,
+    )
 
 
 def test_run_server_port_in_use(monkeypatch):
     """run() must exit with error when port is already in use."""
     import pytest
-    import gpt2giga.api_server
-    import uvicorn
-
-    monkeypatch.setattr("gpt2giga.api_server.check_port_available", lambda h, p: False)
-    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
 
     def fake_exit(code):
         raise SystemExit(code)
 
-    monkeypatch.setattr("gpt2giga.api_server.sys.exit", fake_exit)
-
     with pytest.raises(SystemExit, match="1"):
-        gpt2giga.api_server.run()
+        run_app(
+            uvicorn_runner=lambda *args, **kwargs: None,
+            port_checker=lambda h, p: False,
+            exit_func=fake_exit,
+        )
 
 
 def test_check_port_available_free():

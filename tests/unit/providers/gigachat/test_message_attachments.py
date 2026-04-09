@@ -4,8 +4,8 @@ import pytest
 from fastapi import HTTPException
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol import AttachmentProcessor, RequestTransformer
+from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.providers.gigachat import AttachmentProcessor, RequestTransformer
 
 
 class DummyAttachmentProc:

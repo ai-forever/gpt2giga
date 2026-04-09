@@ -4,19 +4,19 @@ from __future__ import annotations
 
 import json
 from functools import wraps
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import gigachat
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from gpt2giga.common.tools import map_tool_name_from_gigachat
-from gpt2giga.core.logging.setup import sanitize_for_utf8
-from gpt2giga.protocol.gemini.request import (
+from gpt2giga.api.gemini.request import (
     GeminiAPIError,
     model_resource_name,
     normalize_model_name,
 )
+from gpt2giga.core.logging.setup import sanitize_for_utf8
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 _GIGACHAT_ERROR_STATUS = {
     gigachat.exceptions.BadRequestError: "INVALID_ARGUMENT",
@@ -132,11 +132,11 @@ def _coerce_function_args(arguments: Any) -> Any:
 
 
 def build_generate_content_response(
-    giga_dict: Dict[str, Any],
+    giga_dict: dict[str, Any],
     model: str,
     response_id: str,
     request_data: Optional[dict[str, Any]] = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Build a Gemini GenerateContent response from a GigaChat response."""
     choice = (giga_dict.get("choices") or [{}])[0]
     message = choice.get("message") or {}

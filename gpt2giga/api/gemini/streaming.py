@@ -3,25 +3,25 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Optional
 
 import gigachat
 from fastapi import Request
 from gigachat import GigaChat
 
-from gpt2giga.app.dependencies import get_logger_from_state
-from gpt2giga.common.tools import map_tool_name_from_gigachat
-from gpt2giga.core.logging.setup import rquid_context
-from gpt2giga.protocol.gemini.response import (
+from gpt2giga.api.gemini.response import (
     _is_structured_output_request,
     _map_finish_reason,
 )
+from gpt2giga.app.dependencies import get_logger_from_state
+from gpt2giga.core.logging.setup import rquid_context
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
 async def stream_gemini_generate_content(
     request: Request,
     model: str,
-    chat_messages: Dict[str, Any],
+    chat_messages: dict[str, Any],
     response_id: str,
     giga_client: GigaChat,
     request_data: Optional[dict[str, Any]] = None,

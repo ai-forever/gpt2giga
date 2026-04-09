@@ -8,20 +8,20 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, Request, Response
 
 from gpt2giga.api.anthropic.openapi import anthropic_message_batches_openapi_extra
-from gpt2giga.app.dependencies import get_logger_from_state
-from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.request_json import read_request_json
-from gpt2giga.features.batches import get_batches_service_from_state
-from gpt2giga.features.batches.store import get_batch_store
-from gpt2giga.features.files.store import get_file_store
-from gpt2giga.protocol.batches import extract_batch_result_body, parse_jsonl
-from gpt2giga.protocol.anthropic.request import (
+from gpt2giga.api.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
-from gpt2giga.protocol.anthropic.response import (
+from gpt2giga.api.anthropic.response import (
     _anthropic_http_exception,
     _build_anthropic_response,
 )
+from gpt2giga.app.dependencies import get_logger_from_state
+from gpt2giga.core.errors import exceptions_handler
+from gpt2giga.core.http.json_body import read_request_json
+from gpt2giga.features.batches import get_batches_service_from_state
+from gpt2giga.features.batches.store import get_batch_store
+from gpt2giga.features.batches.transforms import extract_batch_result_body, parse_jsonl
+from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Anthropic"])

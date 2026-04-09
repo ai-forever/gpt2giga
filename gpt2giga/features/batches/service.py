@@ -23,7 +23,7 @@ from gpt2giga.features.batches.contracts import (
     BatchesUpstreamClient,
     FilesMetadataStore,
 )
-from gpt2giga.protocol.batches import (
+from gpt2giga.features.batches.transforms import (
     build_openai_batch_object,
     get_batch_target,
     transform_batch_input_file,

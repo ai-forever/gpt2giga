@@ -8,9 +8,9 @@ from typing import Any, Optional, Protocol, TypeAlias
 
 import gigachat
 
-from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.features.chat.contracts import ChatProviderMapper, PreparedChatRequest
 from gpt2giga.features.responses.contracts import PreparedResponsesRequest
+from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
 class GigaChatStreamError(Exception):

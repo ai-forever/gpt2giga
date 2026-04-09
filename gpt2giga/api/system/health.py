@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from starlette.responses import Response
 
-from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.core.errors import exceptions_handler
 
 system_router = APIRouter(tags=["System"])
 

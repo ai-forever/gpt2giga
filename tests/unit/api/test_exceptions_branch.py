@@ -1,6 +1,6 @@
 import pytest
 
-from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.core.errors import exceptions_handler
 
 
 @pytest.mark.asyncio

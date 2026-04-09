@@ -6,7 +6,7 @@ from gpt2giga.features.models.service import (
     ModelsService,
     get_models_service_from_state,
 )
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.core.config.settings import ProxyConfig
 
 
 class FakeMapper:

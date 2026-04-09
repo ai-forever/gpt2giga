@@ -111,7 +111,7 @@ def verify_api_key_gemini(
     ] = None,
 ) -> str:
     """Verify API key and raise Gemini-style API errors."""
-    from gpt2giga.protocol.gemini.response import GeminiAPIError
+    from gpt2giga.api.gemini.request import GeminiAPIError
 
     try:
         provided_key = _resolve_provided_key(

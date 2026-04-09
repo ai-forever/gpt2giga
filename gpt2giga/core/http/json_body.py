@@ -5,14 +5,7 @@ from starlette.requests import Request
 
 
 async def read_request_json(request: Request) -> dict:
-    """Read and parse JSON request body.
-
-    Returns:
-        Parsed JSON body as dict.
-
-    Raises:
-        HTTPException: If body is empty or invalid JSON.
-    """
+    """Read and parse a JSON request body."""
     body = await request.body()
     if not body or not body.strip():
         raise HTTPException(
@@ -39,7 +32,7 @@ async def read_request_json(request: Request) -> dict:
                     "code": "invalid_json",
                 }
             },
-        )
+        ) from e
     if not isinstance(data, dict):
         raise HTTPException(
             status_code=400,

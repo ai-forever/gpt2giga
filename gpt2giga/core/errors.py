@@ -41,7 +41,6 @@ def exceptions_handler(func):
             # Preserve FastAPI/Starlette semantics (status codes, details, headers).
             raise
         except gigachat.exceptions.GigaChatException as e:
-            # Log the exception with context
             from loguru import logger
 
             rquid = rquid_context.get()
@@ -82,7 +81,7 @@ def exceptions_handler(func):
                             "error": error_detail,
                         },
                     )
-                elif len(e.args) == 4:
+                if len(e.args) == 4:
                     url, status_code, message, _ = e.args
                     try:
                         error_detail = json.loads(message)
@@ -98,16 +97,14 @@ def exceptions_handler(func):
                             "error": error_detail,
                         },
                     )
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail={
-                            "error": "Unexpected ResponseError structure",
-                            "args": e.args,
-                        },
-                    )
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error": "Unexpected ResponseError structure",
+                        "args": e.args,
+                    },
+                )
 
-            # Fallback for unexpected GigaChatException
             raise HTTPException(
                 status_code=500,
                 detail={

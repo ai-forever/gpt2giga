@@ -4,13 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from gpt2giga.api.gemini.request import normalize_model_name
+from gpt2giga.api.gemini.response import build_gemini_model, gemini_exceptions_handler
 from gpt2giga.features.models import get_models_service_from_state
 from gpt2giga.features.models.contracts import ModelDescriptor
-from gpt2giga.protocol.gemini import (
-    build_gemini_model,
-    gemini_exceptions_handler,
-    normalize_model_name,
-)
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Gemini"])

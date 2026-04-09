@@ -6,8 +6,8 @@ from fastapi.responses import StreamingResponse
 from gpt2giga.api.openai.helpers import populate_giga_functions
 from gpt2giga.api.openai.openapi import responses_openapi_extra
 from gpt2giga.app.dependencies import get_logger_from_state
-from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.request_json import read_request_json
+from gpt2giga.core.errors import exceptions_handler
+from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.responses import get_responses_service_from_state
 from gpt2giga.features.responses.store import get_response_store

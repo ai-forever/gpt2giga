@@ -1,7 +1,7 @@
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol import RequestTransformer
+from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.providers.gigachat import RequestTransformer
 
 
 def test_transform_response_format_instructions_and_list_messages():

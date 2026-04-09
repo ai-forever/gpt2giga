@@ -1,6 +1,6 @@
 """Shared helpers for OpenAI-compatible API routes."""
 
-from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.providers.gigachat.tool_mapping import convert_tool_to_giga_functions
 
 
 def populate_giga_functions(data: dict, logger) -> None:

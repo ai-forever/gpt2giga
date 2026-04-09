@@ -2,11 +2,10 @@ import mimetypes
 from email.parser import BytesParser
 from email.policy import default
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import HTTPException
 from starlette.requests import Request
-
 
 _CONTENT_TYPE_OVERRIDES = {
     ".jsonl": "application/json",
@@ -39,7 +38,7 @@ def _normalize_file_content_type(content_type: str | None, filename: str | None)
     return normalized_content_type or "application/octet-stream"
 
 
-async def read_request_multipart(request: Request) -> Dict[str, Any]:
+async def read_request_multipart(request: Request) -> dict[str, Any]:
     """Read and parse a multipart/form-data request body."""
     content_type = request.headers.get("content-type", "")
     if "multipart/form-data" not in content_type:
@@ -87,8 +86,8 @@ async def read_request_multipart(request: Request) -> Dict[str, Any]:
             },
         )
 
-    form: Dict[str, str] = {}
-    files: Dict[str, Dict[str, Any]] = {}
+    form: dict[str, str] = {}
+    files: dict[str, dict[str, Any]] = {}
     for part in message.iter_parts():
         field_name = part.get_param("name", header="content-disposition")
         if not field_name:

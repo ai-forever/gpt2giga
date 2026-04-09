@@ -7,6 +7,8 @@ from starlette.responses import RedirectResponse
 from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.dependencies.auth import verify_api_key, verify_api_key_gemini
 from gpt2giga.api.gemini import router as gemini_router
+from gpt2giga.api.gemini.request import GeminiAPIError
+from gpt2giga.api.gemini.response import gemini_error_response
 from gpt2giga.api.litellm import router as litellm_router
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
@@ -18,7 +20,6 @@ from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
 from gpt2giga.core.app_meta import get_app_version
-from gpt2giga.protocol.gemini.response import GeminiAPIError, gemini_error_response
 
 
 def _build_cors_options(config) -> tuple[list[str], list[str], list[str], bool]:

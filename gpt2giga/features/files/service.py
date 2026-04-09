@@ -16,7 +16,7 @@ from gpt2giga.features.files.contracts import (
     FilesUpstreamClient,
     FileUploadData,
 )
-from gpt2giga.protocol.batches import (
+from gpt2giga.features.batches.transforms import (
     infer_openai_file_purpose,
     map_openai_file_purpose,
     transform_batch_output_file,

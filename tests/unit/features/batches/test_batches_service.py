@@ -8,7 +8,7 @@ from gpt2giga.features.batches.service import (
     BatchesService,
     get_batches_service_from_state,
 )
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.core.config.settings import ProxyConfig
 
 
 class FakeBatch:

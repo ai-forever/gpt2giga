@@ -1,5 +1,5 @@
-from gpt2giga.common.json_schema import normalize_json_schema
-from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.core.schema.json_schema import normalize_json_schema
+from gpt2giga.providers.gigachat.tool_mapping import convert_tool_to_giga_functions
 
 
 def test_normalize_json_schema_adds_properties_to_object():
