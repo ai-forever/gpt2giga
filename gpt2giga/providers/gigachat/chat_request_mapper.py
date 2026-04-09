@@ -14,16 +14,106 @@ from gpt2giga.core.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 class RequestTransformerMessagesMixin:
     """Helpers for message and attachment normalization."""
 
+    @staticmethod
+    def _extract_assistant_function_name(message: Dict[str, Any]) -> Optional[str]:
+        if message.get("role") != "assistant":
+            return None
+
+        function_call = message.get("function_call")
+        if isinstance(function_call, dict):
+            name = function_call.get("name")
+            if isinstance(name, str) and name:
+                return name
+
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            return None
+
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function")
+            if not isinstance(function, dict):
+                continue
+            name = function.get("name")
+            if isinstance(name, str) and name:
+                return name
+        return None
+
+    @staticmethod
+    def _is_function_result_message(
+        message: Dict[str, Any], pending_function_name: Optional[str]
+    ) -> bool:
+        if message.get("role") not in {"tool", "function"}:
+            return False
+
+        name = message.get("name")
+        if not isinstance(name, str) or not name:
+            return True
+        if pending_function_name is None:
+            return True
+        return name == pending_function_name
+
+    def _build_missing_tool_result_message(self, function_name: str) -> Dict[str, Any]:
+        return {
+            "role": "tool",
+            "name": function_name,
+            "content": self._build_missing_function_result_payload(),
+        }
+
+    def _repair_dangling_function_history(self, messages: List[Dict]) -> List[Dict]:
+        repaired_messages: List[Dict] = []
+        pending_function_name: Optional[str] = None
+
+        for message in messages:
+            current_message = message.copy()
+
+            if pending_function_name is not None:
+                if self._is_function_result_message(
+                    current_message, pending_function_name
+                ):
+                    if not current_message.get("name"):
+                        current_message["name"] = pending_function_name
+                    pending_function_name = None
+                else:
+                    repaired_messages.append(
+                        self._build_missing_tool_result_message(pending_function_name)
+                    )
+                    self.logger.warning(
+                        "Inserted synthetic tool result for dangling assistant "
+                        f"function call '{pending_function_name}'"
+                    )
+                    pending_function_name = None
+
+            repaired_messages.append(current_message)
+
+            next_function_name = self._extract_assistant_function_name(current_message)
+            if next_function_name:
+                pending_function_name = next_function_name
+
+        if pending_function_name is not None:
+            repaired_messages.append(
+                self._build_missing_tool_result_message(pending_function_name)
+            )
+            self.logger.warning(
+                "Inserted synthetic tool result for trailing assistant "
+                f"function call '{pending_function_name}'"
+            )
+
+        return repaired_messages
+
     async def transform_messages(
         self, messages: List[Dict], giga_client: Optional[GigaChat] = None
     ) -> List[Dict]:
         """Transform messages to GigaChat format."""
+        messages = self._repair_dangling_function_history(messages)
         transformed_messages = []
         attachment_count = 0
         system_message = None
         size_totals = {"audio_image_total": 0}
 
         for index, message in enumerate(messages):
+            message = message.copy()
             self.logger.debug(f"Processing message {index}: role={message.get('role')}")
 
             original_role = message.get("role", "user")
@@ -33,7 +123,7 @@ class RequestTransformerMessagesMixin:
             if message["role"] == "system" and system_message is None:
                 system_message = message
 
-            if original_role == "tool":
+            if original_role in {"tool", "function"}:
                 message["content"] = ensure_json_object_str(message.get("content"))
                 if message.get("name"):
                     message["name"] = map_tool_name_to_gigachat(message["name"])

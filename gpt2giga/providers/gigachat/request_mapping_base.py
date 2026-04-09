@@ -161,3 +161,13 @@ class RequestTransformerBaseMixin:
                 return {"output": value}
             return decoded if isinstance(decoded, dict) else {"output": decoded}
         return {"output": value}
+
+    @staticmethod
+    def _build_missing_function_result_payload() -> Dict[str, Any]:
+        return {
+            "status": "interrupted",
+            "error": {
+                "type": "missing_tool_result",
+                "message": "Tool result missing from client-supplied history.",
+            },
+        }

@@ -92,6 +92,24 @@ def _lowercase_schema_types(value: Any) -> Any:
     return value
 
 
+def _get_function_parameters_schema(declaration: dict[str, Any]) -> dict[str, Any]:
+    """Extract a Gemini function schema from either supported parameter field."""
+    schema = declaration.get("parametersJsonSchema")
+    if schema is None:
+        schema = declaration.get("parameters_json_schema")
+    if schema is None:
+        schema = declaration.get("parameters", {"type": "object", "properties": {}})
+    if not isinstance(schema, dict):
+        raise GeminiAPIError(
+            status_code=400,
+            status="INVALID_ARGUMENT",
+            message=(
+                "Each function declaration `parameters` schema must be an object."
+            ),
+        )
+    return _lowercase_schema_types(schema)
+
+
 def _thinking_to_reasoning_effort(thinking_config: Any) -> Optional[str]:
     """Map Gemini thinking config to the closest GigaChat reasoning effort."""
     if not isinstance(thinking_config, dict):
@@ -330,9 +348,7 @@ def _convert_gemini_tools_to_openai(tools: list[Any]) -> list[dict[str, Any]]:
                     status="INVALID_ARGUMENT",
                     message="Each function declaration must be an object.",
                 )
-            parameters = _lowercase_schema_types(
-                declaration.get("parameters", {"type": "object", "properties": {}})
-            )
+            parameters = _get_function_parameters_schema(declaration)
             openai_tools.append(
                 {
                     "type": "function",
@@ -362,7 +378,7 @@ def _extract_tool_definition_text(tools: list[Any]) -> list[str]:
                 str(declaration.get("name", "")),
                 str(declaration.get("description", "")),
             ]
-            parameters = declaration.get("parameters")
+            parameters = _get_function_parameters_schema(declaration)
             if parameters:
                 parts.append(json.dumps(parameters, ensure_ascii=False))
             text = " ".join(part for part in parts if part)
