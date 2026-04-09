@@ -850,16 +850,24 @@ wheels = [
 
 [[package]]
 name = "gigachat"
-version = "0.2.1a1"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.2a1"
+source = { path = "gigachat-0.2.2a1-py3-none-any.whl" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c7/d8/54cfe0d2f094981673c534e50e403cd6b7e7f9a443efca8b0bb75be91d70/gigachat-0.2.1a1.tar.gz", hash = "sha256:24b9578fbf99040db2ba0493749a712dfd0311dc289f87c1c06eaae925702e50", size = 38979, upload-time = "2026-03-23T14:11:24.163Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/94/2e93036d2bf3bc96df16fa2fb0916c9a2383de792635821210adb06d4978/gigachat-0.2.1a1-py3-none-any.whl", hash = "sha256:f261ae97a7a3a264b4abd3db546da731da82fe4f33b45076eed77858048544c1", size = 51281, upload-time = "2026-03-23T14:11:22.676Z" },
+    { filename = "gigachat-0.2.2a1-py3-none-any.whl", hash = "sha256:f990d2e32a179af75b47edb340a1aee17f9bf41182bec4b22fd09d47d34fef30" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.24,<1" },
+    { name = "pydantic", specifier = ">=2.0,<3" },
+    { name = "pydantic-settings", marker = "python_full_version == '3.8.*'", specifier = ">=2.0,<2.9.0" },
+    { name = "pydantic-settings", marker = "python_full_version == '3.9.*'", specifier = ">=2.0,<2.12.0" },
+    { name = "pydantic-settings", marker = "python_full_version >= '3.10'", specifier = ">=2.0,<3" },
 ]
 
 [[package]]
@@ -905,7 +913,7 @@ requires-dist = [
     { name = "aioitertools", specifier = ">=0.13.0,<0.14" },
     { name = "anthropic", specifier = ">=0.79.0" },
     { name = "fastapi", specifier = ">=0.133.0,<1" },
-    { name = "gigachat", specifier = "==0.2.1a1" },
+    { name = "gigachat", path = "gigachat-0.2.2a1-py3-none-any.whl" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=2.3.0,<3" },
     { name = "pillow", specifier = ">=12.1.1,<13" },

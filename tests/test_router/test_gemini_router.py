@@ -209,6 +209,56 @@ def test_generate_content_with_function_call_and_tools():
     )
 
 
+def test_generate_content_preserves_parameters_json_schema():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-test:generateContent",
+        json={
+            "contents": [{"role": "user", "parts": [{"text": "Read a file"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "read_file",
+                            "description": "Read the content of a file.",
+                            "parameters": {"type": "OBJECT", "properties": {}},
+                            "parametersJsonSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "start_line": {"type": "integer"},
+                                },
+                                "required": ["path"],
+                            },
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    tool_parameters = app.state.request_transformer.last_data["tools"][0]["function"][
+        "parameters"
+    ]
+    assert tool_parameters["properties"]["path"]["type"] == "string"
+    assert tool_parameters["properties"]["start_line"]["type"] == "integer"
+
+    function_parameters = app.state.request_transformer.last_data["functions"][
+        0
+    ].parameters
+    params = (
+        function_parameters.model_dump()
+        if hasattr(function_parameters, "model_dump")
+        else dict(function_parameters)
+    )
+    assert "path" in params["properties"]
+    assert "start_line" in params["properties"]
+    assert params["required"] == ["path"]
+
+
 def test_generate_content_structured_output_returns_json_text():
     app = make_app()
     app.state.gigachat_client._response = {
