@@ -2,8 +2,11 @@
 
 from fastapi import FastAPI
 
-from gpt2giga.protocol import RequestTransformer, ResponseProcessor
-from gpt2giga.providers.gigachat.attachments import AttachmentProcessor
+from gpt2giga.providers.gigachat import (
+    AttachmentProcessor,
+    RequestTransformer,
+    ResponseProcessor,
+)
 from gpt2giga.providers.gigachat.client import (
     close_app_gigachat_client,
     create_app_gigachat_client,

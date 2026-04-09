@@ -1,4 +1,4 @@
-"""Shared helpers for request transformation."""
+"""Shared helpers for GigaChat request mapping."""
 
 import json
 from typing import Any, Dict, List, Optional

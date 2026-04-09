@@ -1,4 +1,4 @@
-"""Message transformation helpers for request payloads."""
+"""GigaChat chat message mapping helpers."""
 
 import json
 from typing import Any, Dict, List, Optional, Tuple

@@ -1,4 +1,4 @@
-"""Request transformation (OpenAI -> GigaChat)."""
+"""Compatibility wrappers for request transformation."""
 
 from .transformer import RequestTransformer
 

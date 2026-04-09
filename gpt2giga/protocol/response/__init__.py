@@ -1,4 +1,4 @@
-"""Response transformation (GigaChat -> OpenAI)."""
+"""Compatibility wrappers for response transformation."""
 
 from .processor import ResponseProcessor
 

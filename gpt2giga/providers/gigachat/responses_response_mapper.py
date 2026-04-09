@@ -1,4 +1,4 @@
-"""Responses API helpers for response transformation."""
+"""GigaChat Responses API output mapping helpers."""
 
 import json
 import time

@@ -38,6 +38,8 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `core/app_meta.py` | App version, port checks, and CLI secret warnings |
 | `providers/gigachat/client.py` | GigaChat client lifecycle, factory resolution, and request-scoped access |
 | `providers/gigachat/auth.py` | Pass-token auth handoff and request-level GigaChat client construction |
+| `providers/gigachat/request_mapper.py` | Primary GigaChat request-mapping entrypoint for chat and responses |
+| `providers/gigachat/response_mapper.py` | Primary GigaChat response-mapping entrypoint for chat and responses |
 | `api_server.py` | Compatibility wrapper over the new `app/*` modules |
 | `app_state.py` | Request/app-scoped metadata stores for batches, files, and responses |
 | `cli.py` | Compatibility wrapper for `app/cli.py` |
@@ -48,7 +50,7 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `models/config.py` | Compatibility wrapper for `core/config/settings.py` |
 | `models/security.py` | Compatibility wrapper for `core/config/security.py` |
 | `common/` | Shared exception handling, auth helpers, request parsing, streaming, schema/tool utilities |
-| `protocol/` | Request, response, attachment, batch, and Anthropic translation logic |
+| `protocol/` | Compatibility facades plus batch and non-GigaChat transport translation logic |
 | `api/` | HTTP transport adapters: provider endpoints, middleware, dependencies, and system routes |
 | `api/*/openapi.py` | Provider-specific OpenAPI schema fragments colocated with routers |
 | `api/_openapi.py` | Shared OpenAPI request-body helper |
@@ -76,18 +78,20 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 - System routes are root-only.
 - Log routes are disabled in `PROD`.
 
-## Protocol Layout
+## Provider And Protocol Layout
 
 | Path | Purpose |
 |---|---|
-| `protocol/request/transformer.py` | Public `RequestTransformer` facade and chat/responses entrypoints |
-| `protocol/request/_base.py` | Shared request parameter, schema, and validation helpers |
-| `protocol/request/_messages.py` | Message role/content normalization and attachment handling |
-| `protocol/request/_responses_v2.py` | Native Responses API v2 request/tool/thread mapping |
-| `protocol/response/processor.py` | Public `ResponseProcessor` facade for chat completions |
-| `protocol/response/_common.py` | Shared response status, usage, reasoning, and serialization helpers |
-| `protocol/response/_responses.py` | Responses API and Responses v2 output shaping helpers |
+| `providers/gigachat/request_mapper.py` | Public `RequestTransformer` implementation for chat/responses request mapping |
+| `providers/gigachat/request_mapping_base.py` | Shared request parameter, schema, and validation helpers |
+| `providers/gigachat/chat_request_mapper.py` | Message role/content normalization and attachment handling |
+| `providers/gigachat/responses_request_mapper.py` | Native Responses API v2 request/tool/thread mapping |
+| `providers/gigachat/response_mapper.py` | Public `ResponseProcessor` implementation for chat completions |
+| `providers/gigachat/response_mapping_common.py` | Shared response status, usage, reasoning, and serialization helpers |
+| `providers/gigachat/responses_response_mapper.py` | Responses API and Responses v2 output shaping helpers |
 | `providers/gigachat/attachments.py` | Image/audio/text attachment handling, upload, and cleanup |
+| `protocol/request/transformer.py` | Compatibility wrapper that re-exports `RequestTransformer` |
+| `protocol/response/processor.py` | Compatibility wrapper that re-exports `ResponseProcessor` |
 | `protocol/batches.py` | Batch target mapping and JSONL transformations |
 | `protocol/anthropic/request.py` | Anthropic request → OpenAI-style intermediary |
 | `protocol/anthropic/response.py` | OpenAI/GigaChat result → Anthropic response |
@@ -109,9 +113,9 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 
 ## Patterns & Conventions
 
-- Keep reusable translation logic in `protocol/` or `common/`, not duplicated in API handlers.
+- Keep GigaChat-specific request/response mapping in `providers/gigachat/*_mapper.py`; use `protocol/` as compatibility or transport-adapter surface.
 - Keep GigaChat SDK lifecycle/auth logic in `providers/gigachat/`, not in `common/` or route modules.
-- Keep `RequestTransformer` and `ResponseProcessor` as the public import surface; grow the underscored helper modules instead of turning the facade files back into mega-modules.
+- Keep `RequestTransformer` and `ResponseProcessor` as the public import surface; add new GigaChat mapping logic under `providers/gigachat/` instead of growing `protocol/` wrappers.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
 - Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - Decorate router handlers with `@exceptions_handler`.
@@ -142,10 +146,10 @@ rg -n "@router\.(get|post|delete)" gpt2giga/api
 rg -n "class .*Middleware" gpt2giga/api/middleware
 
 # Find request/response transformation methods
-rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/protocol
+rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/providers/gigachat gpt2giga/protocol
 
-# Find split request/response internals
-rg --files gpt2giga/protocol/request gpt2giga/protocol/response
+# Find request/response mapper modules
+rg --files gpt2giga/providers/gigachat gpt2giga/protocol/request gpt2giga/protocol/response
 
 # Find batch/file state usage
 rg -n "get_batch_store|get_file_store|batch_metadata_store|file_metadata_store" gpt2giga

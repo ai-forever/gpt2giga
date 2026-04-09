@@ -1,6 +1,10 @@
-from gpt2giga.protocol.request import RequestTransformer
-from gpt2giga.protocol.response import ResponseProcessor
-from gpt2giga.providers.gigachat.attachments import AttachmentProcessor
+"""Compatibility exports for request/response translation helpers."""
+
+from gpt2giga.providers.gigachat import (
+    AttachmentProcessor,
+    RequestTransformer,
+    ResponseProcessor,
+)
 
 __all__ = [
     "AttachmentProcessor",

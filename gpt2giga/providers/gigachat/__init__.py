@@ -10,6 +10,8 @@ from gpt2giga.providers.gigachat.client import (
     create_app_gigachat_client,
     get_gigachat_client,
 )
+from gpt2giga.providers.gigachat.request_mapper import RequestTransformer
+from gpt2giga.providers.gigachat.response_mapper import ResponseProcessor
 
 __all__ = [
     "AttachmentProcessor",
@@ -18,4 +20,6 @@ __all__ = [
     "create_gigachat_client_for_request",
     "get_gigachat_client",
     "pass_token_to_gigachat",
+    "RequestTransformer",
+    "ResponseProcessor",
 ]

@@ -1,4 +1,4 @@
-"""Responses v2 request preparation helpers."""
+"""GigaChat Responses API v2 request mapping helpers."""
 
 import base64
 from typing import Any, Dict, List, Optional
