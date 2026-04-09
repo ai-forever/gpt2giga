@@ -102,7 +102,7 @@ export GPT2GIGA_API_KEY=<ваш_api_ключ>
 }
 ```
 
-Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
+Подробнее о развёртывании с nginx и TLS — в [docs/integrations/nginx/README.md](../nginx/README.md).
 
 ---
 

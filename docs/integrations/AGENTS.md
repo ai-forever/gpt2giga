@@ -1,4 +1,4 @@
-# AGENTS.md — integrations/
+# AGENTS.md — docs/integrations/
 
 ## Package Identity
 
@@ -10,16 +10,16 @@
 
 | Path | Purpose |
 |---|---|
-| `integrations/aider/README.md` | Aider setup |
-| `integrations/claude-code/README.md` | Claude Code setup |
-| `integrations/codex/README.md` | OpenAI Codex setup |
-| `integrations/cursor/README.md` | Cursor setup |
-| `integrations/qwen-code/README.md` | Qwen Code setup |
-| `integrations/openhands/README.md` | OpenHands setup |
-| `integrations/xcode/README.md` | Xcode setup |
-| `integrations/nginx/README.md` | nginx reverse-proxy guide |
-| `integrations/nginx/gpt2giga.conf` | nginx config sample |
-| `integrations/nginx/cloud.png` | nginx guide asset |
+| `docs/integrations/aider/README.md` | Aider setup |
+| `docs/integrations/claude-code/README.md` | Claude Code setup |
+| `docs/integrations/codex/README.md` | OpenAI Codex setup |
+| `docs/integrations/cursor/README.md` | Cursor setup |
+| `docs/integrations/qwen-code/README.md` | Qwen Code setup |
+| `docs/integrations/openhands/README.md` | OpenHands setup |
+| `docs/integrations/xcode/README.md` | Xcode setup |
+| `docs/integrations/nginx/README.md` | nginx reverse-proxy guide |
+| `docs/integrations/nginx/gpt2giga.conf` | nginx config sample |
+| `docs/integrations/nginx/cloud.png` | nginx guide asset |
 
 ## Patterns & Conventions
 
@@ -32,27 +32,27 @@
 ## Touch Points
 
 - Runtime config reference: `.env.example`
-- Proxy config models: `gpt2giga/models/config.py`
-- Security behavior: `gpt2giga/models/security.py`
-- Entrypoint and mounted routes: `gpt2giga/api_server.py`
+- Proxy config models: `gpt2giga/core/config/settings.py`
+- Security behavior: `gpt2giga/core/config/security.py`
+- Entrypoint and mounted routes: `gpt2giga/app/factory.py`
 - Example clients to cross-check docs: `examples/`
 
 ## Quick Find Commands
 
 ```bash
 # Find base URL or API-key instructions
-rg -n "localhost:8090|base_url|api_key|x-api-key" integrations
+rg -n "localhost:8090|base_url|api_key|x-api-key" docs/integrations
 
 # Find model naming examples
-rg -n "GigaChat|openai/" integrations
+rg -n "GigaChat|openai/" docs/integrations
 
 # Find nginx-specific files
-rg -n "server|proxy_pass|location" integrations/nginx
+rg -n "server|proxy_pass|location" docs/integrations/nginx
 ```
 
 ## Common Gotchas
 
-- There are no checked-in `.env.example` files under `integrations/`; keep secrets guidance pointed at the repo-root `.env.example`.
+- There are no checked-in `.env.example` files under `docs/integrations/`; keep secrets guidance pointed at the repo-root `.env.example`.
 - `gpt2giga` supports both root and `/v1` mounted API routes for OpenAI and Anthropic-compatible endpoints; docs should only require `/v1` when the client tooling needs it.
 - This folder should not become a dumping ground for ad hoc experiments; keep runnable examples in `examples/`.
 

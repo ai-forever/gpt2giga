@@ -76,7 +76,7 @@ export ANTHROPIC_API_KEY=<ваш_api_ключ>
 claude
 ```
 
-Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
+Подробнее о развёртывании с nginx и TLS — в [docs/integrations/nginx/README.md](../nginx/README.md).
 
 ---
 

@@ -54,7 +54,7 @@ uv run pre-commit install
 | `gpt2giga/` | Main application package | Routers, protocol transforms, config, middleware |
 | `tests/` | Test suite | Organized into `unit/`, `integration/`, and `smoke/` to mirror layers and external APIs |
 | `examples/` | Runnable SDK examples | OpenAI chat/responses/files/batches, Anthropic, embeddings, agents |
-| `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
+| `docs/` | Project documentation | Integration guides currently live in `docs/integrations/` |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
 | `deploy/` | Deployment assets | Compose stacks in `deploy/compose/` + Traefik config in `deploy/traefik/` |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |

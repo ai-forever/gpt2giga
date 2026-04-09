@@ -69,7 +69,7 @@ https://ваш-сервер.example.com/
 
 В поле API key укажите значение `GPT2GIGA_API_KEY`, настроенное на сервере.
 
-Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
+Подробнее о развёртывании с nginx и TLS — в [docs/integrations/nginx/README.md](../nginx/README.md).
 
 ---
 
@@ -79,7 +79,7 @@ Apple отдельно поддерживает агентный режим че
 
 ### Codex в Xcode
 
-1. Сначала настройте Codex по инструкции из [integrations/codex/README.md](../codex/README.md).
+1. Сначала настройте Codex по инструкции из [docs/integrations/codex/README.md](../codex/README.md).
 2. Скопируйте конфигурацию Codex в директорию Xcode:
 
 ```shell
@@ -91,7 +91,7 @@ cp ~/.codex/config.toml ~/Library/Developer/Xcode/CodingAssistant/codex/config.t
 
 ### Claude Agent в Xcode
 
-1. Сначала настройте Claude Code по инструкции из [integrations/claude-code/README.md](../claude-code/README.md).
+1. Сначала настройте Claude Code по инструкции из [docs/integrations/claude-code/README.md](../claude-code/README.md).
 2. Скопируйте конфигурацию Claude Code в директорию Xcode:
 
 ```shell

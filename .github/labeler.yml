@@ -38,7 +38,7 @@ docs:
   - changed-files:
       - any-glob-to-any-file:
           - 'README.md'
-          - 'integrations/**'
+          - 'docs/**'
           - 'examples/**/*.md'
           - '.github/PULL_REQUEST_TEMPLATE.md'
           - '.github/ISSUE_TEMPLATE/**'

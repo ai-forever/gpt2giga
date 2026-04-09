@@ -20,7 +20,7 @@ gpt2giga
 ```
 
 ## Запустите OpenHands
-### CLI 
+### CLI
 Поставьте openhands
 ```
 pip install openhands-ai

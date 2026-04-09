@@ -142,7 +142,7 @@ sudo ls -la /etc/letsencrypt/live/gpt2giga-ip/
 Скопируйте конфиг в nginx и включите сайт:
 
 ```bash
-sudo cp integrations/nginx/gpt2giga.conf /etc/nginx/sites-available/gpt2giga
+sudo cp docs/integrations/nginx/gpt2giga.conf /etc/nginx/sites-available/gpt2giga
 sudo ln -sf /etc/nginx/sites-available/gpt2giga /etc/nginx/sites-enabled/gpt2giga
 sudo rm -f /etc/nginx/sites-enabled/default
 ```

@@ -34,7 +34,7 @@
 https://ваш-сервер.example.com/
 ```
 
-Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
+Подробнее о развёртывании с nginx и TLS — в [docs/integrations/nginx/README.md](../nginx/README.md).
 > **Примечание:** Cursor добавляет `/v1` автоматически к некоторым запросам.
 
 ### Проверка подключения

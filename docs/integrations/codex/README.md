@@ -91,7 +91,7 @@ base_url = "https://ваш-сервер.example.com/"
 env_key = "GPT2GIGA_API_KEY"
 ```
 
-Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
+Подробнее о развёртывании с nginx и TLS — в [docs/integrations/nginx/README.md](../nginx/README.md).
 
 ---
 
