@@ -1,7 +1,7 @@
 [project]
 name = "gpt2giga"
-version = "0.1.6a1"
-description = "Утилита для проксирования OpenAI и Anthropic запросов в GigaChat"
+version = "0.2.0a1"
+description = "Утилита для проксирования OpenAI, Anthropic и Gemini запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
 readme = "README.md"
@@ -17,10 +17,11 @@ dependencies = [
     "loguru>=0.7.3,<0.8",
     "sse-starlette>=3.0.3,<4",
     "pydantic-settings>=2.12.0,<3",
-    "fastapi>=0.133.0,<1",
-    "starlette>=0.49,<1",
-    "gigachat==0.2.1a1",
+    "fastapi>=0.135.3,<1",
+    "starlette>=1.0.0,<2",
     "anthropic>=0.79.0",
+    "gigachat",
+    "google-genai>=1.70.0",
 ]
 
 [project.scripts]
@@ -62,6 +63,9 @@ test-framework = "pytest"
 ignore-paths = []
 disable-telemetry = true
 formatter-cmds = ["black $file"]
+
+[tool.uv.sources]
+gigachat = { path = "gigachat-0.2.2a1-py3-none-any.whl" }
 [dependency-groups]
 dev = [
     "black (>=26.3.1,<27.0.0)",
