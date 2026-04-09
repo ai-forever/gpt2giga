@@ -115,6 +115,24 @@ def test_docs_disabled_in_prod_mode():
     assert client.get("/openapi.json").status_code == 404
 
 
+def test_openapi_json_available_in_dev_mode():
+    """In DEV mode OpenAPI schema must be generated successfully."""
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    schema = response.json()
+    assert "/chat/completions" in schema["paths"]
+    assert "/messages" in schema["paths"]
+    assert "/v1beta/models/{model}:generateContent" in schema["paths"]
+    chat_examples = schema["paths"]["/chat/completions"]["post"]["requestBody"][
+        "content"
+    ]["application/json"]["examples"]
+    assert "minimal" in chat_examples
+
+
 def test_prod_mode_requires_api_key(monkeypatch):
     import pytest
 

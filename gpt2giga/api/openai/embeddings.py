@@ -3,9 +3,9 @@
 from fastapi import APIRouter, Request
 
 from gpt2giga.app_state import get_gigachat_client
+from gpt2giga.api.openai.openapi import embeddings_openapi_extra
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
-from gpt2giga.openapi_specs.openai import embeddings_openapi_extra
 from gpt2giga.protocol.batches import transform_embedding_body
 
 router = APIRouter(tags=["OpenAI"])

@@ -7,16 +7,16 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request, Response
 
+from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
+from gpt2giga.api.anthropic.openapi import anthropic_message_batches_openapi_extra
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
-from gpt2giga.openapi_specs.anthropic import anthropic_message_batches_openapi_extra
 from gpt2giga.protocol.batches import (
     extract_batch_result_body,
     get_batch_target,
     parse_jsonl,
     transform_batch_input_file,
 )
-from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )

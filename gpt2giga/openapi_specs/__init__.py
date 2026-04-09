@@ -1,1 +1,0 @@
-"""OpenAPI schema helper modules."""

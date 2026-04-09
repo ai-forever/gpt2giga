@@ -565,6 +565,8 @@ response = client.models.generate_content(
 Основной PR-шаблон по умолчанию находится в [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md).
 Русскоязычный вариант расположен в [`.github/PULL_REQUEST_TEMPLATE/ru.md`](./.github/PULL_REQUEST_TEMPLATE/ru.md).
 
+Текущий runtime/development baseline проекта тестируется на `FastAPI>=0.135.3` и `Starlette>=1.0.0,<2`. Для app-level изменений используйте `lifespan`, `APIRouter` и `add_middleware`; устаревшие Starlette hooks вроде `on_event()`, `add_event_handler()`, raw `@app.middleware()` и raw `@app.route()` в проекте не используются.
+
 Чтобы открыть pull request с русским шаблоном, используйте параметр GitHub `template=ru.md` в URL сравнения веток:
 
 ```text

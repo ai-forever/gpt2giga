@@ -48,7 +48,8 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `common/` | Shared exception handling, auth helpers, request parsing, streaming, schema/tool utilities |
 | `protocol/` | Request, response, attachment, batch, and Anthropic translation logic |
 | `api/` | HTTP transport adapters: provider endpoints, middleware, dependencies, and system routes |
-| `openapi_specs/` | OpenAPI schema fragments for OpenAI and Anthropic endpoints |
+| `api/*/openapi.py` | Provider-specific OpenAPI schema fragments colocated with routers |
+| `api/_openapi.py` | Shared OpenAPI request-body helper |
 | `templates/log_viewer.html` | HTML log viewer for `/logs/html` |
 
 ## API Layout
@@ -148,7 +149,7 @@ rg --files gpt2giga/protocol/request gpt2giga/protocol/response
 rg -n "get_batch_store|get_file_store|batch_metadata_store|file_metadata_store" gpt2giga
 
 # Find OpenAPI schema helpers
-rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs gpt2giga/api
+rg -n "openapi_extra|_request_body_oneof" gpt2giga/api
 ```
 
 ## Common Gotchas

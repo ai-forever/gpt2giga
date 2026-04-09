@@ -2,7 +2,7 @@
 
 from typing import Any, Dict
 
-from gpt2giga.openapi_specs.common import _request_body_oneof
+from gpt2giga.api._openapi import _request_body_oneof
 
 
 def anthropic_count_tokens_openapi_extra() -> Dict[str, Any]:

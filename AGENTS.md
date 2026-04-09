@@ -73,7 +73,7 @@ uv run pre-commit install
 - Response transformation is split across `gpt2giga/protocol/response/processor.py`, `_common.py`, and `_responses.py`.
 - Shared HTTP helpers live in `gpt2giga/common/`.
 - Request/app-scoped stores for files and batches live in `gpt2giga/app_state.py`.
-- OpenAPI schema builders live in `gpt2giga/openapi_specs/`.
+- OpenAPI schema builders live next to provider routers in `gpt2giga/api/*/openapi.py`, with shared helpers in `gpt2giga/api/_openapi.py`.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2`; do not add legacy `send_to_gigachat*` aliases back.
 
 ## Quick Find Commands

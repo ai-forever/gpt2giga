@@ -1,8 +1,7 @@
 openai:
   - changed-files:
       - any-glob-to-any-file:
-          - 'gpt2giga/routers/openai/**'
-          - 'gpt2giga/openapi_specs/openai.py'
+          - 'gpt2giga/api/openai/**'
           - 'examples/chat_completions/**'
           - 'examples/responses/**'
           - 'examples/models.py'
@@ -15,8 +14,7 @@ openai:
 anthropic:
   - changed-files:
       - any-glob-to-any-file:
-          - 'gpt2giga/routers/anthropic/**'
-          - 'gpt2giga/openapi_specs/anthropic.py'
+          - 'gpt2giga/api/anthropic/**'
           - 'examples/anthropic/**'
 
 protocol:

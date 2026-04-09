@@ -6,13 +6,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client
-from gpt2giga.common.exceptions import exceptions_handler
-from gpt2giga.common.request_json import read_request_json
-from gpt2giga.core.logging.setup import rquid_context
-from gpt2giga.openapi_specs.anthropic import (
+from gpt2giga.api.anthropic.openapi import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
 )
+from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.request_json import read_request_json
+from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
     _convert_anthropic_messages_to_openai,
