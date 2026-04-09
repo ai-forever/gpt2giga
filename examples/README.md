@@ -1,6 +1,6 @@
 # Примеры использования `gpt2giga`
 
-В папке `examples/` собраны runnable-примеры, показывающие работу прокси с разными совместимыми SDK и эндпоинтами.
+В папке `examples/` собраны runnable-примеры, показывающие работу прокси с разными совместимыми SDK, capability-эндпоинтами и agent-style сценариями.
 
 ## Перед запуском
 
@@ -11,25 +11,36 @@
 ## Быстрые ссылки
 
 - OpenAI Python SDK:
-  - Chat Completions API: [`examples/openai/chat_completions/README.md`](openai/chat_completions/README.md)
+  - Chat Completions API: [`examples/openai/chat/README.md`](openai/chat/README.md)
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)
+  - Files API: [`examples/openai/files/README.md`](openai/files/README.md)
+  - Batches API: [`examples/openai/batches/README.md`](openai/batches/README.md)
+  - Embeddings API: [`examples/openai/embeddings/README.md`](openai/embeddings/README.md)
+  - Models API: [`examples/openai/models/README.md`](openai/models/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./anthropic/README.md)
 - Gemini Python SDK (`google-genai`): [`examples/gemini/README.md`](./gemini/README.md)
+- Agents SDK examples: [`examples/agents/README.md`](agents/README.md)
 
 ## Запуск примеров (из корня репозитория)
 
 ```bash
-# Chat Completions
-uv run python examples/openai/chat_completions/chat_completion.py
+# OpenAI Chat Completions
+uv run python examples/openai/chat/chat_completion.py
 
-# Files API
-uv run python examples/openai/files.py
-
-# Batches API
-uv run python examples/openai/batches.py
-
-# Responses API
+# OpenAI Responses API
 uv run python examples/openai/responses/single_prompt.py
+
+# OpenAI Files API
+uv run python examples/openai/files/files.py
+
+# OpenAI Batches API
+uv run python examples/openai/batches/batches.py
+
+# OpenAI Embeddings API
+uv run python examples/openai/embeddings/embeddings.py
+
+# OpenAI Models API
+uv run python examples/openai/models/models.py
 
 # Anthropic Messages API
 uv run python examples/anthropic/messages.py
@@ -41,17 +52,26 @@ uv run python examples/anthropic/message_batches.py
 uv run python examples/gemini/generate_content.py
 uv run python examples/gemini/structured_output.py
 
-# Additional Responses API example
-uv run python examples/responses/parallel_tool_call.py
+# Agents SDK examples
+uv sync --group integrations
+uv run python examples/agents/openai_agents.py
+WEATHER_API_KEY=... uv run python examples/agents/weather_agent.py
 ```
+
+## Структура
+
+- `examples/openai/chat/`: Chat Completions examples
+- `examples/openai/responses/`: Responses API examples
+- `examples/openai/files/`: Files API example
+- `examples/openai/batches/`: Batches API example
+- `examples/openai/embeddings/`: embeddings example
+- `examples/openai/models/`: models listing/retrieval example
+- `examples/anthropic/`: Anthropic Messages and Message Batches examples
+- `examples/gemini/`: Gemini Developer API examples
+- `examples/agents/`: OpenAI Agents SDK and tool-driven weather agent examples
 
 ## Дополнительно
 
-- `examples/openai/embeddings.py`: эмбеддинги (`/embeddings` или `/v1/embeddings`)
-- `examples/openai/models.py`: список моделей
-- `examples/openai/files.py`: OpenAI Files API
-- `examples/openai/batches.py`: OpenAI Batches API
-- `examples/anthropic/message_batches.py`: Anthropic Message Batches API
-- `examples/gemini/`: Gemini Developer API через официальный `google-genai` SDK
-- `examples/responses/parallel_tool_call.py`: параллельные tool calls через Responses API
-- `examples/openai_agents.py`: интеграция с OpenAI Agents SDK (потребуются доп. зависимости, см. `examples/AGENTS.md`)
+- `examples/agents/openai_agents.py` и `examples/agents/weather_agent.py` требуют `uv sync --group integrations`.
+- `examples/agents/weather_agent.py` дополнительно использует `WEATHER_API_KEY`.
+- `examples/gemini/`: Gemini Developer API через официальный `google-genai` SDK.

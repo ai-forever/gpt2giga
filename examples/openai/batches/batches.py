@@ -52,7 +52,7 @@ with TemporaryDirectory() as tmp_dir:
         completion_window="24h",
         endpoint="/v1/chat/completions",
         input_file_id=uploaded.id,
-        metadata={"source": "examples/batches.py"},
+        metadata={"source": "examples/openai/batches/batches.py"},
     )
     print("Created batch:", batch.id, batch.status, batch.output_file_id)
     retrieved = client.batches.retrieve(batch.id)

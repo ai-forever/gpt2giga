@@ -2,14 +2,8 @@ openai:
   - changed-files:
       - any-glob-to-any-file:
           - 'gpt2giga/api/openai/**'
-          - 'examples/chat_completions/**'
-          - 'examples/responses/**'
-          - 'examples/models.py'
-          - 'examples/files.py'
-          - 'examples/batches.py'
-          - 'examples/embeddings.py'
-          - 'examples/openai_agents.py'
-          - 'examples/weather_agent.py'
+          - 'examples/openai/**'
+          - 'examples/agents/**'
 
 anthropic:
   - changed-files:

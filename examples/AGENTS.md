@@ -2,8 +2,7 @@
 
 ## Package Identity
 
-- **What:** Runnable examples for using `gpt2giga` through OpenAI and Anthropic-compatible SDKs
-- **What:** Runnable examples for using `gpt2giga` through OpenAI, Anthropic, and Gemini-compatible SDKs
+- **What:** Runnable examples for using `gpt2giga` through OpenAI, Anthropic, Gemini, and Agents SDKs
 - **Audience:** Users validating proxy behavior or copying starter integrations
 - **Default target:** `http://localhost:8090`
 
@@ -11,26 +10,27 @@
 
 | Path | Purpose |
 |---|---|
-| `examples/openai/chat_completions/` | OpenAI Chat Completions examples |
+| `examples/openai/chat/` | OpenAI Chat Completions examples |
 | `examples/openai/responses/` | OpenAI Responses API examples |
+| `examples/openai/files/` | OpenAI Files API example |
+| `examples/openai/batches/` | OpenAI Batches API example |
+| `examples/openai/embeddings/` | OpenAI embeddings example |
+| `examples/openai/models/` | OpenAI models listing/retrieval example |
 | `examples/anthropic/` | Anthropic Messages API examples |
 | `examples/gemini/` | Gemini Developer API examples |
-| `examples/openai/files.py` | OpenAI Files API example |
-| `examples/openai/batches.py` | OpenAI Batches API example |
-| `examples/openai/embeddings.py` | Embeddings usage |
-| `examples/openai/models.py` | Model listing/retrieval |
-| `examples/openai_agents.py` | OpenAI Agents SDK example |
-| `examples/responses/parallel_tool_call.py` | Additional Responses API example |
+| `examples/agents/` | OpenAI Agents SDK and weather-agent examples |
 | `examples/README.md` | Example index |
 
 ### Notable Example Files
 
-- `chat_completions/chat_completion.py`: basic streaming chat
-- `chat_completions/chat_reasoning.py`: reasoning mode
-- `chat_completions/function_calling.py`: tool calling
-- `chat_completions/documents.py`: document/file-style input
-- `responses/reasoning.py`: Responses API reasoning example
-- `responses/structured_output.py`: structured outputs
+- `openai/chat/chat_completion.py`: basic streaming chat
+- `openai/chat/chat_reasoning.py`: reasoning mode
+- `openai/chat/function_calling.py`: tool calling
+- `openai/chat/documents.py`: document/file-style input
+- `openai/responses/reasoning.py`: Responses API reasoning example
+- `openai/responses/structured_output.py`: structured outputs
+- `openai/files/files.py`: Files API upload/list/content/delete flow
+- `openai/batches/batches.py`: Batches API end-to-end flow
 - `anthropic/messages.py`: basic Messages API call
 - `anthropic/message_batches.py`: Anthropic Message Batches API
 - `anthropic/messages_stream.py`: streaming Messages API
@@ -38,6 +38,8 @@
 - `gemini/generate_content.py`: basic Gemini `generate_content`
 - `gemini/function_calling.py`: Gemini function declarations / tool responses
 - `gemini/structured_output.py`: Gemini JSON schema output
+- `agents/openai_agents.py`: OpenAI Agents SDK handoffs and tools
+- `agents/weather_agent.py`: weather-focused agent with tool call
 
 ## Patterns & Conventions
 
@@ -47,6 +49,7 @@
 - Prefer `GigaChat-2-Max` in examples unless the example is about model selection.
 - Print or stream visible output so users can confirm behavior quickly.
 - Keep comments short and focused on what the example demonstrates.
+- Keep provider-level folders organized by capability (`chat`, `responses`, `files`, `batches`, `embeddings`, `models`).
 
 ## Setup & Run
 
@@ -54,17 +57,20 @@
 # Install repo dependencies
 uv sync --all-extras --dev
 
-# For the OpenAI Agents example
+# For Agents SDK and Gemini examples
 uv sync --group integrations
 
 # Start the proxy in another terminal
 uv run gpt2giga
 
-# Run an example
-uv run python examples/openai/chat_completions/chat_completion.py
+# Run representative examples
+uv run python examples/openai/chat/chat_completion.py
 uv run python examples/openai/responses/single_prompt.py
+uv run python examples/openai/files/files.py
+uv run python examples/openai/batches/batches.py
 uv run python examples/anthropic/messages.py
 uv run python examples/gemini/generate_content.py
+uv run python examples/agents/openai_agents.py
 ```
 
 ## Quick Find Commands
@@ -85,9 +91,9 @@ rg -n "image_url|base64|document" examples
 
 ## Common Gotchas
 
-- `examples/openai_agents.py` needs the `integrations` dependency group.
+- `examples/agents/openai_agents.py` and `examples/agents/weather_agent.py` need the `integrations` dependency group.
+- `examples/agents/weather_agent.py` also needs `WEATHER_API_KEY`.
 - Anthropic examples use the `anthropic` SDK directly, not the OpenAI client.
 - Gemini examples use the official `google-genai` SDK and also need the `integrations` dependency group.
-- OpenAI examples were moved under `examples/openai/`; keep README links and run commands aligned with that layout.
 - Examples are excluded from coverage and are not the canonical place to implement application logic.
-- Each API-style folder has its own `README.md`; update those alongside code examples when behavior changes.
+- Each capability folder should keep its local `README.md` aligned with runnable file paths.

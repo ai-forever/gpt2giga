@@ -265,11 +265,15 @@ sequenceDiagram
 Подробные runnable-примеры вынесены в папку [`examples/`](./examples/).
 
 - OpenAI Python SDK:
-  - Chat Completions API: [`examples/openai/chat_completions/README.md`](examples/openai/chat_completions/README.md)
+  - Chat Completions API: [`examples/openai/chat/README.md`](examples/openai/chat/README.md)
   - Responses API: [`examples/openai/responses/README.md`](examples/openai/responses/README.md)
-  - Files / Batches / embeddings / models: [`examples/README.md`](./examples/README.md)
+  - Files API: [`examples/openai/files/README.md`](examples/openai/files/README.md)
+  - Batches API: [`examples/openai/batches/README.md`](examples/openai/batches/README.md)
+  - Embeddings API: [`examples/openai/embeddings/README.md`](examples/openai/embeddings/README.md)
+  - Models API: [`examples/openai/models/README.md`](examples/openai/models/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
 - Gemini Python SDK (`google-genai`): [`examples/gemini/README.md`](./examples/gemini/README.md)
+- Agents SDK examples: [`examples/agents/README.md`](./examples/agents/README.md)
 - Индекс всех примеров: [`examples/README.md`](./examples/README.md)
 
 ## Изменение параметров gpt2giga
@@ -553,7 +557,7 @@ response = client.models.generate_content(
 | smolagents                 | https://github.com/huggingface/smolagents          | Фреймворк от hf                                                                                                                             |
 | Openclaw                   | https://openclaw.ai/                               | Personal AI assistant                                                                                                                       |
 | Claude Code                | https://code.claude.com/docs/en/overview           | CLI-агент от Anthropic.<br /> Подробнее о запуске и настройке Claude Code для работы с gpt2giga — в [README](./integrations/claude-code/README.md) |
-| OpenAI Agents SDK          | https://github.com/openai/openai-agents-python     | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
+| OpenAI Agents SDK          | https://github.com/openai/openai-agents-python     | SDK для создания агентов с function calling и handoffs. Примеры использования — в [examples/agents/README.md](./examples/agents/README.md) |
 | Anthropic SDK              | https://github.com/anthropics/anthropic-sdk-python | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
 | Google GenAI SDK           | https://github.com/googleapis/python-genai         | Официальный Python SDK для Gemini Developer API. Примеры использования через gpt2giga — в [examples/gemini/](./examples/gemini/)           |
 | Cursor                     | https://cursor.com/                                | Редактор с ИИ и агентом для программирования.<br /> Подробнее о запуске и настройке Cursor для работы с gpt2giga — в [README](./integrations/cursor/README.md) |

@@ -1,3 +1,5 @@
+"""Compatibility wrappers over feature-owned streaming helpers."""
+
 from typing import Any, AsyncGenerator, Optional
 
 from gigachat import GigaChat
