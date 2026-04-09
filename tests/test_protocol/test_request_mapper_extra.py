@@ -1,8 +1,11 @@
-import pytest
-from gpt2giga.protocol import RequestTransformer
-from gpt2giga.models.config import ProxyConfig
-from unittest.mock import MagicMock, AsyncMock
+import json
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from gpt2giga.models.config import ProxyConfig
+from gpt2giga.protocol import RequestTransformer
 
 
 @pytest.fixture
@@ -110,6 +113,51 @@ async def test_transform_messages_tool_calls_bad_json(request_transformer):
 
     assert "function_call" in res[0]
     assert res[0]["function_call"]["arguments"] == "{bad_json"
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_inserts_placeholder_for_dangling_function_call(
+    request_transformer,
+):
+    messages = [
+        {
+            "role": "assistant",
+            "content": "",
+            "function_call": {
+                "name": "run_shell_command",
+                "arguments": '{"command": "pwd"}',
+            },
+        },
+        {
+            "role": "user",
+            "content": "System: Potential loop detected. Please continue.",
+        },
+    ]
+
+    res = await request_transformer.transform_messages(messages)
+
+    assert len(res) == 3
+    assert res[0]["role"] == "assistant"
+    assert res[0]["function_call"]["name"] == "run_shell_command"
+    assert res[1]["role"] == "function"
+    assert res[1]["name"] == "run_shell_command"
+    assert json.loads(res[1]["content"])["status"] == "interrupted"
+    assert res[2]["role"] == "user"
+    assert "Potential loop detected" in res[2]["content"]
+
+
+@pytest.mark.asyncio
+async def test_transform_messages_preserves_legacy_function_result_name(
+    request_transformer,
+):
+    messages = [{"role": "function", "name": "exec_command", "content": "done"}]
+
+    res = await request_transformer.transform_messages(messages)
+
+    assert len(res) == 1
+    assert res[0]["role"] == "function"
+    assert res[0]["name"] == "exec_command"
+    assert res[0]["content"] == '{"result": "done"}'
 
 
 def test_transform_chat_parameters(request_transformer):
@@ -236,8 +284,12 @@ async def test_transform_messages_no_merge_with_function_call(request_transforme
 
     res = await request_transformer.transform_messages(messages)
 
-    # Should not merge because first has function_call
-    assert len(res) == 2
+    # The assistant messages should stay separate, and the proxy should
+    # synthesize a tool result between them to keep history valid.
+    assert len(res) == 3
+    assert res[0]["role"] == "assistant"
+    assert res[1]["role"] == "function"
+    assert res[2]["role"] == "assistant"
 
 
 @pytest.mark.asyncio

@@ -142,6 +142,54 @@ async def test_prepare_response_v2_maps_multimodal_and_replayed_tool_items():
 
 
 @pytest.mark.asyncio
+async def test_prepare_response_v2_repairs_dangling_assistant_function_call():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    chat = await transformer.prepare_response_v2(
+        {
+            "model": "gpt-x",
+            "input": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "run_shell_command",
+                        "arguments": '{"command": "pwd"}',
+                    },
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": "System: Potential loop detected. Please continue.",
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    messages = chat.model_dump(exclude_none=True, by_alias=True)["messages"]
+    function_call_part = next(
+        part["function_call"]
+        for part in messages[0]["content"]
+        if "function_call" in part
+    )
+    assert len(messages) == 3
+    assert messages[0]["role"] == "assistant"
+    assert function_call_part["name"] == "run_shell_command"
+    assert messages[1]["role"] == "tool"
+    assert messages[1]["content"][0]["function_result"]["name"] == "run_shell_command"
+    assert messages[1]["content"][0]["function_result"]["result"]["status"] == (
+        "interrupted"
+    )
+    assert messages[2]["role"] == "user"
+    assert messages[2]["content"][0]["text"] == (
+        "System: Potential loop detected. Please continue."
+    )
+
+
+@pytest.mark.asyncio
 async def test_prepare_response_v2_wraps_plain_tool_outputs_in_json_object():
     transformer = RequestTransformer(ProxyConfig(), logger)
     chat = await transformer.prepare_response_v2(
