@@ -18,8 +18,8 @@ uv run ruff format --check gpt2giga
 ## Architecture Overview
 
 ```text
-Client SDK -> middleware -> router -> transformer/helpers -> GigaChat SDK
-GigaChat SDK -> response processor -> router -> client-compatible response
+Client SDK -> middleware -> router -> feature service -> provider mapper -> GigaChat SDK
+GigaChat SDK -> provider mapper -> feature service -> router -> client-compatible response
 ```
 
 ## Key Modules
@@ -28,7 +28,7 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 |---|---|
 | `app/factory.py` | FastAPI app factory, middleware registration, router mounting |
 | `app/lifespan.py` | Startup/shutdown orchestration and runtime service lifecycle |
-| `app/wiring.py` | App-scoped runtime wiring for GigaChat client and transformers |
+| `app/wiring.py` | App-scoped runtime wiring for GigaChat client, transformers, and feature services |
 | `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
 | `app/cli.py` | Config loading and env-path handling |
 | `core/config/settings.py` | Primary `ProxySettings`, `GigaChatCLI`, and `ProxyConfig` implementation |
@@ -36,8 +36,11 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `core/logging/setup.py` | Logger setup, redaction, UTF-8 sanitization, and RQUID context |
 | `core/constants.py` | Shared limits, MIME/ext allowlists, and redaction constants |
 | `core/app_meta.py` | App version, port checks, and CLI secret warnings |
+| `features/chat/service.py` | Chat-completions orchestration between HTTP routes and provider mapping |
+| `features/chat/stream.py` | Chat-completions SSE streaming flow |
 | `providers/gigachat/client.py` | GigaChat client lifecycle, factory resolution, and request-scoped access |
 | `providers/gigachat/auth.py` | Pass-token auth handoff and request-level GigaChat client construction |
+| `providers/gigachat/chat_mapper.py` | Chat feature entrypoint for GigaChat request/response mapping |
 | `providers/gigachat/request_mapper.py` | Primary GigaChat request-mapping entrypoint for chat and responses |
 | `providers/gigachat/response_mapper.py` | Primary GigaChat response-mapping entrypoint for chat and responses |
 | `api_server.py` | Compatibility wrapper over the new `app/*` modules |
@@ -60,7 +63,7 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 
 | Path | Endpoints |
 |---|---|
-| `api/openai/chat_completions.py` | `/chat/completions` |
+| `api/openai/chat.py` | `/chat/completions` |
 | `api/openai/responses.py` | `/responses` |
 | `api/openai/embeddings.py` | `/embeddings` |
 | `api/openai/models.py` | `/models` |
@@ -82,6 +85,10 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 
 | Path | Purpose |
 |---|---|
+| `features/chat/contracts.py` | Internal chat feature contracts and provider/client protocols |
+| `features/chat/service.py` | Chat service entrypoint used by OpenAI chat routes |
+| `features/chat/stream.py` | Chat SSE generation and streaming error handling |
+| `providers/gigachat/chat_mapper.py` | Chat feature adapter over provider request/response mappers |
 | `providers/gigachat/request_mapper.py` | Public `RequestTransformer` implementation for chat/responses request mapping |
 | `providers/gigachat/request_mapping_base.py` | Shared request parameter, schema, and validation helpers |
 | `providers/gigachat/chat_request_mapper.py` | Message role/content normalization and attachment handling |
@@ -104,16 +111,17 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 
 - `common/exceptions.py`: `@exceptions_handler` and exception normalization
 - `common/request_json.py` and `common/request_form.py`: safe request parsing
-- `common/streaming.py`: SSE generators for chat and responses
+- `common/streaming.py`: compatibility SSE generators that re-export chat/responses streaming
 - `common/tools.py`: tool/function conversion helpers
 - `common/json_schema.py`: JSON Schema normalization and `$ref` resolution
-- `common/message_utils.py`: role mapping and message collapsing helpers
+- `common/message_utils.py`: shared role/message normalization helpers still used by provider request mapping
 - `common/logs_access.py`: `/logs*` allowlist checks
 - `common/app_meta.py`: compatibility wrapper over `core/app_meta.py`
 
 ## Patterns & Conventions
 
 - Keep GigaChat-specific request/response mapping in `providers/gigachat/*_mapper.py`; use `protocol/` as compatibility or transport-adapter surface.
+- Keep chat-completions orchestration in `features/chat/service.py`; `api/openai/chat.py` should stay thin.
 - Keep GigaChat SDK lifecycle/auth logic in `providers/gigachat/`, not in `common/` or route modules.
 - Keep `RequestTransformer` and `ResponseProcessor` as the public import surface; add new GigaChat mapping logic under `providers/gigachat/` instead of growing `protocol/` wrappers.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.

@@ -21,7 +21,7 @@ tools = [
             "required": ["sign"],
         },
     },
-]
+] * 20
 
 
 def get_horoscope(sign):
@@ -37,7 +37,7 @@ response = client.responses.create(
     tools=tools,
     input=input_list,
 )
-
+print(response)
 # Save function call outputs for subsequent requests
 input_list += response.output
 for item in response.output:
