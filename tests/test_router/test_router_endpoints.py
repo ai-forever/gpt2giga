@@ -230,6 +230,25 @@ def test_responses_non_stream_previous_response_id_reuses_thread():
     assert second_body["output"][0]["content"][0]["text"] == "continued"
 
 
+def test_responses_stream_returns_sse_events():
+    app = make_app()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/responses",
+        json={"input": "hi", "model": "gpt-x", "stream": True},
+    ) as resp:
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        body = "".join(resp.iter_text())
+
+    assert "event: response.created" in body
+    assert "event: response.in_progress" in body
+    assert "event: response.output_text.delta" in body
+    assert "event: response.completed" in body
+
+
 def test_embeddings_with_token_ids(monkeypatch):
     app = make_app(monkeypatch)
     client = TestClient(app)

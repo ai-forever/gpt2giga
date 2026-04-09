@@ -74,6 +74,8 @@ uv run pre-commit install
 - Simple provider mappings for embeddings and model discovery live in `gpt2giga/providers/gigachat/embeddings_mapper.py` and `gpt2giga/providers/gigachat/models_mapper.py`.
 - Request transformation is split across `gpt2giga/providers/gigachat/request_mapper.py`, `request_mapping_base.py`, `chat_request_mapper.py`, and `responses_request_mapper.py`.
 - Response transformation is split across `gpt2giga/providers/gigachat/response_mapper.py`, `response_mapping_common.py`, and `responses_response_mapper.py`.
+- GigaChat stream iteration and chunk normalization live in `gpt2giga/providers/gigachat/streaming.py`.
+- OpenAI SSE formatting helpers live in `gpt2giga/api/openai/streaming.py`; `gpt2giga/common/streaming.py` remains a compatibility surface.
 - Shared HTTP helpers live in `gpt2giga/common/`.
 - Typed runtime dependencies live in `gpt2giga/app/dependencies.py`, with `app.state` organized around `config`, `logger`, `services`, `stores`, and `providers`; flat `app.state.*` aliases remain compatibility shims.
 - Request/app-scoped metadata stores for files, batches, and responses live in feature-owned store modules under `gpt2giga/features/*/store.py`; `gpt2giga/app_state.py` remains a compatibility wrapper.

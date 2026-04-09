@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import traceback
 from typing import Any, AsyncGenerator, Optional
 
-import gigachat
 from gigachat import GigaChat
 from starlette.requests import Request
 
@@ -15,6 +13,11 @@ from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.contracts import ChatProviderMapper
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.gigachat.streaming import (
+    GigaChatStreamError,
+    iter_chat_stream_chunks,
+    map_chat_stream_chunk,
+)
 
 
 async def stream_chat_completion_generator(
@@ -27,6 +30,11 @@ async def stream_chat_completion_generator(
     mapper: ChatProviderMapper,
 ) -> AsyncGenerator[str, None]:
     """Stream chat-completions chunks as SSE lines."""
+    from gpt2giga.api.openai.streaming import (
+        format_chat_stream_chunk,
+        format_chat_stream_done,
+    )
+
     logger = None
     rquid = rquid_context.get()
 
@@ -35,19 +43,24 @@ async def stream_chat_completion_generator(
             giga_client = get_gigachat_client(request)
         logger = get_logger_from_state(request.app.state)
 
-        async for chunk in giga_client.astream(chat_messages):
+        async for chunk in iter_chat_stream_chunks(giga_client, chat_messages):
             if await request.is_disconnected():
                 if logger:
                     logger.info(f"[{rquid}] Client disconnected during streaming")
                 break
-            processed = mapper.process_stream_chunk(chunk, model, response_id)
-            yield f"data: {json.dumps(processed)}\n\n"
+            processed = map_chat_stream_chunk(
+                chunk,
+                mapper=mapper,
+                model=model,
+                response_id=response_id,
+            )
+            yield format_chat_stream_chunk(processed)
 
-        yield "data: [DONE]\n\n"
+        yield format_chat_stream_done()
 
-    except gigachat.exceptions.GigaChatException as exc:
-        error_type = type(exc).__name__
-        error_message = str(exc)
+    except GigaChatStreamError as exc:
+        error_type = exc.error_type
+        error_message = exc.message
         if logger:
             logger.error(
                 f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
@@ -59,8 +72,8 @@ async def stream_chat_completion_generator(
                 "code": "stream_error",
             }
         }
-        yield f"data: {json.dumps(error_response)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield format_chat_stream_chunk(error_response)
+        yield format_chat_stream_done()
 
     except asyncio.CancelledError:
         raise
@@ -79,5 +92,5 @@ async def stream_chat_completion_generator(
                 "code": "internal_error",
             }
         }
-        yield f"data: {json.dumps(error_response)}\n\n"
-        yield "data: [DONE]\n\n"
+        yield format_chat_stream_chunk(error_response)
+        yield format_chat_stream_done()

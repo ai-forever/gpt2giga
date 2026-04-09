@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
+import time
 import traceback
 from typing import Any, AsyncGenerator, Optional
 
-import gigachat
 from gigachat import GigaChat
 from gigachat.models import Chat, ChatV2
 from starlette.requests import Request
@@ -19,6 +18,13 @@ from gpt2giga.app.dependencies import (
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.responses.store import get_response_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.gigachat.streaming import (
+    GigaChatStreamError,
+    ResponsesFunctionCallUpdate,
+    ResponsesTextUpdate,
+    ResponsesToolUpdate,
+    iter_responses_stream_chunks,
+)
 
 
 async def stream_responses_generator(
@@ -31,7 +37,7 @@ async def stream_responses_generator(
     response_processor: Any = None,
 ) -> AsyncGenerator[str, None]:
     """Stream Responses API events as SSE lines."""
-    import time
+    from gpt2giga.api.openai.streaming import format_responses_stream_event
 
     logger = None
     rquid = rquid_context.get()
@@ -54,19 +60,15 @@ async def stream_responses_generator(
     output_meta: list[dict[str, str]] = []
     text_states: dict[str, dict[str, Any]] = {}
     function_states: dict[str, dict[str, Any]] = {}
-    function_state_keys_by_call_id: dict[str, str] = {}
     tool_states: dict[str, dict[str, Any]] = {}
-
-    def sse_event(event_type: str, data: dict) -> str:
-        return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     def emit(event_type: str, payload: dict) -> str:
         nonlocal sequence_number
-        payload = dict(payload)
-        payload["type"] = event_type
-        payload["sequence_number"] = sequence_number
+        body = dict(payload)
+        body["type"] = event_type
+        body["sequence_number"] = sequence_number
         sequence_number += 1
-        return sse_event(event_type, payload)
+        return format_responses_stream_event(event_type, body)
 
     def current_response(status: str) -> dict:
         return processor.build_response_api_result_v2(
@@ -117,20 +119,27 @@ async def stream_responses_generator(
         return state
 
     def ensure_function_state(
-        call_key: str, item_id: str, call_id: str, name: str
-    ) -> dict[str, Any]:
-        from gpt2giga.common.tools import map_tool_name_from_gigachat
-
+        call_key: str,
+        *,
+        item_id: str,
+        call_id: str,
+        name: str | None,
+    ) -> Optional[dict[str, Any]]:
         state = function_states.get(call_key)
         if state is not None:
+            if name:
+                state["name"] = name
+                state["item"]["name"] = name
             return state
-        mapped_name = map_tool_name_from_gigachat(name)
+        if not name:
+            return None
+
         item = {
             "id": item_id,
             "type": "function_call",
             "status": "in_progress",
             "call_id": call_id,
-            "name": mapped_name,
+            "name": name,
             "arguments": "",
         }
         output_index, item = add_output_item("function_call", call_key, item)
@@ -139,12 +148,11 @@ async def stream_responses_generator(
             "item_id": item_id,
             "output_index": output_index,
             "call_id": call_id,
-            "name": mapped_name,
+            "name": name,
             "arguments": "",
             "added": False,
         }
         function_states[call_key] = state
-        function_state_keys_by_call_id[call_id] = call_key
         return state
 
     def tool_event_type(tool_item: dict, status: str) -> Optional[str]:
@@ -164,33 +172,22 @@ async def stream_responses_generator(
         tool_key: str,
         *,
         item_id: str,
-        tool_name: str,
+        output_item: dict[str, Any],
         raw_status: Optional[str],
-        tools_state_id: Optional[str],
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any]:
         state = tool_states.get(tool_key)
         if state is not None:
-            if raw_status:
+            state["item"].update(output_item)
+            if raw_status is not None:
                 state["raw_status"] = raw_status
             return state
 
-        item = processor._build_builtin_tool_output_item(
-            tool_name=tool_name,
-            item_id=item_id,
-            tools_state_id=tools_state_id,
-            response_status="in_progress",
-            raw_status=raw_status,
-        )
-        if item is None:
-            return None
-
+        item = dict(output_item)
         output_index, item = add_output_item("tool", tool_key, item)
         state = {
             "item": item,
             "item_id": item_id,
             "output_index": output_index,
-            "tool_name": tool_name,
-            "tools_state_id": tools_state_id,
             "raw_status": raw_status,
             "last_emitted_status": None,
             "added": False,
@@ -229,183 +226,117 @@ async def stream_responses_generator(
             {"response": current_response("in_progress")},
         )
 
-        async for chunk in giga_client.astream_v2(chat_messages):
+        async for chunk in iter_responses_stream_chunks(
+            giga_client,
+            chat_messages,
+            response_processor=processor,
+            response_id=response_id,
+        ):
             if await request.is_disconnected():
                 if logger:
                     logger.info(f"[{rquid}] Client disconnected during streaming")
                 break
 
-            chunk_dict = processor._safe_model_dump(chunk)
-            model = chunk_dict.get("model") or model
-            created_at = chunk_dict.get("created_at", created_at)
-            thread_id = chunk_dict.get("thread_id") or thread_id
-            finish_reason = chunk_dict.get("finish_reason") or finish_reason
+            model = chunk.model or model
+            created_at = chunk.created_at or created_at
+            thread_id = chunk.thread_id or thread_id
+            finish_reason = chunk.finish_reason or finish_reason
+            if chunk.usage is not None:
+                usage = chunk.usage
 
-            usage_chunk = processor._build_response_usage_v2(chunk_dict.get("usage"))
-            if usage_chunk is not None:
-                usage = usage_chunk
-
-            additional_data = chunk_dict.get("additional_data")
-            for message_index, message in enumerate(chunk_dict.get("messages") or []):
-                if not isinstance(message, dict):
-                    continue
-                message_id = (
-                    message.get("message_id") or f"msg_{response_id}_{message_index}"
-                )
-                tools_state_id = message.get("tools_state_id")
-                message_key = str(message_id)
-                last_tool_state: Optional[dict[str, Any]] = None
-
-                for part_index, part in enumerate(message.get("content") or []):
-                    if not isinstance(part, dict):
-                        continue
-
-                    text = part.get("text")
-                    if isinstance(text, str):
-                        state = ensure_text_state(message_key, message_id)
-                        if state["item"]["content"] == []:
-                            yield emit(
-                                "response.output_item.added",
-                                {
-                                    "output_index": state["output_index"],
-                                    "item": state["item"],
-                                },
-                            )
-                        if not state["part_added"]:
-                            state["item"]["content"] = [
-                                {
-                                    "type": "output_text",
-                                    "text": "",
-                                    "annotations": [],
-                                }
-                            ]
-                            yield emit(
-                                "response.content_part.added",
-                                {
-                                    "item_id": state["item_id"],
-                                    "output_index": state["output_index"],
-                                    "content_index": 0,
-                                    "part": state["item"]["content"][0],
-                                },
-                            )
-                            state["part_added"] = True
-
-                        state["text"] += text
-                        state["item"]["content"][0]["text"] = state["text"]
+            for update in chunk.updates:
+                if isinstance(update, ResponsesTextUpdate):
+                    state = ensure_text_state(update.message_key, update.item_id)
+                    if state["item"]["content"] == []:
                         yield emit(
-                            "response.output_text.delta",
+                            "response.output_item.added",
+                            {
+                                "output_index": state["output_index"],
+                                "item": state["item"],
+                            },
+                        )
+                    if not state["part_added"]:
+                        state["item"]["content"] = [
+                            {
+                                "type": "output_text",
+                                "text": "",
+                                "annotations": [],
+                            }
+                        ]
+                        yield emit(
+                            "response.content_part.added",
                             {
                                 "item_id": state["item_id"],
                                 "output_index": state["output_index"],
                                 "content_index": 0,
-                                "delta": text,
-                                "logprobs": [],
+                                "part": state["item"]["content"][0],
                             },
                         )
+                        state["part_added"] = True
 
-                    function_call = part.get("function_call")
-                    if isinstance(function_call, dict):
-                        call_id = (
-                            str(tools_state_id)
-                            if tools_state_id is not None
-                            else f"call_{message_id}_{part_index}"
+                    state["text"] += update.text
+                    state["item"]["content"][0]["text"] = state["text"]
+                    yield emit(
+                        "response.output_text.delta",
+                        {
+                            "item_id": state["item_id"],
+                            "output_index": state["output_index"],
+                            "content_index": 0,
+                            "delta": update.text,
+                            "logprobs": [],
+                        },
+                    )
+                    continue
+
+                if isinstance(update, ResponsesFunctionCallUpdate):
+                    state = ensure_function_state(
+                        update.call_key,
+                        item_id=update.item_id,
+                        call_id=update.call_id,
+                        name=update.name,
+                    )
+                    if state is None:
+                        continue
+                    if not state["added"]:
+                        yield emit(
+                            "response.output_item.added",
+                            {
+                                "output_index": state["output_index"],
+                                "item": state["item"],
+                            },
                         )
-                        name = function_call.get("name")
-                        if isinstance(name, str) and name:
-                            item_id = f"fc_{call_id}"
-                            state = ensure_function_state(
-                                f"{call_id}:{name}",
-                                item_id,
-                                call_id,
-                                name,
-                            )
-                        else:
-                            state_key = function_state_keys_by_call_id.get(call_id)
-                            state = (
-                                function_states.get(state_key)
-                                if state_key is not None
-                                else None
-                            )
-
-                        if state is not None:
-                            if not state["added"]:
-                                yield emit(
-                                    "response.output_item.added",
-                                    {
-                                        "output_index": state["output_index"],
-                                        "item": state["item"],
-                                    },
-                                )
-                                state["added"] = True
-
-                            arguments = processor._stringify_json(
-                                function_call.get("arguments")
-                            )
-                            if arguments:
-                                state["arguments"] += arguments
-                                state["item"]["arguments"] = state["arguments"]
-                                yield emit(
-                                    "response.function_call_arguments.delta",
-                                    {
-                                        "item_id": state["item_id"],
-                                        "output_index": state["output_index"],
-                                        "delta": arguments,
-                                    },
-                                )
-
-                    tool_execution = part.get("tool_execution")
-                    if isinstance(tool_execution, dict):
-                        tool_name = tool_execution.get("name")
-                        if isinstance(tool_name, str) and tool_name:
-                            item_id = (
-                                f"tool_{tools_state_id or message_id}_{part_index}"
-                            )
-                            state = ensure_tool_state(
-                                f"{tools_state_id or message_id}:{tool_name}",
-                                item_id=item_id,
-                                tool_name=tool_name,
-                                raw_status=tool_execution.get("status"),
-                                tools_state_id=tools_state_id,
-                            )
-                            if state is not None:
-                                if not state["added"]:
-                                    yield emit(
-                                        "response.output_item.added",
-                                        {
-                                            "output_index": state["output_index"],
-                                            "item": state["item"],
-                                        },
-                                    )
-                                    state["added"] = True
-                                updated_item = (
-                                    processor._build_builtin_tool_output_item(
-                                        tool_name=tool_name,
-                                        item_id=state["item_id"],
-                                        tools_state_id=tools_state_id,
-                                        response_status="in_progress",
-                                        raw_status=tool_execution.get("status"),
-                                        additional_data=additional_data,
-                                    )
-                                )
-                                if updated_item is not None:
-                                    state["item"].update(updated_item)
-                                last_tool_state = state
-                                for event in emit_tool_progress(state):
-                                    yield event
-
-                    files = part.get("files")
-                    if isinstance(files, list) and last_tool_state is not None:
-                        updated_item = processor._build_builtin_tool_output_item(
-                            tool_name=last_tool_state["tool_name"],
-                            item_id=last_tool_state["item_id"],
-                            tools_state_id=last_tool_state["tools_state_id"],
-                            response_status="in_progress",
-                            raw_status=last_tool_state["raw_status"],
-                            related_files=files,
-                            additional_data=additional_data,
+                        state["added"] = True
+                    if update.arguments:
+                        state["arguments"] += update.arguments
+                        state["item"]["arguments"] = state["arguments"]
+                        yield emit(
+                            "response.function_call_arguments.delta",
+                            {
+                                "item_id": state["item_id"],
+                                "output_index": state["output_index"],
+                                "delta": update.arguments,
+                            },
                         )
-                        if updated_item is not None:
-                            last_tool_state["item"].update(updated_item)
+                    continue
+
+                if isinstance(update, ResponsesToolUpdate):
+                    state = ensure_tool_state(
+                        update.tool_key,
+                        item_id=update.item_id,
+                        output_item=update.output_item,
+                        raw_status=update.raw_status,
+                    )
+                    if not state["added"]:
+                        yield emit(
+                            "response.output_item.added",
+                            {
+                                "output_index": state["output_index"],
+                                "item": state["item"],
+                            },
+                        )
+                        state["added"] = True
+                    for event in emit_tool_progress(state):
+                        yield event
 
         completed_at = int(time.time())
         response_status, _ = processor._build_response_status(finish_reason)
@@ -522,18 +453,16 @@ async def stream_responses_generator(
         else:
             yield emit("response.completed", {"response": final_response})
 
-    except gigachat.exceptions.GigaChatException as e:
-        error_type = type(e).__name__
-        error_message = str(e)
+    except GigaChatStreamError as exc:
         if logger:
             logger.error(
-                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
+                f"[{rquid}] GigaChat streaming error: {exc.error_type}: {exc.message}"
             )
         yield emit(
             "error",
             {
                 "code": "stream_error",
-                "message": error_message,
+                "message": exc.message,
                 "param": None,
             },
         )
@@ -541,12 +470,12 @@ async def stream_responses_generator(
     except asyncio.CancelledError:
         raise
 
-    except Exception as e:
-        error_type = type(e).__name__
+    except Exception as exc:
+        error_type = type(exc).__name__
         tb = traceback.format_exc()
         if logger:
             logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
+                f"[{rquid}] Unexpected streaming error: {error_type}: {exc}\n{tb}"
             )
         yield emit(
             "error",
