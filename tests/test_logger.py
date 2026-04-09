@@ -3,7 +3,11 @@ from pathlib import Path
 
 import loguru
 
-from gpt2giga.logger import redact_sensitive, sanitize_for_utf8, setup_logger
+from gpt2giga.core.logging.setup import (
+    redact_sensitive,
+    sanitize_for_utf8,
+    setup_logger,
+)
 
 
 def test_init_logger_info_level():

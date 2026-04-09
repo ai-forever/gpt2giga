@@ -31,14 +31,19 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `app/wiring.py` | App-scoped runtime wiring for GigaChat client and transformers |
 | `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
 | `app/cli.py` | Config loading and env-path handling |
+| `core/config/settings.py` | Primary `ProxySettings`, `GigaChatCLI`, and `ProxyConfig` implementation |
+| `core/config/security.py` | Consolidated security posture model and limits |
+| `core/logging/setup.py` | Logger setup, redaction, UTF-8 sanitization, and RQUID context |
+| `core/constants.py` | Shared limits, MIME/ext allowlists, and redaction constants |
+| `core/app_meta.py` | App version, port checks, and CLI secret warnings |
 | `api_server.py` | Compatibility wrapper over the new `app/*` modules |
 | `app_state.py` | Request/app-scoped accessors for GigaChat client, batch store, file store |
 | `cli.py` | Compatibility wrapper for `app/cli.py` |
 | `auth.py` | API-key verification dependency |
-| `logger.py` | Log setup and sensitive-data redaction |
-| `constants.py` | Size limits, security field lists, shared constants |
-| `models/config.py` | `ProxySettings`, `GigaChatCLI`, `ProxyConfig` |
-| `models/security.py` | Security posture summary and request-size defaults |
+| `logger.py` | Compatibility wrapper for `core/logging/setup.py` |
+| `constants.py` | Compatibility wrapper for `core/constants.py` |
+| `models/config.py` | Compatibility wrapper for `core/config/settings.py` |
+| `models/security.py` | Compatibility wrapper for `core/config/security.py` |
 | `common/` | Shared exception handling, auth helpers, request parsing, streaming, schema/tool utilities |
 | `protocol/` | Request, response, attachment, batch, and Anthropic translation logic |
 | `routers/` | OpenAI-compatible, Anthropic-compatible, system, and logs endpoints |
@@ -97,7 +102,7 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 - `common/json_schema.py`: JSON Schema normalization and `$ref` resolution
 - `common/message_utils.py`: role mapping and message collapsing helpers
 - `common/logs_access.py`: `/logs*` allowlist checks
-- `common/app_meta.py`: version, port checks, CLI secret warnings
+- `common/app_meta.py`: compatibility wrapper over `core/app_meta.py`
 
 ## Patterns & Conventions
 
@@ -106,7 +111,7 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
 - Decorate router handlers with `@exceptions_handler`.
 - Use `request.app.state` and helpers in `app_state.py` for shared state instead of globals.
-- New config belongs in `ProxySettings` or `GigaChatCLI` with a `Field(...)` description.
+- New config belongs in `core/config/settings.py` with a `Field(...)` description.
 - Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
 

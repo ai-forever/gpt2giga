@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from gpt2giga.common.tools import map_tool_name_from_gigachat
-from gpt2giga.logger import sanitize_for_utf8
+from gpt2giga.core.logging.setup import sanitize_for_utf8
 from gpt2giga.protocol.gemini.request import (
     GeminiAPIError,
     model_resource_name,

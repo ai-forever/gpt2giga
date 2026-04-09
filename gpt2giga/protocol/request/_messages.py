@@ -8,7 +8,7 @@ from gigachat import GigaChat
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.message_utils import ensure_system_first
 from gpt2giga.common.tools import map_tool_name_to_gigachat
-from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
+from gpt2giga.core.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 
 
 class RequestTransformerMessagesMixin:

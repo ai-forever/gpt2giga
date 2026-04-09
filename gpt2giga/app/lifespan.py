@@ -6,7 +6,7 @@ from fastapi import FastAPI
 
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.wiring import close_runtime_services, wire_runtime_services
-from gpt2giga.logger import setup_logger
+from gpt2giga.core.logging.setup import setup_logger
 
 
 @asynccontextmanager

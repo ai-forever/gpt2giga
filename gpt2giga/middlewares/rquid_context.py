@@ -4,7 +4,7 @@ from typing import Callable
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from gpt2giga.logger import logger, rquid_context
+from gpt2giga.core.logging.setup import logger, rquid_context
 
 
 class RquidMiddleware(BaseHTTPMiddleware):

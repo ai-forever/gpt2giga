@@ -7,7 +7,7 @@ from gpt2giga.app_state import get_gigachat_client, get_response_store
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import stream_responses_generator
-from gpt2giga.logger import rquid_context
+from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.openapi_specs.openai import responses_openapi_extra
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 

@@ -3,7 +3,7 @@ from typing import Any
 from gigachat import GigaChat
 from gigachat.settings import SCOPE
 
-from gpt2giga.constants import _AUTH_KEYS
+from gpt2giga.core.constants import _AUTH_KEYS
 
 
 def pass_token_to_gigachat(gigachat_client: GigaChat, token: str) -> GigaChat:

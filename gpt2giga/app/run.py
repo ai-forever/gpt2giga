@@ -6,9 +6,9 @@ import uvicorn
 
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.factory import create_app
-from gpt2giga.common.app_meta import check_port_available, get_app_version
-from gpt2giga.constants import SECURITY_FIELDS
-from gpt2giga.logger import setup_logger
+from gpt2giga.core.app_meta import check_port_available, get_app_version
+from gpt2giga.core.constants import SECURITY_FIELDS
+from gpt2giga.core.logging.setup import setup_logger
 
 
 def run(

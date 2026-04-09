@@ -7,7 +7,7 @@ from starlette.responses import RedirectResponse
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.lifespan import lifespan
 from gpt2giga.auth import verify_api_key, verify_api_key_gemini
-from gpt2giga.common.app_meta import get_app_version
+from gpt2giga.core.app_meta import get_app_version
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.request_validation import RequestValidationMiddleware

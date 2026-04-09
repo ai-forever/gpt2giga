@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 from fastapi.responses import JSONResponse
 
 from gpt2giga.common.tools import map_tool_name_from_gigachat
-from gpt2giga.logger import rquid_context
+from gpt2giga.core.logging.setup import rquid_context
 
 
 def _map_stop_reason(finish_reason: Optional[str]) -> str:

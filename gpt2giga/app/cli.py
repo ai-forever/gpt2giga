@@ -5,8 +5,8 @@ import os
 
 from dotenv import find_dotenv, load_dotenv
 
-from gpt2giga.common.app_meta import warn_sensitive_cli_args
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.core.app_meta import warn_sensitive_cli_args
+from gpt2giga.core.config.settings import ProxyConfig
 
 
 def load_config() -> ProxyConfig:

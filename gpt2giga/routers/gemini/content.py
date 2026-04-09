@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client
-from gpt2giga.logger import rquid_context
+from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.openapi_specs.gemini import (
     gemini_batch_embed_contents_openapi_extra,
     gemini_count_tokens_openapi_extra,

@@ -10,7 +10,7 @@ from starlette.requests import Request
 
 from gpt2giga.app_state import get_gigachat_client, get_response_store
 from gpt2giga.common.tools import map_tool_name_from_gigachat
-from gpt2giga.logger import rquid_context
+from gpt2giga.core.logging.setup import rquid_context
 
 
 async def stream_chat_completion_generator(

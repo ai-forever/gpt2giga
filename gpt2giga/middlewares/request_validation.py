@@ -10,7 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
+from gpt2giga.core.constants import DEFAULT_MAX_REQUEST_BODY_BYTES
 
 
 class RequestValidationMiddleware(BaseHTTPMiddleware):

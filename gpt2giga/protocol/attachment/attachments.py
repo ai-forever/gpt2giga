@@ -13,7 +13,7 @@ import httpx
 from fastapi import HTTPException
 from gigachat import GigaChat
 
-from gpt2giga.constants import (
+from gpt2giga.core.constants import (
     DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES as CONST_DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
     DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES as CONST_DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES,
     DEFAULT_MAX_TEXT_FILE_SIZE_BYTES as CONST_DEFAULT_MAX_TEXT_FILE_SIZE_BYTES,

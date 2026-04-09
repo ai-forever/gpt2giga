@@ -10,7 +10,7 @@ from fastapi import Request
 from gigachat import GigaChat
 
 from gpt2giga.common.tools import map_tool_name_from_gigachat
-from gpt2giga.logger import rquid_context
+from gpt2giga.core.logging.setup import rquid_context
 
 
 async def _stream_anthropic_generator(

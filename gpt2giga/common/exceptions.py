@@ -6,8 +6,7 @@ import gigachat
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
-from gpt2giga.logger import sanitize_for_utf8
-from gpt2giga.logger import rquid_context
+from gpt2giga.core.logging.setup import rquid_context, sanitize_for_utf8
 
 ERROR_MAPPING = {
     gigachat.exceptions.BadRequestError: (400, "invalid_request_error", None),

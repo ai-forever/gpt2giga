@@ -20,8 +20,8 @@ from gpt2giga.common.tools import (
     convert_tool_to_giga_functions,
     map_tool_name_to_gigachat,
 )
-from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
-from gpt2giga.logger import sanitize_for_utf8
+from gpt2giga.core.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
+from gpt2giga.core.logging.setup import sanitize_for_utf8
 
 
 class RequestTransformerResponsesV2Mixin:
