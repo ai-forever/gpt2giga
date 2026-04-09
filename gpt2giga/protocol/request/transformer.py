@@ -11,10 +11,10 @@ from gpt2giga.common.message_utils import collapse_user_messages
 from gpt2giga.common.tools import map_tool_name_to_gigachat
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.core.logging.setup import sanitize_for_utf8
-from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
 from gpt2giga.protocol.request._base import RequestTransformerBaseMixin
 from gpt2giga.protocol.request._messages import RequestTransformerMessagesMixin
 from gpt2giga.protocol.request._responses_v2 import RequestTransformerResponsesV2Mixin
+from gpt2giga.providers.gigachat.attachments import AttachmentProcessor
 
 
 class RequestTransformer(

@@ -87,7 +87,7 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `protocol/response/processor.py` | Public `ResponseProcessor` facade for chat completions |
 | `protocol/response/_common.py` | Shared response status, usage, reasoning, and serialization helpers |
 | `protocol/response/_responses.py` | Responses API and Responses v2 output shaping helpers |
-| `protocol/attachment/attachments.py` | Image/audio/text attachment handling and cleanup |
+| `providers/gigachat/attachments.py` | Image/audio/text attachment handling, upload, and cleanup |
 | `protocol/batches.py` | Batch target mapping and JSONL transformations |
 | `protocol/anthropic/request.py` | Anthropic request → OpenAI-style intermediary |
 | `protocol/anthropic/response.py` | OpenAI/GigaChat result → Anthropic response |
