@@ -4,9 +4,9 @@ from typing import Annotated
 from fastapi import HTTPException, Security
 from fastapi.security import (
     APIKeyHeader,
-    HTTPBearer,
-    HTTPAuthorizationCredentials,
     APIKeyQuery,
+    HTTPAuthorizationCredentials,
+    HTTPBearer,
 )
 from starlette.requests import Request
 from starlette.status import HTTP_401_UNAUTHORIZED

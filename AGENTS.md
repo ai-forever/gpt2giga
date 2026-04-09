@@ -85,7 +85,7 @@ rg -n "@router\.(get|post|delete)" gpt2giga/routers
 rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
 
 # Find middleware classes
-rg -n "class .*Middleware" gpt2giga/middlewares
+rg -n "class .*Middleware" gpt2giga/api/middleware
 
 # Find batch/file support
 rg -n "batch|file" gpt2giga/routers gpt2giga/protocol gpt2giga/app_state.py

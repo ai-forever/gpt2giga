@@ -39,7 +39,8 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `api_server.py` | Compatibility wrapper over the new `app/*` modules |
 | `app_state.py` | Request/app-scoped accessors for GigaChat client, batch store, file store |
 | `cli.py` | Compatibility wrapper for `app/cli.py` |
-| `auth.py` | API-key verification dependency |
+| `api/dependencies/auth.py` | API-key verification dependencies |
+| `api/middleware/*` | HTTP middleware for auth-adjacent request processing |
 | `logger.py` | Compatibility wrapper for `core/logging/setup.py` |
 | `constants.py` | Compatibility wrapper for `core/constants.py` |
 | `models/config.py` | Compatibility wrapper for `core/config/settings.py` |
@@ -134,7 +135,7 @@ Remember that Starlette executes middleware in reverse registration order on req
 rg -n "@router\.(get|post|delete)" gpt2giga/routers
 
 # Find middleware classes
-rg -n "class .*Middleware" gpt2giga/middlewares
+rg -n "class .*Middleware" gpt2giga/api/middleware
 
 # Find request/response transformation methods
 rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/protocol

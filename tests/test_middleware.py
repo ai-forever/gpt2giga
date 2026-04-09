@@ -5,8 +5,8 @@ from fastapi import FastAPI
 from fastapi import Request
 from starlette.testclient import TestClient
 
-from gpt2giga.middlewares.pass_token import PassTokenMiddleware
-from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
+from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 
 app = FastAPI()
 app.add_middleware(PathNormalizationMiddleware, valid_roots=["v1"])
@@ -130,7 +130,7 @@ def test_pass_token_middleware(monkeypatch):
         raise ValueError("Boom")
 
     monkeypatch.setattr(
-        "gpt2giga.middlewares.pass_token.create_gigachat_client_for_request",
+        "gpt2giga.api.middleware.pass_token.create_gigachat_client_for_request",
         broken_create,
     )
 

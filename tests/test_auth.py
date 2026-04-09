@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from fastapi import HTTPException
 
-from gpt2giga.auth import verify_api_key
+from gpt2giga.api.dependencies.auth import verify_api_key
 from gpt2giga.models.config import ProxyConfig
 
 
@@ -78,7 +78,8 @@ def test_verify_api_key_uses_constant_time_comparison():
     cfg.proxy_settings.api_key = "secret"
     req = make_request({"authorization": "Bearer secret"}, cfg)
     with patch(
-        "gpt2giga.auth.secrets.compare_digest", wraps=secrets.compare_digest
+        "gpt2giga.api.dependencies.auth.secrets.compare_digest",
+        wraps=secrets.compare_digest,
     ) as mock_cmp:
         result = verify_api_key(req)
         mock_cmp.assert_called_once_with("secret", "secret")
@@ -91,7 +92,8 @@ def test_verify_api_key_constant_time_rejects_wrong_key():
     cfg.proxy_settings.api_key = "correct-key"
     req = make_request({"authorization": "Bearer wrong-key"}, cfg)
     with patch(
-        "gpt2giga.auth.secrets.compare_digest", wraps=secrets.compare_digest
+        "gpt2giga.api.dependencies.auth.secrets.compare_digest",
+        wraps=secrets.compare_digest,
     ) as mock_cmp:
         with pytest.raises(HTTPException) as ex:
             verify_api_key(req)
