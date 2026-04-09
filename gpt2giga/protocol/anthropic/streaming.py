@@ -30,6 +30,26 @@ async def _stream_anthropic_generator(
     try:
         logger = getattr(request.app.state, "logger", None)
 
+        function_call_data: Optional[Dict[str, str]] = None
+        content_block_started = False
+        thinking_block_emitted = False
+        content_index = 0
+        input_tokens = 0
+        output_tokens = 0
+
+        stream = giga_client.astream(chat_messages)
+        buffered_chunks = []
+
+        try:
+            first_chunk = await anext(stream)
+        except StopAsyncIteration:
+            first_chunk = None
+        else:
+            buffered_chunks.append(first_chunk)
+            initial_usage = first_chunk.model_dump().get("usage") or {}
+            input_tokens = initial_usage.get("prompt_tokens", 0)
+            output_tokens = initial_usage.get("completion_tokens", 0)
+
         yield sse(
             "message_start",
             {
@@ -42,19 +62,22 @@ async def _stream_anthropic_generator(
                     "model": model,
                     "stop_reason": None,
                     "stop_sequence": None,
-                    "usage": {"input_tokens": 0, "output_tokens": 0},
+                    "usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                    },
                 },
             },
         )
         yield sse("ping", {"type": "ping"})
 
-        function_call_data: Optional[Dict[str, str]] = None
-        content_block_started = False
-        thinking_block_emitted = False
-        content_index = 0
-        output_tokens = 0
+        async def iter_chunks():
+            for chunk in buffered_chunks:
+                yield chunk
+            async for chunk in stream:
+                yield chunk
 
-        async for chunk in giga_client.astream(chat_messages):
+        async for chunk in iter_chunks():
             if await request.is_disconnected():
                 if logger:
                     logger.info(f"[{rquid}] Client disconnected during streaming")
@@ -169,8 +192,9 @@ async def _stream_anthropic_generator(
                 )
 
             chunk_usage = giga_dict.get("usage")
-            if chunk_usage and chunk_usage.get("completion_tokens"):
-                output_tokens = chunk_usage["completion_tokens"]
+            if chunk_usage:
+                input_tokens = chunk_usage.get("prompt_tokens", input_tokens)
+                output_tokens = chunk_usage.get("completion_tokens", output_tokens)
 
         stop_reason = "tool_use" if function_call_data else "end_turn"
         if content_block_started:
@@ -187,7 +211,10 @@ async def _stream_anthropic_generator(
                     "stop_reason": stop_reason,
                     "stop_sequence": None,
                 },
-                "usage": {"output_tokens": output_tokens},
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                },
             },
         )
         yield sse("message_stop", {"type": "message_stop"})

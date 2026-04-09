@@ -12,7 +12,7 @@ from gpt2giga.models.config import ProxyConfig
 
 def make_request(headers: dict, config: ProxyConfig):
     app = SimpleNamespace(state=SimpleNamespace(config=config))
-    req = SimpleNamespace(headers=headers, app=app)
+    req = SimpleNamespace(headers=headers, app=app, query_params={})
     return req
 
 
@@ -27,6 +27,21 @@ def test_verify_api_key_success_x_api_key():
     cfg = ProxyConfig()
     cfg.proxy_settings.api_key = "secret"
     req = make_request({"x-api-key": "secret"}, cfg)
+    assert verify_api_key(req) == "secret"
+
+
+def test_verify_api_key_success_x_goog_api_key():
+    cfg = ProxyConfig()
+    cfg.proxy_settings.api_key = "secret"
+    req = make_request({"x-goog-api-key": "secret"}, cfg)
+    assert verify_api_key(req) == "secret"
+
+
+def test_verify_api_key_success_gemini_query_key():
+    cfg = ProxyConfig()
+    cfg.proxy_settings.api_key = "secret"
+    req = make_request({}, cfg)
+    req.query_params = {"key": "secret"}
     assert verify_api_key(req) == "secret"
 
 

@@ -11,7 +11,7 @@ class MockResponse:
     def __init__(self, data):
         self.data = data
 
-    def model_dump(self):
+    def model_dump(self, *args, **kwargs):
         return self.data
 
 

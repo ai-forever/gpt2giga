@@ -8,5 +8,3 @@ router = APIRouter(tags=["LiteLLM"])
 router.include_router(models_router)
 
 __all__ = ["router"]
-
-

@@ -23,7 +23,7 @@ async def test_request_transformer_collapse_messages():
         {"role": "user", "content": "world"},
     ]
     data = {"messages": messages}
-    chat = await rt.send_to_gigachat(data)
+    chat = await rt.prepare_chat_completion(data)
     # После collapse два подряд user должны склеиться
     # chat is now a dict
     assert len(chat["messages"]) == 1
@@ -54,7 +54,7 @@ async def test_request_transformer_tools_to_functions():
         ],
         "messages": [{"role": "user", "content": "hi"}],
     }
-    chat = await rt.send_to_gigachat(data)
+    chat = await rt.prepare_chat_completion(data)
     # chat is dict
     assert chat.get("functions") and len(chat["functions"]) == 1
 
@@ -63,7 +63,7 @@ class MockResponse:
     def __init__(self, data):
         self.data = data
 
-    def model_dump(self):
+    def model_dump(self, *args, **kwargs):
         return self.data
 
 

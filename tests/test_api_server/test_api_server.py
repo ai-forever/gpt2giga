@@ -13,6 +13,13 @@ def test_root_redirect():
     assert response.status_code == 200
 
 
+def test_root_head_allowed():
+    app = create_app()
+    client = TestClient(app)
+    response = client.head("/")
+    assert response.status_code == 200
+
+
 def test_cors_headers_present():
     app = create_app()
     client = TestClient(app)
@@ -53,6 +60,23 @@ def test_v1_litellm_router_is_registered(monkeypatch):
 
     with TestClient(create_app()) as client:
         response = client.get("/v1/model/info")
+        assert response.status_code != 404
+
+
+def test_v1beta_gemini_router_is_registered(monkeypatch):
+    class FakeGigaChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aget_models(self):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(data=[], object_="list")
+
+    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+
+    with TestClient(create_app()) as client:
+        response = client.get("/v1beta/models")
         assert response.status_code != 404
 
 

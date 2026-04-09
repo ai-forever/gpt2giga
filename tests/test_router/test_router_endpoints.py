@@ -1,5 +1,4 @@
 import sys
-from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,7 +13,7 @@ class MockResponse:
     def __init__(self, data):
         self.data = data
 
-    def model_dump(self):
+    def model_dump(self, *args, **kwargs):
         return self.data
 
 
@@ -36,6 +35,40 @@ class FakeGigachat:
             }
         )
 
+    async def achat_v2(self, chat):
+        storage = chat.get("storage")
+        thread_id = None
+        if isinstance(storage, dict):
+            thread_id = storage.get("thread_id")
+
+        if thread_id == "thread-1":
+            text = "continued"
+        else:
+            thread_id = "thread-1"
+            text = "ok"
+
+        return MockResponse(
+            {
+                "model": "gpt-x",
+                "thread_id": thread_id,
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "content": [{"text": text}],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 1,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        )
+
     def astream(self, chat):
         async def gen():
             yield MockResponse(
@@ -47,31 +80,48 @@ class FakeGigachat:
 
         return gen()
 
+    def astream_v2(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "model": "gpt-x",
+                    "created_at": 123,
+                    "thread_id": "thread-1",
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "he"}],
+                        }
+                    ],
+                }
+            )
+            yield MockResponse(
+                {
+                    "model": "gpt-x",
+                    "created_at": 123,
+                    "thread_id": "thread-1",
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "llo"}],
+                        }
+                    ],
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 1,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                }
+            )
+
+        return gen()
+
     async def aembeddings(self, texts, model):
         return {"data": [{"embedding": [0.1, 0.2], "index": 0}], "model": model}
-
-
-class FakeGigachatReasoning:
-    async def achat(self, chat):
-        return MockResponse(
-            {
-                "choices": [
-                    {
-                        "message": {
-                            "role": "assistant",
-                            "content": "The capital of France is Paris.",
-                            "reasoning_content": "This is a straightforward geography question.",
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 1,
-                    "completion_tokens": 1,
-                    "total_tokens": 2,
-                },
-            }
-        )
 
 
 class FakeRequestTransformer:
@@ -80,6 +130,28 @@ class FakeRequestTransformer:
 
     async def prepare_response(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
+
+    async def prepare_response_v2(
+        self,
+        data,
+        giga_client=None,
+        response_store=None,
+    ):
+        thread_id = None
+        conversation = data.get("conversation")
+        if isinstance(conversation, dict):
+            thread_id = conversation.get("id")
+        elif data.get("previous_response_id") and response_store:
+            metadata = response_store.get(data["previous_response_id"], {})
+            thread_id = metadata.get("thread_id")
+
+        return {
+            "model": data.get("model", "giga"),
+            "messages": [
+                {"role": "user", "content": [{"text": data.get("input", "")}]}
+            ],
+            "storage": {"thread_id": thread_id} if thread_id else True,
+        }
 
 
 def make_app(monkeypatch=None):
@@ -95,7 +167,9 @@ def make_app(monkeypatch=None):
             def decode(self, ids):
                 return "TEXT"
 
-        fake_tk = SimpleNamespace(encoding_for_model=lambda m: FakeEnc())
+        fake_tk = type(
+            "FakeTokenizer", (), {"encoding_for_model": lambda self, m: FakeEnc()}
+        )()
         monkeypatch.setattr(
             sys.modules["gpt2giga.protocol.batches"], "tiktoken", fake_tk
         )
@@ -110,11 +184,12 @@ def test_responses_non_stream():
     body = resp.json()
     assert body["object"] == "response"
     assert body["status"] == "completed"
+    assert body["conversation"] == {"id": "thread-1"}
+    assert "store" not in body
 
 
-def test_responses_non_stream_includes_reasoning_item():
+def test_responses_non_stream_preserves_reasoning_config():
     app = make_app()
-    app.state.gigachat_client = FakeGigachatReasoning()
     client = TestClient(app)
     resp = client.post(
         "/responses",
@@ -127,11 +202,30 @@ def test_responses_non_stream_includes_reasoning_item():
     assert resp.status_code == 200
     body = resp.json()
     assert body["reasoning"] == {"effort": "high", "summary": "auto"}
-    assert body["output"][0]["type"] == "reasoning"
-    assert body["output"][0]["summary"][0]["text"] == (
-        "This is a straightforward geography question."
+    assert body["output"][0]["type"] == "message"
+    assert body["output"][0]["content"][0]["text"] == "ok"
+
+
+def test_responses_non_stream_previous_response_id_reuses_thread():
+    app = make_app()
+    client = TestClient(app)
+
+    first = client.post("/responses", json={"input": "hi", "model": "gpt-x"})
+    assert first.status_code == 200
+    first_body = first.json()
+
+    second = client.post(
+        "/responses",
+        json={
+            "input": "continue",
+            "model": "gpt-x",
+            "previous_response_id": first_body["id"],
+        },
     )
-    assert body["output"][1]["content"][0]["text"] == "The capital of France is Paris."
+    assert second.status_code == 200
+    second_body = second.json()
+    assert second_body["conversation"] == first_body["conversation"]
+    assert second_body["output"][0]["content"][0]["text"] == "continued"
 
 
 def test_embeddings_with_token_ids(monkeypatch):

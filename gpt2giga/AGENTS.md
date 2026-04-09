@@ -52,10 +52,13 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `routers/openai/batches.py` | `/batches` |
 | `routers/anthropic/messages.py` | `/messages` and `/messages/count_tokens` |
 | `routers/anthropic/batches.py` | `/messages/batches` |
+| `routers/gemini/content.py` | `/v1beta/models/*:generateContent`, `countTokens`, embeddings |
+| `routers/gemini/models.py` | `/v1beta/models` and `/v1beta/models/{model}` |
 | `routers/system_router.py` | `/health`, `/ping` |
 | `routers/logs_router.py` | `/logs/{last_n_lines}`, `/logs/stream`, `/logs/html` |
 
 - OpenAI and Anthropic routers are mounted both at root and `/v1`.
+- Gemini routes are mounted under `/v1beta`.
 - System routes are root-only.
 - Log routes are disabled in `PROD`.
 
@@ -63,13 +66,21 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 
 | Path | Purpose |
 |---|---|
-| `protocol/request/transformer.py` | OpenAI-style payload → GigaChat chat payload |
-| `protocol/response/processor.py` | GigaChat response → OpenAI-style response |
+| `protocol/request/transformer.py` | Public `RequestTransformer` facade and chat/responses entrypoints |
+| `protocol/request/_base.py` | Shared request parameter, schema, and validation helpers |
+| `protocol/request/_messages.py` | Message role/content normalization and attachment handling |
+| `protocol/request/_responses_v2.py` | Native Responses API v2 request/tool/thread mapping |
+| `protocol/response/processor.py` | Public `ResponseProcessor` facade for chat completions |
+| `protocol/response/_common.py` | Shared response status, usage, reasoning, and serialization helpers |
+| `protocol/response/_responses.py` | Responses API and Responses v2 output shaping helpers |
 | `protocol/attachment/attachments.py` | Image/audio/text attachment handling and cleanup |
 | `protocol/batches.py` | Batch target mapping and JSONL transformations |
 | `protocol/anthropic/request.py` | Anthropic request → OpenAI-style intermediary |
 | `protocol/anthropic/response.py` | OpenAI/GigaChat result → Anthropic response |
 | `protocol/anthropic/streaming.py` | Anthropic SSE/event translation |
+| `protocol/gemini/request.py` | Gemini request → OpenAI-style intermediary |
+| `protocol/gemini/response.py` | OpenAI/GigaChat result → Gemini response/error |
+| `protocol/gemini/streaming.py` | Gemini SSE/data-only translation |
 
 ## Common Utilities
 
@@ -86,6 +97,8 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 ## Patterns & Conventions
 
 - Keep reusable translation logic in `protocol/` or `common/`, not duplicated in routers.
+- Keep `RequestTransformer` and `ResponseProcessor` as the public import surface; grow the underscored helper modules instead of turning the facade files back into mega-modules.
+- Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
 - Decorate router handlers with `@exceptions_handler`.
 - Use `request.app.state` and helpers in `app_state.py` for shared state instead of globals.
 - New config belongs in `ProxySettings` or `GigaChatCLI` with a `Field(...)` description.
@@ -115,6 +128,9 @@ rg -n "class .*Middleware" gpt2giga/middlewares
 
 # Find request/response transformation methods
 rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/protocol
+
+# Find split request/response internals
+rg --files gpt2giga/protocol/request gpt2giga/protocol/response
 
 # Find batch/file state usage
 rg -n "get_batch_store|get_file_store|batch_metadata_store|file_metadata_store" gpt2giga

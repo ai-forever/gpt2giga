@@ -3,6 +3,7 @@
 ## Package Identity
 
 - **What:** Runnable examples for using `gpt2giga` through OpenAI and Anthropic-compatible SDKs
+- **What:** Runnable examples for using `gpt2giga` through OpenAI, Anthropic, and Gemini-compatible SDKs
 - **Audience:** Users validating proxy behavior or copying starter integrations
 - **Default target:** `http://localhost:8090`
 
@@ -13,6 +14,7 @@
 | `examples/openai/chat_completions/` | OpenAI Chat Completions examples |
 | `examples/openai/responses/` | OpenAI Responses API examples |
 | `examples/anthropic/` | Anthropic Messages API examples |
+| `examples/gemini/` | Gemini Developer API examples |
 | `examples/openai/files.py` | OpenAI Files API example |
 | `examples/openai/batches.py` | OpenAI Batches API example |
 | `examples/openai/embeddings.py` | Embeddings usage |
@@ -33,11 +35,14 @@
 - `anthropic/message_batches.py`: Anthropic Message Batches API
 - `anthropic/messages_stream.py`: streaming Messages API
 - `anthropic/count_tokens.py`: token counting endpoint
+- `gemini/generate_content.py`: basic Gemini `generate_content`
+- `gemini/function_calling.py`: Gemini function declarations / tool responses
+- `gemini/structured_output.py`: Gemini JSON schema output
 
 ## Patterns & Conventions
 
 - Keep examples self-contained and runnable with repo dependencies.
-- Use real SDK clients (`openai`, `anthropic`, `openai-agents`) rather than importing internal `gpt2giga` modules.
+- Use real SDK clients (`openai`, `anthropic`, `google-genai`, `openai-agents`) rather than importing internal `gpt2giga` modules.
 - Default to `api_key="0"` or another placeholder unless the example is specifically about proxy API-key auth.
 - Prefer `GigaChat-2-Max` in examples unless the example is about model selection.
 - Print or stream visible output so users can confirm behavior quickly.
@@ -59,6 +64,7 @@ uv run gpt2giga
 uv run python examples/openai/chat_completions/chat_completion.py
 uv run python examples/openai/responses/single_prompt.py
 uv run python examples/anthropic/messages.py
+uv run python examples/gemini/generate_content.py
 ```
 
 ## Quick Find Commands
@@ -81,6 +87,7 @@ rg -n "image_url|base64|document" examples
 
 - `examples/openai_agents.py` needs the `integrations` dependency group.
 - Anthropic examples use the `anthropic` SDK directly, not the OpenAI client.
+- Gemini examples use the official `google-genai` SDK and also need the `integrations` dependency group.
 - OpenAI examples were moved under `examples/openai/`; keep README links and run commands aligned with that layout.
 - Examples are excluded from coverage and are not the canonical place to implement application logic.
 - Each API-style folder has its own `README.md`; update those alongside code examples when behavior changes.

@@ -1,16 +1,22 @@
+"""GigaChat response transformation entry point."""
+
 import json
 import time
 import uuid
-from typing import Dict, Literal, Optional
+from typing import Dict, Optional
 
 from gigachat.models import ChatCompletion, ChatCompletionChunk
-from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
 from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.protocol.response._common import ResponseProcessorCommonMixin
+from gpt2giga.protocol.response._responses import ResponseProcessorResponsesMixin
 
 
-class ResponseProcessor:
-    """Обработчик ответов от GigaChat в формат OpenAI."""
+class ResponseProcessor(
+    ResponseProcessorResponsesMixin,
+    ResponseProcessorCommonMixin,
+):
+    """Transform GigaChat responses into OpenAI-compatible payloads."""
 
     def __init__(self, logger=None, mode: str = "DEV"):
         if logger is None:
@@ -20,10 +26,6 @@ class ResponseProcessor:
         self.logger = logger
         self._mode = mode.upper() if isinstance(mode, str) else "DEV"
 
-    @property
-    def _is_prod_mode(self) -> bool:
-        return self._mode == "PROD"
-
     def process_response(
         self,
         giga_resp: ChatCompletion,
@@ -31,8 +33,8 @@ class ResponseProcessor:
         response_id: str,
         request_data: Optional[Dict] = None,
     ) -> dict:
-        """Обрабатывает обычный ответ от GigaChat."""
-        giga_dict = giga_resp.model_dump()
+        """Process a non-streaming chat-completions response."""
+        giga_dict = self._safe_model_dump(giga_resp)
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
         is_structured_output = False
@@ -74,188 +76,6 @@ class ResponseProcessor:
             )
         return result
 
-    def process_response_api(
-        self,
-        data: dict,
-        giga_resp: ChatCompletion,
-        gpt_model: str,
-        response_id: str,
-    ) -> dict:
-        giga_dict = giga_resp.model_dump()
-        is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
-
-        is_structured_output = False
-        text_param = data.get("text")
-        if text_param and isinstance(text_param, dict):
-            fmt = text_param.get("format")
-            if fmt and isinstance(fmt, dict) and fmt.get("type") == "json_schema":
-                is_structured_output = True
-
-        for choice in giga_dict["choices"]:
-            self._process_choice_responses(choice, response_id)
-
-        response_text = {"format": {"type": "text"}}
-        if text_param and isinstance(text_param, dict):
-            response_text = text_param
-
-        result = self._build_responses_api_result(
-            request_data=data,
-            gpt_model=gpt_model,
-            response_id=response_id,
-            output=self._create_output_responses(
-                giga_dict,
-                is_tool_call,
-                response_id,
-                is_structured_output=is_structured_output,
-            ),
-            usage=self._build_response_usage(giga_dict.get("usage")),
-            response_text=response_text,
-        )
-        if self._is_prod_mode:
-            self.logger.bind(event="responses_api_response").debug(
-                "Processed responses API response (payload omitted in PROD)"
-            )
-        else:
-            output_count = len(result.get("output", []))
-            usage = result.get("usage") or {}
-            self.logger.bind(
-                event="responses_api_response",
-                response_id=result.get("id"),
-                output_count=output_count,
-                total_tokens=usage.get("total_tokens"),
-            ).debug(
-                f"Processed responses API: {output_count} outputs, "
-                f"tokens={usage.get('total_tokens')}"
-            )
-
-        return result
-
-    @staticmethod
-    def _create_reasoning_item(reasoning_text: Optional[str], response_id: str) -> list:
-        if not reasoning_text:
-            return []
-        return [
-            {
-                "id": f"rs_{response_id}",
-                "type": "reasoning",
-                "summary": [
-                    {
-                        "type": "summary_text",
-                        "text": reasoning_text,
-                    }
-                ],
-            }
-        ]
-
-    @staticmethod
-    def _build_reasoning_config(
-        request_data: Optional[Dict],
-    ) -> dict[str, Optional[str]]:
-        reasoning_data = (
-            request_data.get("reasoning") if isinstance(request_data, dict) else None
-        )
-        if isinstance(reasoning_data, dict):
-            return {
-                "effort": reasoning_data.get("effort"),
-                "summary": reasoning_data.get("summary"),
-            }
-
-        effort = (
-            request_data.get("reasoning_effort")
-            if isinstance(request_data, dict)
-            else None
-        )
-        return {"effort": effort, "summary": None}
-
-    @classmethod
-    def _build_responses_api_result(
-        cls,
-        request_data: Optional[Dict],
-        gpt_model: str,
-        response_id: str,
-        output: list,
-        usage: Optional[Dict],
-        response_text: dict,
-    ) -> dict:
-        request_data = request_data or {}
-        return {
-            "id": f"resp_{response_id}",
-            "object": "response",
-            "created_at": int(time.time()),
-            "status": "completed",
-            "error": None,
-            "incomplete_details": None,
-            "instructions": request_data.get("instructions"),
-            "max_output_tokens": request_data.get("max_output_tokens"),
-            "model": gpt_model,
-            "output": output,
-            "parallel_tool_calls": request_data.get("parallel_tool_calls", True),
-            "previous_response_id": request_data.get("previous_response_id"),
-            "reasoning": cls._build_reasoning_config(request_data),
-            "store": request_data.get("store", True),
-            "temperature": request_data.get("temperature", 1),
-            "text": response_text,
-            "tool_choice": request_data.get("tool_choice", "auto"),
-            "tools": request_data.get("tools", []),
-            "top_p": request_data.get("top_p", 1),
-            "truncation": request_data.get("truncation", "disabled"),
-            "usage": usage,
-            "user": request_data.get("user"),
-            "metadata": request_data.get("metadata", {}),
-        }
-
-    @staticmethod
-    def _create_message_item(text: Optional[str], response_id: str) -> dict:
-        return {
-            "type": "message",
-            "id": f"msg_{response_id}",
-            "status": "completed",
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "output_text",
-                    "text": text,
-                    "annotations": [],
-                    "logprobs": [],
-                }
-            ],
-        }
-
-    @staticmethod
-    def _create_output_responses(
-        data: dict,
-        is_tool_call: bool = False,
-        response_id: Optional[str] = None,
-        message_key: Literal["message", "delta"] = "message",
-        is_structured_output: bool = False,
-    ) -> list:
-        response_id = str(uuid.uuid4()) if response_id is None else response_id
-        choice = data["choices"][0]
-        message = choice.get(message_key, {})
-        reasoning_items = ResponseProcessor._create_reasoning_item(
-            message.get("reasoning_content"), response_id
-        )
-        try:
-            if is_tool_call and not is_structured_output:
-                return reasoning_items + [message["output"]]
-            if is_tool_call and is_structured_output:
-                output_item = message["output"]
-                arguments = output_item.get("arguments", "{}")
-                return reasoning_items + [
-                    ResponseProcessor._create_message_item(arguments, response_id)
-                ]
-            return reasoning_items + [
-                ResponseProcessor._create_message_item(
-                    message.get("content"), response_id
-                )
-            ]
-        except Exception:
-            return reasoning_items + [
-                ResponseProcessor._create_message_item(
-                    message.get("content"), response_id
-                )
-            ]
-
     def process_stream_chunk(
         self,
         giga_resp: ChatCompletionChunk,
@@ -263,8 +83,8 @@ class ResponseProcessor:
         response_id: str,
         request_data: Optional[Dict] = None,
     ) -> dict:
-        """Обрабатывает стриминговый чанк от GigaChat."""
-        giga_dict = giga_resp.model_dump()
+        """Process a streaming chat-completions chunk."""
+        giga_dict = self._safe_model_dump(giga_resp)
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
         is_structured_output = False
@@ -303,37 +123,6 @@ class ResponseProcessor:
             ).debug("Processed stream chunk")
         return result
 
-    def process_stream_chunk_response(
-        self,
-        giga_resp: ChatCompletionChunk,
-        sequence_number: int = 0,
-        response_id: Optional[str] = None,
-    ) -> dict:
-        giga_dict = giga_resp.model_dump()
-        response_id = str(uuid.uuid4()) if response_id is None else response_id
-        for choice in giga_dict["choices"]:
-            self._process_choice_responses(choice, response_id, is_stream=True)
-        delta = giga_dict["choices"][0]["delta"]
-        if delta["content"]:
-            result = ResponseTextDeltaEvent(
-                content_index=0,
-                delta=delta["content"],
-                item_id=f"msg_{response_id}",
-                output_index=0,
-                logprobs=[],
-                type="response.output_text.delta",
-                sequence_number=sequence_number,
-            ).dict()
-        else:
-            result = self._create_output_responses(
-                giga_dict,
-                is_tool_call=True,
-                message_key="delta",
-                response_id=response_id,
-            )
-
-        return result
-
     def _process_choice(
         self,
         choice: Dict,
@@ -341,7 +130,7 @@ class ResponseProcessor:
         is_stream: bool = False,
         is_structured_output: bool = False,
     ):
-        """Обрабатывает отдельный choice."""
+        """Process a single chat choice."""
         message_key = "delta" if is_stream else "message"
 
         choice["index"] = 0
@@ -375,7 +164,7 @@ class ResponseProcessor:
                 self._process_function_call(message, is_tool_call)
 
     def _process_function_call(self, message: Dict, is_tool_call: bool):
-        """Обрабатывает function call."""
+        """Process a chat-completions function call."""
         try:
             arguments = json.dumps(
                 message["function_call"]["arguments"],
@@ -389,7 +178,7 @@ class ResponseProcessor:
             if is_tool_call:
                 message["tool_calls"] = [
                     {
-                        "index": 0,  # Required for streaming tool calls
+                        "index": 0,
                         "id": f"call_{uuid.uuid4()}",
                         "type": "function",
                         "function": function_call,
@@ -399,71 +188,5 @@ class ResponseProcessor:
             else:
                 message["function_call"] = function_call
             message.pop("functions_state_id", None)
-        except Exception as e:
-            self.logger.error(f"Error processing function call: {e}")
-
-    def _process_choice_responses(
-        self, choice: Dict, response_id: str, is_stream: bool = False
-    ):
-        """Обрабатывает отдельный choice (Responses API)."""
-        message_key = "delta" if is_stream else "message"
-
-        choice["index"] = 0
-        choice["logprobs"] = None
-
-        if message_key in choice:
-            message = choice[message_key]
-            message["refusal"] = None
-
-            if message.get("role") == "assistant" and message.get("function_call"):
-                self._process_function_call_responses(message, response_id)
-
-    def _process_function_call_responses(self, message: Dict, response_id: str):
-        """Обрабатывает function call (Responses API)."""
-        try:
-            arguments = json.dumps(
-                message["function_call"]["arguments"],
-                ensure_ascii=False,
-            )
-            message["output"] = ResponseFunctionToolCall(
-                arguments=arguments,
-                call_id=f"call_{response_id}",
-                name=map_tool_name_from_gigachat(message["function_call"]["name"]),
-                id=f"fc_{message['functions_state_id']}",
-                status="completed",
-                type="function_call",
-            ).model_dump()
-
-        except Exception as e:
-            self.logger.error(f"Error processing function call: {e}")
-
-    @staticmethod
-    def _build_usage(usage_data: Optional[Dict]) -> Optional[Dict]:
-        """Строит объект usage."""
-        if not usage_data:
-            return None
-
-        return {
-            "prompt_tokens": usage_data["prompt_tokens"],
-            "completion_tokens": usage_data["completion_tokens"],
-            "total_tokens": usage_data["total_tokens"],
-            "prompt_tokens_details": {
-                "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
-            },
-            "completion_tokens_details": {"reasoning_tokens": 0},
-        }
-
-    @staticmethod
-    def _build_response_usage(usage_data: Optional[Dict]) -> Optional[Dict]:
-        if not usage_data:
-            return None
-        return {
-            "input_tokens": usage_data.get("prompt_tokens", 0),
-            "output_tokens": usage_data.get("completion_tokens", 0),
-            "total_tokens": usage_data["total_tokens"],
-            "prompt_tokens_details": {
-                "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
-            },
-            "input_tokens_details": {"cached_tokens": 0},
-            "output_tokens_details": {"reasoning_tokens": 0},
-        }
+        except Exception as exc:
+            self.logger.error(f"Error processing function call: {exc}")

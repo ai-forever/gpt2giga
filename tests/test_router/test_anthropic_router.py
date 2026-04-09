@@ -31,7 +31,7 @@ class MockResponse:
     def __init__(self, data):
         self.data = data
 
-    def model_dump(self):
+    def model_dump(self, *args, **kwargs):
         return self.data
 
 
@@ -1004,6 +1004,18 @@ class TestMessagesEndpoint:
         assert "content_block_stop" in events
         assert "message_delta" in events
         assert "message_stop" in events
+
+        data_lines = [
+            line.replace("data: ", "") for line in lines if line.startswith("data: ")
+        ]
+        for data in data_lines:
+            parsed = json.loads(data)
+            if parsed.get("type") == "message_delta":
+                assert parsed["usage"]["input_tokens"] == 10
+                assert parsed["usage"]["output_tokens"] == 2
+                break
+        else:
+            raise AssertionError("message_delta event not found")
 
     def test_stream_function_call(self):
         app = make_app(FakeGigachatFunctionCall())

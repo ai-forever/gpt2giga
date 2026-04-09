@@ -54,6 +54,17 @@ traefik-down:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_TRAEFIK) down
 
 
+COMPOSE_MULTIPLE = compose/multiple.yaml
+
+multiple-up:
+	$(DOCKER_COMPOSE) -f $(COMPOSE_MULTIPLE) up
+
+multiple-up-d:
+	$(DOCKER_COMPOSE) -f $(COMPOSE_MULTIPLE) up -d
+
+multiple-down:
+	$(DOCKER_COMPOSE) -f $(COMPOSE_MULTIPLE) down
+
 COMPOSE_OBSERVE_MULTIPLE = compose/observe-multiple.yaml
 
 observe-multiple:

@@ -7,7 +7,7 @@ from gigachat import GigaChat
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
-from gpt2giga.auth import verify_api_key
+from gpt2giga.auth import verify_api_key, verify_api_key_gemini
 from gpt2giga.cli import load_config
 from gpt2giga.common.app_meta import check_port_available, get_app_version
 from gpt2giga.constants import SECURITY_FIELDS
@@ -17,7 +17,9 @@ from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
+from gpt2giga.protocol.gemini.response import GeminiAPIError, gemini_error_response
 from gpt2giga.routers.anthropic import router as anthropic_router
+from gpt2giga.routers.gemini import router as gemini_router
 from gpt2giga.routers.litellm import router as litellm_router
 from gpt2giga.routers.logs_router import logs_api_router, logs_router
 from gpt2giga.routers.openai import router as openai_router
@@ -113,6 +115,15 @@ def create_app(config=None) -> FastAPI:
 
     app.state.config = config
 
+    @app.exception_handler(GeminiAPIError)
+    async def _handle_gemini_api_error(_, exc: GeminiAPIError):
+        return gemini_error_response(
+            status_code=exc.status_code,
+            status=exc.status,
+            message=exc.message,
+            details=exc.details,
+        )
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow_origins,
@@ -126,6 +137,7 @@ def create_app(config=None) -> FastAPI:
         PathNormalizationMiddleware,
         valid_roots=[
             "v1",
+            "v1beta",
             "chat",
             "models",
             "embeddings",
@@ -145,13 +157,14 @@ def create_app(config=None) -> FastAPI:
     if config.proxy_settings.pass_token:
         app.add_middleware(PassTokenMiddleware)
 
-    @app.get("/", include_in_schema=False)
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     async def docs_redirect():
         if is_prod_mode:
             return {"status": "ok", "mode": "PROD"}
         return RedirectResponse(url="/docs")
 
     api_dependencies = [Depends(verify_api_key)] if auth_required else []
+    gemini_dependencies = [Depends(verify_api_key_gemini)] if auth_required else []
     app.include_router(openai_router, dependencies=api_dependencies)
     app.include_router(
         openai_router,
@@ -173,6 +186,12 @@ def create_app(config=None) -> FastAPI:
         dependencies=api_dependencies,
     )
     app.include_router(litellm_router, dependencies=api_dependencies)
+    app.include_router(
+        gemini_router,
+        prefix="/v1beta",
+        tags=["V1beta Gemini"],
+        dependencies=gemini_dependencies,
+    )
     app.include_router(system_router)
     if not is_prod_mode:
         app.include_router(logs_api_router, dependencies=api_dependencies)

@@ -70,6 +70,7 @@ SENSITIVE_KEYS = frozenset(
         "api_key",
         "api-key",
         "x-api-key",
+        "x-goog-api-key",
         "token",
         "access_token",
         "refresh_token",

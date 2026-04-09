@@ -33,7 +33,6 @@ async def chat_completions(request: Request):
         return state.response_processor.process_response(
             response, data["model"], current_rquid, request_data=data
         )
-
     return StreamingResponse(
         stream_chat_completion_generator(
             request, data["model"], chat_messages, current_rquid, giga_client
