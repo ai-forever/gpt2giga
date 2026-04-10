@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from gpt2giga.app.dependencies import RuntimeProviders, RuntimeServices
+from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.features.chat.service import ChatService, get_chat_service_from_state
 
 
@@ -37,16 +38,39 @@ class FakeClient:
 
     async def achat_v2(self, chat):
         self.last_request_v2 = chat
-        return SimpleNamespace(payload=chat)
+        return SimpleNamespace(
+            payload={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "ok-v2"}],
+                    }
+                ],
+                "finish_reason": "stop",
+            }
+        )
 
 
 class LegacyRequestTransformer:
     def __init__(self):
         self.calls = []
+        self.calls_v2 = []
 
     async def prepare_chat_completion(self, data, giga_client=None):
         self.calls.append((data, giga_client))
         return {"messages": data["messages"], "model": data["model"]}
+
+    async def prepare_chat_completion_v2(self, data, giga_client=None):
+        self.calls_v2.append((data, giga_client))
+        return {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": str(data["messages"][0]["content"])}],
+                }
+            ],
+            "model": data["model"],
+        }
 
 
 class LegacyResponseProcessor:
@@ -62,6 +86,36 @@ class LegacyResponseProcessor:
         self, giga_resp, gpt_model, response_id, request_data=None
     ):
         return {"id": response_id, "model": gpt_model, "payload": giga_resp}
+
+    def process_response_v2(self, giga_resp, gpt_model, response_id, request_data=None):
+        normalized = self.normalize_chat_v2_response(giga_resp)
+        return {
+            "id": response_id,
+            "model": gpt_model,
+            "payload": normalized,
+            "request_model": request_data["model"],
+        }
+
+    def process_stream_chunk_v2(
+        self, giga_resp, gpt_model, response_id, request_data=None
+    ):
+        return {"id": response_id, "model": gpt_model, "payload": giga_resp}
+
+    def normalize_chat_v2_response(self, giga_resp):
+        payload = giga_resp.payload
+        message = (payload.get("messages") or [{}])[0]
+        text_part = (message.get("content") or [{"text": ""}])[0]
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": message.get("role", "assistant"),
+                        "content": text_part.get("text", ""),
+                    },
+                    "finish_reason": payload.get("finish_reason", "stop"),
+                }
+            ]
+        }
 
 
 class FakeMapperV2(FakeMapper):
@@ -161,3 +215,33 @@ async def test_chat_service_create_completion_uses_v2_backend_when_mapper_reques
         "model": "gpt-x",
     }
     assert result["id"] == "resp-v2"
+
+
+@pytest.mark.asyncio
+async def test_get_chat_service_from_state_respects_v2_mode_from_config():
+    transformer = LegacyRequestTransformer()
+    response_processor = LegacyResponseProcessor()
+    state = SimpleNamespace(
+        services=RuntimeServices(),
+        providers=RuntimeProviders(
+            request_transformer=transformer,
+            response_processor=response_processor,
+        ),
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}}),
+    )
+    giga_client = FakeClient()
+    data = {"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]}
+
+    service = get_chat_service_from_state(state)
+    result = await service.create_completion(
+        data,
+        giga_client=giga_client,
+        response_id="resp-v2-config",
+    )
+
+    assert service.backend_mode == "v2"
+    assert giga_client.last_request is None
+    assert giga_client.last_request_v2["model"] == "gpt-x"
+    assert giga_client.last_request_v2["messages"][0]["content"][0]["text"] == "hi"
+    assert transformer.calls_v2 == [(data, giga_client)]
+    assert result["id"] == "resp-v2-config"

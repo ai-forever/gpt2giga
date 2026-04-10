@@ -7,8 +7,9 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.api.gemini import router
+from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.providers.gigachat import ResponseProcessor
 
 
 class MockResponse:
@@ -26,6 +27,7 @@ class FakeTokensCount:
 
 class FakeGigaChat:
     def __init__(self):
+        self.last_method = None
         self.last_embedding_texts = None
         self.last_embedding_model = None
         self.last_token_texts = None
@@ -44,10 +46,35 @@ class FakeGigaChat:
         }
 
     async def achat(self, chat):
+        self.last_method = "v1"
         return MockResponse(self._response)
+
+    async def achat_v2(self, chat):
+        self.last_method = "v2"
+        return MockResponse(
+            {
+                "model": "gemini-test",
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "content": [{"text": "Hello from v2!"}],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 10,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                },
+            }
+        )
 
     def astream(self, chat):
         async def gen():
+            self.last_method = "v1"
             yield MockResponse(
                 {
                     "choices": [{"delta": {"content": "Hel"}}],
@@ -60,6 +87,45 @@ class FakeGigaChat:
                     "usage": {
                         "prompt_tokens": 10,
                         "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                }
+            )
+
+        return gen()
+
+    def astream_v2(self, chat):
+        async def gen():
+            self.last_method = "v2"
+            yield MockResponse(
+                {
+                    "model": "gemini-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "Hel"}],
+                        }
+                    ],
+                }
+            )
+            yield MockResponse(
+                {
+                    "model": "gemini-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "lo"}],
+                        }
+                    ],
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 5,
                         "total_tokens": 15,
                     },
                 }
@@ -96,12 +162,31 @@ class FakeGigaChat:
 class FakeRequestTransformer:
     def __init__(self):
         self.last_data = None
+        self.last_mode = None
 
     async def prepare_chat_completion(self, data, giga_client=None):
+        self.last_mode = "v1"
         self.last_data = data
         return {
             "model": data.get("model", "giga"),
             "messages": data.get("messages", []),
+            "functions": data.get("functions"),
+            "function_call": data.get("function_call"),
+            "response_format": data.get("response_format"),
+            "reasoning_effort": data.get("reasoning_effort"),
+        }
+
+    async def prepare_chat_completion_v2(self, data, giga_client=None):
+        self.last_mode = "v2"
+        self.last_data = data
+        return {
+            "model": data.get("model", "giga"),
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"text": str(data.get("messages", []))}],
+                }
+            ],
             "functions": data.get("functions"),
             "function_call": data.get("function_call"),
             "response_format": data.get("response_format"),
@@ -114,6 +199,7 @@ def make_app():
     app.include_router(router)
     app.state.gigachat_client = FakeGigaChat()
     app.state.request_transformer = FakeRequestTransformer()
+    app.state.response_processor = ResponseProcessor()
     app.state.config = ProxyConfig()
     app.state.logger = SimpleNamespace(
         debug=lambda *args, **kwargs: None,
@@ -139,6 +225,25 @@ def test_generate_content_text():
     assert app.state.request_transformer.last_data["messages"] == [
         {"role": "user", "content": "Hello"}
     ]
+
+
+def test_generate_content_v2_mode_uses_chat_v2_backend():
+    app = make_app()
+    app.state.config = ProxyConfig.model_validate(
+        {"proxy": {"gigachat_api_mode": "v2"}}
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-test:generateContent",
+        json={"contents": [{"role": "user", "parts": [{"text": "Hello"}]}]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidates"][0]["content"]["parts"][0]["text"] == "Hello from v2!"
+    assert app.state.gigachat_client.last_method == "v2"
+    assert app.state.request_transformer.last_mode == "v2"
 
 
 def test_generate_content_with_function_call_and_tools():
@@ -318,6 +423,25 @@ def test_stream_generate_content_returns_sse():
     assert "data: " in response.text
     assert '"text": "Hel"' in response.text
     assert '"finishReason": "STOP"' in response.text
+
+
+def test_stream_generate_content_v2_mode_uses_chat_v2_backend():
+    app = make_app()
+    app.state.config = ProxyConfig.model_validate(
+        {"proxy": {"gigachat_api_mode": "v2"}}
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-test:streamGenerateContent?alt=sse",
+        json={"contents": [{"role": "user", "parts": [{"text": "Hello"}]}]},
+    )
+
+    assert response.status_code == 200
+    assert '"text": "Hel"' in response.text
+    assert '"finishReason": "STOP"' in response.text
+    assert app.state.gigachat_client.last_method == "v2"
+    assert app.state.request_transformer.last_mode == "v2"
 
 
 def test_count_tokens_with_generate_content_request_and_tools():

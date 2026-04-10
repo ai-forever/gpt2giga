@@ -91,6 +91,13 @@ class GigaChatChatMapper:
             request_data=request_data,
         )
 
+    def normalize_provider_response(self, giga_resp: Any) -> dict[str, Any]:
+        """Normalize a raw GigaChat response for provider-owned adapters."""
+        response_processor = self._require_response_processor()
+        if self.uses_v2_backend:
+            return response_processor.normalize_chat_v2_response(giga_resp)
+        return giga_resp.model_dump()
+
     def process_stream_chunk(
         self,
         giga_resp: Any,

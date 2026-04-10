@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Optional, Protocol, TypeAlias, runtime_checkable
+from typing import (
+    Any,
+    AsyncIterator,
+    Literal,
+    Optional,
+    Protocol,
+    TypeAlias,
+    runtime_checkable,
+)
 
 from gigachat import GigaChat
 
@@ -10,6 +18,7 @@ ChatRequestData: TypeAlias = dict[str, Any]
 PreparedChatRequest: TypeAlias = Any
 ChatResponseData: TypeAlias = dict[str, Any]
 ChatStreamChunk: TypeAlias = dict[str, Any]
+ChatBackendMode: TypeAlias = Literal["v1", "v2"]
 
 
 @runtime_checkable

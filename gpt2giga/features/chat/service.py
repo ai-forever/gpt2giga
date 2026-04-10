@@ -11,6 +11,7 @@ from gpt2giga.app.dependencies import (
     set_runtime_service,
 )
 from gpt2giga.features.chat.contracts import (
+    ChatBackendMode,
     ChatProviderMapper,
     ChatRequestData,
     ChatResponseData,
@@ -27,6 +28,26 @@ class ChatService:
     def __init__(self, mapper: ChatProviderMapper):
         self.mapper = mapper
 
+    @property
+    def backend_mode(self) -> ChatBackendMode:
+        """Return the configured backend mode for chat-like requests."""
+        backend_mode = getattr(self.mapper, "backend_mode", None)
+        if backend_mode in {"v1", "v2"}:
+            return backend_mode
+        if getattr(self.mapper, "uses_v2_backend", False):
+            return "v2"
+        return "v1"
+
+    @property
+    def uses_v2_backend(self) -> bool:
+        """Return ``True`` when the service is configured for v2 calls."""
+        return self.backend_mode == "v2"
+
+    @property
+    def response_processor(self) -> Any:
+        """Expose the provider response processor for provider adapters."""
+        return getattr(self.mapper, "response_processor", None)
+
     async def prepare_request(
         self,
         data: ChatRequestData,
@@ -35,6 +56,28 @@ class ChatService:
     ) -> PreparedChatRequest:
         """Prepare a provider request for chat completions."""
         return await self.mapper.prepare_request(data, giga_client)
+
+    async def execute_prepared_request(
+        self,
+        prepared_request: PreparedChatRequest,
+        *,
+        giga_client: ChatUpstreamClient,
+    ) -> Any:
+        """Execute an already prepared chat-like request against GigaChat."""
+        if self.uses_v2_backend:
+            return await giga_client.achat_v2(prepared_request)
+        return await giga_client.achat(prepared_request)
+
+    def normalize_provider_response(self, giga_resp: Any) -> dict[str, Any]:
+        """Normalize a raw backend response for provider-specific adapters."""
+        normalize_response = getattr(self.mapper, "normalize_provider_response", None)
+        if callable(normalize_response):
+            return normalize_response(giga_resp)
+        if hasattr(giga_resp, "model_dump"):
+            return giga_resp.model_dump()
+        if isinstance(giga_resp, dict):
+            return giga_resp
+        raise TypeError("Unsupported provider response payload.")
 
     async def create_completion(
         self,
@@ -45,10 +88,10 @@ class ChatService:
     ) -> ChatResponseData:
         """Execute a non-streaming chat completion."""
         prepared_request = await self.prepare_request(data, giga_client=giga_client)
-        if getattr(self.mapper, "uses_v2_backend", False):
-            response = await giga_client.achat_v2(prepared_request)
-        else:
-            response = await giga_client.achat(prepared_request)
+        response = await self.execute_prepared_request(
+            prepared_request,
+            giga_client=giga_client,
+        )
         return self.mapper.process_response(
             response,
             data["model"],
@@ -73,7 +116,7 @@ class ChatService:
             response_id=response_id,
             giga_client=giga_client,
             mapper=self.mapper,
-            api_mode="v2" if getattr(self.mapper, "uses_v2_backend", False) else "v1",
+            api_mode=self.backend_mode,
         ):
             yield line
 
@@ -88,9 +131,13 @@ def get_chat_service_from_state(state: Any) -> Any:
     providers = get_runtime_providers(state)
     mapper = providers.chat_mapper
     if mapper is None:
+        config = getattr(state, "config", None)
+        proxy_settings = getattr(config, "proxy_settings", None)
+        backend_mode = getattr(proxy_settings, "chat_backend_mode", "v1")
         mapper = GigaChatChatMapper(
             request_transformer=providers.request_transformer,
             response_processor=providers.response_processor,
+            backend_mode=backend_mode,
         )
         set_runtime_provider(state, "chat_mapper", mapper)
 

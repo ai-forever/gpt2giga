@@ -1066,6 +1066,23 @@ class TestMessagesEndpoint:
         resp = client.post("/messages", json=payload)
         assert resp.status_code == 200
 
+    def test_non_stream_v2_mode_uses_chat_v2_backend(self):
+        app = make_app(
+            config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+        )
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 200
+        assert app.state.gigachat_client.last_method == "v2"
+        assert app.state.request_transformer.last_mode == "v2"
+
     def test_non_stream_with_stop_sequences(self):
         app = make_app()
         client = TestClient(app)
@@ -1328,6 +1345,25 @@ class TestMessagesEndpoint:
                 assert b["index"] == 0
             elif b["content_block"]["type"] == "text":
                 assert b["index"] == 1
+
+    def test_stream_v2_mode_uses_chat_v2_backend(self):
+        app = make_app(
+            config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+        )
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 200
+        assert "content_block_delta" in resp.text
+        assert app.state.gigachat_client.last_method == "v2"
+        assert app.state.request_transformer.last_mode == "v2"
 
 
 class TestConvertAssistantTextOnly:
