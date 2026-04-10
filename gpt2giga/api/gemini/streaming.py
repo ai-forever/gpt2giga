@@ -14,6 +14,11 @@ from gpt2giga.api.gemini.response import (
     _map_finish_reason,
 )
 from gpt2giga.app.dependencies import get_logger_from_state
+from gpt2giga.app.observability import (
+    set_request_audit_error,
+    set_request_audit_model,
+    set_request_audit_usage,
+)
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
@@ -33,6 +38,7 @@ async def stream_gemini_generate_content(
     logger = get_logger_from_state(request.app.state)
     rquid = rquid_context.get()
     structured_output = _is_structured_output_request(request_data)
+    set_request_audit_model(request, model)
 
     try:
         stream_iter = (
@@ -112,6 +118,7 @@ async def stream_gemini_generate_content(
 
             usage = giga_dict.get("usage")
             if usage:
+                set_request_audit_usage(request, usage)
                 payload["usageMetadata"] = {
                     "promptTokenCount": usage.get("prompt_tokens", 0),
                     "candidatesTokenCount": usage.get("completion_tokens", 0),
@@ -121,6 +128,7 @@ async def stream_gemini_generate_content(
             if parts or finish_reason is not None or usage:
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
     except gigachat.exceptions.GigaChatException as exc:
+        set_request_audit_error(request, type(exc).__name__)
         if logger:
             logger.error(
                 f"[{rquid}] GigaChat streaming error: {type(exc).__name__}: {exc}"
@@ -134,6 +142,7 @@ async def stream_gemini_generate_content(
         }
         yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
     except Exception as exc:
+        set_request_audit_error(request, type(exc).__name__)
         if logger:
             logger.error(f"[{rquid}] Unexpected Gemini streaming error: {exc}")
         payload = {

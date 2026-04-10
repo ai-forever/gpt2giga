@@ -29,6 +29,10 @@ from gpt2giga.api.gemini.streaming import stream_gemini_generate_content
 from gpt2giga.app.dependencies import (
     get_logger_from_state,
 )
+from gpt2giga.app.observability import (
+    annotate_request_audit_from_payload,
+    set_request_audit_model,
+)
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.service import get_chat_service_from_state
 from gpt2giga.features.embeddings import get_embeddings_service_from_state
@@ -63,6 +67,7 @@ async def generate_content(model: str, request: Request):
     data = await read_gemini_request_json(request)
     normalized_model = _ensure_route_model_matches_body(model, data.get("model"))
     data["model"] = normalized_model
+    set_request_audit_model(request, normalized_model)
 
     giga_client = get_gigachat_client(request)
     app_state = request.app.state
@@ -79,12 +84,18 @@ async def generate_content(model: str, request: Request):
         giga_client=giga_client,
     )
     giga_dict = chat_service.normalize_provider_response(response)
-    return build_generate_content_response(
+    gemini_response = build_generate_content_response(
         giga_dict,
         normalized_model,
         rquid_context.get(),
         request_data=data,
     )
+    annotate_request_audit_from_payload(
+        request,
+        gemini_response,
+        fallback_model=normalized_model,
+    )
+    return gemini_response
 
 
 @router.post(
@@ -97,6 +108,7 @@ async def stream_generate_content(model: str, request: Request):
     data = await read_gemini_request_json(request)
     normalized_model = _ensure_route_model_matches_body(model, data.get("model"))
     data["model"] = normalized_model
+    set_request_audit_model(request, normalized_model)
 
     giga_client = get_gigachat_client(request)
     app_state = request.app.state
@@ -134,6 +146,7 @@ async def count_tokens(model: str, request: Request):
     """Gemini Developer API compatible countTokens endpoint."""
     data = await read_gemini_request_json(request)
     normalized_model = _ensure_route_model_matches_body(model, data.get("model"))
+    set_request_audit_model(request, normalized_model)
     count_payload = data.get("generateContentRequest") or data
     if not isinstance(count_payload, dict):
         raise GeminiAPIError(
@@ -160,6 +173,7 @@ async def count_tokens(model: str, request: Request):
 async def batch_embed_contents(model: str, request: Request):
     """Gemini Developer API compatible batch embeddings endpoint."""
     data = await read_gemini_request_json(request)
+    set_request_audit_model(request, normalize_model_name(model))
     requests_payload = data.get("requests")
     if not isinstance(requests_payload, list) or not requests_payload:
         raise GeminiAPIError(
@@ -180,6 +194,7 @@ async def batch_embed_contents(model: str, request: Request):
 async def embed_content(model: str, request: Request):
     """Gemini REST alias for single-item embeddings."""
     data = await read_gemini_request_json(request)
+    set_request_audit_model(request, normalize_model_name(model))
     content = data.get("content")
     if content is None and data.get("contents") is not None:
         contents = data.get("contents")

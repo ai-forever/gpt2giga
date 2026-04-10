@@ -594,8 +594,11 @@
       const lines = payload.events.map((event) => {
         const stamp = new Date(event.created_at).toLocaleTimeString();
         const provider = event.provider || "unknown";
+        const model = event.model ? ` model=${event.model}` : "";
+        const tokens = event.token_usage ? ` tokens=${event.token_usage.total_tokens}` : "";
+        const stream = event.stream_duration_ms != null ? ` stream=${event.stream_duration_ms}ms` : "";
         const error = event.error_type ? ` error=${event.error_type}` : "";
-        return `[${stamp}] ${event.status_code} ${provider} ${event.method} ${event.endpoint} ${event.duration_ms}ms${error}`;
+        return `[${stamp}] ${event.status_code} ${provider} ${event.method} ${event.endpoint} ${event.duration_ms}ms${stream}${model}${tokens}${error}`;
       });
       target.textContent = lines.join("\n");
       statusTarget.textContent = `${payload.count} items`;

@@ -20,6 +20,10 @@ from gpt2giga.api.anthropic.streaming import _stream_anthropic_generator
 from gpt2giga.app.dependencies import (
     get_logger_from_state,
 )
+from gpt2giga.app.observability import (
+    annotate_request_audit_from_payload,
+    set_request_audit_model,
+)
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.core.logging.setup import rquid_context
@@ -38,6 +42,7 @@ async def count_tokens(request: Request):
     data = await read_request_json(request)
     giga_client = get_gigachat_client(request)
     model = data.get("model", "unknown")
+    set_request_audit_model(request, model)
 
     openai_messages = _convert_anthropic_messages_to_openai(
         data.get("system"), data.get("messages", [])
@@ -65,6 +70,7 @@ async def messages(request: Request):
     giga_client = get_gigachat_client(request)
 
     model = data.get("model", "unknown")
+    set_request_audit_model(request, model)
     app_state = request.app.state
     chat_service = get_chat_service_from_state(app_state)
     api_mode = chat_service.backend_mode
@@ -82,7 +88,13 @@ async def messages(request: Request):
             giga_client=giga_client,
         )
         giga_dict = chat_service.normalize_provider_response(response)
-        return _build_anthropic_response(giga_dict, model, current_rquid)
+        anthropic_response = _build_anthropic_response(giga_dict, model, current_rquid)
+        annotate_request_audit_from_payload(
+            request,
+            anthropic_response,
+            fallback_model=model,
+        )
+        return anthropic_response
 
     return StreamingResponse(
         _stream_anthropic_generator(

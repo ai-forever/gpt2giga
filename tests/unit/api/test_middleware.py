@@ -4,12 +4,18 @@ from unittest.mock import MagicMock
 from fastapi import FastAPI
 from fastapi import Request
 from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
 from starlette.testclient import TestClient
 
 from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.app.observability import (
+    set_request_audit_error,
+    set_request_audit_model,
+    set_request_audit_usage,
+)
 from gpt2giga.core.config.settings import ProxyConfig
 
 app = FastAPI()
@@ -176,6 +182,7 @@ def test_observability_middleware_records_recent_requests_and_errors():
     assert [item["endpoint"] for item in recent_requests] == ["/ok", "/boom"]
     assert recent_requests[0]["status_code"] == 200
     assert recent_requests[1]["status_code"] == 418
+    assert recent_requests[1]["error_type"] == "HTTP_418"
     assert recent_errors == [recent_requests[1]]
 
 
@@ -192,3 +199,48 @@ def test_observability_middleware_ignores_admin_surface():
 
     assert client.get("/admin/echo").status_code == 200
     assert test_app.state.stores.recent_requests.recent() == []
+
+
+def test_observability_middleware_records_stream_metadata_and_stream_errors():
+    test_app = FastAPI()
+    ensure_runtime_dependencies(test_app.state, config=ProxyConfig())
+    test_app.add_middleware(ObservabilityMiddleware)
+
+    @test_app.get("/stream")
+    async def stream(request: Request):
+        set_request_audit_model(request, "gpt-x")
+
+        async def gen():
+            set_request_audit_usage(
+                request,
+                {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 2,
+                    "total_tokens": 5,
+                },
+            )
+            set_request_audit_error(request, "RateLimitError")
+            yield "data: partial\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream")
+
+    client = TestClient(test_app)
+
+    response = client.get("/stream")
+
+    assert response.status_code == 200
+    assert "partial" in response.text
+    recent_requests = test_app.state.stores.recent_requests.recent()
+    recent_errors = test_app.state.stores.recent_errors.recent()
+
+    assert len(recent_requests) == 1
+    event = recent_requests[0]
+    assert event["model"] == "gpt-x"
+    assert event["token_usage"] == {
+        "prompt_tokens": 3,
+        "completion_tokens": 2,
+        "total_tokens": 5,
+    }
+    assert event["stream_duration_ms"] is not None
+    assert event["error_type"] == "RateLimitError"
+    assert recent_errors == [event]

@@ -6,6 +6,10 @@ from fastapi.responses import StreamingResponse
 from gpt2giga.api.openai.helpers import populate_giga_functions
 from gpt2giga.api.openai.openapi import responses_openapi_extra
 from gpt2giga.app.dependencies import get_logger_from_state
+from gpt2giga.app.observability import (
+    annotate_request_audit_from_payload,
+    set_request_audit_model,
+)
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.core.logging.setup import rquid_context
@@ -21,6 +25,7 @@ router = APIRouter(tags=["OpenAI"])
 async def responses(request: Request):
     """Create a Responses API response."""
     data = await read_request_json(request)
+    set_request_audit_model(request, data.get("model"))
     current_rquid = rquid_context.get()
     giga_client = get_gigachat_client(request)
     app_state = request.app.state
@@ -29,12 +34,18 @@ async def responses(request: Request):
 
     populate_giga_functions(data, get_logger_from_state(app_state))
     if not data.get("stream", False):
-        return await responses_service.create_response(
+        response = await responses_service.create_response(
             data,
             giga_client=giga_client,
             response_id=current_rquid,
             response_store=response_store,
         )
+        annotate_request_audit_from_payload(
+            request,
+            response,
+            fallback_model=data.get("model"),
+        )
+        return response
 
     return StreamingResponse(
         responses_service.stream_response(

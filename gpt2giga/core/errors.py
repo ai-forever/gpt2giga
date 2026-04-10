@@ -4,8 +4,10 @@ from functools import wraps
 
 import gigachat
 from fastapi import HTTPException
+from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from gpt2giga.app.observability import set_request_audit_error
 from gpt2giga.core.logging.setup import rquid_context, sanitize_for_utf8
 
 ERROR_MAPPING = {
@@ -31,6 +33,7 @@ ERROR_MAPPING = {
 def exceptions_handler(func):
     @wraps(func)
     async def wrapper(*args, **kwargs):
+        request = _find_request_arg(args, kwargs)
         try:
             return await func(*args, **kwargs)
         except asyncio.CancelledError:
@@ -38,9 +41,11 @@ def exceptions_handler(func):
             # especially for streaming endpoints.
             raise
         except HTTPException:
+            _annotate_request_error(request, "HTTPException")
             # Preserve FastAPI/Starlette semantics (status codes, details, headers).
             raise
         except gigachat.exceptions.GigaChatException as e:
+            _annotate_request_error(request, type(e).__name__)
             from loguru import logger
 
             rquid = rquid_context.get()
@@ -113,6 +118,7 @@ def exceptions_handler(func):
                 },
             )
         except Exception as e:
+            _annotate_request_error(request, type(e).__name__)
             from loguru import logger
 
             rquid = rquid_context.get()
@@ -133,3 +139,18 @@ def exceptions_handler(func):
             )
 
     return wrapper
+
+
+def _find_request_arg(args, kwargs) -> Request | None:
+    for value in kwargs.values():
+        if isinstance(value, Request):
+            return value
+    for value in args:
+        if isinstance(value, Request):
+            return value
+    return None
+
+
+def _annotate_request_error(request: Request | None, error_type: str) -> None:
+    if request is not None:
+        set_request_audit_error(request, error_type)

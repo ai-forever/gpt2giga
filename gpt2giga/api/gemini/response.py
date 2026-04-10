@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import gigachat
 from fastapi import HTTPException
+from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from gpt2giga.api.gemini.request import (
@@ -15,6 +16,7 @@ from gpt2giga.api.gemini.request import (
     model_resource_name,
     normalize_model_name,
 )
+from gpt2giga.app.observability import set_request_audit_error
 from gpt2giga.core.logging.setup import sanitize_for_utf8
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
@@ -53,9 +55,11 @@ def gemini_exceptions_handler(func):
 
     @wraps(func)
     async def wrapper(*args, **kwargs):
+        request = _find_request_arg(args, kwargs)
         try:
             return await func(*args, **kwargs)
         except GeminiAPIError as exc:
+            _annotate_request_error(request, type(exc).__name__)
             return gemini_error_response(
                 status_code=exc.status_code,
                 status=exc.status,
@@ -63,6 +67,7 @@ def gemini_exceptions_handler(func):
                 details=exc.details,
             )
         except HTTPException as exc:
+            _annotate_request_error(request, type(exc).__name__)
             message = exc.detail if isinstance(exc.detail, str) else "Request failed"
             status = "INVALID_ARGUMENT" if 400 <= exc.status_code < 500 else "INTERNAL"
             return gemini_error_response(
@@ -71,6 +76,7 @@ def gemini_exceptions_handler(func):
                 message=message,
             )
         except gigachat.exceptions.GigaChatException as exc:
+            _annotate_request_error(request, type(exc).__name__)
             status = "INTERNAL"
             for error_class, mapped_status in _GIGACHAT_ERROR_STATUS.items():
                 if isinstance(exc, error_class):
@@ -85,6 +91,7 @@ def gemini_exceptions_handler(func):
                 message=str(exc),
             )
         except Exception as exc:
+            _annotate_request_error(request, type(exc).__name__)
             return gemini_error_response(
                 status_code=500,
                 status="INTERNAL",
@@ -92,6 +99,21 @@ def gemini_exceptions_handler(func):
             )
 
     return wrapper
+
+
+def _find_request_arg(args, kwargs) -> Request | None:
+    for value in kwargs.values():
+        if isinstance(value, Request):
+            return value
+    for value in args:
+        if isinstance(value, Request):
+            return value
+    return None
+
+
+def _annotate_request_error(request: Request | None, error_type: str) -> None:
+    if request is not None:
+        set_request_audit_error(request, error_type)
 
 
 def _is_structured_output_request(request_data: Optional[dict[str, Any]]) -> bool:

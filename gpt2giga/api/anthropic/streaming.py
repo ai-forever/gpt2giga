@@ -10,6 +10,11 @@ from fastapi import Request
 from gigachat import GigaChat
 
 from gpt2giga.app.dependencies import get_logger_from_state
+from gpt2giga.app.observability import (
+    set_request_audit_error,
+    set_request_audit_model,
+    set_request_audit_usage,
+)
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
@@ -27,6 +32,7 @@ async def _stream_anthropic_generator(
     """SSE generator producing Anthropic Messages streaming events."""
     logger = None
     rquid = rquid_context.get()
+    set_request_audit_model(request, model)
 
     def sse(event_type: str, data: dict) -> str:
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
@@ -57,6 +63,17 @@ async def _stream_anthropic_generator(
             initial_usage = first_chunk.model_dump().get("usage") or {}
             input_tokens = initial_usage.get("prompt_tokens", 0)
             output_tokens = initial_usage.get("completion_tokens", 0)
+            set_request_audit_usage(
+                request,
+                {
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": initial_usage.get(
+                        "total_tokens",
+                        input_tokens + output_tokens,
+                    ),
+                },
+            )
 
         yield sse(
             "message_start",
@@ -207,6 +224,17 @@ async def _stream_anthropic_generator(
             if chunk_usage:
                 input_tokens = chunk_usage.get("prompt_tokens", input_tokens)
                 output_tokens = chunk_usage.get("completion_tokens", output_tokens)
+                set_request_audit_usage(
+                    request,
+                    {
+                        "prompt_tokens": input_tokens,
+                        "completion_tokens": output_tokens,
+                        "total_tokens": chunk_usage.get(
+                            "total_tokens",
+                            input_tokens + output_tokens,
+                        ),
+                    },
+                )
 
         stop_reason = "tool_use" if function_call_data else "end_turn"
         if content_block_started:
@@ -231,6 +259,7 @@ async def _stream_anthropic_generator(
         )
         yield sse("message_stop", {"type": "message_stop"})
     except gigachat.exceptions.GigaChatException as exc:
+        set_request_audit_error(request, type(exc).__name__)
         if logger:
             logger.error(
                 f"[{rquid}] GigaChat streaming error: {type(exc).__name__}: {exc}"
@@ -243,6 +272,7 @@ async def _stream_anthropic_generator(
             },
         )
     except Exception as exc:
+        set_request_audit_error(request, type(exc).__name__)
         traceback_text = traceback.format_exc()
         if logger:
             logger.error(

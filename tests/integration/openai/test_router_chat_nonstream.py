@@ -2,7 +2,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
+from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.providers.gigachat import ResponseProcessor
 from gpt2giga.api.openai import router
 
@@ -77,13 +79,16 @@ class FakeRequestTransformer:
         return {"model": data.get("model", "giga")}
 
 
-def make_app(*, config=None):
+def make_app(*, config=None, observability: bool = False):
     app = FastAPI()
     app.include_router(router)
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
     app.state.config = config or ProxyConfig()
+    if observability:
+        ensure_runtime_dependencies(app.state, config=app.state.config)
+        app.add_middleware(ObservabilityMiddleware)
     return app
 
 
@@ -129,3 +134,30 @@ def test_chat_completions_non_stream_v2_mode():
     assert body["choices"][0]["message"]["content"] == "ok-v2"
     assert app.state.gigachat_client.last_method == "v2"
     assert app.state.request_transformer.last_mode == "v2"
+
+
+def test_chat_completions_non_stream_records_audit_metadata():
+    app = make_app(observability=True)
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    recent_requests = app.state.stores.recent_requests.recent()
+    assert len(recent_requests) == 1
+    event = recent_requests[0]
+    assert event["endpoint"] == "/chat/completions"
+    assert event["model"] == "gpt-x"
+    assert event["token_usage"] == {
+        "prompt_tokens": 1,
+        "completion_tokens": 1,
+        "total_tokens": 2,
+    }
+    assert event["stream_duration_ms"] is None
+    assert event["error_type"] is None

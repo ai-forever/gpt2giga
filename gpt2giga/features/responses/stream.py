@@ -15,6 +15,11 @@ from gpt2giga.app.dependencies import (
     get_logger_from_state,
     get_response_processor_from_state,
 )
+from gpt2giga.app.observability import (
+    set_request_audit_error,
+    set_request_audit_model,
+    set_request_audit_usage,
+)
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.responses.store import get_response_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
@@ -44,6 +49,7 @@ async def _stream_responses_generator_v1(
     rquid = rquid_context.get()
     processor = response_processor
     model = request_data.get("model", "unknown") if request_data else "unknown"
+    set_request_audit_model(request, model)
     usage: Optional[dict] = None
     finish_reason: Optional[str] = None
     sequence_number = 0
@@ -107,8 +113,10 @@ async def _stream_responses_generator_v1(
             chunk_model = chunk_dict.get("model")
             if isinstance(chunk_model, str) and chunk_model:
                 model = chunk_model
+                set_request_audit_model(request, chunk_model)
             if chunk_dict.get("usage") is not None:
                 usage = processor._build_response_usage(chunk_dict.get("usage"))
+                set_request_audit_usage(request, usage)
 
             processed = processor.process_stream_chunk_response(
                 chunk,
@@ -257,6 +265,7 @@ async def _stream_responses_generator_v1(
             yield emit("response.completed", {"response": final_response})
 
     except GigaChatStreamError as exc:
+        set_request_audit_error(request, exc.error_type)
         if logger:
             logger.error(
                 f"[{rquid}] GigaChat streaming error: {exc.error_type}: {exc.message}"
@@ -275,6 +284,7 @@ async def _stream_responses_generator_v1(
 
     except Exception as exc:
         error_type = type(exc).__name__
+        set_request_audit_error(request, error_type)
         tb = traceback.format_exc()
         if logger:
             logger.error(
@@ -308,6 +318,8 @@ async def stream_responses_generator(
     processor = response_processor or get_response_processor_from_state(
         request.app.state
     )
+    if request_data is not None:
+        set_request_audit_model(request, request_data.get("model"))
     response_store = (
         response_store if response_store is not None else get_response_store(request)
     )
@@ -514,11 +526,14 @@ async def stream_responses_generator(
                 break
 
             model = chunk.model or model
+            if isinstance(chunk.model, str) and chunk.model:
+                set_request_audit_model(request, chunk.model)
             created_at = chunk.created_at or created_at
             thread_id = chunk.thread_id or thread_id
             finish_reason = chunk.finish_reason or finish_reason
             if chunk.usage is not None:
                 usage = chunk.usage
+                set_request_audit_usage(request, usage)
 
             for update in chunk.updates:
                 if isinstance(update, ResponsesTextUpdate):
@@ -730,6 +745,7 @@ async def stream_responses_generator(
             yield emit("response.completed", {"response": final_response})
 
     except GigaChatStreamError as exc:
+        set_request_audit_error(request, exc.error_type)
         if logger:
             logger.error(
                 f"[{rquid}] GigaChat streaming error: {exc.error_type}: {exc.message}"
@@ -748,6 +764,7 @@ async def stream_responses_generator(
 
     except Exception as exc:
         error_type = type(exc).__name__
+        set_request_audit_error(request, error_type)
         tb = traceback.format_exc()
         if logger:
             logger.error(
