@@ -67,6 +67,36 @@ class ProxySettings(BaseSettings):
             "(achat_v2/astream_v2)."
         ),
     )
+    runtime_store_backend: str = Field(
+        default="memory",
+        description=(
+            "Backend для stateful runtime-ресурсов: metadata stores, recent "
+            "requests и recent errors. Встроенный backend: memory. "
+            "Кастомные backend-ы можно регистрировать в app.runtime_backends."
+        ),
+    )
+    runtime_store_dsn: Optional[str] = Field(
+        default=None,
+        description=(
+            "Опциональный DSN/URL для внешнего runtime store backend "
+            "(например Redis/Postgres) при использовании кастомной реализации."
+        ),
+    )
+    runtime_store_namespace: str = Field(
+        default="gpt2giga",
+        description=(
+            "Логический namespace для stateful runtime backend-а. "
+            "Полезен для Redis/Postgres и кастомных backend-ов."
+        ),
+    )
+    recent_requests_max_items: int = Field(
+        default=200,
+        description="Максимальное число recent request events в admin ring buffer.",
+    )
+    recent_errors_max_items: int = Field(
+        default=100,
+        description="Максимальное число recent error events в admin ring buffer.",
+    )
     embeddings: str = Field(
         default="EmbeddingsGigaR",
         description="Модель для эмбеддингов",
@@ -182,6 +212,22 @@ class ProxySettings(BaseSettings):
         """Normalize backend mode from ENV/CLI friendly forms."""
         if isinstance(value, str):
             return value.strip().lower()
+        return value
+
+    @field_validator("runtime_store_backend", mode="before")
+    @classmethod
+    def normalize_runtime_store_backend(cls, value):
+        """Normalize runtime store backend names from ENV/CLI friendly forms."""
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("runtime_store_namespace", mode="before")
+    @classmethod
+    def normalize_runtime_store_namespace(cls, value):
+        """Normalize runtime store namespaces from ENV/CLI friendly forms."""
+        if isinstance(value, str):
+            return value.strip()
         return value
 
     @model_validator(mode="after")

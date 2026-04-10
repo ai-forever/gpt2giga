@@ -16,6 +16,10 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.enable_reasoning is False
     assert s.enabled_providers == ["openai", "anthropic", "gemini"]
     assert s.gigachat_api_mode == "v1"
+    assert s.runtime_store_backend == "memory"
+    assert s.runtime_store_namespace == "gpt2giga"
+    assert s.recent_requests_max_items == 200
+    assert s.recent_errors_max_items == 100
     assert s.chat_backend_mode == "v1"
     assert s.responses_backend_mode == "v1"
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
@@ -79,6 +83,12 @@ def test_proxy_settings_gigachat_api_mode_v2(monkeypatch):
     assert s.gigachat_api_mode == "v2"
     assert s.chat_backend_mode == "v2"
     assert s.responses_backend_mode == "v2"
+
+
+def test_proxy_settings_runtime_store_backend_normalized(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_RUNTIME_STORE_BACKEND", " MEMORY ")
+    s = ProxySettings()
+    assert s.runtime_store_backend == "memory"
 
 
 def test_proxy_settings_invalid_port(monkeypatch):

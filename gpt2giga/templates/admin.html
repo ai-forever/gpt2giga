@@ -175,6 +175,10 @@
       grid-column: span 5;
     }
 
+    .panel.feed {
+      grid-column: span 6;
+    }
+
     .panel.logs {
       grid-column: 1 / -1;
     }
@@ -311,6 +315,10 @@
       line-height: 1.5;
     }
 
+    .feed-empty {
+      color: var(--muted);
+    }
+
     .route-list {
       max-height: 360px;
       overflow: auto;
@@ -335,6 +343,7 @@
     @media (max-width: 960px) {
       .panel.overview,
       .panel.runtime,
+      .panel.feed,
       .panel.logs {
         grid-column: 1 / -1;
       }
@@ -353,7 +362,7 @@
           <p class="eyebrow">gpt2giga operator console</p>
           <h1>Admin Surface</h1>
           <p class="subhead">
-            Runtime status, enabled provider groups, mounted routes, and live logs in one place.
+            Runtime status, enabled provider groups, mounted routes, recent request/error feeds, and live logs in one place.
             This UI is meant for local operator and debug workflows, not for public exposure.
           </p>
         </div>
@@ -410,6 +419,22 @@
         <div class="route-list" id="routes"></div>
       </section>
 
+      <section class="panel feed">
+        <div class="panel-head">
+          <h2>Recent Requests</h2>
+          <span class="logs-status" id="requestsStatus">Loading…</span>
+        </div>
+        <pre id="recentRequests">Loading recent requests…</pre>
+      </section>
+
+      <section class="panel feed">
+        <div class="panel-head">
+          <h2>Recent Errors</h2>
+          <span class="logs-status" id="errorsStatus">Loading…</span>
+        </div>
+        <pre id="recentErrors">Loading recent errors…</pre>
+      </section>
+
       <section class="panel logs">
         <div class="panel-head">
           <h2>Logs</h2>
@@ -439,6 +464,10 @@
     const runtimeStatus = document.getElementById("runtimeStatus");
     const routes = document.getElementById("routes");
     const routesStatus = document.getElementById("routesStatus");
+    const recentRequests = document.getElementById("recentRequests");
+    const requestsStatus = document.getElementById("requestsStatus");
+    const recentErrors = document.getElementById("recentErrors");
+    const errorsStatus = document.getElementById("errorsStatus");
     const logs = document.getElementById("logs");
     const logsStatus = document.getElementById("logsStatus");
 
@@ -470,6 +499,7 @@
       [
         ["Mode", runtime.mode],
         ["Backend", runtime.gigachat_api_mode],
+        ["State", runtime.runtime_store_backend],
         ["Providers", runtime.enabled_providers.join(", ") || "none"],
         ["Auth", runtime.auth_required ? "required" : "disabled"],
       ].forEach(([label, value]) => {
@@ -524,6 +554,8 @@
         docs_enabled: String(runtime.docs_enabled),
         log_file: config.log_filename,
         enabled_providers: runtime.enabled_providers.join(", "),
+        runtime_store_backend: runtime.runtime_store_backend,
+        runtime_store_namespace: runtime.runtime_store_namespace,
         api_key_auth: String(config.enable_api_key_auth),
         pass_token: String(runtime.pass_token),
         pass_model: String(runtime.pass_model),
@@ -552,6 +584,23 @@
       routesStatus.textContent = `${payload.routes.length} mounted`;
     }
 
+    function renderRecentEvents(target, statusTarget, payload, emptyLabel) {
+      if (!payload.events.length) {
+        target.textContent = emptyLabel;
+        statusTarget.textContent = "Empty";
+        return;
+      }
+
+      const lines = payload.events.map((event) => {
+        const stamp = new Date(event.created_at).toLocaleTimeString();
+        const provider = event.provider || "unknown";
+        const error = event.error_type ? ` error=${event.error_type}` : "";
+        return `[${stamp}] ${event.status_code} ${provider} ${event.method} ${event.endpoint} ${event.duration_ms}ms${error}`;
+      });
+      target.textContent = lines.join("\n");
+      statusTarget.textContent = `${payload.count} items`;
+    }
+
     async function loadLogs() {
       logsStatus.textContent = "Loading logs…";
       try {
@@ -568,21 +617,29 @@
     async function refresh() {
       runtimeStatus.textContent = "Loading…";
       routesStatus.textContent = "Loading…";
+      requestsStatus.textContent = "Loading…";
+      errorsStatus.textContent = "Loading…";
       try {
-        const [runtime, config, capabilities, routePayload] = await Promise.all([
+        const [runtime, config, capabilities, routePayload, requestPayload, errorPayload] = await Promise.all([
           fetchJson("/admin/api/runtime"),
           fetchJson("/admin/api/config"),
           fetchJson("/admin/api/capabilities"),
           fetchJson("/admin/api/routes"),
+          fetchJson("/admin/api/requests/recent?limit=25"),
+          fetchJson("/admin/api/errors/recent?limit=25"),
         ]);
         renderHeadline(runtime);
         renderBackend(capabilities);
         renderProviders(capabilities);
         renderRuntime(runtime, config);
         renderRoutes(routePayload);
+        renderRecentEvents(recentRequests, requestsStatus, requestPayload, "[no recent requests]");
+        renderRecentEvents(recentErrors, errorsStatus, errorPayload, "[no recent errors]");
       } catch (error) {
         runtimeStatus.textContent = error.message;
         routesStatus.textContent = error.message;
+        requestsStatus.textContent = error.message;
+        errorsStatus.textContent = error.message;
       }
       await loadLogs();
     }

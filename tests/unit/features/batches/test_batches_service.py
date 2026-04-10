@@ -135,7 +135,7 @@ async def test_batches_service_create_batch_uses_transformer_and_stores_metadata
     translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
     assert giga_client.last_batch_method == "chat_completions"
     assert translated_line["id"] == "req-1"
-    assert translated_line["request"]["translated"] == "chat"
+    assert translated_line["request"]["translated"] == "chat-v1"
     assert batch_store["batch-1"]["input_file_id"] == "input-file-1"
     assert file_store["file-output-1"]["purpose"] == "batch_output"
     assert result["object"] == "batch"
@@ -305,7 +305,7 @@ async def test_batches_service_uses_v2_transformer_for_chat_batches():
 def test_get_batches_service_from_state_builds_service_from_config():
     state = SimpleNamespace(
         request_transformer=FakeRequestTransformer(),
-        config=ProxyConfig(),
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v1"}}),
     )
 
     service = get_batches_service_from_state(state)

@@ -3,10 +3,14 @@ from unittest.mock import MagicMock
 
 from fastapi import FastAPI
 from fastapi import Request
+from fastapi import HTTPException
 from starlette.testclient import TestClient
 
+from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.core.config.settings import ProxyConfig
 
 app = FastAPI()
 app.add_middleware(PathNormalizationMiddleware, valid_roots=["v1"])
@@ -146,3 +150,45 @@ def test_pass_token_middleware(monkeypatch):
     assert resp.status_code == 200
     # Nothing should happen, no warning
     test_app.state.logger.warning.assert_not_called()
+
+
+def test_observability_middleware_records_recent_requests_and_errors():
+    test_app = FastAPI()
+    ensure_runtime_dependencies(test_app.state, config=ProxyConfig())
+    test_app.add_middleware(ObservabilityMiddleware)
+
+    @test_app.get("/ok")
+    def ok():
+        return {"ok": True}
+
+    @test_app.get("/boom")
+    def boom():
+        raise HTTPException(status_code=418, detail="teapot")
+
+    client = TestClient(test_app)
+
+    assert client.get("/ok").status_code == 200
+    assert client.get("/boom").status_code == 418
+
+    recent_requests = test_app.state.stores.recent_requests.recent()
+    recent_errors = test_app.state.stores.recent_errors.recent()
+
+    assert [item["endpoint"] for item in recent_requests] == ["/ok", "/boom"]
+    assert recent_requests[0]["status_code"] == 200
+    assert recent_requests[1]["status_code"] == 418
+    assert recent_errors == [recent_requests[1]]
+
+
+def test_observability_middleware_ignores_admin_surface():
+    test_app = FastAPI()
+    ensure_runtime_dependencies(test_app.state, config=ProxyConfig())
+    test_app.add_middleware(ObservabilityMiddleware)
+
+    @test_app.get("/admin/echo")
+    def admin_echo():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+
+    assert client.get("/admin/echo").status_code == 200
+    assert test_app.state.stores.recent_requests.recent() == []

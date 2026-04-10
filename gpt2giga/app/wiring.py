@@ -96,3 +96,7 @@ async def close_runtime_services(app: FastAPI, *, logger) -> None:
         await attachment_processor.close()
         providers.attachment_processor = None
         app.state.attachment_processor = None
+
+    stores = get_runtime_stores(app.state)
+    if stores.backend is not None:
+        await stores.backend.close()

@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.routing import APIRoute
 from starlette.requests import Request
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.app.observability import (
+    filter_request_events,
+    get_recent_error_feed_from_state,
+    get_recent_request_feed_from_state,
+)
 from gpt2giga.app.dependencies import (
     get_config_from_state,
     get_runtime_providers,
@@ -77,7 +82,7 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, list[str]]] = {
 }
 
 
-def _collect_state_status(request: Request) -> dict[str, dict[str, bool]]:
+def _collect_state_status(request: Request) -> dict[str, dict[str, bool | int | None]]:
     """Return a coarse runtime snapshot of typed app-state containers."""
     services = get_runtime_services(request.app.state)
     providers = get_runtime_providers(request.app.state)
@@ -101,9 +106,14 @@ def _collect_state_status(request: Request) -> dict[str, dict[str, bool]]:
             "models_mapper": providers.models_mapper is not None,
         },
         "stores": {
-            "files": bool(stores.files),
-            "batches": bool(stores.batches),
-            "responses": bool(stores.responses),
+            "backend": stores.backend.name if stores.backend is not None else None,
+            "files": len(stores.files),
+            "batches": len(stores.batches),
+            "responses": len(stores.responses),
+            "recent_requests": len(
+                get_recent_request_feed_from_state(request.app.state)
+            ),
+            "recent_errors": len(get_recent_error_feed_from_state(request.app.state)),
         },
     }
 
@@ -144,6 +154,8 @@ def _runtime_summary(request: Request) -> dict[str, object]:
         "openapi_enabled": request.app.openapi_url is not None,
         "enabled_providers": list(proxy.enabled_providers),
         "gigachat_api_mode": proxy.gigachat_api_mode,
+        "runtime_store_backend": proxy.runtime_store_backend,
+        "runtime_store_namespace": proxy.runtime_store_namespace,
         "pass_model": proxy.pass_model,
         "pass_token": proxy.pass_token,
         "enable_reasoning": proxy.enable_reasoning,
@@ -176,6 +188,11 @@ async def get_admin_config(request: Request):
         "port": proxy.port,
         "enabled_providers": list(proxy.enabled_providers),
         "gigachat_api_mode": proxy.gigachat_api_mode,
+        "runtime_store_backend": proxy.runtime_store_backend,
+        "runtime_store_namespace": proxy.runtime_store_namespace,
+        "runtime_store_dsn_configured": proxy.runtime_store_dsn is not None,
+        "recent_requests_max_items": proxy.recent_requests_max_items,
+        "recent_errors_max_items": proxy.recent_errors_max_items,
         "enable_api_key_auth": proxy.enable_api_key_auth,
         "pass_model": proxy.pass_model,
         "pass_token": proxy.pass_token,
@@ -219,6 +236,7 @@ async def get_admin_capabilities(request: Request):
             "gigachat_api_mode": config.proxy_settings.gigachat_api_mode,
             "chat_backend_mode": config.proxy_settings.chat_backend_mode,
             "responses_backend_mode": config.proxy_settings.responses_backend_mode,
+            "runtime_store_backend": config.proxy_settings.runtime_store_backend,
         },
         "providers": {
             provider: {
@@ -240,6 +258,8 @@ async def get_admin_capabilities(request: Request):
                 "config",
                 "runtime",
                 "routes",
+                "recent_requests",
+                "recent_errors",
                 "logs",
                 "logs_stream",
             ],
@@ -250,9 +270,75 @@ async def get_admin_capabilities(request: Request):
                 "/admin/api/runtime",
                 "/admin/api/routes",
                 "/admin/api/capabilities",
+                "/admin/api/requests/recent",
+                "/admin/api/errors/recent",
                 "/admin/api/logs",
                 "/admin/api/logs/stream",
             ],
             "legacy_routes": ["/logs", "/logs/stream", "/logs/html"],
         },
     }
+
+
+def _recent_events_payload(
+    request: Request,
+    *,
+    kind: str,
+    limit: int,
+    provider: str | None,
+    endpoint: str | None,
+) -> dict[str, object]:
+    """Build a filtered recent-events payload for admin tooling."""
+    feed = (
+        get_recent_request_feed_from_state(request.app.state)
+        if kind == "requests"
+        else get_recent_error_feed_from_state(request.app.state)
+    )
+    events = filter_request_events(
+        feed.recent(limit=limit),
+        provider=provider,
+        endpoint=endpoint,
+    )
+    return {
+        "events": events,
+        "count": len(events),
+        "kind": kind,
+    }
+
+
+@admin_runtime_api_router.get("/admin/api/requests/recent")
+@exceptions_handler
+async def get_admin_recent_requests(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=500),
+    provider: str | None = Query(default=None),
+    endpoint: str | None = Query(default=None),
+):
+    """Return recent structured request events for the admin UI."""
+    verify_logs_ip_allowlist(request)
+    return _recent_events_payload(
+        request,
+        kind="requests",
+        limit=limit,
+        provider=provider,
+        endpoint=endpoint,
+    )
+
+
+@admin_runtime_api_router.get("/admin/api/errors/recent")
+@exceptions_handler
+async def get_admin_recent_errors(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=500),
+    provider: str | None = Query(default=None),
+    endpoint: str | None = Query(default=None),
+):
+    """Return recent structured error events for the admin UI."""
+    verify_logs_ip_allowlist(request)
+    return _recent_events_payload(
+        request,
+        kind="errors",
+        limit=limit,
+        provider=provider,
+        endpoint=endpoint,
+    )

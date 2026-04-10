@@ -12,6 +12,7 @@ from gpt2giga.api.gemini.request import GeminiAPIError
 from gpt2giga.api.gemini.response import gemini_error_response
 from gpt2giga.api.litellm import router as litellm_router
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
+from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
 from gpt2giga.api.middleware.rquid_context import RquidMiddleware
@@ -94,6 +95,9 @@ def _register_middlewares(app: FastAPI, config) -> None:
 
     if config.proxy_settings.pass_token:
         app.add_middleware(PassTokenMiddleware)
+
+    # Keep observability outermost so it sees the final status of the whole stack.
+    app.add_middleware(ObservabilityMiddleware)
 
 
 def _register_root_redirect(app: FastAPI, *, is_prod_mode: bool) -> None:

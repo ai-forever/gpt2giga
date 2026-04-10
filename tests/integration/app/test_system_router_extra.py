@@ -189,6 +189,8 @@ def test_admin_runtime_endpoint():
     payload = resp.json()
     assert payload["mode"] == "DEV"
     assert payload["admin_enabled"] is True
+    assert payload["runtime_store_backend"] == "memory"
+    assert payload["state"]["stores"]["backend"] == "memory"
 
 
 def test_admin_capabilities_reflect_enabled_providers():
@@ -201,3 +203,16 @@ def test_admin_capabilities_reflect_enabled_providers():
     assert payload["providers"]["openai"]["enabled"] is True
     assert payload["providers"]["anthropic"]["enabled"] is False
     assert payload["providers"]["gemini"]["enabled"] is True
+
+
+def test_admin_recent_endpoints_return_empty_payload_by_default():
+    app = make_app()
+    client = TestClient(app)
+
+    recent_requests = client.get("/admin/api/requests/recent")
+    recent_errors = client.get("/admin/api/errors/recent")
+
+    assert recent_requests.status_code == 200
+    assert recent_requests.json() == {"events": [], "count": 0, "kind": "requests"}
+    assert recent_errors.status_code == 200
+    assert recent_errors.json() == {"events": [], "count": 0, "kind": "errors"}

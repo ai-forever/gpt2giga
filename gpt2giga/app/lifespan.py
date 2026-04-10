@@ -5,7 +5,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from gpt2giga.app.cli import load_config
-from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.app.dependencies import (
+    configure_runtime_stores,
+    ensure_runtime_dependencies,
+)
 from gpt2giga.app.wiring import close_runtime_services, wire_runtime_services
 from gpt2giga.core.logging.setup import setup_logger
 
@@ -29,6 +32,9 @@ async def lifespan(app: FastAPI):
         )
 
     ensure_runtime_dependencies(app.state, config=config, logger=logger)
+    stores = configure_runtime_stores(app.state, config=config, logger=logger)
+    if stores.backend is not None:
+        await stores.backend.open()
     wire_runtime_services(app, config=config, logger=logger)
     logger.info("Application startup complete")
 

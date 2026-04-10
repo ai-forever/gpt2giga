@@ -6,6 +6,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from gpt2giga.app.runtime_backends import (
+    EventFeed,
+    RuntimeStateBackend,
+    create_runtime_backend,
+    provision_runtime_resources,
+)
+
 
 @dataclass(slots=True)
 class RuntimeServices:
@@ -21,11 +28,14 @@ class RuntimeServices:
 
 @dataclass(slots=True)
 class RuntimeStores:
-    """App-scoped in-memory metadata stores."""
+    """App-scoped stateful runtime resources."""
 
-    files: dict[str, Any] = field(default_factory=dict)
-    batches: dict[str, Any] = field(default_factory=dict)
-    responses: dict[str, Any] = field(default_factory=dict)
+    backend: RuntimeStateBackend | None = None
+    files: Any = field(default_factory=dict)
+    batches: Any = field(default_factory=dict)
+    responses: Any = field(default_factory=dict)
+    recent_requests: EventFeed | None = None
+    recent_errors: EventFeed | None = None
 
 
 @dataclass(slots=True)
@@ -84,7 +94,7 @@ def ensure_runtime_dependencies(
         state.logger = logger
 
     get_runtime_services(state)
-    get_runtime_stores(state)
+    configure_runtime_stores(state, config=config, logger=logger)
     get_runtime_providers(state)
     sync_runtime_aliases(state)
 
@@ -105,6 +115,47 @@ def get_runtime_stores(state: Any) -> RuntimeStores:
     if not isinstance(stores, RuntimeStores):
         stores = RuntimeStores()
         state.stores = stores
+    _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)
+    if (
+        stores.backend is None
+        or stores.recent_requests is None
+        or stores.recent_errors is None
+    ):
+        configure_runtime_stores(
+            state,
+            config=getattr(state, "config", None),
+            logger=getattr(state, "logger", None),
+        )
+    return stores
+
+
+def configure_runtime_stores(
+    state: Any,
+    *,
+    config: Any | None = None,
+    logger: Any | None = None,
+) -> RuntimeStores:
+    """Provision runtime stores and feeds through the configured backend."""
+    stores = getattr(state, "stores", None)
+    if not isinstance(stores, RuntimeStores):
+        stores = RuntimeStores()
+        state.stores = stores
+
+    proxy_settings = getattr(config, "proxy_settings", None)
+    backend_name = getattr(proxy_settings, "runtime_store_backend", "memory")
+    current_backend = stores.backend
+    if current_backend is not None and current_backend.name == backend_name:
+        _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)
+        return stores
+
+    backend = create_runtime_backend(backend_name, config=config, logger=logger)
+    resources = provision_runtime_resources(backend, config=config)
+    stores.backend = backend
+    stores.files = resources["files"]
+    stores.batches = resources["batches"]
+    stores.responses = resources["responses"]
+    stores.recent_requests = resources["recent_requests"]
+    stores.recent_errors = resources["recent_errors"]
     _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)
     return stores
 

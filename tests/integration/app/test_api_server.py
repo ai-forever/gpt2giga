@@ -142,6 +142,8 @@ def test_openapi_json_available_in_dev_mode():
     assert "/messages" in schema["paths"]
     assert "/v1beta/models/{model}:generateContent" in schema["paths"]
     assert "/admin/api/runtime" in schema["paths"]
+    assert "/admin/api/requests/recent" in schema["paths"]
+    assert "/admin/api/errors/recent" in schema["paths"]
     assert "/logs" not in schema["paths"]
     chat_examples = schema["paths"]["/chat/completions"]["post"]["requestBody"][
         "content"
@@ -267,6 +269,32 @@ def test_openapi_only_includes_enabled_providers(monkeypatch):
     assert "/model/info" in schema["paths"]
     assert "/messages" not in schema["paths"]
     assert "/v1beta/models/{model}:generateContent" not in schema["paths"]
+
+
+def test_admin_recent_requests_endpoint_collects_runtime_events(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    with TestClient(create_app()) as client:
+        assert client.get("/health").status_code == 200
+        response = client.get("/admin/api/requests/recent")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "requests"
+    assert any(event["endpoint"] == "/health" for event in payload["events"])
+
+
+def test_admin_recent_errors_endpoint_collects_404_events(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    with TestClient(create_app()) as client:
+        assert client.get("/does-not-exist").status_code == 404
+        response = client.get("/admin/api/errors/recent")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "errors"
+    assert any(event["status_code"] == 404 for event in payload["events"])
 
 
 def test_run_server(monkeypatch):

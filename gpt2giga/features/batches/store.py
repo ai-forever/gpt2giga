@@ -1,4 +1,4 @@
-"""In-memory store helpers for the batches feature."""
+"""Store helpers for the batches feature."""
 
 from __future__ import annotations
 
@@ -7,20 +7,21 @@ from typing import Any
 from fastapi import Request
 
 from gpt2giga.app.dependencies import get_runtime_stores
+from gpt2giga.features.batches.contracts import BatchesMetadataStore
 
 
-def get_batch_store_from_state(state: Any) -> dict:
-    """Return the in-memory batches metadata store from app state."""
+def get_batch_store_from_state(state: Any) -> BatchesMetadataStore:
+    """Return the batches metadata store from app state."""
     return get_runtime_stores(state).batches
 
 
-def get_batch_store(request: Request) -> dict:
-    """Return the in-memory batches metadata store for a request."""
+def get_batch_store(request: Request) -> BatchesMetadataStore:
+    """Return the batches metadata store for a request."""
     return get_batch_store_from_state(request.app.state)
 
 
 def find_batch_metadata_by_output_file_id(
-    batch_store: dict,
+    batch_store: BatchesMetadataStore,
     file_id: str,
 ) -> dict | None:
     """Return batch metadata for a known batch output file."""

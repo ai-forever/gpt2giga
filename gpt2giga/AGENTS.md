@@ -74,10 +74,13 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/gemini/request.py` | Gemini request parsing and translation into the shared intermediary |
 | `api/gemini/response.py` | Gemini response/error shaping |
 | `api/gemini/streaming.py` | Gemini SSE/data-only translation |
-| `api/` | HTTP transport adapters: provider endpoints, middleware, dependencies, and system routes |
+| `api/` | HTTP transport adapters: provider endpoints, middleware, dependencies, system routes, and admin routes |
 | `api/*/openapi.py` | Provider-specific OpenAPI schema fragments colocated with routers |
 | `api/_openapi.py` | Shared OpenAPI request-body helper |
-| `templates/log_viewer.html` | HTML log viewer for `/logs/html` |
+| `api/admin/runtime.py` | `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities` |
+| `api/admin/logs.py` | `/admin/api/logs`, `/admin/api/logs/stream`, legacy `/logs*` compatibility shims |
+| `api/admin/ui.py` | `/admin` operator UI |
+| `templates/admin.html` | Admin UI shell with runtime overview and embedded log viewer |
 
 ## API Layout
 
@@ -94,12 +97,14 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/gemini/content.py` | `/v1beta/models/*:generateContent`, `countTokens`, embeddings |
 | `api/gemini/models.py` | `/v1beta/models` and `/v1beta/models/{model}` |
 | `api/system/health.py` | `/health`, `/ping` |
-| `api/system/logs.py` | `/logs`, `/logs/stream`, `/logs/html` |
+| `api/admin/ui.py` | `/admin` |
+| `api/admin/runtime.py` | `/admin/api/*` runtime/operator endpoints |
+| `api/admin/logs.py` | `/admin/api/logs*` and legacy `/logs*` compatibility routes |
 
 - OpenAI and Anthropic routers are mounted both at root and `/v1`.
 - Gemini routes are mounted under `/v1beta`.
 - System routes are root-only.
-- Log routes are disabled in `PROD`.
+- Admin and legacy log routes are disabled in `PROD`.
 
 ## Provider And Transport Layout
 
@@ -154,7 +159,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - `core/app_meta.py`: app version, port checks, and CLI secret warnings
 - `providers/gigachat/tool_mapping.py`: tool/function conversion helpers
 - `providers/gigachat/message_utils.py`: provider-facing role/message normalization helpers
-- `api/system/logs.py`: `/logs*` allowlist checks
+- `api/admin/logs.py`: admin/logs IP allowlist checks and legacy `/logs*` redirects
 
 ## Patterns & Conventions
 
