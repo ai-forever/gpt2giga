@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>gpt2giga Admin</title>
+  <style>
+    :root {
+      --bg: #f4efe5;
+      --panel: rgba(255, 251, 245, 0.88);
+      --panel-strong: #fffdf8;
+      --ink: #1d1c19;
+      --muted: #5d574f;
+      --line: rgba(63, 53, 39, 0.14);
+      --accent: #a64524;
+      --accent-soft: rgba(166, 69, 36, 0.12);
+      --warning: #8c2f1b;
+      --success: #1e6b43;
+      --shadow: 0 18px 50px rgba(63, 53, 39, 0.12);
+      --font-sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+      --font-mono: "IBM Plex Mono", "SFMono-Regular", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--font-sans);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, rgba(166, 69, 36, 0.16), transparent 32%),
+        radial-gradient(circle at top right, rgba(25, 107, 67, 0.14), transparent 28%),
+        linear-gradient(180deg, #fbf7f0 0%, var(--bg) 100%);
+    }
+
+    .shell {
+      width: min(1200px, calc(100% - 32px));
+      margin: 24px auto 40px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .hero,
+    .panel {
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+    }
+
+    .hero {
+      padding: 24px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .hero-top {
+      display: flex;
+      align-items: start;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1;
+      font-weight: 700;
+    }
+
+    .subhead {
+      margin: 10px 0 0;
+      max-width: 760px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .warning {
+      padding: 14px 16px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(140, 47, 27, 0.96), rgba(166, 69, 36, 0.96));
+      color: #fffaf4;
+      line-height: 1.5;
+    }
+
+    .warning strong {
+      display: block;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      min-width: 220px;
+      flex: 1 1 240px;
+    }
+
+    .field label {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    input,
+    select,
+    button {
+      font: inherit;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.86);
+      color: var(--ink);
+    }
+
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 12px 18px;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      transition: transform 120ms ease, opacity 120ms ease;
+    }
+
+    button.secondary {
+      background: #2e2b27;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .panel {
+      padding: 18px;
+    }
+
+    .panel.overview {
+      grid-column: span 7;
+    }
+
+    .panel.runtime {
+      grid-column: span 5;
+    }
+
+    .panel.logs {
+      grid-column: 1 / -1;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .panel h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .chips,
+    .stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .chip,
+    .stat {
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: var(--accent-soft);
+      color: var(--ink);
+      font-size: 13px;
+    }
+
+    .stat strong,
+    .chip strong {
+      margin-right: 6px;
+    }
+
+    .provider-list,
+    .route-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .provider {
+      padding: 14px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }
+
+    .provider header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      letter-spacing: 0.02em;
+    }
+
+    .badge.enabled {
+      background: rgba(30, 107, 67, 0.12);
+      color: var(--success);
+    }
+
+    .badge.disabled {
+      background: rgba(140, 47, 27, 0.1);
+      color: var(--warning);
+    }
+
+    .kv {
+      margin: 0;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+    }
+
+    .kv div {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(29, 28, 25, 0.04);
+    }
+
+    .kv dt {
+      margin: 0 0 4px;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .kv dd {
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .logs-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .logs-status {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      min-height: 360px;
+      max-height: 560px;
+      overflow: auto;
+      border-radius: 16px;
+      border: 1px solid rgba(29, 28, 25, 0.12);
+      background: #141310;
+      color: #f0f1e8;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .route-list {
+      max-height: 360px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .route {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(29, 28, 25, 0.04);
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .route small {
+      color: var(--muted);
+    }
+
+    @media (max-width: 960px) {
+      .panel.overview,
+      .panel.runtime,
+      .panel.logs {
+        grid-column: 1 / -1;
+      }
+
+      .kv {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-top">
+        <div>
+          <p class="eyebrow">gpt2giga operator console</p>
+          <h1>Admin Surface</h1>
+          <p class="subhead">
+            Runtime status, enabled provider groups, mounted routes, and live logs in one place.
+            This UI is meant for local operator and debug workflows, not for public exposure.
+          </p>
+        </div>
+        <div class="stats" id="headlineStats"></div>
+      </div>
+
+      <div class="warning">
+        <strong>Warning</strong>
+        Logs and runtime metadata may contain sensitive details such as request payloads, internal addresses,
+        and user-provided content. Keep this UI behind trusted access only.
+      </div>
+
+      <div class="controls">
+        <div class="field">
+          <label for="apiKey">API key</label>
+          <input id="apiKey" type="password" placeholder="Optional unless auth is enabled" />
+        </div>
+        <div class="field" style="max-width: 140px;">
+          <label for="logLines">Log lines</label>
+          <select id="logLines">
+            <option value="100">100</option>
+            <option value="250" selected>250</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+        </div>
+        <button id="refreshBtn" type="button">Refresh</button>
+        <button id="streamBtn" class="secondary" type="button">Start log stream</button>
+      </div>
+    </section>
+
+    <section class="grid">
+      <section class="panel overview">
+        <div class="panel-head">
+          <h2>Capabilities</h2>
+          <div class="chips" id="backendChips"></div>
+        </div>
+        <div class="provider-list" id="providers"></div>
+      </section>
+
+      <section class="panel runtime">
+        <div class="panel-head">
+          <h2>Runtime</h2>
+          <span class="logs-status" id="runtimeStatus">Loading…</span>
+        </div>
+        <dl class="kv" id="runtimeDetails"></dl>
+      </section>
+
+      <section class="panel runtime">
+        <div class="panel-head">
+          <h2>Routes</h2>
+          <span class="logs-status" id="routesStatus">Loading…</span>
+        </div>
+        <div class="route-list" id="routes"></div>
+      </section>
+
+      <section class="panel logs">
+        <div class="panel-head">
+          <h2>Logs</h2>
+          <span class="logs-status" id="logsStatus">Idle</span>
+        </div>
+        <div class="logs-toolbar">
+          <div class="chips">
+            <span class="chip"><strong>Endpoint</strong><span>/admin/api/logs</span></span>
+            <span class="chip"><strong>Stream</strong><span>/admin/api/logs/stream</span></span>
+          </div>
+        </div>
+        <pre id="logs">Loading logs…</pre>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const apiKeyInput = document.getElementById("apiKey");
+    const logLinesInput = document.getElementById("logLines");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const streamBtn = document.getElementById("streamBtn");
+
+    const headlineStats = document.getElementById("headlineStats");
+    const backendChips = document.getElementById("backendChips");
+    const providers = document.getElementById("providers");
+    const runtimeDetails = document.getElementById("runtimeDetails");
+    const runtimeStatus = document.getElementById("runtimeStatus");
+    const routes = document.getElementById("routes");
+    const routesStatus = document.getElementById("routesStatus");
+    const logs = document.getElementById("logs");
+    const logsStatus = document.getElementById("logsStatus");
+
+    let activeLogReader = null;
+
+    function getHeaders() {
+      const apiKey = apiKeyInput.value.trim();
+      return apiKey ? { "x-api-key": apiKey } : {};
+    }
+
+    async function fetchJson(path) {
+      const response = await fetch(path, { headers: getHeaders() });
+      if (!response.ok) {
+        throw new Error(`${path} -> ${response.status}`);
+      }
+      return response.json();
+    }
+
+    async function fetchText(path) {
+      const response = await fetch(path, { headers: getHeaders() });
+      if (!response.ok) {
+        throw new Error(`${path} -> ${response.status}`);
+      }
+      return response.text();
+    }
+
+    function renderHeadline(runtime) {
+      headlineStats.innerHTML = "";
+      [
+        ["Mode", runtime.mode],
+        ["Backend", runtime.gigachat_api_mode],
+        ["Providers", runtime.enabled_providers.join(", ") || "none"],
+        ["Auth", runtime.auth_required ? "required" : "disabled"],
+      ].forEach(([label, value]) => {
+        const span = document.createElement("span");
+        span.className = "stat";
+        span.innerHTML = `<strong>${label}</strong>${value}`;
+        headlineStats.appendChild(span);
+      });
+    }
+
+    function renderBackend(capabilities) {
+      backendChips.innerHTML = "";
+      const items = [
+        ["chat", capabilities.backend.chat_backend_mode],
+        ["responses", capabilities.backend.responses_backend_mode],
+      ];
+      items.forEach(([label, value]) => {
+        const span = document.createElement("span");
+        span.className = "chip";
+        span.innerHTML = `<strong>${label}</strong>${value}`;
+        backendChips.appendChild(span);
+      });
+    }
+
+    function renderProviders(capabilities) {
+      providers.innerHTML = "";
+      Object.entries(capabilities.providers).forEach(([name, provider]) => {
+        const article = document.createElement("article");
+        article.className = "provider";
+        const statusClass = provider.enabled ? "enabled" : "disabled";
+        const capabilityText = provider.capabilities.join(", ");
+        article.innerHTML = `
+          <header>
+            <strong>${name}</strong>
+            <span class="badge ${statusClass}">${provider.enabled ? "enabled" : "disabled"}</span>
+          </header>
+          <div class="chips">
+            <span class="chip"><strong>Capabilities</strong>${capabilityText}</span>
+            <span class="chip"><strong>Routes</strong>${provider.routes.length}</span>
+          </div>
+        `;
+        providers.appendChild(article);
+      });
+    }
+
+    function renderRuntime(runtime, config) {
+      runtimeDetails.innerHTML = "";
+      const values = {
+        version: runtime.app_version,
+        mode: runtime.mode,
+        admin_enabled: String(runtime.admin_enabled),
+        docs_enabled: String(runtime.docs_enabled),
+        log_file: config.log_filename,
+        enabled_providers: runtime.enabled_providers.join(", "),
+        api_key_auth: String(config.enable_api_key_auth),
+        pass_token: String(runtime.pass_token),
+        pass_model: String(runtime.pass_model),
+        log_redaction: String(runtime.log_redact_sensitive),
+        allowlist_enabled: String(runtime.logs_ip_allowlist_enabled),
+      };
+      Object.entries(values).forEach(([key, value]) => {
+        const wrapper = document.createElement("div");
+        wrapper.innerHTML = `<dt>${key.replaceAll("_", " ")}</dt><dd>${value}</dd>`;
+        runtimeDetails.appendChild(wrapper);
+      });
+      runtimeStatus.textContent = "Ready";
+    }
+
+    function renderRoutes(payload) {
+      routes.innerHTML = "";
+      payload.routes.slice(0, 24).forEach((route) => {
+        const item = document.createElement("div");
+        item.className = "route";
+        item.innerHTML = `
+          <span>${route.methods.join(", ")} ${route.path}</span>
+          <small>${route.tags.join(", ") || "untagged"}</small>
+        `;
+        routes.appendChild(item);
+      });
+      routesStatus.textContent = `${payload.routes.length} mounted`;
+    }
+
+    async function loadLogs() {
+      logsStatus.textContent = "Loading logs…";
+      try {
+        const text = await fetchText(`/admin/api/logs?lines=${logLinesInput.value}`);
+        logs.textContent = text || "[empty log file]";
+        logs.scrollTop = logs.scrollHeight;
+        logsStatus.textContent = `Loaded ${logLinesInput.value} lines`;
+      } catch (error) {
+        logs.textContent = `[error] ${error.message}`;
+        logsStatus.textContent = "Request failed";
+      }
+    }
+
+    async function refresh() {
+      runtimeStatus.textContent = "Loading…";
+      routesStatus.textContent = "Loading…";
+      try {
+        const [runtime, config, capabilities, routePayload] = await Promise.all([
+          fetchJson("/admin/api/runtime"),
+          fetchJson("/admin/api/config"),
+          fetchJson("/admin/api/capabilities"),
+          fetchJson("/admin/api/routes"),
+        ]);
+        renderHeadline(runtime);
+        renderBackend(capabilities);
+        renderProviders(capabilities);
+        renderRuntime(runtime, config);
+        renderRoutes(routePayload);
+      } catch (error) {
+        runtimeStatus.textContent = error.message;
+        routesStatus.textContent = error.message;
+      }
+      await loadLogs();
+    }
+
+    async function toggleStream() {
+      if (activeLogReader) {
+        activeLogReader.cancel();
+        activeLogReader = null;
+        streamBtn.textContent = "Start log stream";
+        logsStatus.textContent = "Stream stopped";
+        return;
+      }
+
+      logsStatus.textContent = "Connecting stream…";
+      try {
+        const response = await fetch("/admin/api/logs/stream", { headers: getHeaders() });
+        if (!response.ok || !response.body) {
+          throw new Error(`/admin/api/logs/stream -> ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        activeLogReader = reader;
+        streamBtn.textContent = "Stop log stream";
+        logsStatus.textContent = "Streaming";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          const chunk = decoder.decode(value, { stream: true });
+          logs.textContent += chunk;
+          logs.scrollTop = logs.scrollHeight;
+        }
+      } catch (error) {
+        logsStatus.textContent = error.message;
+      } finally {
+        if (activeLogReader) {
+          activeLogReader = null;
+          streamBtn.textContent = "Start log stream";
+        }
+      }
+    }
+
+    refreshBtn.addEventListener("click", refresh);
+    streamBtn.addEventListener("click", toggleStream);
+
+    if (new URLSearchParams(window.location.search).get("tab") === "logs") {
+      document.getElementById("logs").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    refresh();
+  </script>
+</body>
+</html>
