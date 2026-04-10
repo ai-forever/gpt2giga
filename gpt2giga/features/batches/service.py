@@ -33,9 +33,16 @@ from gpt2giga.features.batches.transforms import (
 class BatchesService:
     """Coordinate the internal batches flow."""
 
-    def __init__(self, request_transformer: Any, *, embeddings_model: str):
+    def __init__(
+        self,
+        request_transformer: Any,
+        *,
+        embeddings_model: str,
+        gigachat_api_mode: str = "v1",
+    ):
         self.request_transformer = request_transformer
         self.embeddings_model = embeddings_model
+        self.gigachat_api_mode = gigachat_api_mode
 
     async def create_batch(
         self,
@@ -135,6 +142,7 @@ class BatchesService:
             request_transformer=self.request_transformer,
             giga_client=giga_client,
             embeddings_model=self.embeddings_model,
+            gigachat_api_mode=self.gigachat_api_mode,
         )
         batch = await giga_client.acreate_batch(
             transformed_content,
@@ -315,6 +323,7 @@ def get_batches_service_from_state(state: Any) -> Any:
     service = BatchesService(
         request_transformer,
         embeddings_model=config.proxy_settings.embeddings,
+        gigachat_api_mode=config.proxy_settings.chat_backend_mode,
     )
     return set_runtime_service(state, "batches", service)
 

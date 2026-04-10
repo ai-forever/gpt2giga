@@ -27,6 +27,7 @@ from gpt2giga.api.gemini.response import (
 )
 from gpt2giga.api.gemini.streaming import stream_gemini_generate_content
 from gpt2giga.app.dependencies import (
+    get_config_from_state,
     get_logger_from_state,
     get_request_transformer_from_state,
 )
@@ -66,15 +67,26 @@ async def generate_content(model: str, request: Request):
 
     giga_client = get_gigachat_client(request)
     app_state = request.app.state
+    api_mode = get_config_from_state(app_state).proxy_settings.chat_backend_mode
+    response_processor = getattr(app_state, "response_processor", None)
     openai_data = build_openai_data_from_gemini_request(
         data, get_logger_from_state(app_state)
     )
-    chat_messages = await get_request_transformer_from_state(
-        app_state
-    ).prepare_chat_completion(openai_data, giga_client)
-    response = await giga_client.achat(chat_messages)
+    request_transformer = get_request_transformer_from_state(app_state)
+    if api_mode == "v2":
+        chat_messages = await request_transformer.prepare_chat_completion_v2(
+            openai_data, giga_client
+        )
+        response = await giga_client.achat_v2(chat_messages)
+        giga_dict = response_processor.normalize_chat_v2_response(response)
+    else:
+        chat_messages = await request_transformer.prepare_chat_completion(
+            openai_data, giga_client
+        )
+        response = await giga_client.achat(chat_messages)
+        giga_dict = response.model_dump()
     return build_generate_content_response(
-        response.model_dump(),
+        giga_dict,
         normalized_model,
         rquid_context.get(),
         request_data=data,
@@ -94,12 +106,20 @@ async def stream_generate_content(model: str, request: Request):
 
     giga_client = get_gigachat_client(request)
     app_state = request.app.state
+    api_mode = get_config_from_state(app_state).proxy_settings.chat_backend_mode
+    response_processor = getattr(app_state, "response_processor", None)
     openai_data = build_openai_data_from_gemini_request(
         data, get_logger_from_state(app_state)
     )
-    chat_messages = await get_request_transformer_from_state(
-        app_state
-    ).prepare_chat_completion(openai_data, giga_client)
+    request_transformer = get_request_transformer_from_state(app_state)
+    if api_mode == "v2":
+        chat_messages = await request_transformer.prepare_chat_completion_v2(
+            openai_data, giga_client
+        )
+    else:
+        chat_messages = await request_transformer.prepare_chat_completion(
+            openai_data, giga_client
+        )
     response_id = rquid_context.get()
     return StreamingResponse(
         stream_gemini_generate_content(
@@ -109,6 +129,8 @@ async def stream_generate_content(model: str, request: Request):
             response_id,
             giga_client,
             request_data=data,
+            api_mode=api_mode,
+            response_processor=response_processor,
         ),
         media_type="text/event-stream",
     )

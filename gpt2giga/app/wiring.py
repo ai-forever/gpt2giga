@@ -35,6 +35,8 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
     services = get_runtime_services(app.state)
     get_runtime_stores(app.state)
     providers = get_runtime_providers(app.state)
+    chat_backend_mode = config.proxy_settings.chat_backend_mode
+    responses_backend_mode = config.proxy_settings.responses_backend_mode
 
     create_app_gigachat_client(app, settings=config.gigachat_settings)
 
@@ -57,6 +59,7 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
     providers.chat_mapper = GigaChatChatMapper(
         request_transformer=providers.request_transformer,
         response_processor=providers.response_processor,
+        backend_mode=chat_backend_mode,
     )
     services.chat = ChatService(providers.chat_mapper)
     providers.embeddings_mapper = GigaChatEmbeddingsMapper()
@@ -73,10 +76,12 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
     services.batches = BatchesService(
         providers.request_transformer,
         embeddings_model=config.proxy_settings.embeddings,
+        gigachat_api_mode=chat_backend_mode,
     )
     services.responses = ResponsesService(
         providers.request_transformer,
         providers.response_processor,
+        backend_mode=responses_backend_mode,
     )
     sync_runtime_aliases(app.state)
 

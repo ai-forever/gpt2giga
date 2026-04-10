@@ -23,8 +23,271 @@ from gpt2giga.providers.gigachat.streaming import (
     ResponsesFunctionCallUpdate,
     ResponsesTextUpdate,
     ResponsesToolUpdate,
+    iter_chat_stream_chunks,
     iter_responses_stream_chunks,
 )
+
+
+async def _stream_responses_generator_v1(
+    request: Request,
+    chat_messages: Chat | Any,
+    *,
+    response_id: str,
+    giga_client: Optional[GigaChat],
+    request_data: Optional[dict],
+    response_processor: Any,
+) -> AsyncGenerator[str, None]:
+    """Stream legacy Responses API events over the v1 backend path."""
+    from gpt2giga.api.openai.streaming import format_responses_stream_event
+
+    logger = None
+    rquid = rquid_context.get()
+    processor = response_processor
+    model = request_data.get("model", "unknown") if request_data else "unknown"
+    usage: Optional[dict] = None
+    finish_reason: Optional[str] = None
+    sequence_number = 0
+    text_item: dict[str, Any] | None = None
+    text_value = ""
+    function_item: dict[str, Any] | None = None
+    function_arguments = ""
+    function_name: str | None = None
+    response_text = processor._build_response_text_config(request_data)
+
+    def emit(event_type: str, payload: dict) -> str:
+        nonlocal sequence_number
+        body = dict(payload)
+        body["type"] = event_type
+        body["sequence_number"] = sequence_number
+        sequence_number += 1
+        return format_responses_stream_event(event_type, body)
+
+    def current_response(status: str) -> dict:
+        _, details = processor._build_response_status(finish_reason)
+        result = processor._build_responses_api_result(
+            request_data=request_data,
+            gpt_model=model,
+            response_id=response_id,
+            output=output_items(),
+            usage=usage,
+            response_text=response_text,
+        )
+        result["status"] = status
+        result["incomplete_details"] = details if status == "incomplete" else None
+        return result
+
+    def output_items() -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        if text_item is not None:
+            items.append(text_item)
+        if function_item is not None:
+            items.append(function_item)
+        return items
+
+    try:
+        if giga_client is None:
+            giga_client = get_gigachat_client(request)
+        logger = get_logger_from_state(request.app.state)
+
+        yield emit("response.created", {"response": current_response("in_progress")})
+        yield emit(
+            "response.in_progress",
+            {"response": current_response("in_progress")},
+        )
+
+        async for chunk in iter_chat_stream_chunks(giga_client, chat_messages):
+            if await request.is_disconnected():
+                if logger:
+                    logger.info(f"[{rquid}] Client disconnected during streaming")
+                break
+
+            chunk_dict = processor._safe_model_dump(chunk)
+            choice = (chunk_dict.get("choices") or [{}])[0]
+            finish_reason = choice.get("finish_reason") or finish_reason
+            chunk_model = chunk_dict.get("model")
+            if isinstance(chunk_model, str) and chunk_model:
+                model = chunk_model
+            if chunk_dict.get("usage") is not None:
+                usage = processor._build_response_usage(chunk_dict.get("usage"))
+
+            processed = processor.process_stream_chunk_response(
+                chunk,
+                response_id=response_id,
+            )
+            event_type = processed.get("type") if isinstance(processed, dict) else None
+            if event_type == "response.output_text.delta":
+                if text_item is None:
+                    text_item = {
+                        "id": processed["item_id"],
+                        "type": "message",
+                        "status": "in_progress",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "",
+                                "annotations": [],
+                                "logprobs": [],
+                            }
+                        ],
+                    }
+                    yield emit(
+                        "response.output_item.added",
+                        {"output_index": 0, "item": text_item},
+                    )
+                    yield emit(
+                        "response.content_part.added",
+                        {
+                            "item_id": text_item["id"],
+                            "output_index": 0,
+                            "content_index": 0,
+                            "part": text_item["content"][0],
+                        },
+                    )
+                delta = processed.get("delta", "")
+                text_value += delta
+                text_item["content"][0]["text"] = text_value
+                yield emit(
+                    "response.output_text.delta",
+                    {
+                        "item_id": text_item["id"],
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": delta,
+                        "logprobs": [],
+                    },
+                )
+                continue
+
+            for output_index, item in enumerate(
+                processed if isinstance(processed, list) else [processed],
+                start=1 if text_item is not None else 0,
+            ):
+                if not isinstance(item, dict) or item.get("type") != "function_call":
+                    continue
+                if function_item is None:
+                    function_item = dict(item)
+                    function_item["status"] = "in_progress"
+                    function_arguments = ""
+                    function_name = function_item.get("name")
+                    yield emit(
+                        "response.output_item.added",
+                        {"output_index": output_index, "item": function_item},
+                    )
+
+                new_arguments = item.get("arguments", "")
+                if isinstance(new_arguments, str):
+                    if new_arguments.startswith(function_arguments):
+                        delta = new_arguments[len(function_arguments) :]
+                    else:
+                        delta = new_arguments
+                    if delta:
+                        function_arguments = (
+                            f"{function_arguments}{delta}"
+                            if new_arguments.startswith(function_arguments)
+                            else new_arguments
+                        )
+                        function_item["arguments"] = function_arguments
+                        yield emit(
+                            "response.function_call_arguments.delta",
+                            {
+                                "item_id": function_item["id"],
+                                "output_index": output_index,
+                                "delta": delta,
+                            },
+                        )
+
+        response_status, incomplete_details = processor._build_response_status(
+            finish_reason
+        )
+        final_item_status = processor._build_output_item_status(response_status)
+
+        if text_item is not None:
+            text_item["status"] = final_item_status
+            yield emit(
+                "response.output_text.done",
+                {
+                    "item_id": text_item["id"],
+                    "output_index": 0,
+                    "content_index": 0,
+                    "text": text_value,
+                    "logprobs": [],
+                },
+            )
+            yield emit(
+                "response.content_part.done",
+                {
+                    "item_id": text_item["id"],
+                    "output_index": 0,
+                    "content_index": 0,
+                    "part": text_item["content"][0],
+                },
+            )
+            yield emit(
+                "response.output_item.done",
+                {"output_index": 0, "item": text_item},
+            )
+
+        if function_item is not None:
+            function_item["status"] = final_item_status
+            yield emit(
+                "response.function_call_arguments.done",
+                {
+                    "item_id": function_item["id"],
+                    "output_index": 1 if text_item is not None else 0,
+                    "name": function_name,
+                    "arguments": function_arguments,
+                },
+            )
+            yield emit(
+                "response.output_item.done",
+                {
+                    "output_index": 1 if text_item is not None else 0,
+                    "item": function_item,
+                },
+            )
+
+        final_response = current_response(response_status)
+        final_response["incomplete_details"] = (
+            incomplete_details if response_status == "incomplete" else None
+        )
+        if response_status == "incomplete":
+            yield emit("response.incomplete", {"response": final_response})
+        else:
+            yield emit("response.completed", {"response": final_response})
+
+    except GigaChatStreamError as exc:
+        if logger:
+            logger.error(
+                f"[{rquid}] GigaChat streaming error: {exc.error_type}: {exc.message}"
+            )
+        yield emit(
+            "error",
+            {
+                "code": "stream_error",
+                "message": exc.message,
+                "param": None,
+            },
+        )
+
+    except asyncio.CancelledError:
+        raise
+
+    except Exception as exc:
+        error_type = type(exc).__name__
+        tb = traceback.format_exc()
+        if logger:
+            logger.error(
+                f"[{rquid}] Unexpected streaming error: {error_type}: {exc}\n{tb}"
+            )
+        yield emit(
+            "error",
+            {
+                "code": "internal_error",
+                "message": "Stream interrupted",
+                "param": None,
+            },
+        )
 
 
 async def stream_responses_generator(
@@ -35,6 +298,7 @@ async def stream_responses_generator(
     request_data: Optional[dict] = None,
     response_store: Optional[dict] = None,
     response_processor: Any = None,
+    api_mode: str = "v2",
 ) -> AsyncGenerator[str, None]:
     """Stream Responses API events as SSE lines."""
     from gpt2giga.api.openai.streaming import format_responses_stream_event
@@ -47,6 +311,18 @@ async def stream_responses_generator(
     response_store = (
         response_store if response_store is not None else get_response_store(request)
     )
+
+    if api_mode == "v1":
+        async for line in _stream_responses_generator_v1(
+            request,
+            chat_messages,
+            response_id=response_id,
+            giga_client=giga_client,
+            request_data=request_data,
+            response_processor=processor,
+        ):
+            yield line
+        return
 
     created_at = int(time.time())
     completed_at: Optional[int] = None

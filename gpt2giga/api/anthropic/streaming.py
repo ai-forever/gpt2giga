@@ -17,9 +17,12 @@ from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 async def _stream_anthropic_generator(
     request: Request,
     model: str,
-    chat_messages: dict[str, Any],
+    chat_messages: Any,
     response_id: str,
     giga_client: GigaChat,
+    *,
+    api_mode: str = "v1",
+    response_processor: Any = None,
 ) -> AsyncGenerator[str, None]:
     """SSE generator producing Anthropic Messages streaming events."""
     logger = None
@@ -38,7 +41,11 @@ async def _stream_anthropic_generator(
         input_tokens = 0
         output_tokens = 0
 
-        stream = giga_client.astream(chat_messages)
+        stream = (
+            giga_client.astream_v2(chat_messages)
+            if api_mode == "v2"
+            else giga_client.astream(chat_messages)
+        )
         buffered_chunks = []
 
         try:
@@ -84,7 +91,11 @@ async def _stream_anthropic_generator(
                     logger.info(f"[{rquid}] Client disconnected during streaming")
                 break
 
-            giga_dict = chunk.model_dump()
+            giga_dict = (
+                response_processor.normalize_chat_v2_stream_chunk(chunk)
+                if api_mode == "v2" and response_processor is not None
+                else chunk.model_dump()
+            )
             choice = giga_dict["choices"][0]
             delta = choice.get("delta", {})
             delta_content = delta.get("content", "")

@@ -11,9 +11,21 @@ from gigachat import GigaChat
 class GigaChatChatMapper:
     """Wrap chat-specific request/response mapping for the GigaChat provider."""
 
-    def __init__(self, *, request_transformer=None, response_processor=None):
+    def __init__(
+        self,
+        *,
+        request_transformer=None,
+        response_processor=None,
+        backend_mode: str = "v1",
+    ):
         self.request_transformer = request_transformer
         self.response_processor = response_processor
+        self.backend_mode = backend_mode
+
+    @property
+    def uses_v2_backend(self) -> bool:
+        """Return ``True`` when chat-like routes should use the v2 backend."""
+        return self.backend_mode == "v2"
 
     @staticmethod
     def _accepts_giga_client(prepare_request) -> bool:
@@ -47,7 +59,11 @@ class GigaChatChatMapper:
     ) -> dict[str, Any]:
         """Prepare a GigaChat chat request."""
         request_transformer = self._require_request_transformer()
-        prepare_request = request_transformer.prepare_chat_completion
+        prepare_request = (
+            request_transformer.prepare_chat_completion_v2
+            if self.uses_v2_backend
+            else request_transformer.prepare_chat_completion
+        )
         if giga_client is None or not self._accepts_giga_client(prepare_request):
             return await prepare_request(data)
         return await prepare_request(data, giga_client)
@@ -61,6 +77,13 @@ class GigaChatChatMapper:
     ) -> dict[str, Any]:
         """Convert a non-streaming GigaChat chat response."""
         response_processor = self._require_response_processor()
+        if self.uses_v2_backend:
+            return response_processor.process_response_v2(
+                giga_resp,
+                gpt_model,
+                response_id,
+                request_data=request_data,
+            )
         return response_processor.process_response(
             giga_resp,
             gpt_model,
@@ -77,6 +100,13 @@ class GigaChatChatMapper:
     ) -> dict[str, Any]:
         """Convert a streaming GigaChat chat chunk."""
         response_processor = self._require_response_processor()
+        if self.uses_v2_backend:
+            return response_processor.process_stream_chunk_v2(
+                giga_resp,
+                gpt_model,
+                response_id,
+                request_data=request_data,
+            )
         return response_processor.process_stream_chunk(
             giga_resp,
             gpt_model,

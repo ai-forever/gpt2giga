@@ -47,15 +47,39 @@ class FakeRequestTransformer:
         return {
             "model": data.get("model", "GigaChat"),
             "messages": data["messages"],
-            "translated": "chat",
+            "translated": "chat-v1",
         }
+
+    async def prepare_chat_completion_v2(self, data, giga_client=None):
+        class Prepared:
+            def model_dump(self, *args, **kwargs):
+                return {
+                    "model": data.get("model", "GigaChat"),
+                    "messages": [{"role": "user", "content": [{"text": "hello"}]}],
+                    "translated": "chat-v2",
+                }
+
+        return Prepared()
 
     async def prepare_response(self, data, giga_client=None):
         return {
             "model": data.get("model", "GigaChat"),
             "messages": [{"role": "user", "content": data["input"]}],
-            "translated": "responses",
+            "translated": "responses-v1",
         }
+
+    async def prepare_response_v2(self, data, giga_client=None, response_store=None):
+        class Prepared:
+            def model_dump(self, *args, **kwargs):
+                return {
+                    "model": data.get("model", "GigaChat"),
+                    "messages": [
+                        {"role": "user", "content": [{"text": data["input"]}]}
+                    ],
+                    "translated": "responses-v2",
+                }
+
+        return Prepared()
 
 
 class FakeBatchesClient:
@@ -181,6 +205,103 @@ async def test_batches_service_list_anthropic_batches_filters_by_metadata():
     assert file_store["file-output-1"]["purpose"] == "batch_output"
 
 
+@pytest.mark.asyncio
+async def test_batches_service_uses_v1_transformer_for_responses_batches():
+    service = BatchesService(
+        FakeRequestTransformer(),
+        embeddings_model="EmbeddingsGigaR",
+        gigachat_api_mode="v1",
+    )
+    giga_client = FakeBatchesClient()
+
+    await service.create_batch_from_rows(
+        [
+            {
+                "custom_id": "req-1",
+                "method": "POST",
+                "url": "/v1/responses",
+                "body": {
+                    "model": "gpt-x",
+                    "input": "hello",
+                },
+            }
+        ],
+        endpoint="/v1/responses",
+        completion_window="24h",
+        giga_client=giga_client,
+        batch_store={},
+        file_store={},
+    )
+
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert translated_line["request"]["translated"] == "responses-v1"
+
+
+@pytest.mark.asyncio
+async def test_batches_service_uses_v2_transformer_for_responses_batches():
+    service = BatchesService(
+        FakeRequestTransformer(),
+        embeddings_model="EmbeddingsGigaR",
+        gigachat_api_mode="v2",
+    )
+    giga_client = FakeBatchesClient()
+
+    await service.create_batch_from_rows(
+        [
+            {
+                "custom_id": "req-1",
+                "method": "POST",
+                "url": "/v1/responses",
+                "body": {
+                    "model": "gpt-x",
+                    "input": "hello",
+                },
+            }
+        ],
+        endpoint="/v1/responses",
+        completion_window="24h",
+        giga_client=giga_client,
+        batch_store={},
+        file_store={},
+    )
+
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert translated_line["request"]["translated"] == "responses-v2"
+    assert translated_line["request"]["messages"][0]["content"][0]["text"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_batches_service_uses_v2_transformer_for_chat_batches():
+    service = BatchesService(
+        FakeRequestTransformer(),
+        embeddings_model="EmbeddingsGigaR",
+        gigachat_api_mode="v2",
+    )
+    giga_client = FakeBatchesClient()
+
+    await service.create_batch_from_rows(
+        [
+            {
+                "custom_id": "req-1",
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": "gpt-x",
+                    "messages": [{"role": "user", "content": "hello"}],
+                },
+            }
+        ],
+        endpoint="/v1/chat/completions",
+        completion_window="24h",
+        giga_client=giga_client,
+        batch_store={},
+        file_store={},
+    )
+
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert translated_line["request"]["translated"] == "chat-v2"
+
+
 def test_get_batches_service_from_state_builds_service_from_config():
     state = SimpleNamespace(
         request_transformer=FakeRequestTransformer(),
@@ -191,3 +312,4 @@ def test_get_batches_service_from_state_builds_service_from_config():
 
     assert state.batches_service is service
     assert service.embeddings_model == state.config.proxy_settings.embeddings
+    assert service.gigachat_api_mode == "v1"

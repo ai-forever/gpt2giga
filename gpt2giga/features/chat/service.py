@@ -45,7 +45,10 @@ class ChatService:
     ) -> ChatResponseData:
         """Execute a non-streaming chat completion."""
         prepared_request = await self.prepare_request(data, giga_client=giga_client)
-        response = await giga_client.achat(prepared_request)
+        if getattr(self.mapper, "uses_v2_backend", False):
+            response = await giga_client.achat_v2(prepared_request)
+        else:
+            response = await giga_client.achat(prepared_request)
         return self.mapper.process_response(
             response,
             data["model"],
@@ -70,6 +73,7 @@ class ChatService:
             response_id=response_id,
             giga_client=giga_client,
             mapper=self.mapper,
+            api_mode="v2" if getattr(self.mapper, "uses_v2_backend", False) else "v1",
         ):
             yield line
 

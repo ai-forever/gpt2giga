@@ -18,6 +18,7 @@ from gpt2giga.api.anthropic.request import (
 from gpt2giga.api.anthropic.response import _build_anthropic_response
 from gpt2giga.api.anthropic.streaming import _stream_anthropic_generator
 from gpt2giga.app.dependencies import (
+    get_config_from_state,
     get_logger_from_state,
     get_request_transformer_from_state,
 )
@@ -66,21 +67,39 @@ async def messages(request: Request):
 
     model = data.get("model", "unknown")
     app_state = request.app.state
+    api_mode = get_config_from_state(app_state).proxy_settings.chat_backend_mode
+    response_processor = getattr(app_state, "response_processor", None)
     openai_data: Dict = _build_openai_data_from_anthropic_request(
         data, get_logger_from_state(app_state)
     )
-    chat_messages = await get_request_transformer_from_state(
-        app_state
-    ).prepare_chat_completion(openai_data, giga_client)
+    request_transformer = get_request_transformer_from_state(app_state)
+    if api_mode == "v2":
+        chat_messages = await request_transformer.prepare_chat_completion_v2(
+            openai_data, giga_client
+        )
+    else:
+        chat_messages = await request_transformer.prepare_chat_completion(
+            openai_data, giga_client
+        )
 
     if not stream:
-        response = await giga_client.achat(chat_messages)
-        giga_dict = response.model_dump()
+        if api_mode == "v2":
+            response = await giga_client.achat_v2(chat_messages)
+            giga_dict = response_processor.normalize_chat_v2_response(response)
+        else:
+            response = await giga_client.achat(chat_messages)
+            giga_dict = response.model_dump()
         return _build_anthropic_response(giga_dict, model, current_rquid)
 
     return StreamingResponse(
         _stream_anthropic_generator(
-            request, model, chat_messages, current_rquid, giga_client
+            request,
+            model,
+            chat_messages,
+            current_rquid,
+            giga_client,
+            api_mode=api_mode,
+            response_processor=response_processor,
         ),
         media_type="text/event-stream",
     )

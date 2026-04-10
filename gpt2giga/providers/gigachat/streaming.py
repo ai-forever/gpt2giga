@@ -129,6 +129,18 @@ async def iter_chat_stream_chunks(
         raise GigaChatStreamError.from_exception(exc) from exc
 
 
+async def iter_chat_v2_stream_chunks(
+    giga_client: Any,
+    chat_messages: PreparedChatRequest,
+) -> AsyncIterator[Any]:
+    """Yield raw GigaChat v2 chat stream chunks."""
+    try:
+        async for chunk in giga_client.astream_v2(chat_messages):
+            yield chunk
+    except gigachat.exceptions.GigaChatException as exc:
+        raise GigaChatStreamError.from_exception(exc) from exc
+
+
 def map_chat_stream_chunk(
     chunk: Any,
     *,

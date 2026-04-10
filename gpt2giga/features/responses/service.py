@@ -14,6 +14,7 @@ from gpt2giga.app.dependencies import (
 )
 from gpt2giga.features.responses.contracts import (
     PreparedResponsesRequest,
+    ResponsesBackendMode,
     ResponsesMetadataStore,
     ResponsesRequestData,
     ResponsesRequestPreparer,
@@ -32,9 +33,17 @@ class ResponsesService:
         self,
         request_preparer: ResponsesRequestPreparer,
         response_processor: ResponsesResultProcessor,
+        *,
+        backend_mode: ResponsesBackendMode = "v1",
     ):
         self.request_preparer = request_preparer
         self.response_processor = response_processor
+        self.backend_mode = backend_mode
+
+    @property
+    def uses_v2_backend(self) -> bool:
+        """Return ``True`` when Responses should use the v2 backend path."""
+        return self.backend_mode == "v2"
 
     async def prepare_request(
         self,
@@ -44,11 +53,13 @@ class ResponsesService:
         response_store: ResponsesMetadataStore | None = None,
     ) -> PreparedResponsesRequest:
         """Prepare a provider request for the Responses API."""
-        return await self.request_preparer.prepare_response_v2(
-            data,
-            giga_client,
-            response_store=response_store,
-        )
+        if self.uses_v2_backend:
+            return await self.request_preparer.prepare_response_v2(
+                data,
+                giga_client,
+                response_store=response_store,
+            )
+        return await self.request_preparer.prepare_response(data, giga_client)
 
     async def create_response(
         self,
@@ -64,13 +75,21 @@ class ResponsesService:
             giga_client=giga_client,
             response_store=response_store,
         )
-        response = await giga_client.achat_v2(prepared_request)
-        return self.response_processor.process_response_api_v2(
+        if self.uses_v2_backend:
+            response = await giga_client.achat_v2(prepared_request)
+            return self.response_processor.process_response_api_v2(
+                data,
+                response,
+                data["model"],
+                response_id,
+                response_store=response_store,
+            )
+        response = await giga_client.achat(prepared_request)
+        return self.response_processor.process_response_api(
             data,
             response,
             data["model"],
             response_id,
-            response_store=response_store,
         )
 
     async def stream_response(
@@ -101,6 +120,7 @@ class ResponsesService:
             request_data=data,
             response_store=resolved_store,
             response_processor=self.response_processor,
+            api_mode=self.backend_mode,
         ):
             yield line
 
@@ -114,5 +134,12 @@ def get_responses_service_from_state(state: Any) -> Any:
 
     request_preparer = get_request_transformer_from_state(state)
     response_processor = get_response_processor_from_state(state)
-    service = ResponsesService(request_preparer, response_processor)
+    config = getattr(state, "config", None)
+    proxy_settings = getattr(config, "proxy_settings", None)
+    backend_mode = getattr(proxy_settings, "responses_backend_mode", "v1")
+    service = ResponsesService(
+        request_preparer,
+        response_processor,
+        backend_mode=backend_mode,
+    )
     return set_runtime_service(state, "responses", service)

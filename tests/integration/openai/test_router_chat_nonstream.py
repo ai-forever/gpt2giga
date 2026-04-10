@@ -16,7 +16,11 @@ class MockResponse:
 
 
 class FakeGigachat:
+    def __init__(self):
+        self.last_method = None
+
     async def achat(self, chat):
+        self.last_method = "v1"
         return MockResponse(
             {
                 "choices": [
@@ -33,22 +37,53 @@ class FakeGigachat:
             }
         )
 
+    async def achat_v2(self, chat):
+        self.last_method = "v2"
+        return MockResponse(
+            {
+                "model": "gpt-x",
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "content": [{"text": "ok-v2"}],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 1,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        )
+
 
 class FakeRequestTransformer:
+    def __init__(self):
+        self.last_mode = None
+
     async def prepare_chat_completion(self, data, giga_client=None):
+        self.last_mode = "v1"
         return {"model": data.get("model", "giga")}
+
+    async def prepare_chat_completion_v2(self, data, giga_client=None):
+        self.last_mode = "v2"
+        return {"model": data.get("model", "giga"), "messages": data.get("messages")}
 
     async def prepare_response(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
 
 
-def make_app():
+def make_app(*, config=None):
     app = FastAPI()
     app.include_router(router)
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = config or ProxyConfig()
     return app
 
 
@@ -76,3 +111,21 @@ def test_chat_completions_non_stream_response_api():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
+
+
+def test_chat_completions_non_stream_v2_mode():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
+    client = TestClient(app)
+    payload = {
+        "model": "gpt-x",
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+    resp = client.post("/chat/completions", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["object"] == "chat.completion"
+    assert body["choices"][0]["message"]["content"] == "ok-v2"
+    assert app.state.gigachat_client.last_method == "v2"
+    assert app.state.request_transformer.last_mode == "v2"

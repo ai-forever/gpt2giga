@@ -18,13 +18,17 @@ class MockResponse:
 
 
 class FakeGigachat:
+    def __init__(self):
+        self.last_responses_method = None
+
     async def achat(self, chat):
+        self.last_responses_method = "v1"
         return MockResponse(
             {
                 "choices": [
                     {
                         "message": {"role": "assistant", "content": "ok"},
-                        "finish_reason": "function_call",
+                        "finish_reason": "stop",
                     }
                 ],
                 "usage": {
@@ -36,6 +40,7 @@ class FakeGigachat:
         )
 
     async def achat_v2(self, chat):
+        self.last_responses_method = "v2"
         storage = chat.get("storage")
         thread_id = None
         if isinstance(storage, dict):
@@ -71,17 +76,36 @@ class FakeGigachat:
 
     def astream(self, chat):
         async def gen():
+            self.last_responses_method = "v1"
             yield MockResponse(
-                {"choices": [{"delta": {"content": "he"}}], "usage": None}
+                {
+                    "model": "gpt-x",
+                    "choices": [{"delta": {"role": "assistant", "content": "he"}}],
+                    "usage": None,
+                }
             )
             yield MockResponse(
-                {"choices": [{"delta": {"content": "llo"}}], "usage": None}
+                {
+                    "model": "gpt-x",
+                    "choices": [
+                        {
+                            "delta": {"role": "assistant", "content": "llo"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                }
             )
 
         return gen()
 
     def astream_v2(self, chat):
         async def gen():
+            self.last_responses_method = "v2"
             yield MockResponse(
                 {
                     "model": "gpt-x",
@@ -125,10 +149,14 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
+    def __init__(self):
+        self.last_mode = None
+
     async def prepare_chat_completion(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
 
     async def prepare_response(self, data, giga_client=None):
+        self.last_mode = "v1"
         return {"model": data.get("model", "giga")}
 
     async def prepare_response_v2(
@@ -137,6 +165,7 @@ class FakeRequestTransformer:
         giga_client=None,
         response_store=None,
     ):
+        self.last_mode = "v2"
         thread_id = None
         conversation = data.get("conversation")
         if isinstance(conversation, dict):
@@ -154,13 +183,13 @@ class FakeRequestTransformer:
         }
 
 
-def make_app(monkeypatch=None):
+def make_app(monkeypatch=None, *, config=None):
     app = FastAPI()
     app.include_router(router)
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = config or ProxyConfig()
     if monkeypatch:
 
         class FakeEnc:
@@ -179,7 +208,9 @@ def make_app(monkeypatch=None):
 
 
 def test_responses_non_stream():
-    app = make_app()
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
     client = TestClient(app)
     resp = client.post("/responses", json={"input": "hi", "model": "gpt-x"})
     assert resp.status_code == 200
@@ -190,8 +221,27 @@ def test_responses_non_stream():
     assert "store" not in body
 
 
+def test_responses_non_stream_v1_mode_uses_legacy_backend_path():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v1"}})
+    )
+    client = TestClient(app)
+
+    resp = client.post("/responses", json={"input": "hi", "model": "gpt-x"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "completed"
+    assert body["output"][0]["content"][0]["text"] == "ok"
+    assert body.get("conversation") is None
+    assert app.state.gigachat_client.last_responses_method == "v1"
+    assert app.state.request_transformer.last_mode == "v1"
+
+
 def test_responses_non_stream_preserves_reasoning_config():
-    app = make_app()
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
     client = TestClient(app)
     resp = client.post(
         "/responses",
@@ -209,7 +259,9 @@ def test_responses_non_stream_preserves_reasoning_config():
 
 
 def test_responses_non_stream_previous_response_id_reuses_thread():
-    app = make_app()
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
     client = TestClient(app)
 
     first = client.post("/responses", json={"input": "hi", "model": "gpt-x"})
@@ -231,7 +283,9 @@ def test_responses_non_stream_previous_response_id_reuses_thread():
 
 
 def test_responses_stream_returns_sse_events():
-    app = make_app()
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
     client = TestClient(app)
 
     with client.stream(
@@ -247,6 +301,27 @@ def test_responses_stream_returns_sse_events():
     assert "event: response.in_progress" in body
     assert "event: response.output_text.delta" in body
     assert "event: response.completed" in body
+
+
+def test_responses_stream_v1_mode_returns_sse_events():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v1"}})
+    )
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/responses",
+        json={"input": "hi", "model": "gpt-x", "stream": True},
+    ) as resp:
+        assert resp.status_code == 200
+        body = "".join(resp.iter_text())
+
+    assert "event: response.created" in body
+    assert "event: response.output_text.delta" in body
+    assert "event: response.completed" in body
+    assert app.state.gigachat_client.last_responses_method == "v1"
+    assert app.state.request_transformer.last_mode == "v1"
 
 
 def test_embeddings_with_token_ids(monkeypatch):

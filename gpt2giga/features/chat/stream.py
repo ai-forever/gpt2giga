@@ -15,6 +15,7 @@ from gpt2giga.features.chat.contracts import ChatProviderMapper
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 from gpt2giga.providers.gigachat.streaming import (
     GigaChatStreamError,
+    iter_chat_v2_stream_chunks,
     iter_chat_stream_chunks,
     map_chat_stream_chunk,
 )
@@ -28,6 +29,7 @@ async def stream_chat_completion_generator(
     giga_client: Optional[GigaChat] = None,
     *,
     mapper: ChatProviderMapper,
+    api_mode: str = "v1",
 ) -> AsyncGenerator[str, None]:
     """Stream chat-completions chunks as SSE lines."""
     from gpt2giga.api.openai.streaming import (
@@ -43,7 +45,12 @@ async def stream_chat_completion_generator(
             giga_client = get_gigachat_client(request)
         logger = get_logger_from_state(request.app.state)
 
-        async for chunk in iter_chat_stream_chunks(giga_client, chat_messages):
+        stream_iter = (
+            iter_chat_v2_stream_chunks(giga_client, chat_messages)
+            if api_mode == "v2"
+            else iter_chat_stream_chunks(giga_client, chat_messages)
+        )
+        async for chunk in stream_iter:
             if await request.is_disconnected():
                 if logger:
                     logger.info(f"[{rquid}] Client disconnected during streaming")

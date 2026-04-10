@@ -7,7 +7,7 @@ from typing import Any, AsyncIterator, Optional, Protocol, TypeAlias, runtime_ch
 from gigachat import GigaChat
 
 ChatRequestData: TypeAlias = dict[str, Any]
-PreparedChatRequest: TypeAlias = dict[str, Any]
+PreparedChatRequest: TypeAlias = Any
 ChatResponseData: TypeAlias = dict[str, Any]
 ChatStreamChunk: TypeAlias = dict[str, Any]
 
@@ -19,8 +19,14 @@ class ChatUpstreamClient(Protocol):
     async def achat(self, chat: PreparedChatRequest) -> Any:
         """Run a non-streaming chat request."""
 
+    async def achat_v2(self, chat: PreparedChatRequest) -> Any:
+        """Run a non-streaming v2 chat request."""
+
     def astream(self, chat: Any) -> AsyncIterator[Any]:
         """Run a streaming chat request."""
+
+    def astream_v2(self, chat: Any) -> AsyncIterator[Any]:
+        """Run a streaming v2 chat request."""
 
 
 @runtime_checkable

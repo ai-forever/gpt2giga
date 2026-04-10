@@ -60,15 +60,54 @@ class FakeGigachat:
                 "total_tokens": 15,
             },
         }
+        self.last_method = None
 
     async def achat(self, chat):
+        self.last_method = "v1"
         return MockResponse(self._response)
+
+    async def achat_v2(self, chat):
+        self.last_method = "v2"
+        response = self._response
+        if "messages" in response:
+            return MockResponse(response)
+
+        choice = response["choices"][0]
+        message = choice.get("message", {})
+        content = []
+        if message.get("content"):
+            content.append({"text": message["content"]})
+        if isinstance(message.get("function_call"), dict):
+            content.append({"function_call": message["function_call"]})
+
+        usage = response.get("usage") or {}
+        return MockResponse(
+            {
+                "model": "anthropic-test",
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "content": content or [{"text": ""}],
+                    }
+                ],
+                "finish_reason": choice.get("finish_reason"),
+                "usage": {
+                    "input_tokens": usage.get("prompt_tokens", 0),
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                },
+            }
+        )
 
     async def atokens_count(self, input_, model=None):
         return [FakeTokensCount(tokens=len(s.split())) for s in input_]
 
     def astream(self, chat):
         async def gen():
+            self.last_method = "v1"
             yield MockResponse(
                 {"choices": [{"delta": {"content": "Hel"}}], "usage": None}
             )
@@ -78,6 +117,45 @@ class FakeGigachat:
                     "usage": {
                         "prompt_tokens": 10,
                         "completion_tokens": 2,
+                        "total_tokens": 12,
+                    },
+                }
+            )
+
+        return gen()
+
+    def astream_v2(self, chat):
+        async def gen():
+            self.last_method = "v2"
+            yield MockResponse(
+                {
+                    "model": "anthropic-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "Hel"}],
+                        }
+                    ],
+                }
+            )
+            yield MockResponse(
+                {
+                    "model": "anthropic-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "lo!"}],
+                        }
+                    ],
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 2,
                         "total_tokens": 12,
                     },
                 }
@@ -334,7 +412,11 @@ class FakeGigachatBatches(FakeGigachat):
 
 
 class FakeRequestTransformer:
+    def __init__(self):
+        self.last_mode = None
+
     async def prepare_chat_completion(self, data, giga_client=None):
+        self.last_mode = "v1"
         return {
             "model": data.get("model", "giga"),
             "messages": data.get("messages", []),
@@ -343,14 +425,31 @@ class FakeRequestTransformer:
             "function_call": data.get("function_call"),
         }
 
+    async def prepare_chat_completion_v2(self, data, giga_client=None):
+        self.last_mode = "v2"
 
-def make_app(gigachat=None):
+        class Prepared:
+            def model_dump(self, *args, **kwargs):
+                return {
+                    "model": data.get("model", "giga"),
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{"text": str(data.get("messages", []))}],
+                        }
+                    ],
+                }
+
+        return Prepared()
+
+
+def make_app(gigachat=None, *, config=None):
     app = FastAPI()
     app.include_router(router)
     app.state.gigachat_client = gigachat or FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = config or ProxyConfig()
     app.state.logger = logger
     return app
 

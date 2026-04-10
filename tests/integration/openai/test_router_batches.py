@@ -166,17 +166,30 @@ class FakeRequestTransformer:
         return {
             "model": "GigaChat",
             "messages": [{"role": "user", "content": data["input"]}],
-            "translated": "responses",
+            "translated": "responses-v1",
         }
 
+    async def prepare_response_v2(self, data, giga_client=None, response_store=None):
+        class Prepared:
+            def model_dump(self, *args, **kwargs):
+                return {
+                    "model": "GigaChat",
+                    "messages": [
+                        {"role": "user", "content": [{"text": data["input"]}]}
+                    ],
+                    "translated": "responses-v2",
+                }
 
-def make_app():
+        return Prepared()
+
+
+def make_app(*, config=None):
     app = FastAPI()
     app.include_router(router)
     app.state.gigachat_client = FakeGigaChat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = config or ProxyConfig()
     return app
 
 
@@ -335,6 +348,92 @@ def test_batches_create_defaults_completion_window_to_24h():
 
     assert created.status_code == 200
     assert created.json()["completion_window"] == "24h"
+
+
+def test_batches_endpoints_translate_responses_batches_with_v2_by_default():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
+    giga_client = app.state.gigachat_client
+    client = TestClient(app)
+
+    input_line = {
+        "custom_id": "req-1",
+        "method": "POST",
+        "url": "/v1/responses",
+        "body": {
+            "model": "gpt-x",
+            "input": "hello",
+        },
+    }
+    upload = client.post(
+        "/files",
+        data={"purpose": "batch"},
+        files={
+            "file": (
+                "batch.jsonl",
+                (json.dumps(input_line) + "\n").encode("utf-8"),
+                "application/json",
+            )
+        },
+    )
+
+    created = client.post(
+        "/batches",
+        json={
+            "completion_window": "24h",
+            "endpoint": "/v1/responses",
+            "input_file_id": upload.json()["id"],
+        },
+    )
+
+    assert created.status_code == 200
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert translated_line["request"]["translated"] == "responses-v2"
+    assert translated_line["request"]["messages"][0]["content"][0]["text"] == "hello"
+
+
+def test_batches_endpoints_translate_responses_batches_with_v1_mode():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v1"}})
+    )
+    giga_client = app.state.gigachat_client
+    client = TestClient(app)
+
+    input_line = {
+        "custom_id": "req-1",
+        "method": "POST",
+        "url": "/v1/responses",
+        "body": {
+            "model": "gpt-x",
+            "input": "hello",
+        },
+    }
+    upload = client.post(
+        "/files",
+        data={"purpose": "batch"},
+        files={
+            "file": (
+                "batch.jsonl",
+                (json.dumps(input_line) + "\n").encode("utf-8"),
+                "application/json",
+            )
+        },
+    )
+
+    created = client.post(
+        "/batches",
+        json={
+            "completion_window": "24h",
+            "endpoint": "/v1/responses",
+            "input_file_id": upload.json()["id"],
+        },
+    )
+
+    assert created.status_code == 200
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert translated_line["request"]["translated"] == "responses-v1"
+    assert translated_line["request"]["messages"][0]["content"] == "hello"
 
 
 def test_openapi_includes_examples_for_files_and_batches():

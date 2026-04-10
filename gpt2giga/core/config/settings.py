@@ -18,6 +18,7 @@ from gpt2giga.core.constants import (
 )
 
 ProviderName = Literal["openai", "anthropic", "gemini"]
+GigaChatAPIMode = Literal["v1", "v2"]
 _ALL_ENABLED_PROVIDERS: tuple[ProviderName, ...] = ("openai", "anthropic", "gemini")
 
 
@@ -53,6 +54,17 @@ class ProxySettings(BaseSettings):
             "Список внешних провайдеров, роуты которых нужно включить. "
             "Поддерживаются: openai, anthropic, gemini. "
             "Значение 'all' в ENV/CLI включает все провайдеры."
+        ),
+    )
+    gigachat_api_mode: GigaChatAPIMode = Field(
+        default="v1",
+        description=(
+            "Режим backend API GigaChat. "
+            "'v1' направляет все chat-like endpoints через legacy API "
+            "(achat/astream). "
+            "'v2' направляет OpenAI chat/responses, Anthropic messages и "
+            "Gemini generateContent через native v2 API "
+            "(achat_v2/astream_v2)."
         ),
     )
     embeddings: str = Field(
@@ -164,6 +176,14 @@ class ProxySettings(BaseSettings):
 
         return value
 
+    @field_validator("gigachat_api_mode", mode="before")
+    @classmethod
+    def normalize_gigachat_api_mode(cls, value):
+        """Normalize backend mode from ENV/CLI friendly forms."""
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
     @model_validator(mode="after")
     def _validate_prod_security(self):
         """Emit warnings when PROD mode has insecure defaults."""
@@ -209,6 +229,16 @@ class ProxySettings(BaseSettings):
             max_text_file_size_bytes=self.max_text_file_size_bytes,
             max_audio_image_total_size_bytes=self.max_audio_image_total_size_bytes,
         )
+
+    @property
+    def chat_backend_mode(self) -> Literal["v1", "v2"]:
+        """Resolve the effective backend mode for chat-like capabilities."""
+        return self.gigachat_api_mode
+
+    @property
+    def responses_backend_mode(self) -> Literal["v1", "v2"]:
+        """Resolve the effective backend mode for the Responses capability."""
+        return self.gigachat_api_mode
 
     model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)
 

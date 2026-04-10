@@ -227,3 +227,15 @@ class ResponseProcessorCommonMixin:
             "output_tokens_details": {"reasoning_tokens": 0},
             "total_tokens": usage_data.get("total_tokens", 0),
         }
+
+    @staticmethod
+    def _build_legacy_usage_from_v2(usage_data: Optional[Dict]) -> Optional[Dict]:
+        if not usage_data:
+            return None
+        input_details = usage_data.get("input_tokens_details") or {}
+        return {
+            "prompt_tokens": usage_data.get("input_tokens", 0),
+            "completion_tokens": usage_data.get("output_tokens", 0),
+            "total_tokens": usage_data.get("total_tokens", 0),
+            "precached_prompt_tokens": input_details.get("cached_tokens", 0),
+        }

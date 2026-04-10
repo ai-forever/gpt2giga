@@ -86,6 +86,36 @@ class FakeResponsesClient:
         return gen()
 
 
+class FakeResponsesClientLegacy:
+    def astream(self, chat):
+        async def gen():
+            yield make_chunk(
+                {
+                    "model": "gpt-x",
+                    "choices": [{"delta": {"role": "assistant", "content": "A"}}],
+                    "usage": None,
+                }
+            )
+            yield make_chunk(
+                {
+                    "model": "gpt-x",
+                    "choices": [
+                        {
+                            "delta": {"role": "assistant", "content": "B"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                }
+            )
+
+        return gen()
+
+
 class FakeClientError:
     def astream(self, chat):
         async def gen():
@@ -386,6 +416,45 @@ async def test_stream_responses_generator_success():
     assert data["response"]["conversation"] == {"id": "thread-1"}
     assert data["response"]["output"][0]["content"][0]["text"] == "AB"
     assert response_store["resp_test123"]["thread_id"] == "thread-1"
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_legacy_v1_success():
+    req = FakeRequest(FakeResponsesClientLegacy())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(
+        req,
+        chat,
+        response_id="legacy123",
+        request_data={"model": "gpt-x"},
+        api_mode="v1",
+    ):
+        lines.append(line)
+
+    assert len(lines) == 10
+
+    event_type, data = parse_sse(lines[0])
+    assert event_type == "response.created"
+    assert data["response"]["status"] == "in_progress"
+
+    event_type, data = parse_sse(lines[4])
+    assert event_type == "response.output_text.delta"
+    assert data["delta"] == "A"
+
+    event_type, data = parse_sse(lines[5])
+    assert event_type == "response.output_text.delta"
+    assert data["delta"] == "B"
+
+    event_type, data = parse_sse(lines[8])
+    assert event_type == "response.output_item.done"
+    assert data["item"]["status"] == "completed"
+
+    event_type, data = parse_sse(lines[-1])
+    assert event_type == "response.completed"
+    assert data["response"]["status"] == "completed"
+    assert data["response"].get("conversation") is None
+    assert data["response"]["output"][0]["content"][0]["text"] == "AB"
 
 
 @pytest.mark.asyncio

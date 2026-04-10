@@ -188,6 +188,69 @@ class RequestTransformer(
         transformed_data = self.transform_chat_parameters(data)
         return await self._finalize_transformation(transformed_data, giga_client)
 
+    @staticmethod
+    def _coerce_functions_to_tools(functions: Any) -> list[dict[str, Any]]:
+        tools: list[dict[str, Any]] = []
+        if not isinstance(functions, list):
+            return tools
+        for function in functions:
+            if hasattr(function, "model_dump"):
+                function = function.model_dump(exclude_none=True, by_alias=True)
+            if isinstance(function, dict):
+                tools.append({"type": "function", "function": function})
+        return tools
+
+    def _build_chat_v2_request_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        request_data = data.copy()
+        messages = request_data.pop("messages", None)
+        input_ = request_data.pop("input", None)
+        if messages is None:
+            if isinstance(input_, list):
+                messages = input_
+            elif input_ is not None:
+                messages = [{"role": "user", "content": input_}]
+            else:
+                messages = []
+        request_data["input"] = messages
+
+        if "max_tokens" in request_data and "max_output_tokens" not in request_data:
+            request_data["max_output_tokens"] = request_data["max_tokens"]
+
+        if "reasoning" not in request_data:
+            reasoning_effort = request_data.get("reasoning_effort")
+            if reasoning_effort in {"low", "medium", "high"}:
+                request_data["reasoning"] = {"effort": reasoning_effort}
+
+        response_format = request_data.pop("response_format", None)
+        if isinstance(response_format, dict):
+            if response_format.get("type") == "json_object":
+                request_data["text"] = {"format": {"type": "text"}}
+            else:
+                request_data["text"] = {"format": response_format}
+
+        if "tools" not in request_data and "functions" in request_data:
+            request_data["tools"] = self._coerce_functions_to_tools(
+                request_data.get("functions")
+            )
+
+        function_call = request_data.pop("function_call", None)
+        if "tool_choice" not in request_data:
+            if isinstance(function_call, str):
+                request_data["tool_choice"] = function_call
+            elif isinstance(function_call, dict):
+                name = function_call.get("name")
+                if isinstance(name, str) and name:
+                    request_data["tool_choice"] = {"type": "function", "name": name}
+
+        return request_data
+
+    async def prepare_chat_completion_v2(
+        self, data: dict, giga_client: Optional[GigaChat] = None
+    ):
+        """Prepare a native GigaChat v2 payload for chat-like endpoints."""
+        request_data = self._build_chat_v2_request_data(data)
+        return await self.prepare_response_v2(request_data, giga_client)
+
     async def prepare_response(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:

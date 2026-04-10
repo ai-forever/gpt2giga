@@ -16,11 +16,36 @@ class FakeGigachat:
 
         return gen()
 
+    def astream_v2(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda *args, **kwargs: {
+                    "model": "gpt-x",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "hi-v2"}],
+                        }
+                    ],
+                }
+            )
+
+        return gen()
+
 
 class FakeRequestTransformer:
     async def prepare_chat_completion(self, data):
         # имитируем наличие tools для ветки is_tool_call
         return {"model": data.get("model", "giga"), "tools": data.get("tools")}
+
+    async def prepare_chat_completion_v2(self, data, giga_client=None):
+        return {
+            "model": data.get("model", "giga"),
+            "messages": data.get("messages", []),
+            "tools": data.get("tools"),
+        }
 
     async def prepare_response(self, data):
         return {"model": data.get("model", "giga"), "tools": data.get("tools")}

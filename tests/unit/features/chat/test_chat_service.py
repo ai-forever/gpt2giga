@@ -10,6 +10,7 @@ class FakeMapper:
     def __init__(self):
         self.prepared_with = None
         self.processed_with = None
+        self.uses_v2_backend = False
 
     async def prepare_request(self, data, giga_client=None):
         self.prepared_with = (data, giga_client)
@@ -28,9 +29,14 @@ class FakeMapper:
 class FakeClient:
     def __init__(self):
         self.last_request = None
+        self.last_request_v2 = None
 
     async def achat(self, chat):
         self.last_request = chat
+        return SimpleNamespace(payload=chat)
+
+    async def achat_v2(self, chat):
+        self.last_request_v2 = chat
         return SimpleNamespace(payload=chat)
 
 
@@ -56,6 +62,12 @@ class LegacyResponseProcessor:
         self, giga_resp, gpt_model, response_id, request_data=None
     ):
         return {"id": response_id, "model": gpt_model, "payload": giga_resp}
+
+
+class FakeMapperV2(FakeMapper):
+    def __init__(self):
+        super().__init__()
+        self.uses_v2_backend = True
 
 
 @pytest.mark.asyncio
@@ -128,3 +140,24 @@ async def test_get_chat_service_from_state_builds_from_typed_runtime_dependencie
     assert state.providers.chat_mapper is service.mapper
     assert transformer.calls == [(data, giga_client)]
     assert result["id"] == "resp-typed"
+
+
+@pytest.mark.asyncio
+async def test_chat_service_create_completion_uses_v2_backend_when_mapper_requests_it():
+    mapper = FakeMapperV2()
+    service = ChatService(mapper)
+    giga_client = FakeClient()
+    data = {"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]}
+
+    result = await service.create_completion(
+        data,
+        giga_client=giga_client,
+        response_id="resp-v2",
+    )
+
+    assert giga_client.last_request is None
+    assert giga_client.last_request_v2 == {
+        "messages": data["messages"],
+        "model": "gpt-x",
+    }
+    assert result["id"] == "resp-v2"

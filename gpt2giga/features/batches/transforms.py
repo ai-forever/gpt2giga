@@ -120,6 +120,7 @@ async def transform_batch_input_file(
     request_transformer: Any,
     giga_client: Any,
     embeddings_model: str,
+    gigachat_api_mode: str = "v1",
 ) -> bytes:
     """Transform OpenAI JSONL batch input into GigaChat `{id, request}` JSONL."""
     transformed_lines = []
@@ -145,16 +146,36 @@ async def transform_batch_input_file(
             )
 
         if target.kind == "chat":
-            transformed_body = await request_transformer.prepare_chat_completion(
-                body, giga_client
-            )
+            if gigachat_api_mode == "v2":
+                transformed_body = await request_transformer.prepare_chat_completion_v2(
+                    body, giga_client
+                )
+                if hasattr(transformed_body, "model_dump"):
+                    transformed_body = transformed_body.model_dump(
+                        exclude_none=True,
+                        by_alias=True,
+                    )
+            else:
+                transformed_body = await request_transformer.prepare_chat_completion(
+                    body, giga_client
+                )
             batch_model = _resolve_batch_model(body, giga_client)
             if batch_model and "model" not in transformed_body:
                 transformed_body["model"] = batch_model
         elif target.kind == "responses":
-            transformed_body = await request_transformer.prepare_response(
-                body, giga_client
-            )
+            if gigachat_api_mode == "v1":
+                transformed_body = await request_transformer.prepare_response(
+                    body, giga_client
+                )
+            else:
+                transformed_body = await request_transformer.prepare_response_v2(
+                    body, giga_client
+                )
+                if hasattr(transformed_body, "model_dump"):
+                    transformed_body = transformed_body.model_dump(
+                        exclude_none=True,
+                        by_alias=True,
+                    )
             batch_model = _resolve_batch_model(body, giga_client)
             if batch_model and "model" not in transformed_body:
                 transformed_body["model"] = batch_model
@@ -292,6 +313,13 @@ def _transform_chat_batch_result(
     if not isinstance(raw_body, dict):
         return raw_body
     model = request_body.get("model", "GigaChat")
+    if "messages" in raw_body and "choices" not in raw_body:
+        return response_processor.process_response_v2(
+            SimpleNamespace(model_dump=lambda **_: raw_body),
+            model,
+            str(response_id),
+            request_data=request_body,
+        )
     return response_processor.process_response(
         SimpleNamespace(model_dump=lambda **_: raw_body),
         model,
@@ -311,6 +339,13 @@ def _transform_responses_batch_result(
     if not isinstance(raw_body, dict):
         return raw_body
     model = request_body.get("model", "GigaChat")
+    if "messages" in raw_body and "choices" not in raw_body:
+        return response_processor.process_response_api_v2(
+            request_body,
+            SimpleNamespace(model_dump=lambda **_: raw_body),
+            model,
+            str(response_id),
+        )
     return response_processor.process_response_api(
         request_body,
         SimpleNamespace(model_dump=lambda **_: raw_body),

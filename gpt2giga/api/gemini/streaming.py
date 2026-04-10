@@ -21,10 +21,13 @@ from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 async def stream_gemini_generate_content(
     request: Request,
     model: str,
-    chat_messages: dict[str, Any],
+    chat_messages: Any,
     response_id: str,
     giga_client: GigaChat,
     request_data: Optional[dict[str, Any]] = None,
+    *,
+    api_mode: str = "v1",
+    response_processor: Any = None,
 ) -> AsyncGenerator[str, None]:
     """Yield Gemini-compatible SSE chunks from a GigaChat stream."""
     logger = get_logger_from_state(request.app.state)
@@ -32,13 +35,22 @@ async def stream_gemini_generate_content(
     structured_output = _is_structured_output_request(request_data)
 
     try:
-        async for chunk in giga_client.astream(chat_messages):
+        stream_iter = (
+            giga_client.astream_v2(chat_messages)
+            if api_mode == "v2"
+            else giga_client.astream(chat_messages)
+        )
+        async for chunk in stream_iter:
             if await request.is_disconnected():
                 if logger:
                     logger.info(f"[{rquid}] Client disconnected during streaming")
                 break
 
-            giga_dict = chunk.model_dump()
+            giga_dict = (
+                response_processor.normalize_chat_v2_stream_chunk(chunk)
+                if api_mode == "v2" and response_processor is not None
+                else chunk.model_dump()
+            )
             choice = (giga_dict.get("choices") or [{}])[0]
             delta = choice.get("delta") or {}
 
