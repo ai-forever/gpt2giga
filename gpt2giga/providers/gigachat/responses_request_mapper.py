@@ -15,6 +15,7 @@ from gigachat.models import (
     ChatV2UserInfo,
 )
 
+from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.core.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.core.logging.setup import sanitize_for_utf8
 from gpt2giga.core.schema.json_schema import normalize_json_schema, resolve_schema_refs
@@ -891,7 +892,7 @@ class RequestTransformerResponsesV2Mixin:
         response_store: Optional[Dict[str, Any]] = None,
     ) -> ChatV2:
         """Prepare a native GigaChat v2 payload for the Responses API."""
-        request_data = data.copy()
+        request_data = to_backend_payload(data)
 
         function_specs, builtin_tools, _unsupported_tools, user_timezone = (
             self._collect_response_tools(request_data.get("tools", []) or [])

@@ -8,6 +8,8 @@ from typing import Any
 import anyio
 import tiktoken
 
+from gpt2giga.core.contracts import to_backend_payload
+
 
 class GigaChatEmbeddingsMapper:
     """Wrap embeddings-specific request mapping for the GigaChat provider."""
@@ -19,8 +21,9 @@ class GigaChatEmbeddingsMapper:
         embeddings_model: str,
     ) -> dict[str, Any]:
         """Prepare a GigaChat embeddings request."""
-        inputs = data.get("input", [])
-        openai_model = data.get("model")
+        payload = to_backend_payload(data)
+        inputs = payload.get("input", [])
+        openai_model = payload.get("model")
         normalized_inputs = await _normalize_embedding_inputs(inputs, openai_model)
         return {
             "input": normalized_inputs,

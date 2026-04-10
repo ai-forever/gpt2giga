@@ -4,7 +4,18 @@ import pytest
 
 from gpt2giga.app.dependencies import RuntimeProviders, RuntimeServices
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.core.contracts import NormalizedChatRequest, NormalizedMessage
 from gpt2giga.features.chat.service import ChatService, get_chat_service_from_state
+
+
+def _get_model(data):
+    return data.model if hasattr(data, "model") else data["model"]
+
+
+def _get_messages(data):
+    if hasattr(data, "messages"):
+        return [message.to_openai_message() for message in data.messages]
+    return data["messages"]
 
 
 class FakeMapper:
@@ -15,7 +26,7 @@ class FakeMapper:
 
     async def prepare_request(self, data, giga_client=None):
         self.prepared_with = (data, giga_client)
-        return {"messages": data["messages"], "model": data["model"]}
+        return {"messages": _get_messages(data), "model": _get_model(data)}
 
     def process_response(self, giga_resp, gpt_model, response_id, request_data=None):
         self.processed_with = (giga_resp, gpt_model, response_id, request_data)
@@ -58,18 +69,19 @@ class LegacyRequestTransformer:
 
     async def prepare_chat_completion(self, data, giga_client=None):
         self.calls.append((data, giga_client))
-        return {"messages": data["messages"], "model": data["model"]}
+        return {"messages": _get_messages(data), "model": _get_model(data)}
 
     async def prepare_chat_completion_v2(self, data, giga_client=None):
         self.calls_v2.append((data, giga_client))
+        messages = _get_messages(data)
         return {
             "messages": [
                 {
                     "role": "user",
-                    "content": [{"text": str(data["messages"][0]["content"])}],
+                    "content": [{"text": str(messages[0]["content"])}],
                 }
             ],
-            "model": data["model"],
+            "model": _get_model(data),
         }
 
 
@@ -129,7 +141,10 @@ async def test_chat_service_create_completion_uses_mapper_contract():
     mapper = FakeMapper()
     service = ChatService(mapper)
     giga_client = FakeClient()
-    data = {"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]}
+    data = NormalizedChatRequest(
+        model="gpt-x",
+        messages=[NormalizedMessage(role="user", content="hi")],
+    )
 
     result = await service.create_completion(
         data,
@@ -137,9 +152,20 @@ async def test_chat_service_create_completion_uses_mapper_contract():
         response_id="resp-1",
     )
 
-    assert giga_client.last_request == {"messages": data["messages"], "model": "gpt-x"}
+    assert giga_client.last_request == {
+        "messages": [{"role": "user", "content": "hi"}],
+        "model": "gpt-x",
+    }
     assert mapper.prepared_with == (data, giga_client)
-    assert mapper.processed_with[1:] == ("gpt-x", "resp-1", data)
+    assert mapper.processed_with[1:] == (
+        "gpt-x",
+        "resp-1",
+        {
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        },
+    )
     assert result["id"] == "resp-1"
     assert result["request_model"] == "gpt-x"
 
@@ -201,7 +227,10 @@ async def test_chat_service_create_completion_uses_v2_backend_when_mapper_reques
     mapper = FakeMapperV2()
     service = ChatService(mapper)
     giga_client = FakeClient()
-    data = {"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]}
+    data = NormalizedChatRequest(
+        model="gpt-x",
+        messages=[NormalizedMessage(role="user", content="hi")],
+    )
 
     result = await service.create_completion(
         data,
@@ -211,7 +240,7 @@ async def test_chat_service_create_completion_uses_v2_backend_when_mapper_reques
 
     assert giga_client.last_request is None
     assert giga_client.last_request_v2 == {
-        "messages": data["messages"],
+        "messages": [{"role": "user", "content": "hi"}],
         "model": "gpt-x",
     }
     assert result["id"] == "resp-v2"

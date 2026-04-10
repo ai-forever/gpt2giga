@@ -9,6 +9,20 @@ from gpt2giga.providers.gigachat import ResponseProcessor
 from gpt2giga.api.openai import router
 
 
+def _get_model(data):
+    return data.model if hasattr(data, "model") else data.get("model", "giga")
+
+
+def _get_input(data):
+    return data.input if hasattr(data, "input") else data.get("input", "")
+
+
+def _get_option(data, key):
+    if hasattr(data, "options"):
+        return data.options.get(key)
+    return data.get(key)
+
+
 class MockResponse:
     def __init__(self, data):
         self.data = data
@@ -153,11 +167,11 @@ class FakeRequestTransformer:
         self.last_mode = None
 
     async def prepare_chat_completion(self, data, giga_client=None):
-        return {"model": data.get("model", "giga")}
+        return {"model": _get_model(data)}
 
     async def prepare_response(self, data, giga_client=None):
         self.last_mode = "v1"
-        return {"model": data.get("model", "giga")}
+        return {"model": _get_model(data)}
 
     async def prepare_response_v2(
         self,
@@ -167,18 +181,18 @@ class FakeRequestTransformer:
     ):
         self.last_mode = "v2"
         thread_id = None
-        conversation = data.get("conversation")
+        conversation = _get_option(data, "conversation")
         if isinstance(conversation, dict):
             thread_id = conversation.get("id")
-        elif data.get("previous_response_id") and response_store:
-            metadata = response_store.get(data["previous_response_id"], {})
-            thread_id = metadata.get("thread_id")
+        else:
+            previous_response_id = _get_option(data, "previous_response_id")
+            if previous_response_id and response_store:
+                metadata = response_store.get(previous_response_id, {})
+                thread_id = metadata.get("thread_id")
 
         return {
-            "model": data.get("model", "giga"),
-            "messages": [
-                {"role": "user", "content": [{"text": data.get("input", "")}]}
-            ],
+            "model": _get_model(data),
+            "messages": [{"role": "user", "content": [{"text": _get_input(data)}]}],
             "storage": {"thread_id": thread_id} if thread_id else True,
         }
 

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
-EmbeddingsRequestData: TypeAlias = dict[str, Any]
+from gpt2giga.core.contracts import NormalizedEmbeddingsRequest
+
+EmbeddingsRequestData: TypeAlias = NormalizedEmbeddingsRequest | dict[str, Any]
 PreparedEmbeddingsRequest: TypeAlias = dict[str, Any]
 
 

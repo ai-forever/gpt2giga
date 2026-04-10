@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from gigachat import GigaChat
 from gigachat.models import FunctionCall, Messages, MessagesRole
 
+from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.core.logging.setup import sanitize_for_utf8
 from gpt2giga.providers.gigachat.attachments import AttachmentProcessor
@@ -185,7 +186,7 @@ class RequestTransformer(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """Prepare a Chat Completions payload."""
-        transformed_data = self.transform_chat_parameters(data)
+        transformed_data = self.transform_chat_parameters(to_backend_payload(data))
         return await self._finalize_transformation(transformed_data, giga_client)
 
     @staticmethod
@@ -248,13 +249,13 @@ class RequestTransformer(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ):
         """Prepare a native GigaChat v2 payload for chat-like endpoints."""
-        request_data = self._build_chat_v2_request_data(data)
+        request_data = self._build_chat_v2_request_data(to_backend_payload(data))
         return await self.prepare_response_v2(request_data, giga_client)
 
     async def prepare_response(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """Prepare a legacy Responses API payload."""
-        transformed_data = self.transform_responses_parameters(data)
+        transformed_data = self.transform_responses_parameters(to_backend_payload(data))
         transformed_data["messages"] = self.transform_response_format(transformed_data)
         return await self._finalize_transformation(transformed_data, giga_client)

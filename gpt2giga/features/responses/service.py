@@ -12,6 +12,7 @@ from gpt2giga.app.dependencies import (
     get_runtime_services,
     set_runtime_service,
 )
+from gpt2giga.core.contracts import get_request_model, to_backend_payload
 from gpt2giga.features.responses.contracts import (
     PreparedResponsesRequest,
     ResponsesBackendMode,
@@ -70,6 +71,7 @@ class ResponsesService:
         response_store: ResponsesMetadataStore | None = None,
     ) -> ResponsesResponseData:
         """Execute a non-streaming Responses API request."""
+        request_payload = to_backend_payload(data)
         prepared_request = await self.prepare_request(
             data,
             giga_client=giga_client,
@@ -78,17 +80,17 @@ class ResponsesService:
         if self.uses_v2_backend:
             response = await giga_client.achat_v2(prepared_request)
             return self.response_processor.process_response_api_v2(
-                data,
+                request_payload,
                 response,
-                data["model"],
+                get_request_model(data),
                 response_id,
                 response_store=response_store,
             )
         response = await giga_client.achat(prepared_request)
         return self.response_processor.process_response_api(
-            data,
+            request_payload,
             response,
-            data["model"],
+            get_request_model(data),
             response_id,
         )
 
@@ -107,6 +109,7 @@ class ResponsesService:
             if response_store is not None
             else get_response_store(request)
         )
+        request_payload = to_backend_payload(data)
         prepared_request = await self.prepare_request(
             data,
             giga_client=giga_client,
@@ -117,7 +120,7 @@ class ResponsesService:
             prepared_request,
             response_id=response_id,
             giga_client=giga_client,
-            request_data=data,
+            request_data=request_payload,
             response_store=resolved_store,
             response_processor=self.response_processor,
             api_mode=self.backend_mode,

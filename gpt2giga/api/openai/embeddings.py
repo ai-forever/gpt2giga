@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Request
 
 from gpt2giga.api.openai.openapi import embeddings_openapi_extra
+from gpt2giga.api.openai.request_adapter import build_normalized_embeddings_request
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.features.embeddings import get_embeddings_service_from_state
@@ -15,7 +16,7 @@ router = APIRouter(tags=["OpenAI"])
 @exceptions_handler
 async def embeddings(request: Request):
     """Create embeddings."""
-    data = await read_request_json(request)
+    data = build_normalized_embeddings_request(await read_request_json(request))
     embeddings_service = get_embeddings_service_from_state(request.app.state)
     giga_client = get_gigachat_client(request)
     return await embeddings_service.create_embeddings(

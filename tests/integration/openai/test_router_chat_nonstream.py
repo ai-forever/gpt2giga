@@ -9,6 +9,16 @@ from gpt2giga.providers.gigachat import ResponseProcessor
 from gpt2giga.api.openai import router
 
 
+def _get_model(data):
+    return data.model if hasattr(data, "model") else data.get("model", "giga")
+
+
+def _get_messages(data):
+    if hasattr(data, "messages"):
+        return [message.to_openai_message() for message in data.messages]
+    return data.get("messages")
+
+
 class MockResponse:
     def __init__(self, data):
         self.data = data
@@ -69,14 +79,14 @@ class FakeRequestTransformer:
 
     async def prepare_chat_completion(self, data, giga_client=None):
         self.last_mode = "v1"
-        return {"model": data.get("model", "giga")}
+        return {"model": _get_model(data)}
 
     async def prepare_chat_completion_v2(self, data, giga_client=None):
         self.last_mode = "v2"
-        return {"model": data.get("model", "giga"), "messages": data.get("messages")}
+        return {"model": _get_model(data), "messages": _get_messages(data)}
 
     async def prepare_response(self, data, giga_client=None):
-        return {"model": data.get("model", "giga")}
+        return {"model": _get_model(data)}
 
 
 def make_app(*, config=None, observability: bool = False):

@@ -10,6 +10,7 @@ from gpt2giga.app.dependencies import (
     set_runtime_provider,
     set_runtime_service,
 )
+from gpt2giga.core.contracts import get_request_model, to_backend_payload
 from gpt2giga.features.chat.contracts import (
     ChatBackendMode,
     ChatProviderMapper,
@@ -94,9 +95,9 @@ class ChatService:
         )
         return self.mapper.process_response(
             response,
-            data["model"],
+            get_request_model(data),
             response_id,
-            request_data=data,
+            request_data=to_backend_payload(data),
         )
 
     async def stream_completion(
@@ -111,7 +112,7 @@ class ChatService:
         prepared_request = await self.prepare_request(data, giga_client=giga_client)
         async for line in stream_chat_completion_generator(
             request,
-            data["model"],
+            get_request_model(data),
             prepared_request,
             response_id=response_id,
             giga_client=giga_client,

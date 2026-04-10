@@ -4,6 +4,7 @@ import pytest
 
 from gpt2giga.app.dependencies import RuntimeProviders, RuntimeServices
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.core.contracts import NormalizedResponsesRequest
 from gpt2giga.features.responses.service import (
     ResponsesService,
     get_responses_service_from_state,
@@ -19,16 +20,32 @@ class FakeRequestPreparer:
     async def prepare_response(self, data, giga_client=None):
         self.legacy_prepared_with = (data, giga_client)
         return {
-            "model": data["model"],
-            "messages": [{"role": "user", "content": data["input"]}],
+            "model": data.model if hasattr(data, "model") else data["model"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": data.input if hasattr(data, "input") else data["input"],
+                }
+            ],
             "backend": "v1",
         }
 
     async def prepare_response_v2(self, data, giga_client=None, response_store=None):
         self.prepared_with = (data, giga_client, response_store)
         return {
-            "model": data["model"],
-            "messages": [{"role": "user", "content": [{"text": data["input"]}]}],
+            "model": data.model if hasattr(data, "model") else data["model"],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": data.input
+                            if hasattr(data, "input")
+                            else data["input"]
+                        }
+                    ],
+                }
+            ],
             "backend": "v2",
         }
 
@@ -107,7 +124,7 @@ async def test_responses_service_create_response_uses_runtime_contracts():
     )
     giga_client = FakeClient()
     response_store = {}
-    data = {"model": "gpt-x", "input": "hi"}
+    data = NormalizedResponsesRequest(model="gpt-x", input="hi")
 
     result = await service.create_response(
         data,
@@ -122,6 +139,11 @@ async def test_responses_service_create_response_uses_runtime_contracts():
         "backend": "v2",
     }
     assert request_preparer.prepared_with == (data, giga_client, response_store)
+    assert response_processor.processed_with[0] == {
+        "model": "gpt-x",
+        "input": "hi",
+        "stream": False,
+    }
     assert response_processor.processed_with[2:] == ("gpt-x", "resp-1", response_store)
     assert result["id"] == "resp_resp-1"
     assert result["request_model"] == "gpt-x"

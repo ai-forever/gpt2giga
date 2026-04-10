@@ -14,7 +14,9 @@ from typing import (
 
 from gigachat import GigaChat
 
-ResponsesRequestData: TypeAlias = dict[str, Any]
+from gpt2giga.core.contracts import NormalizedResponsesRequest
+
+ResponsesRequestData: TypeAlias = NormalizedResponsesRequest | dict[str, Any]
 PreparedResponsesRequest: TypeAlias = Any
 ResponsesResponseData: TypeAlias = dict[str, Any]
 ResponsesMetadataStore: TypeAlias = MutableMapping[str, Any]
