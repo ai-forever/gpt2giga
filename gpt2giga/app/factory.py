@@ -106,36 +106,44 @@ def _register_root_redirect(app: FastAPI, *, is_prod_mode: bool) -> None:
 
 def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -> None:
     """Mount all API routers with the current auth policy."""
+    config = app.state.config
+    enabled_providers = set(config.proxy_settings.enabled_providers)
     api_dependencies = [Depends(verify_api_key)] if auth_required else []
     gemini_dependencies = [Depends(verify_api_key_gemini)] if auth_required else []
 
-    app.include_router(openai_router, dependencies=api_dependencies)
-    app.include_router(
-        openai_router,
-        prefix="/v1",
-        tags=["V1"],
-        dependencies=api_dependencies,
-    )
-    app.include_router(
-        anthropic_router,
-        prefix="/v1",
-        tags=["V1 Anthropic"],
-        dependencies=api_dependencies,
-    )
-    app.include_router(anthropic_router, dependencies=api_dependencies)
-    app.include_router(
-        litellm_router,
-        prefix="/v1",
-        tags=["V1 LiteLLM"],
-        dependencies=api_dependencies,
-    )
-    app.include_router(litellm_router, dependencies=api_dependencies)
-    app.include_router(
-        gemini_router,
-        prefix="/v1beta",
-        tags=["V1beta Gemini"],
-        dependencies=gemini_dependencies,
-    )
+    if "openai" in enabled_providers:
+        app.include_router(openai_router, dependencies=api_dependencies)
+        app.include_router(
+            openai_router,
+            prefix="/v1",
+            tags=["V1"],
+            dependencies=api_dependencies,
+        )
+        app.include_router(
+            litellm_router,
+            prefix="/v1",
+            tags=["V1 LiteLLM"],
+            dependencies=api_dependencies,
+        )
+        app.include_router(litellm_router, dependencies=api_dependencies)
+
+    if "anthropic" in enabled_providers:
+        app.include_router(
+            anthropic_router,
+            prefix="/v1",
+            tags=["V1 Anthropic"],
+            dependencies=api_dependencies,
+        )
+        app.include_router(anthropic_router, dependencies=api_dependencies)
+
+    if "gemini" in enabled_providers:
+        app.include_router(
+            gemini_router,
+            prefix="/v1beta",
+            tags=["V1beta Gemini"],
+            dependencies=gemini_dependencies,
+        )
+
     app.include_router(system_router)
 
     if not is_prod_mode:

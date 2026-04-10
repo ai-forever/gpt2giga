@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
 
@@ -5,6 +7,17 @@ from gpt2giga.app.factory import create_app
 from gpt2giga.app.run import run as run_app
 from gpt2giga.core.app_meta import check_port_available
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
+
+
+class _FakeGigaChat:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def aget_models(self):
+        return SimpleNamespace(data=[], object_="list")
+
+    async def aclose(self):
+        return None
 
 
 def test_root_redirect():
@@ -192,6 +205,61 @@ def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypa
     assert client.get("/logs").status_code == 401
     assert client.get("/logs/stream").status_code == 401
     assert client.get("/logs/html").status_code == 401
+
+
+def test_openai_provider_group_mounts_litellm_routes(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(proxy=ProxySettings(enabled_providers=["openai"]))
+    with TestClient(create_app(config=cfg)) as client:
+        assert client.get("/v1/models").status_code != 404
+        assert client.get("/v1/model/info").status_code != 404
+        assert client.get("/messages").status_code == 404
+        assert client.get("/v1beta/models").status_code == 404
+
+
+def test_anthropic_provider_can_be_enabled_independently(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(proxy=ProxySettings(enabled_providers=["anthropic"]))
+    with TestClient(create_app(config=cfg)) as client:
+        assert (
+            client.post("/messages", json={"model": "test", "messages": []}).status_code
+            != 404
+        )
+        assert client.get("/v1/models").status_code == 404
+        assert client.get("/v1/model/info").status_code == 404
+        assert client.get("/v1beta/models").status_code == 404
+
+
+def test_gemini_provider_can_be_enabled_independently(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(proxy=ProxySettings(enabled_providers=["gemini"]))
+    with TestClient(create_app(config=cfg)) as client:
+        assert client.get("/v1beta/models").status_code != 404
+        assert client.get("/v1/models").status_code == 404
+        assert client.get("/v1/model/info").status_code == 404
+        assert (
+            client.post("/messages", json={"model": "test", "messages": []}).status_code
+            == 404
+        )
+
+
+def test_openapi_only_includes_enabled_providers(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(proxy=ProxySettings(enabled_providers=["openai"]))
+    client = TestClient(create_app(config=cfg))
+
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    schema = response.json()
+    assert "/chat/completions" in schema["paths"]
+    assert "/model/info" in schema["paths"]
+    assert "/messages" not in schema["paths"]
+    assert "/v1beta/models/{model}:generateContent" not in schema["paths"]
 
 
 def test_run_server(monkeypatch):

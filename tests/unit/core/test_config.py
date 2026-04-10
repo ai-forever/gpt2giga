@@ -6,12 +6,14 @@ from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_HOST", raising=False)
     monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
+    monkeypatch.delenv("GPT2GIGA_ENABLED_PROVIDERS", raising=False)
     s = ProxySettings()
     assert s.mode == "DEV"
     assert s.host == "localhost"
     assert isinstance(s.port, int)
     assert isinstance(s.log_level, str)
     assert s.enable_reasoning is False
+    assert s.enabled_providers == ["openai", "anthropic", "gemini"]
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024
@@ -40,6 +42,24 @@ def test_proxy_settings_bool_cast_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_USE_HTTPS", "true")
     s = ProxySettings()
     assert s.use_https is True
+
+
+def test_proxy_settings_enabled_providers_from_env_csv(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_ENABLED_PROVIDERS", "openai, gemini")
+    s = ProxySettings()
+    assert s.enabled_providers == ["openai", "gemini"]
+
+
+def test_proxy_settings_enabled_providers_supports_all(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_ENABLED_PROVIDERS", "all")
+    s = ProxySettings()
+    assert s.enabled_providers == ["openai", "anthropic", "gemini"]
+
+
+def test_proxy_settings_enabled_providers_invalid_value(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_ENABLED_PROVIDERS", "openai,unknown")
+    with pytest.raises(Exception):
+        ProxySettings()
 
 
 def test_proxy_settings_invalid_port(monkeypatch):

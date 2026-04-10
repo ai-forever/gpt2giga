@@ -2,11 +2,11 @@
 
 import warnings
 from functools import cached_property
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gpt2giga.core.config.security import SecuritySettings
 from gpt2giga.core.constants import (
@@ -16,6 +16,9 @@ from gpt2giga.core.constants import (
     DEFAULT_MAX_REQUEST_BODY_BYTES,
     DEFAULT_MAX_TEXT_FILE_SIZE_BYTES,
 )
+
+ProviderName = Literal["openai", "anthropic", "gemini"]
+_ALL_ENABLED_PROVIDERS: tuple[ProviderName, ...] = ("openai", "anthropic", "gemini")
 
 
 class ProxySettings(BaseSettings):
@@ -43,6 +46,14 @@ class ProxySettings(BaseSettings):
     pass_token: bool = Field(
         default=False,
         description="Передавать токен из запроса в API",
+    )
+    enabled_providers: Annotated[list[ProviderName], NoDecode] = Field(
+        default_factory=lambda: list(_ALL_ENABLED_PROVIDERS),
+        description=(
+            "Список внешних провайдеров, роуты которых нужно включить. "
+            "Поддерживаются: openai, anthropic, gemini. "
+            "Значение 'all' в ENV/CLI включает все провайдеры."
+        ),
     )
     embeddings: str = Field(
         default="EmbeddingsGigaR",
@@ -124,6 +135,33 @@ class ProxySettings(BaseSettings):
     def normalize_mode(cls, value):
         if isinstance(value, str):
             return value.strip().upper()
+        return value
+
+    @field_validator("enabled_providers", mode="before")
+    @classmethod
+    def normalize_enabled_providers(cls, value):
+        """Normalize enabled providers from ENV/CLI friendly forms."""
+        if value is None or value == "":
+            return list(_ALL_ENABLED_PROVIDERS)
+
+        def _normalize_parts(parts: list[str]) -> list[str]:
+            normalized = [part.strip().lower() for part in parts if part.strip()]
+            if "all" in normalized:
+                return list(_ALL_ENABLED_PROVIDERS)
+            return list(dict.fromkeys(normalized))
+
+        if isinstance(value, str):
+            return _normalize_parts(value.split(","))
+
+        if isinstance(value, (list, tuple, set)):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    parts.extend(item.split(","))
+                else:
+                    return value
+            return _normalize_parts(parts)
+
         return value
 
     @model_validator(mode="after")
