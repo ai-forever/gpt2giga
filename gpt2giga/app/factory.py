@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
 from gpt2giga.api.anthropic import router as anthropic_router
+from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
 from gpt2giga.api.dependencies.auth import verify_api_key, verify_api_key_gemini
 from gpt2giga.api.gemini import router as gemini_router
 from gpt2giga.api.gemini.request import GeminiAPIError
@@ -15,7 +16,7 @@ from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
 from gpt2giga.api.middleware.rquid_context import RquidMiddleware
 from gpt2giga.api.openai import router as openai_router
-from gpt2giga.api.system import logs_api_router, logs_router, system_router
+from gpt2giga.api.system import system_router
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
@@ -82,6 +83,7 @@ def _register_middlewares(app: FastAPI, config) -> None:
             "model",
             "files",
             "batches",
+            "admin",
         ],
     )
     app.add_middleware(RquidMiddleware)
@@ -147,8 +149,9 @@ def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -
     app.include_router(system_router)
 
     if not is_prod_mode:
-        app.include_router(logs_api_router, dependencies=api_dependencies)
-        app.include_router(logs_router, dependencies=api_dependencies)
+        app.include_router(admin_api_router, dependencies=api_dependencies)
+        app.include_router(admin_router, dependencies=api_dependencies)
+        app.include_router(legacy_logs_router, dependencies=api_dependencies)
 
 
 def create_app(

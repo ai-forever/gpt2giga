@@ -357,7 +357,7 @@ gpt2giga \
 
 - `GPT2GIGA_HOST="localhost"` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
 - `GPT2GIGA_MODE="DEV"` — режим запуска (`DEV` или `PROD`). В `PROD` отключаются `/docs`, `/redoc`, `/openapi.json`;
-  в `PROD` также обязательно требуется `GPT2GIGA_API_KEY`, отключаются `/logs`, `/logs/stream`, `/logs/html`;
+  в `PROD` также обязательно требуется `GPT2GIGA_API_KEY`, отключаются `/admin`, `/admin/api/*` и legacy `/logs*`;
   и автоматически ужесточается CORS (нет wildcard `*`, `allow_credentials=False`);
 - `GPT2GIGA_PORT="8090"` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
 - `GPT2GIGA_USE_HTTPS="False"` — Использовать ли https. По умолчанию `False`;
@@ -498,27 +498,38 @@ response = client.models.generate_content(
     contents="Кто ты?",
 )
 ```
-## Системные эндпоинты
+## System и Admin эндпоинты
 - `GET /health`
 - `GET | POST /ping`
-- `GET /logs/{last_n_lines}` - получение последних N строчек из логов;
-- `GET /logs/stream` - SSE стриминг логов;
-- `GET /logs/html` - HTML страница для удобства просмотра стрима логов
+- `GET /admin` - DEV-only операторский UI с обзором runtime и вкладкой логов
+- `GET /admin/api/version` - версия приложения
+- `GET /admin/api/config` - безопасная сводка активной конфигурации
+- `GET /admin/api/runtime` - runtime-сводка: режим, auth, backend mode, enabled providers
+- `GET /admin/api/routes` - список смонтированных HTTP route
+- `GET /admin/api/capabilities` - активные provider/capability группы
+- `GET /admin/api/logs?lines=250` - последние N строк логов
+- `GET /admin/api/logs/stream` - SSE-стрим логов
 
-При использовании можно зайти на страницу: `http://localhost:8090/logs/html` и:
+Legacy-совместимость для логов в `DEV`:
+
+- `GET /logs` - legacy alias для raw logs endpoint
+- `GET /logs/stream` - legacy alias для SSE logs endpoint
+- `GET /logs/html` - deprecated redirect на `/admin?tab=logs`
+
+При использовании можно зайти на страницу `http://localhost:8090/admin` и:
 1. Если используется API ключ [Использование API ключа](#использование-api-ключа), то введите ваш `GPT2GIGA_API_KEY`
-2. Иначе, введите любой символ
+2. Иначе поле можно оставить пустым
 
 После этого, воспользуйтесь утилитой и будут выведены логи.
 
-> **⚠️ Безопасность:** Эндпоинты `/logs*` предназначены только для разработки. В `PROD` режиме (`GPT2GIGA_MODE=PROD`) они автоматически отключены. Не открывайте log-эндпоинты наружу без аутентификации.
+> **⚠️ Безопасность:** Endpoints `/admin*` и legacy `/logs*` предназначены только для разработки и локального operator/debug-доступа. В `PROD` режиме (`GPT2GIGA_MODE=PROD`) они автоматически отключены. Если включена API-key auth, тот же ключ защищает и admin endpoints.
 ## Production hardening checklist
 
 Перед развертыванием gpt2giga в production-среде убедитесь, что выполнены следующие шаги:
 
 ### Обязательные
 
-- [ ] **Режим PROD**: установите `GPT2GIGA_MODE=PROD`. В этом режиме автоматически отключаются `/docs`, `/redoc`, `/openapi.json` и все `/logs*`-эндпоинты; CORS ужесточается (нет wildcard `*`, `allow_credentials=False`).
+- [ ] **Режим PROD**: установите `GPT2GIGA_MODE=PROD`. В этом режиме автоматически отключаются `/docs`, `/redoc`, `/openapi.json`, `/admin`, `/admin/api/*` и legacy `/logs*`; CORS ужесточается (нет wildcard `*`, `allow_credentials=False`).
 - [ ] **API key аутентификация**: установите `GPT2GIGA_ENABLE_API_KEY_AUTH=True` и задайте надёжный `GPT2GIGA_API_KEY` (минимум 32 символа, случайная строка).
 - [ ] **TLS-сертификаты GigaChat**: установите `GIGACHAT_VERIFY_SSL_CERTS=True`. Не отключайте проверку SSL в production.
 - [ ] **HTTPS**: включите `GPT2GIGA_USE_HTTPS=True` и укажите пути к TLS-сертификатам (`GPT2GIGA_HTTPS_KEY_FILE`, `GPT2GIGA_HTTPS_CERT_FILE`), либо разместите прокси за reverse proxy (nginx, Caddy, Traefik) с TLS-терминацией.

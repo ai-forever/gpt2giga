@@ -2,8 +2,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
+from gpt2giga.api.system import system_router
 from gpt2giga.core.config.settings import ProxyConfig
-from gpt2giga.api.system import logs_api_router, logs_router, system_router
 
 
 @pytest.fixture
@@ -16,8 +17,9 @@ def temp_log_file(tmp_path):
 def make_app(logs_ip_allowlist=None):
     app = FastAPI()
     app.include_router(system_router)
-    app.include_router(logs_api_router)
-    app.include_router(logs_router)
+    app.include_router(admin_api_router)
+    app.include_router(admin_router)
+    app.include_router(legacy_logs_router)
     config = ProxyConfig()
     if logs_ip_allowlist is not None:
         config.proxy_settings.logs_ip_allowlist = logs_ip_allowlist
@@ -43,13 +45,22 @@ def test_logs_not_found():
     assert "Log file not found" in resp.text
 
 
-def test_logs_html_ok():
+def test_admin_ui_ok():
     app = make_app()
-    app.include_router(logs_router)
     client = TestClient(app)
-    resp = client.get("/logs/html")
+    resp = client.get("/admin")
     assert resp.status_code == 200
     assert "<html" in resp.text.lower()
+    assert "Admin Surface" in resp.text
+
+
+def test_legacy_logs_html_redirects_to_admin():
+    app = make_app()
+    client = TestClient(app)
+    resp = client.get("/logs/html", follow_redirects=False)
+    assert resp.status_code == 307
+    assert resp.headers["location"] == "/admin?tab=logs"
+    assert resp.headers["deprecation"] == "true"
 
 
 def test_logs_read_exception(temp_log_file, monkeypatch):
@@ -130,11 +141,11 @@ def test_logs_ip_allowlist_allows_matching_ip(temp_log_file):
     assert resp.status_code == 200
 
 
-def test_logs_html_ip_allowlist_blocks(temp_log_file):
-    """IP allowlist also applies to /logs/html."""
+def test_logs_html_ip_allowlist_blocks():
+    """IP allowlist also applies to /admin."""
     app = make_app(logs_ip_allowlist=["192.168.1.100"])
     client = TestClient(app)
-    resp = client.get("/logs/html")
+    resp = client.get("/admin")
     assert resp.status_code == 403
 
 
@@ -160,11 +171,33 @@ def test_logs_ip_allowlist_xforwardedfor(temp_log_file):
     assert resp.status_code == 200
 
 
-def test_logs_html_warning_banner():
-    """Verify the warning banner is present in the log viewer HTML."""
+def test_admin_ui_warning_banner():
+    """Verify the warning banner is present in the admin UI."""
     app = make_app()
     client = TestClient(app)
-    resp = client.get("/logs/html")
+    resp = client.get("/admin")
     assert resp.status_code == 200
-    assert "WARNING" in resp.text
-    assert "sensitive information" in resp.text
+    assert "Warning" in resp.text
+    assert "sensitive details" in resp.text
+
+
+def test_admin_runtime_endpoint():
+    app = make_app()
+    client = TestClient(app)
+    resp = client.get("/admin/api/runtime")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["mode"] == "DEV"
+    assert payload["admin_enabled"] is True
+
+
+def test_admin_capabilities_reflect_enabled_providers():
+    app = make_app()
+    app.state.config.proxy_settings.enabled_providers = ["openai", "gemini"]
+    client = TestClient(app)
+    resp = client.get("/admin/api/capabilities")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["providers"]["openai"]["enabled"] is True
+    assert payload["providers"]["anthropic"]["enabled"] is False
+    assert payload["providers"]["gemini"]["enabled"] is True

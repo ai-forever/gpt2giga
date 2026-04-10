@@ -141,6 +141,8 @@ def test_openapi_json_available_in_dev_mode():
     assert "/chat/completions" in schema["paths"]
     assert "/messages" in schema["paths"]
     assert "/v1beta/models/{model}:generateContent" in schema["paths"]
+    assert "/admin/api/runtime" in schema["paths"]
+    assert "/logs" not in schema["paths"]
     chat_examples = schema["paths"]["/chat/completions"]["post"]["requestBody"][
         "content"
     ]["application/json"]["examples"]
@@ -162,9 +164,11 @@ def test_prod_mode_forces_auth_dependency():
     assert response.status_code == 401
 
 
-def test_prod_mode_disables_logs_router():
+def test_prod_mode_disables_admin_and_legacy_logs_routes():
     app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD", api_key="k")))
     client = TestClient(app)
+    assert client.get("/admin").status_code == 404
+    assert client.get("/admin/api/runtime").status_code == 404
     assert client.get("/logs").status_code == 404
     assert client.get("/logs/stream").status_code == 404
     assert client.get("/logs/html").status_code == 404
@@ -202,6 +206,9 @@ def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypa
     app = create_app(config=cfg)
     client = TestClient(app)
 
+    assert client.get("/admin").status_code == 401
+    assert client.get("/admin/api/runtime").status_code == 401
+    assert client.get("/admin/api/logs").status_code == 401
     assert client.get("/logs").status_code == 401
     assert client.get("/logs/stream").status_code == 401
     assert client.get("/logs/html").status_code == 401

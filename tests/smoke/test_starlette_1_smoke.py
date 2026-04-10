@@ -5,9 +5,9 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.app.factory import create_app
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.api.admin import admin_api_router
 from gpt2giga.api.openai import router as openai_router
-from gpt2giga.api.system import logs_api_router
-from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 from gpt2giga.providers.gigachat import ResponseProcessor
 
 
@@ -57,11 +57,17 @@ class FakeRequestTransformer:
             "messages": data.get("messages", []),
         }
 
+    async def prepare_chat_completion_v2(self, data, giga_client=None):
+        return await self.prepare_chat_completion(data, giga_client=giga_client)
+
 
 def make_streaming_app():
     app = FastAPI()
     app.include_router(openai_router)
-    ensure_runtime_dependencies(app.state, config=ProxyConfig())
+    ensure_runtime_dependencies(
+        app.state,
+        config=ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1")),
+    )
     app.state.providers.gigachat_client = FakeStreamingGigaChat()
     app.state.providers.response_processor = ResponseProcessor()
     app.state.providers.request_transformer = FakeRequestTransformer()
@@ -135,12 +141,12 @@ def test_starlette_1_openai_streaming_smoke():
 
 def test_starlette_1_logs_sse_error_smoke(tmp_path):
     app = FastAPI()
-    app.include_router(logs_api_router)
+    app.include_router(admin_api_router)
     app.state.config = ProxyConfig()
     app.state.config.proxy_settings.log_filename = str(tmp_path / "missing.log")
     client = TestClient(app)
 
-    with client.stream("GET", "/logs/stream") as response:
+    with client.stream("GET", "/admin/api/logs/stream") as response:
         lines = [line for line in response.iter_lines() if line]
 
     assert response.status_code == 200
