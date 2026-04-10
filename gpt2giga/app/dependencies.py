@@ -12,6 +12,7 @@ from gpt2giga.app.runtime_backends import (
     create_runtime_backend,
     provision_runtime_resources,
 )
+from gpt2giga.app.telemetry import ObservabilityHub, create_observability_hub
 
 
 @dataclass(slots=True)
@@ -51,6 +52,13 @@ class RuntimeProviders:
     chat_mapper: Any = None
     embeddings_mapper: Any = None
     models_mapper: Any = None
+
+
+@dataclass(slots=True)
+class RuntimeObservability:
+    """App-scoped observability hubs and exporters."""
+
+    hub: ObservabilityHub | None = None
 
 
 _SERVICE_ALIASES = {
@@ -96,6 +104,7 @@ def ensure_runtime_dependencies(
     get_runtime_services(state)
     configure_runtime_stores(state, config=config, logger=logger)
     get_runtime_providers(state)
+    configure_runtime_observability(state, config=config, logger=logger)
     sync_runtime_aliases(state)
 
 
@@ -168,6 +177,47 @@ def get_runtime_providers(state: Any) -> RuntimeProviders:
         state.providers = providers
     _merge_runtime_aliases(state, providers, _PROVIDER_ALIASES, skip_none=True)
     return providers
+
+
+def get_runtime_observability(state: Any) -> RuntimeObservability:
+    """Return the typed observability container for app state."""
+    observability = getattr(state, "observability", None)
+    if not isinstance(observability, RuntimeObservability):
+        observability = RuntimeObservability()
+        state.observability = observability
+    if observability.hub is None:
+        configure_runtime_observability(
+            state,
+            config=getattr(state, "config", None),
+            logger=getattr(state, "logger", None),
+        )
+    return observability
+
+
+def configure_runtime_observability(
+    state: Any,
+    *,
+    config: Any | None = None,
+    logger: Any | None = None,
+) -> RuntimeObservability:
+    """Provision configured observability sinks."""
+    observability = getattr(state, "observability", None)
+    if not isinstance(observability, RuntimeObservability):
+        observability = RuntimeObservability()
+        state.observability = observability
+
+    proxy_settings = getattr(config, "proxy_settings", None)
+    sink_names = list(getattr(proxy_settings, "observability_sinks", ["prometheus"]))
+    current_hub = observability.hub
+    if current_hub is not None and current_hub.enabled_sink_names == sink_names:
+        return observability
+
+    observability.hub = create_observability_hub(
+        sink_names,
+        config=config,
+        logger=logger,
+    )
+    return observability
 
 
 def set_runtime_service(state: Any, name: str, value: Any) -> Any:

@@ -20,22 +20,26 @@ class _FakeGigaChat:
         return None
 
 
+def _default_config() -> ProxyConfig:
+    return ProxyConfig(proxy=ProxySettings())
+
+
 def test_root_redirect():
-    app = create_app()
+    app = create_app(config=_default_config())
     client = TestClient(app)
     response = client.get("/")
     assert response.status_code == 200
 
 
 def test_root_head_allowed():
-    app = create_app()
+    app = create_app(config=_default_config())
     client = TestClient(app)
     response = client.head("/")
     assert response.status_code == 200
 
 
 def test_cors_headers_present():
-    app = create_app()
+    app = create_app(config=_default_config())
     client = TestClient(app)
     response = client.options("/health", headers={"Origin": "http://example.com"})
     assert response.status_code == 405
@@ -53,7 +57,7 @@ def test_v1_prefix_router_is_registered(monkeypatch):
 
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(config=_default_config())) as client:
         # Используем контекстный менеджер, чтобы lifespan сработал и инициализировал state
         response = client.get("/v1/models")
         # Должен быть 200, 401, 500, но не 404 (404 значит роутер не подключен)
@@ -72,7 +76,7 @@ def test_v1_litellm_router_is_registered(monkeypatch):
 
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(config=_default_config())) as client:
         response = client.get("/v1/model/info")
         assert response.status_code != 404
 
@@ -89,7 +93,7 @@ def test_v1beta_gemini_router_is_registered(monkeypatch):
 
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(config=_default_config())) as client:
         response = client.get("/v1beta/models")
         assert response.status_code != 404
 
@@ -108,7 +112,7 @@ def test_v1_models_no_307_redirect(monkeypatch):
 
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", FakeGigaChat)
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(config=_default_config())) as client:
         response = client.get("/v1/models", follow_redirects=False)
         assert response.status_code != 307, (
             f"Expected non-redirect status, got 307 -> {response.headers.get('location')}"
@@ -117,7 +121,7 @@ def test_v1_models_no_307_redirect(monkeypatch):
 
 def test_redirect_slashes_disabled():
     """FastAPI app must be created with redirect_slashes=False."""
-    app = create_app()
+    app = create_app(config=_default_config())
     assert app.router.redirect_slashes is False
 
 
@@ -131,7 +135,7 @@ def test_docs_disabled_in_prod_mode():
 
 def test_openapi_json_available_in_dev_mode():
     """In DEV mode OpenAPI schema must be generated successfully."""
-    app = create_app()
+    app = create_app(config=_default_config())
     client = TestClient(app)
 
     response = client.get("/openapi.json")
@@ -141,7 +145,9 @@ def test_openapi_json_available_in_dev_mode():
     assert "/chat/completions" in schema["paths"]
     assert "/messages" in schema["paths"]
     assert "/v1beta/models/{model}:generateContent" in schema["paths"]
+    assert "/metrics" in schema["paths"]
     assert "/admin/api/runtime" in schema["paths"]
+    assert "/admin/api/metrics" in schema["paths"]
     assert "/admin/api/requests/recent" in schema["paths"]
     assert "/admin/api/errors/recent" in schema["paths"]
     assert "/logs" not in schema["paths"]
@@ -160,7 +166,15 @@ def test_prod_mode_requires_api_key(monkeypatch):
 
 
 def test_prod_mode_forces_auth_dependency():
-    app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD", api_key="k")))
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                mode="PROD",
+                api_key="k",
+                enabled_providers=["openai", "anthropic", "gemini"],
+            )
+        )
+    )
     client = TestClient(app)
     response = client.get("/models")
     assert response.status_code == 401
@@ -174,6 +188,15 @@ def test_prod_mode_disables_admin_and_legacy_logs_routes():
     assert client.get("/logs").status_code == 404
     assert client.get("/logs/stream").status_code == 404
     assert client.get("/logs/html").status_code == 404
+
+
+def test_prod_mode_keeps_metrics_route_but_requires_api_key(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD", api_key="k")))
+    client = TestClient(app)
+
+    assert client.get("/metrics").status_code == 401
 
 
 def test_prod_mode_cors_is_hardened():
@@ -274,7 +297,7 @@ def test_openapi_only_includes_enabled_providers(monkeypatch):
 def test_admin_recent_requests_endpoint_collects_runtime_events(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(config=_default_config())) as client:
         assert client.get("/health").status_code == 200
         response = client.get("/admin/api/requests/recent")
 
@@ -287,7 +310,7 @@ def test_admin_recent_requests_endpoint_collects_runtime_events(monkeypatch):
 def test_admin_recent_errors_endpoint_collects_404_events(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 
-    with TestClient(create_app()) as client:
+    with TestClient(create_app(config=_default_config())) as client:
         assert client.get("/does-not-exist").status_code == 404
         response = client.get("/admin/api/errors/recent")
 
@@ -295,6 +318,33 @@ def test_admin_recent_errors_endpoint_collects_404_events(monkeypatch):
     payload = response.json()
     assert payload["kind"] == "errors"
     assert any(event["status_code"] == 404 for event in payload["events"])
+
+
+def test_metrics_endpoints_expose_prometheus_payload(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    with TestClient(create_app(config=_default_config())) as client:
+        assert client.get("/health").status_code == 200
+        metrics = client.get("/metrics")
+        admin_metrics = client.get("/admin/api/metrics")
+
+    assert metrics.status_code == 200
+    assert admin_metrics.status_code == 200
+    assert "version=0.0.4" in metrics.headers["content-type"]
+    assert (
+        'gpt2giga_http_requests_total{provider="system",endpoint="/health",'
+        'method="GET",status_code="200"} 1'
+    ) in metrics.text
+    assert metrics.text == admin_metrics.text
+
+
+def test_metrics_endpoints_return_404_when_prometheus_sink_disabled(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(proxy=ProxySettings(observability_sinks=[]))
+    with TestClient(create_app(config=cfg)) as client:
+        assert client.get("/metrics").status_code == 404
+        assert client.get("/admin/api/metrics").status_code == 404
 
 
 def test_run_server(monkeypatch):

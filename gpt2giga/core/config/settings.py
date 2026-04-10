@@ -89,6 +89,14 @@ class ProxySettings(BaseSettings):
             "Полезен для Redis/Postgres и кастомных backend-ов."
         ),
     )
+    observability_sinks: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["prometheus"],
+        description=(
+            "Список observability sink-ов для нормализованных request events. "
+            "Встроенный sink: prometheus. Кастомные sink-и вроде otlp или "
+            "langfuse можно зарегистрировать через app.telemetry registry."
+        ),
+    )
     recent_requests_max_items: int = Field(
         default=200,
         description="Максимальное число recent request events в admin ring buffer.",
@@ -228,6 +236,35 @@ class ProxySettings(BaseSettings):
         """Normalize runtime store namespaces from ENV/CLI friendly forms."""
         if isinstance(value, str):
             return value.strip()
+        return value
+
+    @field_validator("observability_sinks", mode="before")
+    @classmethod
+    def normalize_observability_sinks(cls, value):
+        """Normalize observability sink selection from ENV/CLI friendly forms."""
+        if value is None:
+            return ["prometheus"]
+
+        def _normalize_parts(parts: list[str]) -> list[str]:
+            normalized = [part.strip().lower() for part in parts if part.strip()]
+            if not normalized:
+                return []
+            if any(part in {"off", "none", "disabled"} for part in normalized):
+                return []
+            return list(dict.fromkeys(normalized))
+
+        if isinstance(value, str):
+            return _normalize_parts(value.split(","))
+
+        if isinstance(value, (list, tuple, set)):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    parts.extend(item.split(","))
+                else:
+                    return value
+            return _normalize_parts(parts)
+
         return value
 
     @model_validator(mode="after")

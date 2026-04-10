@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import (
+    configure_runtime_observability,
     configure_runtime_stores,
     ensure_runtime_dependencies,
 )
@@ -35,6 +36,13 @@ async def lifespan(app: FastAPI):
     stores = configure_runtime_stores(app.state, config=config, logger=logger)
     if stores.backend is not None:
         await stores.backend.open()
+    observability = configure_runtime_observability(
+        app.state,
+        config=config,
+        logger=logger,
+    )
+    if observability.hub is not None:
+        await observability.hub.open()
     wire_runtime_services(app, config=config, logger=logger)
     logger.info("Application startup complete")
 

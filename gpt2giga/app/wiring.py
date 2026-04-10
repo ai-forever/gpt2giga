@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from gpt2giga.app.dependencies import (
     ensure_runtime_dependencies,
+    get_runtime_observability,
     get_runtime_providers,
     get_runtime_services,
     get_runtime_stores,
@@ -100,3 +101,7 @@ async def close_runtime_services(app: FastAPI, *, logger) -> None:
     stores = get_runtime_stores(app.state)
     if stores.backend is not None:
         await stores.backend.close()
+
+    observability = get_runtime_observability(app.state)
+    if observability.hub is not None:
+        await observability.hub.close()

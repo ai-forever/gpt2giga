@@ -18,6 +18,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.gigachat_api_mode == "v1"
     assert s.runtime_store_backend == "memory"
     assert s.runtime_store_namespace == "gpt2giga"
+    assert s.observability_sinks == ["prometheus"]
     assert s.recent_requests_max_items == 200
     assert s.recent_errors_max_items == 100
     assert s.chat_backend_mode == "v1"
@@ -89,6 +90,18 @@ def test_proxy_settings_runtime_store_backend_normalized(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_RUNTIME_STORE_BACKEND", " MEMORY ")
     s = ProxySettings()
     assert s.runtime_store_backend == "memory"
+
+
+def test_proxy_settings_observability_sinks_from_env_csv(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SINKS", "prometheus, otlp")
+    s = ProxySettings()
+    assert s.observability_sinks == ["prometheus", "otlp"]
+
+
+def test_proxy_settings_observability_sinks_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SINKS", " none ")
+    s = ProxySettings()
+    assert s.observability_sinks == []
 
 
 def test_proxy_settings_invalid_port(monkeypatch):

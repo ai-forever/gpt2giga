@@ -501,12 +501,14 @@ response = client.models.generate_content(
 ## System и Admin эндпоинты
 - `GET /health`
 - `GET | POST /ping`
+- `GET /metrics` - Prometheus metrics endpoint для request counters / latency / stream duration / errors
 - `GET /admin` - DEV-only операторский UI с обзором runtime и вкладкой логов
 - `GET /admin/api/version` - версия приложения
 - `GET /admin/api/config` - безопасная сводка активной конфигурации
 - `GET /admin/api/runtime` - runtime-сводка: режим, auth, backend mode, enabled providers
 - `GET /admin/api/routes` - список смонтированных HTTP route
 - `GET /admin/api/capabilities` - активные provider/capability группы
+- `GET /admin/api/metrics` - Prometheus exposition через admin surface
 - `GET /admin/api/logs?lines=250` - последние N строк логов
 - `GET /admin/api/logs/stream` - SSE-стрим логов
 
@@ -522,7 +524,9 @@ Legacy-совместимость для логов в `DEV`:
 
 После этого, воспользуйтесь утилитой и будут выведены логи.
 
-> **⚠️ Безопасность:** Endpoints `/admin*` и legacy `/logs*` предназначены только для разработки и локального operator/debug-доступа. В `PROD` режиме (`GPT2GIGA_MODE=PROD`) они автоматически отключены. Если включена API-key auth, тот же ключ защищает и admin endpoints.
+Для отключения встроенного metrics exporter используйте `GPT2GIGA_OBSERVABILITY_SINKS=none`. Для кастомных sink-ов вроде OTLP/Langfuse можно зарегистрировать свой sink через telemetry registry и затем добавить его имя в `GPT2GIGA_OBSERVABILITY_SINKS`.
+
+> **⚠️ Безопасность:** Endpoints `/admin*` и legacy `/logs*` предназначены только для разработки и локального operator/debug-доступа. В `PROD` режиме (`GPT2GIGA_MODE=PROD`) они автоматически отключены. Endpoint `/metrics` остается доступным для скрейпа, но при включенной API-key auth защищается тем же ключом.
 ## Production hardening checklist
 
 Перед развертыванием gpt2giga в production-среде убедитесь, что выполнены следующие шаги:

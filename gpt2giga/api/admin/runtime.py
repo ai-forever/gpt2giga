@@ -7,6 +7,7 @@ from fastapi.routing import APIRoute
 from starlette.requests import Request
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.api.system.metrics import build_metrics_response
 from gpt2giga.app.observability import (
     filter_request_events,
     get_recent_error_feed_from_state,
@@ -14,6 +15,7 @@ from gpt2giga.app.observability import (
 )
 from gpt2giga.app.dependencies import (
     get_config_from_state,
+    get_runtime_observability,
     get_runtime_providers,
     get_runtime_services,
     get_runtime_stores,
@@ -145,6 +147,7 @@ def _runtime_summary(request: Request) -> dict[str, object]:
     proxy = config.proxy_settings
     is_prod_mode = proxy.mode == "PROD"
     auth_required = proxy.enable_api_key_auth or is_prod_mode
+    metrics_enabled = "prometheus" in set(proxy.observability_sinks)
     return {
         "app_version": request.app.version or get_app_version(),
         "mode": proxy.mode,
@@ -156,6 +159,8 @@ def _runtime_summary(request: Request) -> dict[str, object]:
         "gigachat_api_mode": proxy.gigachat_api_mode,
         "runtime_store_backend": proxy.runtime_store_backend,
         "runtime_store_namespace": proxy.runtime_store_namespace,
+        "observability_sinks": list(proxy.observability_sinks),
+        "metrics_enabled": metrics_enabled,
         "pass_model": proxy.pass_model,
         "pass_token": proxy.pass_token,
         "enable_reasoning": proxy.enable_reasoning,
@@ -190,6 +195,7 @@ async def get_admin_config(request: Request):
         "gigachat_api_mode": proxy.gigachat_api_mode,
         "runtime_store_backend": proxy.runtime_store_backend,
         "runtime_store_namespace": proxy.runtime_store_namespace,
+        "observability_sinks": list(proxy.observability_sinks),
         "runtime_store_dsn_configured": proxy.runtime_store_dsn is not None,
         "recent_requests_max_items": proxy.recent_requests_max_items,
         "recent_errors_max_items": proxy.recent_errors_max_items,
@@ -231,12 +237,14 @@ async def get_admin_capabilities(request: Request):
     verify_logs_ip_allowlist(request)
     config = get_config_from_state(request.app.state)
     enabled_providers = set(config.proxy_settings.enabled_providers)
+    metrics_enabled = "prometheus" in set(config.proxy_settings.observability_sinks)
     return {
         "backend": {
             "gigachat_api_mode": config.proxy_settings.gigachat_api_mode,
             "chat_backend_mode": config.proxy_settings.chat_backend_mode,
             "responses_backend_mode": config.proxy_settings.responses_backend_mode,
             "runtime_store_backend": config.proxy_settings.runtime_store_backend,
+            "observability_sinks": list(config.proxy_settings.observability_sinks),
         },
         "providers": {
             provider: {
@@ -247,8 +255,16 @@ async def get_admin_capabilities(request: Request):
         },
         "system": {
             "enabled": True,
-            "capabilities": ["health", "ping"],
-            "routes": ["/health", "/ping"],
+            "capabilities": [
+                "health",
+                "ping",
+                *([] if not metrics_enabled else ["metrics"]),
+            ],
+            "routes": [
+                "/health",
+                "/ping",
+                *([] if not metrics_enabled else ["/metrics"]),
+            ],
         },
         "admin": {
             "enabled": config.proxy_settings.mode != "PROD",
@@ -260,6 +276,7 @@ async def get_admin_capabilities(request: Request):
                 "routes",
                 "recent_requests",
                 "recent_errors",
+                *([] if not metrics_enabled else ["metrics"]),
                 "logs",
                 "logs_stream",
             ],
@@ -272,6 +289,7 @@ async def get_admin_capabilities(request: Request):
                 "/admin/api/capabilities",
                 "/admin/api/requests/recent",
                 "/admin/api/errors/recent",
+                *([] if not metrics_enabled else ["/admin/api/metrics"]),
                 "/admin/api/logs",
                 "/admin/api/logs/stream",
             ],
@@ -304,6 +322,15 @@ def _recent_events_payload(
         "count": len(events),
         "kind": kind,
     }
+
+
+@admin_runtime_api_router.get("/admin/api/metrics")
+@exceptions_handler
+async def get_admin_metrics(request: Request):
+    """Expose Prometheus metrics through the admin surface."""
+    verify_logs_ip_allowlist(request)
+    get_runtime_observability(request.app.state)
+    return build_metrics_response(request)
 
 
 @admin_runtime_api_router.get("/admin/api/requests/recent")

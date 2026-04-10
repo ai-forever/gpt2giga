@@ -19,6 +19,7 @@ from gpt2giga.app.observability import (
 _IGNORED_PREFIXES = (
     "/admin",
     "/logs",
+    "/metrics",
     "/docs",
     "/redoc",
     "/openapi.json",

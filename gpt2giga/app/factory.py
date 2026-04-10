@@ -17,7 +17,7 @@ from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
 from gpt2giga.api.middleware.rquid_context import RquidMiddleware
 from gpt2giga.api.openai import router as openai_router
-from gpt2giga.api.system import system_router
+from gpt2giga.api.system import metrics_router, system_router
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
@@ -85,6 +85,7 @@ def _register_middlewares(app: FastAPI, config) -> None:
             "files",
             "batches",
             "admin",
+            "metrics",
         ],
     )
     app.add_middleware(RquidMiddleware)
@@ -151,6 +152,7 @@ def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -
         )
 
     app.include_router(system_router)
+    app.include_router(metrics_router, dependencies=api_dependencies)
 
     if not is_prod_mode:
         app.include_router(admin_api_router, dependencies=api_dependencies)

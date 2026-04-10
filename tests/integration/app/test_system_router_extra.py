@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
 from gpt2giga.api.system import system_router
-from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
 @pytest.fixture
@@ -20,7 +20,7 @@ def make_app(logs_ip_allowlist=None):
     app.include_router(admin_api_router)
     app.include_router(admin_router)
     app.include_router(legacy_logs_router)
-    config = ProxyConfig()
+    config = ProxyConfig(proxy=ProxySettings())
     if logs_ip_allowlist is not None:
         config.proxy_settings.logs_ip_allowlist = logs_ip_allowlist
     app.state.config = config
