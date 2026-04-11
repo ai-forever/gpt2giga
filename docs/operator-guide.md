@@ -1,0 +1,252 @@
+# Operator Guide
+
+Этот документ описывает runtime switches и операторские сценарии для `gpt2giga`: какие provider-ы включать, когда выбирать backend `v1`/`v2`, как использовать `/admin`, `/metrics` и что меняется между `DEV` и `PROD`.
+
+## Базовые runtime switches
+
+Ключевые настройки:
+
+- `GPT2GIGA_ENABLED_PROVIDERS`
+- `GPT2GIGA_GIGACHAT_API_MODE`
+- `GPT2GIGA_MODE`
+- `GPT2GIGA_ENABLE_API_KEY_AUTH`
+- `GPT2GIGA_OBSERVABILITY_SINKS`
+
+### `GPT2GIGA_ENABLED_PROVIDERS`
+
+Управляет тем, какие внешние provider-роуты монтируются при старте.
+
+Поддерживаемые значения:
+
+- `openai`
+- `anthropic`
+- `gemini`
+- `all`
+
+Формат:
+
+```dotenv
+GPT2GIGA_ENABLED_PROVIDERS=openai,gemini
+```
+
+Поведение:
+
+- по умолчанию включены все built-in provider-ы;
+- `openai` включает и OpenAI routes, и LiteLLM-compatible `/model/info`;
+- выключенные provider-ы не попадают ни в router mounting, ни в OpenAPI schema.
+
+### `GPT2GIGA_GIGACHAT_API_MODE`
+
+Управляет backend path для chat-like flows.
+
+Значения:
+
+- `v1`
+- `v2`
+
+Формат:
+
+```dotenv
+GPT2GIGA_GIGACHAT_API_MODE=v2
+```
+
+Режим `v2` влияет на:
+
+- OpenAI `chat/completions`
+- OpenAI `responses`
+- Anthropic `messages`
+- Gemini `generateContent` / `streamGenerateContent`
+- responses-targeted batches
+
+Если вы хотите предсказуемый rollout, сначала включайте `v2` на staging или на отдельном instance.
+
+### `GPT2GIGA_MODE`
+
+Режимы:
+
+- `DEV`
+- `PROD`
+
+`DEV`:
+
+- доступны `/admin` и `/admin/api/*`;
+- доступны legacy `/logs*`;
+- доступны `/docs`, `/redoc`, `/openapi.json`.
+
+`PROD`:
+
+- `/admin*` отключены;
+- `/logs*` отключены;
+- `/docs`, `/redoc`, `/openapi.json` отключены;
+- нужен `GPT2GIGA_API_KEY`;
+- CORS policy ужесточается автоматически.
+
+### `GPT2GIGA_OBSERVABILITY_SINKS`
+
+Управляет telemetry sink-ами для normalized request events.
+
+Примеры:
+
+```dotenv
+GPT2GIGA_OBSERVABILITY_SINKS=prometheus
+GPT2GIGA_OBSERVABILITY_SINKS=none
+GPT2GIGA_OBSERVABILITY_SINKS=prometheus,otlp
+```
+
+`prometheus` включает `/metrics` и `/admin/api/metrics`.
+
+## Типовые сценарии
+
+### Только OpenAI-compatible surface
+
+```dotenv
+GPT2GIGA_ENABLED_PROVIDERS=openai
+GPT2GIGA_GIGACHAT_API_MODE=v1
+```
+
+Итог:
+
+- доступны OpenAI routes;
+- доступен LiteLLM-compatible `/model/info`;
+- Anthropic и Gemini routes не монтируются.
+
+### OpenAI + Gemini
+
+```dotenv
+GPT2GIGA_ENABLED_PROVIDERS=openai,gemini
+GPT2GIGA_GIGACHAT_API_MODE=v1
+```
+
+Итог:
+
+- доступны OpenAI и Gemini routes;
+- Anthropic routes отсутствуют;
+- OpenAPI показывает только включенные группы.
+
+### Rollout backend `v2`
+
+```dotenv
+GPT2GIGA_ENABLED_PROVIDERS=openai,anthropic,gemini
+GPT2GIGA_GIGACHAT_API_MODE=v2
+```
+
+Подходит для:
+
+- testing/staging;
+- отдельных инстансов для новых клиентов;
+- поэтапного перевода chat-like traffic на `achat_v2/astream_v2`.
+
+## Локальный запуск
+
+```bash
+cp .env.example .env
+uv sync --all-extras --dev
+uv run gpt2giga
+```
+
+Измените `.env` перед стартом:
+
+```dotenv
+GPT2GIGA_ENABLED_PROVIDERS=openai,gemini
+GPT2GIGA_GIGACHAT_API_MODE=v2
+GPT2GIGA_MODE=DEV
+```
+
+После старта можно открыть:
+
+- `http://localhost:8090/admin`
+- `http://localhost:8090/metrics`
+
+## Docker / Compose
+
+Готовые compose-стеки лежат в `deploy/compose/`.
+
+Основные файлы:
+
+- `deploy/compose/base.yaml` — обычный single-instance запуск;
+- `deploy/compose/multiple.yaml` — несколько инстансов с разными моделями;
+- `deploy/compose/observability.yaml` — запуск через mitmproxy для debug/SSE inspection;
+- `deploy/compose/traefik.yaml` — reverse proxy и несколько инстансов.
+
+Базовый workflow:
+
+1. Скопируйте `.env.example` в `.env`.
+2. Задайте нужные switches в `.env`.
+3. Запустите нужный профиль.
+
+Пример для DEV:
+
+```dotenv
+GPT2GIGA_MODE=DEV
+GPT2GIGA_ENABLED_PROVIDERS=openai,gemini
+GPT2GIGA_GIGACHAT_API_MODE=v2
+```
+
+```bash
+docker compose -f deploy/compose/base.yaml --profile DEV up -d
+```
+
+Пример для PROD:
+
+```dotenv
+GPT2GIGA_MODE=PROD
+GPT2GIGA_ENABLE_API_KEY_AUTH=True
+GPT2GIGA_API_KEY=<strong-secret>
+GPT2GIGA_ENABLED_PROVIDERS=openai
+GPT2GIGA_GIGACHAT_API_MODE=v1
+```
+
+```bash
+docker compose -f deploy/compose/base.yaml --profile PROD up -d
+```
+
+## Admin и legacy logs
+
+В `DEV` доступны:
+
+- `/admin`
+- `/admin/api/version`
+- `/admin/api/config`
+- `/admin/api/runtime`
+- `/admin/api/routes`
+- `/admin/api/capabilities`
+- `/admin/api/requests/recent`
+- `/admin/api/errors/recent`
+- `/admin/api/logs`
+- `/admin/api/logs/stream`
+
+Legacy endpoints:
+
+- `/logs`
+- `/logs/stream`
+- `/logs/html`
+
+`/logs/html` больше не является отдельным UI и работает как deprecated redirect на `/admin?tab=logs`.
+
+Если включен `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, admin endpoints требуют тот же API key, что и provider routes.
+
+Если задан `GPT2GIGA_LOGS_IP_ALLOWLIST`, он применяется и к `/admin*`, и к `/logs*`.
+
+## Metrics и observability
+
+`/metrics`:
+
+- доступен в `DEV` и `PROD`;
+- публикуется только если включен sink `prometheus`;
+- при API-key auth защищается тем же ключом.
+
+Admin UI и admin API используют structured request audit feed:
+
+- recent requests;
+- recent errors;
+- filters по `provider` и `endpoint` на API-уровне;
+- runtime summary с `enabled_providers`, `gigachat_api_mode`, `runtime_store_backend`, `observability_sinks`.
+
+Текущее хранилище recent feeds — in-memory backend. Для durable/queryable storage нужен отдельный custom runtime backend.
+
+## Рекомендуемый rollout
+
+1. Для локальной разработки используйте `DEV`, `prometheus`, и только нужные provider-ы.
+2. Для staging поднимайте отдельный instance с `GPT2GIGA_GIGACHAT_API_MODE=v2`.
+3. Для production ограничивайте `GPT2GIGA_ENABLED_PROVIDERS` только реально используемыми API surfaces.
+4. `PROD` запускайте только с API key и внешним TLS/reverse proxy.

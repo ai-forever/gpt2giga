@@ -22,9 +22,10 @@
 6. [Авторизация с помощью заголовка](#авторизация-с-помощью-заголовка)
 7. [Использование HTTPS](#использование-https)
 8. [Использование API ключа](#использование-api-ключа)
-9. [Системные эндпоинты](#системные-эндпоинты)
-10. [Совместимые приложения](#совместимые-приложения)
-11. [Вклад и PR-шаблоны](#вклад-и-pr-шаблоны)
+9. [System и Admin эндпоинты](#system-и-admin-эндпоинты)
+10. [Архитектура и дополнительные документы](#архитектура-и-дополнительные-документы)
+11. [Совместимые приложения](#совместимые-приложения)
+12. [Вклад и PR-шаблоны](#вклад-и-pr-шаблоны)
 
 
 ## Описание
@@ -373,6 +374,10 @@ gpt2giga \
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
 - `GPT2GIGA_ENABLE_API_KEY_AUTH="False"` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
 - `GPT2GIGA_API_KEY=""` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
+- `GPT2GIGA_ENABLED_PROVIDERS="openai,anthropic,gemini"` — список внешних provider-ов, которые нужно смонтировать при старте. Поддерживаются `openai`, `anthropic`, `gemini`, а также специальное значение `all`. LiteLLM-compatible `/model/info` включается вместе с `openai`.
+- `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend path для chat-like flows: `v1` или `v2`.
+- `GPT2GIGA_RUNTIME_STORE_BACKEND="memory"` — runtime backend для stateful metadata stores и recent audit feeds.
+- `GPT2GIGA_OBSERVABILITY_SINKS="prometheus"` — список telemetry sink-ов для normalized request events. Значение `none` отключает встроенный metrics exporter.
 - `GPT2GIGA_CORS_ALLOW_ORIGINS='["*"]'` — список разрешенных Origin (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_HEADERS='["*"]'` — список разрешенных заголовков (JSON массив).
@@ -394,6 +399,41 @@ gpt2giga \
 - `GIGACHAT_TOKEN_EXPIRY_BUFFER_MS` - Буфер времени (мс) до истечения токена для запуска обновления. По умолчанию `60000` (60 секунд).
 
 После запуска сервер будет перенаправлять поддерживаемые OpenAI-, Anthropic- и Gemini-совместимые запросы в GigaChat API.
+
+### Runtime switches: providers и backend mode
+
+Ключевые runtime switches:
+
+- `GPT2GIGA_ENABLED_PROVIDERS` — какие внешние provider-роуты будут опубликованы;
+- `GPT2GIGA_GIGACHAT_API_MODE` — какой backend path использовать для chat-like flows: `v1` или `v2`.
+
+Примеры:
+
+```dotenv
+# Только OpenAI-compatible surface + LiteLLM /model/info
+GPT2GIGA_ENABLED_PROVIDERS=openai
+GPT2GIGA_GIGACHAT_API_MODE=v1
+```
+
+```dotenv
+# OpenAI + Gemini
+GPT2GIGA_ENABLED_PROVIDERS=openai,gemini
+GPT2GIGA_GIGACHAT_API_MODE=v1
+```
+
+```dotenv
+# Полный набор provider-ов и backend v2
+GPT2GIGA_ENABLED_PROVIDERS=all
+GPT2GIGA_GIGACHAT_API_MODE=v2
+```
+
+Для Docker/Compose сценариев эти настройки также читаются из `.env`, который подключается в `deploy/compose/*.yaml`.
+
+Подробно:
+
+- архитектура и runtime model — [ARCHITECTURE_v2.md](./ARCHITECTURE_v2.md)
+- operator scenarios — [docs/operator-guide.md](./docs/operator-guide.md)
+- how to add a provider — [docs/how-to-add-provider.md](./docs/how-to-add-provider.md)
 
 ## Авторизация с помощью заголовка
 
@@ -527,6 +567,13 @@ Legacy-совместимость для логов в `DEV`:
 Для отключения встроенного metrics exporter используйте `GPT2GIGA_OBSERVABILITY_SINKS=none`. Для кастомных sink-ов вроде OTLP/Langfuse можно зарегистрировать свой sink через telemetry registry и затем добавить его имя в `GPT2GIGA_OBSERVABILITY_SINKS`.
 
 > **⚠️ Безопасность:** Endpoints `/admin*` и legacy `/logs*` предназначены только для разработки и локального operator/debug-доступа. В `PROD` режиме (`GPT2GIGA_MODE=PROD`) они автоматически отключены. Endpoint `/metrics` остается доступным для скрейпа, но при включенной API-key auth защищается тем же ключом.
+
+## Архитектура и дополнительные документы
+
+- [ARCHITECTURE_v2.md](./ARCHITECTURE_v2.md) — актуальная схема слоев `app/core/api/features/providers`, canonical contracts, provider registry, system/admin split и backend API mode.
+- [docs/operator-guide.md](./docs/operator-guide.md) — как поднимать только нужные provider-ы, как включать `v2`, как использовать `/admin`, `/metrics` и Docker/Compose стеки.
+- [docs/how-to-add-provider.md](./docs/how-to-add-provider.md) — пошаговый workflow для подключения нового внешнего provider-а через adapter bundle и registry.
+
 ## Production hardening checklist
 
 Перед развертыванием gpt2giga в production-среде убедитесь, что выполнены следующие шаги:
