@@ -303,6 +303,74 @@ async def test_prepare_response_v2_rejects_conversation_and_previous_response_id
     assert exc_info.value.detail["error"]["param"] == "conversation"
 
 
+@pytest.mark.asyncio
+async def test_prepare_response_v2_filters_allowed_tools_to_single_builtin():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    chat = await transformer.prepare_response_v2(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "sum",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"a": {"type": "number"}},
+                        },
+                    },
+                },
+                {"type": "web_search"},
+                {"type": "code_interpreter"},
+            ],
+            "tool_choice": {
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": [{"type": "web_search"}],
+            },
+        }
+    )
+
+    payload = chat.model_dump(exclude_none=True, by_alias=True)
+    assert payload["tools"] == [{"web_search": {}}]
+    assert payload["tool_config"] == {"mode": "forced", "tool_name": "web_search"}
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_maps_reserved_function_tool_choice():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    chat = await transformer.prepare_response_v2(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"query": {"type": "string"}},
+                        },
+                    },
+                }
+            ],
+            "tool_choice": {"type": "function", "name": "web_search"},
+        }
+    )
+
+    payload = chat.model_dump(exclude_none=True, by_alias=True)
+    assert (
+        payload["tools"][0]["functions"]["specifications"][0]["name"]
+        == "__gpt2giga_user_search_web"
+    )
+    assert payload["tool_config"] == {
+        "mode": "forced",
+        "function_name": "__gpt2giga_user_search_web",
+    }
+
+
 class MockResponse:
     def __init__(self, data):
         self.data = data
