@@ -37,6 +37,7 @@ class RuntimeStores:
     responses: Any = field(default_factory=dict)
     usage_by_api_key: Any = field(default_factory=dict)
     usage_by_provider: Any = field(default_factory=dict)
+    governance_counters: Any = field(default_factory=dict)
     recent_requests: EventFeed | None = None
     recent_errors: EventFeed | None = None
 
@@ -169,6 +170,7 @@ def configure_runtime_stores(
     stores.responses = resources["responses"]
     stores.usage_by_api_key = resources["usage_by_api_key"]
     stores.usage_by_provider = resources["usage_by_provider"]
+    stores.governance_counters = resources["governance_counters"]
     stores.recent_requests = resources["recent_requests"]
     stores.recent_errors = resources["recent_errors"]
     _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)

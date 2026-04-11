@@ -21,6 +21,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.enable_telemetry is True
     assert s.observability_sinks == ["prometheus"]
     assert s.scoped_api_keys == []
+    assert s.governance_limits == []
     assert s.recent_requests_max_items == 200
     assert s.recent_errors_max_items == 100
     assert s.chat_backend_mode == "v1"
@@ -139,6 +140,47 @@ def test_proxy_settings_scoped_api_keys_invalid_json(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_SCOPED_API_KEYS", "not-json")
     with pytest.raises(Exception):
         ProxySettings()
+
+
+def test_proxy_settings_governance_limits_from_env_json(monkeypatch):
+    monkeypatch.setenv(
+        "GPT2GIGA_GOVERNANCE_LIMITS",
+        (
+            '[{"name":"openai-burst","scope":"api_key","providers":["openai"],'
+            '"endpoints":["chat/completions"],"models":["GigaChat-2-Max"],'
+            '"window_seconds":60,"max_requests":3,"max_total_tokens":500}]'
+        ),
+    )
+    s = ProxySettings()
+    assert len(s.governance_limits) == 1
+    rule = s.governance_limits[0]
+    assert rule.name == "openai-burst"
+    assert rule.scope == "api_key"
+    assert rule.providers == ["openai"]
+    assert rule.endpoints == ["chat/completions"]
+    assert rule.models == ["GigaChat-2-Max"]
+    assert rule.window_seconds == 60
+    assert rule.max_requests == 3
+    assert rule.max_total_tokens == 500
+
+
+def test_proxy_settings_governance_limits_invalid_json(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_GOVERNANCE_LIMITS", "not-json")
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
+def test_proxy_settings_governance_limits_require_threshold():
+    with pytest.raises(Exception):
+        ProxySettings(
+            governance_limits=[
+                {
+                    "scope": "provider",
+                    "providers": ["openai"],
+                    "window_seconds": 60,
+                }
+            ]
+        )
 
 
 def test_proxy_settings_invalid_port(monkeypatch):

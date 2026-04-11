@@ -197,6 +197,9 @@ def test_admin_runtime_endpoint():
     assert payload["state"]["stores"]["backend"] == "memory"
     assert payload["state"]["stores"]["usage_by_api_key"] == 0
     assert payload["state"]["stores"]["usage_by_provider"] == 0
+    assert payload["state"]["stores"]["governance_counters"] == 0
+    assert payload["governance_enabled"] is False
+    assert payload["governance_limits_configured"] == 0
 
 
 def test_admin_capabilities_reflect_enabled_providers():
@@ -232,8 +235,10 @@ def test_admin_config_exposes_grouped_safe_summary():
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["summary"]["network"]["bind"] == "localhost:8090"
+    assert payload["summary"]["network"]["governance_limits_configured"] == 0
     assert payload["summary"]["providers"]["gigachat_api_mode"] == "v1"
     assert payload["summary"]["providers"]["telemetry_enabled"] is True
+    assert payload["summary"]["providers"]["governance_enabled"] is False
     assert payload["summary"]["limits"]["max_request_body_bytes"] > 0
     assert payload["summary"]["logging"]["log_filename"] == "gpt2giga.log"
 

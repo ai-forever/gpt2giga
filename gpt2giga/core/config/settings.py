@@ -20,7 +20,61 @@ from gpt2giga.core.constants import (
 
 ProviderName = Literal["openai", "anthropic", "gemini"]
 GigaChatAPIMode = Literal["v1", "v2"]
+GovernanceLimitScope = Literal["api_key", "provider"]
 _ALL_ENABLED_PROVIDERS: tuple[ProviderName, ...] = ("openai", "anthropic", "gemini")
+
+
+def _normalize_provider_allowlist(value):
+    """Normalize provider allowlists from ENV/CLI friendly forms."""
+    if value is None or value == "":
+        return None
+
+    def _normalize_parts(parts: list[str]) -> list[str] | None:
+        normalized = [part.strip().lower() for part in parts if part.strip()]
+        if not normalized or "all" in normalized:
+            return None
+        return list(dict.fromkeys(normalized))
+
+    if isinstance(value, str):
+        return _normalize_parts(value.split(","))
+
+    if isinstance(value, (list, tuple, set)):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.extend(item.split(","))
+            else:
+                return value
+        return _normalize_parts(parts)
+
+    return value
+
+
+def _normalize_optional_string_list(value):
+    """Normalize endpoint/model allowlists from ENV/CLI friendly forms."""
+    if value is None or value == "":
+        return None
+
+    def _normalize_parts(parts: list[str]) -> list[str] | None:
+        normalized = [part.strip() for part in parts if isinstance(part, str)]
+        normalized = [part for part in normalized if part]
+        if not normalized:
+            return None
+        return list(dict.fromkeys(normalized))
+
+    if isinstance(value, str):
+        return _normalize_parts(value.split(","))
+
+    if isinstance(value, (list, tuple, set)):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.extend(item.split(","))
+            else:
+                return value
+        return _normalize_parts(parts)
+
+    return value
 
 
 class ScopedAPIKeySettings(BaseModel):
@@ -72,56 +126,98 @@ class ScopedAPIKeySettings(BaseModel):
     @classmethod
     def normalize_providers(cls, value):
         """Normalize provider allowlists from ENV/CLI friendly forms."""
-        if value is None or value == "":
-            return None
-
-        def _normalize_parts(parts: list[str]) -> list[str] | None:
-            normalized = [part.strip().lower() for part in parts if part.strip()]
-            if not normalized or "all" in normalized:
-                return None
-            return list(dict.fromkeys(normalized))
-
-        if isinstance(value, str):
-            return _normalize_parts(value.split(","))
-
-        if isinstance(value, (list, tuple, set)):
-            parts: list[str] = []
-            for item in value:
-                if isinstance(item, str):
-                    parts.extend(item.split(","))
-                else:
-                    return value
-            return _normalize_parts(parts)
-
-        return value
+        return _normalize_provider_allowlist(value)
 
     @field_validator("endpoints", "models", mode="before")
     @classmethod
     def normalize_optional_string_list(cls, value):
         """Normalize endpoint/model allowlists from ENV/CLI friendly forms."""
-        if value is None or value == "":
+        return _normalize_optional_string_list(value)
+
+
+class GovernanceLimitSettings(BaseModel):
+    """Fixed-window governance rule for request rate and token quotas."""
+
+    name: Optional[str] = Field(
+        default=None,
+        description="Опциональное имя governance rule для admin/runtime surfaces.",
+    )
+    scope: GovernanceLimitScope = Field(
+        description="Группа subject-ов, по которой считать окно: api_key или provider.",
+    )
+    providers: Annotated[list[ProviderName], NoDecode] | None = Field(
+        default=None,
+        description=(
+            "Опциональный allowlist внешних provider-ов. "
+            "Пусто = rule применяется ко всем provider-ам."
+        ),
+    )
+    endpoints: Annotated[list[str], NoDecode] | None = Field(
+        default=None,
+        description=(
+            "Опциональный allowlist normalized endpoint ids без /v1 или /v1beta."
+        ),
+    )
+    models: Annotated[list[str], NoDecode] | None = Field(
+        default=None,
+        description="Опциональный allowlist model aliases/ids.",
+    )
+    window_seconds: int = Field(
+        default=60,
+        ge=1,
+        le=86_400,
+        description="Размер fixed window в секундах.",
+    )
+    max_requests: int | None = Field(
+        default=None,
+        ge=1,
+        description="Максимум HTTP requests в одном окне.",
+    )
+    max_total_tokens: int | None = Field(
+        default=None,
+        ge=1,
+        description="Максимум total_tokens в одном окне.",
+    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        """Normalize blank names to ``None``."""
+        if value is None:
             return None
-
-        def _normalize_parts(parts: list[str]) -> list[str] | None:
-            normalized = [part.strip() for part in parts if isinstance(part, str)]
-            normalized = [part for part in normalized if part]
-            if not normalized:
-                return None
-            return list(dict.fromkeys(normalized))
-
         if isinstance(value, str):
-            return _normalize_parts(value.split(","))
-
-        if isinstance(value, (list, tuple, set)):
-            parts: list[str] = []
-            for item in value:
-                if isinstance(item, str):
-                    parts.extend(item.split(","))
-                else:
-                    return value
-            return _normalize_parts(parts)
-
+            normalized = value.strip()
+            return normalized or None
         return value
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def normalize_scope(cls, value):
+        """Normalize governance scope names from ENV/CLI friendly forms."""
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
+    @field_validator("providers", mode="before")
+    @classmethod
+    def normalize_providers(cls, value):
+        """Normalize provider allowlists from ENV/CLI friendly forms."""
+        return _normalize_provider_allowlist(value)
+
+    @field_validator("endpoints", "models", mode="before")
+    @classmethod
+    def normalize_optional_string_list(cls, value):
+        """Normalize endpoint/model allowlists from ENV/CLI friendly forms."""
+        return _normalize_optional_string_list(value)
+
+    @model_validator(mode="after")
+    def validate_thresholds(self):
+        """Require at least one request- or token-based threshold."""
+        if self.max_requests is None and self.max_total_tokens is None:
+            raise ValueError(
+                "governance limit must define max_requests or max_total_tokens"
+            )
+        return self
 
 
 class ProxySettings(BaseSettings):
@@ -298,6 +394,14 @@ class ProxySettings(BaseSettings):
             "endpoint и model."
         ),
     )
+    governance_limits: list[GovernanceLimitSettings] = Field(
+        default_factory=list,
+        description=(
+            "Опциональные governance rules в JSON-массиве. Поддерживают fixed-window "
+            "rate limits и token quotas по api_key/provider с optional filters по "
+            "provider, endpoint и model."
+        ),
+    )
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -416,6 +520,27 @@ class ProxySettings(BaseSettings):
             return decoded
         return value
 
+    @field_validator("governance_limits", mode="before")
+    @classmethod
+    def normalize_governance_limits(cls, value):
+        """Normalize governance limits from ENV/CLI friendly forms."""
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return []
+            try:
+                decoded = json.loads(normalized)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "governance_limits must be a JSON array of rule descriptors"
+                ) from exc
+            if decoded is None:
+                return []
+            return decoded
+        return value
+
     @model_validator(mode="after")
     def _validate_prod_security(self):
         """Emit warnings when PROD mode has insecure defaults."""
@@ -451,6 +576,7 @@ class ProxySettings(BaseSettings):
             enable_api_key_auth=self.enable_api_key_auth,
             api_key=self.api_key,
             scoped_api_keys_configured=len(self.scoped_api_keys),
+            governance_limits_configured=len(self.governance_limits),
             cors_allow_origins=self.cors_allow_origins,
             cors_allow_methods=self.cors_allow_methods,
             cors_allow_headers=self.cors_allow_headers,

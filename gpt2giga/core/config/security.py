@@ -29,6 +29,10 @@ class SecuritySettings(BaseModel):
         default=0,
         description="Number of configured scoped API keys.",
     )
+    governance_limits_configured: int = Field(
+        default=0,
+        description="Number of configured request governance rules.",
+    )
 
     cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
     cors_allow_methods: list[str] = Field(default_factory=lambda: ["*"])
@@ -72,6 +76,7 @@ class SecuritySettings(BaseModel):
             "auth_required": self.auth_required,
             "api_key_configured": self.api_key is not None,
             "scoped_api_keys_configured": self.scoped_api_keys_configured,
+            "governance_limits_configured": self.governance_limits_configured,
             "cors_allow_origins": self.cors_allow_origins,
             "has_wildcard_cors": self.has_wildcard_cors,
             "log_redact_sensitive": self.log_redact_sensitive,

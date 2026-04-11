@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any, TypedDict
 
 from gpt2giga.app.dependencies import get_runtime_observability, get_runtime_stores
+from gpt2giga.app.governance import record_governance_event
 from gpt2giga.app.runtime_backends import EventFeed
 
 
@@ -59,6 +60,7 @@ def record_request_event(state: Any, event: RequestAuditEvent) -> None:
     if int(event["status_code"]) >= 400 or event.get("error_type") is not None:
         get_recent_error_feed_from_state(state).append(event)
     _record_usage_accounting(state, event)
+    record_governance_event(state, event)
     hub = get_runtime_observability(state).hub
     if hub is not None:
         hub.record_request_event(event)

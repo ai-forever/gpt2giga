@@ -723,6 +723,11 @@ RUNTIME_RESOURCE_DESCRIPTORS: tuple[RuntimeResourceDescriptor, ...] = (
         description="Aggregated usage accounting grouped by external provider.",
     ),
     RuntimeResourceDescriptor(
+        name="governance_counters",
+        kind="mapping",
+        description="Fixed-window governance counters for request and token quotas.",
+    ),
+    RuntimeResourceDescriptor(
         name="recent_requests",
         kind="feed",
         description="Recent request audit events.",

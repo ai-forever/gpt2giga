@@ -221,6 +221,7 @@ def _build_config_summary(proxy: object) -> dict[str, dict[str, object]]:
             "https_enabled": proxy.use_https,
             "api_key_auth": proxy.enable_api_key_auth,
             "scoped_api_keys_configured": len(proxy.scoped_api_keys),
+            "governance_limits_configured": len(proxy.governance_limits),
             "admin_enabled": proxy.mode != "PROD",
         },
         "providers": {
@@ -230,6 +231,7 @@ def _build_config_summary(proxy: object) -> dict[str, dict[str, object]]:
             "observability_sinks": list(proxy.observability_sinks),
             "runtime_store_backend": proxy.runtime_store_backend,
             "runtime_store_namespace": proxy.runtime_store_namespace,
+            "governance_enabled": bool(proxy.governance_limits),
         },
         "features": {
             "pass_model": proxy.pass_model,
@@ -366,6 +368,7 @@ def _collect_state_status(request: Request) -> dict[str, dict[str, bool | int | 
             "responses": len(stores.responses),
             "usage_by_api_key": len(stores.usage_by_api_key),
             "usage_by_provider": len(stores.usage_by_provider),
+            "governance_counters": len(stores.governance_counters),
             "recent_requests": len(
                 get_recent_request_feed_from_state(request.app.state)
             ),
@@ -417,6 +420,8 @@ def _runtime_summary(request: Request) -> dict[str, object]:
         "telemetry_enabled": proxy.enable_telemetry,
         "observability_sinks": list(proxy.observability_sinks),
         "metrics_enabled": metrics_enabled,
+        "governance_limits_configured": len(proxy.governance_limits),
+        "governance_enabled": bool(proxy.governance_limits),
         "pass_model": proxy.pass_model,
         "pass_token": proxy.pass_token,
         "enable_reasoning": proxy.enable_reasoning,
@@ -463,6 +468,7 @@ async def get_admin_config(request: Request):
         "max_audio_image_total_size_bytes": proxy.max_audio_image_total_size_bytes,
         "enable_api_key_auth": proxy.enable_api_key_auth,
         "scoped_api_keys_configured": len(proxy.scoped_api_keys),
+        "governance_limits_configured": len(proxy.governance_limits),
         "pass_model": proxy.pass_model,
         "pass_token": proxy.pass_token,
         "enable_reasoning": proxy.enable_reasoning,
@@ -514,6 +520,10 @@ async def get_admin_capabilities(request: Request):
             "runtime_store_backend": config.proxy_settings.runtime_store_backend,
             "telemetry_enabled": config.proxy_settings.enable_telemetry,
             "observability_sinks": list(config.proxy_settings.observability_sinks),
+            "governance_enabled": bool(config.proxy_settings.governance_limits),
+            "governance_limits_configured": len(
+                config.proxy_settings.governance_limits
+            ),
         },
         "matrix": capability_matrix,
         "providers": {

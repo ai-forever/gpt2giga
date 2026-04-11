@@ -6,6 +6,7 @@ from starlette.responses import RedirectResponse
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
 from gpt2giga.api.dependencies.auth import build_api_key_verifier
+from gpt2giga.api.dependencies.governance import build_governance_verifier
 from gpt2giga.api.gemini.request import GeminiAPIError
 from gpt2giga.api.gemini.response import gemini_error_response
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
@@ -126,8 +127,16 @@ def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -
                 gemini_style=mount.auth_policy == "gemini",
                 allow_scoped_keys=True,
             )
+            governance_dependency = build_governance_verifier(
+                provider_name=descriptor.name,
+                gemini_style=mount.auth_policy == "gemini",
+            )
+            provider_dependencies = []
+            if auth_required:
+                provider_dependencies.append(Depends(auth_dependency))
+            provider_dependencies.append(Depends(governance_dependency))
             include_kwargs = {
-                "dependencies": [Depends(auth_dependency)] if auth_required else [],
+                "dependencies": provider_dependencies,
             }
             if mount.prefix:
                 include_kwargs["prefix"] = mount.prefix

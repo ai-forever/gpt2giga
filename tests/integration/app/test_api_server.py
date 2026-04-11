@@ -287,6 +287,48 @@ def test_scoped_api_key_cannot_access_admin_routes(monkeypatch):
     assert response.json()["detail"] == "Scoped API key is not allowed for this route"
 
 
+def test_governance_limit_blocks_second_scoped_openai_request(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+    monkeypatch.setattr("gpt2giga.app.governance.time", lambda: 1_800_000_000)
+
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            mode="DEV",
+            enable_api_key_auth=True,
+            api_key="global-secret",
+            scoped_api_keys=[
+                {
+                    "name": "sdk-openai",
+                    "key": "scoped-secret",
+                    "providers": ["openai"],
+                    "endpoints": ["models"],
+                }
+            ],
+            governance_limits=[
+                {
+                    "name": "sdk-openai-models",
+                    "scope": "api_key",
+                    "providers": ["openai"],
+                    "endpoints": ["models"],
+                    "window_seconds": 60,
+                    "max_requests": 1,
+                }
+            ],
+        )
+    )
+    with TestClient(create_app(config=cfg)) as client:
+        first = client.get(
+            "/v1/models", headers={"Authorization": "Bearer scoped-secret"}
+        )
+        second = client.get(
+            "/v1/models", headers={"Authorization": "Bearer scoped-secret"}
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["Retry-After"] == "60"
+
+
 def test_openai_provider_group_mounts_litellm_routes(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 

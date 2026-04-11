@@ -375,6 +375,7 @@ gpt2giga \
 - `GPT2GIGA_ENABLE_API_KEY_AUTH="False"` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
 - `GPT2GIGA_API_KEY=""` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
 - `GPT2GIGA_SCOPED_API_KEYS='[{"name":"sdk-openai","key":"secret","providers":["openai"],"endpoints":["chat/completions"],"models":["GigaChat-2-Max"]}]'` — опциональные scoped API keys в JSON-массиве. Global `GPT2GIGA_API_KEY` остаётся full-access, а scoped keys можно ограничить по `provider`, `endpoint` и `model`.
+- `GPT2GIGA_GOVERNANCE_LIMITS='[{"name":"openai-burst","scope":"api_key","providers":["openai"],"endpoints":["chat/completions"],"window_seconds":60,"max_requests":30},{"name":"openai-quota","scope":"provider","providers":["openai"],"models":["GigaChat-2-Max"],"window_seconds":3600,"max_total_tokens":200000}]'` — опциональные fixed-window governance rules для rate limiting и token quotas по `api_key` или `provider`, с optional filters по `provider`, `endpoint` и `model`.
 - `GPT2GIGA_ENABLED_PROVIDERS="openai,anthropic,gemini"` — список внешних provider-ов, которые нужно смонтировать при старте. Поддерживаются `openai`, `anthropic`, `gemini`, а также специальное значение `all`. LiteLLM-compatible `/model/info` включается вместе с `openai`.
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend path для chat-like flows: `v1` или `v2`.
 - `GPT2GIGA_RUNTIME_STORE_BACKEND="memory"` — runtime backend для stateful metadata stores и recent audit feeds. Built-in варианты: `memory`, `sqlite`.
@@ -412,6 +413,7 @@ gpt2giga \
 - `GPT2GIGA_GIGACHAT_API_MODE` — какой backend path использовать для chat-like flows: `v1` или `v2`.
 - `GPT2GIGA_RUNTIME_STORE_BACKEND` — где хранить runtime metadata и recent audit feeds: `memory` или `sqlite`.
 - `GPT2GIGA_ENABLE_TELEMETRY` — включать ли telemetry sinks поверх request audit feed.
+- `GPT2GIGA_GOVERNANCE_LIMITS` — fixed-window правила для request limits и token quotas.
 
 Примеры:
 
@@ -444,6 +446,11 @@ GPT2GIGA_RUNTIME_STORE_NAMESPACE=dev-local
 # Оставить только admin recent feeds, без telemetry sink layer
 GPT2GIGA_ENABLE_TELEMETRY=false
 GPT2GIGA_OBSERVABILITY_SINKS=prometheus
+```
+
+```dotenv
+# Ограничить burst по scoped API key и общий token quota по provider
+GPT2GIGA_GOVERNANCE_LIMITS=[{"name":"openai-burst","scope":"api_key","providers":["openai"],"endpoints":["chat/completions"],"window_seconds":60,"max_requests":30},{"name":"openai-quota","scope":"provider","providers":["openai"],"models":["GigaChat-2-Max"],"window_seconds":3600,"max_total_tokens":200000}]
 ```
 
 Для Docker/Compose сценариев эти настройки также читаются из `.env`, который подключается в `deploy/compose/*.yaml`.
@@ -502,6 +509,7 @@ GPT2GIGA_HTTPS_CERT_FILE="Path to cert.pem"
 GPT2GIGA_ENABLE_API_KEY_AUTH=True
 GPT2GIGA_API_KEY=123
 # GPT2GIGA_SCOPED_API_KEYS=[{"name":"sdk-openai","key":"scoped-123","providers":["openai"],"endpoints":["chat/completions"]}]
+# GPT2GIGA_GOVERNANCE_LIMITS=[{"name":"sdk-openai-burst","scope":"api_key","providers":["openai"],"endpoints":["chat/completions"],"window_seconds":60,"max_requests":30}]
 ```
 
 После этого сервис будет требовать API-ключ на пользовательских эндпоинтах. Поддерживаются разные варианты передачи ключа:
@@ -509,6 +517,7 @@ GPT2GIGA_API_KEY=123
 - `x-api-key` и `Authorization: Bearer ...` для OpenAI- и Anthropic-совместимых клиентов;
 - `x-goog-api-key` и query-параметр `key` для Gemini Developer API-совместимых клиентов.
 - global `GPT2GIGA_API_KEY` сохраняет полный доступ, а scoped keys работают только на provider-роутах и могут быть ограничены по `provider`, `endpoint` и `model`.
+- governance rules из `GPT2GIGA_GOVERNANCE_LIMITS` возвращают `429`, когда превышен fixed-window лимит по `request_count` или `total_tokens`.
 
 Авторизация по query-параметру:
 ```bash
@@ -571,6 +580,8 @@ response = client.models.generate_content(
 - `GET /admin/api/routes` - список смонтированных HTTP route
 - `GET /admin/api/capabilities` - активные provider/capability группы
 - `GET /admin/api/metrics` - Prometheus exposition через admin surface
+- `GET /admin/api/usage/keys` - агрегированный usage по API key
+- `GET /admin/api/usage/providers` - агрегированный usage по external provider
 - `GET /admin/api/logs?lines=250` - последние N строк логов
 - `GET /admin/api/logs/stream` - SSE-стрим логов
 

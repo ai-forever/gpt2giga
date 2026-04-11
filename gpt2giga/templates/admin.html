@@ -770,6 +770,8 @@
         enabled_providers: summary.providers.enabled_providers.join(", ") || "none",
         telemetry_enabled: String(summary.providers.telemetry_enabled),
         observability_sinks: summary.providers.observability_sinks.join(", ") || "none",
+        governance_enabled: String(summary.providers.governance_enabled),
+        governance_limits: summary.network.governance_limits_configured,
         request_limit_bytes: summary.limits.max_request_body_bytes,
         media_limit_bytes: summary.limits.max_audio_image_total_size_bytes,
         recent_request_buffer: summary.limits.recent_requests_max_items,

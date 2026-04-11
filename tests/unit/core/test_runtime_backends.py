@@ -78,6 +78,7 @@ def test_ensure_runtime_dependencies_configures_memory_backend_resources():
     assert state.stores.responses == {}
     assert state.stores.usage_by_api_key == {}
     assert state.stores.usage_by_provider == {}
+    assert state.stores.governance_counters == {}
     assert len(state.stores.recent_requests) == 0
     assert len(state.stores.recent_errors) == 0
 
@@ -109,6 +110,7 @@ def test_runtime_store_backend_can_be_registered_and_selected():
         "responses",
         "usage_by_api_key",
         "usage_by_provider",
+        "governance_counters",
     ]
     assert stores.backend.feed_names == [
         ("recent_requests", 7),
@@ -134,6 +136,12 @@ def test_sqlite_runtime_backend_persists_mappings_and_feeds(tmp_path):
         "name": "global",
         "request_count": 2,
         "total_tokens": 15,
+    }
+    first_stores.governance_counters["governance:0:openai:1712810400"] = {
+        "request_count": 1,
+        "total_tokens": 15,
+        "window_started_at": 1712810400,
+        "window_ends_at": 1712810460,
     }
     first_stores.recent_requests.append(
         {
@@ -168,6 +176,12 @@ def test_sqlite_runtime_backend_persists_mappings_and_feeds(tmp_path):
         "name": "global",
         "request_count": 2,
         "total_tokens": 15,
+    }
+    assert second_stores.governance_counters["governance:0:openai:1712810400"] == {
+        "request_count": 1,
+        "total_tokens": 15,
+        "window_started_at": 1712810400,
+        "window_ends_at": 1712810460,
     }
     assert second_stores.recent_requests.recent() == [
         {

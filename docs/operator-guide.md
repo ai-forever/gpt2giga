@@ -11,6 +11,7 @@
 - `GPT2GIGA_MODE`
 - `GPT2GIGA_ENABLE_API_KEY_AUTH`
 - `GPT2GIGA_OBSERVABILITY_SINKS`
+- `GPT2GIGA_GOVERNANCE_LIMITS`
 
 ### `GPT2GIGA_ENABLED_PROVIDERS`
 
@@ -94,6 +95,36 @@ GPT2GIGA_OBSERVABILITY_SINKS=prometheus,otlp
 ```
 
 `prometheus` включает `/metrics` и `/admin/api/metrics`.
+
+### `GPT2GIGA_GOVERNANCE_LIMITS`
+
+Управляет fixed-window governance rules для:
+
+- request rate limiting по `max_requests`;
+- token quota по `max_total_tokens`.
+
+Rule может быть scoped по:
+
+- `api_key`
+- `provider`
+
+И дополнительно фильтроваться по:
+
+- `providers`
+- `endpoints`
+- `models`
+
+Пример:
+
+```dotenv
+GPT2GIGA_GOVERNANCE_LIMITS=[{"name":"openai-burst","scope":"api_key","providers":["openai"],"endpoints":["chat/completions"],"window_seconds":60,"max_requests":30},{"name":"openai-provider-quota","scope":"provider","providers":["openai"],"models":["GigaChat-2-Max"],"window_seconds":3600,"max_total_tokens":200000}]
+```
+
+Поведение:
+
+- request-based rule резервирует слот на входе в handler и возвращает `429`, если окно уже заполнено;
+- token-based quota обновляется после завершения запроса из normalized audit event;
+- scoped `api_key` rules работают только когда request уже аутентифицирован и `request.state.api_key_context` известен.
 
 ## Типовые сценарии
 

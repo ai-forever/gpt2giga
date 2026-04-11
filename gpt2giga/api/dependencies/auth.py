@@ -87,7 +87,7 @@ def _set_request_api_key_context(request: Request, context: APIKeyContext) -> No
     setattr(state, "api_key_context", context)
 
 
-def _normalize_endpoint_id(path: str | None) -> str | None:
+def normalize_endpoint_id(path: str | None) -> str | None:
     """Normalize a route path into a stable endpoint identifier."""
     if not path:
         return None
@@ -99,21 +99,21 @@ def _normalize_endpoint_id(path: str | None) -> str | None:
     return normalized or None
 
 
-def _resolve_endpoint_id(request: Request) -> str | None:
+def resolve_endpoint_id(request: Request) -> str | None:
     """Resolve the normalized endpoint identifier for the matched route."""
     scope = getattr(request, "scope", {})
     route = scope.get("route") if isinstance(scope, dict) else None
     route_path = getattr(route, "path_format", None) or getattr(route, "path", None)
     if isinstance(route_path, str):
-        return _normalize_endpoint_id(route_path)
+        return normalize_endpoint_id(route_path)
     url = getattr(request, "url", None)
     raw_path = getattr(url, "path", None)
     if isinstance(raw_path, str):
-        return _normalize_endpoint_id(raw_path)
+        return normalize_endpoint_id(raw_path)
     return None
 
 
-async def _resolve_requested_model(
+async def resolve_requested_model(
     request: Request,
     *,
     provider_name: str | None,
@@ -172,7 +172,7 @@ async def _authorize_scoped_key(
     if not allow_scoped_keys:
         _raise_scope_denied("Scoped API key is not allowed for this route")
 
-    endpoint_id = _resolve_endpoint_id(request)
+    endpoint_id = resolve_endpoint_id(request)
     model = None
 
     if scoped_key.providers is not None:
@@ -184,7 +184,7 @@ async def _authorize_scoped_key(
             _raise_scope_denied("API key is not allowed for this endpoint")
 
     if scoped_key.models is not None:
-        model = await _resolve_requested_model(request, provider_name=provider_name)
+        model = await resolve_requested_model(request, provider_name=provider_name)
         if model is None or model not in scoped_key.models:
             _raise_scope_denied("API key is not allowed for this model")
 
@@ -223,7 +223,7 @@ async def _verify_provided_key(
                 name="global",
                 source="global",
                 provider=provider_name,
-                endpoint=_resolve_endpoint_id(request),
+                endpoint=resolve_endpoint_id(request),
                 model=None,
             ),
         )
