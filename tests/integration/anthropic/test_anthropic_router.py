@@ -189,6 +189,34 @@ class FakeGigachatReasoning:
             }
         )
 
+    async def achat_v2(self, chat):
+        usage = {
+            "input_tokens": 20,
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens": 30,
+            "total_tokens": 50,
+        }
+        return MockResponse(
+            {
+                "model": "anthropic-test",
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "text": "Ответ: 1021 коробка.",
+                                "reasoning": "847 + 3*156 = 847 + 468 = 1315. 1315 - 294 = 1021.",
+                            }
+                        ],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": usage,
+            }
+        )
+
     def astream(self, chat):
         async def gen():
             yield MockResponse(
@@ -210,6 +238,49 @@ class FakeGigachatReasoning:
                     "usage": {
                         "prompt_tokens": 20,
                         "completion_tokens": 10,
+                        "total_tokens": 30,
+                    },
+                }
+            )
+
+        return gen()
+
+    def astream_v2(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "model": "anthropic-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "text": "",
+                                    "reasoning": "847 + 468 = 1315. 1315 - 294 = 1021.",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+            yield MockResponse(
+                {
+                    "model": "anthropic-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "Ответ: 1021."}],
+                        }
+                    ],
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 20,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 10,
                         "total_tokens": 30,
                     },
                 }
@@ -245,6 +316,35 @@ class FakeGigachatFunctionCall:
             }
         )
 
+    async def achat_v2(self, chat):
+        return MockResponse(
+            {
+                "model": "anthropic-test",
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "function_call": {
+                                    "name": "get_weather",
+                                    "arguments": {"location": "San Francisco"},
+                                }
+                            }
+                        ],
+                    }
+                ],
+                "finish_reason": "function_call",
+                "usage": {
+                    "input_tokens": 15,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 8,
+                    "total_tokens": 23,
+                },
+            }
+        )
+
     def astream(self, chat):
         async def gen():
             yield MockResponse(
@@ -260,6 +360,31 @@ class FakeGigachatFunctionCall:
                         }
                     ],
                     "usage": None,
+                }
+            )
+
+        return gen()
+
+    def astream_v2(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "model": "anthropic-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "function_call": {
+                                        "name": "get_weather",
+                                        "arguments": {"location": "SF"},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
                 }
             )
 
@@ -293,6 +418,35 @@ class FakeGigachatFunctionCallReservedWebSearch:
             }
         )
 
+    async def achat_v2(self, chat):
+        return MockResponse(
+            {
+                "model": "anthropic-test",
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "function_call": {
+                                    "name": "__gpt2giga_user_search_web",
+                                    "arguments": {"query": "SF"},
+                                }
+                            }
+                        ],
+                    }
+                ],
+                "finish_reason": "function_call",
+                "usage": {
+                    "input_tokens": 15,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 8,
+                    "total_tokens": 23,
+                },
+            }
+        )
+
     def astream(self, chat):
         async def gen():
             yield MockResponse(
@@ -308,6 +462,31 @@ class FakeGigachatFunctionCallReservedWebSearch:
                         }
                     ],
                     "usage": None,
+                }
+            )
+
+        return gen()
+
+    def astream_v2(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "model": "anthropic-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "function_call": {
+                                        "name": "__gpt2giga_user_search_web",
+                                        "arguments": {"query": "SF"},
+                                    }
+                                }
+                            ],
+                        }
+                    ],
                 }
             )
 
@@ -452,7 +631,9 @@ def make_app(gigachat=None, *, config=None):
     app.state.gigachat_client = gigachat or FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = config or ProxyConfig()
+    app.state.config = config or ProxyConfig.model_validate(
+        {"proxy": {"gigachat_api_mode": "v1"}}
+    )
     app.state.logger = logger
     return app
 
@@ -500,6 +681,58 @@ class TestConvertAnthropicToolsToOpenai:
         assert len(result) == 2
         assert result[0]["function"]["name"] == "a"
         assert result[1]["function"]["name"] == "b"
+
+
+def test_messages_v2_mode_preserves_tool_use_blocks():
+    app = make_app(
+        gigachat=FakeGigachat(
+            response_data={
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "function_call": {
+                                "name": "get_weather",
+                                "arguments": {"city": "Moscow"},
+                            },
+                        },
+                        "finish_reason": "function_call",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+            }
+        ),
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}}),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/messages",
+        json={
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}],
+            "tools": [
+                {
+                    "name": "get_weather",
+                    "description": "Get weather.",
+                    "input_schema": {"type": "object", "properties": {}},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["stop_reason"] == "tool_use"
+    assert body["content"][0]["type"] == "tool_use"
+    assert body["content"][0]["name"] == "get_weather"
+    assert app.state.gigachat_client.last_method == "v2"
+    assert app.state.request_transformer.last_mode == "v2"
 
 
 class TestConvertAnthropicMessagesToOpenai:
@@ -1630,8 +1863,11 @@ class TestMessageBatchesEndpoint:
             json.loads(line)
             for line in giga_client.last_batch_content.decode("utf-8").splitlines()
         ]
+        first_content = translated_lines[0]["request"]["messages"][0]["content"]
+        if isinstance(first_content, list):
+            first_content = first_content[0]["text"]
         assert translated_lines[0]["id"] == "req-1"
-        assert translated_lines[0]["request"]["messages"][0]["content"] == "Hello batch"
+        assert first_content == "Hello batch"
         assert "custom_id" not in translated_lines[0]
         assert "body" not in translated_lines[0]
 

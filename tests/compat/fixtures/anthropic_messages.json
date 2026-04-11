@@ -1,0 +1,196 @@
+{
+  "incoming_request": {
+    "model": "claude-test",
+    "system": "Be brief",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "Weather in Moscow?"
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "name": "get_weather",
+        "description": "Get weather.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    ],
+    "tool_choice": {
+      "type": "tool",
+      "name": "get_weather"
+    },
+    "temperature": 0.2
+  },
+  "normalized_request": {
+    "model": "claude-test",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Be brief"
+      },
+      {
+        "role": "user",
+        "content": "Weather in Moscow?"
+      }
+    ],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "function_call": {
+        "name": "get_weather"
+      },
+      "functions": [
+        {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": ""
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      ],
+      "temperature": 0.2
+    }
+  },
+  "backend_payload": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "Be brief"
+      },
+      {
+        "role": "user",
+        "content": "Weather in Moscow?"
+      }
+    ],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "get_weather",
+        "description": "Get weather.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string",
+              "description": ""
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    ],
+    "function_call": {
+      "name": "get_weather"
+    },
+    "temperature": 0.2
+  },
+  "backend_response": {
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "function_call": {
+            "name": "get_weather",
+            "arguments": {
+              "city": "Moscow"
+            }
+          }
+        },
+        "finish_reason": "function_call"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 5,
+      "completion_tokens": 3,
+      "total_tokens": 8
+    }
+  },
+  "external_response": {
+    "id": "msg_resp-anthropic",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "tool_use",
+        "id": "toolu_1234567890abcdef12345678",
+        "name": "get_weather",
+        "input": {
+          "city": "Moscow"
+        }
+      }
+    ],
+    "model": "claude-test",
+    "stop_reason": "tool_use",
+    "stop_sequence": null,
+    "usage": {
+      "input_tokens": 5,
+      "output_tokens": 3
+    }
+  }
+}

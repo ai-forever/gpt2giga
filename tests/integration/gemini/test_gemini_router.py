@@ -32,6 +32,7 @@ class FakeGigaChat:
         self.last_embedding_texts = None
         self.last_embedding_model = None
         self.last_token_texts = None
+        self._response_v2 = None
         self._response = {
             "choices": [
                 {
@@ -52,6 +53,40 @@ class FakeGigaChat:
 
     async def achat_v2(self, chat):
         self.last_method = "v2"
+        response = self._response_v2
+        if response is None:
+            return MockResponse(
+                {
+                    "model": "gemini-test",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "Hello from v2!"}],
+                        }
+                    ],
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                }
+            )
+        if "messages" in response:
+            return MockResponse(response)
+
+        choice = response["choices"][0]
+        message = choice.get("message", {})
+        content = []
+        if message.get("content"):
+            content.append({"text": message["content"]})
+        if isinstance(message.get("function_call"), dict):
+            content.append({"function_call": message["function_call"]})
+
+        usage = response.get("usage") or {}
         return MockResponse(
             {
                 "model": "gemini-test",
@@ -60,15 +95,15 @@ class FakeGigaChat:
                     {
                         "message_id": "msg-1",
                         "role": "assistant",
-                        "content": [{"text": "Hello from v2!"}],
+                        "content": content or [{"text": "Hello from v2!"}],
                     }
                 ],
-                "finish_reason": "stop",
+                "finish_reason": choice.get("finish_reason", "stop"),
                 "usage": {
-                    "input_tokens": 10,
+                    "input_tokens": usage.get("prompt_tokens", 10),
                     "input_tokens_details": {"cached_tokens": 0},
-                    "output_tokens": 5,
-                    "total_tokens": 15,
+                    "output_tokens": usage.get("completion_tokens", 5),
+                    "total_tokens": usage.get("total_tokens", 15),
                 },
             }
         )
@@ -203,7 +238,9 @@ def make_app():
     app.state.gigachat_client = FakeGigaChat()
     app.state.request_transformer = FakeRequestTransformer()
     app.state.response_processor = ResponseProcessor()
-    app.state.config = ProxyConfig()
+    app.state.config = ProxyConfig.model_validate(
+        {"proxy": {"gigachat_api_mode": "v1"}}
+    )
     app.state.logger = SimpleNamespace(
         debug=lambda *args, **kwargs: None,
         info=lambda *args, **kwargs: None,
@@ -245,6 +282,69 @@ def test_generate_content_v2_mode_uses_chat_v2_backend():
     assert response.status_code == 200
     body = response.json()
     assert body["candidates"][0]["content"]["parts"][0]["text"] == "Hello from v2!"
+    assert app.state.gigachat_client.last_method == "v2"
+    assert app.state.request_transformer.last_mode == "v2"
+
+
+def test_generate_content_v2_mode_preserves_function_calls():
+    app = make_app()
+    app.state.config = ProxyConfig.model_validate(
+        {"proxy": {"gigachat_api_mode": "v2"}}
+    )
+    app.state.gigachat_client._response_v2 = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Moscow"},
+                    },
+                },
+                "finish_reason": "function_call",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        },
+    }
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-test:generateContent",
+        json={
+            "contents": [{"role": "user", "parts": [{"text": "Weather?"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "get_weather",
+                            "description": "Get weather by city.",
+                            "parameters": {
+                                "type": "OBJECT",
+                                "properties": {"city": {"type": "STRING"}},
+                            },
+                        }
+                    ]
+                }
+            ],
+            "toolConfig": {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["get_weather"],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidates"][0]["content"]["parts"][0]["functionCall"]["name"] == (
+        "get_weather"
+    )
     assert app.state.gigachat_client.last_method == "v2"
     assert app.state.request_transformer.last_mode == "v2"
 

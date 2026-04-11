@@ -1,0 +1,206 @@
+{
+  "incoming_request": {
+    "model": "gpt-x",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Be brief"
+      },
+      {
+        "role": "user",
+        "content": "Weather in Moscow?"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "temperature": 0.2
+  },
+  "normalized_request": {
+    "model": "gpt-x",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Be brief"
+      },
+      {
+        "role": "user",
+        "content": "Weather in Moscow?"
+      }
+    ],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "functions": [
+        {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": ""
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      ],
+      "temperature": 0.2
+    }
+  },
+  "backend_payload": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "Be brief"
+      },
+      {
+        "role": "user",
+        "content": "Weather in Moscow?"
+      }
+    ],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "get_weather",
+        "description": "Get weather.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string",
+              "description": ""
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    ],
+    "temperature": 0.2
+  },
+  "backend_response": {
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": "Cold",
+          "function_call": {
+            "name": "get_weather",
+            "arguments": {
+              "city": "Moscow"
+            }
+          }
+        },
+        "finish_reason": "function_call"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 5,
+      "completion_tokens": 3,
+      "total_tokens": 8
+    }
+  },
+  "external_response": {
+    "id": "chatcmpl-resp-openai",
+    "object": "chat.completion",
+    "created": 1700000000,
+    "model": "gpt-x",
+    "choices": [
+      {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "Cold",
+          "refusal": null,
+          "tool_calls": [
+            {
+              "id": "call_12345678-90ab-cdef-1234-567890abcdef",
+              "type": "function",
+              "index": 0,
+              "function": {
+                "name": "get_weather",
+                "arguments": "{\"city\": \"Moscow\"}"
+              }
+            }
+          ]
+        },
+        "logprobs": null,
+        "finish_reason": "tool_calls"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 5,
+      "completion_tokens": 3,
+      "total_tokens": 8,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 0
+      }
+    },
+    "system_fingerprint": "fp_resp-openai"
+  }
+}

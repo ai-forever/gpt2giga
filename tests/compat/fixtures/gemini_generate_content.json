@@ -1,0 +1,217 @@
+{
+  "incoming_request": {
+    "model": "models/gemini-2.5-pro",
+    "systemInstruction": {
+      "parts": [
+        {
+          "text": "Be brief"
+        }
+      ]
+    },
+    "contents": [
+      {
+        "role": "user",
+        "parts": [
+          {
+            "text": "Weather in Moscow?"
+          }
+        ]
+      }
+    ],
+    "tools": [
+      {
+        "functionDeclarations": [
+          {
+            "name": "get_weather",
+            "description": "Get weather.",
+            "parameters": {
+              "type": "OBJECT",
+              "properties": {
+                "city": {
+                  "type": "STRING"
+                }
+              },
+              "required": [
+                "city"
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "toolConfig": {
+      "functionCallingConfig": {
+        "mode": "ANY",
+        "allowedFunctionNames": [
+          "get_weather"
+        ]
+      }
+    },
+    "generationConfig": {
+      "temperature": 0.2
+    }
+  },
+  "normalized_request": {
+    "model": "gemini-2.5-pro",
+    "messages": [
+      {
+        "role": "system",
+        "content": "Be brief"
+      },
+      {
+        "role": "user",
+        "content": "Weather in Moscow?"
+      }
+    ],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "options": {
+      "function_call": {
+        "name": "get_weather"
+      },
+      "functions": [
+        {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string",
+                "description": ""
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      ],
+      "temperature": 0.2
+    }
+  },
+  "backend_payload": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "Be brief"
+      },
+      {
+        "role": "user",
+        "content": "Weather in Moscow?"
+      }
+    ],
+    "stream": false,
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "get_weather",
+        "description": "Get weather.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string",
+              "description": ""
+            }
+          },
+          "required": [
+            "city"
+          ]
+        }
+      }
+    ],
+    "function_call": {
+      "name": "get_weather"
+    },
+    "temperature": 0.2
+  },
+  "backend_response": {
+    "choices": [
+      {
+        "message": {
+          "role": "assistant",
+          "content": "",
+          "function_call": {
+            "name": "get_weather",
+            "arguments": {
+              "city": "Moscow"
+            }
+          }
+        },
+        "finish_reason": "function_call"
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 5,
+      "completion_tokens": 3,
+      "total_tokens": 8
+    }
+  },
+  "external_response": {
+    "candidates": [
+      {
+        "content": {
+          "role": "model",
+          "parts": [
+            {
+              "functionCall": {
+                "name": "get_weather",
+                "args": {
+                  "city": "Moscow"
+                }
+              }
+            }
+          ]
+        },
+        "finishReason": "STOP",
+        "index": 0
+      }
+    ],
+    "usageMetadata": {
+      "promptTokenCount": 5,
+      "candidatesTokenCount": 3,
+      "totalTokenCount": 8
+    },
+    "modelVersion": "gemini-2.5-pro",
+    "responseId": "resp-gemini"
+  }
+}

@@ -30,27 +30,61 @@ class MockResponse:
 class FakeGigachat:
     def __init__(self):
         self.last_method = None
+        self._response = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+        }
+        self._response_v2 = None
 
     async def achat(self, chat):
         self.last_method = "v1"
-        return MockResponse(
-            {
-                "choices": [
-                    {
-                        "message": {"role": "assistant", "content": "ok"},
-                        "finish_reason": "function_call",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 1,
-                    "completion_tokens": 1,
-                    "total_tokens": 2,
-                },
-            }
-        )
+        return MockResponse(self._response)
 
     async def achat_v2(self, chat):
         self.last_method = "v2"
+        response = self._response_v2
+        if response is None:
+            return MockResponse(
+                {
+                    "model": "gpt-x",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "content": [{"text": "ok-v2"}],
+                        }
+                    ],
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 1,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                }
+            )
+        if "messages" in response:
+            return MockResponse(response)
+
+        choice = response["choices"][0]
+        message = choice.get("message", {})
+        content = []
+        if message.get("content"):
+            content.append({"text": message["content"]})
+        if isinstance(message.get("function_call"), dict):
+            content.append({"function_call": message["function_call"]})
+
+        usage = response.get("usage") or {}
         return MockResponse(
             {
                 "model": "gpt-x",
@@ -59,15 +93,15 @@ class FakeGigachat:
                     {
                         "message_id": "msg-1",
                         "role": "assistant",
-                        "content": [{"text": "ok-v2"}],
+                        "content": content or [{"text": ""}],
                     }
                 ],
-                "finish_reason": "stop",
+                "finish_reason": choice.get("finish_reason", "stop"),
                 "usage": {
-                    "input_tokens": 1,
+                    "input_tokens": usage.get("prompt_tokens", 0),
                     "input_tokens_details": {"cached_tokens": 0},
-                    "output_tokens": 1,
-                    "total_tokens": 2,
+                    "output_tokens": usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
                 },
             }
         )
@@ -95,7 +129,9 @@ def make_app(*, config=None, observability: bool = False):
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = config or ProxyConfig()
+    app.state.config = config or ProxyConfig.model_validate(
+        {"proxy": {"gigachat_api_mode": "v1"}}
+    )
     if observability:
         ensure_runtime_dependencies(app.state, config=app.state.config)
         app.add_middleware(ObservabilityMiddleware)
@@ -142,6 +178,50 @@ def test_chat_completions_non_stream_v2_mode():
     body = resp.json()
     assert body["object"] == "chat.completion"
     assert body["choices"][0]["message"]["content"] == "ok-v2"
+    assert app.state.gigachat_client.last_method == "v2"
+    assert app.state.request_transformer.last_mode == "v2"
+
+
+def test_chat_completions_non_stream_v2_mode_preserves_tool_calls():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
+    app.state.gigachat_client._response_v2 = {
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Moscow"},
+                    },
+                },
+                "finish_reason": "function_call",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+        },
+    }
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["choices"][0]["finish_reason"] == "tool_calls"
+    assert body["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == (
+        "get_weather"
+    )
     assert app.state.gigachat_client.last_method == "v2"
     assert app.state.request_transformer.last_mode == "v2"
 

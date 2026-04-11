@@ -278,6 +278,20 @@ def test_gemini_provider_can_be_enabled_independently(monkeypatch):
         )
 
 
+def test_all_provider_groups_can_be_enabled_explicitly(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(proxy=ProxySettings(enabled_providers=["all"]))
+    with TestClient(create_app(config=cfg)) as client:
+        assert client.get("/v1/models").status_code != 404
+        assert client.get("/v1/model/info").status_code != 404
+        assert (
+            client.post("/messages", json={"model": "test", "messages": []}).status_code
+            != 404
+        )
+        assert client.get("/v1beta/models").status_code != 404
+
+
 def test_openapi_only_includes_enabled_providers(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 
