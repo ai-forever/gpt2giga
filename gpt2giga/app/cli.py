@@ -6,6 +6,7 @@ import os
 from dotenv import find_dotenv, load_dotenv
 
 from gpt2giga.core.app_meta import warn_sensitive_cli_args
+from gpt2giga.core.config.control_plane import apply_control_plane_overrides
 from gpt2giga.core.config.settings import ProxyConfig
 
 
@@ -21,4 +22,5 @@ def load_config() -> ProxyConfig:
     env_path = find_dotenv(requested_env)
     load_dotenv(env_path)
 
-    return ProxyConfig()
+    config = ProxyConfig()
+    return apply_control_plane_overrides(config)

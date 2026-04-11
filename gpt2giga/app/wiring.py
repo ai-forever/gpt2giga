@@ -3,6 +3,8 @@
 from fastapi import FastAPI
 
 from gpt2giga.app.dependencies import (
+    configure_runtime_observability,
+    configure_runtime_stores,
     ensure_runtime_dependencies,
     get_runtime_observability,
     get_runtime_providers,
@@ -105,3 +107,23 @@ async def close_runtime_services(app: FastAPI, *, logger) -> None:
     observability = get_runtime_observability(app.state)
     if observability.hub is not None:
         await observability.hub.close()
+
+
+async def reload_runtime_services(app: FastAPI, *, config, logger) -> None:
+    """Reload runtime services after a live-safe config update."""
+    await close_runtime_services(app, logger=logger)
+
+    ensure_runtime_dependencies(app.state, config=config, logger=logger)
+    stores = configure_runtime_stores(app.state, config=config, logger=logger)
+    if stores.backend is not None:
+        await stores.backend.open()
+
+    observability = configure_runtime_observability(
+        app.state,
+        config=config,
+        logger=logger,
+    )
+    if observability.hub is not None:
+        await observability.hub.open()
+
+    wire_runtime_services(app, config=config, logger=logger)

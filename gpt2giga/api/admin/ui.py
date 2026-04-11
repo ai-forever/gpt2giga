@@ -1,4 +1,4 @@
-"""Admin HTML UI endpoints."""
+"""Admin console HTML endpoints."""
 
 from __future__ import annotations
 
@@ -14,20 +14,42 @@ from gpt2giga.core.errors import exceptions_handler
 
 admin_router = APIRouter(include_in_schema=False)
 
-_ADMIN_HTML: str | None = None
+_CONSOLE_HTML: str | None = None
+_CONSOLE_PAGES = (
+    "/admin",
+    "/admin/overview",
+    "/admin/settings",
+    "/admin/keys",
+    "/admin/logs",
+    "/admin/playground",
+    "/admin/traffic",
+    "/admin/providers",
+    "/admin/system",
+)
 
 
-@admin_router.get("/admin", response_class=HTMLResponse)
-@exceptions_handler
-async def get_admin_ui(request: Request):
-    """Serve the admin UI shell."""
-    verify_logs_ip_allowlist(request)
-
-    global _ADMIN_HTML  # noqa: PLW0603
-    if _ADMIN_HTML is None:
-        html_path = Path(__file__).resolve().parents[2] / "templates" / "admin.html"
-        _ADMIN_HTML = await anyio.to_thread.run_sync(
+async def _get_console_html() -> str:
+    global _CONSOLE_HTML  # noqa: PLW0603
+    if _CONSOLE_HTML is None:
+        html_path = Path(__file__).resolve().parents[2] / "templates" / "console.html"
+        _CONSOLE_HTML = await anyio.to_thread.run_sync(
             lambda: html_path.read_text(encoding="utf-8"),
         )
+    return _CONSOLE_HTML
 
-    return HTMLResponse(_ADMIN_HTML)
+
+async def _serve_console(request: Request) -> HTMLResponse:
+    verify_logs_ip_allowlist(request)
+    return HTMLResponse(await _get_console_html())
+
+
+def _register_console_route(path: str) -> None:
+    @admin_router.get(path, response_class=HTMLResponse)
+    @exceptions_handler
+    async def _render_console(request: Request) -> HTMLResponse:
+        """Serve the multi-page operator console shell."""
+        return await _serve_console(request)
+
+
+for _route in _CONSOLE_PAGES:
+    _register_console_route(_route)

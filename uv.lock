@@ -933,6 +933,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "aioitertools" },
     { name = "anthropic" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "gigachat" },
     { name = "google-genai" },
@@ -958,7 +959,6 @@ dev = [
     { name = "ruff" },
 ]
 integrations = [
-    { name = "cryptography" },
     { name = "openai-agents" },
     { name = "pyjwt" },
 ]
@@ -968,6 +968,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.10.10,<4" },
     { name = "aioitertools", specifier = ">=0.13.0,<0.14" },
     { name = "anthropic", specifier = ">=0.79.0" },
+    { name = "cryptography", specifier = ">=46.0.5" },
     { name = "fastapi", specifier = ">=0.135.3,<1" },
     { name = "gigachat", path = "gigachat-0.2.2a1-py3-none-any.whl" },
     { name = "google-genai", specifier = ">=1.70.0" },
@@ -993,7 +994,6 @@ dev = [
     { name = "ruff", specifier = ">=0.15,<1" },
 ]
 integrations = [
-    { name = "cryptography", specifier = ">=46.0.5" },
     { name = "openai-agents", specifier = ">=0.12.0,<1" },
     { name = "pyjwt", specifier = ">=2.12.0" },
 ]

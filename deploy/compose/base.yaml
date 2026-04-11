@@ -8,8 +8,11 @@ x-gpt2giga-common: &gpt2giga-common
     args:
       PYTHON_VERSION: "3.13"
   container_name: gpt2giga
-  env_file:
-    - ../../.env
+  environment:
+    GPT2GIGA_HOST: "0.0.0.0"
+    GPT2GIGA_CONTROL_PLANE_DIR: "/var/lib/gpt2giga/control"
+  volumes:
+    - gpt2giga-data:/var/lib/gpt2giga
 
 services:
   gpt2giga-prod:
@@ -17,6 +20,8 @@ services:
     profiles: ["PROD"]
     environment:
       GPT2GIGA_MODE: "PROD"
+      GPT2GIGA_HOST: "0.0.0.0"
+      GPT2GIGA_CONTROL_PLANE_DIR: "/var/lib/gpt2giga/control"
     ports:
       - "127.0.0.1:${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
 
@@ -25,5 +30,10 @@ services:
     profiles: ["", "DEV"]
     environment:
       GPT2GIGA_MODE: "DEV"
+      GPT2GIGA_HOST: "0.0.0.0"
+      GPT2GIGA_CONTROL_PLANE_DIR: "/var/lib/gpt2giga/control"
     ports:
       - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
+
+volumes:
+  gpt2giga-data:

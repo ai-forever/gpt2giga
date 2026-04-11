@@ -52,9 +52,9 @@ def test_admin_ui_ok():
     resp = client.get("/admin")
     assert resp.status_code == 200
     assert "<html" in resp.text.lower()
-    assert "Admin Surface" in resp.text
-    assert "Capability Matrix" in resp.text
-    assert "Clear filters" in resp.text
+    assert "gpt2giga Console" in resp.text
+    assert "Gateway Console" in resp.text
+    assert "Playground" in resp.text
 
 
 def test_legacy_logs_html_redirects_to_admin():
@@ -180,8 +180,8 @@ def test_admin_ui_warning_banner():
     client = TestClient(app)
     resp = client.get("/admin")
     assert resp.status_code == 200
-    assert "Warning" in resp.text
-    assert "sensitive details" in resp.text
+    assert "Control-plane config is not persisted yet" in resp.text
+    assert "GigaChat credentials are not configured yet" in resp.text
 
 
 def test_admin_runtime_endpoint():
