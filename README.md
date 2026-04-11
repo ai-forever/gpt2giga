@@ -379,6 +379,7 @@ gpt2giga \
 - `GPT2GIGA_RUNTIME_STORE_BACKEND="memory"` — runtime backend для stateful metadata stores и recent audit feeds. Built-in варианты: `memory`, `sqlite`.
 - `GPT2GIGA_RUNTIME_STORE_DSN=""` — путь/DSN для runtime backend-а. Для `sqlite` поддерживаются обычный file path или `sqlite:///absolute/path.db`.
 - `GPT2GIGA_RUNTIME_STORE_NAMESPACE="gpt2giga"` — логический namespace внутри runtime backend-а.
+- `GPT2GIGA_ENABLE_TELEMETRY="True"` — включает telemetry sink layer для normalized request events. При `False` recent feeds для `/admin` остаются, но fan-out в Prometheus/OTLP/Langfuse отключается.
 - `GPT2GIGA_OBSERVABILITY_SINKS="prometheus"` — список telemetry sink-ов для normalized request events. Значение `none` отключает встроенный metrics exporter.
 - `GPT2GIGA_CORS_ALLOW_ORIGINS='["*"]'` — список разрешенных Origin (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
@@ -409,6 +410,7 @@ gpt2giga \
 - `GPT2GIGA_ENABLED_PROVIDERS` — какие внешние provider-роуты будут опубликованы;
 - `GPT2GIGA_GIGACHAT_API_MODE` — какой backend path использовать для chat-like flows: `v1` или `v2`.
 - `GPT2GIGA_RUNTIME_STORE_BACKEND` — где хранить runtime metadata и recent audit feeds: `memory` или `sqlite`.
+- `GPT2GIGA_ENABLE_TELEMETRY` — включать ли telemetry sinks поверх request audit feed.
 
 Примеры:
 
@@ -437,12 +439,19 @@ GPT2GIGA_RUNTIME_STORE_DSN=sqlite:///tmp/gpt2giga-runtime.db
 GPT2GIGA_RUNTIME_STORE_NAMESPACE=dev-local
 ```
 
+```dotenv
+# Оставить только admin recent feeds, без telemetry sink layer
+GPT2GIGA_ENABLE_TELEMETRY=false
+GPT2GIGA_OBSERVABILITY_SINKS=prometheus
+```
+
 Для Docker/Compose сценариев эти настройки также читаются из `.env`, который подключается в `deploy/compose/*.yaml`.
 
 Подробно:
 
 - архитектура и runtime model — [ARCHITECTURE_v2.md](./ARCHITECTURE_v2.md)
 - operator scenarios — [docs/operator-guide.md](./docs/operator-guide.md)
+- runtime backend extension examples — [deploy/compose/runtime-backends/README.md](./deploy/compose/runtime-backends/README.md)
 - how to add a provider — [docs/how-to-add-provider.md](./docs/how-to-add-provider.md)
 
 ## Авторизация с помощью заголовка

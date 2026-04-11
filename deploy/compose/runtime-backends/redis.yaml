@@ -1,0 +1,38 @@
+x-gpt2giga-runtime-common: &gpt2giga-runtime-common
+  image: ghcr.io/ai-forever/gpt2giga:latest
+  restart: unless-stopped
+  build:
+    context: ../../..
+    dockerfile: Dockerfile
+    args:
+      PYTHON_VERSION: "3.13"
+  env_file:
+    - ../../../.env
+
+services:
+  gpt2giga:
+    <<: *gpt2giga-runtime-common
+    container_name: gpt2giga-redis-runtime
+    environment:
+      GPT2GIGA_MODE: "DEV"
+      GPT2GIGA_RUNTIME_STORE_BACKEND: "redis"
+      GPT2GIGA_RUNTIME_STORE_DSN: "redis://redis:6379/0"
+      GPT2GIGA_RUNTIME_STORE_NAMESPACE: "redis-dev"
+      GPT2GIGA_ENABLE_TELEMETRY: "false"
+    depends_on:
+      - redis
+    ports:
+      - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
+
+  redis:
+    image: redis:7-alpine
+    container_name: gpt2giga-runtime-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-runtime-data:/data
+    ports:
+      - "6379:6379"
+
+volumes:
+  redis-runtime-data:

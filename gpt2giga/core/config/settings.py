@@ -90,6 +90,14 @@ class ProxySettings(BaseSettings):
             "Полезен для Redis/Postgres и кастомных backend-ов."
         ),
     )
+    enable_telemetry: bool = Field(
+        default=True,
+        description=(
+            "Включить telemetry sink layer поверх request audit events. "
+            "False отключает fan-out в Prometheus/OTLP/Langfuse и оставляет "
+            "только recent request/error feeds для admin."
+        ),
+    )
     observability_sinks: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["prometheus"],
         description=(
@@ -332,6 +340,11 @@ class ProxySettings(BaseSettings):
     def responses_backend_mode(self) -> Literal["v1", "v2"]:
         """Resolve the effective backend mode for the Responses capability."""
         return self.gigachat_api_mode
+
+    @property
+    def metrics_enabled(self) -> bool:
+        """Return whether Prometheus metrics are effectively enabled."""
+        return self.enable_telemetry and "prometheus" in set(self.observability_sinks)
 
     model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)
 

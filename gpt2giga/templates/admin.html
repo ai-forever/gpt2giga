@@ -686,6 +686,7 @@
         ["State", runtime.runtime_store_backend],
         ["Providers", runtime.enabled_providers.join(", ") || "none"],
         ["Auth", runtime.auth_required ? "required" : "disabled"],
+        ["Telemetry", runtime.telemetry_enabled ? "on" : "off"],
         ["Metrics", runtime.metrics_enabled ? "on" : "off"],
       ].forEach(([label, value]) => {
         const span = document.createElement("span");
@@ -700,6 +701,7 @@
       const items = [
         ["chat", capabilities.backend.chat_backend_mode],
         ["responses", capabilities.backend.responses_backend_mode],
+        ["telemetry", capabilities.backend.telemetry_enabled ? "on" : "off"],
         ["sinks", capabilities.backend.observability_sinks.join(", ") || "none"],
         ["features", [
           config.enable_reasoning ? "reasoning" : null,
@@ -766,6 +768,7 @@
         mode: summary.network.mode,
         backend_mode: summary.providers.gigachat_api_mode,
         enabled_providers: summary.providers.enabled_providers.join(", ") || "none",
+        telemetry_enabled: String(summary.providers.telemetry_enabled),
         observability_sinks: summary.providers.observability_sinks.join(", ") || "none",
         request_limit_bytes: summary.limits.max_request_body_bytes,
         media_limit_bytes: summary.limits.max_audio_image_total_size_bytes,

@@ -62,6 +62,74 @@ class RuntimeStateBackend:
         raise NotImplementedError
 
 
+class ConfigurableRuntimeStateBackend(RuntimeStateBackend):
+    """Base scaffold for custom runtime backends like Redis, Postgres, or S3.
+
+    Subclass this base when you want to plug in an external durable backend:
+
+    1. Implement ``mapping()`` and ``feed()``.
+    2. Optionally override ``open()`` and ``close()`` for client lifecycle.
+    3. Register the backend via ``register_runtime_backend(MyBackend.descriptor(...))``.
+
+    The shared proxy config is already normalized for you:
+
+    - ``runtime_store_dsn``: backend connection string or object location;
+    - ``runtime_store_namespace``: logical tenant/prefix for keys/tables/buckets.
+
+    Example backends usually map these settings like this:
+
+    - Redis: ``redis://redis:6379/0``
+    - Postgres: ``postgresql://user:pass@postgres:5432/gpt2giga``
+    - S3/MinIO: ``s3://access:secret@minio:9000/runtime-bucket?region=us-east-1``
+    """
+
+    name = "custom"
+
+    def __init__(
+        self,
+        *,
+        dsn: str | None = None,
+        namespace: str = "gpt2giga",
+        logger: Any | None = None,
+    ) -> None:
+        self.dsn = dsn
+        self.namespace = namespace or "gpt2giga"
+        self.logger = logger
+
+    @classmethod
+    def from_config(
+        cls,
+        *,
+        config: Any | None = None,
+        logger: Any | None = None,
+    ) -> ConfigurableRuntimeStateBackend:
+        """Build a backend instance from the shared proxy config."""
+        proxy_settings = getattr(config, "proxy_settings", None)
+        return cls(
+            dsn=getattr(proxy_settings, "runtime_store_dsn", None),
+            namespace=getattr(proxy_settings, "runtime_store_namespace", "gpt2giga"),
+            logger=logger,
+        )
+
+    @classmethod
+    def descriptor(
+        cls,
+        *,
+        name: str | None = None,
+        description: str,
+    ) -> RuntimeBackendDescriptor:
+        """Build a registry descriptor for a custom backend subclass."""
+        backend_name = name or cls.name
+        return RuntimeBackendDescriptor(
+            name=backend_name,
+            description=description,
+            factory=lambda **kwargs: cls.from_config(
+                config=kwargs.get("config"),
+                logger=kwargs.get("logger"),
+            ),
+        )
+
+
 class InMemoryEventFeed:
     """Store recent events in a bounded in-memory ring buffer."""
 

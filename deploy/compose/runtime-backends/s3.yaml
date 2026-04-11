@@ -1,0 +1,56 @@
+x-gpt2giga-runtime-common: &gpt2giga-runtime-common
+  image: ghcr.io/ai-forever/gpt2giga:latest
+  restart: unless-stopped
+  build:
+    context: ../../..
+    dockerfile: Dockerfile
+    args:
+      PYTHON_VERSION: "3.13"
+  env_file:
+    - ../../../.env
+
+services:
+  gpt2giga:
+    <<: *gpt2giga-runtime-common
+    container_name: gpt2giga-s3-runtime
+    environment:
+      GPT2GIGA_MODE: "DEV"
+      GPT2GIGA_RUNTIME_STORE_BACKEND: "s3"
+      GPT2GIGA_RUNTIME_STORE_DSN: "s3://gpt2giga:gpt2giga-secret@minio:9000/gpt2giga-runtime?region=us-east-1&secure=false"
+      GPT2GIGA_RUNTIME_STORE_NAMESPACE: "s3-dev"
+      GPT2GIGA_ENABLE_TELEMETRY: "false"
+    depends_on:
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
+
+  minio:
+    image: minio/minio:latest
+    container_name: gpt2giga-runtime-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: gpt2giga
+      MINIO_ROOT_PASSWORD: gpt2giga-secret
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-runtime-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: gpt2giga-runtime-minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 gpt2giga gpt2giga-secret; do sleep 1; done &&
+      mc mb --ignore-existing local/gpt2giga-runtime
+      "
+
+volumes:
+  minio-runtime-data:

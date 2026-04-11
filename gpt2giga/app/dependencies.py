@@ -59,6 +59,8 @@ class RuntimeObservability:
     """App-scoped observability hubs and exporters."""
 
     hub: ObservabilityHub | None = None
+    telemetry_enabled: bool = True
+    configured: bool = False
 
 
 _SERVICE_ALIASES = {
@@ -185,7 +187,7 @@ def get_runtime_observability(state: Any) -> RuntimeObservability:
     if not isinstance(observability, RuntimeObservability):
         observability = RuntimeObservability()
         state.observability = observability
-    if observability.hub is None:
+    if not observability.configured:
         configure_runtime_observability(
             state,
             config=getattr(state, "config", None),
@@ -207,9 +209,21 @@ def configure_runtime_observability(
         state.observability = observability
 
     proxy_settings = getattr(config, "proxy_settings", None)
+    telemetry_enabled = bool(getattr(proxy_settings, "enable_telemetry", True))
     sink_names = list(getattr(proxy_settings, "observability_sinks", ["prometheus"]))
     current_hub = observability.hub
-    if current_hub is not None and current_hub.enabled_sink_names == sink_names:
+    if not telemetry_enabled:
+        observability.hub = None
+        observability.telemetry_enabled = False
+        observability.configured = True
+        return observability
+
+    if (
+        current_hub is not None
+        and observability.telemetry_enabled
+        and current_hub.enabled_sink_names == sink_names
+    ):
+        observability.configured = True
         return observability
 
     observability.hub = create_observability_hub(
@@ -217,6 +231,8 @@ def configure_runtime_observability(
         config=config,
         logger=logger,
     )
+    observability.telemetry_enabled = True
+    observability.configured = True
     return observability
 
 

@@ -5,6 +5,7 @@ from gpt2giga.app.dependencies import (
     ensure_runtime_dependencies,
 )
 from gpt2giga.app.runtime_backends import (
+    ConfigurableRuntimeStateBackend,
     RuntimeBackendDescriptor,
     RuntimeStateBackend,
     register_runtime_backend,
@@ -52,6 +53,16 @@ class _CustomBackend(RuntimeStateBackend):
 
     def feed(self, name, *, max_items):
         self.feed_names.append((name, max_items))
+        return _FakeFeed()
+
+
+class _ScaffoldBackend(ConfigurableRuntimeStateBackend):
+    name = "scaffold-test"
+
+    def mapping(self, name):
+        return {}
+
+    def feed(self, name, *, max_items):
         return _FakeFeed()
 
 
@@ -200,3 +211,20 @@ def test_sqlite_runtime_backend_prunes_feed_capacity(tmp_path):
         {"request_id": "req-2", "status_code": 200},
         {"request_id": "req-3", "status_code": 200},
     ]
+
+
+def test_configurable_runtime_backend_descriptor_uses_shared_proxy_config():
+    config = ProxyConfig(
+        proxy=ProxySettings(
+            runtime_store_dsn="redis://redis:6379/0",
+            runtime_store_namespace="backend-tests",
+        )
+    )
+
+    descriptor = _ScaffoldBackend.descriptor(description="Scaffold backend")
+    backend = descriptor.factory(config=config, logger="logger")
+
+    assert isinstance(backend, _ScaffoldBackend)
+    assert backend.dsn == "redis://redis:6379/0"
+    assert backend.namespace == "backend-tests"
+    assert backend.logger == "logger"

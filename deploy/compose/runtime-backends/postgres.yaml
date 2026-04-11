@@ -1,0 +1,47 @@
+x-gpt2giga-runtime-common: &gpt2giga-runtime-common
+  image: ghcr.io/ai-forever/gpt2giga:latest
+  restart: unless-stopped
+  build:
+    context: ../../..
+    dockerfile: Dockerfile
+    args:
+      PYTHON_VERSION: "3.13"
+  env_file:
+    - ../../../.env
+
+services:
+  gpt2giga:
+    <<: *gpt2giga-runtime-common
+    container_name: gpt2giga-postgres-runtime
+    environment:
+      GPT2GIGA_MODE: "DEV"
+      GPT2GIGA_RUNTIME_STORE_BACKEND: "postgres"
+      GPT2GIGA_RUNTIME_STORE_DSN: "postgresql://gpt2giga:gpt2giga@postgres:5432/gpt2giga"
+      GPT2GIGA_RUNTIME_STORE_NAMESPACE: "postgres-dev"
+      GPT2GIGA_ENABLE_TELEMETRY: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${GPT2GIGA_PORT:-8090}:${GPT2GIGA_PORT:-8090}"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: gpt2giga-runtime-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gpt2giga
+      POSTGRES_USER: gpt2giga
+      POSTGRES_PASSWORD: gpt2giga
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gpt2giga -d gpt2giga"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres-runtime-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres-runtime-data:

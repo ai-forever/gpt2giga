@@ -61,6 +61,7 @@ def _build_config_summary(proxy: object) -> dict[str, dict[str, object]]:
         "providers": {
             "enabled_providers": list(proxy.enabled_providers),
             "gigachat_api_mode": proxy.gigachat_api_mode,
+            "telemetry_enabled": proxy.enable_telemetry,
             "observability_sinks": list(proxy.observability_sinks),
             "runtime_store_backend": proxy.runtime_store_backend,
             "runtime_store_namespace": proxy.runtime_store_namespace,
@@ -229,7 +230,7 @@ def _runtime_summary(request: Request) -> dict[str, object]:
     proxy = config.proxy_settings
     is_prod_mode = proxy.mode == "PROD"
     auth_required = proxy.enable_api_key_auth or is_prod_mode
-    metrics_enabled = "prometheus" in set(proxy.observability_sinks)
+    metrics_enabled = proxy.metrics_enabled
     return {
         "app_version": request.app.version or get_app_version(),
         "mode": proxy.mode,
@@ -241,6 +242,7 @@ def _runtime_summary(request: Request) -> dict[str, object]:
         "gigachat_api_mode": proxy.gigachat_api_mode,
         "runtime_store_backend": proxy.runtime_store_backend,
         "runtime_store_namespace": proxy.runtime_store_namespace,
+        "telemetry_enabled": proxy.enable_telemetry,
         "observability_sinks": list(proxy.observability_sinks),
         "metrics_enabled": metrics_enabled,
         "pass_model": proxy.pass_model,
@@ -277,6 +279,7 @@ async def get_admin_config(request: Request):
         "gigachat_api_mode": proxy.gigachat_api_mode,
         "runtime_store_backend": proxy.runtime_store_backend,
         "runtime_store_namespace": proxy.runtime_store_namespace,
+        "enable_telemetry": proxy.enable_telemetry,
         "observability_sinks": list(proxy.observability_sinks),
         "runtime_store_dsn_configured": proxy.runtime_store_dsn is not None,
         "recent_requests_max_items": proxy.recent_requests_max_items,
@@ -326,7 +329,7 @@ async def get_admin_capabilities(request: Request):
     verify_logs_ip_allowlist(request)
     config = get_config_from_state(request.app.state)
     enabled_providers = set(config.proxy_settings.enabled_providers)
-    metrics_enabled = "prometheus" in set(config.proxy_settings.observability_sinks)
+    metrics_enabled = config.proxy_settings.metrics_enabled
     capability_matrix = _build_capability_matrix(
         config, metrics_enabled=metrics_enabled
     )
@@ -336,6 +339,7 @@ async def get_admin_capabilities(request: Request):
             "chat_backend_mode": config.proxy_settings.chat_backend_mode,
             "responses_backend_mode": config.proxy_settings.responses_backend_mode,
             "runtime_store_backend": config.proxy_settings.runtime_store_backend,
+            "telemetry_enabled": config.proxy_settings.enable_telemetry,
             "observability_sinks": list(config.proxy_settings.observability_sinks),
         },
         "matrix": capability_matrix,

@@ -192,6 +192,7 @@ def test_admin_runtime_endpoint():
     payload = resp.json()
     assert payload["mode"] == "DEV"
     assert payload["admin_enabled"] is True
+    assert payload["telemetry_enabled"] is True
     assert payload["runtime_store_backend"] == "memory"
     assert payload["state"]["stores"]["backend"] == "memory"
 
@@ -220,8 +221,21 @@ def test_admin_config_exposes_grouped_safe_summary():
     payload = resp.json()
     assert payload["summary"]["network"]["bind"] == "localhost:8090"
     assert payload["summary"]["providers"]["gigachat_api_mode"] == "v1"
+    assert payload["summary"]["providers"]["telemetry_enabled"] is True
     assert payload["summary"]["limits"]["max_request_body_bytes"] > 0
     assert payload["summary"]["logging"]["log_filename"] == "gpt2giga.log"
+
+
+def test_admin_runtime_reflects_disabled_telemetry():
+    app = make_app(config=ProxyConfig(proxy=ProxySettings(enable_telemetry=False)))
+    client = TestClient(app)
+
+    resp = client.get("/admin/api/runtime")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["telemetry_enabled"] is False
+    assert payload["metrics_enabled"] is False
 
 
 def test_admin_recent_endpoints_support_extended_filters():

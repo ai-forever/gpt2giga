@@ -18,6 +18,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.gigachat_api_mode == "v1"
     assert s.runtime_store_backend == "memory"
     assert s.runtime_store_namespace == "gpt2giga"
+    assert s.enable_telemetry is True
     assert s.observability_sinks == ["prometheus"]
     assert s.recent_requests_max_items == 200
     assert s.recent_errors_max_items == 100
@@ -96,6 +97,13 @@ def test_proxy_settings_runtime_store_dsn_normalized(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_RUNTIME_STORE_DSN", " sqlite:///tmp/runtime.db ")
     s = ProxySettings()
     assert s.runtime_store_dsn == "sqlite:///tmp/runtime.db"
+
+
+def test_proxy_settings_enable_telemetry_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_ENABLE_TELEMETRY", "false")
+    s = ProxySettings()
+    assert s.enable_telemetry is False
+    assert s.metrics_enabled is False
 
 
 def test_proxy_settings_observability_sinks_from_env_csv(monkeypatch):

@@ -255,6 +255,19 @@ GPT2GIGA_RUNTIME_STORE_DSN=sqlite:///var/lib/gpt2giga/runtime.db
 GPT2GIGA_RUNTIME_STORE_NAMESPACE=prod-main
 ```
 
+Telemetry sink layer можно отключить отдельно:
+
+```dotenv
+GPT2GIGA_ENABLE_TELEMETRY=false
+```
+
+Это оставит working recent request/error feeds для `/admin`, но выключит
+Prometheus/OTLP/Langfuse fan-out и сделает `/metrics` недоступным.
+
+Scaffolding для custom runtime backend-ов и compose-примеры для Redis/Postgres/S3:
+
+- [deploy/compose/runtime-backends/README.md](../deploy/compose/runtime-backends/README.md)
+
 ## Рекомендуемый rollout
 
 1. Для локальной разработки используйте `DEV`, `prometheus`, и только нужные provider-ы.

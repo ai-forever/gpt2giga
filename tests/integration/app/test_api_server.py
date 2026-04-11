@@ -384,6 +384,15 @@ def test_metrics_endpoints_return_404_when_prometheus_sink_disabled(monkeypatch)
         assert client.get("/admin/api/metrics").status_code == 404
 
 
+def test_metrics_endpoints_return_404_when_telemetry_disabled(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(proxy=ProxySettings(enable_telemetry=False))
+    with TestClient(create_app(config=cfg)) as client:
+        assert client.get("/metrics").status_code == 404
+        assert client.get("/admin/api/metrics").status_code == 404
+
+
 def test_run_server(monkeypatch):
     run_app(
         uvicorn_runner=lambda *args, **kwargs: None,
