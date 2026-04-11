@@ -267,14 +267,75 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
     proxy = config.proxy_settings
     gigachat = config.gigachat_settings
     payload = load_control_plane_payload()
+    persisted = has_persisted_control_plane()
+    gigachat_ready = bool(
+        getattr(gigachat, "credentials", None)
+        or getattr(gigachat, "access_token", None)
+    )
+    security_ready = bool(
+        proxy.enable_api_key_auth and (proxy.api_key or proxy.scoped_api_keys)
+    )
+
+    warnings: list[str] = []
+    if not persisted:
+        warnings.append(
+            "Control-plane config is not persisted yet. Save setup values to survive restarts."
+        )
+    if not gigachat_ready:
+        warnings.append(
+            "GigaChat credentials are missing. Proxy calls will fail until auth is configured."
+        )
+    if not proxy.enable_api_key_auth:
+        warnings.append(
+            "Gateway API key auth is disabled. This is convenient for local bring-up but not hardened."
+        )
+    elif not security_ready:
+        warnings.append(
+            "Gateway API key auth is enabled, but no global or scoped gateway key is configured."
+        )
+    if "*" in proxy.cors_allow_origins:
+        warnings.append("CORS allows all origins.")
+    if proxy.runtime_store_backend == "memory":
+        warnings.append(
+            "Runtime store backend is memory. Stateful metadata and recent events are not durable."
+        )
+
+    setup_complete = persisted and gigachat_ready and security_ready
     return {
-        "persisted": has_persisted_control_plane(),
+        "persisted": persisted,
         "path": str(get_control_plane_file()),
+        "key_path": str(get_control_plane_key_file()),
         "updated_at": payload.get("updated_at"),
-        "gigachat_ready": bool(
-            getattr(gigachat, "credentials", None)
-            or getattr(gigachat, "access_token", None)
-        ),
+        "gigachat_ready": gigachat_ready,
+        "security_ready": security_ready,
         "global_api_key_configured": proxy.api_key is not None,
         "scoped_api_keys_configured": len(proxy.scoped_api_keys),
+        "setup_complete": setup_complete,
+        "wizard_steps": [
+            {
+                "id": "storage",
+                "label": "Persist settings",
+                "ready": persisted,
+                "description": "Write control-plane config to disk for restart-safe bootstrap.",
+            },
+            {
+                "id": "gigachat",
+                "label": "Configure GigaChat",
+                "ready": gigachat_ready,
+                "description": "Provide credentials or access token for upstream model calls.",
+            },
+            {
+                "id": "security",
+                "label": "Bootstrap security",
+                "ready": security_ready,
+                "description": "Enable gateway auth and create at least one gateway key.",
+            },
+            {
+                "id": "finish",
+                "label": "Ready for operators",
+                "ready": setup_complete,
+                "description": "Persisted config, upstream auth and gateway auth are all in place.",
+            },
+        ],
+        "warnings": warnings,
     }

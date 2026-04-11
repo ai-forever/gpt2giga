@@ -22,6 +22,7 @@ def make_app(config=None):
 def test_console_routes_are_available():
     client = TestClient(make_app())
 
+    assert client.get("/admin/setup").status_code == 200
     assert client.get("/admin/settings").status_code == 200
     assert client.get("/admin/keys").status_code == 200
     assert client.get("/admin/logs").status_code == 200
@@ -38,6 +39,10 @@ def test_setup_endpoint_reports_persisted_status(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["persisted"] is False
     assert payload["gigachat_ready"] is False
+    assert payload["security_ready"] is False
+    assert payload["setup_complete"] is False
+    assert payload["wizard_steps"][0]["id"] == "storage"
+    assert payload["warnings"]
 
 
 def test_gigachat_settings_update_is_persisted(tmp_path, monkeypatch):

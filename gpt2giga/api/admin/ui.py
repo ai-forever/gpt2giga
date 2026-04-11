@@ -18,6 +18,7 @@ _CONSOLE_HTML: str | None = None
 _CONSOLE_PAGES = (
     "/admin",
     "/admin/overview",
+    "/admin/setup",
     "/admin/settings",
     "/admin/keys",
     "/admin/logs",
