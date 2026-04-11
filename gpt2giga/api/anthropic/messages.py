@@ -1,7 +1,5 @@
 """Anthropic message endpoints."""
 
-from typing import Dict, List
-
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
@@ -9,11 +7,9 @@ from gpt2giga.api.anthropic.openapi import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
 )
-from gpt2giga.api.anthropic.request import (
-    _build_openai_data_from_anthropic_request,
-    _convert_anthropic_messages_to_openai,
-    _extract_text_from_openai_messages,
-    _extract_tool_definitions_text,
+from gpt2giga.api.anthropic.request_adapter import (
+    build_normalized_chat_request,
+    build_token_count_texts,
 )
 from gpt2giga.api.anthropic.response import _build_anthropic_response
 from gpt2giga.api.anthropic.streaming import _stream_anthropic_generator
@@ -43,14 +39,7 @@ async def count_tokens(request: Request):
     giga_client = get_gigachat_client(request)
     model = data.get("model", "unknown")
     set_request_audit_model(request, model)
-
-    openai_messages = _convert_anthropic_messages_to_openai(
-        data.get("system"), data.get("messages", [])
-    )
-    texts: List[str] = _extract_text_from_openai_messages(openai_messages)
-
-    if "tools" in data and data["tools"]:
-        texts.extend(_extract_tool_definitions_text(data["tools"]))
+    texts = build_token_count_texts(data)
 
     if not texts:
         return {"input_tokens": 0}
@@ -74,11 +63,12 @@ async def messages(request: Request):
     app_state = request.app.state
     chat_service = get_chat_service_from_state(app_state)
     api_mode = chat_service.backend_mode
-    openai_data: Dict = _build_openai_data_from_anthropic_request(
-        data, get_logger_from_state(app_state)
+    normalized_request = build_normalized_chat_request(
+        data,
+        logger=get_logger_from_state(app_state),
     )
     chat_messages = await chat_service.prepare_request(
-        openai_data,
+        normalized_request,
         giga_client=giga_client,
     )
 

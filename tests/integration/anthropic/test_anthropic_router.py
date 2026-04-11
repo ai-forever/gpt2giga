@@ -19,6 +19,7 @@ from gpt2giga.api.anthropic.response import (
 )
 from gpt2giga.api.anthropic import router
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.providers.gigachat import ResponseProcessor
 
 
@@ -416,26 +417,28 @@ class FakeRequestTransformer:
         self.last_mode = None
 
     async def prepare_chat_completion(self, data, giga_client=None):
+        payload = to_backend_payload(data)
         self.last_mode = "v1"
         return {
-            "model": data.get("model", "giga"),
-            "messages": data.get("messages", []),
-            "reasoning_effort": data.get("reasoning_effort"),
-            "functions": data.get("functions"),
-            "function_call": data.get("function_call"),
+            "model": payload.get("model", "giga"),
+            "messages": payload.get("messages", []),
+            "reasoning_effort": payload.get("reasoning_effort"),
+            "functions": payload.get("functions"),
+            "function_call": payload.get("function_call"),
         }
 
     async def prepare_chat_completion_v2(self, data, giga_client=None):
+        payload = to_backend_payload(data)
         self.last_mode = "v2"
 
         class Prepared:
             def model_dump(self, *args, **kwargs):
                 return {
-                    "model": data.get("model", "giga"),
+                    "model": payload.get("model", "giga"),
                     "messages": [
                         {
                             "role": "user",
-                            "content": [{"text": str(data.get("messages", []))}],
+                            "content": [{"text": str(payload.get("messages", []))}],
                         }
                     ],
                 }

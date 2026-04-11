@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.api.gemini import router
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.providers.gigachat import ResponseProcessor
 
 
@@ -165,32 +166,34 @@ class FakeRequestTransformer:
         self.last_mode = None
 
     async def prepare_chat_completion(self, data, giga_client=None):
+        payload = to_backend_payload(data)
         self.last_mode = "v1"
-        self.last_data = data
+        self.last_data = payload
         return {
-            "model": data.get("model", "giga"),
-            "messages": data.get("messages", []),
-            "functions": data.get("functions"),
-            "function_call": data.get("function_call"),
-            "response_format": data.get("response_format"),
-            "reasoning_effort": data.get("reasoning_effort"),
+            "model": payload.get("model", "giga"),
+            "messages": payload.get("messages", []),
+            "functions": payload.get("functions"),
+            "function_call": payload.get("function_call"),
+            "response_format": payload.get("response_format"),
+            "reasoning_effort": payload.get("reasoning_effort"),
         }
 
     async def prepare_chat_completion_v2(self, data, giga_client=None):
+        payload = to_backend_payload(data)
         self.last_mode = "v2"
-        self.last_data = data
+        self.last_data = payload
         return {
-            "model": data.get("model", "giga"),
+            "model": payload.get("model", "giga"),
             "messages": [
                 {
                     "role": "user",
-                    "content": [{"text": str(data.get("messages", []))}],
+                    "content": [{"text": str(payload.get("messages", []))}],
                 }
             ],
-            "functions": data.get("functions"),
-            "function_call": data.get("function_call"),
-            "response_format": data.get("response_format"),
-            "reasoning_effort": data.get("reasoning_effort"),
+            "functions": payload.get("functions"),
+            "function_call": payload.get("function_call"),
+            "response_format": payload.get("response_format"),
+            "reasoning_effort": payload.get("reasoning_effort"),
         }
 
 
