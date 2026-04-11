@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, AsyncGenerator, Optional
 
-import gigachat
 from fastapi import Request
 from gigachat import GigaChat
 
@@ -15,11 +15,16 @@ from gpt2giga.api.gemini.response import (
 )
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.app.observability import (
-    set_request_audit_error,
     set_request_audit_model,
     set_request_audit_usage,
 )
 from gpt2giga.core.logging.setup import rquid_context
+from gpt2giga.providers.gigachat.streaming import (
+    iter_chat_stream_chunks,
+    iter_chat_v2_stream_chunks,
+    iter_stream_with_disconnect,
+    report_stream_failure,
+)
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
@@ -42,16 +47,16 @@ async def stream_gemini_generate_content(
 
     try:
         stream_iter = (
-            giga_client.astream_v2(chat_messages)
+            iter_chat_v2_stream_chunks(giga_client, chat_messages)
             if api_mode == "v2"
-            else giga_client.astream(chat_messages)
+            else iter_chat_stream_chunks(giga_client, chat_messages)
         )
-        async for chunk in stream_iter:
-            if await request.is_disconnected():
-                if logger:
-                    logger.info(f"[{rquid}] Client disconnected during streaming")
-                break
-
+        async for chunk in iter_stream_with_disconnect(
+            request,
+            stream_iter,
+            logger=logger,
+            rquid=rquid,
+        ):
             giga_dict = (
                 response_processor.normalize_chat_v2_stream_chunk(chunk)
                 if api_mode == "v2" and response_processor is not None
@@ -127,28 +132,20 @@ async def stream_gemini_generate_content(
 
             if parts or finish_reason is not None or usage:
                 yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-    except gigachat.exceptions.GigaChatException as exc:
-        set_request_audit_error(request, type(exc).__name__)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {type(exc).__name__}: {exc}"
-            )
-        payload = {
-            "error": {
-                "code": getattr(exc, "status_code", 500) or 500,
-                "message": str(exc),
-                "status": "INTERNAL",
-            }
-        }
-        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
-        set_request_audit_error(request, type(exc).__name__)
-        if logger:
-            logger.error(f"[{rquid}] Unexpected Gemini streaming error: {exc}")
+        failure = report_stream_failure(
+            request,
+            exc,
+            logger=logger,
+            rquid=rquid,
+            unexpected_log_label="Unexpected Gemini streaming error",
+        )
         payload = {
             "error": {
-                "code": 500,
-                "message": "Stream interrupted",
+                "code": failure.status_code or 500,
+                "message": failure.message,
                 "status": "INTERNAL",
             }
         }

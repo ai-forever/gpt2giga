@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import traceback
 from typing import Any, AsyncGenerator, Optional
 
 from gigachat import GigaChat
@@ -11,7 +10,6 @@ from starlette.requests import Request
 
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.app.observability import (
-    set_request_audit_error,
     set_request_audit_model,
     set_request_audit_usage,
 )
@@ -19,10 +17,11 @@ from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.contracts import ChatProviderMapper
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 from gpt2giga.providers.gigachat.streaming import (
-    GigaChatStreamError,
     iter_chat_v2_stream_chunks,
     iter_chat_stream_chunks,
+    iter_stream_with_disconnect,
     map_chat_stream_chunk,
+    report_stream_failure,
 )
 
 
@@ -56,11 +55,12 @@ async def stream_chat_completion_generator(
             if api_mode == "v2"
             else iter_chat_stream_chunks(giga_client, chat_messages)
         )
-        async for chunk in stream_iter:
-            if await request.is_disconnected():
-                if logger:
-                    logger.info(f"[{rquid}] Client disconnected during streaming")
-                break
+        async for chunk in iter_stream_with_disconnect(
+            request,
+            stream_iter,
+            logger=logger,
+            rquid=rquid,
+        ):
             processed = map_chat_stream_chunk(
                 chunk,
                 mapper=mapper,
@@ -75,40 +75,21 @@ async def stream_chat_completion_generator(
 
         yield format_chat_stream_done()
 
-    except GigaChatStreamError as exc:
-        set_request_audit_error(request, exc.error_type)
-        error_type = exc.error_type
-        error_message = exc.message
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
-            )
-        error_response = {
-            "error": {
-                "message": error_message,
-                "type": error_type,
-                "code": "stream_error",
-            }
-        }
-        yield format_chat_stream_chunk(error_response)
-        yield format_chat_stream_done()
-
     except asyncio.CancelledError:
         raise
 
     except Exception as exc:
-        error_type = type(exc).__name__
-        set_request_audit_error(request, error_type)
-        tb = traceback.format_exc()
-        if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {exc}\n{tb}"
-            )
+        failure = report_stream_failure(
+            request,
+            exc,
+            logger=logger,
+            rquid=rquid,
+        )
         error_response = {
             "error": {
-                "message": "Stream interrupted",
-                "type": error_type,
-                "code": "internal_error",
+                "message": failure.message,
+                "type": failure.error_type,
+                "code": failure.code,
             }
         }
         yield format_chat_stream_chunk(error_response)

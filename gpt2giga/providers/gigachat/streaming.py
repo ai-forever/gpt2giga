@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import traceback
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, TypeAlias
+from typing import Any, Optional, Protocol, TypeAlias, TypeVar
 
 import gigachat
 
+from gpt2giga.app.observability import set_request_audit_error
 from gpt2giga.features.chat.contracts import ChatProviderMapper, PreparedChatRequest
 from gpt2giga.features.responses.contracts import PreparedResponsesRequest
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
+
+StreamChunkT = TypeVar("StreamChunkT")
 
 
 class GigaChatStreamError(Exception):
@@ -38,6 +42,16 @@ class GigaChatStreamError(Exception):
             message=str(exc),
             status_code=getattr(exc, "status_code", None),
         )
+
+
+@dataclass(slots=True)
+class StreamFailure:
+    """Normalized stream-failure state shared by transport presenters."""
+
+    error_type: str
+    message: str
+    code: str
+    status_code: int | None = None
 
 
 class GigaChatResponsesStreamProcessor(Protocol):
@@ -115,6 +129,62 @@ class ResponsesStreamChunk:
     finish_reason: str | None = None
     usage: dict[str, Any] | None = None
     updates: list[ResponsesStreamUpdate] = field(default_factory=list)
+
+
+async def iter_stream_with_disconnect(
+    request: Any,
+    stream_iter: AsyncIterator[StreamChunkT],
+    *,
+    logger: Any = None,
+    rquid: str | None = None,
+) -> AsyncIterator[StreamChunkT]:
+    """Yield stream chunks until the client disconnects."""
+    async for chunk in stream_iter:
+        if await request.is_disconnected():
+            if logger:
+                logger.info(f"{_log_prefix(rquid)}Client disconnected during streaming")
+            break
+        yield chunk
+
+
+def report_stream_failure(
+    request: Any,
+    exc: Exception,
+    *,
+    logger: Any = None,
+    rquid: str | None = None,
+    unexpected_log_label: str = "Unexpected streaming error",
+) -> StreamFailure:
+    """Normalize, audit, and log a stream failure."""
+    if isinstance(exc, gigachat.exceptions.GigaChatException):
+        exc = GigaChatStreamError.from_exception(exc)
+
+    if isinstance(exc, GigaChatStreamError):
+        set_request_audit_error(request, exc.error_type)
+        if logger:
+            logger.error(
+                f"{_log_prefix(rquid)}GigaChat streaming error: "
+                f"{exc.error_type}: {exc.message}"
+            )
+        return StreamFailure(
+            error_type=exc.error_type,
+            message=exc.message,
+            code="stream_error",
+            status_code=exc.status_code,
+        )
+
+    error_type = type(exc).__name__
+    set_request_audit_error(request, error_type)
+    if logger:
+        logger.error(
+            f"{_log_prefix(rquid)}{unexpected_log_label}: "
+            f"{error_type}: {exc}\n{traceback.format_exc()}"
+        )
+    return StreamFailure(
+        error_type=error_type,
+        message="Stream interrupted",
+        code="internal_error",
+    )
 
 
 async def iter_chat_stream_chunks(
@@ -292,3 +362,7 @@ def _collect_responses_updates(
                     last_tool_update.output_item = output_item
 
     return updates
+
+
+def _log_prefix(rquid: str | None) -> str:
+    return f"[{rquid}] " if rquid else ""

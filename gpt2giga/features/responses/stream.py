@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-import traceback
 from typing import Any, AsyncGenerator, Optional
 
 from gigachat import GigaChat
@@ -16,7 +15,6 @@ from gpt2giga.app.dependencies import (
     get_response_processor_from_state,
 )
 from gpt2giga.app.observability import (
-    set_request_audit_error,
     set_request_audit_model,
     set_request_audit_usage,
 )
@@ -24,13 +22,30 @@ from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.responses.store import get_response_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 from gpt2giga.providers.gigachat.streaming import (
-    GigaChatStreamError,
     ResponsesFunctionCallUpdate,
     ResponsesTextUpdate,
     ResponsesToolUpdate,
     iter_chat_stream_chunks,
     iter_responses_stream_chunks,
+    iter_stream_with_disconnect,
+    report_stream_failure,
 )
+
+
+class ResponsesStreamEventSequencer:
+    """Serialize Responses SSE events with monotonically increasing sequence IDs."""
+
+    def __init__(self, formatter: Any) -> None:
+        self._formatter = formatter
+        self._sequence_number = 0
+
+    def emit(self, event_type: str, payload: dict[str, Any]) -> str:
+        """Format an event and attach type/sequence metadata."""
+        body = dict(payload)
+        body["type"] = event_type
+        body["sequence_number"] = self._sequence_number
+        self._sequence_number += 1
+        return self._formatter(event_type, body)
 
 
 async def _stream_responses_generator_v1(
@@ -52,21 +67,13 @@ async def _stream_responses_generator_v1(
     set_request_audit_model(request, model)
     usage: Optional[dict] = None
     finish_reason: Optional[str] = None
-    sequence_number = 0
     text_item: dict[str, Any] | None = None
     text_value = ""
     function_item: dict[str, Any] | None = None
     function_arguments = ""
     function_name: str | None = None
     response_text = processor._build_response_text_config(request_data)
-
-    def emit(event_type: str, payload: dict) -> str:
-        nonlocal sequence_number
-        body = dict(payload)
-        body["type"] = event_type
-        body["sequence_number"] = sequence_number
-        sequence_number += 1
-        return format_responses_stream_event(event_type, body)
+    emitter = ResponsesStreamEventSequencer(format_responses_stream_event)
 
     def current_response(status: str) -> dict:
         _, details = processor._build_response_status(finish_reason)
@@ -95,18 +102,21 @@ async def _stream_responses_generator_v1(
             giga_client = get_gigachat_client(request)
         logger = get_logger_from_state(request.app.state)
 
-        yield emit("response.created", {"response": current_response("in_progress")})
-        yield emit(
+        yield emitter.emit(
+            "response.created",
+            {"response": current_response("in_progress")},
+        )
+        yield emitter.emit(
             "response.in_progress",
             {"response": current_response("in_progress")},
         )
 
-        async for chunk in iter_chat_stream_chunks(giga_client, chat_messages):
-            if await request.is_disconnected():
-                if logger:
-                    logger.info(f"[{rquid}] Client disconnected during streaming")
-                break
-
+        async for chunk in iter_stream_with_disconnect(
+            request,
+            iter_chat_stream_chunks(giga_client, chat_messages),
+            logger=logger,
+            rquid=rquid,
+        ):
             chunk_dict = processor._safe_model_dump(chunk)
             choice = (chunk_dict.get("choices") or [{}])[0]
             finish_reason = choice.get("finish_reason") or finish_reason
@@ -139,11 +149,11 @@ async def _stream_responses_generator_v1(
                             }
                         ],
                     }
-                    yield emit(
+                    yield emitter.emit(
                         "response.output_item.added",
                         {"output_index": 0, "item": text_item},
                     )
-                    yield emit(
+                    yield emitter.emit(
                         "response.content_part.added",
                         {
                             "item_id": text_item["id"],
@@ -155,7 +165,7 @@ async def _stream_responses_generator_v1(
                 delta = processed.get("delta", "")
                 text_value += delta
                 text_item["content"][0]["text"] = text_value
-                yield emit(
+                yield emitter.emit(
                     "response.output_text.delta",
                     {
                         "item_id": text_item["id"],
@@ -178,7 +188,7 @@ async def _stream_responses_generator_v1(
                     function_item["status"] = "in_progress"
                     function_arguments = ""
                     function_name = function_item.get("name")
-                    yield emit(
+                    yield emitter.emit(
                         "response.output_item.added",
                         {"output_index": output_index, "item": function_item},
                     )
@@ -196,7 +206,7 @@ async def _stream_responses_generator_v1(
                             else new_arguments
                         )
                         function_item["arguments"] = function_arguments
-                        yield emit(
+                        yield emitter.emit(
                             "response.function_call_arguments.delta",
                             {
                                 "item_id": function_item["id"],
@@ -212,7 +222,7 @@ async def _stream_responses_generator_v1(
 
         if text_item is not None:
             text_item["status"] = final_item_status
-            yield emit(
+            yield emitter.emit(
                 "response.output_text.done",
                 {
                     "item_id": text_item["id"],
@@ -222,7 +232,7 @@ async def _stream_responses_generator_v1(
                     "logprobs": [],
                 },
             )
-            yield emit(
+            yield emitter.emit(
                 "response.content_part.done",
                 {
                     "item_id": text_item["id"],
@@ -231,14 +241,14 @@ async def _stream_responses_generator_v1(
                     "part": text_item["content"][0],
                 },
             )
-            yield emit(
+            yield emitter.emit(
                 "response.output_item.done",
                 {"output_index": 0, "item": text_item},
             )
 
         if function_item is not None:
             function_item["status"] = final_item_status
-            yield emit(
+            yield emitter.emit(
                 "response.function_call_arguments.done",
                 {
                     "item_id": function_item["id"],
@@ -247,7 +257,7 @@ async def _stream_responses_generator_v1(
                     "arguments": function_arguments,
                 },
             )
-            yield emit(
+            yield emitter.emit(
                 "response.output_item.done",
                 {
                     "output_index": 1 if text_item is not None else 0,
@@ -260,41 +270,25 @@ async def _stream_responses_generator_v1(
             incomplete_details if response_status == "incomplete" else None
         )
         if response_status == "incomplete":
-            yield emit("response.incomplete", {"response": final_response})
+            yield emitter.emit("response.incomplete", {"response": final_response})
         else:
-            yield emit("response.completed", {"response": final_response})
-
-    except GigaChatStreamError as exc:
-        set_request_audit_error(request, exc.error_type)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {exc.error_type}: {exc.message}"
-            )
-        yield emit(
-            "error",
-            {
-                "code": "stream_error",
-                "message": exc.message,
-                "param": None,
-            },
-        )
+            yield emitter.emit("response.completed", {"response": final_response})
 
     except asyncio.CancelledError:
         raise
 
     except Exception as exc:
-        error_type = type(exc).__name__
-        set_request_audit_error(request, error_type)
-        tb = traceback.format_exc()
-        if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {exc}\n{tb}"
-            )
-        yield emit(
+        failure = report_stream_failure(
+            request,
+            exc,
+            logger=logger,
+            rquid=rquid,
+        )
+        yield emitter.emit(
             "error",
             {
-                "code": "internal_error",
-                "message": "Stream interrupted",
+                "code": failure.code,
+                "message": failure.message,
                 "param": None,
             },
         )
@@ -343,20 +337,12 @@ async def stream_responses_generator(
     usage: Optional[dict] = None
     finish_reason: Optional[str] = None
 
-    sequence_number = 0
     output_items: list[dict] = []
     output_meta: list[dict[str, str]] = []
     text_states: dict[str, dict[str, Any]] = {}
     function_states: dict[str, dict[str, Any]] = {}
     tool_states: dict[str, dict[str, Any]] = {}
-
-    def emit(event_type: str, payload: dict) -> str:
-        nonlocal sequence_number
-        body = dict(payload)
-        body["type"] = event_type
-        body["sequence_number"] = sequence_number
-        sequence_number += 1
-        return format_responses_stream_event(event_type, body)
+    emitter = ResponsesStreamEventSequencer(format_responses_stream_event)
 
     def current_response(status: str) -> dict:
         return processor.build_response_api_result_v2(
@@ -494,7 +480,7 @@ async def stream_responses_generator(
             return []
         state["last_emitted_status"] = status
         return [
-            emit(
+            emitter.emit(
                 event_type,
                 {
                     "item_id": state["item_id"],
@@ -508,23 +494,26 @@ async def stream_responses_generator(
             giga_client = get_gigachat_client(request)
         logger = get_logger_from_state(request.app.state)
 
-        yield emit("response.created", {"response": current_response("in_progress")})
-        yield emit(
+        yield emitter.emit(
+            "response.created",
+            {"response": current_response("in_progress")},
+        )
+        yield emitter.emit(
             "response.in_progress",
             {"response": current_response("in_progress")},
         )
 
-        async for chunk in iter_responses_stream_chunks(
-            giga_client,
-            chat_messages,
-            response_processor=processor,
-            response_id=response_id,
+        async for chunk in iter_stream_with_disconnect(
+            request,
+            iter_responses_stream_chunks(
+                giga_client,
+                chat_messages,
+                response_processor=processor,
+                response_id=response_id,
+            ),
+            logger=logger,
+            rquid=rquid,
         ):
-            if await request.is_disconnected():
-                if logger:
-                    logger.info(f"[{rquid}] Client disconnected during streaming")
-                break
-
             model = chunk.model or model
             if isinstance(chunk.model, str) and chunk.model:
                 set_request_audit_model(request, chunk.model)
@@ -539,7 +528,7 @@ async def stream_responses_generator(
                 if isinstance(update, ResponsesTextUpdate):
                     state = ensure_text_state(update.message_key, update.item_id)
                     if state["item"]["content"] == []:
-                        yield emit(
+                        yield emitter.emit(
                             "response.output_item.added",
                             {
                                 "output_index": state["output_index"],
@@ -554,7 +543,7 @@ async def stream_responses_generator(
                                 "annotations": [],
                             }
                         ]
-                        yield emit(
+                        yield emitter.emit(
                             "response.content_part.added",
                             {
                                 "item_id": state["item_id"],
@@ -567,7 +556,7 @@ async def stream_responses_generator(
 
                     state["text"] += update.text
                     state["item"]["content"][0]["text"] = state["text"]
-                    yield emit(
+                    yield emitter.emit(
                         "response.output_text.delta",
                         {
                             "item_id": state["item_id"],
@@ -589,7 +578,7 @@ async def stream_responses_generator(
                     if state is None:
                         continue
                     if not state["added"]:
-                        yield emit(
+                        yield emitter.emit(
                             "response.output_item.added",
                             {
                                 "output_index": state["output_index"],
@@ -600,7 +589,7 @@ async def stream_responses_generator(
                     if update.arguments:
                         state["arguments"] += update.arguments
                         state["item"]["arguments"] = state["arguments"]
-                        yield emit(
+                        yield emitter.emit(
                             "response.function_call_arguments.delta",
                             {
                                 "item_id": state["item_id"],
@@ -618,7 +607,7 @@ async def stream_responses_generator(
                         raw_status=update.raw_status,
                     )
                     if not state["added"]:
-                        yield emit(
+                        yield emitter.emit(
                             "response.output_item.added",
                             {
                                 "output_index": state["output_index"],
@@ -648,14 +637,14 @@ async def stream_responses_generator(
                             "annotations": [],
                         }
                     ]
-                    yield emit(
+                    yield emitter.emit(
                         "response.output_item.added",
                         {
                             "output_index": state["output_index"],
                             "item": state["item"],
                         },
                     )
-                    yield emit(
+                    yield emitter.emit(
                         "response.content_part.added",
                         {
                             "item_id": state["item_id"],
@@ -672,7 +661,7 @@ async def stream_responses_generator(
                     "annotations": [],
                 }
                 state["item"]["content"] = [part]
-                yield emit(
+                yield emitter.emit(
                     "response.output_text.done",
                     {
                         "item_id": state["item_id"],
@@ -682,7 +671,7 @@ async def stream_responses_generator(
                         "logprobs": [],
                     },
                 )
-                yield emit(
+                yield emitter.emit(
                     "response.content_part.done",
                     {
                         "item_id": state["item_id"],
@@ -691,7 +680,7 @@ async def stream_responses_generator(
                         "part": part,
                     },
                 )
-                yield emit(
+                yield emitter.emit(
                     "response.output_item.done",
                     {
                         "output_index": state["output_index"],
@@ -703,7 +692,7 @@ async def stream_responses_generator(
             if kind == "function_call":
                 state = function_states[key]
                 state["item"]["status"] = final_item_status
-                yield emit(
+                yield emitter.emit(
                     "response.function_call_arguments.done",
                     {
                         "item_id": state["item_id"],
@@ -712,7 +701,7 @@ async def stream_responses_generator(
                         "arguments": state["arguments"],
                     },
                 )
-                yield emit(
+                yield emitter.emit(
                     "response.output_item.done",
                     {
                         "output_index": state["output_index"],
@@ -729,7 +718,7 @@ async def stream_responses_generator(
                 )
             for event in emit_tool_progress(state):
                 yield event
-            yield emit(
+            yield emitter.emit(
                 "response.output_item.done",
                 {
                     "output_index": state["output_index"],
@@ -740,41 +729,25 @@ async def stream_responses_generator(
         final_response = current_response(response_status)
         processor.store_response_metadata(response_store, final_response)
         if response_status == "incomplete":
-            yield emit("response.incomplete", {"response": final_response})
+            yield emitter.emit("response.incomplete", {"response": final_response})
         else:
-            yield emit("response.completed", {"response": final_response})
-
-    except GigaChatStreamError as exc:
-        set_request_audit_error(request, exc.error_type)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {exc.error_type}: {exc.message}"
-            )
-        yield emit(
-            "error",
-            {
-                "code": "stream_error",
-                "message": exc.message,
-                "param": None,
-            },
-        )
+            yield emitter.emit("response.completed", {"response": final_response})
 
     except asyncio.CancelledError:
         raise
 
     except Exception as exc:
-        error_type = type(exc).__name__
-        set_request_audit_error(request, error_type)
-        tb = traceback.format_exc()
-        if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {exc}\n{tb}"
-            )
-        yield emit(
+        failure = report_stream_failure(
+            request,
+            exc,
+            logger=logger,
+            rquid=rquid,
+        )
+        yield emitter.emit(
             "error",
             {
-                "code": "internal_error",
-                "message": "Stream interrupted",
+                "code": failure.code,
+                "message": failure.message,
                 "param": None,
             },
         )

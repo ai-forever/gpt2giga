@@ -1,21 +1,25 @@
 """Anthropic streaming helpers."""
 
+import asyncio
 import json
-import traceback
 import uuid
 from typing import Any, AsyncGenerator, Optional
 
-import gigachat
 from fastapi import Request
 from gigachat import GigaChat
 
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.app.observability import (
-    set_request_audit_error,
     set_request_audit_model,
     set_request_audit_usage,
 )
 from gpt2giga.core.logging.setup import rquid_context
+from gpt2giga.providers.gigachat.streaming import (
+    iter_chat_stream_chunks,
+    iter_chat_v2_stream_chunks,
+    iter_stream_with_disconnect,
+    report_stream_failure,
+)
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
@@ -47,15 +51,15 @@ async def _stream_anthropic_generator(
         input_tokens = 0
         output_tokens = 0
 
-        stream = (
-            giga_client.astream_v2(chat_messages)
+        stream_iter = (
+            iter_chat_v2_stream_chunks(giga_client, chat_messages)
             if api_mode == "v2"
-            else giga_client.astream(chat_messages)
+            else iter_chat_stream_chunks(giga_client, chat_messages)
         )
         buffered_chunks = []
 
         try:
-            first_chunk = await anext(stream)
+            first_chunk = await anext(stream_iter)
         except StopAsyncIteration:
             first_chunk = None
         else:
@@ -99,15 +103,15 @@ async def _stream_anthropic_generator(
         async def iter_chunks():
             for chunk in buffered_chunks:
                 yield chunk
-            async for chunk in stream:
+            async for chunk in stream_iter:
                 yield chunk
 
-        async for chunk in iter_chunks():
-            if await request.is_disconnected():
-                if logger:
-                    logger.info(f"[{rquid}] Client disconnected during streaming")
-                break
-
+        async for chunk in iter_stream_with_disconnect(
+            request,
+            iter_chunks(),
+            logger=logger,
+            rquid=rquid,
+        ):
             giga_dict = (
                 response_processor.normalize_chat_v2_stream_chunk(chunk)
                 if api_mode == "v2" and response_processor is not None
@@ -258,33 +262,19 @@ async def _stream_anthropic_generator(
             },
         )
         yield sse("message_stop", {"type": "message_stop"})
-    except gigachat.exceptions.GigaChatException as exc:
-        set_request_audit_error(request, type(exc).__name__)
-        if logger:
-            logger.error(
-                f"[{rquid}] GigaChat streaming error: {type(exc).__name__}: {exc}"
-            )
-        yield sse(
-            "error",
-            {
-                "type": "error",
-                "error": {"type": "api_error", "message": str(exc)},
-            },
-        )
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
-        set_request_audit_error(request, type(exc).__name__)
-        traceback_text = traceback.format_exc()
-        if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {type(exc).__name__}: {exc}\n{traceback_text}"
-            )
+        failure = report_stream_failure(
+            request,
+            exc,
+            logger=logger,
+            rquid=rquid,
+        )
         yield sse(
             "error",
             {
                 "type": "error",
-                "error": {
-                    "type": "api_error",
-                    "message": "Stream interrupted",
-                },
+                "error": {"type": "api_error", "message": failure.message},
             },
         )
