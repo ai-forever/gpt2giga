@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
 from gpt2giga.api.system import system_router
+from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
@@ -23,7 +24,7 @@ def make_app(logs_ip_allowlist=None):
     config = ProxyConfig(proxy=ProxySettings())
     if logs_ip_allowlist is not None:
         config.proxy_settings.logs_ip_allowlist = logs_ip_allowlist
-    app.state.config = config
+    ensure_runtime_dependencies(app.state, config=config)
     return app
 
 
@@ -52,6 +53,8 @@ def test_admin_ui_ok():
     assert resp.status_code == 200
     assert "<html" in resp.text.lower()
     assert "Admin Surface" in resp.text
+    assert "Capability Matrix" in resp.text
+    assert "Clear filters" in resp.text
 
 
 def test_legacy_logs_html_redirects_to_admin():
@@ -203,6 +206,92 @@ def test_admin_capabilities_reflect_enabled_providers():
     assert payload["providers"]["openai"]["enabled"] is True
     assert payload["providers"]["anthropic"]["enabled"] is False
     assert payload["providers"]["gemini"]["enabled"] is True
+    matrix_names = {row["name"] for row in payload["matrix"]["rows"]}
+    assert {"openai", "anthropic", "gemini", "system", "admin"} <= matrix_names
+
+
+def test_admin_config_exposes_grouped_safe_summary():
+    app = make_app()
+    client = TestClient(app)
+
+    resp = client.get("/admin/api/config")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["summary"]["network"]["bind"] == "localhost:8090"
+    assert payload["summary"]["providers"]["gigachat_api_mode"] == "v1"
+    assert payload["summary"]["limits"]["max_request_body_bytes"] > 0
+    assert payload["summary"]["logging"]["log_filename"] == "gpt2giga.log"
+
+
+def test_admin_recent_endpoints_support_extended_filters():
+    app = make_app()
+    app.state.stores.recent_requests.append(
+        {
+            "created_at": "2026-04-11T10:00:00Z",
+            "request_id": "req-openai",
+            "provider": "openai",
+            "endpoint": "/chat/completions",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "status_code": 200,
+            "duration_ms": 41.0,
+            "stream_duration_ms": None,
+            "client_ip": "127.0.0.1",
+            "model": "gpt-4.1-mini",
+            "token_usage": {
+                "prompt_tokens": 4,
+                "completion_tokens": 6,
+                "total_tokens": 10,
+            },
+            "error_type": None,
+        }
+    )
+    app.state.stores.recent_requests.append(
+        {
+            "created_at": "2026-04-11T10:01:00Z",
+            "request_id": "req-gemini",
+            "provider": "gemini",
+            "endpoint": "/v1beta/models/gemini:generateContent",
+            "method": "POST",
+            "path": "/v1beta/models/gemini:generateContent",
+            "status_code": 429,
+            "duration_ms": 63.0,
+            "stream_duration_ms": 81.0,
+            "client_ip": "127.0.0.1",
+            "model": "gemini-2.5-pro",
+            "token_usage": None,
+            "error_type": "RateLimitError",
+        }
+    )
+    app.state.stores.recent_errors.append(app.state.stores.recent_requests.recent()[-1])
+
+    client = TestClient(app)
+    resp = client.get(
+        "/admin/api/errors/recent",
+        params={
+            "provider": "gemini",
+            "method": "POST",
+            "status_code": 429,
+            "model": "gemini-2.5-pro",
+            "error_type": "RateLimitError",
+        },
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["count"] == 1
+    assert payload["events"][0]["request_id"] == "req-gemini"
+    assert payload["filters"] == {
+        "provider": "gemini",
+        "endpoint": None,
+        "method": "POST",
+        "status_code": 429,
+        "model": "gemini-2.5-pro",
+        "error_type": "RateLimitError",
+    }
+    assert payload["available_filters"]["provider"] == ["gemini"]
+    assert payload["available_filters"]["status_code"] == [429]
 
 
 def test_admin_recent_endpoints_return_empty_payload_by_default():
@@ -213,6 +302,48 @@ def test_admin_recent_endpoints_return_empty_payload_by_default():
     recent_errors = client.get("/admin/api/errors/recent")
 
     assert recent_requests.status_code == 200
-    assert recent_requests.json() == {"events": [], "count": 0, "kind": "requests"}
+    assert recent_requests.json() == {
+        "events": [],
+        "count": 0,
+        "kind": "requests",
+        "limit": 50,
+        "filters": {
+            "provider": None,
+            "endpoint": None,
+            "method": None,
+            "status_code": None,
+            "model": None,
+            "error_type": None,
+        },
+        "available_filters": {
+            "provider": [],
+            "endpoint": [],
+            "method": [],
+            "status_code": [],
+            "model": [],
+            "error_type": [],
+        },
+    }
     assert recent_errors.status_code == 200
-    assert recent_errors.json() == {"events": [], "count": 0, "kind": "errors"}
+    assert recent_errors.json() == {
+        "events": [],
+        "count": 0,
+        "kind": "errors",
+        "limit": 50,
+        "filters": {
+            "provider": None,
+            "endpoint": None,
+            "method": None,
+            "status_code": None,
+            "model": None,
+            "error_type": None,
+        },
+        "available_filters": {
+            "provider": [],
+            "endpoint": [],
+            "method": [],
+            "status_code": [],
+            "model": [],
+            "error_type": [],
+        },
+    }

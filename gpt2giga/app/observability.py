@@ -66,13 +66,25 @@ def filter_request_events(
     *,
     provider: str | None = None,
     endpoint: str | None = None,
+    method: str | None = None,
+    status_code: int | None = None,
+    model: str | None = None,
+    error_type: str | None = None,
 ) -> list[RequestAuditEvent]:
-    """Filter request events by provider and endpoint."""
+    """Filter request events by normalized admin filter fields."""
     filtered = events
     if provider is not None:
         filtered = [item for item in filtered if item.get("provider") == provider]
     if endpoint is not None:
         filtered = [item for item in filtered if item.get("endpoint") == endpoint]
+    if method is not None:
+        filtered = [item for item in filtered if item.get("method") == method]
+    if status_code is not None:
+        filtered = [item for item in filtered if item.get("status_code") == status_code]
+    if model is not None:
+        filtered = [item for item in filtered if item.get("model") == model]
+    if error_type is not None:
+        filtered = [item for item in filtered if item.get("error_type") == error_type]
     return filtered
 
 

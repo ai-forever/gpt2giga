@@ -111,6 +111,11 @@
       align-items: end;
     }
 
+    .controls.filters {
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
     .field {
       display: grid;
       gap: 6px;
@@ -238,6 +243,52 @@
       margin-bottom: 8px;
     }
 
+    .matrix-wrap {
+      margin-top: 14px;
+      overflow: auto;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: var(--panel-strong);
+    }
+
+    .matrix-table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .matrix-table th,
+    .matrix-table td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .matrix-table th {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      background: rgba(29, 28, 25, 0.04);
+    }
+
+    .matrix-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .surface {
+      display: grid;
+      gap: 4px;
+    }
+
+    .surface small {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
     .badge {
       display: inline-flex;
       align-items: center;
@@ -362,7 +413,7 @@
           <p class="eyebrow">gpt2giga operator console</p>
           <h1>Admin Surface</h1>
           <p class="subhead">
-            Runtime status, enabled provider groups, mounted routes, recent request/error feeds, and live logs in one place.
+            Runtime status, provider capability matrix, safe config summary, recent request/error feeds, and live logs in one place.
             This UI is meant for local operator and debug workflows, not for public exposure.
           </p>
         </div>
@@ -392,20 +443,84 @@
         <button id="refreshBtn" type="button">Refresh</button>
         <button id="streamBtn" class="secondary" type="button">Start log stream</button>
       </div>
+
+      <div class="controls filters">
+        <div class="field" style="max-width: 140px;">
+          <label for="eventLimit">Event rows</label>
+          <select id="eventLimit">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filterProvider">Provider</label>
+          <select id="filterProvider">
+            <option value="">All providers</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filterEndpoint">Endpoint</label>
+          <select id="filterEndpoint">
+            <option value="">All endpoints</option>
+          </select>
+        </div>
+        <div class="field" style="max-width: 140px;">
+          <label for="filterMethod">Method</label>
+          <select id="filterMethod">
+            <option value="">All methods</option>
+          </select>
+        </div>
+        <div class="field" style="max-width: 140px;">
+          <label for="filterStatusCode">Status</label>
+          <select id="filterStatusCode">
+            <option value="">All codes</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filterModel">Model</label>
+          <select id="filterModel">
+            <option value="">All models</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="filterErrorType">Error type</label>
+          <select id="filterErrorType">
+            <option value="">All errors</option>
+          </select>
+        </div>
+        <button id="clearFiltersBtn" class="secondary" type="button">Clear filters</button>
+      </div>
     </section>
 
     <section class="grid">
       <section class="panel overview">
         <div class="panel-head">
           <h2>Capabilities</h2>
-          <div class="chips" id="backendChips"></div>
+          <div class="chips" id="backendChips">
+            <span class="chip"><strong>View</strong>Capability Matrix</span>
+          </div>
         </div>
         <div class="provider-list" id="providers"></div>
+        <div class="matrix-wrap">
+          <table class="matrix-table">
+            <thead>
+              <tr>
+                <th>Surface</th>
+                <th>State</th>
+                <th>Capabilities</th>
+                <th>Routes</th>
+              </tr>
+            </thead>
+            <tbody id="capabilityMatrix"></tbody>
+          </table>
+        </div>
       </section>
 
       <section class="panel runtime">
         <div class="panel-head">
-          <h2>Runtime</h2>
+          <h2>Config Summary</h2>
           <span class="logs-status" id="runtimeStatus">Loading…</span>
         </div>
         <dl class="kv" id="runtimeDetails"></dl>
@@ -454,12 +569,21 @@
   <script>
     const apiKeyInput = document.getElementById("apiKey");
     const logLinesInput = document.getElementById("logLines");
+    const eventLimitInput = document.getElementById("eventLimit");
+    const filterProviderInput = document.getElementById("filterProvider");
+    const filterEndpointInput = document.getElementById("filterEndpoint");
+    const filterMethodInput = document.getElementById("filterMethod");
+    const filterStatusCodeInput = document.getElementById("filterStatusCode");
+    const filterModelInput = document.getElementById("filterModel");
+    const filterErrorTypeInput = document.getElementById("filterErrorType");
     const refreshBtn = document.getElementById("refreshBtn");
     const streamBtn = document.getElementById("streamBtn");
+    const clearFiltersBtn = document.getElementById("clearFiltersBtn");
 
     const headlineStats = document.getElementById("headlineStats");
     const backendChips = document.getElementById("backendChips");
     const providers = document.getElementById("providers");
+    const capabilityMatrix = document.getElementById("capabilityMatrix");
     const runtimeDetails = document.getElementById("runtimeDetails");
     const runtimeStatus = document.getElementById("runtimeStatus");
     const routes = document.getElementById("routes");
@@ -494,6 +618,66 @@
       return response.text();
     }
 
+    function setSelectOptions(select, values, emptyLabel) {
+      const currentValue = select.value;
+      const normalizedValues = Array.from(
+        new Set(values.filter((value) => value !== null && value !== undefined && String(value) !== ""))
+      ).map((value) => String(value));
+      if (currentValue && !normalizedValues.includes(currentValue)) {
+        normalizedValues.push(currentValue);
+      }
+
+      select.innerHTML = "";
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "";
+      emptyOption.textContent = emptyLabel;
+      select.appendChild(emptyOption);
+
+      normalizedValues.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+      normalizedValues.forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      });
+
+      select.value = currentValue;
+    }
+
+    function getEventFilters() {
+      return {
+        provider: filterProviderInput.value,
+        endpoint: filterEndpointInput.value,
+        method: filterMethodInput.value,
+        status_code: filterStatusCodeInput.value,
+        model: filterModelInput.value,
+        error_type: filterErrorTypeInput.value,
+      };
+    }
+
+    function buildRecentEventsPath(kind) {
+      const params = new URLSearchParams({ limit: eventLimitInput.value });
+      Object.entries(getEventFilters()).forEach(([key, value]) => {
+        if (value) {
+          params.set(key, value);
+        }
+      });
+      return `/admin/api/${kind}/recent?${params.toString()}`;
+    }
+
+    function mergeFilterValues(...collections) {
+      return Array.from(
+        new Set(
+          collections.flatMap((collection) => {
+            if (!Array.isArray(collection)) {
+              return [];
+            }
+            return collection.map((item) => String(item));
+          })
+        )
+      );
+    }
+
     function renderHeadline(runtime) {
       headlineStats.innerHTML = "";
       [
@@ -502,6 +686,7 @@
         ["State", runtime.runtime_store_backend],
         ["Providers", runtime.enabled_providers.join(", ") || "none"],
         ["Auth", runtime.auth_required ? "required" : "disabled"],
+        ["Metrics", runtime.metrics_enabled ? "on" : "off"],
       ].forEach(([label, value]) => {
         const span = document.createElement("span");
         span.className = "stat";
@@ -510,11 +695,18 @@
       });
     }
 
-    function renderBackend(capabilities) {
+    function renderBackend(capabilities, config) {
       backendChips.innerHTML = "";
       const items = [
         ["chat", capabilities.backend.chat_backend_mode],
         ["responses", capabilities.backend.responses_backend_mode],
+        ["sinks", capabilities.backend.observability_sinks.join(", ") || "none"],
+        ["features", [
+          config.enable_reasoning ? "reasoning" : null,
+          config.enable_images ? "images" : null,
+          config.pass_model ? "pass_model" : null,
+          config.pass_token ? "pass_token" : null,
+        ].filter(Boolean).join(", ") || "baseline"],
       ];
       items.forEach(([label, value]) => {
         const span = document.createElement("span");
@@ -530,10 +722,10 @@
         const article = document.createElement("article");
         article.className = "provider";
         const statusClass = provider.enabled ? "enabled" : "disabled";
-        const capabilityText = provider.capabilities.join(", ");
+        const capabilityText = provider.capabilities.join(", ") || "none";
         article.innerHTML = `
           <header>
-            <strong>${name}</strong>
+            <strong>${provider.display_name || name}</strong>
             <span class="badge ${statusClass}">${provider.enabled ? "enabled" : "disabled"}</span>
           </header>
           <div class="chips">
@@ -545,22 +737,46 @@
       });
     }
 
+    function renderCapabilityMatrix(capabilities) {
+      capabilityMatrix.innerHTML = "";
+      capabilities.matrix.rows.forEach((row) => {
+        const tr = document.createElement("tr");
+        const statusClass = row.enabled ? "enabled" : "disabled";
+        tr.innerHTML = `
+          <td>
+            <div class="surface">
+              <strong>${row.display_name}</strong>
+              <small>${row.surface}</small>
+            </div>
+          </td>
+          <td><span class="badge ${statusClass}">${row.enabled ? "enabled" : "disabled"}</span></td>
+          <td>${row.capabilities.join(", ") || "none"}</td>
+          <td>${row.route_count}</td>
+        `;
+        capabilityMatrix.appendChild(tr);
+      });
+    }
+
     function renderRuntime(runtime, config) {
       runtimeDetails.innerHTML = "";
+      const summary = config.summary;
       const values = {
         version: runtime.app_version,
-        mode: runtime.mode,
-        admin_enabled: String(runtime.admin_enabled),
-        docs_enabled: String(runtime.docs_enabled),
-        log_file: config.log_filename,
-        enabled_providers: runtime.enabled_providers.join(", "),
-        runtime_store_backend: runtime.runtime_store_backend,
-        runtime_store_namespace: runtime.runtime_store_namespace,
-        api_key_auth: String(config.enable_api_key_auth),
-        pass_token: String(runtime.pass_token),
-        pass_model: String(runtime.pass_model),
-        log_redaction: String(runtime.log_redact_sensitive),
-        allowlist_enabled: String(runtime.logs_ip_allowlist_enabled),
+        bind: summary.network.bind,
+        mode: summary.network.mode,
+        backend_mode: summary.providers.gigachat_api_mode,
+        enabled_providers: summary.providers.enabled_providers.join(", ") || "none",
+        observability_sinks: summary.providers.observability_sinks.join(", ") || "none",
+        request_limit_bytes: summary.limits.max_request_body_bytes,
+        media_limit_bytes: summary.limits.max_audio_image_total_size_bytes,
+        recent_request_buffer: summary.limits.recent_requests_max_items,
+        recent_error_buffer: summary.limits.recent_errors_max_items,
+        log_level: summary.logging.log_level,
+        log_file: summary.logging.log_filename,
+        log_rotation_bytes: summary.logging.log_max_size,
+        log_redaction: String(summary.logging.log_redact_sensitive),
+        api_key_auth: String(summary.network.api_key_auth),
+        admin_enabled: String(summary.network.admin_enabled),
       };
       Object.entries(values).forEach(([key, value]) => {
         const wrapper = document.createElement("div");
@@ -585,9 +801,12 @@
     }
 
     function renderRecentEvents(target, statusTarget, payload, emptyLabel) {
+      const activeFilters = Object.values(payload.filters || {}).filter(
+        (value) => value !== null && value !== undefined && String(value) !== ""
+      ).length;
       if (!payload.events.length) {
         target.textContent = emptyLabel;
-        statusTarget.textContent = "Empty";
+        statusTarget.textContent = activeFilters ? "Empty after filters" : "Empty";
         return;
       }
 
@@ -601,7 +820,44 @@
         return `[${stamp}] ${event.status_code} ${provider} ${event.method} ${event.endpoint} ${event.duration_ms}ms${stream}${model}${tokens}${error}`;
       });
       target.textContent = lines.join("\n");
-      statusTarget.textContent = `${payload.count} items`;
+      statusTarget.textContent = activeFilters
+        ? `${payload.count}/${payload.limit} filtered`
+        : `${payload.count}/${payload.limit} items`;
+    }
+
+    function renderFilterControls(capabilities, requestPayload, errorPayload) {
+      const providerValues = mergeFilterValues(
+        Object.keys(capabilities.providers),
+        requestPayload.available_filters.provider,
+        errorPayload.available_filters.provider
+      );
+      const endpointValues = mergeFilterValues(
+        requestPayload.available_filters.endpoint,
+        errorPayload.available_filters.endpoint
+      );
+      const methodValues = mergeFilterValues(
+        requestPayload.available_filters.method,
+        errorPayload.available_filters.method
+      );
+      const statusValues = mergeFilterValues(
+        requestPayload.available_filters.status_code,
+        errorPayload.available_filters.status_code
+      );
+      const modelValues = mergeFilterValues(
+        requestPayload.available_filters.model,
+        errorPayload.available_filters.model
+      );
+      const errorValues = mergeFilterValues(
+        requestPayload.available_filters.error_type,
+        errorPayload.available_filters.error_type
+      );
+
+      setSelectOptions(filterProviderInput, providerValues, "All providers");
+      setSelectOptions(filterEndpointInput, endpointValues, "All endpoints");
+      setSelectOptions(filterMethodInput, methodValues, "All methods");
+      setSelectOptions(filterStatusCodeInput, statusValues, "All codes");
+      setSelectOptions(filterModelInput, modelValues, "All models");
+      setSelectOptions(filterErrorTypeInput, errorValues, "All errors");
     }
 
     async function loadLogs() {
@@ -628,16 +884,18 @@
           fetchJson("/admin/api/config"),
           fetchJson("/admin/api/capabilities"),
           fetchJson("/admin/api/routes"),
-          fetchJson("/admin/api/requests/recent?limit=25"),
-          fetchJson("/admin/api/errors/recent?limit=25"),
+          fetchJson(buildRecentEventsPath("requests")),
+          fetchJson(buildRecentEventsPath("errors")),
         ]);
         renderHeadline(runtime);
-        renderBackend(capabilities);
+        renderBackend(capabilities, config);
         renderProviders(capabilities);
+        renderCapabilityMatrix(capabilities);
         renderRuntime(runtime, config);
         renderRoutes(routePayload);
         renderRecentEvents(recentRequests, requestsStatus, requestPayload, "[no recent requests]");
         renderRecentEvents(recentErrors, errorsStatus, errorPayload, "[no recent errors]");
+        renderFilterControls(capabilities, requestPayload, errorPayload);
       } catch (error) {
         runtimeStatus.textContent = error.message;
         routesStatus.textContent = error.message;
@@ -688,8 +946,23 @@
       }
     }
 
+    function clearFilters() {
+      [
+        filterProviderInput,
+        filterEndpointInput,
+        filterMethodInput,
+        filterStatusCodeInput,
+        filterModelInput,
+        filterErrorTypeInput,
+      ].forEach((input) => {
+        input.value = "";
+      });
+      refresh();
+    }
+
     refreshBtn.addEventListener("click", refresh);
     streamBtn.addEventListener("click", toggleStream);
+    clearFiltersBtn.addEventListener("click", clearFilters);
 
     if (new URLSearchParams(window.location.search).get("tab") === "logs") {
       document.getElementById("logs").scrollIntoView({ behavior: "smooth", block: "start" });
