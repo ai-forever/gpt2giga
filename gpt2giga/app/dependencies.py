@@ -35,6 +35,8 @@ class RuntimeStores:
     files: Any = field(default_factory=dict)
     batches: Any = field(default_factory=dict)
     responses: Any = field(default_factory=dict)
+    usage_by_api_key: Any = field(default_factory=dict)
+    usage_by_provider: Any = field(default_factory=dict)
     recent_requests: EventFeed | None = None
     recent_errors: EventFeed | None = None
 
@@ -165,6 +167,8 @@ def configure_runtime_stores(
     stores.files = resources["files"]
     stores.batches = resources["batches"]
     stores.responses = resources["responses"]
+    stores.usage_by_api_key = resources["usage_by_api_key"]
+    stores.usage_by_provider = resources["usage_by_provider"]
     stores.recent_requests = resources["recent_requests"]
     stores.recent_errors = resources["recent_errors"]
     _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)

@@ -163,11 +163,11 @@ def test_observability_middleware_records_recent_requests_and_errors():
     ensure_runtime_dependencies(test_app.state, config=ProxyConfig())
     test_app.add_middleware(ObservabilityMiddleware)
 
-    @test_app.get("/ok")
+    @test_app.get("/ok", tags=["OpenAI"])
     def ok():
         return {"ok": True}
 
-    @test_app.get("/boom")
+    @test_app.get("/boom", tags=["OpenAI"])
     def boom():
         raise HTTPException(status_code=418, detail="teapot")
 
@@ -184,6 +184,8 @@ def test_observability_middleware_records_recent_requests_and_errors():
     assert recent_requests[1]["status_code"] == 418
     assert recent_requests[1]["error_type"] == "HTTP_418"
     assert recent_errors == [recent_requests[1]]
+    assert test_app.state.stores.usage_by_provider["openai"]["request_count"] == 2
+    assert test_app.state.stores.usage_by_provider["openai"]["error_count"] == 1
 
 
 def test_observability_middleware_ignores_admin_surface():
@@ -244,3 +246,42 @@ def test_observability_middleware_records_stream_metadata_and_stream_errors():
     assert event["stream_duration_ms"] is not None
     assert event["error_type"] == "RateLimitError"
     assert recent_errors == [event]
+
+
+def test_observability_middleware_aggregates_usage_by_api_key_and_provider():
+    test_app = FastAPI()
+    ensure_runtime_dependencies(test_app.state, config=ProxyConfig())
+    test_app.add_middleware(ObservabilityMiddleware)
+
+    @test_app.post("/chat/completions", tags=["OpenAI"])
+    async def chat(request: Request):
+        request.state.api_key_context = SimpleNamespace(
+            name="sdk-openai",
+            source="scoped",
+        )
+        set_request_audit_model(request, "GigaChat-2-Max")
+        set_request_audit_usage(
+            request,
+            {
+                "prompt_tokens": 7,
+                "completion_tokens": 5,
+                "total_tokens": 12,
+            },
+        )
+        return {"ok": True}
+
+    client = TestClient(test_app)
+
+    response = client.post("/chat/completions", json={"model": "GigaChat-2-Max"})
+
+    assert response.status_code == 200
+    api_key_usage = test_app.state.stores.usage_by_api_key["sdk-openai"]
+    provider_usage = test_app.state.stores.usage_by_provider["openai"]
+    assert api_key_usage["source"] == "scoped"
+    assert api_key_usage["request_count"] == 1
+    assert api_key_usage["total_tokens"] == 12
+    assert api_key_usage["providers"]["openai"]["request_count"] == 1
+    assert api_key_usage["models"]["GigaChat-2-Max"]["total_tokens"] == 12
+    assert provider_usage["request_count"] == 1
+    assert provider_usage["api_keys"]["sdk-openai"]["source"] == "scoped"
+    assert provider_usage["endpoints"]["/chat/completions"]["request_count"] == 1

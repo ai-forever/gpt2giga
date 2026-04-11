@@ -76,6 +76,8 @@ def test_ensure_runtime_dependencies_configures_memory_backend_resources():
     assert state.stores.files == {}
     assert state.stores.batches == {}
     assert state.stores.responses == {}
+    assert state.stores.usage_by_api_key == {}
+    assert state.stores.usage_by_provider == {}
     assert len(state.stores.recent_requests) == 0
     assert len(state.stores.recent_errors) == 0
 
@@ -101,7 +103,13 @@ def test_runtime_store_backend_can_be_registered_and_selected():
 
     assert stores.backend is not None
     assert stores.backend.name == "custom-test"
-    assert stores.backend.mapping_names == ["files", "batches", "responses"]
+    assert stores.backend.mapping_names == [
+        "files",
+        "batches",
+        "responses",
+        "usage_by_api_key",
+        "usage_by_provider",
+    ]
     assert stores.backend.feed_names == [
         ("recent_requests", 7),
         ("recent_errors", 3),
@@ -122,6 +130,11 @@ def test_sqlite_runtime_backend_persists_mappings_and_feeds(tmp_path):
     first_stores = configure_runtime_stores(first_state, config=config)
 
     first_stores.files["file-1"] = {"id": "file-1", "purpose": "batch"}
+    first_stores.usage_by_api_key["global"] = {
+        "name": "global",
+        "request_count": 2,
+        "total_tokens": 15,
+    }
     first_stores.recent_requests.append(
         {
             "request_id": "req-1",
@@ -151,6 +164,11 @@ def test_sqlite_runtime_backend_persists_mappings_and_feeds(tmp_path):
     assert second_stores.backend is not None
     assert second_stores.backend.name == "sqlite"
     assert second_stores.files["file-1"] == {"id": "file-1", "purpose": "batch"}
+    assert second_stores.usage_by_api_key["global"] == {
+        "name": "global",
+        "request_count": 2,
+        "total_tokens": 15,
+    }
     assert second_stores.recent_requests.recent() == [
         {
             "request_id": "req-1",

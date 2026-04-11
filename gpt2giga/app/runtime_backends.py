@@ -713,6 +713,16 @@ RUNTIME_RESOURCE_DESCRIPTORS: tuple[RuntimeResourceDescriptor, ...] = (
         description="Responses API metadata.",
     ),
     RuntimeResourceDescriptor(
+        name="usage_by_api_key",
+        kind="mapping",
+        description="Aggregated usage accounting grouped by API key.",
+    ),
+    RuntimeResourceDescriptor(
+        name="usage_by_provider",
+        kind="mapping",
+        description="Aggregated usage accounting grouped by external provider.",
+    ),
+    RuntimeResourceDescriptor(
         name="recent_requests",
         kind="feed",
         description="Recent request audit events.",

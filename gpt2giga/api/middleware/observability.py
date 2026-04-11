@@ -91,6 +91,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         if endpoint.startswith(_IGNORED_PREFIXES):
             return None
         audit = get_request_audit_metadata(request)
+        api_key_context = getattr(request.state, "api_key_context", None)
         resolved_error_type = audit.get("error_type") or error_type
         if resolved_error_type is None and response_status_code >= 400:
             resolved_error_type = f"HTTP_{response_status_code}"
@@ -109,6 +110,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             "model": audit.get("model"),
             "token_usage": audit.get("token_usage"),
             "error_type": resolved_error_type,
+            "api_key_name": getattr(api_key_context, "name", None),
+            "api_key_source": getattr(api_key_context, "source", None),
         }
 
     def _record_event(

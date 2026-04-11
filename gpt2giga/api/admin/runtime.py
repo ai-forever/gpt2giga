@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from fastapi import APIRouter, Query
 from fastapi.routing import APIRoute
 from starlette.requests import Request
@@ -46,6 +48,168 @@ def _collect_event_filter_options(
         }
         options[key] = sorted(values, key=lambda item: str(item))
     return options
+
+
+def _sorted_usage_entries(entries: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Sort usage entries by tokens and request volume."""
+    return sorted(
+        entries,
+        key=lambda entry: (
+            -int(entry.get("total_tokens", 0) or 0),
+            -int(entry.get("request_count", 0) or 0),
+            str(entry.get("name") or entry.get("provider") or entry.get("kind") or ""),
+        ),
+    )
+
+
+def _collect_usage_filter_options(
+    entries: list[dict[str, object]],
+) -> dict[str, list[str]]:
+    """Collect available filter values from aggregated usage entries."""
+    models = sorted(
+        {
+            model
+            for entry in entries
+            for model in (
+                (entry.get("models") or {}).keys()
+                if isinstance(entry.get("models"), Mapping)
+                else []
+            )
+        }
+    )
+    providers = sorted(
+        {
+            provider
+            for entry in entries
+            for provider in (
+                (entry.get("providers") or {}).keys()
+                if isinstance(entry.get("providers"), Mapping)
+                else []
+            )
+        }
+    )
+    api_keys = sorted(
+        {
+            api_key
+            for entry in entries
+            for api_key in (
+                (entry.get("api_keys") or {}).keys()
+                if isinstance(entry.get("api_keys"), Mapping)
+                else []
+            )
+        }
+    )
+    sources = sorted(
+        {
+            str(source)
+            for source in (entry.get("source") for entry in entries)
+            if isinstance(source, str) and source
+        }
+    )
+    return {
+        "provider": providers,
+        "model": models,
+        "api_key_name": api_keys,
+        "source": sources,
+    }
+
+
+def _usage_summary(entries: list[dict[str, object]]) -> dict[str, int]:
+    """Build a compact total summary for aggregated usage entries."""
+    return {
+        "request_count": sum(
+            int(entry.get("request_count", 0) or 0) for entry in entries
+        ),
+        "success_count": sum(
+            int(entry.get("success_count", 0) or 0) for entry in entries
+        ),
+        "error_count": sum(int(entry.get("error_count", 0) or 0) for entry in entries),
+        "prompt_tokens": sum(
+            int(entry.get("prompt_tokens", 0) or 0) for entry in entries
+        ),
+        "completion_tokens": sum(
+            int(entry.get("completion_tokens", 0) or 0) for entry in entries
+        ),
+        "total_tokens": sum(
+            int(entry.get("total_tokens", 0) or 0) for entry in entries
+        ),
+    }
+
+
+def _matches_usage_filters(
+    entry: Mapping[str, object],
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    api_key_name: str | None = None,
+    source: str | None = None,
+) -> bool:
+    """Return whether an aggregated usage entry matches the admin filters."""
+    if source is not None and entry.get("source") != source:
+        return False
+    if provider is not None:
+        if entry.get("provider") != provider:
+            providers = entry.get("providers")
+            if not isinstance(providers, Mapping) or provider not in providers:
+                return False
+    if model is not None:
+        models = entry.get("models")
+        if not isinstance(models, Mapping) or model not in models:
+            return False
+    if api_key_name is not None:
+        if entry.get("name") != api_key_name:
+            api_keys = entry.get("api_keys")
+            if not isinstance(api_keys, Mapping) or api_key_name not in api_keys:
+                return False
+    return True
+
+
+def _usage_payload(
+    request: Request,
+    *,
+    kind: str,
+    limit: int,
+    provider: str | None = None,
+    model: str | None = None,
+    api_key_name: str | None = None,
+    source: str | None = None,
+) -> dict[str, object]:
+    """Build an admin payload for aggregated usage entries."""
+    stores = get_runtime_stores(request.app.state)
+    store = stores.usage_by_api_key if kind == "keys" else stores.usage_by_provider
+    entries = [
+        dict(value)
+        for _, value in sorted(store.items(), key=lambda item: str(item[0]))
+        if isinstance(value, Mapping)
+    ]
+    filtered_entries = _sorted_usage_entries(
+        [
+            entry
+            for entry in entries
+            if _matches_usage_filters(
+                entry,
+                provider=_normalize_optional_text(provider),
+                model=_normalize_optional_text(model),
+                api_key_name=_normalize_optional_text(api_key_name),
+                source=_normalize_optional_text(source),
+            )
+        ]
+    )
+    limited_entries = filtered_entries[:limit]
+    return {
+        "entries": limited_entries,
+        "count": len(limited_entries),
+        "kind": kind,
+        "limit": limit,
+        "filters": {
+            "provider": _normalize_optional_text(provider),
+            "model": _normalize_optional_text(model),
+            "api_key_name": _normalize_optional_text(api_key_name),
+            "source": _normalize_optional_text(source),
+        },
+        "available_filters": _collect_usage_filter_options(entries),
+        "summary": _usage_summary(limited_entries),
+    }
 
 
 def _build_config_summary(proxy: object) -> dict[str, dict[str, object]]:
@@ -141,6 +305,8 @@ def _build_capability_matrix(
                     "routes",
                     "recent_requests",
                     "recent_errors",
+                    "usage_by_key",
+                    "usage_by_provider",
                     *([] if not metrics_enabled else ["metrics"]),
                     "logs",
                     "logs_stream",
@@ -154,11 +320,13 @@ def _build_capability_matrix(
                     "/admin/api/capabilities",
                     "/admin/api/requests/recent",
                     "/admin/api/errors/recent",
+                    "/admin/api/usage/keys",
+                    "/admin/api/usage/providers",
                     *([] if not metrics_enabled else ["/admin/api/metrics"]),
                     "/admin/api/logs",
                     "/admin/api/logs/stream",
                 ],
-                "route_count": 10 + int(metrics_enabled),
+                "route_count": 12 + int(metrics_enabled),
             },
         ]
     )
@@ -196,6 +364,8 @@ def _collect_state_status(request: Request) -> dict[str, dict[str, bool | int | 
             "files": len(stores.files),
             "batches": len(stores.batches),
             "responses": len(stores.responses),
+            "usage_by_api_key": len(stores.usage_by_api_key),
+            "usage_by_provider": len(stores.usage_by_provider),
             "recent_requests": len(
                 get_recent_request_feed_from_state(request.app.state)
             ),
@@ -506,4 +676,46 @@ async def get_admin_recent_errors(
         status_code=status_code,
         model=model,
         error_type=error_type,
+    )
+
+
+@admin_runtime_api_router.get("/admin/api/usage/keys")
+@exceptions_handler
+async def get_admin_usage_by_key(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=500),
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+):
+    """Return aggregated usage counters grouped by authenticated API key."""
+    verify_logs_ip_allowlist(request)
+    return _usage_payload(
+        request,
+        kind="keys",
+        limit=limit,
+        provider=provider,
+        model=model,
+        source=source,
+    )
+
+
+@admin_runtime_api_router.get("/admin/api/usage/providers")
+@exceptions_handler
+async def get_admin_usage_by_provider(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=500),
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    api_key_name: str | None = Query(default=None),
+):
+    """Return aggregated usage counters grouped by external provider."""
+    verify_logs_ip_allowlist(request)
+    return _usage_payload(
+        request,
+        kind="providers",
+        limit=limit,
+        provider=provider,
+        model=model,
+        api_key_name=api_key_name,
     )

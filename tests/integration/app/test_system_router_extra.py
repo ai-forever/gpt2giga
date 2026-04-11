@@ -195,6 +195,8 @@ def test_admin_runtime_endpoint():
     assert payload["telemetry_enabled"] is True
     assert payload["runtime_store_backend"] == "memory"
     assert payload["state"]["stores"]["backend"] == "memory"
+    assert payload["state"]["stores"]["usage_by_api_key"] == 0
+    assert payload["state"]["stores"]["usage_by_provider"] == 0
 
 
 def test_admin_capabilities_reflect_enabled_providers():
@@ -212,7 +214,17 @@ def test_admin_capabilities_reflect_enabled_providers():
 
 
 def test_admin_config_exposes_grouped_safe_summary():
-    app = make_app()
+    app = make_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                host="localhost",
+                port=8090,
+                gigachat_api_mode="v1",
+                runtime_store_backend="memory",
+                enable_telemetry=True,
+            )
+        )
+    )
     client = TestClient(app)
 
     resp = client.get("/admin/api/config")
@@ -361,6 +373,101 @@ def test_admin_recent_endpoints_return_empty_payload_by_default():
             "error_type": [],
         },
     }
+
+
+def test_admin_usage_endpoints_return_aggregated_payloads():
+    app = make_app()
+    app.state.stores.usage_by_api_key["sdk-openai"] = {
+        "kind": "api_key",
+        "name": "sdk-openai",
+        "source": "scoped",
+        "request_count": 2,
+        "success_count": 2,
+        "error_count": 0,
+        "prompt_tokens": 7,
+        "completion_tokens": 5,
+        "total_tokens": 12,
+        "models": {
+            "GigaChat-2-Max": {
+                "request_count": 2,
+                "success_count": 2,
+                "error_count": 0,
+                "prompt_tokens": 7,
+                "completion_tokens": 5,
+                "total_tokens": 12,
+            }
+        },
+        "endpoints": {"/chat/completions": {"request_count": 2, "total_tokens": 12}},
+        "providers": {"openai": {"request_count": 2, "total_tokens": 12}},
+        "first_seen_at": "2026-04-11T10:00:00Z",
+        "last_seen_at": "2026-04-11T10:01:00Z",
+    }
+    app.state.stores.usage_by_provider["openai"] = {
+        "kind": "provider",
+        "provider": "openai",
+        "request_count": 2,
+        "success_count": 2,
+        "error_count": 0,
+        "prompt_tokens": 7,
+        "completion_tokens": 5,
+        "total_tokens": 12,
+        "models": {
+            "GigaChat-2-Max": {
+                "request_count": 2,
+                "success_count": 2,
+                "error_count": 0,
+                "prompt_tokens": 7,
+                "completion_tokens": 5,
+                "total_tokens": 12,
+            }
+        },
+        "endpoints": {"/chat/completions": {"request_count": 2, "total_tokens": 12}},
+        "api_keys": {"sdk-openai": {"request_count": 2, "total_tokens": 12}},
+        "first_seen_at": "2026-04-11T10:00:00Z",
+        "last_seen_at": "2026-04-11T10:01:00Z",
+    }
+
+    client = TestClient(app)
+    by_key = client.get(
+        "/admin/api/usage/keys",
+        params={"provider": "openai", "model": "GigaChat-2-Max", "source": "scoped"},
+    )
+    by_provider = client.get(
+        "/admin/api/usage/providers",
+        params={"provider": "openai", "api_key_name": "sdk-openai"},
+    )
+
+    assert by_key.status_code == 200
+    assert by_key.json() == {
+        "entries": [app.state.stores.usage_by_api_key["sdk-openai"]],
+        "count": 1,
+        "kind": "keys",
+        "limit": 50,
+        "filters": {
+            "provider": "openai",
+            "model": "GigaChat-2-Max",
+            "api_key_name": None,
+            "source": "scoped",
+        },
+        "available_filters": {
+            "provider": ["openai"],
+            "model": ["GigaChat-2-Max"],
+            "api_key_name": [],
+            "source": ["scoped"],
+        },
+        "summary": {
+            "request_count": 2,
+            "success_count": 2,
+            "error_count": 0,
+            "prompt_tokens": 7,
+            "completion_tokens": 5,
+            "total_tokens": 12,
+        },
+    }
+    assert by_provider.status_code == 200
+    assert by_provider.json()["entries"][0]["provider"] == "openai"
+    assert by_provider.json()["available_filters"]["api_key_name"] == ["sdk-openai"]
+    assert by_provider.json()["summary"]["total_tokens"] == 12
 
 
 def test_admin_recent_endpoints_support_sqlite_backend_queries(tmp_path):
