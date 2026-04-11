@@ -9,9 +9,9 @@ from starlette.requests import Request
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
 from gpt2giga.api.system.metrics import build_metrics_response
 from gpt2giga.app.observability import (
-    filter_request_events,
     get_recent_error_feed_from_state,
     get_recent_request_feed_from_state,
+    query_request_events,
 )
 from gpt2giga.app.dependencies import (
     get_config_from_state,
@@ -412,8 +412,9 @@ def _recent_events_payload(
         else get_recent_error_feed_from_state(request.app.state)
     )
     recent_events = feed.recent(limit=limit)
-    events = filter_request_events(
-        recent_events,
+    events = query_request_events(
+        feed,
+        limit=limit,
         provider=_normalize_optional_text(provider),
         endpoint=_normalize_optional_text(endpoint),
         method=_normalize_optional_text(method),

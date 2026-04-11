@@ -92,6 +92,12 @@ def test_proxy_settings_runtime_store_backend_normalized(monkeypatch):
     assert s.runtime_store_backend == "memory"
 
 
+def test_proxy_settings_runtime_store_dsn_normalized(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_RUNTIME_STORE_DSN", " sqlite:///tmp/runtime.db ")
+    s = ProxySettings()
+    assert s.runtime_store_dsn == "sqlite:///tmp/runtime.db"
+
+
 def test_proxy_settings_observability_sinks_from_env_csv(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SINKS", "prometheus, otlp")
     s = ProxySettings()

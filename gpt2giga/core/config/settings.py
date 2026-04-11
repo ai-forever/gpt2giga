@@ -71,7 +71,7 @@ class ProxySettings(BaseSettings):
         default="memory",
         description=(
             "Backend для stateful runtime-ресурсов: metadata stores, recent "
-            "requests и recent errors. Встроенный backend: memory. "
+            "requests и recent errors. Встроенные backend-ы: memory, sqlite. "
             "Кастомные backend-ы можно регистрировать в app.runtime_backends."
         ),
     )
@@ -79,7 +79,8 @@ class ProxySettings(BaseSettings):
         default=None,
         description=(
             "Опциональный DSN/URL для внешнего runtime store backend "
-            "(например Redis/Postgres) при использовании кастомной реализации."
+            "(например sqlite:///tmp/gpt2giga-runtime.db, Redis/Postgres) "
+            "при использовании built-in sqlite или кастомной реализации."
         ),
     )
     runtime_store_namespace: str = Field(
@@ -236,6 +237,15 @@ class ProxySettings(BaseSettings):
         """Normalize runtime store namespaces from ENV/CLI friendly forms."""
         if isinstance(value, str):
             return value.strip()
+        return value
+
+    @field_validator("runtime_store_dsn", mode="before")
+    @classmethod
+    def normalize_runtime_store_dsn(cls, value):
+        """Normalize runtime store DSN values from ENV/CLI friendly forms."""
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
         return value
 
     @field_validator("observability_sinks", mode="before")

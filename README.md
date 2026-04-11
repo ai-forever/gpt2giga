@@ -376,7 +376,9 @@ gpt2giga \
 - `GPT2GIGA_API_KEY=""` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
 - `GPT2GIGA_ENABLED_PROVIDERS="openai,anthropic,gemini"` — список внешних provider-ов, которые нужно смонтировать при старте. Поддерживаются `openai`, `anthropic`, `gemini`, а также специальное значение `all`. LiteLLM-compatible `/model/info` включается вместе с `openai`.
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend path для chat-like flows: `v1` или `v2`.
-- `GPT2GIGA_RUNTIME_STORE_BACKEND="memory"` — runtime backend для stateful metadata stores и recent audit feeds.
+- `GPT2GIGA_RUNTIME_STORE_BACKEND="memory"` — runtime backend для stateful metadata stores и recent audit feeds. Built-in варианты: `memory`, `sqlite`.
+- `GPT2GIGA_RUNTIME_STORE_DSN=""` — путь/DSN для runtime backend-а. Для `sqlite` поддерживаются обычный file path или `sqlite:///absolute/path.db`.
+- `GPT2GIGA_RUNTIME_STORE_NAMESPACE="gpt2giga"` — логический namespace внутри runtime backend-а.
 - `GPT2GIGA_OBSERVABILITY_SINKS="prometheus"` — список telemetry sink-ов для normalized request events. Значение `none` отключает встроенный metrics exporter.
 - `GPT2GIGA_CORS_ALLOW_ORIGINS='["*"]'` — список разрешенных Origin (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
@@ -406,6 +408,7 @@ gpt2giga \
 
 - `GPT2GIGA_ENABLED_PROVIDERS` — какие внешние provider-роуты будут опубликованы;
 - `GPT2GIGA_GIGACHAT_API_MODE` — какой backend path использовать для chat-like flows: `v1` или `v2`.
+- `GPT2GIGA_RUNTIME_STORE_BACKEND` — где хранить runtime metadata и recent audit feeds: `memory` или `sqlite`.
 
 Примеры:
 
@@ -425,6 +428,13 @@ GPT2GIGA_GIGACHAT_API_MODE=v1
 # Полный набор provider-ов и backend v2
 GPT2GIGA_ENABLED_PROVIDERS=all
 GPT2GIGA_GIGACHAT_API_MODE=v2
+```
+
+```dotenv
+# Durable/queryable runtime backend для admin audit feeds
+GPT2GIGA_RUNTIME_STORE_BACKEND=sqlite
+GPT2GIGA_RUNTIME_STORE_DSN=sqlite:///tmp/gpt2giga-runtime.db
+GPT2GIGA_RUNTIME_STORE_NAMESPACE=dev-local
 ```
 
 Для Docker/Compose сценариев эти настройки также читаются из `.env`, который подключается в `deploy/compose/*.yaml`.

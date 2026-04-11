@@ -15,13 +15,13 @@ def temp_log_file(tmp_path):
     return log_file
 
 
-def make_app(logs_ip_allowlist=None):
+def make_app(logs_ip_allowlist=None, config=None):
     app = FastAPI()
     app.include_router(system_router)
     app.include_router(admin_api_router)
     app.include_router(admin_router)
     app.include_router(legacy_logs_router)
-    config = ProxyConfig(proxy=ProxySettings())
+    config = config or ProxyConfig(proxy=ProxySettings())
     if logs_ip_allowlist is not None:
         config.proxy_settings.logs_ip_allowlist = logs_ip_allowlist
     ensure_runtime_dependencies(app.state, config=config)
@@ -347,3 +347,61 @@ def test_admin_recent_endpoints_return_empty_payload_by_default():
             "error_type": [],
         },
     }
+
+
+def test_admin_recent_endpoints_support_sqlite_backend_queries(tmp_path):
+    config = ProxyConfig(
+        proxy=ProxySettings(
+            runtime_store_backend="sqlite",
+            runtime_store_dsn=str(tmp_path / "runtime.sqlite3"),
+            runtime_store_namespace="admin-tests",
+            recent_errors_max_items=5,
+        )
+    )
+    app = make_app(config=config)
+    app.state.stores.recent_errors.append(
+        {
+            "created_at": "2026-04-11T10:01:00Z",
+            "request_id": "req-openai-1",
+            "provider": "openai",
+            "endpoint": "/chat/completions",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "status_code": 500,
+            "duration_ms": 63.0,
+            "stream_duration_ms": None,
+            "client_ip": "127.0.0.1",
+            "model": "gpt-4.1-mini",
+            "token_usage": None,
+            "error_type": "InternalServerError",
+        }
+    )
+    app.state.stores.recent_errors.append(
+        {
+            "created_at": "2026-04-11T10:02:00Z",
+            "request_id": "req-gemini-1",
+            "provider": "gemini",
+            "endpoint": "/v1beta/models/gemini:generateContent",
+            "method": "POST",
+            "path": "/v1beta/models/gemini:generateContent",
+            "status_code": 429,
+            "duration_ms": 81.0,
+            "stream_duration_ms": 93.0,
+            "client_ip": "127.0.0.1",
+            "model": "gemini-2.5-pro",
+            "token_usage": None,
+            "error_type": "RateLimitError",
+        }
+    )
+
+    client = TestClient(app)
+    resp = client.get(
+        "/admin/api/errors/recent",
+        params={"provider": "gemini", "status_code": 429},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["count"] == 1
+    assert payload["events"][0]["request_id"] == "req-gemini-1"
+    assert payload["available_filters"]["provider"] == ["gemini", "openai"]

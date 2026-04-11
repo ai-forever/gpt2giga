@@ -242,7 +242,18 @@ Admin UI и admin API используют structured request audit feed:
 - filters по `provider` и `endpoint` на API-уровне;
 - runtime summary с `enabled_providers`, `gigachat_api_mode`, `runtime_store_backend`, `observability_sinks`.
 
-Текущее хранилище recent feeds — in-memory backend. Для durable/queryable storage нужен отдельный custom runtime backend.
+Для runtime storage доступны built-in backend-ы:
+
+- `memory` — process-local dict/ring-buffer storage;
+- `sqlite` — durable/queryable SQLite storage для metadata stores и recent feeds.
+
+Пример:
+
+```dotenv
+GPT2GIGA_RUNTIME_STORE_BACKEND=sqlite
+GPT2GIGA_RUNTIME_STORE_DSN=sqlite:///var/lib/gpt2giga/runtime.db
+GPT2GIGA_RUNTIME_STORE_NAMESPACE=prod-main
+```
 
 ## Рекомендуемый rollout
 

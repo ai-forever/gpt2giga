@@ -88,6 +88,45 @@ def filter_request_events(
     return filtered
 
 
+def query_request_events(
+    feed: EventFeed,
+    *,
+    limit: int | None = None,
+    provider: str | None = None,
+    endpoint: str | None = None,
+    method: str | None = None,
+    status_code: int | None = None,
+    model: str | None = None,
+    error_type: str | None = None,
+) -> list[RequestAuditEvent]:
+    """Query recent request events with a graceful fallback for legacy feeds."""
+    filters = {
+        key: value
+        for key, value in {
+            "provider": provider,
+            "endpoint": endpoint,
+            "method": method,
+            "status_code": status_code,
+            "model": model,
+            "error_type": error_type,
+        }.items()
+        if value is not None
+    }
+    query = getattr(feed, "query", None)
+    if callable(query):
+        return list(query(limit=limit, filters=filters))
+
+    return filter_request_events(
+        feed.recent(limit=limit),
+        provider=provider,
+        endpoint=endpoint,
+        method=method,
+        status_code=status_code,
+        model=model,
+        error_type=error_type,
+    )
+
+
 def set_request_audit_model(request: Any, model: str | None) -> None:
     """Persist the requested or resolved model for the current request."""
     if isinstance(model, str) and model:

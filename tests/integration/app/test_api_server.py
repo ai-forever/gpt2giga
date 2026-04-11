@@ -334,6 +334,29 @@ def test_admin_recent_errors_endpoint_collects_404_events(monkeypatch):
     assert any(event["status_code"] == 404 for event in payload["events"])
 
 
+def test_sqlite_runtime_backend_works_through_app_lifespan(tmp_path, monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            runtime_store_backend="sqlite",
+            runtime_store_dsn=str(tmp_path / "runtime.sqlite3"),
+            runtime_store_namespace="lifespan-tests",
+        )
+    )
+
+    with TestClient(create_app(config=cfg)) as client:
+        assert client.get("/health").status_code == 200
+        response = client.get(
+            "/admin/api/requests/recent", params={"provider": "system"}
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "requests"
+    assert any(event["endpoint"] == "/health" for event in payload["events"])
+
+
 def test_metrics_endpoints_expose_prometheus_payload(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 
