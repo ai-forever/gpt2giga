@@ -374,6 +374,7 @@ gpt2giga \
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
 - `GPT2GIGA_ENABLE_API_KEY_AUTH="False"` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
 - `GPT2GIGA_API_KEY=""` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
+- `GPT2GIGA_SCOPED_API_KEYS='[{"name":"sdk-openai","key":"secret","providers":["openai"],"endpoints":["chat/completions"],"models":["GigaChat-2-Max"]}]'` — опциональные scoped API keys в JSON-массиве. Global `GPT2GIGA_API_KEY` остаётся full-access, а scoped keys можно ограничить по `provider`, `endpoint` и `model`.
 - `GPT2GIGA_ENABLED_PROVIDERS="openai,anthropic,gemini"` — список внешних provider-ов, которые нужно смонтировать при старте. Поддерживаются `openai`, `anthropic`, `gemini`, а также специальное значение `all`. LiteLLM-compatible `/model/info` включается вместе с `openai`.
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend path для chat-like flows: `v1` или `v2`.
 - `GPT2GIGA_RUNTIME_STORE_BACKEND="memory"` — runtime backend для stateful metadata stores и recent audit feeds. Built-in варианты: `memory`, `sqlite`.
@@ -500,12 +501,14 @@ GPT2GIGA_HTTPS_CERT_FILE="Path to cert.pem"
 ```dotenv
 GPT2GIGA_ENABLE_API_KEY_AUTH=True
 GPT2GIGA_API_KEY=123
+# GPT2GIGA_SCOPED_API_KEYS=[{"name":"sdk-openai","key":"scoped-123","providers":["openai"],"endpoints":["chat/completions"]}]
 ```
 
 После этого сервис будет требовать API-ключ на пользовательских эндпоинтах. Поддерживаются разные варианты передачи ключа:
 
 - `x-api-key` и `Authorization: Bearer ...` для OpenAI- и Anthropic-совместимых клиентов;
 - `x-goog-api-key` и query-параметр `key` для Gemini Developer API-совместимых клиентов.
+- global `GPT2GIGA_API_KEY` сохраняет полный доступ, а scoped keys работают только на provider-роутах и могут быть ограничены по `provider`, `endpoint` и `model`.
 
 Авторизация по query-параметру:
 ```bash

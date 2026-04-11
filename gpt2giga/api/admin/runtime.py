@@ -56,6 +56,7 @@ def _build_config_summary(proxy: object) -> dict[str, dict[str, object]]:
             "bind": f"{proxy.host}:{proxy.port}",
             "https_enabled": proxy.use_https,
             "api_key_auth": proxy.enable_api_key_auth,
+            "scoped_api_keys_configured": len(proxy.scoped_api_keys),
             "admin_enabled": proxy.mode != "PROD",
         },
         "providers": {
@@ -235,6 +236,7 @@ def _runtime_summary(request: Request) -> dict[str, object]:
         "app_version": request.app.version or get_app_version(),
         "mode": proxy.mode,
         "auth_required": auth_required,
+        "scoped_api_keys_configured": len(proxy.scoped_api_keys),
         "docs_enabled": request.app.docs_url is not None,
         "redoc_enabled": request.app.redoc_url is not None,
         "openapi_enabled": request.app.openapi_url is not None,
@@ -290,6 +292,7 @@ async def get_admin_config(request: Request):
         "max_text_file_size_bytes": proxy.max_text_file_size_bytes,
         "max_audio_image_total_size_bytes": proxy.max_audio_image_total_size_bytes,
         "enable_api_key_auth": proxy.enable_api_key_auth,
+        "scoped_api_keys_configured": len(proxy.scoped_api_keys),
         "pass_model": proxy.pass_model,
         "pass_token": proxy.pass_token,
         "enable_reasoning": proxy.enable_reasoning,

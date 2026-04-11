@@ -239,6 +239,54 @@ def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypa
     assert client.get("/logs/html").status_code == 401
 
 
+def test_scoped_api_key_allows_matching_provider_route(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            mode="DEV",
+            enable_api_key_auth=True,
+            api_key="global-secret",
+            scoped_api_keys=[
+                {
+                    "name": "sdk-openai",
+                    "key": "scoped-secret",
+                    "providers": ["openai"],
+                    "endpoints": ["models"],
+                }
+            ],
+        )
+    )
+    with TestClient(create_app(config=cfg)) as client:
+        response = client.get(
+            "/v1/models", headers={"Authorization": "Bearer scoped-secret"}
+        )
+
+    assert response.status_code == 200
+
+
+def test_scoped_api_key_cannot_access_admin_routes(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            mode="DEV",
+            enable_api_key_auth=True,
+            api_key="global-secret",
+            scoped_api_keys=[{"key": "scoped-secret", "providers": ["openai"]}],
+        )
+    )
+    app = create_app(config=cfg)
+    client = TestClient(app)
+
+    response = client.get(
+        "/admin/api/runtime", headers={"Authorization": "Bearer scoped-secret"}
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Scoped API key is not allowed for this route"
+
+
 def test_openai_provider_group_mounts_litellm_routes(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 

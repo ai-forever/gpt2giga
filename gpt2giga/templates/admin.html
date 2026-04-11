@@ -779,6 +779,7 @@
         log_rotation_bytes: summary.logging.log_max_size,
         log_redaction: String(summary.logging.log_redact_sensitive),
         api_key_auth: String(summary.network.api_key_auth),
+        scoped_api_keys: summary.network.scoped_api_keys_configured,
         admin_enabled: String(summary.network.admin_enabled),
       };
       Object.entries(values).forEach(([key, value]) => {

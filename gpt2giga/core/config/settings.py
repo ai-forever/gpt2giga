@@ -1,11 +1,12 @@
 """Primary runtime settings models."""
 
+import json
 import warnings
 from functools import cached_property
 from typing import Annotated, Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gpt2giga.core.config.security import SecuritySettings
@@ -20,6 +21,107 @@ from gpt2giga.core.constants import (
 ProviderName = Literal["openai", "anthropic", "gemini"]
 GigaChatAPIMode = Literal["v1", "v2"]
 _ALL_ENABLED_PROVIDERS: tuple[ProviderName, ...] = ("openai", "anthropic", "gemini")
+
+
+class ScopedAPIKeySettings(BaseModel):
+    """Optional API key with narrowed access scopes."""
+
+    name: Optional[str] = Field(
+        default=None,
+        description="Человеко-читаемое имя scoped API key для admin/runtime surfaces.",
+    )
+    key: str = Field(
+        min_length=1,
+        description="Значение scoped API key.",
+        repr=False,
+    )
+    providers: Annotated[list[ProviderName], NoDecode] | None = Field(
+        default=None,
+        description=(
+            "Опциональный allowlist внешних provider-ов: openai, anthropic, gemini. "
+            "Пусто = без ограничения по provider."
+        ),
+    )
+    endpoints: Annotated[list[str], NoDecode] | None = Field(
+        default=None,
+        description=(
+            "Опциональный allowlist normalized endpoint ids без /v1 или /v1beta "
+            "(например chat/completions, responses, models/{model}:generateContent)."
+        ),
+    )
+    models: Annotated[list[str], NoDecode] | None = Field(
+        default=None,
+        description=(
+            "Опциональный allowlist model aliases/ids. Пусто = без ограничения по "
+            "модели."
+        ),
+    )
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value):
+        """Normalize blank names to ``None``."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+    @field_validator("providers", mode="before")
+    @classmethod
+    def normalize_providers(cls, value):
+        """Normalize provider allowlists from ENV/CLI friendly forms."""
+        if value is None or value == "":
+            return None
+
+        def _normalize_parts(parts: list[str]) -> list[str] | None:
+            normalized = [part.strip().lower() for part in parts if part.strip()]
+            if not normalized or "all" in normalized:
+                return None
+            return list(dict.fromkeys(normalized))
+
+        if isinstance(value, str):
+            return _normalize_parts(value.split(","))
+
+        if isinstance(value, (list, tuple, set)):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    parts.extend(item.split(","))
+                else:
+                    return value
+            return _normalize_parts(parts)
+
+        return value
+
+    @field_validator("endpoints", "models", mode="before")
+    @classmethod
+    def normalize_optional_string_list(cls, value):
+        """Normalize endpoint/model allowlists from ENV/CLI friendly forms."""
+        if value is None or value == "":
+            return None
+
+        def _normalize_parts(parts: list[str]) -> list[str] | None:
+            normalized = [part.strip() for part in parts if isinstance(part, str)]
+            normalized = [part for part in normalized if part]
+            if not normalized:
+                return None
+            return list(dict.fromkeys(normalized))
+
+        if isinstance(value, str):
+            return _normalize_parts(value.split(","))
+
+        if isinstance(value, (list, tuple, set)):
+            parts: list[str] = []
+            for item in value:
+                if isinstance(item, str):
+                    parts.extend(item.split(","))
+                else:
+                    return value
+            return _normalize_parts(parts)
+
+        return value
 
 
 class ProxySettings(BaseSettings):
@@ -188,6 +290,14 @@ class ProxySettings(BaseSettings):
         description="API ключ для защиты эндпоинтов (если enable_api_key_auth=True)",
         repr=False,
     )
+    scoped_api_keys: list[ScopedAPIKeySettings] = Field(
+        default_factory=list,
+        description=(
+            "Опциональные scoped API keys в JSON-массиве. Global GPT2GIGA_API_KEY "
+            "сохраняет полный доступ, а scoped keys можно ограничить по provider, "
+            "endpoint и model."
+        ),
+    )
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -285,6 +395,27 @@ class ProxySettings(BaseSettings):
 
         return value
 
+    @field_validator("scoped_api_keys", mode="before")
+    @classmethod
+    def normalize_scoped_api_keys(cls, value):
+        """Normalize scoped API keys from ENV/CLI friendly forms."""
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized:
+                return []
+            try:
+                decoded = json.loads(normalized)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "scoped_api_keys must be a JSON array of key descriptors"
+                ) from exc
+            if decoded is None:
+                return []
+            return decoded
+        return value
+
     @model_validator(mode="after")
     def _validate_prod_security(self):
         """Emit warnings when PROD mode has insecure defaults."""
@@ -319,6 +450,7 @@ class ProxySettings(BaseSettings):
             mode=self.mode,
             enable_api_key_auth=self.enable_api_key_auth,
             api_key=self.api_key,
+            scoped_api_keys_configured=len(self.scoped_api_keys),
             cors_allow_origins=self.cors_allow_origins,
             cors_allow_methods=self.cors_allow_methods,
             cors_allow_headers=self.cors_allow_headers,

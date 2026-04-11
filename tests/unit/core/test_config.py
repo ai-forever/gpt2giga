@@ -20,6 +20,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.runtime_store_namespace == "gpt2giga"
     assert s.enable_telemetry is True
     assert s.observability_sinks == ["prometheus"]
+    assert s.scoped_api_keys == []
     assert s.recent_requests_max_items == 200
     assert s.recent_errors_max_items == 100
     assert s.chat_backend_mode == "v1"
@@ -118,6 +119,28 @@ def test_proxy_settings_observability_sinks_can_be_disabled(monkeypatch):
     assert s.observability_sinks == []
 
 
+def test_proxy_settings_scoped_api_keys_from_env_json(monkeypatch):
+    monkeypatch.setenv(
+        "GPT2GIGA_SCOPED_API_KEYS",
+        (
+            '[{"name":"sdk","key":"secret","providers":["openai"],'
+            '"endpoints":["chat/completions"],"models":["GigaChat-2-Max"]}]'
+        ),
+    )
+    s = ProxySettings()
+    assert len(s.scoped_api_keys) == 1
+    assert s.scoped_api_keys[0].name == "sdk"
+    assert s.scoped_api_keys[0].providers == ["openai"]
+    assert s.scoped_api_keys[0].endpoints == ["chat/completions"]
+    assert s.scoped_api_keys[0].models == ["GigaChat-2-Max"]
+
+
+def test_proxy_settings_scoped_api_keys_invalid_json(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_SCOPED_API_KEYS", "not-json")
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
 def test_proxy_settings_invalid_port(monkeypatch):
     # Невалидный порт должен вызвать ошибку парсинга pydantic
     monkeypatch.setenv("GPT2GIGA_PORT", "not_an_int")
@@ -139,3 +162,14 @@ def test_api_key_hidden_from_model_dump_exclude():
     dumped = s.model_dump(exclude={"api_key"})
     assert "api_key" not in dumped
     assert "super-secret-key-12345" not in str(dumped)
+
+
+def test_scoped_api_key_hidden_from_repr():
+    """Scoped API key values must not appear in ProxySettings repr."""
+    s = ProxySettings(
+        scoped_api_keys=[
+            {"name": "sdk", "key": "scoped-secret", "providers": ["openai"]}
+        ]
+    )
+    text = repr(s)
+    assert "scoped-secret" not in text

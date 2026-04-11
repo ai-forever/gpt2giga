@@ -5,7 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
-from gpt2giga.api.dependencies.auth import verify_api_key, verify_api_key_gemini
+from gpt2giga.api.dependencies.auth import build_api_key_verifier
 from gpt2giga.api.gemini.request import GeminiAPIError
 from gpt2giga.api.gemini.response import gemini_error_response
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
@@ -111,19 +111,23 @@ def _register_root_redirect(app: FastAPI, *, is_prod_mode: bool) -> None:
 def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -> None:
     """Mount all API routers with the current auth policy."""
     config = app.state.config
-    api_dependencies = [Depends(verify_api_key)] if auth_required else []
-    gemini_dependencies = [Depends(verify_api_key_gemini)] if auth_required else []
-    dependencies_by_policy = {
-        "default": api_dependencies,
-        "gemini": gemini_dependencies,
-    }
+    api_dependencies = (
+        [Depends(build_api_key_verifier(allow_scoped_keys=False))]
+        if auth_required
+        else []
+    )
 
     for descriptor in iter_enabled_provider_descriptors(
         config.proxy_settings.enabled_providers
     ):
         for mount in descriptor.mounts:
+            auth_dependency = build_api_key_verifier(
+                provider_name=descriptor.name,
+                gemini_style=mount.auth_policy == "gemini",
+                allow_scoped_keys=True,
+            )
             include_kwargs = {
-                "dependencies": dependencies_by_policy[mount.auth_policy],
+                "dependencies": [Depends(auth_dependency)] if auth_required else [],
             }
             if mount.prefix:
                 include_kwargs["prefix"] = mount.prefix
