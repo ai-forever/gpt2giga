@@ -8,21 +8,20 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, Request, Response
 
 from gpt2giga.api.anthropic.openapi import anthropic_message_batches_openapi_extra
-from gpt2giga.api.anthropic.request_adapter import (
-    build_normalized_chat_request,
-)
 from gpt2giga.api.anthropic.response import (
     _anthropic_http_exception,
     _build_anthropic_response,
 )
-from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
-from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.features.batches import get_batches_service_from_state
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.batches.transforms import extract_batch_result_body, parse_jsonl
 from gpt2giga.features.files.store import get_file_store
+from gpt2giga.providers.anthropic import (
+    AnthropicBatchValidationError,
+    anthropic_provider_adapters,
+)
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Anthropic"])
@@ -253,87 +252,27 @@ def _build_anthropic_batch_results(
 @exceptions_handler
 async def create_message_batch(request: Request):
     """Anthropic Message Batches API compatible create endpoint."""
-    data = await read_request_json(request)
-    completion_window = data.get("completion_window", "24h")
-    if completion_window is None:
-        completion_window = "24h"
-    if completion_window != "24h":
+    try:
+        batch_payload = anthropic_provider_adapters.batches.build_create_payload(
+            await read_request_json(request),
+            logger=request.app.state.logger,
+        )
+    except AnthropicBatchValidationError as exc:
         return _anthropic_http_exception(
             400,
             "invalid_request_error",
-            'Only `completion_window="24h"` is supported.',
+            str(exc),
         )
-    requests_data = data.get("requests")
-    if not isinstance(requests_data, list) or not requests_data:
-        return _anthropic_http_exception(
-            400,
-            "invalid_request_error",
-            "`requests` must be a non-empty array.",
-        )
-
-    seen_custom_ids = set()
-    openai_rows = []
-    stored_requests = []
-    for index, batch_request in enumerate(requests_data, start=1):
-        if not isinstance(batch_request, dict):
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                f"`requests[{index - 1}]` must be an object.",
-            )
-
-        custom_id = batch_request.get("custom_id")
-        params = batch_request.get("params")
-        if not isinstance(custom_id, str) or not custom_id:
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                f"`requests[{index - 1}].custom_id` must be a non-empty string.",
-            )
-        if custom_id in seen_custom_ids:
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                f"Duplicate `custom_id` detected: `{custom_id}`.",
-            )
-        if not isinstance(params, dict):
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                f"`requests[{index - 1}].params` must be an object.",
-            )
-        if params.get("stream"):
-            return _anthropic_http_exception(
-                400,
-                "invalid_request_error",
-                "Streaming requests are not supported inside message batches.",
-            )
-
-        seen_custom_ids.add(custom_id)
-        openai_rows.append(
-            {
-                "custom_id": custom_id,
-                "method": "POST",
-                "url": "/v1/chat/completions",
-                "body": to_backend_payload(
-                    build_normalized_chat_request(
-                        params,
-                        logger=get_logger_from_state(request.app.state),
-                    )
-                ),
-            }
-        )
-        stored_requests.append({"custom_id": custom_id, "params": params})
 
     giga_client = get_gigachat_client(request)
     batches_service = get_batches_service_from_state(request.app.state)
     record = await batches_service.create_batch_from_rows(
-        openai_rows,
+        batch_payload.rows,
         endpoint="/v1/chat/completions",
-        completion_window=completion_window,
+        completion_window=batch_payload.completion_window,
         metadata={
             "api_format": "anthropic_messages",
-            "requests": stored_requests,
+            "requests": batch_payload.stored_requests,
         },
         giga_client=giga_client,
         batch_store=get_batch_store(request),

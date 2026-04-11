@@ -2,11 +2,28 @@
 
 from fastapi import APIRouter
 
-from gpt2giga.api.anthropic.batches import router as batches_router
-from gpt2giga.api.anthropic.messages import router as messages_router
+_router: APIRouter | None = None
 
-router = APIRouter(tags=["Anthropic"])
-router.include_router(messages_router)
-router.include_router(batches_router)
+
+def _build_router() -> APIRouter:
+    router = APIRouter(tags=["Anthropic"])
+
+    from gpt2giga.api.anthropic.batches import router as batches_router
+    from gpt2giga.api.anthropic.messages import router as messages_router
+
+    router.include_router(messages_router)
+    router.include_router(batches_router)
+    return router
+
+
+def __getattr__(name: str):
+    if name != "router":
+        raise AttributeError(name)
+
+    global _router
+    if _router is None:
+        _router = _build_router()
+    return _router
+
 
 __all__ = ["router"]

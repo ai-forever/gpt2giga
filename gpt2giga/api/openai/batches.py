@@ -10,6 +10,7 @@ from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.features.batches import get_batches_service_from_state
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.files.store import get_file_store
+from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["OpenAI"])
@@ -19,7 +20,9 @@ router = APIRouter(tags=["OpenAI"])
 @exceptions_handler
 async def create_batch(request: Request):
     """Create a batch job."""
-    data = await read_request_json(request)
+    data = openai_provider_adapters.batches.build_create_payload(
+        await read_request_json(request)
+    )
     giga_client = get_gigachat_client(request)
     batches_service = get_batches_service_from_state(request.app.state)
     return await batches_service.create_batch(

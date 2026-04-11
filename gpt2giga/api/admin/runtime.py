@@ -22,66 +22,9 @@ from gpt2giga.app.dependencies import (
 )
 from gpt2giga.core.app_meta import get_app_version
 from gpt2giga.core.errors import exceptions_handler
+from gpt2giga.providers import list_provider_descriptors
 
 admin_runtime_api_router = APIRouter(tags=["Admin"])
-
-_PROVIDER_CAPABILITIES: dict[str, dict[str, list[str]]] = {
-    "openai": {
-        "capabilities": [
-            "models",
-            "chat_completions",
-            "responses",
-            "embeddings",
-            "files",
-            "batches",
-            "litellm_model_info",
-        ],
-        "routes": [
-            "/models",
-            "/chat/completions",
-            "/responses",
-            "/embeddings",
-            "/files",
-            "/batches",
-            "/model/info",
-            "/v1/models",
-            "/v1/chat/completions",
-            "/v1/responses",
-            "/v1/embeddings",
-            "/v1/files",
-            "/v1/batches",
-            "/v1/model/info",
-        ],
-    },
-    "anthropic": {
-        "capabilities": ["messages", "count_tokens", "message_batches"],
-        "routes": [
-            "/messages",
-            "/messages/count_tokens",
-            "/messages/batches",
-            "/v1/messages",
-            "/v1/messages/count_tokens",
-            "/v1/messages/batches",
-        ],
-    },
-    "gemini": {
-        "capabilities": [
-            "generate_content",
-            "stream_generate_content",
-            "count_tokens",
-            "batch_embed_contents",
-            "models",
-        ],
-        "routes": [
-            "/v1beta/models",
-            "/v1beta/models/{model}",
-            "/v1beta/models/{model}:generateContent",
-            "/v1beta/models/{model}:streamGenerateContent",
-            "/v1beta/models/{model}:countTokens",
-            "/v1beta/models/{model}:batchEmbedContents",
-        ],
-    },
-}
 
 
 def _collect_state_status(request: Request) -> dict[str, dict[str, bool | int | None]]:
@@ -247,11 +190,13 @@ async def get_admin_capabilities(request: Request):
             "observability_sinks": list(config.proxy_settings.observability_sinks),
         },
         "providers": {
-            provider: {
-                "enabled": provider in enabled_providers,
-                **details,
+            descriptor.name: {
+                "enabled": descriptor.name in enabled_providers,
+                "display_name": descriptor.display_name,
+                "capabilities": list(descriptor.capabilities),
+                "routes": list(descriptor.routes),
             }
-            for provider, details in _PROVIDER_CAPABILITIES.items()
+            for descriptor in list_provider_descriptors()
         },
         "system": {
             "enabled": True,

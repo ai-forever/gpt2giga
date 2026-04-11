@@ -7,10 +7,6 @@ from gpt2giga.api.anthropic.openapi import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
 )
-from gpt2giga.api.anthropic.request_adapter import (
-    build_normalized_chat_request,
-    build_token_count_texts,
-)
 from gpt2giga.api.anthropic.response import _build_anthropic_response
 from gpt2giga.api.anthropic.streaming import _stream_anthropic_generator
 from gpt2giga.app.dependencies import (
@@ -24,6 +20,7 @@ from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.service import get_chat_service_from_state
+from gpt2giga.providers.anthropic import anthropic_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Anthropic"])
@@ -39,7 +36,7 @@ async def count_tokens(request: Request):
     giga_client = get_gigachat_client(request)
     model = data.get("model", "unknown")
     set_request_audit_model(request, model)
-    texts = build_token_count_texts(data)
+    texts = anthropic_provider_adapters.chat.build_token_count_texts(data)
 
     if not texts:
         return {"input_tokens": 0}
@@ -63,7 +60,7 @@ async def messages(request: Request):
     app_state = request.app.state
     chat_service = get_chat_service_from_state(app_state)
     api_mode = chat_service.backend_mode
-    normalized_request = build_normalized_chat_request(
+    normalized_request = anthropic_provider_adapters.chat.build_normalized_request(
         data,
         logger=get_logger_from_state(app_state),
     )

@@ -16,12 +16,6 @@ from gpt2giga.api.gemini.request import (
     normalize_model_name,
     read_gemini_request_json,
 )
-from gpt2giga.api.gemini.request_adapter import (
-    build_batch_embeddings_request,
-    build_count_tokens_texts,
-    build_normalized_chat_request,
-    build_single_embeddings_request,
-)
 from gpt2giga.api.gemini.response import (
     build_batch_embed_contents_response,
     build_generate_content_response,
@@ -39,6 +33,7 @@ from gpt2giga.app.observability import (
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.service import get_chat_service_from_state
 from gpt2giga.features.embeddings import get_embeddings_service_from_state
+from gpt2giga.providers.gemini import gemini_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["Gemini"])
@@ -75,7 +70,7 @@ async def generate_content(model: str, request: Request):
     giga_client = get_gigachat_client(request)
     app_state = request.app.state
     chat_service = get_chat_service_from_state(app_state)
-    normalized_request = build_normalized_chat_request(
+    normalized_request = gemini_provider_adapters.chat.build_normalized_request(
         data,
         logger=get_logger_from_state(app_state),
     )
@@ -118,7 +113,7 @@ async def stream_generate_content(model: str, request: Request):
     app_state = request.app.state
     chat_service = get_chat_service_from_state(app_state)
     api_mode = chat_service.backend_mode
-    normalized_request = build_normalized_chat_request(
+    normalized_request = gemini_provider_adapters.chat.build_normalized_request(
         data,
         logger=get_logger_from_state(app_state),
     )
@@ -160,7 +155,7 @@ async def count_tokens(model: str, request: Request):
             message="`generateContentRequest` must be an object when provided.",
         )
 
-    texts = build_count_tokens_texts(count_payload)
+    texts = gemini_provider_adapters.chat.build_count_tokens_texts(count_payload)
     if not texts:
         return {"totalTokens": 0}
 
@@ -189,7 +184,10 @@ async def batch_embed_contents(model: str, request: Request):
 
     embeddings_service = get_embeddings_service_from_state(request.app.state)
     giga_client = get_gigachat_client(request)
-    normalized_request = build_batch_embeddings_request(requests_payload, model)
+    normalized_request = gemini_provider_adapters.embeddings.build_batch_request(
+        requests_payload,
+        model,
+    )
     result = await embeddings_service.create_embeddings(
         normalized_request,
         giga_client=giga_client,
@@ -205,7 +203,7 @@ async def embed_content(model: str, request: Request):
     set_request_audit_model(request, normalize_model_name(model))
     embeddings_service = get_embeddings_service_from_state(request.app.state)
     giga_client = get_gigachat_client(request)
-    normalized_request = build_single_embeddings_request(
+    normalized_request = gemini_provider_adapters.embeddings.build_single_request(
         data, model_resource_name(model)
     )
     result = await embeddings_service.create_embeddings(

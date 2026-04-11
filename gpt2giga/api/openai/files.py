@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Query, Request, Response
 
 from gpt2giga.api.openai.openapi import files_openapi_extra
 from gpt2giga.app.dependencies import get_response_processor_from_state
@@ -11,6 +11,7 @@ from gpt2giga.core.http.form_body import read_request_multipart
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.files import get_files_service_from_state
 from gpt2giga.features.files.store import get_file_store
+from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["OpenAI"])
@@ -21,20 +22,7 @@ router = APIRouter(tags=["OpenAI"])
 async def create_file(request: Request):
     """Upload a file."""
     multipart = await read_request_multipart(request)
-    purpose = multipart["form"].get("purpose")
-    upload = multipart["files"].get("file")
-    if not purpose or upload is None:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "message": "Multipart upload requires both `file` and `purpose`.",
-                    "type": "invalid_request_error",
-                    "param": None,
-                    "code": "invalid_multipart",
-                }
-            },
-        )
+    purpose, upload = openai_provider_adapters.files.extract_create_file_args(multipart)
 
     giga_client = get_gigachat_client(request)
     files_service = get_files_service_from_state(request.app.state)

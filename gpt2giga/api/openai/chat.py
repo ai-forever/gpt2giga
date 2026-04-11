@@ -4,7 +4,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.api.openai.openapi import chat_completions_openapi_extra
-from gpt2giga.api.openai.request_adapter import build_normalized_chat_request
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.app.observability import (
     annotate_request_audit_from_payload,
@@ -14,6 +13,7 @@ from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.service import get_chat_service_from_state
+from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 router = APIRouter(tags=["OpenAI"])
@@ -28,7 +28,7 @@ async def chat_completions(request: Request):
     giga_client = get_gigachat_client(request)
     app_state = request.app.state
     chat_service = get_chat_service_from_state(app_state)
-    data = build_normalized_chat_request(
+    data = openai_provider_adapters.chat.build_normalized_request(
         payload,
         logger=get_logger_from_state(app_state),
     )

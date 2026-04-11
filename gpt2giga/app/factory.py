@@ -4,24 +4,21 @@ from fastapi import Depends, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
-from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
 from gpt2giga.api.dependencies.auth import verify_api_key, verify_api_key_gemini
-from gpt2giga.api.gemini import router as gemini_router
 from gpt2giga.api.gemini.request import GeminiAPIError
 from gpt2giga.api.gemini.response import gemini_error_response
-from gpt2giga.api.litellm import router as litellm_router
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
 from gpt2giga.api.middleware.rquid_context import RquidMiddleware
-from gpt2giga.api.openai import router as openai_router
 from gpt2giga.api.system import metrics_router, system_router
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
 from gpt2giga.core.app_meta import get_app_version
+from gpt2giga.providers import iter_enabled_provider_descriptors
 
 
 def _build_cors_options(config) -> tuple[list[str], list[str], list[str], bool]:
@@ -114,42 +111,28 @@ def _register_root_redirect(app: FastAPI, *, is_prod_mode: bool) -> None:
 def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -> None:
     """Mount all API routers with the current auth policy."""
     config = app.state.config
-    enabled_providers = set(config.proxy_settings.enabled_providers)
     api_dependencies = [Depends(verify_api_key)] if auth_required else []
     gemini_dependencies = [Depends(verify_api_key_gemini)] if auth_required else []
+    dependencies_by_policy = {
+        "default": api_dependencies,
+        "gemini": gemini_dependencies,
+    }
 
-    if "openai" in enabled_providers:
-        app.include_router(openai_router, dependencies=api_dependencies)
-        app.include_router(
-            openai_router,
-            prefix="/v1",
-            tags=["V1"],
-            dependencies=api_dependencies,
-        )
-        app.include_router(
-            litellm_router,
-            prefix="/v1",
-            tags=["V1 LiteLLM"],
-            dependencies=api_dependencies,
-        )
-        app.include_router(litellm_router, dependencies=api_dependencies)
-
-    if "anthropic" in enabled_providers:
-        app.include_router(
-            anthropic_router,
-            prefix="/v1",
-            tags=["V1 Anthropic"],
-            dependencies=api_dependencies,
-        )
-        app.include_router(anthropic_router, dependencies=api_dependencies)
-
-    if "gemini" in enabled_providers:
-        app.include_router(
-            gemini_router,
-            prefix="/v1beta",
-            tags=["V1beta Gemini"],
-            dependencies=gemini_dependencies,
-        )
+    for descriptor in iter_enabled_provider_descriptors(
+        config.proxy_settings.enabled_providers
+    ):
+        for mount in descriptor.mounts:
+            include_kwargs = {
+                "dependencies": dependencies_by_policy[mount.auth_policy],
+            }
+            if mount.prefix:
+                include_kwargs["prefix"] = mount.prefix
+            if mount.tags:
+                include_kwargs["tags"] = list(mount.tags)
+            app.include_router(
+                mount.router_factory(),
+                **include_kwargs,
+            )
 
     app.include_router(system_router)
     app.include_router(metrics_router, dependencies=api_dependencies)
