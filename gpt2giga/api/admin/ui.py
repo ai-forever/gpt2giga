@@ -7,9 +7,11 @@ from pathlib import Path
 import anyio
 from fastapi import APIRouter
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.app.dependencies import get_config_from_state
+from gpt2giga.core.config.control_plane import requires_admin_bootstrap
 from gpt2giga.core.errors import exceptions_handler
 
 admin_router = APIRouter(include_in_schema=False)
@@ -40,8 +42,11 @@ async def _get_console_html() -> str:
     return _CONSOLE_HTML
 
 
-async def _serve_console(request: Request) -> HTMLResponse:
+async def _serve_console(request: Request) -> Response:
     verify_logs_ip_allowlist(request)
+    config = get_config_from_state(request.app.state)
+    if requires_admin_bootstrap(config) and request.url.path != "/admin/setup":
+        return RedirectResponse(url="/admin/setup")
     return HTMLResponse(await _get_console_html())
 
 

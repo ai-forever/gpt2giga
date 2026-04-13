@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ CONTROL_PLANE_VERSION = 1
 CONTROL_PLANE_DIR_ENV = "GPT2GIGA_CONTROL_PLANE_DIR"
 _CONTROL_FILE_NAME = "control-plane.json"
 _CONTROL_KEY_FILE_NAME = "control-plane.key"
+_BOOTSTRAP_TOKEN_FILE_NAME = "bootstrap-token"
 _PROXY_SECRET_FIELDS = {"api_key", "scoped_api_keys"}
 _GIGACHAT_SECRET_FIELDS = {
     "access_token",
@@ -51,6 +53,11 @@ def get_control_plane_file() -> Path:
 def get_control_plane_key_file() -> Path:
     """Return the local encryption-key path for persisted secrets."""
     return get_control_plane_dir() / _CONTROL_KEY_FILE_NAME
+
+
+def get_control_plane_bootstrap_token_file() -> Path:
+    """Return the bootstrap-token path used for first-run admin access."""
+    return get_control_plane_dir() / _BOOTSTRAP_TOKEN_FILE_NAME
 
 
 def has_persisted_control_plane() -> bool:
@@ -116,6 +123,33 @@ def _load_fernet(*, create: bool) -> Fernet | None:
     except OSError:
         pass
     return Fernet(key)
+
+
+def load_bootstrap_token(*, create: bool) -> str | None:
+    """Load or lazily create the bootstrap token used for first-run admin access."""
+    token_file = get_control_plane_bootstrap_token_file()
+    if token_file.exists():
+        token = token_file.read_text(encoding="utf-8").strip()
+        return token or None
+    if not create:
+        return None
+
+    _ensure_control_plane_dir()
+    token = secrets.token_urlsafe(24)
+    token_file.write_text(token + "\n", encoding="utf-8")
+    try:
+        os.chmod(token_file, 0o600)
+    except OSError:
+        pass
+    return token
+
+
+def clear_bootstrap_token() -> None:
+    """Remove the bootstrap token once first-run setup is complete."""
+    try:
+        get_control_plane_bootstrap_token_file().unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _encrypt_secret_payload(fernet: Fernet, value: Any) -> str:
@@ -227,6 +261,37 @@ def apply_control_plane_overrides(config: ProxyConfig) -> ProxyConfig:
     )
 
 
+def is_gigachat_ready(config: ProxyConfig) -> bool:
+    """Return whether upstream GigaChat auth is configured."""
+    gigachat = config.gigachat_settings
+    return bool(
+        getattr(gigachat, "credentials", None)
+        or getattr(gigachat, "access_token", None)
+    )
+
+
+def is_security_ready(config: ProxyConfig) -> bool:
+    """Return whether gateway auth is enabled and has at least one usable key."""
+    proxy = config.proxy_settings
+    return bool(proxy.enable_api_key_auth and (proxy.api_key or proxy.scoped_api_keys))
+
+
+def is_control_plane_setup_complete(config: ProxyConfig) -> bool:
+    """Return whether persisted config, upstream auth and gateway auth are all ready."""
+    return (
+        has_persisted_control_plane()
+        and is_gigachat_ready(config)
+        and is_security_ready(config)
+    )
+
+
+def requires_admin_bootstrap(config: ProxyConfig) -> bool:
+    """Return whether PROD admin access must stay in bootstrap mode."""
+    return config.proxy_settings.mode == "PROD" and not is_control_plane_setup_complete(
+        config
+    )
+
+
 def persist_control_plane_config(config: ProxyConfig) -> Path:
     """Persist the current runtime config for future UI-managed startups."""
     _ensure_control_plane_dir()
@@ -259,22 +324,21 @@ def persist_control_plane_config(config: ProxyConfig) -> Path:
     }
     path = get_control_plane_file()
     _write_json(path, payload)
+    if is_control_plane_setup_complete(config):
+        clear_bootstrap_token()
     return path
 
 
 def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
     """Return a safe summary of the persisted-control-plane state."""
     proxy = config.proxy_settings
-    gigachat = config.gigachat_settings
     payload = load_control_plane_payload()
     persisted = has_persisted_control_plane()
-    gigachat_ready = bool(
-        getattr(gigachat, "credentials", None)
-        or getattr(gigachat, "access_token", None)
-    )
-    security_ready = bool(
-        proxy.enable_api_key_auth and (proxy.api_key or proxy.scoped_api_keys)
-    )
+    gigachat_ready = is_gigachat_ready(config)
+    security_ready = is_security_ready(config)
+    setup_complete = persisted and gigachat_ready and security_ready
+    bootstrap_required = requires_admin_bootstrap(config)
+    bootstrap_token = load_bootstrap_token(create=bootstrap_required)
 
     warnings: list[str] = []
     if not persisted:
@@ -299,8 +363,11 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
         warnings.append(
             "Runtime store backend is memory. Stateful metadata and recent events are not durable."
         )
+    if bootstrap_required:
+        warnings.append(
+            "PROD bootstrap mode is active. Admin setup is limited to localhost or the bootstrap token until setup is complete."
+        )
 
-    setup_complete = persisted and gigachat_ready and security_ready
     return {
         "persisted": persisted,
         "path": str(get_control_plane_file()),
@@ -311,6 +378,17 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
         "global_api_key_configured": proxy.api_key is not None,
         "scoped_api_keys_configured": len(proxy.scoped_api_keys),
         "setup_complete": setup_complete,
+        "bootstrap": {
+            "required": bootstrap_required,
+            "allow_localhost": bootstrap_required,
+            "allow_token": bootstrap_required,
+            "token_configured": bootstrap_token is not None,
+            "token_path": (
+                str(get_control_plane_bootstrap_token_file())
+                if bootstrap_required
+                else None
+            ),
+        },
         "wizard_steps": [
             {
                 "id": "storage",

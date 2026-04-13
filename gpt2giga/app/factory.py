@@ -5,6 +5,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
+from gpt2giga.api.admin.access import build_admin_access_verifier
 from gpt2giga.api.dependencies.auth import build_api_key_verifier
 from gpt2giga.api.dependencies.governance import build_governance_verifier
 from gpt2giga.api.gemini.request import GeminiAPIError
@@ -21,6 +22,10 @@ from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
 from gpt2giga.core.app_meta import get_app_version
+from gpt2giga.core.config.control_plane import (
+    load_bootstrap_token,
+    requires_admin_bootstrap,
+)
 from gpt2giga.providers import iter_enabled_provider_descriptors
 
 
@@ -121,6 +126,9 @@ def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -
         if auth_required
         else []
     )
+    admin_dependencies = (
+        [Depends(build_admin_access_verifier())] if auth_required else []
+    )
 
     for descriptor in iter_enabled_provider_descriptors(
         config.proxy_settings.enabled_providers
@@ -155,8 +163,8 @@ def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -
     app.include_router(translate_router, dependencies=api_dependencies)
     app.include_router(translate_router, prefix="/v1", dependencies=api_dependencies)
     app.include_router(metrics_router, dependencies=api_dependencies)
-    app.include_router(admin_api_router, dependencies=api_dependencies)
-    app.include_router(admin_router, dependencies=api_dependencies)
+    app.include_router(admin_api_router, dependencies=admin_dependencies)
+    app.include_router(admin_router, dependencies=admin_dependencies)
 
     if not is_prod_mode:
         app.include_router(legacy_logs_router, dependencies=api_dependencies)
@@ -175,12 +183,15 @@ def create_app(
 
     is_prod_mode = config.proxy_settings.mode == "PROD"
     auth_required = config.proxy_settings.enable_api_key_auth or is_prod_mode
+    bootstrap_required = requires_admin_bootstrap(config)
 
-    if auth_required and not config.proxy_settings.api_key:
+    if auth_required and not config.proxy_settings.api_key and not bootstrap_required:
         raise RuntimeError(
             "API key must be configured when auth is enabled or MODE=PROD "
             "(set GPT2GIGA_API_KEY / --proxy.api-key)."
         )
+    if bootstrap_required:
+        load_bootstrap_token(create=True)
 
     app = FastAPI(
         lifespan=lifespan,

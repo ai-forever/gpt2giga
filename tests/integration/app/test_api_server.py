@@ -19,6 +19,10 @@ from gpt2giga.api.tags import (
 from gpt2giga.app.factory import create_app
 from gpt2giga.app.run import run as run_app
 from gpt2giga.core.app_meta import check_port_available
+from gpt2giga.core.config.control_plane import (
+    get_control_plane_bootstrap_token_file,
+    persist_control_plane_config,
+)
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
@@ -273,12 +277,27 @@ def test_translate_endpoint_rejects_non_text_translation_to_gigachat(monkeypatch
     )
 
 
-def test_prod_mode_requires_api_key(monkeypatch):
-    import pytest
+def test_prod_mode_without_api_key_enters_bootstrap_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
 
-    monkeypatch.delenv("GPT2GIGA_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="API key must be configured"):
-        create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD")))
+    app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD")))
+    client = TestClient(app)
+
+    redirect = client.get("/admin", follow_redirects=False)
+    assert redirect.status_code == 307
+    assert redirect.headers["location"] == "/admin/setup"
+
+    setup = client.get("/admin/api/setup")
+    assert setup.status_code == 200
+    assert setup.json()["bootstrap"]["required"] is True
+    assert get_control_plane_bootstrap_token_file().exists() is True
+
+    provider = client.get("/v1/models")
+    assert provider.status_code == 503
+    assert (
+        provider.json()["detail"]
+        == "Instance setup is incomplete. Finish /admin/setup first."
+    )
 
 
 def test_prod_mode_forces_auth_dependency():
@@ -296,8 +315,16 @@ def test_prod_mode_forces_auth_dependency():
     assert response.status_code == 401
 
 
-def test_prod_mode_keeps_admin_routes_protected_and_disables_legacy_logs_routes():
-    app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD", api_key="k")))
+def test_prod_mode_keeps_admin_routes_protected_and_disables_legacy_logs_routes(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    config = ProxyConfig(
+        proxy=ProxySettings(mode="PROD", enable_api_key_auth=True, api_key="k"),
+        gigachat={"credentials": "gigachat-creds", "scope": "GIGACHAT_API_PERS"},
+    )
+    persist_control_plane_config(config)
+    app = create_app(config=config)
     client = TestClient(app)
 
     assert client.get("/admin").status_code == 401
@@ -314,6 +341,42 @@ def test_prod_mode_keeps_admin_routes_protected_and_disables_legacy_logs_routes(
     assert client.get("/logs").status_code == 404
     assert client.get("/logs/stream").status_code == 404
     assert client.get("/logs/html").status_code == 404
+
+
+def test_prod_bootstrap_allows_remote_setup_with_bootstrap_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+
+    app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD")))
+    client = TestClient(app)
+    token = get_control_plane_bootstrap_token_file().read_text(encoding="utf-8").strip()
+
+    denied = client.get(
+        "/admin/api/setup",
+        headers={"X-Forwarded-For": "10.0.0.5"},
+    )
+    assert denied.status_code == 401
+
+    allowed = client.get(
+        "/admin/api/setup",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Forwarded-For": "10.0.0.5",
+        },
+    )
+    assert allowed.status_code == 200
+
+    blocked_route = client.get(
+        "/admin/api/capabilities",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Forwarded-For": "10.0.0.5",
+        },
+    )
+    assert blocked_route.status_code == 403
+    assert (
+        blocked_route.json()["detail"]
+        == "This admin route is unavailable until /admin/setup is complete."
+    )
 
 
 def test_prod_mode_keeps_metrics_route_but_requires_api_key(monkeypatch):

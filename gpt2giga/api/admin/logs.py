@@ -19,7 +19,7 @@ admin_logs_api_router = APIRouter(tags=["Admin"])
 legacy_logs_router = APIRouter(include_in_schema=False)
 
 
-def _get_client_ip(request: Request) -> str:
+def get_client_ip(request: Request) -> str:
     """Extract client IP from X-Forwarded-For or request.client."""
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
@@ -36,7 +36,7 @@ def verify_logs_ip_allowlist(request: Request) -> None:
     if not allowlist:
         return
 
-    client_ip = _get_client_ip(request)
+    client_ip = get_client_ip(request)
     if client_ip not in allowlist:
         from fastapi import HTTPException
 

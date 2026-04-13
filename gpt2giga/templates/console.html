@@ -445,8 +445,8 @@
         </nav>
         <div class="auth-box">
           <label>
-            Admin API key
-            <input id="admin-key-input" type="password" placeholder="If /admin requires auth" />
+            Admin API key / bootstrap token
+            <input id="admin-key-input" type="password" placeholder="Admin key or first-run bootstrap token" />
           </label>
           <label>
             Gateway API key
@@ -498,7 +498,7 @@
         setup: {
           eyebrow: "Setup",
           title: "Bootstrap and first-run flow",
-          subtitle: "Persist control-plane config, configure GigaChat and lock down gateway access from one guided page.",
+          subtitle: "Persist control-plane config, configure GigaChat and close out PROD bootstrap access from one guided page.",
         },
         settings: {
           eyebrow: "Settings",
@@ -701,6 +701,9 @@
           if (!setup.security_ready) {
             pushAlert("Gateway auth bootstrap is incomplete. Create a global or scoped API key before exposing the proxy beyond local bring-up.", "warn");
           }
+          if (setup.bootstrap && setup.bootstrap.required) {
+            pushAlert("PROD bootstrap mode is active. Until setup is complete, admin access is limited to localhost or the bootstrap token.", "warn");
+          }
           if (runtime.mode === "DEV") {
             pushAlert("Console is running in DEV mode. That keeps /admin and docs available, which is convenient but not hardened.", "info");
           }
@@ -820,6 +823,11 @@
             "Setup progress",
             `<div class="stack">
               ${renderSetupSteps(setup.wizard_steps)}
+              ${
+                setup.bootstrap && setup.bootstrap.required
+                  ? `<div class="banner warn">Bootstrap gate is active. This instance is still in PROD first-run mode, so admin setup is available only from localhost or with the bootstrap token stored at ${escapeHtml(setup.bootstrap.token_path || "the control-plane volume")}.</div>`
+                  : `<div class="banner">Bootstrap gate is closed. Normal operator access now relies on the configured admin/global API key path.</div>`
+              }
               <div class="split">
                 <div class="stack">
                   <div class="stat-line"><strong>Control-plane file</strong><span class="muted">${escapeHtml(setup.path)}</span></div>
@@ -828,6 +836,13 @@
                   <div class="stat-line"><strong>Store backend</strong><span class="muted">${escapeHtml(runtime.runtime_store_backend)}</span></div>
                 </div>
                 <div class="stack">
+                  ${
+                    setup.bootstrap && setup.bootstrap.required
+                      ? `<div class="pill">Bootstrap localhost access: ${setup.bootstrap.allow_localhost ? "on" : "off"}</div>
+                         <div class="pill">Bootstrap token access: ${setup.bootstrap.allow_token ? "on" : "off"}</div>
+                         <div class="pill">Bootstrap token file: ${escapeHtml(setup.bootstrap.token_path || "n/a")}</div>`
+                      : ""
+                  }
                   ${
                     (setup.warnings || []).length
                       ? setup.warnings.map((warning) => `<div class="banner warn">${escapeHtml(warning)}</div>`).join("")

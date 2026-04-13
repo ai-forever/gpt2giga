@@ -1,7 +1,9 @@
 from gpt2giga.core.config.control_plane import (
     apply_control_plane_overrides,
+    get_control_plane_bootstrap_token_file,
     get_control_plane_file,
     has_persisted_control_plane,
+    load_bootstrap_token,
     load_control_plane_overrides,
     persist_control_plane_config,
 )
@@ -65,3 +67,30 @@ def test_apply_control_plane_overrides_replaces_runtime_defaults(tmp_path, monke
     assert merged.proxy_settings.enable_reasoning is True
     assert merged.gigachat_settings.credentials.get_secret_value() == "persisted-creds"
     assert merged.gigachat_settings.model == "GigaChat-Max"
+
+
+def test_bootstrap_token_is_created_and_cleared_on_completed_setup(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+
+    token = load_bootstrap_token(create=True)
+
+    assert token
+    assert get_control_plane_bootstrap_token_file().exists()
+
+    persist_control_plane_config(
+        ProxyConfig(
+            proxy=ProxySettings(
+                mode="PROD",
+                enable_api_key_auth=True,
+                api_key="global-secret",
+            ),
+            gigachat={
+                "credentials": "gigachat-credentials",
+                "scope": "GIGACHAT_API_PERS",
+            },
+        )
+    )
+
+    assert get_control_plane_bootstrap_token_file().exists() is False

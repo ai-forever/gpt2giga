@@ -19,6 +19,7 @@ from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 
 from gpt2giga.api.gemini.request import normalize_model_name
 from gpt2giga.app.dependencies import get_config_from_state
+from gpt2giga.core.config.control_plane import requires_admin_bootstrap
 from gpt2giga.core.config.settings import ScopedAPIKeySettings
 
 api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
@@ -43,7 +44,7 @@ class APIKeyContext:
     model: str | None
 
 
-def _resolve_provided_key(
+def resolve_provided_api_key(
     request: Request,
     header_param: str | None = None,
     query_param: str | None = None,
@@ -197,7 +198,7 @@ async def _authorize_scoped_key(
     )
 
 
-async def _verify_provided_key(
+async def verify_provided_api_key(
     request: Request,
     provided_key: str | None,
     *,
@@ -205,15 +206,24 @@ async def _verify_provided_key(
     allow_scoped_keys: bool = True,
 ) -> str:
     """Validate a provided key against the configured global/scoped keys."""
-    if not provided_key:
-        raise HTTPException(
-            status_code=HTTP_401_UNAUTHORIZED, detail="API key required"
-        )
-
     config = get_config_from_state(request.app.state)
     proxy = config.proxy_settings
     expected_key = getattr(proxy, "api_key", None)
+    if not provided_key:
+        if not expected_key and requires_admin_bootstrap(config):
+            raise HTTPException(
+                status_code=503,
+                detail="Instance setup is incomplete. Finish /admin/setup first.",
+            )
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED, detail="API key required"
+        )
     if not expected_key:
+        if requires_admin_bootstrap(config):
+            raise HTTPException(
+                status_code=503,
+                detail="Instance setup is incomplete. Finish /admin/setup first.",
+            )
         raise HTTPException(status_code=500, detail="API key not configured")
 
     if secrets.compare_digest(provided_key, expected_key):
@@ -268,7 +278,7 @@ def build_api_key_verifier(
             HTTPAuthorizationCredentials | None, Security(bearer_scheme)
         ] = None,
     ) -> str:
-        provided_key = _resolve_provided_key(
+        provided_key = resolve_provided_api_key(
             request,
             header_param=header_param,
             query_param=query_param,
@@ -277,7 +287,7 @@ def build_api_key_verifier(
             gemini_query_param=gemini_query_param,
         )
         try:
-            return await _verify_provided_key(
+            return await verify_provided_api_key(
                 request,
                 provided_key,
                 provider_name=provider_name,
