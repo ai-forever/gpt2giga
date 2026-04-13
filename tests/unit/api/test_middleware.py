@@ -92,6 +92,24 @@ def test_path_norm_keeps_v1beta_prefix():
     assert resp.json() == {"ok": True}
 
 
+def test_path_norm_keeps_upload_v1beta_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["upload", "v1beta", "files"],
+    )
+
+    @test_app.post("/upload/v1beta/files")
+    def upload_file():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+    resp = client.post("/proxy/upload/v1beta/files")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
 def test_pass_token_middleware(monkeypatch):
     test_app = FastAPI()
     test_app.add_middleware(PassTokenMiddleware)

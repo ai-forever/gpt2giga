@@ -182,7 +182,8 @@ async def _create_file_from_multipart(request: Request) -> JSONResponse:
                 request=request,
                 metadata=get_file_store(request).get(created["id"]),
             )
-        }
+        },
+        headers={"X-Goog-Upload-Status": "final"},
     )
 
 
@@ -403,5 +404,6 @@ async def finalize_upload(upload_id: str, request: Request):
                 request=request,
                 metadata=get_file_store(request).get(created["id"]),
             )
-        }
+        },
+        headers={"X-Goog-Upload-Status": "final"},
     )

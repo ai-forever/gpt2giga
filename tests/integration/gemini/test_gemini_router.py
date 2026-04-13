@@ -929,6 +929,7 @@ def test_resumable_file_upload_flow():
     )
 
     assert finalize.status_code == 200
+    assert finalize.headers["X-Goog-Upload-Status"] == "final"
     file_payload = finalize.json()["file"]
     assert file_payload["displayName"] == "poem.txt"
     assert client.get(

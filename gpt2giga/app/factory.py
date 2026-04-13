@@ -74,6 +74,7 @@ def _register_middlewares(app: FastAPI, config) -> None:
     app.add_middleware(
         PathNormalizationMiddleware,
         valid_roots=[
+            "upload",
             "v1",
             "v1beta",
             "chat",
