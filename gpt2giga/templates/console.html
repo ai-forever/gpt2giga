@@ -479,9 +479,31 @@
       const heroActions = document.getElementById("hero-actions");
       const adminKeyInput = document.getElementById("admin-key-input");
       const gatewayKeyInput = document.getElementById("gateway-key-input");
+      const urlParams = new URLSearchParams(window.location.search);
 
       adminKeyInput.value = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
       gatewayKeyInput.value = localStorage.getItem(GATEWAY_KEY_STORAGE) || adminKeyInput.value;
+
+      function hydrateKeysFromQuery() {
+        const queryKey = urlParams.get("x-api-key")?.trim();
+        if (!queryKey) return;
+
+        adminKeyInput.value = queryKey;
+        localStorage.setItem(ADMIN_KEY_STORAGE, queryKey);
+
+        const storedGatewayKey = localStorage.getItem(GATEWAY_KEY_STORAGE)?.trim();
+        if (!storedGatewayKey) {
+          gatewayKeyInput.value = queryKey;
+          localStorage.setItem(GATEWAY_KEY_STORAGE, queryKey);
+        }
+
+        urlParams.delete("x-api-key");
+        const nextQuery = urlParams.toString();
+        const cleanUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
+        window.history.replaceState({}, "", cleanUrl);
+      }
+
+      hydrateKeysFromQuery();
 
       document.getElementById("save-auth").addEventListener("click", () => {
         localStorage.setItem(ADMIN_KEY_STORAGE, adminKeyInput.value.trim());
@@ -954,12 +976,19 @@
               }
               <div class="split">
                 <div class="stack">
+                  <div class="stat-line"><strong>Claim status</strong><span class="muted">${setup.claim && setup.claim.claimed ? "claimed" : setup.claim && setup.claim.required ? "pending" : "not required"}</span></div>
                   <div class="stat-line"><strong>Control-plane file</strong><span class="muted">${escapeHtml(setup.path)}</span></div>
                   <div class="stat-line"><strong>Encryption key file</strong><span class="muted">${escapeHtml(setup.key_path || "n/a")}</span></div>
                   <div class="stat-line"><strong>Runtime mode</strong><span class="muted">${escapeHtml(runtime.mode)}</span></div>
                   <div class="stat-line"><strong>Store backend</strong><span class="muted">${escapeHtml(runtime.runtime_store_backend)}</span></div>
                 </div>
                 <div class="stack">
+                  ${
+                    setup.claim && setup.claim.claimed
+                      ? `<div class="pill">Claimed at: ${escapeHtml(setup.claim.claimed_at || "n/a")}</div>
+                         <div class="pill">Operator: ${escapeHtml(setup.claim.operator_label || "not recorded")}</div>`
+                      : ""
+                  }
                   ${
                     setup.bootstrap && setup.bootstrap.required
                       ? `<div class="pill">Bootstrap localhost access: ${setup.bootstrap.allow_localhost ? "on" : "off"}</div>
@@ -978,7 +1007,45 @@
             "wide-panel span-12",
           )}
           ${card(
-            "Step 1 · Application posture",
+            "Step 1 · Claim instance",
+            `<div class="stack">
+              <div class="banner ${setup.claim && setup.claim.claimed ? "" : "warn"}">
+                ${
+                  setup.claim && setup.claim.required
+                    ? setup.claim.claimed
+                      ? `This bootstrap session is already claimed${setup.claim.operator_label ? ` by ${escapeHtml(setup.claim.operator_label)}` : ""}.`
+                      : "First-run PROD bootstrap is active. Claim the instance before continuing with operator setup."
+                    : "Claiming is not required in the current runtime mode."
+                }
+              </div>
+              ${
+                setup.claim && setup.claim.claimed
+                  ? `<div class="split">
+                      <div class="stack">
+                        <div class="pill">Claimed at: ${escapeHtml(setup.claim.claimed_at || "n/a")}</div>
+                        <div class="pill">Claimed via: ${escapeHtml(setup.claim.claimed_via || "n/a")}</div>
+                      </div>
+                      <div class="stack">
+                        <div class="pill">Operator label: ${escapeHtml(setup.claim.operator_label || "not recorded")}</div>
+                        <div class="pill">Source IP: ${escapeHtml(setup.claim.claimed_from || "unknown")}</div>
+                      </div>
+                    </div>`
+                  : setup.claim && setup.claim.required
+                    ? `<form id="setup-claim-form" class="stack">
+                        <label>Operator label (optional)
+                          <input name="operator_label" placeholder="Primary operator" />
+                        </label>
+                        <div class="toolbar">
+                          <button>Claim this instance</button>
+                        </div>
+                      </form>`
+                    : ""
+              }
+            </div>`,
+            "wide-panel span-4",
+          )}
+          ${card(
+            "Step 2 · Application posture",
             `<form id="setup-application-form" class="stack">
               <div class="split">
                 <label>Mode
@@ -1023,7 +1090,7 @@
             "wide-panel span-4",
           )}
           ${card(
-            "Step 2 · GigaChat auth",
+            "Step 3 · GigaChat auth",
             `<form id="setup-gigachat-form" class="stack">
               <div class="split">
                 <label>Model
@@ -1059,7 +1126,7 @@
             "wide-panel span-4",
           )}
           ${card(
-            "Step 3 · Security bootstrap",
+            "Step 4 · Security bootstrap",
             `<div class="stack">
               <form id="setup-security-form" class="stack">
                 <label><span>Enable gateway API key auth</span><select name="enable_api_key_auth"><option value="true" ${security.values.enable_api_key_auth ? "selected" : ""}>on</option><option value="false" ${!security.values.enable_api_key_auth ? "selected" : ""}>off</option></select></label>
@@ -1091,8 +1158,9 @@
             "wide-panel span-4",
           )}
           ${card(
-            "Step 4 · Finish",
+            "Step 5 · Finish",
             `<div class="stack">
+              <div class="pill">Claimed instance: ${setup.claim && setup.claim.claimed ? "yes" : setup.claim && setup.claim.required ? "pending" : "not required"}</div>
               <div class="pill">Persisted config: ${setup.persisted ? "yes" : "no"}</div>
               <div class="pill">GigaChat ready: ${setup.gigachat_ready ? "yes" : "no"}</div>
               <div class="pill">Security ready: ${setup.security_ready ? "yes" : "no"}</div>
@@ -1113,6 +1181,28 @@
         `;
 
         document.getElementById("refresh-setup").addEventListener("click", () => renderRoute("setup"));
+
+        const claimForm = document.getElementById("setup-claim-form");
+        if (claimForm) {
+          claimForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const form = event.currentTarget;
+            const response = await apiFetch("/admin/api/setup/claim", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                operator_label: form.operator_label.value.trim() || null,
+              }),
+            });
+            pushAlert(
+              response.claim.operator_label
+                ? `Instance claimed by ${response.claim.operator_label}.`
+                : "Instance claim recorded.",
+              "info",
+            );
+            renderRoute("setup");
+          });
+        }
 
         document.getElementById("setup-application-form").addEventListener("submit", async (event) => {
           event.preventDefault();

@@ -1,5 +1,7 @@
 """FastAPI application factory and HTTP wiring."""
 
+from urllib.parse import urlencode
+
 from fastapi import Depends, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
@@ -108,14 +110,19 @@ def _register_middlewares(app: FastAPI, config) -> None:
     app.add_middleware(ObservabilityMiddleware)
 
 
-def _register_root_redirect(app: FastAPI, *, is_prod_mode: bool) -> None:
+def _register_root_redirect(app: FastAPI, *, config, is_prod_mode: bool) -> None:
     """Register the root redirect or health-like response."""
 
     @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     async def root_redirect():
         if is_prod_mode:
             return {"status": "ok", "mode": "PROD"}
-        return RedirectResponse(url="/admin")
+        target = "/admin"
+        if config.proxy_settings.enable_api_key_auth and config.proxy_settings.api_key:
+            target = (
+                f"{target}?{urlencode({'x-api-key': config.proxy_settings.api_key})}"
+            )
+        return RedirectResponse(url=target)
 
 
 def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -> None:
@@ -211,6 +218,6 @@ def create_app(
 
     _register_exception_handlers(app)
     _register_middlewares(app, config)
-    _register_root_redirect(app, is_prod_mode=is_prod_mode)
+    _register_root_redirect(app, config=config, is_prod_mode=is_prod_mode)
     _register_routes(app, auth_required=auth_required, is_prod_mode=is_prod_mode)
     return app

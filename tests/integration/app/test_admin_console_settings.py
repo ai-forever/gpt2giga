@@ -43,8 +43,27 @@ def test_setup_endpoint_reports_persisted_status(tmp_path, monkeypatch):
     assert payload["gigachat_ready"] is False
     assert payload["security_ready"] is False
     assert payload["setup_complete"] is False
-    assert payload["wizard_steps"][0]["id"] == "storage"
+    assert payload["claim"]["required"] is False
+    assert payload["claim"]["claimed"] is False
+    assert payload["wizard_steps"][0]["id"] == "claim"
     assert payload["warnings"]
+
+
+def test_setup_claim_endpoint_records_operator_metadata_in_prod(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD"))))
+
+    response = client.post(
+        "/admin/api/setup/claim",
+        json={"operator_label": "Primary operator"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["claimed"] is True
+    assert payload["claim"]["operator_label"] == "Primary operator"
+    assert payload["control_plane"]["claim"]["claimed"] is True
+    assert payload["control_plane"]["wizard_steps"][0]["ready"] is True
 
 
 def test_gigachat_settings_update_is_persisted(tmp_path, monkeypatch):

@@ -39,6 +39,7 @@ _admin_bearer_scheme = HTTPBearer(auto_error=False)
 
 _BOOTSTRAP_ADMIN_API_ROUTES = {
     "/admin/api/setup",
+    "/admin/api/setup/claim",
     "/admin/api/runtime",
     "/admin/api/settings/application",
     "/admin/api/settings/gigachat",

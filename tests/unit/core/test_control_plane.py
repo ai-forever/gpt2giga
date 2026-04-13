@@ -1,11 +1,15 @@
 from gpt2giga.core.config.control_plane import (
     apply_control_plane_overrides,
     build_proxy_config_from_control_plane_payload,
+    claim_admin_instance,
     get_control_plane_bootstrap_token_file,
+    get_control_plane_bootstrap_state_file,
     get_control_plane_file,
     has_persisted_control_plane,
+    is_admin_instance_claimed,
     list_control_plane_revisions,
     load_bootstrap_token,
+    load_bootstrap_state,
     load_control_plane_overrides,
     load_control_plane_revision_payload,
     persist_control_plane_config,
@@ -97,6 +101,29 @@ def test_bootstrap_token_is_created_and_cleared_on_completed_setup(
     )
 
     assert get_control_plane_bootstrap_token_file().exists() is False
+
+
+def test_claim_admin_instance_persists_first_operator_metadata(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+
+    claimed = claim_admin_instance(
+        operator_label="Local operator",
+        claimed_via="admin_setup",
+        claimed_from="127.0.0.1",
+    )
+
+    assert claimed["claimed_at"] is not None
+    assert claimed["operator_label"] == "Local operator"
+    assert get_control_plane_bootstrap_state_file().exists() is True
+    assert is_admin_instance_claimed() is True
+
+    loaded = load_bootstrap_state()
+    assert loaded["operator_label"] == "Local operator"
+    assert loaded["claimed_via"] == "admin_setup"
+    assert loaded["claimed_from"] == "127.0.0.1"
+
+    duplicate = claim_admin_instance(operator_label="Someone else")
+    assert duplicate == loaded
 
 
 def test_control_plane_revisions_keep_recent_snapshots(tmp_path, monkeypatch):

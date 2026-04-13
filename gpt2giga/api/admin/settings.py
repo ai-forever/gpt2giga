@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 
-from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.api.admin.logs import get_client_ip, verify_logs_ip_allowlist
 from gpt2giga.app.dependencies import (
     ensure_runtime_dependencies,
     get_config_from_state,
@@ -21,6 +21,7 @@ from gpt2giga.app.wiring import reload_runtime_services
 from gpt2giga.core.config.control_plane import (
     build_proxy_config_from_control_plane_payload,
     build_control_plane_status,
+    claim_admin_instance,
     list_control_plane_revisions,
     load_control_plane_revision_payload,
     persist_control_plane_config,
@@ -150,6 +151,12 @@ class ScopedKeyRotateRequest(BaseModel):
     """Rotate a scoped key in place."""
 
     key: str | None = Field(default=None, min_length=1)
+
+
+class ClaimInstanceRequest(BaseModel):
+    """Capture optional operator context for the first-run claim step."""
+
+    operator_label: str | None = Field(default=None, min_length=1)
 
 
 def _mask_secret(value: str | None) -> str | None:
@@ -532,6 +539,35 @@ async def get_admin_setup_status(request: Request):
     """Return first-run and persisted-config status for the console."""
     verify_logs_ip_allowlist(request)
     return _control_summary(request)
+
+
+@admin_settings_api_router.post("/admin/api/setup/claim")
+@exceptions_handler
+async def claim_admin_setup_instance(
+    request: Request,
+    payload: ClaimInstanceRequest | None = Body(default=None),
+):
+    """Record the operator claim for the current bootstrap session."""
+    verify_logs_ip_allowlist(request)
+    config = get_config_from_state(request.app.state)
+    control_plane = _control_summary(request)
+
+    if not control_plane["bootstrap"]["required"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Claim flow is available only during PROD bootstrap.",
+        )
+
+    claim = claim_admin_instance(
+        operator_label=payload.operator_label if payload else None,
+        claimed_via="admin_setup",
+        claimed_from=get_client_ip(request) or None,
+    )
+    return {
+        "claimed": True,
+        "claim": claim,
+        "control_plane": build_control_plane_status(config),
+    }
 
 
 @admin_settings_api_router.get("/admin/api/settings/application")

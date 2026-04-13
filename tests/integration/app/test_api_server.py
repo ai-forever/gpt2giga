@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
@@ -55,6 +56,26 @@ def test_root_head_allowed():
     response = client.head("/", follow_redirects=False)
     assert response.status_code == 307
     assert response.headers["location"] == "/admin"
+
+
+def test_root_redirect_includes_api_key_query_in_dev_when_auth_enabled():
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                mode="DEV",
+                enable_api_key_auth=True,
+                api_key="dev-secret+/=",
+            )
+        )
+    )
+    client = TestClient(app)
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    parsed = urlparse(response.headers["location"])
+    assert parsed.path == "/admin"
+    assert parse_qs(parsed.query) == {"x-api-key": ["dev-secret+/="]}
 
 
 def test_cors_headers_present():
@@ -292,6 +313,8 @@ def test_prod_mode_without_api_key_enters_bootstrap_mode(tmp_path, monkeypatch):
     setup = client.get("/admin/api/setup")
     assert setup.status_code == 200
     assert setup.json()["bootstrap"]["required"] is True
+    assert setup.json()["claim"]["required"] is True
+    assert setup.json()["claim"]["claimed"] is False
     assert get_control_plane_bootstrap_token_file().exists() is True
 
     provider = client.get("/v1/models")
@@ -366,6 +389,18 @@ def test_prod_bootstrap_allows_remote_setup_with_bootstrap_token(tmp_path, monke
         },
     )
     assert allowed.status_code == 200
+
+    claimed = client.post(
+        "/admin/api/setup/claim",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Forwarded-For": "10.0.0.5",
+        },
+        json={"operator_label": "Remote bootstrap"},
+    )
+    assert claimed.status_code == 200
+    assert claimed.json()["control_plane"]["claim"]["claimed"] is True
+    assert claimed.json()["control_plane"]["claim"]["claimed_from"] == "10.0.0.5"
 
     blocked_route = client.get(
         "/admin/api/capabilities",

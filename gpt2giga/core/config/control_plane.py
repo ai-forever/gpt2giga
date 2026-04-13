@@ -18,6 +18,7 @@ CONTROL_PLANE_DIR_ENV = "GPT2GIGA_CONTROL_PLANE_DIR"
 _CONTROL_FILE_NAME = "control-plane.json"
 _CONTROL_KEY_FILE_NAME = "control-plane.key"
 _BOOTSTRAP_TOKEN_FILE_NAME = "bootstrap-token"
+_BOOTSTRAP_STATE_FILE_NAME = "bootstrap-state.json"
 _REVISIONS_DIR_NAME = "revisions"
 _MAX_REVISIONS = 12
 _PROXY_SECRET_FIELDS = {"api_key", "scoped_api_keys"}
@@ -60,6 +61,11 @@ def get_control_plane_key_file() -> Path:
 def get_control_plane_bootstrap_token_file() -> Path:
     """Return the bootstrap-token path used for first-run admin access."""
     return get_control_plane_dir() / _BOOTSTRAP_TOKEN_FILE_NAME
+
+
+def get_control_plane_bootstrap_state_file() -> Path:
+    """Return the bootstrap-state path used for first-run claim metadata."""
+    return get_control_plane_dir() / _BOOTSTRAP_STATE_FILE_NAME
 
 
 def get_control_plane_revisions_dir() -> Path:
@@ -174,6 +180,53 @@ def clear_bootstrap_token() -> None:
         get_control_plane_bootstrap_token_file().unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def load_bootstrap_state() -> dict[str, Any]:
+    """Load persisted first-run claim metadata."""
+    path = get_control_plane_bootstrap_state_file()
+    if not path.exists():
+        return {
+            "claimed_at": None,
+            "operator_label": None,
+            "claimed_via": None,
+            "claimed_from": None,
+        }
+
+    payload = _read_json(path)
+    return {
+        "claimed_at": payload.get("claimed_at"),
+        "operator_label": payload.get("operator_label"),
+        "claimed_via": payload.get("claimed_via"),
+        "claimed_from": payload.get("claimed_from"),
+    }
+
+
+def is_admin_instance_claimed() -> bool:
+    """Return whether the first-run admin bootstrap has been claimed."""
+    return bool(load_bootstrap_state().get("claimed_at"))
+
+
+def claim_admin_instance(
+    *,
+    operator_label: str | None = None,
+    claimed_via: str | None = None,
+    claimed_from: str | None = None,
+) -> dict[str, Any]:
+    """Persist the first operator claim for the current instance."""
+    existing = load_bootstrap_state()
+    if existing.get("claimed_at"):
+        return existing
+
+    _ensure_control_plane_dir()
+    payload = {
+        "claimed_at": _utc_now(),
+        "operator_label": operator_label or None,
+        "claimed_via": claimed_via or None,
+        "claimed_from": claimed_from or None,
+    }
+    _write_json(get_control_plane_bootstrap_state_file(), payload)
+    return payload
 
 
 def _encrypt_secret_payload(fernet: Fernet, value: Any) -> str:
@@ -461,12 +514,16 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
     """Return a safe summary of the persisted-control-plane state."""
     proxy = config.proxy_settings
     payload = load_control_plane_payload()
+    bootstrap_state = load_bootstrap_state()
     persisted = has_persisted_control_plane()
     gigachat_ready = is_gigachat_ready(config)
     security_ready = is_security_ready(config)
     setup_complete = persisted and gigachat_ready and security_ready
     bootstrap_required = requires_admin_bootstrap(config)
     bootstrap_token = load_bootstrap_token(create=bootstrap_required)
+    claimed = bool(bootstrap_state.get("claimed_at"))
+    claim_required = bootstrap_required
+    claim_ready = claimed or not claim_required
 
     warnings: list[str] = []
     if not persisted:
@@ -492,6 +549,10 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
             "Runtime store backend is memory. Stateful metadata and recent events are not durable."
         )
     if bootstrap_required:
+        if not claimed:
+            warnings.append(
+                "Instance has not been claimed yet. The first operator should claim it before continuing setup."
+            )
         warnings.append(
             "PROD bootstrap mode is active. Admin setup is limited to localhost or the bootstrap token until setup is complete."
         )
@@ -506,6 +567,14 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
         "global_api_key_configured": proxy.api_key is not None,
         "scoped_api_keys_configured": len(proxy.scoped_api_keys),
         "setup_complete": setup_complete,
+        "claim": {
+            "required": claim_required,
+            "claimed": claimed,
+            "claimed_at": bootstrap_state.get("claimed_at"),
+            "operator_label": bootstrap_state.get("operator_label"),
+            "claimed_via": bootstrap_state.get("claimed_via"),
+            "claimed_from": bootstrap_state.get("claimed_from"),
+        },
         "bootstrap": {
             "required": bootstrap_required,
             "allow_localhost": bootstrap_required,
@@ -518,6 +587,16 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
             ),
         },
         "wizard_steps": [
+            {
+                "id": "claim",
+                "label": "Claim instance",
+                "ready": claim_ready,
+                "description": (
+                    "Record the first operator that is taking ownership of the bootstrap flow."
+                    if claim_required
+                    else "Claim flow is only required during PROD first-run bootstrap."
+                ),
+            },
             {
                 "id": "storage",
                 "label": "Persist settings",
