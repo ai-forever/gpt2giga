@@ -1,6 +1,17 @@
 import type { DiffEntry, SetupStep } from "./types";
 import { escapeHtml, humanizeField } from "./utils";
 
+interface StatLineItem {
+  label: string;
+  value: string;
+  tone?: "default" | "good" | "warn";
+}
+
+interface TableColumn {
+  label: string;
+  className?: string;
+}
+
 export function banner(message: string, tone: "info" | "warn" | "danger" = "info"): string {
   const toneClass =
     tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
@@ -30,6 +41,70 @@ export function kpi(label: string, value: string | number, className = "panel pa
 
 export function renderJson(data: unknown): string {
   return `<pre class="code-block">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+}
+
+export function renderEmptyState(message: string): string {
+  return `<p class="muted">${escapeHtml(message)}</p>`;
+}
+
+export function renderStatLines(items: StatLineItem[], emptyMessage = "Nothing to show."): string {
+  if (!items.length) {
+    return renderEmptyState(emptyMessage);
+  }
+
+  return `
+    <div class="stack">
+      ${items
+        .map((item) => {
+          const tone = item.tone ?? "default";
+          return `
+            <div class="stat-line">
+              <span class="muted">${escapeHtml(item.label)}</span>
+              ${pill(item.value, tone)}
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+export function renderTable(
+  columns: TableColumn[],
+  rows: string[][],
+  emptyMessage = "No rows available.",
+): string {
+  if (!rows.length) {
+    return renderEmptyState(emptyMessage);
+  }
+
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            ${columns
+              .map(
+                (column) =>
+                  `<th${column.className ? ` class="${escapeHtml(column.className)}"` : ""}>${escapeHtml(column.label)}</th>`,
+              )
+              .join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  ${row.map((cell) => `<td>${cell}</td>`).join("")}
+                </tr>
+              `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 
 export function renderSetupSteps(steps: SetupStep[]): string {

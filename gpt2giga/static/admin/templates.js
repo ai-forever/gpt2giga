@@ -23,6 +23,56 @@ export function kpi(label, value, className = "panel panel--span-3") {
 export function renderJson(data) {
     return `<pre class="code-block">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
 }
+export function renderEmptyState(message) {
+    return `<p class="muted">${escapeHtml(message)}</p>`;
+}
+export function renderStatLines(items, emptyMessage = "Nothing to show.") {
+    if (!items.length) {
+        return renderEmptyState(emptyMessage);
+    }
+    return `
+    <div class="stack">
+      ${items
+        .map((item) => {
+        const tone = item.tone ?? "default";
+        return `
+            <div class="stat-line">
+              <span class="muted">${escapeHtml(item.label)}</span>
+              ${pill(item.value, tone)}
+            </div>
+          `;
+    })
+        .join("")}
+    </div>
+  `;
+}
+export function renderTable(columns, rows, emptyMessage = "No rows available.") {
+    if (!rows.length) {
+        return renderEmptyState(emptyMessage);
+    }
+    return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            ${columns
+        .map((column) => `<th${column.className ? ` class="${escapeHtml(column.className)}"` : ""}>${escapeHtml(column.label)}</th>`)
+        .join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+        .map((row) => `
+                <tr>
+                  ${row.map((cell) => `<td>${cell}</td>`).join("")}
+                </tr>
+              `)
+        .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
 export function renderSetupSteps(steps) {
     if (!steps.length) {
         return `<p class="muted">No setup steps reported.</p>`;

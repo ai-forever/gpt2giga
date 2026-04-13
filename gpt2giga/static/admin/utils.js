@@ -71,6 +71,23 @@ export function formatBytes(value) {
     const precision = size >= 100 || unitIndex === 0 ? 0 : 1;
     return `${size.toFixed(precision)} ${units[unitIndex]}`;
 }
+export function formatNumber(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return value === null || value === undefined || value === "" ? "0" : String(value);
+    }
+    return new Intl.NumberFormat().format(numeric);
+}
+export function formatDurationMs(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return "0 ms";
+    }
+    if (numeric >= 1000) {
+        return `${(numeric / 1000).toFixed(numeric >= 10_000 ? 0 : 1)} s`;
+    }
+    return `${Math.round(numeric)} ms`;
+}
 export function asArray(value) {
     return Array.isArray(value) ? value : [];
 }

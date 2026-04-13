@@ -85,6 +85,25 @@ export function formatBytes(value: unknown): string {
   return `${size.toFixed(precision)} ${units[unitIndex]}`;
 }
 
+export function formatNumber(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return value === null || value === undefined || value === "" ? "0" : String(value);
+  }
+  return new Intl.NumberFormat().format(numeric);
+}
+
+export function formatDurationMs(value: unknown): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "0 ms";
+  }
+  if (numeric >= 1000) {
+    return `${(numeric / 1000).toFixed(numeric >= 10_000 ? 0 : 1)} s`;
+  }
+  return `${Math.round(numeric)} ms`;
+}
+
 export function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
