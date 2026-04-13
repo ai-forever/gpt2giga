@@ -1,5 +1,7 @@
-import { card, kpi, renderDefinitionList } from "../templates.js";
+import { withBusyState } from "../forms.js";
+import { card, kpi, pill, renderDefinitionList } from "../templates.js";
 import { asArray, escapeHtml, formatBytes, formatTimestamp, safeJsonParse, } from "../utils.js";
+const INVALID_JSON = "__invalid__";
 export async function renderFilesBatches(app, token) {
     const filters = readFilesBatchesFilters();
     const [filesPayload, batchesPayload] = await Promise.all([
@@ -13,8 +15,8 @@ export async function renderFilesBatches(app, token) {
     const batches = asArray(batchesPayload.data);
     const filteredFiles = files.filter((item) => matchesFile(item, filters));
     const filteredBatches = batches.filter((item) => matchesBatch(item, filters));
-    const completedBatches = filteredBatches.filter((batch) => batch.status === "completed").length;
-    const activeBatches = filteredBatches.length - completedBatches;
+    const attentionBatches = filteredBatches.filter((batch) => isAttentionBatchStatus(batch.status)).length;
+    const outputReadyBatches = filteredBatches.filter((batch) => Boolean(String(batch.output_file_id ?? ""))).length;
     const fileLookup = new Map(files.map((item) => [String(item.id ?? ""), item]));
     const batchLookup = new Map(batches.map((item) => [String(item.id ?? ""), item]));
     app.setHeroActions(`
@@ -25,8 +27,8 @@ export async function renderFilesBatches(app, token) {
     app.setContent(`
     ${kpi("Files shown", `${filteredFiles.length}/${files.length}`)}
     ${kpi("Batches shown", `${filteredBatches.length}/${batches.length}`)}
-    ${kpi("Completed", completedBatches)}
-    ${kpi("Active", activeBatches)}
+    ${kpi("Output ready", outputReadyBatches)}
+    ${kpi("Needs attention", attentionBatches)}
     ${card("Inventory filters", `
         <form id="files-batches-filters-form" class="stack">
           <div class="quad-grid">
@@ -97,14 +99,24 @@ export async function renderFilesBatches(app, token) {
         <div class="surface">
           <div class="stack">
             <div id="files-batches-summary">
+              ${renderDefinitionList(buildIdleSelectionSummary(filteredFiles.length, files.length, filteredBatches.length, batches.length, filters), "No selection yet.")}
+            </div>
+            <div class="toolbar" id="files-batches-actions">
+              <span class="muted">Select a file or batch to unlock context-aware actions.</span>
+            </div>
+            <div id="files-batches-detail-summary">
               ${renderDefinitionList([
-        { label: "Selection", value: "No file or batch selected" },
-        { label: "Files shown", value: `${filteredFiles.length}/${files.length}` },
-        { label: "Batches shown", value: `${filteredBatches.length}/${batches.length}` },
-        { label: "Filters", value: summarizeFilters(filters) || "No active filters" },
-    ], "No selection yet.")}
+        { label: "Detail surface", value: "Idle" },
+        { label: "Loaded object", value: "No file or batch metadata loaded" },
+    ], "No detail payload loaded.")}
             </div>
             <pre class="code-block" id="files-batches-detail">No selection yet.</pre>
+            <div id="files-batches-content-summary">
+              ${renderDefinitionList([
+        { label: "Preview surface", value: "Idle" },
+        { label: "Loaded content", value: "No file content loaded" },
+    ], "No file content loaded.")}
+            </div>
             <pre class="code-block" id="files-batches-content">No file content loaded.</pre>
           </div>
         </div>
@@ -158,7 +170,7 @@ export async function renderFilesBatches(app, token) {
             return `
                         <tr>
                           <td><strong>${escapeHtml(id)}</strong><br /><span class="muted">${escapeHtml(item.input_file_id ?? "no input file")}</span></td>
-                          <td>${escapeHtml(item.status ?? "unknown")}</td>
+                          <td>${renderBatchStatus(String(item.status ?? "unknown"))}</td>
                           <td>${escapeHtml(item.endpoint ?? "n/a")}</td>
                           <td>${escapeHtml(outputFile || "n/a")}</td>
                           <td>
@@ -180,17 +192,159 @@ export async function renderFilesBatches(app, token) {
     const detailNode = app.pageContent.querySelector("#files-batches-detail");
     const contentNode = app.pageContent.querySelector("#files-batches-content");
     const summaryNode = app.pageContent.querySelector("#files-batches-summary");
+    const detailSummaryNode = app.pageContent.querySelector("#files-batches-detail-summary");
+    const contentSummaryNode = app.pageContent.querySelector("#files-batches-content-summary");
+    const actionNode = app.pageContent.querySelector("#files-batches-actions");
     const batchInput = app.pageContent.querySelector("#batch-input-file-id");
     const filtersForm = app.pageContent.querySelector("#files-batches-filters-form");
-    if (!detailNode || !contentNode || !summaryNode || !batchInput || !filtersForm) {
+    const uploadForm = app.pageContent.querySelector("#files-upload-form");
+    const batchForm = app.pageContent.querySelector("#batch-create-form");
+    if (!detailNode ||
+        !contentNode ||
+        !summaryNode ||
+        !detailSummaryNode ||
+        !contentSummaryNode ||
+        !actionNode ||
+        !batchInput ||
+        !filtersForm ||
+        !uploadForm ||
+        !batchForm) {
         return;
     }
+    let selection = { kind: "idle" };
+    const setDefinitionBlock = (node, items, emptyMessage) => {
+        node.innerHTML = renderDefinitionList(items, emptyMessage);
+    };
+    const setSummary = (items) => {
+        setDefinitionBlock(summaryNode, items, "No selection yet.");
+    };
+    const setDetailSummary = (items) => {
+        setDefinitionBlock(detailSummaryNode, items, "No detail payload loaded.");
+    };
+    const setContentSummary = (items) => {
+        setDefinitionBlock(contentSummaryNode, items, "No file content loaded.");
+    };
+    const updateInspectorActions = () => {
+        actionNode.innerHTML = renderInspectorActions(selection);
+    };
+    const focusBatchComposer = (fileId) => {
+        const source = fileLookup.get(fileId);
+        batchInput.value = fileId;
+        selection = { kind: "file", fileId };
+        setSummary([
+            { label: "Selection", value: "Batch input ready" },
+            { label: "File id", value: fileId },
+            { label: "Purpose", value: String(source?.purpose ?? "batch") },
+            { label: "Filename", value: String(source?.filename ?? fileId) },
+            {
+                label: "Next step",
+                value: "Create batch",
+                note: "The input field has been populated for the batch form.",
+            },
+        ]);
+        setDetailSummary([
+            { label: "Detail surface", value: "Composer handoff" },
+            { label: "Selected input", value: fileId },
+            { label: "Endpoint target", value: "Choose an endpoint in the batch form" },
+        ]);
+        detailNode.textContent = `Selected ${fileId} as batch input.`;
+        updateInspectorActions();
+        batchInput.focus();
+    };
+    const previewFileContent = async (fileId, button, options) => {
+        const source = fileLookup.get(fileId);
+        const label = options?.label ?? "File content preview";
+        setContentSummary([
+            { label: "Preview surface", value: label },
+            { label: "File id", value: fileId },
+            {
+                label: "Loaded content",
+                value: "Loading…",
+                note: options?.support ?? String(source?.filename ?? fileId),
+            },
+        ]);
+        contentNode.textContent = "Loading file content…";
+        await withBusyState({
+            button,
+            pendingLabel: "Loading…",
+            action: async () => {
+                const text = await app.api.text(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
+                setContentSummary(buildContentPreviewSummary(text, fileId, label, options?.support ?? String(source?.filename ?? fileId)));
+                contentNode.textContent = text;
+            },
+        });
+    };
+    const inspectFile = async (fileId, button) => {
+        await withBusyState({
+            button,
+            pendingLabel: "Loading…",
+            action: async () => {
+                const payload = await app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, {}, true);
+                const source = fileLookup.get(fileId) ?? payload;
+                selection = { kind: "file", fileId };
+                setSummary([
+                    { label: "Selection", value: "File" },
+                    { label: "File id", value: fileId },
+                    { label: "Purpose", value: String(source.purpose ?? "user_data") },
+                    { label: "Filename", value: String(source.filename ?? fileId) },
+                    {
+                        label: "Created",
+                        value: formatTimestamp(source.created_at),
+                        note: formatBytes(source.bytes),
+                    },
+                ]);
+                setDetailSummary([
+                    { label: "Detail surface", value: "File metadata" },
+                    { label: "Linked batches", value: String(countLinkedBatches(fileId, batches)) },
+                    { label: "Stored bytes", value: formatBytes(source.bytes) },
+                ]);
+                detailNode.textContent = JSON.stringify(payload, null, 2);
+                updateInspectorActions();
+            },
+        });
+    };
+    const inspectBatch = async (batchId, button) => {
+        await withBusyState({
+            button,
+            pendingLabel: "Loading…",
+            action: async () => {
+                const payload = await app.api.json(`/v1/batches/${encodeURIComponent(batchId)}`, {}, true);
+                const source = batchLookup.get(batchId) ?? payload;
+                const inputFileId = String(source.input_file_id ?? "");
+                const outputFileId = String(source.output_file_id ?? "");
+                selection = {
+                    kind: "batch",
+                    batchId,
+                    inputFileId: inputFileId || undefined,
+                    outputFileId: outputFileId || undefined,
+                };
+                setSummary([
+                    { label: "Selection", value: "Batch" },
+                    { label: "Batch id", value: batchId },
+                    { label: "Status", value: String(source.status ?? "unknown") },
+                    { label: "Endpoint", value: String(source.endpoint ?? "n/a") },
+                    {
+                        label: "Output file",
+                        value: outputFileId || "n/a",
+                        note: inputFileId || "no input file",
+                    },
+                ]);
+                setDetailSummary([
+                    { label: "Detail surface", value: "Batch metadata" },
+                    { label: "Lifecycle posture", value: humanizeBatchLifecycle(source.status) },
+                    { label: "Input file", value: inputFileId || "missing" },
+                    { label: "Output file", value: outputFileId || "not ready" },
+                ]);
+                detailNode.textContent = JSON.stringify(payload, null, 2);
+                updateInspectorActions();
+            },
+        });
+    };
+    updateInspectorActions();
     document.getElementById("refresh-files-batches")?.addEventListener("click", () => {
         void app.render("files-batches");
     });
-    document
-        .getElementById("reset-files-batches-filters")
-        ?.addEventListener("click", () => {
+    document.getElementById("reset-files-batches-filters")?.addEventListener("click", () => {
         window.history.replaceState({}, "", "/admin/files-batches");
         void app.render("files-batches");
     });
@@ -207,12 +361,7 @@ export async function renderFilesBatches(app, token) {
         window.history.replaceState({}, "", buildFilesBatchesUrl(nextFilters));
         void app.render("files-batches");
     });
-    const setSummary = (items) => {
-        summaryNode.innerHTML = renderDefinitionList(items, "No selection yet.");
-    };
-    app.pageContent
-        .querySelector("#files-upload-form")
-        ?.addEventListener("submit", async (event) => {
+    uploadForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const form = event.currentTarget;
         const fields = form.elements;
@@ -221,147 +370,251 @@ export async function renderFilesBatches(app, token) {
             app.pushAlert("Choose a file before uploading.", "warn");
             return;
         }
-        const body = new FormData();
-        body.set("purpose", fields.purpose.value);
-        body.set("file", upload, upload.name);
-        const response = await app.api.json("/v1/files", { method: "POST", body }, true);
-        app.queueAlert(`Uploaded file ${String(response.id ?? "")}.`, "info");
-        await app.render("files-batches");
+        const submitter = event.submitter;
+        const button = submitter instanceof HTMLButtonElement
+            ? submitter
+            : form.querySelector('button[type="submit"]');
+        await withBusyState({
+            root: form,
+            button,
+            pendingLabel: "Uploading…",
+            action: async () => {
+                const body = new FormData();
+                body.set("purpose", fields.purpose.value);
+                body.set("file", upload, upload.name);
+                const response = await app.api.json("/v1/files", { method: "POST", body }, true);
+                app.queueAlert(`Uploaded file ${String(response.id ?? "")}.`, "info");
+                await app.render("files-batches");
+            },
+        });
     });
-    app.pageContent
-        .querySelector("#batch-create-form")
-        ?.addEventListener("submit", async (event) => {
+    batchForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const form = event.currentTarget;
         const fields = form.elements;
         const metadataText = fields.metadata.value.trim();
-        const metadata = metadataText ? safeJsonParse(metadataText, "__invalid__") : undefined;
-        if (metadata === "__invalid__" ||
+        const metadata = metadataText ? safeJsonParse(metadataText, INVALID_JSON) : undefined;
+        if (metadata === INVALID_JSON ||
             (metadata !== undefined &&
                 (metadata === null || Array.isArray(metadata) || typeof metadata !== "object"))) {
             app.pushAlert("Batch metadata must be a JSON object.", "danger");
             return;
         }
-        const response = await app.api.json("/v1/batches", {
-            method: "POST",
-            json: {
-                endpoint: fields.endpoint.value,
-                input_file_id: fields.input_file_id.value.trim(),
-                completion_window: "24h",
-                metadata,
+        const submitter = event.submitter;
+        const button = submitter instanceof HTMLButtonElement
+            ? submitter
+            : form.querySelector('button[type="submit"]');
+        await withBusyState({
+            root: form,
+            button,
+            pendingLabel: "Creating…",
+            action: async () => {
+                const response = await app.api.json("/v1/batches", {
+                    method: "POST",
+                    json: {
+                        endpoint: fields.endpoint.value,
+                        input_file_id: fields.input_file_id.value.trim(),
+                        completion_window: "24h",
+                        metadata,
+                    },
+                }, true);
+                app.queueAlert(`Created batch ${String(response.id ?? "")} for ${String(response.endpoint ?? "")}.`, "info");
+                await app.render("files-batches");
             },
-        }, true);
-        app.queueAlert(`Created batch ${String(response.id ?? "")} for ${String(response.endpoint ?? "")}.`, "info");
-        await app.render("files-batches");
+        });
     });
-    app.pageContent.querySelectorAll("[data-file-view]").forEach((button) => {
-        button.addEventListener("click", async () => {
-            const fileId = button.dataset.fileView;
+    actionNode.addEventListener("click", async (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+            return;
+        }
+        const button = target.closest("[data-inspector-action]");
+        if (!button) {
+            return;
+        }
+        const action = button.dataset.inspectorAction;
+        if (!action) {
+            return;
+        }
+        if (action === "inspect-file" && selection.fileId) {
+            await inspectFile(selection.fileId, button);
+            return;
+        }
+        if (action === "use-file" && selection.fileId) {
+            focusBatchComposer(selection.fileId);
+            return;
+        }
+        if (action === "preview-file" && selection.fileId) {
+            await previewFileContent(selection.fileId, button);
+            return;
+        }
+        if (action === "inspect-batch" && selection.batchId) {
+            await inspectBatch(selection.batchId, button);
+            return;
+        }
+        if (action === "batch-input" && selection.inputFileId) {
+            await inspectFile(selection.inputFileId, button);
+            return;
+        }
+        if (action === "batch-output" && selection.outputFileId && selection.batchId) {
+            await previewFileContent(selection.outputFileId, button, {
+                label: "Batch output preview",
+                support: `Batch ${selection.batchId}`,
+            });
+            return;
+        }
+        if (action === "inspect-output-file" && selection.outputFileId) {
+            await inspectFile(selection.outputFileId, button);
+        }
+    });
+    app.pageContent.querySelectorAll("[data-file-view]").forEach((item) => {
+        item.addEventListener("click", async () => {
+            await inspectFile(item.dataset.fileView ?? "", item instanceof HTMLButtonElement ? item : null);
+        });
+    });
+    app.pageContent.querySelectorAll("[data-file-use]").forEach((item) => {
+        item.addEventListener("click", () => {
+            const fileId = item.dataset.fileUse;
             if (!fileId) {
                 return;
             }
-            const payload = await app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, {}, true);
-            const source = fileLookup.get(fileId) ?? payload;
-            setSummary([
-                { label: "Selection", value: "File" },
-                { label: "File id", value: fileId },
-                { label: "Purpose", value: String(source.purpose ?? "user_data") },
-                { label: "Filename", value: String(source.filename ?? fileId) },
-                {
-                    label: "Created",
-                    value: formatTimestamp(source.created_at),
-                    note: formatBytes(source.bytes),
+            focusBatchComposer(fileId);
+        });
+    });
+    app.pageContent.querySelectorAll("[data-file-content]").forEach((item) => {
+        item.addEventListener("click", async () => {
+            const fileId = item.dataset.fileContent;
+            if (!fileId) {
+                return;
+            }
+            selection = { kind: "file", fileId };
+            updateInspectorActions();
+            await previewFileContent(fileId, item instanceof HTMLButtonElement ? item : null);
+        });
+    });
+    app.pageContent.querySelectorAll("[data-file-delete]").forEach((item) => {
+        item.addEventListener("click", async () => {
+            const fileId = item.dataset.fileDelete;
+            if (!fileId) {
+                return;
+            }
+            if (!window.confirm(`Delete file ${fileId}?`)) {
+                return;
+            }
+            await withBusyState({
+                button: item instanceof HTMLButtonElement ? item : null,
+                pendingLabel: "Deleting…",
+                action: async () => {
+                    await app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
+                    app.queueAlert(`Deleted file ${fileId}.`, "info");
+                    await app.render("files-batches");
                 },
-            ]);
-            detailNode.textContent = JSON.stringify(payload, null, 2);
+            });
         });
     });
-    app.pageContent.querySelectorAll("[data-file-use]").forEach((button) => {
-        button.addEventListener("click", () => {
-            const fileId = button.dataset.fileUse;
+    app.pageContent.querySelectorAll("[data-batch-view]").forEach((item) => {
+        item.addEventListener("click", async () => {
+            await inspectBatch(item.dataset.batchView ?? "", item instanceof HTMLButtonElement ? item : null);
+        });
+    });
+    app.pageContent.querySelectorAll("[data-batch-output]").forEach((item) => {
+        item.addEventListener("click", async () => {
+            const fileId = item.dataset.batchOutput;
             if (!fileId) {
                 return;
             }
-            const source = fileLookup.get(fileId);
-            batchInput.value = fileId;
-            setSummary([
-                { label: "Selection", value: "Batch input ready" },
-                { label: "File id", value: fileId },
-                { label: "Purpose", value: String(source?.purpose ?? "batch") },
-                { label: "Filename", value: String(source?.filename ?? fileId) },
-                { label: "Next step", value: "Create batch", note: "The input field has been populated for the batch form." },
-            ]);
-            detailNode.textContent = `Selected ${fileId} as batch input.`;
-            batchInput.focus();
-        });
-    });
-    app.pageContent.querySelectorAll("[data-file-content]").forEach((button) => {
-        button.addEventListener("click", async () => {
-            const fileId = button.dataset.fileContent;
-            if (!fileId) {
-                return;
-            }
-            const source = fileLookup.get(fileId);
-            setSummary([
-                { label: "Selection", value: "File content preview" },
-                { label: "File id", value: fileId },
-                { label: "Filename", value: String(source?.filename ?? fileId) },
-                { label: "Purpose", value: String(source?.purpose ?? "user_data") },
-            ]);
-            contentNode.textContent = "Loading file content…";
-            contentNode.textContent = await app.api.text(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
-        });
-    });
-    app.pageContent.querySelectorAll("[data-file-delete]").forEach((button) => {
-        button.addEventListener("click", async () => {
-            const fileId = button.dataset.fileDelete;
-            if (!fileId) {
-                return;
-            }
-            await app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
-            app.queueAlert(`Deleted file ${fileId}.`, "info");
-            await app.render("files-batches");
-        });
-    });
-    app.pageContent.querySelectorAll("[data-batch-view]").forEach((button) => {
-        button.addEventListener("click", async () => {
-            const batchId = button.dataset.batchView;
-            if (!batchId) {
-                return;
-            }
-            const payload = await app.api.json(`/v1/batches/${encodeURIComponent(batchId)}`, {}, true);
-            const source = batchLookup.get(batchId) ?? payload;
-            setSummary([
-                { label: "Selection", value: "Batch" },
-                { label: "Batch id", value: batchId },
-                { label: "Status", value: String(source.status ?? "unknown") },
-                { label: "Endpoint", value: String(source.endpoint ?? "n/a") },
-                {
-                    label: "Output file",
-                    value: String(source.output_file_id ?? "n/a"),
-                    note: String(source.input_file_id ?? "no input file"),
-                },
-            ]);
-            detailNode.textContent = JSON.stringify(payload, null, 2);
-        });
-    });
-    app.pageContent.querySelectorAll("[data-batch-output]").forEach((button) => {
-        button.addEventListener("click", async () => {
-            const fileId = button.dataset.batchOutput;
-            if (!fileId) {
-                return;
-            }
-            const batch = batches.find((item) => String(item.output_file_id ?? "") === fileId);
+            const batch = batches.find((entry) => String(entry.output_file_id ?? "") === fileId);
+            selection = {
+                kind: "batch",
+                batchId: String(batch?.id ?? ""),
+                inputFileId: String(batch?.input_file_id ?? "") || undefined,
+                outputFileId: fileId,
+            };
             setSummary([
                 { label: "Selection", value: "Batch output" },
                 { label: "Output file", value: fileId },
                 { label: "Batch id", value: String(batch?.id ?? "unknown") },
                 { label: "Endpoint", value: String(batch?.endpoint ?? "n/a") },
             ]);
-            contentNode.textContent = "Loading batch output…";
-            contentNode.textContent = await app.api.text(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
+            setDetailSummary([
+                { label: "Detail surface", value: "Batch output handoff" },
+                { label: "Batch id", value: String(batch?.id ?? "unknown") },
+                { label: "Output file", value: fileId },
+            ]);
+            updateInspectorActions();
+            await previewFileContent(fileId, item instanceof HTMLButtonElement ? item : null, {
+                label: "Batch output preview",
+                support: `Batch ${String(batch?.id ?? "unknown")}`,
+            });
         });
     });
+}
+function buildIdleSelectionSummary(filteredFiles, totalFiles, filteredBatches, totalBatches, filters) {
+    return [
+        { label: "Selection", value: "No file or batch selected" },
+        { label: "Files shown", value: `${filteredFiles}/${totalFiles}` },
+        { label: "Batches shown", value: `${filteredBatches}/${totalBatches}` },
+        { label: "Filters", value: summarizeFilters(filters) || "No active filters" },
+    ];
+}
+function renderInspectorActions(selection) {
+    if (selection.kind === "file" && selection.fileId) {
+        return `
+      <button class="button button--secondary" data-inspector-action="inspect-file" type="button">Refresh metadata</button>
+      <button class="button button--secondary" data-inspector-action="preview-file" type="button">Preview content</button>
+      <button class="button" data-inspector-action="use-file" type="button">Use for batch</button>
+    `;
+    }
+    if (selection.kind === "batch" && selection.batchId) {
+        return `
+      <button class="button button--secondary" data-inspector-action="inspect-batch" type="button">Refresh batch</button>
+      <button class="button button--secondary" ${selection.inputFileId ? 'data-inspector-action="batch-input"' : "disabled"} type="button">Inspect input</button>
+      <button class="button button--secondary" ${selection.outputFileId ? 'data-inspector-action="inspect-output-file"' : "disabled"} type="button">Inspect output file</button>
+      <button class="button" ${selection.outputFileId ? 'data-inspector-action="batch-output"' : "disabled"} type="button">Preview output</button>
+    `;
+    }
+    return `<span class="muted">Select a file or batch to unlock context-aware actions.</span>`;
+}
+function buildContentPreviewSummary(text, fileId, label, support) {
+    const lines = text ? text.split(/\r?\n/).length : 0;
+    const nonEmptyLines = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    const trimmed = text.trim();
+    const json = trimmed ? safeJsonParse(trimmed, INVALID_JSON) : INVALID_JSON;
+    let formatLabel = "text";
+    let formatNote = lines <= 1 ? "single payload" : "plain text or JSON fragments";
+    if (json !== INVALID_JSON) {
+        if (Array.isArray(json)) {
+            const records = json;
+            formatLabel = "json array";
+            formatNote = `${records.length} top-level item${records.length === 1 ? "" : "s"}`;
+        }
+        else if (json && typeof json === "object") {
+            const fieldCount = Object.keys(json).length;
+            formatLabel = "json object";
+            formatNote = `${fieldCount} top-level field${fieldCount === 1 ? "" : "s"}`;
+        }
+        else {
+            formatLabel = "json scalar";
+        }
+    }
+    else if (nonEmptyLines.length > 0 &&
+        nonEmptyLines.every((line) => safeJsonParse(line, INVALID_JSON) !== INVALID_JSON)) {
+        formatLabel = "jsonl";
+        formatNote = `${nonEmptyLines.length} record${nonEmptyLines.length === 1 ? "" : "s"}`;
+    }
+    return [
+        { label: "Preview surface", value: label, note: support },
+        { label: "File id", value: fileId },
+        { label: "Format", value: formatLabel, note: formatNote },
+        {
+            label: "Payload size",
+            value: `${lines} line${lines === 1 ? "" : "s"}`,
+            note: formatBytes(new TextEncoder().encode(text).length),
+        },
+    ];
 }
 function readFilesBatchesFilters() {
     const params = new URLSearchParams(window.location.search);
@@ -433,4 +686,38 @@ function setIfPresent(params, key, value) {
     if (value) {
         params.set(key, value);
     }
+}
+function countLinkedBatches(fileId, batches) {
+    return batches.filter((batch) => {
+        const inputFileId = String(batch.input_file_id ?? "");
+        const outputFileId = String(batch.output_file_id ?? "");
+        return inputFileId === fileId || outputFileId === fileId;
+    }).length;
+}
+function isAttentionBatchStatus(value) {
+    const status = String(value ?? "").toLowerCase();
+    return ["failed", "cancelled", "expired"].includes(status);
+}
+function renderBatchStatus(value) {
+    const normalized = value || "unknown";
+    if (normalized === "completed") {
+        return pill(normalized, "good");
+    }
+    if (isAttentionBatchStatus(normalized)) {
+        return pill(normalized, "warn");
+    }
+    return pill(normalized);
+}
+function humanizeBatchLifecycle(value) {
+    const status = String(value ?? "").toLowerCase();
+    if (status === "completed") {
+        return "output ready";
+    }
+    if (isAttentionBatchStatus(status)) {
+        return "operator follow-up required";
+    }
+    if (status) {
+        return "still processing";
+    }
+    return "unknown";
 }

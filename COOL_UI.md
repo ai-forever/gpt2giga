@@ -202,6 +202,7 @@ open http://localhost:8090
 
 - в `templates.ts` появился ещё один reusable summary/inspector primitive вместо page-local ad-hoc блоков
 - `Logs` и `Files & Batches` начали использовать summary-first surfaces, а не только raw JSON `pre`
+- `Files & Batches` получил context-aware inspector action rail и preview summaries для input/output content вместо одного немого `pre`
 
 ### 2. Нормализовать page state
 
@@ -219,6 +220,7 @@ open http://localhost:8090
 
 - у `Logs` уже есть явный lifecycle для live stream state и cleanup
 - у `Files & Batches` уже есть локальный inventory filter state через URL/query-driven rerender
+- у `Files & Batches` уже есть явные pending states на upload/create/delete/load действиях и selection-driven inspector actions
 
 Следующий уровень тут всё ещё нужен для более системных pending/optimistic patterns.
 
@@ -235,6 +237,7 @@ open http://localhost:8090
 - `Logs` теперь имеет filters, live stream status и нормальный SSE parsing без протокольного шума в `pre`
 - `Logs` теперь умеет инспектировать recent request/error context рядом с tail surface
 - `Files & Batches` теперь имеет inventory filters и более читаемый inspector summary
+- `Files & Batches` теперь показывает payload format/size summary для preview и ведёт через selection -> inspect -> preview/output -> batch handoff
 
 ### 4. Улучшить forms UX
 
