@@ -17,3 +17,7 @@ uv run python examples/openai/batches/batches.py
 - загрузку файла через Files API;
 - создание batch-задачи;
 - чтение batch metadata и output file.
+
+## Готовый JSONL
+
+- [`chat_completions_batch.jsonl`](./chat_completions_batch.jsonl): готовый OpenAI Batch input для `/v1/chat/completions`.

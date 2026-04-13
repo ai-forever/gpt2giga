@@ -25,6 +25,8 @@ uv sync --group integrations
 uv run python examples/gemini/generate_content.py
 uv run python examples/gemini/stream_generate_content.py
 uv run python examples/gemini/chat.py
+uv run python examples/gemini/files.py
+uv run python examples/gemini/batches.py
 uv run python examples/gemini/function_calling.py
 uv run python examples/gemini/structured_output.py
 uv run python examples/gemini/count_tokens.py
@@ -36,6 +38,9 @@ uv run python examples/gemini/embeddings.py
 - `generate_content.py`: базовый `models.generate_content(...)`
 - `stream_generate_content.py`: streaming через `generate_content_stream(...)`
 - `chat.py`: клиентский chat-session поверх `generateContent`
+- `files.py`: upload/list/get/download/delete для Gemini Files API
+- `batches.py`: `batchGenerateContent` через uploaded JSONL source
+- `batch_generate_content.jsonl`: готовые JSONL-строки для `batch.inputConfig.fileName`
 - `function_calling.py`: function declarations и tool response
 - `structured_output.py`: JSON schema / structured output
 - `count_tokens.py`: `models.count_tokens(...)`

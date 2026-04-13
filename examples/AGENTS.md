@@ -36,6 +36,8 @@
 - `anthropic/messages_stream.py`: streaming Messages API
 - `anthropic/count_tokens.py`: token counting endpoint
 - `gemini/generate_content.py`: basic Gemini `generate_content`
+- `gemini/files.py`: Gemini file upload/list/download flow
+- `gemini/batches.py`: Gemini `batchGenerateContent` via JSONL file
 - `gemini/function_calling.py`: Gemini function declarations / tool responses
 - `gemini/structured_output.py`: Gemini JSON schema output
 - `agents/openai_agents.py`: OpenAI Agents SDK handoffs and tools

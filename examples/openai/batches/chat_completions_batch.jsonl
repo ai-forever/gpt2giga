@@ -1,0 +1,2 @@
+{"custom_id":"openai-batch-1","method":"POST","url":"/v1/chat/completions","body":{"model":"GigaChat-2-Max","messages":[{"role":"system","content":"You are a concise release assistant."},{"role":"user","content":"Draft a one-line release note title for adding batch JSONL examples."}],"temperature":0.2}}
+{"custom_id":"openai-batch-2","method":"POST","url":"/v1/chat/completions","body":{"model":"GigaChat-2-Max","messages":[{"role":"user","content":"Summarize why OpenAI batch input uses one JSON object per line."}],"temperature":0.3}}

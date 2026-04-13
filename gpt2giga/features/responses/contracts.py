@@ -32,6 +32,9 @@ class ResponsesUpstreamClient(Protocol):
     async def achat_v2(self, chat: PreparedResponsesRequest) -> Any:
         """Run a non-streaming Responses API request."""
 
+    async def aget_file_content(self, file_id: str) -> Any:
+        """Return provider file contents as a base64 payload."""
+
     def astream(self, chat: PreparedResponsesRequest) -> AsyncIterator[Any]:
         """Run a streaming legacy Responses API request."""
 

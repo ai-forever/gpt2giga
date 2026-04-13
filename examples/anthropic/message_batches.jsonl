@@ -1,0 +1,2 @@
+{"custom_id":"anthropic-batch-1","params":{"model":"GigaChat-2-Max","max_tokens":128,"system":"You are a concise release assistant.","messages":[{"role":"user","content":"Draft a one-line release note title for adding batch JSONL examples."}]}}
+{"custom_id":"anthropic-batch-2","params":{"model":"GigaChat-2-Max","max_tokens":128,"messages":[{"role":"user","content":"Summarize why Anthropic batch requests use params per row."}]}}

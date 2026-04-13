@@ -43,9 +43,9 @@ uv run python examples/anthropic/message_batches.py
 - `messages.py`: базовый запрос (не стрим)
 - `messages_stream.py`: streaming
 - `message_batches.py`: Message Batches API
+- `message_batches.jsonl`: готовые строки batch-запросов в формате `custom_id` + `params` для сборки поля `requests`
 - `multi_turn.py`: многоходовый диалог
 - `system_prompt.py`: системный промпт
 - `function_calling.py`: tool use / function calling
 - `reasoning.py`: extended thinking (`thinking`) → `reasoning_effort`
 - `image_url.py`, `base64_image.py`: изображения (URL и base64)
-

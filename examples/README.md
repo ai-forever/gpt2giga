@@ -51,6 +51,8 @@ uv run python examples/anthropic/message_batches.py
 
 # Gemini Developer API
 uv run python examples/gemini/generate_content.py
+uv run python examples/gemini/files.py
+uv run python examples/gemini/batches.py
 uv run python examples/gemini/structured_output.py
 
 # Provider-to-provider translation

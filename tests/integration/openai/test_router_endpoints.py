@@ -1,4 +1,5 @@
 import sys
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -21,6 +22,15 @@ def _get_option(data, key):
     if hasattr(data, "options"):
         return data.options.get(key)
     return data.get(key)
+
+
+def _get_tools(data):
+    if hasattr(data, "tools"):
+        return [
+            tool.to_openai_tool() if hasattr(tool, "to_openai_tool") else tool
+            for tool in data.tools
+        ]
+    return data.get("tools")
 
 
 class MockResponse:
@@ -57,6 +67,51 @@ class FakeGigachat:
     async def achat_v2(self, chat):
         self.last_responses_method = "v2"
         self.last_chat_v2 = chat
+        tools = chat.get("tools") or []
+        has_image_generation = any(
+            tool == {"image_generate": {}}
+            or (isinstance(tool, dict) and tool.get("type") == "image_generation")
+            for tool in tools
+        )
+        if has_image_generation:
+            return MockResponse(
+                {
+                    "model": "gpt-x",
+                    "thread_id": "thread-1",
+                    "created_at": 123,
+                    "messages": [
+                        {
+                            "message_id": "msg-1",
+                            "role": "assistant",
+                            "tools_state_id": "tool-1",
+                            "content": [
+                                {
+                                    "tool_execution": {
+                                        "name": "image_generate",
+                                        "status": "completed",
+                                    }
+                                },
+                                {
+                                    "files": [
+                                        {
+                                            "id": "file-img-1",
+                                            "mime": "image/jpeg",
+                                            "target": "image",
+                                        }
+                                    ]
+                                },
+                            ],
+                        }
+                    ],
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 1,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                }
+            )
         storage = chat.get("storage")
         thread_id = None
         text = "stateless"
@@ -163,6 +218,9 @@ class FakeGigachat:
     async def aembeddings(self, texts, model):
         return {"data": [{"embedding": [0.1, 0.2], "index": 0}], "model": model}
 
+    async def aget_file_content(self, file_id):
+        return SimpleNamespace(content=f"b64:{file_id}")
+
 
 class FakeRequestTransformer:
     def __init__(self):
@@ -203,9 +261,12 @@ class FakeRequestTransformer:
         if storage_payload is not None and thread_id:
             storage_payload["thread_id"] = thread_id
 
+        tools = _get_tools(data)
+
         return {
             "model": _get_model(data),
             "messages": [{"role": "user", "content": [{"text": _get_input(data)}]}],
+            **({"tools": tools} if tools else {}),
             **({"storage": storage_payload} if storage_payload is not None else {}),
         }
 
@@ -348,6 +409,27 @@ def test_responses_non_stream_store_false_disables_gigachat_storage():
     body = resp.json()
     assert body.get("conversation") is None
     assert app.state.gigachat_client.last_chat_v2.get("storage") is None
+
+
+def test_responses_non_stream_image_generation_maps_file_to_base64():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
+    client = TestClient(app)
+
+    resp = client.post(
+        "/responses",
+        json={
+            "input": "draw a cat",
+            "model": "gpt-x",
+            "tools": [{"type": "image_generation"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["output"][0]["type"] == "image_generation_call"
+    assert body["output"][0]["result"] == "b64:file-img-1"
 
 
 def test_responses_stream_returns_sse_events():

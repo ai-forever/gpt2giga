@@ -119,6 +119,40 @@ class ResponsesService:
             param="model",
         )
 
+    @staticmethod
+    async def _hydrate_image_generation_results(
+        response: ResponsesResponseData,
+        *,
+        giga_client: ResponsesUpstreamClient,
+    ) -> ResponsesResponseData:
+        """Replace generated image file ids with base64 payloads."""
+        output = response.get("output")
+        if not isinstance(output, list):
+            return response
+
+        get_file_content = getattr(giga_client, "aget_file_content", None)
+        if not callable(get_file_content):
+            return response
+
+        for item in output:
+            if (
+                not isinstance(item, dict)
+                or item.get("type") != "image_generation_call"
+            ):
+                continue
+            file_id = item.get("result")
+            if not isinstance(file_id, str) or not file_id:
+                continue
+            try:
+                file_response = await get_file_content(file_id=file_id)
+            except Exception:
+                continue
+            file_content = getattr(file_response, "content", None)
+            if isinstance(file_content, str) and file_content:
+                item["result"] = file_content
+
+        return response
+
     async def prepare_request(
         self,
         data: ResponsesRequestData,
@@ -156,12 +190,16 @@ class ResponsesService:
         )
         if self.uses_v2_backend:
             response = await giga_client.achat_v2(prepared_request)
-            return self.response_processor.process_response_api_v2(
+            result = self.response_processor.process_response_api_v2(
                 request_payload,
                 response,
                 request_model or "unknown",
                 response_id,
                 response_store=response_store,
+            )
+            return await self._hydrate_image_generation_results(
+                result,
+                giga_client=giga_client,
             )
         response = await giga_client.achat(prepared_request)
         return self.response_processor.process_response_api(

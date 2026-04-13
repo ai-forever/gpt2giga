@@ -112,6 +112,9 @@ class FakeClient:
         self.last_request = chat
         return SimpleNamespace(payload=chat)
 
+    async def aget_file_content(self, file_id):
+        return SimpleNamespace(content=f"b64:{file_id}")
+
 
 @pytest.mark.asyncio
 async def test_responses_service_create_response_uses_runtime_contracts():
@@ -177,6 +180,41 @@ async def test_responses_service_reuses_stored_model_for_thread_continuation():
     assert response_processor.processed_with[0]["model"] == "gpt-x"
     assert response_processor.processed_with[2:] == ("gpt-x", "resp-2", response_store)
     assert result["request_model"] == "gpt-x"
+
+
+@pytest.mark.asyncio
+async def test_responses_service_hydrates_image_generation_results():
+    request_preparer = FakeRequestPreparer()
+    response_processor = FakeResponseProcessor()
+
+    def process_response_api_v2(*args, **kwargs):
+        return {
+            "id": "resp_resp-img",
+            "model": "gpt-x",
+            "output": [
+                {
+                    "type": "image_generation_call",
+                    "status": "completed",
+                    "result": "file-img-1",
+                }
+            ],
+        }
+
+    response_processor.process_response_api_v2 = process_response_api_v2
+    service = ResponsesService(
+        request_preparer,
+        response_processor,
+        backend_mode="v2",
+    )
+
+    result = await service.create_response(
+        {"model": "gpt-x", "input": "draw"},
+        giga_client=FakeClient(),
+        response_id="resp-img",
+        response_store={},
+    )
+
+    assert result["output"][0]["result"] == "b64:file-img-1"
 
 
 @pytest.mark.asyncio
