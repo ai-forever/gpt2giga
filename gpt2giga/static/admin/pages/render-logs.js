@@ -3,6 +3,7 @@ import { asArray, asRecord, escapeHtml, formatDurationMs, formatNumber, formatTi
 const DEFAULT_LINES = "150";
 const DEFAULT_LIMIT = "8";
 const MAX_LOG_LINES = 4000;
+const MAX_TAIL_CONTEXT_ROWS = 12;
 export async function renderLogs(app, token) {
     const filters = readLogsFilters();
     const [tail, recentRequests, recentErrors] = await Promise.all([
@@ -15,10 +16,21 @@ export async function renderLogs(app, token) {
     }
     const requestEvents = asArray(recentRequests.events);
     const errorEvents = asArray(recentErrors.events);
+    const requestLookup = indexEventsByRequestId(requestEvents);
+    const errorLookup = indexEventsByRequestId(errorEvents);
     let rawLogLines = normalizeLogText(tail);
     let streamController = null;
-    let streaming = false;
     let autoScroll = true;
+    let nextStreamSessionId = 0;
+    const streamState = {
+        phase: "idle",
+        sessionId: 0,
+        startedAt: null,
+        lastEventAt: null,
+        appendedLines: 0,
+        note: "Tail buffer loaded from the file on disk.",
+        lastError: "",
+    };
     app.setHeroActions(`
     <button class="button button--secondary" id="reset-log-filters" type="button">Reset filters</button>
     <button class="button button--secondary" id="refresh-logs" type="button">Refresh tail</button>
@@ -58,9 +70,8 @@ export async function renderLogs(app, token) {
               <div class="stack">
                 <h4>Request scope</h4>
                 <p class="muted">
-                  Request pinning narrows the recent request/error context panels and also filters the
-                  rendered tail by the same request id, so one link from Traffic can carry the full
-                  investigation context.
+                  Request pinning narrows the recent request/error context panels, tail-derived request
+                  context, and the rendered tail by one request id so Traffic handoff stays one click away.
                 </p>
               </div>
             </div>
@@ -107,7 +118,7 @@ export async function renderLogs(app, token) {
                 ${["5", "8", "12", "20"].map((value) => renderOption(value, filters.limit || DEFAULT_LIMIT)).join("")}
               </select>
             </label>
-            <span class="muted">Filters scope the request/error context panels and the tail viewer in one place.</span>
+            <span class="muted">Filters scope the request/error context panels, tail-derived request links, and the tail viewer in one place.</span>
           </div>
           <div class="toolbar">
             <button class="button" type="submit">Apply filters</button>
@@ -123,7 +134,7 @@ export async function renderLogs(app, token) {
             <div class="surface__header">
               <div class="stack">
                 <h4>Live tail status</h4>
-                <p class="muted">Streaming now parses SSE events and appends only log lines, not the raw protocol envelope.</p>
+                <p class="muted">SSE lifecycle is tracked explicitly so stop/reload flows do not leave a hanging stream reader behind.</p>
               </div>
               <div class="surface__meta" id="logs-stream-status">${pill("idle")}</div>
             </div>
@@ -135,6 +146,9 @@ export async function renderLogs(app, token) {
               <button class="button button--secondary" id="clear-log-output" type="button">Clear buffer</button>
               <span class="muted" id="logs-stream-note">Tail buffer loaded from the file on disk.</span>
             </div>
+            <div id="logs-stream-diagnostics">
+              ${renderDefinitionList(buildStreamDiagnostics(streamState, rawLogLines.length))}
+            </div>
           </div>
         </div>
       `, "panel panel--span-4")}
@@ -143,14 +157,14 @@ export async function renderLogs(app, token) {
           <div class="stack">
             <div id="logs-selection-summary">
               ${renderDefinitionList([
-        { label: "Selection", value: "No event selected" },
+        { label: "Selection", value: "No context selected" },
         { label: "Filters", value: summarizeActiveFilters(filters) || "No event filters" },
         {
             label: "Request scope",
             value: filters.requestId || "Recent log window",
             note: filters.requestId
-                ? "The rendered tail and event panels are pinned to one request id."
-                : "Select a request or error row to pin its traffic context.",
+                ? "The rendered tail, tail-derived request links, and event panels are pinned to one request id."
+                : "Select a tail-derived request link or a recent request/error row to inspect context.",
         },
     ], "No event selected yet.")}
             </div>
@@ -165,13 +179,18 @@ export async function renderLogs(app, token) {
           </div>
         </div>
       `, "panel panel--span-4")}
+    ${card("Tail-derived request context", `
+        <div id="logs-tail-context">
+          ${renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup))}
+        </div>
+      `, "panel panel--span-4")}
     ${card("Rendered log tail", `
         <div class="surface surface--dark">
           <div class="stack">
             <div class="surface__header">
               <div class="stack">
                 <h4>Rendered output</h4>
-                <p class="muted">Client-side text filtering is applied after fetching the selected tail window.</p>
+                <p class="muted">Client-side filtering is applied after fetching the selected tail window. Use the tail-derived context panel to jump from matching lines into structured request data.</p>
               </div>
               <div class="surface__meta">
                 <span class="pill" id="logs-match-count">${escapeHtml(`${countMatchingLines(rawLogLines, filters)} matches`)}</span>
@@ -180,28 +199,28 @@ export async function renderLogs(app, token) {
             <pre class="code-block code-block--tall" id="log-output">${escapeHtml(formatRenderedLogOutput(rawLogLines, filters))}</pre>
           </div>
         </div>
-      `, "panel panel--span-8")}
+      `, "panel panel--span-12")}
     ${card("Recent errors", renderTable([
         { label: "When" },
         { label: "Failure" },
         { label: "Route" },
-        { label: "Inspect" },
+        { label: "Actions" },
     ], errorEvents.map((event, index) => [
         `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(String(event.request_id ?? "no request id"))}</span>`,
         `<strong>${escapeHtml(String(event.error_type ?? "HTTP error"))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
         `${escapeHtml(String(event.provider ?? "unknown"))}<br /><span class="muted">${escapeHtml(`${String(event.method ?? "GET")} ${String(event.endpoint ?? event.path ?? "n/a")}`)}</span>`,
-        `<button class="button button--secondary" data-log-detail="${index}" data-log-kind="error" type="button">Inspect</button>`,
+        renderEventRowActions(index, "error", String(event.request_id ?? ""), buildTrafficUrlForRequest),
     ]), "No recent errors matched the current filters."), "panel panel--span-6")}
     ${card("Recent requests", renderTable([
         { label: "When" },
         { label: "Latency" },
         { label: "Route" },
-        { label: "Inspect" },
+        { label: "Actions" },
     ], requestEvents.map((event, index) => [
         `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(String(event.request_id ?? "no request id"))}</span>`,
         `<strong>${escapeHtml(formatDurationMs(event.stream_duration_ms ?? event.duration_ms))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
         `${escapeHtml(String(event.provider ?? "unknown"))}<br /><span class="muted">${escapeHtml(`${String(event.method ?? "GET")} ${String(event.endpoint ?? event.path ?? "n/a")}`)}</span>`,
-        `<button class="button button--secondary" data-log-detail="${index}" data-log-kind="request" type="button">Inspect</button>`,
+        renderEventRowActions(index, "request", String(event.request_id ?? ""), buildTrafficUrlForRequest),
     ]), "No recent requests matched the current filters."), "panel panel--span-6")}
   `);
     const refreshButton = document.getElementById("refresh-logs");
@@ -213,10 +232,12 @@ export async function renderLogs(app, token) {
     const matchCount = app.pageContent.querySelector("#logs-match-count");
     const streamStatus = app.pageContent.querySelector("#logs-stream-status");
     const streamNote = app.pageContent.querySelector("#logs-stream-note");
+    const streamDiagnostics = app.pageContent.querySelector("#logs-stream-diagnostics");
     const autoScrollToggle = app.pageContent.querySelector("#logs-auto-scroll");
     const detailNode = app.pageContent.querySelector("#logs-detail");
     const summaryNode = app.pageContent.querySelector("#logs-selection-summary");
     const actionsNode = app.pageContent.querySelector("#logs-selection-actions");
+    const tailContextNode = app.pageContent.querySelector("#logs-tail-context");
     if (!refreshButton ||
         !resetFiltersButton ||
         !streamButton ||
@@ -226,41 +247,92 @@ export async function renderLogs(app, token) {
         !matchCount ||
         !streamStatus ||
         !streamNote ||
+        !streamDiagnostics ||
         !autoScrollToggle ||
         !detailNode ||
         !summaryNode ||
-        !actionsNode) {
+        !actionsNode ||
+        !tailContextNode) {
         return;
     }
+    const inspectPayloads = {
+        request: requestEvents,
+        error: errorEvents,
+    };
+    const isStreamActive = () => streamState.phase === "connecting" ||
+        streamState.phase === "streaming" ||
+        streamState.phase === "stopping";
+    const setSelectionFromEvent = (kind, item) => {
+        const requestId = normalizeOptionalText(item.request_id);
+        const counterpart = requestId && kind === "request"
+            ? (errorLookup.get(requestId) ?? null)
+            : requestId
+                ? (requestLookup.get(requestId) ?? null)
+                : null;
+        summaryNode.innerHTML = renderDefinitionList(buildLogEventSelectionSummary(kind, item, counterpart), "No event selected yet.");
+        actionsNode.innerHTML = renderLogSelectionActions(requestId || null, filters);
+        detailNode.textContent = JSON.stringify({
+            selected_event: item,
+            counterpart_event: counterpart,
+        }, null, 2);
+    };
+    const setSelectionFromTailRow = (row) => {
+        summaryNode.innerHTML = renderDefinitionList(buildTailSelectionSummary(row), "No tail-derived request context selected yet.");
+        actionsNode.innerHTML = renderLogSelectionActions(row.requestId || null, filters);
+        detailNode.textContent = JSON.stringify({
+            selected_tail_line: {
+                line_number: row.lineNumber,
+                line: row.line,
+                request_id: row.requestId,
+            },
+            matched_request_event: row.requestEvent,
+            matched_error_event: row.errorEvent,
+        }, null, 2);
+    };
+    const renderTailContext = () => {
+        tailContextNode.innerHTML = renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup));
+    };
+    const renderStreamDiagnosticsPanel = () => {
+        streamDiagnostics.innerHTML = renderDefinitionList(buildStreamDiagnostics(streamState, rawLogLines.length));
+    };
+    const setStreamVisuals = () => {
+        const { label, tone, buttonLabel } = describeStreamPhase(streamState.phase);
+        streamStatus.innerHTML = pill(label, tone);
+        streamNote.textContent = streamState.note;
+        streamButton.textContent = buttonLabel;
+        streamButton.toggleAttribute("disabled", streamState.phase === "stopping");
+        renderStreamDiagnosticsPanel();
+    };
     const setRenderedLogs = () => {
         const rendered = formatRenderedLogOutput(rawLogLines, filters);
         const matchingLines = countMatchingLines(rawLogLines, filters);
         logOutput.textContent = rendered;
         matchCount.textContent = `${matchingLines} matches`;
+        renderTailContext();
         if (autoScroll) {
             logOutput.scrollTop = logOutput.scrollHeight;
         }
     };
-    const setStreamVisuals = (label, tone = "default", note = "Tail buffer loaded from the file on disk.") => {
-        streamStatus.innerHTML = pill(label, tone);
-        streamNote.textContent = note;
-        streamButton.textContent = streaming ? "Stop live stream" : "Start live stream";
-    };
-    const stopStream = () => {
-        streamController?.abort();
-        streamController = null;
-        streaming = false;
-        setStreamVisuals("idle");
+    const stopStream = (reason) => {
+        if (!streamController || streamState.phase === "stopping") {
+            return;
+        }
+        streamState.phase = "stopping";
+        streamState.note = reason;
+        setStreamVisuals();
+        streamController.abort();
     };
     app.registerCleanup(() => {
-        stopStream();
+        stopStream("Stopping live stream during page cleanup.");
     });
     const refreshLogs = async () => {
         const nextTail = await app.api.text(`/admin/api/logs?lines=${encodeURIComponent(filters.lines || DEFAULT_LINES)}`);
         rawLogLines = normalizeLogText(nextTail);
         setRenderedLogs();
-        if (!streaming) {
-            setStreamVisuals("idle", "default", "Tail refreshed from the file on disk.");
+        if (!isStreamActive()) {
+            streamState.phase = streamState.phase === "error" ? "error" : "idle";
+            streamState.note = "Tail refreshed from the file on disk.";
+            setStreamVisuals();
         }
     };
     const appendLogLine = (line) => {
@@ -268,45 +340,82 @@ export async function renderLogs(app, token) {
             return;
         }
         rawLogLines = [...rawLogLines, line].slice(-MAX_LOG_LINES);
+        streamState.appendedLines += 1;
+        streamState.lastEventAt = Date.now();
         setRenderedLogs();
+        renderStreamDiagnosticsPanel();
     };
     const startStream = async () => {
-        if (streaming) {
+        if (isStreamActive()) {
             return;
         }
-        streaming = true;
-        streamController = new AbortController();
-        setStreamVisuals("connecting", "warn", "Opening the live SSE stream for new log lines.");
+        const sessionId = ++nextStreamSessionId;
+        const controller = new AbortController();
+        streamController = controller;
+        streamState.phase = "connecting";
+        streamState.sessionId = sessionId;
+        streamState.startedAt = Date.now();
+        streamState.lastEventAt = null;
+        streamState.appendedLines = 0;
+        streamState.lastError = "";
+        streamState.note = "Opening the live SSE stream for new log lines.";
+        setStreamVisuals();
         try {
             const response = await app.api.raw("/admin/api/logs/stream", {
-                signal: streamController.signal,
+                signal: controller.signal,
             });
             if (!response.body) {
                 throw new Error("Log stream body is unavailable.");
             }
-            setStreamVisuals("streaming", "good", "New log lines are appended as they arrive.");
+            if (controller.signal.aborted || !app.isCurrentRender(token) || streamState.sessionId !== sessionId) {
+                return;
+            }
+            streamState.phase = "streaming";
+            streamState.note = "New log lines are appended as they arrive.";
+            setStreamVisuals();
             await readSseStream(response.body, (event) => {
+                if (controller.signal.aborted || !app.isCurrentRender(token) || streamState.sessionId !== sessionId) {
+                    return;
+                }
                 if (event.type === "error") {
-                    setStreamVisuals("stream error", "warn", event.data || "Log stream reported an error.");
-                    app.pushAlert(event.data || "Log stream reported an error.", "warn");
+                    streamState.phase = "error";
+                    streamState.lastError = event.data || "Log stream reported an error.";
+                    streamState.note = "Server-side stream error reported. Inspect the error and restart the stream.";
+                    setStreamVisuals();
+                    app.pushAlert(streamState.lastError, "warn");
                     return;
                 }
                 if (event.type === "message" && event.data) {
                     appendLogLine(event.data);
                 }
-            });
+            }, controller.signal);
+            if (!controller.signal.aborted && !streamState.lastError) {
+                streamState.note = "Live stream ended cleanly. The current tail remains available.";
+            }
         }
         catch (error) {
-            if (!(error instanceof DOMException && error.name === "AbortError")) {
-                setStreamVisuals("stream error", "warn", toErrorMessage(error));
-                app.pushAlert(toErrorMessage(error), "danger");
+            if (error instanceof DOMException && error.name === "AbortError") {
+                if (!streamState.note) {
+                    streamState.note = "Live stream stopped.";
+                }
+            }
+            else {
+                streamState.phase = "error";
+                streamState.lastError = toErrorMessage(error);
+                streamState.note = "Live SSE stream failed before the tail reader could settle.";
+                setStreamVisuals();
+                app.pushAlert(streamState.lastError, "danger");
             }
         }
         finally {
-            streaming = false;
-            streamController = null;
+            if (streamController === controller) {
+                streamController = null;
+            }
+            if (streamState.sessionId === sessionId && streamState.phase !== "error") {
+                streamState.phase = "idle";
+            }
             if (app.isCurrentRender(token)) {
-                setStreamVisuals("idle", "default", "Live stream stopped. The current tail remains available.");
+                setStreamVisuals();
             }
         }
     };
@@ -318,8 +427,8 @@ export async function renderLogs(app, token) {
         void app.render("logs");
     });
     streamButton.addEventListener("click", () => {
-        if (streaming) {
-            stopStream();
+        if (isStreamActive()) {
+            stopStream("Stopping the current SSE session and releasing the stream reader.");
             return;
         }
         void startStream();
@@ -327,7 +436,10 @@ export async function renderLogs(app, token) {
     clearButton.addEventListener("click", () => {
         rawLogLines = [];
         setRenderedLogs();
-        setStreamVisuals(streaming ? "streaming" : "idle", streaming ? "good" : "default", streaming ? "Stream is still connected. Buffer cleared locally." : "Tail buffer cleared locally.");
+        streamState.note = isStreamActive()
+            ? "Buffer cleared locally while the live stream stays connected."
+            : "Tail buffer cleared locally.";
+        setStreamVisuals();
     });
     autoScrollToggle.addEventListener("change", () => {
         autoScroll = autoScrollToggle.checked;
@@ -373,10 +485,25 @@ export async function renderLogs(app, token) {
             void app.render("logs");
         }
     });
-    const inspectPayloads = {
-        request: requestEvents,
-        error: errorEvents,
-    };
+    tailContextNode.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+            return;
+        }
+        const button = target.closest("[data-log-tail-detail]");
+        if (!button) {
+            return;
+        }
+        const rowId = button.dataset.logTailDetail;
+        if (!rowId) {
+            return;
+        }
+        const row = buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup).find((candidate) => candidate.rowId === rowId);
+        if (!row) {
+            return;
+        }
+        setSelectionFromTailRow(row);
+    });
     app.pageContent.querySelectorAll("[data-log-detail]").forEach((button) => {
         button.addEventListener("click", () => {
             const kind = button.dataset.logKind;
@@ -388,27 +515,12 @@ export async function renderLogs(app, token) {
             if (!item) {
                 return;
             }
-            summaryNode.innerHTML = renderDefinitionList([
-                { label: "Selection", value: kind === "error" ? "Recent error" : "Recent request" },
-                { label: "Request id", value: String(item.request_id ?? "n/a") },
-                { label: "Provider", value: String(item.provider ?? "unknown") },
-                {
-                    label: "Route",
-                    value: `${String(item.method ?? "GET")} ${String(item.endpoint ?? item.path ?? "n/a")}`,
-                },
-                { label: "Status", value: formatNumber(item.status_code ?? 0) },
-                {
-                    label: "Timing",
-                    value: formatDurationMs(item.stream_duration_ms ?? item.duration_ms),
-                    note: kind === "error" ? String(item.error_type ?? "request failed") : String(item.model ?? "no model"),
-                },
-            ], "No event selected yet.");
-            actionsNode.innerHTML = renderLogSelectionActions(String(item.request_id ?? ""), filters);
-            detailNode.textContent = JSON.stringify(item, null, 2);
+            setSelectionFromEvent(kind, item);
         });
     });
     setRenderedLogs();
-    setStreamVisuals("idle");
+    setStreamVisuals();
+    seedLogsSelection(filters, requestLookup, errorLookup, rawLogLines, setSelectionFromEvent, setSelectionFromTailRow);
 }
 function readLogsFilters() {
     const params = new URLSearchParams(window.location.search);
@@ -496,7 +608,7 @@ function renderLogSelectionActions(requestId, filters) {
     }
     return actions.length
         ? actions.join("")
-        : '<span class="muted">Select a request or error row to open the matching traffic context.</span>';
+        : '<span class="muted">Select a tail-derived request line or a recent request/error row to open matching traffic context.</span>';
 }
 function buildTrafficUrlForRequest(requestId) {
     const params = new URLSearchParams();
@@ -523,21 +635,275 @@ function setIfPresent(params, key, value, skipValue = "") {
         params.set(key, value);
     }
 }
-async function readSseStream(stream, onEvent) {
+function buildTailContextRows(lines, filters, requestLookup, errorLookup) {
+    const rows = [];
+    lines.forEach((line, index) => {
+        if (!matchesLineToFilters(line, filters)) {
+            return;
+        }
+        const requestId = extractRequestIdFromLogLine(line);
+        if (!requestId) {
+            return;
+        }
+        rows.push({
+            rowId: `${index + 1}:${requestId}`,
+            lineNumber: index + 1,
+            line,
+            requestId,
+            requestEvent: requestLookup.get(requestId) ?? null,
+            errorEvent: errorLookup.get(requestId) ?? null,
+        });
+    });
+    return rows.slice(-MAX_TAIL_CONTEXT_ROWS).reverse();
+}
+function renderTailContextTable(rows) {
+    return renderTable([
+        { label: "Tail line" },
+        { label: "Request id" },
+        { label: "Structured context" },
+        { label: "Actions" },
+    ], rows.map((row) => [
+        `<strong>#${escapeHtml(formatNumber(row.lineNumber))}</strong><br /><span class="muted">${escapeHtml(truncateText(row.line, 140))}</span>`,
+        `<strong>${escapeHtml(row.requestId)}</strong><br /><span class="muted">${escapeHtml(describeTailContext(row))}</span>`,
+        renderTailStructuredContext(row),
+        `
+        <div class="toolbar">
+          <button class="button button--secondary" data-log-tail-detail="${escapeHtml(row.rowId)}" type="button">Inspect</button>
+          <a class="button" href="${escapeHtml(buildTrafficUrlForRequest(row.requestId))}">Open traffic</a>
+        </div>
+      `,
+    ]), "No request ids were extracted from the current rendered tail. Expand the tail window, adjust the text filter, or inspect a recent request/error row instead.");
+}
+function describeTailContext(row) {
+    if (row.requestEvent && row.errorEvent) {
+        return "request + error context loaded";
+    }
+    if (row.errorEvent) {
+        return "error context loaded";
+    }
+    if (row.requestEvent) {
+        return "request context loaded";
+    }
+    return "tail line only";
+}
+function renderTailStructuredContext(row) {
+    const source = row.errorEvent ?? row.requestEvent;
+    if (!source) {
+        return '<span class="muted">No structured request/error record for this request id in the current window.</span>';
+    }
+    const route = `${String(source.method ?? "GET")} ${String(source.endpoint ?? source.path ?? "n/a")}`;
+    const note = row.errorEvent
+        ? `${formatNumber(row.errorEvent.status_code ?? 0)} · ${String(row.errorEvent.error_type ?? "error event")}`
+        : `${formatNumber(source.status_code ?? 0)} · ${String(source.model ?? "request event")}`;
+    return `${escapeHtml(route)}<br /><span class="muted">${escapeHtml(note)}</span>`;
+}
+function buildTailSelectionSummary(row) {
+    return [
+        { label: "Selection", value: "Tail-derived request line" },
+        {
+            label: "Request id",
+            value: row.requestId,
+            note: "This id was extracted from the rendered tail and can be handed off directly into Traffic.",
+        },
+        {
+            label: "Tail line",
+            value: `#${formatNumber(row.lineNumber)}`,
+            note: truncateText(row.line, 180),
+        },
+        {
+            label: "Recent request",
+            value: row.requestEvent ? "Loaded" : "Not in current window",
+            note: row.requestEvent ? summarizeRouteStatus(row.requestEvent) : "The request event feed does not currently include this request id.",
+        },
+        {
+            label: "Recent error",
+            value: row.errorEvent ? "Loaded" : "Not in current window",
+            note: row.errorEvent ? summarizeRouteStatus(row.errorEvent) : "No matching error event is loaded for this request id.",
+        },
+    ];
+}
+function buildLogEventSelectionSummary(kind, item, counterpart) {
+    const requestId = normalizeOptionalText(item.request_id);
+    const tokenUsage = asRecord(item.token_usage);
+    return [
+        { label: "Selection", value: kind === "error" ? "Recent error event" : "Recent request event" },
+        {
+            label: "Request id",
+            value: requestId || "n/a",
+            note: requestId
+                ? "Use this id to pin Logs or jump into the matching Traffic context."
+                : "This row cannot drive the cross-page request handoff because no request id was recorded.",
+        },
+        {
+            label: "Route",
+            value: `${String(item.method ?? "GET")} ${String(item.endpoint ?? item.path ?? "n/a")}`,
+        },
+        {
+            label: "Provider",
+            value: String(item.provider ?? "unknown"),
+            note: String(item.model ?? item.api_key_name ?? item.api_key_source ?? "no model or key recorded"),
+        },
+        {
+            label: "Status",
+            value: formatNumber(item.status_code ?? 0),
+            note: kind === "error" ? String(item.error_type ?? "request failed") : summarizeTokenUsage(tokenUsage),
+        },
+        {
+            label: "Timing",
+            value: formatDurationMs(item.stream_duration_ms ?? item.duration_ms),
+            note: String(item.client_ip ?? "client hidden"),
+        },
+        {
+            label: kind === "error" ? "Matching recent request" : "Matching recent error",
+            value: counterpart ? "Loaded in the current window" : requestId ? "Not in the current window" : "Unavailable",
+            note: counterpart ? summarizeRouteStatus(counterpart) : undefined,
+        },
+    ];
+}
+function buildStreamDiagnostics(streamState, bufferLines) {
+    return [
+        {
+            label: "Phase",
+            value: streamState.phase,
+            note: streamState.phase === "stopping" ? "Waiting for the active SSE reader to unwind." : streamState.note,
+        },
+        {
+            label: "Session",
+            value: streamState.sessionId ? `#${formatNumber(streamState.sessionId)}` : "No live session yet",
+        },
+        {
+            label: "Buffer",
+            value: `${formatNumber(bufferLines)} lines`,
+            note: `${formatNumber(streamState.appendedLines)} appended during the last live session`,
+        },
+        {
+            label: "Started",
+            value: streamState.startedAt ? formatTimestamp(new Date(streamState.startedAt).toISOString()) : "n/a",
+        },
+        {
+            label: "Last line",
+            value: streamState.lastEventAt ? formatTimestamp(new Date(streamState.lastEventAt).toISOString()) : "n/a",
+            note: streamState.lastError || undefined,
+        },
+    ];
+}
+function describeStreamPhase(phase) {
+    if (phase === "connecting") {
+        return { label: "connecting", tone: "warn", buttonLabel: "Stop live stream" };
+    }
+    if (phase === "streaming") {
+        return { label: "streaming", tone: "good", buttonLabel: "Stop live stream" };
+    }
+    if (phase === "stopping") {
+        return { label: "stopping", tone: "warn", buttonLabel: "Stopping…" };
+    }
+    if (phase === "error") {
+        return { label: "error", tone: "warn", buttonLabel: "Restart live stream" };
+    }
+    return { label: "idle", tone: "default", buttonLabel: "Start live stream" };
+}
+function extractRequestIdFromLogLine(line) {
+    const pipeMatch = line.match(/^\s*[^|]+\|\s*[^|]+\|\s*([^|]+?)\s*\|/u);
+    const pipeValue = pipeMatch?.[1]?.trim();
+    if (pipeValue && pipeValue !== "-") {
+        return pipeValue;
+    }
+    const explicitMatch = line.match(/\brequest_id[=:]\s*([A-Za-z0-9._:-]+)/iu);
+    if (explicitMatch?.[1]) {
+        return explicitMatch[1];
+    }
+    const bracketedMatch = line.match(/\[([A-Za-z0-9._:-]{6,})\]/u);
+    return bracketedMatch?.[1] ?? "";
+}
+function matchesLineToFilters(line, filters) {
+    return filterLogLines([line], filters).length > 0;
+}
+function renderEventRowActions(index, kind, requestId, buildContextUrl) {
+    const actions = [
+        `<button class="button button--secondary" data-log-detail="${index}" data-log-kind="${kind}" type="button">Inspect</button>`,
+    ];
+    if (requestId.trim()) {
+        actions.push(`<a class="button" href="${escapeHtml(buildContextUrl(requestId))}">Open traffic</a>`);
+    }
+    return `<div class="toolbar">${actions.join("")}</div>`;
+}
+function summarizeRouteStatus(event) {
+    return `${String(event.method ?? "GET")} ${String(event.endpoint ?? event.path ?? "n/a")} · status ${formatNumber(event.status_code ?? 0)}`;
+}
+function summarizeTokenUsage(usage) {
+    if (Object.keys(usage).length === 0) {
+        return "No token usage recorded";
+    }
+    return `${formatNumber(usage.total_tokens ?? 0)} total tokens`;
+}
+function normalizeOptionalText(value) {
+    return String(value ?? "").trim();
+}
+function truncateText(value, maxLength) {
+    if (value.length <= maxLength) {
+        return value;
+    }
+    return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+function indexEventsByRequestId(events) {
+    const index = new Map();
+    events.forEach((event) => {
+        const requestId = normalizeOptionalText(event.request_id);
+        if (requestId && !index.has(requestId)) {
+            index.set(requestId, event);
+        }
+    });
+    return index;
+}
+function seedLogsSelection(filters, requestLookup, errorLookup, rawLogLines, setSelectionFromEvent, setSelectionFromTailRow) {
+    if (!filters.requestId) {
+        return;
+    }
+    const requestEvent = requestLookup.get(filters.requestId);
+    if (requestEvent) {
+        setSelectionFromEvent("request", requestEvent);
+        return;
+    }
+    const errorEvent = errorLookup.get(filters.requestId);
+    if (errorEvent) {
+        setSelectionFromEvent("error", errorEvent);
+        return;
+    }
+    const tailRow = buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup).find((row) => row.requestId === filters.requestId);
+    if (tailRow) {
+        setSelectionFromTailRow(tailRow);
+    }
+}
+async function readSseStream(stream, onEvent, signal) {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    while (true) {
-        const { value, done } = await reader.read();
-        if (done) {
-            buffer += decoder.decode();
-            flushSseBuffer(buffer, onEvent);
-            return;
+    const abortReader = () => {
+        void reader.cancel().catch(() => {
+            // Ignore cancellation races when the stream has already closed.
+        });
+    };
+    signal?.addEventListener("abort", abortReader, { once: true });
+    try {
+        while (true) {
+            if (signal?.aborted) {
+                throw new DOMException("The operation was aborted.", "AbortError");
+            }
+            const { value, done } = await reader.read();
+            if (done) {
+                buffer += decoder.decode();
+                flushSseBuffer(buffer, onEvent);
+                return;
+            }
+            buffer += decoder.decode(value, { stream: true });
+            const frames = buffer.split(/\r?\n\r?\n/u);
+            buffer = frames.pop() ?? "";
+            frames.forEach((frame) => flushSseBuffer(frame, onEvent));
         }
-        buffer += decoder.decode(value, { stream: true });
-        const frames = buffer.split(/\r?\n\r?\n/u);
-        buffer = frames.pop() ?? "";
-        frames.forEach((frame) => flushSseBuffer(frame, onEvent));
+    }
+    finally {
+        signal?.removeEventListener("abort", abortReader);
+        reader.releaseLock();
     }
 }
 function flushSseBuffer(rawFrame, onEvent) {

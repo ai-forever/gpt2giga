@@ -34,6 +34,12 @@ interface DefinitionItem {
   note?: string;
 }
 
+interface TrafficSelection {
+  requestId: string | null;
+  counterpartKind: "request" | "error" | null;
+  counterpartIndex: number | null;
+}
+
 type TrafficEvent = Record<string, unknown>;
 type UsageEntry = Record<string, unknown>;
 
@@ -59,6 +65,8 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
   const keyEntries = asArray<UsageEntry>(usageKeys.entries);
   const providerEntries = asArray<UsageEntry>(usageProviders.entries);
   const providerSummary = asRecord(usageProviders.summary);
+  const requestLookup = indexEventsByRequestId(requestEvents);
+  const errorLookup = indexEventsByRequestId(errorEvents);
   const requestPinned = Boolean(filters.requestId);
   const scopeSummary = buildTrafficScopeSummary(filters, requestEvents, errorEvents, providerEntries, providerSummary);
 
@@ -177,8 +185,8 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
                 <h4>Request pinning</h4>
                 <p class="muted">
                   Request id filters lock the recent request/error tables and payload inspector to one
-                  audit event. Usage rollups stay provider/model/key-oriented because they are aggregated
-                  counters, not per-request records.
+                  audit event. Usage rollups stay aggregate, but every request/error row can jump straight
+                  back into the matching Logs view with the same request id.
                 </p>
               </div>
             </div>
@@ -200,7 +208,7 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
           { label: "Status" },
           { label: "Latency" },
           { label: "Model / Key" },
-          { label: "Inspect" },
+          { label: "Actions" },
         ],
         requestEvents.map((event, index) => [
           `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(String(event.request_id ?? "no request id"))}</span>`,
@@ -208,7 +216,7 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
           renderStatusSummary(event),
           `<strong>${escapeHtml(formatDurationMs(event.stream_duration_ms ?? event.duration_ms))}</strong><br /><span class="muted">${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
           `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
-          `<button class="button button--secondary" data-traffic-detail="${index}" data-traffic-kind="request" type="button">View</button>`,
+          renderEventRowActions(index, "request", String(event.request_id ?? ""), buildLogsUrlForRequest),
         ]),
         "No recent requests matched the selected filters.",
       ),
@@ -231,7 +239,7 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
             ${renderDefinitionList(buildTrafficSelectionSummary(filters), "Select a request, error, or usage row.")}
           </div>
           <div class="toolbar" id="traffic-selection-actions">
-            ${renderTrafficSelectionActions(null, filters)}
+            ${renderTrafficSelectionActions({ requestId: null, counterpartKind: null, counterpartIndex: null }, filters)}
           </div>
           <pre class="code-block code-block--tall" id="traffic-detail">${escapeHtml(
             JSON.stringify(
@@ -256,7 +264,7 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
           { label: "Failure" },
           { label: "Latency" },
           { label: "Context" },
-          { label: "Inspect" },
+          { label: "Actions" },
         ],
         errorEvents.map((event, index) => [
           `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(String(event.request_id ?? "no request id"))}</span>`,
@@ -264,7 +272,7 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
           `<strong>${escapeHtml(String(event.error_type ?? "HTTP error"))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
           `<strong>${escapeHtml(formatDurationMs(event.stream_duration_ms ?? event.duration_ms))}</strong><br /><span class="muted">${escapeHtml(String(event.client_ip ?? "client hidden"))}</span>`,
           `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
-          `<button class="button button--secondary" data-traffic-detail="${index}" data-traffic-kind="error" type="button">View</button>`,
+          renderEventRowActions(index, "error", String(event.request_id ?? ""), buildLogsUrlForRequest),
         ]),
         "No recent errors matched the selected filters.",
       ),
@@ -349,12 +357,64 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
     return;
   }
 
+  const inspectPayloads: Record<string, Record<string, unknown>[]> = {
+    request: requestEvents,
+    error: errorEvents,
+    key: keyEntries,
+    provider: providerEntries,
+  };
+
   const setSelectionSummary = (items: DefinitionItem[]): void => {
     summaryNode.innerHTML = renderDefinitionList(items, "Select a request, error, or usage row.");
   };
 
-  const setSelectionActions = (requestId: string | null): void => {
-    actionNode.innerHTML = renderTrafficSelectionActions(requestId, filters);
+  const setSelectionActions = (selection: TrafficSelection): void => {
+    actionNode.innerHTML = renderTrafficSelectionActions(selection, filters);
+  };
+
+  const selectTrafficEvent = (kind: "request" | "error", item: TrafficEvent): void => {
+    const requestId = normalizeOptionalText(item.request_id);
+    const counterpartKind = kind === "request" ? "error" : "request";
+    const counterpartRows = counterpartKind === "error" ? errorEvents : requestEvents;
+    const counterpartIndex = requestId
+      ? counterpartRows.findIndex((candidate) => normalizeOptionalText(candidate.request_id) === requestId)
+      : -1;
+    const counterpart =
+      requestId && kind === "request"
+        ? (errorLookup.get(requestId) ?? null)
+        : requestId
+          ? (requestLookup.get(requestId) ?? null)
+          : null;
+
+    setSelectionSummary(buildTrafficEventSelectionSummary(kind, item, counterpart));
+    setSelectionActions({
+      requestId: requestId || null,
+      counterpartKind: counterpartIndex >= 0 ? counterpartKind : null,
+      counterpartIndex: counterpartIndex >= 0 ? counterpartIndex : null,
+    });
+    detailNode.textContent = JSON.stringify(
+      {
+        selected_event: item,
+        counterpart_event: counterpart,
+        active_filters: filters,
+      },
+      null,
+      2,
+    );
+  };
+
+  const selectUsageRow = (kind: "key" | "provider", item: UsageEntry): void => {
+    setSelectionSummary(buildUsageSelectionSummary(kind, item, filters));
+    setSelectionActions({ requestId: null, counterpartKind: null, counterpartIndex: null });
+    detailNode.textContent = JSON.stringify(
+      {
+        selected_usage_entry: item,
+        usage_summary: providerSummary,
+        active_filters: filters,
+      },
+      null,
+      2,
+    );
   };
 
   filtersForm.addEventListener("submit", (event) => {
@@ -416,15 +476,21 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
     if (action === "clear-request-scope") {
       window.history.replaceState({}, "", buildTrafficUrl({ ...filters, requestId: "" }));
       void app.render("traffic");
+      return;
+    }
+    if (action === "inspect-counterpart") {
+      const kind = button.dataset.counterpartKind;
+      const indexValue = button.dataset.counterpartIndex;
+      if ((kind !== "request" && kind !== "error") || indexValue === undefined) {
+        return;
+      }
+      const item = inspectPayloads[kind]?.[Number(indexValue)];
+      if (!item) {
+        return;
+      }
+      selectTrafficEvent(kind, item);
     }
   });
-
-  const inspectPayloads: Record<string, Record<string, unknown>[]> = {
-    request: requestEvents,
-    error: errorEvents,
-    key: keyEntries,
-    provider: providerEntries,
-  };
 
   app.pageContent.querySelectorAll<HTMLElement>("[data-traffic-detail]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -439,59 +505,18 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
         return;
       }
 
-      detailNode.textContent = JSON.stringify(item, null, 2);
-
       if (kind === "request" || kind === "error") {
-        const requestId = String(item.request_id ?? "");
-        setSelectionSummary([
-          { label: "Selection", value: kind === "error" ? "Recent error" : "Recent request" },
-          { label: "Request id", value: requestId || "n/a" },
-          { label: "Provider", value: String(item.provider ?? "unknown") },
-          {
-            label: "Route",
-            value: `${String(item.method ?? "GET")} ${String(item.endpoint ?? item.path ?? "n/a")}`,
-          },
-          { label: "Status", value: formatNumber(item.status_code ?? 0) },
-          {
-            label: "Timing",
-            value: formatDurationMs(item.stream_duration_ms ?? item.duration_ms),
-            note:
-              kind === "error"
-                ? String(item.error_type ?? "request failed")
-                : String(item.model ?? "no model"),
-          },
-        ]);
-        setSelectionActions(requestId || null);
+        selectTrafficEvent(kind, item);
         return;
       }
 
-      setSelectionSummary([
-        {
-          label: "Selection",
-          value: kind === "key" ? "Usage by key" : "Usage by provider",
-        },
-        {
-          label: kind === "key" ? "Key" : "Provider",
-          value: String(item.name ?? item.provider ?? "unknown"),
-        },
-        {
-          label: "Requests",
-          value: formatNumber(item.request_count ?? 0),
-          note: `${formatNumber(item.error_count ?? 0)} errors`,
-        },
-        { label: "Tokens", value: formatNumber(item.total_tokens ?? 0) },
-        {
-          label: "Breakdown",
-          value:
-            kind === "key"
-              ? joinObjectKeys(item.providers)
-              : joinObjectKeys(item.api_keys),
-          note: joinObjectKeys(item.models),
-        },
-      ]);
-      setSelectionActions(null);
+      if (kind === "key" || kind === "provider") {
+        selectUsageRow(kind, item);
+      }
     });
   });
+
+  seedTrafficSelection(filters, requestLookup, errorLookup, selectTrafficEvent);
 }
 
 function buildTrafficScopeSummary(
@@ -542,30 +567,116 @@ function buildTrafficSelectionSummary(filters: TrafficFilters): DefinitionItem[]
       value: filters.requestId || "Recent request window",
       note: filters.requestId
         ? "Pinned traffic tables are scoped to one request id."
-        : "Select a request or error row to pin its traffic context.",
+        : "Select a request or error row to pin its traffic context and jump back into Logs.",
     },
     {
       label: "Usage rollups",
       value: filters.requestId ? "Provider/model/key filtered only" : "Aligned with the current filters",
+      note: "Usage tables stay aggregate even when recent request/error feeds are pinned to one request id.",
+    },
+  ];
+}
+
+function buildTrafficEventSelectionSummary(
+  kind: "request" | "error",
+  item: TrafficEvent,
+  counterpart: TrafficEvent | null,
+): DefinitionItem[] {
+  const requestId = normalizeOptionalText(item.request_id);
+  const usage = asRecord(item.token_usage);
+
+  return [
+    { label: "Selection", value: kind === "error" ? "Recent error event" : "Recent request event" },
+    {
+      label: "Request id",
+      value: requestId || "n/a",
+      note: requestId
+        ? "This id can reopen Logs with the same request context already applied."
+        : "No request id was recorded, so the Logs handoff is unavailable for this row.",
+    },
+    {
+      label: "Route",
+      value: `${String(item.method ?? "GET")} ${String(item.endpoint ?? item.path ?? "n/a")}`,
+    },
+    {
+      label: "Provider",
+      value: String(item.provider ?? "unknown"),
+      note: String(item.model ?? item.api_key_name ?? item.api_key_source ?? "no model or key recorded"),
+    },
+    {
+      label: "Status",
+      value: formatNumber(item.status_code ?? 0),
+      note: kind === "error" ? String(item.error_type ?? "request failed") : summarizeTokenUsage(usage),
+    },
+    {
+      label: "Timing",
+      value: formatDurationMs(item.stream_duration_ms ?? item.duration_ms),
+      note: String(item.client_ip ?? "client hidden"),
+    },
+    {
+      label: kind === "error" ? "Matching recent request" : "Matching recent error",
+      value: counterpart ? "Loaded in the current window" : requestId ? "Not in the current window" : "Unavailable",
+      note: counterpart ? summarizeRouteStatus(counterpart) : undefined,
+    },
+  ];
+}
+
+function buildUsageSelectionSummary(
+  kind: "key" | "provider",
+  item: UsageEntry,
+  filters: TrafficFilters,
+): DefinitionItem[] {
+  return [
+    {
+      label: "Selection",
+      value: kind === "key" ? "Usage by key" : "Usage by provider",
+    },
+    {
+      label: kind === "key" ? "Key" : "Provider",
+      value: String(item.name ?? item.provider ?? "unknown"),
+    },
+    {
+      label: "Requests",
+      value: formatNumber(item.request_count ?? 0),
+      note: `${formatNumber(item.error_count ?? 0)} errors`,
+    },
+    { label: "Tokens", value: formatNumber(item.total_tokens ?? 0) },
+    {
+      label: "Breakdown",
+      value: kind === "key" ? joinObjectKeys(item.providers) : joinObjectKeys(item.api_keys),
+      note: joinObjectKeys(item.models),
+    },
+    {
+      label: "Request pin impact",
+      value: filters.requestId ? "Aggregate tables stay unpinned" : "Following the current filters",
+      note: filters.requestId
+        ? "The recent request/error feeds are pinned, but usage rows stay grouped by provider/model/key."
+        : "Pin a request from the request/error tables to hand off one request into Logs.",
     },
   ];
 }
 
 function renderTrafficSelectionActions(
-  requestId: string | null,
+  selection: TrafficSelection,
   filters: TrafficFilters,
 ): string {
   const actions: string[] = [];
 
-  if (requestId) {
+  if (selection.requestId) {
     actions.push(
-      `<a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(requestId))}">Open logs for request</a>`,
+      `<a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(selection.requestId))}">Open logs for request</a>`,
     );
-    if (filters.requestId !== requestId) {
+    if (filters.requestId !== selection.requestId) {
       actions.push(
-        `<button class="button" data-traffic-action="scope-request" data-request-id="${escapeHtml(requestId)}" type="button">Pin this request</button>`,
+        `<button class="button" data-traffic-action="scope-request" data-request-id="${escapeHtml(selection.requestId)}" type="button">Pin this request</button>`,
       );
     }
+  }
+
+  if (selection.counterpartKind && selection.counterpartIndex !== null) {
+    actions.push(
+      `<button class="button button--secondary" data-traffic-action="inspect-counterpart" data-counterpart-kind="${escapeHtml(selection.counterpartKind)}" data-counterpart-index="${escapeHtml(String(selection.counterpartIndex))}" type="button">Inspect matching ${escapeHtml(selection.counterpartKind)}</button>`,
+    );
   }
 
   if (filters.requestId) {
@@ -576,7 +687,7 @@ function renderTrafficSelectionActions(
 
   return actions.length
     ? actions.join("")
-    : '<span class="muted">Select a request or error row to jump into the matching log context.</span>';
+    : '<span class="muted">Select a request or error row to inspect payload and reopen the matching Logs context.</span>';
 }
 
 function buildLogsUrlForRequest(requestId: string): string {
@@ -716,4 +827,67 @@ function renderStatusSummary(event: TrafficEvent): string {
 function joinObjectKeys(value: unknown): string {
   const keys = Object.keys(asRecord(value));
   return keys.length ? keys.join(", ") : "no breakdown";
+}
+
+function summarizeTokenUsage(usage: Record<string, unknown>): string {
+  if (Object.keys(usage).length === 0) {
+    return "No token usage recorded";
+  }
+  return `${formatNumber(usage.total_tokens ?? 0)} total tokens`;
+}
+
+function summarizeRouteStatus(event: TrafficEvent): string {
+  return `${String(event.method ?? "GET")} ${String(event.endpoint ?? event.path ?? "n/a")} · status ${formatNumber(event.status_code ?? 0)}`;
+}
+
+function normalizeOptionalText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+function indexEventsByRequestId(events: TrafficEvent[]): Map<string, TrafficEvent> {
+  const index = new Map<string, TrafficEvent>();
+  events.forEach((event) => {
+    const requestId = normalizeOptionalText(event.request_id);
+    if (requestId && !index.has(requestId)) {
+      index.set(requestId, event);
+    }
+  });
+  return index;
+}
+
+function renderEventRowActions(
+  index: number,
+  kind: "request" | "error",
+  requestId: string,
+  buildContextUrl: (requestId: string) => string,
+): string {
+  const actions = [
+    `<button class="button button--secondary" data-traffic-detail="${index}" data-traffic-kind="${kind}" type="button">View</button>`,
+  ];
+  if (requestId.trim()) {
+    actions.push(`<a class="button" href="${escapeHtml(buildContextUrl(requestId))}">Open logs</a>`);
+  }
+  return `<div class="toolbar">${actions.join("")}</div>`;
+}
+
+function seedTrafficSelection(
+  filters: TrafficFilters,
+  requestLookup: Map<string, TrafficEvent>,
+  errorLookup: Map<string, TrafficEvent>,
+  selectTrafficEvent: (kind: "request" | "error", item: TrafficEvent) => void,
+): void {
+  if (!filters.requestId) {
+    return;
+  }
+
+  const requestEvent = requestLookup.get(filters.requestId);
+  if (requestEvent) {
+    selectTrafficEvent("request", requestEvent);
+    return;
+  }
+
+  const errorEvent = errorLookup.get(filters.requestId);
+  if (errorEvent) {
+    selectTrafficEvent("error", errorEvent);
+  }
 }
