@@ -51,4 +51,5 @@ uv run python examples/gemini/embeddings.py
 - Генерация использует реальные GigaChat model ids, например `GigaChat-2-Max`.
 - Эмбеддинги используют модель, настроенную на стороне proxy. По умолчанию это `EmbeddingsGigaR`; если вы поменяли `GPT2GIGA_EMBEDDINGS`, обновите `model=...` в примере.
 - `embeddings.py` передаёт список `contents=[...]`, поэтому пример покрывает batch-style embeddings flow поверх Gemini-compatible embeddings routes.
-- Совместимость в этой итерации сфокусирована на text + function calling. Файлы, мультимодальные parts и built-in Gemini tools пока не поддерживаются.
+- Совместимость в этой итерации сфокусирована на text, function calling, files, batchGenerateContent и embeddings.
+- Built-in Gemini tools и часть мультимодальных/file-backed сценариев всё ещё остаются вне scope.

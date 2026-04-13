@@ -80,6 +80,40 @@ def test_build_normalized_responses_request_allows_missing_model_for_thread_cont
     assert request.options["previous_response_id"] == "resp_prev"
 
 
+def test_build_normalized_responses_request_preserves_native_gigachat_tools():
+    request = build_normalized_responses_request(
+        {
+            "model": "gpt-x",
+            "input": "hi",
+            "tools": [
+                {
+                    "web_search": {
+                        "type": "actual_info_web_search",
+                        "indexes": ["news"],
+                        "flags": ["gopro"],
+                    }
+                },
+                {"url_content_extraction": {}},
+            ],
+        }
+    )
+
+    assert request.tools[0].kind == "web_search"
+    assert request.tools[0].to_openai_tool() == {
+        "type": "web_search",
+        "web_search": {
+            "type": "actual_info_web_search",
+            "indexes": ["news"],
+            "flags": ["gopro"],
+        },
+    }
+    assert request.tools[1].kind == "url_content_extraction"
+    assert request.tools[1].to_openai_tool() == {
+        "type": "url_content_extraction",
+        "url_content_extraction": {},
+    }
+
+
 def test_build_normalized_embeddings_request_keeps_additional_options():
     request = build_normalized_embeddings_request(
         {

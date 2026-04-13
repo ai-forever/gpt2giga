@@ -310,7 +310,7 @@ def responses_openapi_extra() -> Dict[str, Any]:
             },
             "tools": {
                 "type": "array",
-                "description": "OpenAI tools format. Functions and built-in `web_search*`, `code_interpreter`, `image_generation` are supported best-effort.",
+                "description": 'OpenAI tools format. Functions and built-in `web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate` are supported best-effort. For `web_search`, GigaChat-native config may be passed as `{"type": "web_search", "web_search": {"type": "actual_info_web_search", "indexes": [...], "flags": [...]}}`.',
                 "items": {"type": "object", "additionalProperties": True},
             },
             "tool_choice": {

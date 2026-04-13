@@ -8,6 +8,13 @@ from typing import Any, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field
 
 NormalizedContent: TypeAlias = str | list[dict[str, Any]] | None
+_NATIVE_GIGACHAT_TOOL_KEYS = {
+    "code_interpreter",
+    "image_generate",
+    "model_3d_generate",
+    "url_content_extraction",
+    "web_search",
+}
 
 
 class NormalizedMessage(BaseModel):
@@ -70,16 +77,34 @@ class NormalizedTool(BaseModel):
     strict: bool | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
+    @staticmethod
+    def _detect_native_gigachat_tool(
+        tool_payload: dict[str, Any],
+    ) -> str | None:
+        for key in _NATIVE_GIGACHAT_TOOL_KEYS:
+            if key in tool_payload:
+                return key
+        return None
+
     @classmethod
     def from_openai_tool(cls, tool: dict[str, Any]) -> "NormalizedTool":
         """Create a normalized tool from an OpenAI tool entry."""
         tool_payload = deepcopy(tool)
+        native_tool_key = None
+        kind_value = tool_payload.get("type")
+        if not isinstance(kind_value, str):
+            native_tool_key = cls._detect_native_gigachat_tool(tool_payload)
+            if native_tool_key is not None:
+                tool_payload["type"] = native_tool_key
+
         kind = str(tool_payload.get("type", "function"))
         function_payload = tool_payload.get("function")
         if isinstance(function_payload, dict):
             definition = function_payload
         else:
             definition = tool_payload
+        if native_tool_key is not None:
+            definition = {"name": native_tool_key}
         return cls(
             kind=kind,
             name=str(definition.get("name", "")),

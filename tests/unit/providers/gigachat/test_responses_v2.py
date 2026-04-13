@@ -69,6 +69,46 @@ async def test_prepare_response_v2_maps_json_schema_tools_and_conversation():
 
 
 @pytest.mark.asyncio
+async def test_prepare_response_v2_maps_native_gigachat_tools_and_web_search_config():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    chat = await transformer.prepare_response_v2(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "tools": [
+                {
+                    "web_search": {
+                        "type": "actual_info_web_search",
+                        "indexes": ["news"],
+                        "flags": ["gopro"],
+                    }
+                },
+                {"type": "image_generate"},
+                {"type": "url_content_extraction"},
+                {"type": "model_3d_generate"},
+            ],
+            "tool_choice": {"type": "url_content_extraction"},
+        }
+    )
+
+    payload = chat.model_dump(exclude_none=True, by_alias=True)
+    assert payload["tools"][0] == {
+        "web_search": {
+            "type": "actual_info_web_search",
+            "indexes": ["news"],
+            "flags": ["gopro"],
+        }
+    }
+    assert payload["tools"][1] == {"image_generate": {}}
+    assert payload["tools"][2] == {"url_content_extraction": {}}
+    assert payload["tools"][3] == {"model_3d_generate": {}}
+    assert payload["tool_config"] == {
+        "mode": "forced",
+        "tool_name": "url_content_extraction",
+    }
+
+
+@pytest.mark.asyncio
 async def test_prepare_response_v2_maps_multimodal_and_replayed_tool_items():
     transformer = RequestTransformer(ProxyConfig(), logger)
     chat = await transformer.prepare_response_v2(
@@ -602,6 +642,65 @@ def test_response_processor_process_response_api_v2_maps_orphan_image_files():
                 if isinstance(part, dict) and isinstance(part.get("text"), str):
                     texts.append(part["text"])
     assert any("Готово." in t for t in texts)
+
+
+def test_response_processor_process_response_api_v2_maps_gigachat_native_tool_items():
+    processor = ResponseProcessor(logger)
+    out = processor.process_response_api_v2(
+        {"model": "gpt-x", "input": "hello"},
+        MockResponse(
+            {
+                "model": "gpt-x",
+                "thread_id": "thread-tools",
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "tools_state_id": "state-1",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "url_content_extraction",
+                                    "status": "completed",
+                                }
+                            },
+                            {
+                                "tool_execution": {
+                                    "name": "model_3d_generate",
+                                    "status": "completed",
+                                }
+                            },
+                            {
+                                "files": [
+                                    {
+                                        "id": "model-1",
+                                        "mime": "model/gltf-binary",
+                                        "target": "model",
+                                    }
+                                ]
+                            },
+                        ],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 1,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 2,
+                    "total_tokens": 3,
+                },
+            }
+        ),
+        gpt_model="gpt-x",
+        response_id="v2-native-tools",
+    )
+
+    assert out["output"][0]["type"] == "url_content_extraction_call"
+    assert out["output"][0]["status"] == "completed"
+    assert out["output"][1]["type"] == "model_3d_generate_call"
+    assert out["output"][1]["status"] == "completed"
+    assert out["output"][1]["result"] == "model-1"
 
 
 def test_collect_responses_updates_carries_tool_state_across_chunks():

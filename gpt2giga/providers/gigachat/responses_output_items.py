@@ -192,6 +192,38 @@ class ResponsesOutputItemsMixin:
                 result["result"] = first_file
             return result
 
+        if tool_name == "url_content_extraction":
+            if status not in {"in_progress", "completed", "failed"}:
+                status = cls._build_output_item_status(response_status)
+            return {
+                "id": item_id,
+                "type": "url_content_extraction_call",
+                "status": status,
+            }
+
+        if tool_name == "model_3d_generate":
+            if status not in {"in_progress", "generating", "completed", "failed"}:
+                status = (
+                    "completed" if response_status == "completed" else "in_progress"
+                )
+            result = {
+                "id": item_id,
+                "type": "model_3d_generate_call",
+                "status": status,
+            }
+            first_file = next(
+                (
+                    file_desc["id"]
+                    for file_desc in related_files
+                    if isinstance(file_desc, dict)
+                    and isinstance(file_desc.get("id"), str)
+                ),
+                None,
+            )
+            if first_file:
+                result["result"] = first_file
+            return result
+
         return None
 
     @classmethod
@@ -293,6 +325,18 @@ class ResponsesOutputItemsMixin:
                 if isinstance(files, list):
                     if last_tool_item is not None:
                         if last_tool_item.get("type") == "image_generation_call":
+                            first_file = next(
+                                (
+                                    file_desc.get("id")
+                                    for file_desc in files
+                                    if isinstance(file_desc, dict)
+                                    and isinstance(file_desc.get("id"), str)
+                                ),
+                                None,
+                            )
+                            if first_file:
+                                last_tool_item["result"] = first_file
+                        elif last_tool_item.get("type") == "model_3d_generate_call":
                             first_file = next(
                                 (
                                     file_desc.get("id")

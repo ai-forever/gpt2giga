@@ -441,6 +441,12 @@ async def stream_responses_generator(
         if item_type == "image_generation_call":
             if status in {"in_progress", "generating", "completed"}:
                 return f"response.image_generation_call.{status}"
+        if item_type == "url_content_extraction_call":
+            if status in {"in_progress", "completed"}:
+                return f"response.url_content_extraction_call.{status}"
+        if item_type == "model_3d_generate_call":
+            if status in {"in_progress", "generating", "completed"}:
+                return f"response.model_3d_generate_call.{status}"
         return None
 
     def ensure_tool_state(

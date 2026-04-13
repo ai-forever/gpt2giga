@@ -16,6 +16,9 @@ _RESPONSE_BUILTIN_TOOL_ALIASES = {
     "web_search_preview_2025_03_11": "web_search",
     "code_interpreter": "code_interpreter",
     "image_generation": "image_generate",
+    "image_generate": "image_generate",
+    "url_content_extraction": "url_content_extraction",
+    "model_3d_generate": "model_3d_generate",
 }
 
 
@@ -27,6 +30,47 @@ class ResponsesV2ToolMappingMixin:
         if not isinstance(type_, str):
             return None
         return _RESPONSE_BUILTIN_TOOL_ALIASES.get(type_)
+
+    @classmethod
+    def _resolve_response_tool_name(cls, tool: Dict[str, Any]) -> Optional[str]:
+        tool_type = tool.get("type")
+        mapped_type = cls._map_openai_tool_type_to_gigachat(tool_type)
+        if mapped_type is not None:
+            return mapped_type
+
+        for key in _RESPONSE_BUILTIN_TOOL_ALIASES.values():
+            if key in tool:
+                return key
+
+        return None
+
+    @staticmethod
+    def _coerce_optional_string_list(value: Any) -> Optional[List[str]]:
+        if not isinstance(value, list):
+            return None
+        coerced = [
+            item.strip() for item in value if isinstance(item, str) and item.strip()
+        ]
+        return coerced or None
+
+    @classmethod
+    def _build_web_search_tool(cls, tool: Dict[str, Any]) -> ChatV2Tool:
+        raw_config = tool.get("web_search")
+        config = raw_config if isinstance(raw_config, dict) else {}
+
+        raw_type = config.get("type")
+        search_type = (
+            raw_type.strip() if isinstance(raw_type, str) and raw_type.strip() else None
+        )
+        indexes = cls._coerce_optional_string_list(
+            config.get("indexes", tool.get("indexes"))
+        )
+        flags = cls._coerce_optional_string_list(config.get("flags", tool.get("flags")))
+        return ChatV2Tool.web_search_tool(
+            type=search_type,
+            indexes=indexes,
+            flags=flags,
+        )
 
     def _collect_response_tools(
         self,
@@ -59,9 +103,9 @@ class ResponsesV2ToolMappingMixin:
                     unsupported_tools.append(tool)
                 continue
 
-            giga_tool_name = self._map_openai_tool_type_to_gigachat(tool_type)
+            giga_tool_name = self._resolve_response_tool_name(tool)
             if giga_tool_name == "web_search":
-                builtin_tools[giga_tool_name] = ChatV2Tool.web_search_tool()
+                builtin_tools[giga_tool_name] = self._build_web_search_tool(tool)
                 user_location = tool.get("user_location")
                 if isinstance(user_location, dict):
                     timezone = user_location.get("timezone")
@@ -73,6 +117,12 @@ class ResponsesV2ToolMappingMixin:
                 continue
             if giga_tool_name == "image_generate":
                 builtin_tools[giga_tool_name] = ChatV2Tool.image_generate_tool()
+                continue
+            if giga_tool_name == "url_content_extraction":
+                builtin_tools[giga_tool_name] = ChatV2Tool.url_content_extraction_tool()
+                continue
+            if giga_tool_name == "model_3d_generate":
+                builtin_tools[giga_tool_name] = ChatV2Tool.model_3d_generate_tool()
                 continue
 
             unsupported_tools.append(tool)
