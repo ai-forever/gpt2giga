@@ -46,9 +46,11 @@ def test_openai_provider_descriptor_exposes_mounts_and_adapters():
 def test_gemini_provider_descriptor_uses_gemini_auth_policy():
     descriptor = get_provider_descriptor("gemini")
 
-    assert len(descriptor.mounts) == 1
-    assert descriptor.mounts[0].prefix == "/v1beta"
-    assert descriptor.mounts[0].auth_policy == "gemini"
+    assert {mount.prefix for mount in descriptor.mounts} == {
+        "/v1beta",
+        "/upload/v1beta",
+    }
+    assert all(mount.auth_policy == "gemini" for mount in descriptor.mounts)
 
 
 def test_iter_enabled_provider_descriptors_filters_registry():

@@ -1,4 +1,5 @@
-import { escapeHtml, humanizeField } from "./utils.js";
+import { describePendingRuntimeImpact, planPendingApply, } from "./forms.js";
+import { escapeHtml, formatTimestamp, humanizeField, uniqueSortedStrings, } from "./utils.js";
 export function banner(message, tone = "info") {
     const toneClass = tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
     return `<div class="${toneClass}">${escapeHtml(message)}</div>`;
@@ -111,6 +112,26 @@ export function renderTable(columns, rows, emptyMessage = "No rows available.") 
     </div>
   `;
 }
+export function renderSelectOption(value, selected, label) {
+    const normalizedValue = String(value ?? "");
+    return `<option value="${escapeHtml(normalizedValue)}" ${selected === normalizedValue ? "selected" : ""}>${escapeHtml(label ?? normalizedValue)}</option>`;
+}
+export function renderStaticSelectOptions(selected, values) {
+    return values.map((value) => renderSelectOption(value, selected)).join("");
+}
+export function renderBooleanSelectOptions(selected) {
+    const normalizedValue = selected ? "true" : "false";
+    return [
+        renderSelectOption("true", normalizedValue, "on"),
+        renderSelectOption("false", normalizedValue, "off"),
+    ].join("");
+}
+export function renderFilterSelectOptions(selected, values, emptyLabel = "All") {
+    return [
+        renderSelectOption("", selected, emptyLabel),
+        ...uniqueSortedStrings(values).map((value) => renderSelectOption(value, selected)),
+    ].join("");
+}
 export function renderSetupSteps(steps) {
     if (!steps.length) {
         return `<p class="muted">No setup steps reported.</p>`;
@@ -217,6 +238,33 @@ export function renderFormChangeSummary(summary, options) {
         ? renderPendingFieldGroup("Masked secret updates", summary.secretFields, "Secret values stay masked after save, but this shows which secret surfaces will rotate or clear.", "default")
         : ""}
       ${options?.note ? `<p class="muted">${escapeHtml(options.note)}</p>` : ""}
+    </div>
+  `;
+}
+export function renderControlPlaneSectionStatus({ summary, persisted, updatedAt, note, validationMessage, actionState, }) {
+    const plannedApply = planPendingApply(summary);
+    const runtimeImpact = describePendingRuntimeImpact(plannedApply);
+    const persistedLabel = persisted && updatedAt
+        ? `Persisted target: ${formatTimestamp(updatedAt)}`
+        : "Persisted target: not saved yet";
+    return `
+    <div class="stack">
+      ${actionState ? banner(actionState.message, actionState.tone) : ""}
+      ${renderFormChangeSummary(plannedApply.effectiveSummary, {
+        note,
+        validationMessage,
+    })}
+      <div class="pill-row">
+        ${pill(persistedLabel, persisted ? "default" : "warn")}
+        ${pill(runtimeImpact.label, runtimeImpact.tone)}
+        ${plannedApply.blockedLiveFields.length
+        ? pill(`Live-capable if isolated: ${plannedApply.blockedLiveFields.length}`)
+        : ""}
+      </div>
+      ${plannedApply.blockedLiveFields.length
+        ? `<p class="muted">These fields can reload live on their own, but this save batch still waits for restart: ${escapeHtml(plannedApply.blockedLiveFields.map((field) => humanizeField(field)).join(", "))}.</p>`
+        : ""}
+      <p class="muted">${escapeHtml(runtimeImpact.detail)}</p>
     </div>
   `;
 }

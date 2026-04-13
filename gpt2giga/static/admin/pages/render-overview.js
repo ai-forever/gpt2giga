@@ -1,5 +1,5 @@
-import { banner, card, kpi, renderDefinitionList, renderStatLines, renderTable } from "../templates.js";
-import { asArray, asRecord, escapeHtml, formatNumber, formatTimestamp } from "../utils.js";
+import { banner, card, kpi, pill, renderDefinitionList, renderStatLines, renderTable, } from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatNumber, formatTimestamp, } from "../utils.js";
 const MAX_SUMMARY_ROWS = 5;
 export async function renderOverview(app, token) {
     const [runtime, setup, usageKeys, usageProviders, errors] = await Promise.all([

@@ -1,6 +1,6 @@
-import { bindValidityReset, buildApplicationPayload, buildPendingDiffEntries, collectGigachatPayload, summarizePendingChanges, withBusyState, } from "../forms.js";
-import { banner, card, pill, renderFormChangeSummary, renderSecretField, renderSetupSteps, } from "../templates.js";
-import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils.js";
+import { bindValidityReset, bindSecretFieldBehavior, buildApplicationPayload, buildPendingDiffEntries, collectGigachatPayload, describePersistOutcome, summarizePendingChanges, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
+import { banner, card, pill, renderBooleanSelectOptions, renderControlPlaneSectionStatus, renderSecretField, renderStaticSelectOptions, renderSetupSteps, } from "../templates.js";
+import { asArray, asRecord, csv, escapeHtml, parseCsv, toErrorMessage, } from "../utils.js";
 export async function renderSetup(app, token) {
     const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
         app.api.json("/admin/api/setup"),
@@ -21,6 +21,8 @@ export async function renderSetup(app, token) {
     const globalKey = asRecord(asRecord(keys.global));
     const scopedKeys = asArray(keys.scoped);
     const warnings = asArray(setup.warnings);
+    const persisted = Boolean(setup.persisted);
+    const persistedUpdatedAt = setup.updated_at;
     app.setHeroActions(`
     <button class="button button--secondary" id="refresh-setup" type="button">Refresh setup state</button>
     <a class="button" href="/admin/settings">Open full settings</a>
@@ -89,21 +91,19 @@ export async function renderSetup(app, token) {
       `, "panel panel--span-4")}
     ${card("Step 2 · Application posture", `
         <form id="setup-application-form" class="stack">
-          ${banner("Keep at least one provider enabled. Switching mode, runtime store backend or pass-token posture can require a restart.")}
+          ${banner("Saving always updates the persisted control-plane target. Runtime only reloads immediately when this bootstrap step stays restart-safe.")}
           <div id="setup-application-status"></div>
           <div class="dual-grid">
             <label class="field">
               <span>Mode</span>
               <select name="mode">
-                <option value="DEV" ${applicationValues.mode === "DEV" ? "selected" : ""}>DEV</option>
-                <option value="PROD" ${applicationValues.mode === "PROD" ? "selected" : ""}>PROD</option>
+                ${renderStaticSelectOptions(String(applicationValues.mode ?? ""), ["DEV", "PROD"])}
               </select>
             </label>
             <label class="field">
               <span>GigaChat API mode</span>
               <select name="gigachat_api_mode">
-                <option value="v1" ${applicationValues.gigachat_api_mode === "v1" ? "selected" : ""}>v1</option>
-                <option value="v2" ${applicationValues.gigachat_api_mode === "v2" ? "selected" : ""}>v2</option>
+                ${renderStaticSelectOptions(String(applicationValues.gigachat_api_mode ?? ""), ["v1", "v2"])}
               </select>
             </label>
           </div>
@@ -121,8 +121,7 @@ export async function renderSetup(app, token) {
             <label class="field">
               <span>Runtime store backend</span>
               <select name="runtime_store_backend">
-                <option value="memory" ${applicationValues.runtime_store_backend === "memory" ? "selected" : ""}>memory</option>
-                <option value="sqlite" ${applicationValues.runtime_store_backend === "sqlite" ? "selected" : ""}>sqlite</option>
+                ${renderStaticSelectOptions(String(applicationValues.runtime_store_backend ?? ""), ["memory", "sqlite"])}
               </select>
             </label>
             <label class="field">
@@ -134,22 +133,19 @@ export async function renderSetup(app, token) {
             <label class="field">
               <span>Telemetry</span>
               <select name="enable_telemetry">
-                <option value="true" ${applicationValues.enable_telemetry ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.enable_telemetry ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.enable_telemetry))}
               </select>
             </label>
             <label class="field">
               <span>Pass model</span>
               <select name="pass_model">
-                <option value="true" ${applicationValues.pass_model ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.pass_model ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.pass_model))}
               </select>
             </label>
             <label class="field">
               <span>Pass token</span>
               <select name="pass_token">
-                <option value="true" ${applicationValues.pass_token ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.pass_token ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.pass_token))}
               </select>
             </label>
           </div>
@@ -158,7 +154,7 @@ export async function renderSetup(app, token) {
       `, "panel panel--span-4")}
     ${card("Step 3 · GigaChat auth", `
         <form id="setup-gigachat-form" class="stack">
-          ${banner("Leave secret fields blank to keep the stored value. Paste a new secret to replace it, or use the clear toggle only when you want to remove it.")}
+          ${banner("Connection tests use the candidate values without persisting them. Saving updates the persisted target first, then reloads runtime only when the batch is restart-safe.")}
           <div id="setup-gigachat-status"></div>
           <div class="dual-grid">
             <label class="field"><span>Model</span><input name="model" value="${escapeHtml(gigachatValues.model ?? "")}" /></label>
@@ -189,8 +185,7 @@ export async function renderSetup(app, token) {
           <label class="field">
             <span>Verify SSL</span>
             <select name="verify_ssl_certs">
-              <option value="true" ${gigachatValues.verify_ssl_certs ? "selected" : ""}>on</option>
-              <option value="false" ${!gigachatValues.verify_ssl_certs ? "selected" : ""}>off</option>
+              ${renderBooleanSelectOptions(Boolean(gigachatValues.verify_ssl_certs))}
             </select>
           </label>
           <label class="field">
@@ -206,13 +201,12 @@ export async function renderSetup(app, token) {
     ${card("Step 4 · Security bootstrap", `
         <div class="stack">
           <form id="setup-security-form" class="stack">
-            ${banner("Gateway auth and CORS persist immediately, but mounted routes may still require a restart before posture fully matches the saved config.", "warn")}
+            ${banner("Security bootstrap saves to the control plane first. If this step includes restart-sensitive changes, the running process keeps the previous posture until restart.", "warn")}
             <div id="setup-security-status"></div>
             <label class="field">
               <span>Enable gateway API key auth</span>
               <select name="enable_api_key_auth">
-                <option value="true" ${securityValues.enable_api_key_auth ? "selected" : ""}>on</option>
-                <option value="false" ${!securityValues.enable_api_key_auth ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(securityValues.enable_api_key_auth))}
               </select>
             </label>
             <label class="field">
@@ -273,38 +267,27 @@ export async function renderSetup(app, token) {
     const applicationFields = applicationForm?.elements;
     const gigachatFields = gigachatForm?.elements;
     bindValidityReset(applicationFields?.enabled_providers, gigachatFields?.timeout);
-    const validateEnabledProviders = () => {
-        const field = applicationFields?.enabled_providers;
-        if (!field) {
-            return false;
-        }
-        if (parseCsv(field.value).length > 0) {
-            field.setCustomValidity("");
-            return true;
-        }
-        field.setCustomValidity("Provide at least one enabled provider.");
-        field.reportValidity();
-        return false;
-    };
-    const validateGigachatTimeout = () => {
-        const field = gigachatFields?.timeout;
-        if (!field) {
-            return true;
-        }
-        const rawValue = field.value.trim();
-        if (!rawValue) {
-            field.setCustomValidity("");
-            return true;
-        }
-        const numeric = Number(rawValue);
-        if (Number.isFinite(numeric) && numeric > 0) {
-            field.setCustomValidity("");
-            return true;
-        }
-        field.setCustomValidity("Timeout must be a positive number of seconds.");
-        field.reportValidity();
-        return false;
-    };
+    const syncCredentialsSecret = gigachatForm
+        ? bindSecretFieldBehavior({
+            form: gigachatForm,
+            fieldName: "credentials",
+            clearFieldName: "clear_credentials",
+            preview: String(gigachatValues.credentials_preview ?? "not configured"),
+        })
+        : () => null;
+    const syncAccessTokenSecret = gigachatForm
+        ? bindSecretFieldBehavior({
+            form: gigachatForm,
+            fieldName: "access_token",
+            clearFieldName: "clear_access_token",
+            preview: String(gigachatValues.access_token_preview ?? "not configured"),
+        })
+        : () => null;
+    let applicationActionState = null;
+    let gigachatActionState = null;
+    let securityActionState = null;
+    const getApplicationValidationMessage = (report = false) => validateRequiredCsvField(applicationFields?.enabled_providers, "Provide at least one enabled provider.", { report });
+    const getGigachatValidationMessage = (report = false) => validatePositiveNumberField(gigachatFields?.timeout, "Timeout must be a positive number of seconds.", { report });
     const buildSecurityStepPayload = (form) => {
         const fields = form.elements;
         return {
@@ -323,19 +306,41 @@ export async function renderSetup(app, token) {
         const applicationEntries = buildPendingDiffEntries("application", applicationValues, buildApplicationPayload(applicationForm));
         const gigachatEntries = buildPendingDiffEntries("gigachat", gigachatValues, collectGigachatPayload(gigachatForm));
         const securityEntries = buildPendingDiffEntries("security", securityValues, buildSecurityStepPayload(securityForm));
+        const applicationValidationMessage = getApplicationValidationMessage();
+        const gigachatValidationMessage = getGigachatValidationMessage();
+        const secretStates = [syncCredentialsSecret(), syncAccessTokenSecret()].flatMap((state) => state ? [state] : []);
+        const stagedSecretMessages = secretStates
+            .filter((state) => state.intent !== "keep")
+            .map((state) => state.message);
         if (applicationStatusNode) {
-            applicationStatusNode.innerHTML = renderFormChangeSummary(summarizePendingChanges(applicationEntries), {
+            applicationStatusNode.innerHTML = renderControlPlaneSectionStatus({
+                summary: summarizePendingChanges(applicationEntries),
+                persisted,
+                updatedAt: persistedUpdatedAt,
                 note: "Use this step for runtime posture and provider routing. Restart-sensitive controls are called out before you save.",
+                validationMessage: applicationValidationMessage || undefined,
+                actionState: applicationActionState,
             });
         }
         if (gigachatStatusNode) {
-            gigachatStatusNode.innerHTML = renderFormChangeSummary(summarizePendingChanges(gigachatEntries), {
-                note: "Testing the connection here does not persist the form; only save once the pending state looks correct.",
+            gigachatStatusNode.innerHTML = renderControlPlaneSectionStatus({
+                summary: summarizePendingChanges(gigachatEntries),
+                persisted,
+                updatedAt: persistedUpdatedAt,
+                note: stagedSecretMessages.length
+                    ? `Testing the connection here does not persist the form. ${stagedSecretMessages.join(" ")}`
+                    : "Testing the connection here does not persist the form; save only after the pending state looks correct.",
+                validationMessage: gigachatValidationMessage || undefined,
+                actionState: gigachatActionState,
             });
         }
         if (securityStatusNode) {
-            securityStatusNode.innerHTML = renderFormChangeSummary(summarizePendingChanges(securityEntries), {
+            securityStatusNode.innerHTML = renderControlPlaneSectionStatus({
+                summary: summarizePendingChanges(securityEntries),
+                persisted,
+                updatedAt: persistedUpdatedAt,
                 note: "Gateway auth posture and CORS are the main restart-sensitive controls in this step.",
+                actionState: securityActionState,
             });
         }
     };
@@ -373,7 +378,8 @@ export async function renderSetup(app, token) {
     });
     applicationForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
-        if (!validateEnabledProviders()) {
+        if (getApplicationValidationMessage(true)) {
+            refreshStepStatuses();
             return;
         }
         const form = event.currentTarget;
@@ -381,25 +387,40 @@ export async function renderSetup(app, token) {
         const button = submitter instanceof HTMLButtonElement
             ? submitter
             : form.querySelector('button[type="submit"]');
-        await withBusyState({
-            root: form,
-            button,
-            pendingLabel: "Saving…",
-            action: async () => {
-                const response = await app.api.json("/admin/api/settings/application", {
-                    method: "PUT",
-                    json: buildApplicationPayload(form),
-                });
-                app.queueAlert(response.restart_required
-                    ? "Application bootstrap step saved. Restart required for part of the change set."
-                    : "Application bootstrap step saved and applied.", response.restart_required ? "warn" : "info");
-                await app.render("setup");
-            },
-        });
+        applicationActionState = {
+            tone: "info",
+            message: "Saving the application bootstrap step. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
+        };
+        refreshStepStatuses();
+        try {
+            await withBusyState({
+                root: form,
+                button,
+                pendingLabel: "Saving…",
+                action: async () => {
+                    const response = await app.api.json("/admin/api/settings/application", {
+                        method: "PUT",
+                        json: buildApplicationPayload(form),
+                    });
+                    const outcome = describePersistOutcome("Application bootstrap step", response);
+                    app.queueAlert(outcome.message, outcome.tone);
+                    await app.render("setup");
+                },
+            });
+        }
+        catch (error) {
+            applicationActionState = {
+                tone: "danger",
+                message: `Application bootstrap step failed to save: ${toErrorMessage(error)}`,
+            };
+            refreshStepStatuses();
+            app.pushAlert(applicationActionState.message, "danger");
+        }
     });
     gigachatForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
-        if (!validateGigachatTimeout()) {
+        if (getGigachatValidationMessage(true)) {
+            refreshStepStatuses();
             return;
         }
         const form = event.currentTarget;
@@ -407,45 +428,83 @@ export async function renderSetup(app, token) {
         const button = submitter instanceof HTMLButtonElement
             ? submitter
             : form.querySelector('button[type="submit"]');
-        await withBusyState({
-            root: form,
-            button,
-            pendingLabel: "Saving…",
-            action: async () => {
-                const response = await app.api.json("/admin/api/settings/gigachat", {
-                    method: "PUT",
-                    json: collectGigachatPayload(form),
-                });
-                app.queueAlert(response.restart_required
-                    ? "GigaChat bootstrap step saved. Restart required."
-                    : "GigaChat bootstrap step saved and runtime reloaded.", response.restart_required ? "warn" : "info");
-                await app.render("setup");
-            },
-        });
+        gigachatActionState = {
+            tone: "info",
+            message: "Saving the GigaChat bootstrap step. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
+        };
+        refreshStepStatuses();
+        try {
+            await withBusyState({
+                root: form,
+                button,
+                pendingLabel: "Saving…",
+                action: async () => {
+                    const response = await app.api.json("/admin/api/settings/gigachat", {
+                        method: "PUT",
+                        json: collectGigachatPayload(form),
+                    });
+                    const outcome = describePersistOutcome("GigaChat bootstrap step", response);
+                    app.queueAlert(outcome.message, outcome.tone);
+                    await app.render("setup");
+                },
+            });
+        }
+        catch (error) {
+            gigachatActionState = {
+                tone: "danger",
+                message: `GigaChat bootstrap step failed to save: ${toErrorMessage(error)}`,
+            };
+            refreshStepStatuses();
+            app.pushAlert(gigachatActionState.message, "danger");
+        }
     });
     document.getElementById("setup-gigachat-test")?.addEventListener("click", async (event) => {
         const form = gigachatForm;
         if (!form) {
             return;
         }
-        if (!validateGigachatTimeout()) {
+        if (getGigachatValidationMessage(true)) {
+            refreshStepStatuses();
             return;
         }
         const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
-        await withBusyState({
-            root: form,
-            button,
-            pendingLabel: "Testing…",
-            action: async () => {
-                const result = await app.api.json("/admin/api/settings/gigachat/test", {
-                    method: "POST",
-                    json: collectGigachatPayload(form),
-                });
-                app.pushAlert(result.ok
-                    ? `GigaChat connection ok. Models visible: ${String(result.model_count ?? 0)}.`
-                    : `GigaChat connection failed: ${String(result.error_type ?? "Error")}: ${String(result.error ?? "unknown error")}`, result.ok ? "info" : "danger");
-            },
-        });
+        gigachatActionState = {
+            tone: "info",
+            message: "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save this step.",
+        };
+        refreshStepStatuses();
+        try {
+            await withBusyState({
+                root: form,
+                button,
+                pendingLabel: "Testing…",
+                action: async () => {
+                    const result = await app.api.json("/admin/api/settings/gigachat/test", {
+                        method: "POST",
+                        json: collectGigachatPayload(form),
+                    });
+                    gigachatActionState = result.ok
+                        ? {
+                            tone: "info",
+                            message: `Connection ok. Models visible: ${String(result.model_count ?? 0)}. Candidate values were tested but not persisted.`,
+                        }
+                        : {
+                            tone: "danger",
+                            message: `Connection failed: ${String(result.error_type ?? "Error")}: ${String(result.error ?? "unknown error")}. Persisted values remain unchanged.`,
+                        };
+                    refreshStepStatuses();
+                    app.pushAlert(gigachatActionState.message, gigachatActionState.tone);
+                },
+            });
+        }
+        catch (error) {
+            gigachatActionState = {
+                tone: "danger",
+                message: `GigaChat connection test failed: ${toErrorMessage(error)}`,
+            };
+            refreshStepStatuses();
+            app.pushAlert(gigachatActionState.message, "danger");
+        }
     });
     securityForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -454,21 +513,35 @@ export async function renderSetup(app, token) {
         const button = submitter instanceof HTMLButtonElement
             ? submitter
             : form.querySelector('button[type="submit"]');
-        await withBusyState({
-            root: form,
-            button,
-            pendingLabel: "Saving…",
-            action: async () => {
-                const response = await app.api.json("/admin/api/settings/security", {
-                    method: "PUT",
-                    json: buildSecurityStepPayload(form),
-                });
-                app.queueAlert(response.restart_required
-                    ? "Security bootstrap step saved. Restart required."
-                    : "Security bootstrap step saved and applied.", response.restart_required ? "warn" : "info");
-                await app.render("setup");
-            },
-        });
+        securityActionState = {
+            tone: "info",
+            message: "Saving the security bootstrap step. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
+        };
+        refreshStepStatuses();
+        try {
+            await withBusyState({
+                root: form,
+                button,
+                pendingLabel: "Saving…",
+                action: async () => {
+                    const response = await app.api.json("/admin/api/settings/security", {
+                        method: "PUT",
+                        json: buildSecurityStepPayload(form),
+                    });
+                    const outcome = describePersistOutcome("Security bootstrap step", response);
+                    app.queueAlert(outcome.message, outcome.tone);
+                    await app.render("setup");
+                },
+            });
+        }
+        catch (error) {
+            securityActionState = {
+                tone: "danger",
+                message: `Security bootstrap step failed to save: ${toErrorMessage(error)}`,
+            };
+            refreshStepStatuses();
+            app.pushAlert(securityActionState.message, "danger");
+        }
     });
     document.getElementById("setup-create-global-key")?.addEventListener("click", async (event) => {
         const input = document.getElementById("setup-global-key-value");

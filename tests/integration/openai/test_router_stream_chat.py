@@ -59,19 +59,26 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
+    @staticmethod
+    def _payload(data):
+        return data if isinstance(data, dict) else data.to_backend_payload()
+
     async def prepare_chat_completion(self, data):
+        payload = self._payload(data)
         # имитируем наличие tools для ветки is_tool_call
-        return {"model": data.get("model", "giga"), "tools": data.get("tools")}
+        return {"model": payload.get("model", "giga"), "tools": payload.get("tools")}
 
     async def prepare_chat_completion_v2(self, data, giga_client=None):
+        payload = self._payload(data)
         return {
-            "model": data.get("model", "giga"),
-            "messages": data.get("messages", []),
-            "tools": data.get("tools"),
+            "model": payload.get("model", "giga"),
+            "messages": payload.get("messages", []),
+            "tools": payload.get("tools"),
         }
 
     async def prepare_response(self, data):
-        return {"model": data.get("model", "giga"), "tools": data.get("tools")}
+        payload = self._payload(data)
+        return {"model": payload.get("model", "giga"), "tools": payload.get("tools")}
 
 
 def make_app(*, observability: bool = False):

@@ -51,10 +51,15 @@ class FakeUploadGigaChat:
 
 
 class FakeRequestTransformer:
+    @staticmethod
+    def _payload(data):
+        return data if isinstance(data, dict) else data.to_backend_payload()
+
     async def prepare_chat_completion(self, data, giga_client=None):
+        payload = self._payload(data)
         return {
-            "model": data.get("model", "GigaChat"),
-            "messages": data.get("messages", []),
+            "model": payload.get("model", "GigaChat"),
+            "messages": payload.get("messages", []),
         }
 
     async def prepare_chat_completion_v2(self, data, giga_client=None):

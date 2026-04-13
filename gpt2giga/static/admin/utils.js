@@ -14,6 +14,16 @@ export function parseCsv(value) {
         .map((item) => item.trim())
         .filter(Boolean);
 }
+export function uniqueSortedStrings(values) {
+    return Array.from(new Set(values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean))).sort((left, right) => left.localeCompare(right));
+}
+export function setQueryParamIfPresent(params, key, value, skipValue = "") {
+    if (value && value !== skipValue) {
+        params.set(key, value);
+    }
+}
 export function safeJsonParse(value, fallback) {
     try {
         return JSON.parse(value);

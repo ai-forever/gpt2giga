@@ -73,6 +73,100 @@ export function bindValidityReset(...fields) {
         field.addEventListener("change", resetValidity);
     });
 }
+export function validateRequiredCsvField(field, message, options) {
+    if (!field) {
+        return "";
+    }
+    const error = parseCsv(field.value).length > 0 ? "" : message;
+    field.setCustomValidity(error);
+    if (error && options?.report) {
+        field.reportValidity();
+    }
+    return error;
+}
+export function validatePositiveNumberField(field, message, options) {
+    if (!field) {
+        return "";
+    }
+    const rawValue = field.value.trim();
+    let error = "";
+    if (rawValue) {
+        const numeric = Number(rawValue);
+        if (!Number.isFinite(numeric) || numeric <= 0) {
+            error = message;
+        }
+    }
+    field.setCustomValidity(error);
+    if (error && options?.report) {
+        field.reportValidity();
+    }
+    return error;
+}
+export function validateJsonArrayField(field, value, { invalidMessage, nonArrayMessage, report, }) {
+    if (!field) {
+        return "";
+    }
+    const error = value === INVALID_JSON
+        ? invalidMessage
+        : !Array.isArray(value)
+            ? nonArrayMessage
+            : "";
+    field.setCustomValidity(error);
+    if (error && report) {
+        field.reportValidity();
+    }
+    return error;
+}
+export function bindSecretFieldBehavior(options) {
+    const textarea = options.form.elements.namedItem(options.fieldName);
+    const clearToggle = options.form.elements.namedItem(options.clearFieldName);
+    if (!(textarea instanceof HTMLTextAreaElement) || !(clearToggle instanceof HTMLInputElement)) {
+        return () => null;
+    }
+    const note = textarea.closest(".stack")?.querySelector(".field-note");
+    const originalPlaceholder = textarea.placeholder;
+    const preview = options.preview || "not configured";
+    const sync = () => {
+        const hasValue = textarea.value.trim().length > 0;
+        if (hasValue) {
+            clearToggle.checked = false;
+            clearToggle.disabled = true;
+            textarea.disabled = false;
+            textarea.placeholder = originalPlaceholder;
+            if (note) {
+                note.textContent = `Stored preview: ${preview}. Pending action: replace the stored secret on save.`;
+            }
+            return {
+                intent: "replace",
+                message: "A new secret is staged and will replace the stored value on save.",
+            };
+        }
+        clearToggle.disabled = false;
+        if (clearToggle.checked) {
+            textarea.disabled = true;
+            textarea.placeholder = "Uncheck clear to paste a replacement secret";
+            if (note) {
+                note.textContent = `Stored preview: ${preview}. Pending action: clear the stored secret on save.`;
+            }
+            return {
+                intent: "clear",
+                message: "The stored secret will be removed when this section is saved.",
+            };
+        }
+        textarea.disabled = false;
+        textarea.placeholder = originalPlaceholder;
+        if (note) {
+            note.textContent = `Stored preview: ${preview}. Pending action: keep the stored secret unless you paste a replacement.`;
+        }
+        return {
+            intent: "keep",
+            message: "The stored secret remains unchanged unless you paste a replacement.",
+        };
+    };
+    textarea.addEventListener("input", sync);
+    clearToggle.addEventListener("change", sync);
+    return sync;
+}
 export async function withBusyState({ root, button, pendingLabel, action, }) {
     const controls = root
         ? Array.from(root.querySelectorAll(FORM_CONTROL_SELECTOR))
@@ -138,6 +232,60 @@ export function collectGigachatPayload(form) {
         payload.access_token = null;
     }
     return payload;
+}
+export function planPendingApply(summary) {
+    if (summary.restartFields.length === 0) {
+        return {
+            effectiveSummary: summary,
+            blockedLiveFields: [],
+        };
+    }
+    return {
+        effectiveSummary: {
+            ...summary,
+            liveFields: [],
+        },
+        blockedLiveFields: [...summary.liveFields],
+    };
+}
+export function describePendingRuntimeImpact(plan) {
+    if (plan.effectiveSummary.changedFields.length === 0) {
+        return {
+            label: "Runtime matches persisted target",
+            tone: "good",
+            detail: "The current form matches the saved control-plane state.",
+        };
+    }
+    if (plan.effectiveSummary.restartFields.length > 0) {
+        return {
+            label: "Runtime keeps current config until restart",
+            tone: "warn",
+            detail: "This save batch includes restart-sensitive fields, so the persisted target updates now but the running process keeps the previous runtime config until restart.",
+        };
+    }
+    return {
+        label: "Runtime updates immediately after save",
+        tone: "good",
+        detail: "This change set can be persisted and reloaded without restarting the process.",
+    };
+}
+export function describePersistOutcome(sectionLabel, response) {
+    if (response.restart_required) {
+        return {
+            message: `${sectionLabel} saved. Persisted target updated, but the running process keeps the previous runtime config until restart.`,
+            tone: "warn",
+        };
+    }
+    if (response.applied_runtime) {
+        return {
+            message: `${sectionLabel} saved and applied to the running process.`,
+            tone: "info",
+        };
+    }
+    return {
+        message: `${sectionLabel} saved.`,
+        tone: "info",
+    };
 }
 export function buildPendingDiffEntries(section, currentValues, payload) {
     return Object.entries(payload)

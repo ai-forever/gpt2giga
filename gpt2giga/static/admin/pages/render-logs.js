@@ -1,5 +1,5 @@
-import { card, kpi, pill, renderDefinitionList, renderTable, } from "../templates.js";
-import { asArray, asRecord, escapeHtml, formatDurationMs, formatNumber, formatTimestamp, toErrorMessage, } from "../utils.js";
+import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderStaticSelectOptions, renderTable, } from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatDurationMs, formatNumber, formatTimestamp, setQueryParamIfPresent, toErrorMessage, } from "../utils.js";
 const DEFAULT_LINES = "150";
 const DEFAULT_LIMIT = "8";
 const MAX_LOG_LINES = 4000;
@@ -47,9 +47,7 @@ export async function renderLogs(app, token) {
             <label class="field">
               <span>Tail lines</span>
               <select name="lines">
-                ${["100", "150", "250", "500", "1000"]
-        .map((value) => renderOption(value, filters.lines || DEFAULT_LINES))
-        .join("")}
+                ${renderStaticSelectOptions(filters.lines || DEFAULT_LINES, ["100", "150", "250", "500", "1000"])}
               </select>
             </label>
             <label class="field">
@@ -80,34 +78,34 @@ export async function renderLogs(app, token) {
             <label class="field">
               <span>Provider</span>
               <select name="provider">
-                ${renderSelectOptions(filters.provider, uniqueOptions([
+                ${renderFilterSelectOptions(filters.provider, [
         ...asArray(asRecord(recentRequests.available_filters).provider),
         ...asArray(asRecord(recentErrors.available_filters).provider),
-    ]))}
+    ])}
               </select>
             </label>
             <label class="field">
               <span>Method</span>
               <select name="method">
-                ${renderSelectOptions(filters.method, uniqueOptions([
+                ${renderFilterSelectOptions(filters.method, [
         ...asArray(asRecord(recentRequests.available_filters).method),
         ...asArray(asRecord(recentErrors.available_filters).method),
-    ]))}
+    ])}
               </select>
             </label>
             <label class="field">
               <span>Status code</span>
               <select name="status_code">
-                ${renderSelectOptions(filters.statusCode, uniqueOptions([
+                ${renderFilterSelectOptions(filters.statusCode, [
         ...asArray(asRecord(recentRequests.available_filters).status_code),
         ...asArray(asRecord(recentErrors.available_filters).status_code),
-    ]))}
+    ])}
               </select>
             </label>
             <label class="field">
               <span>Error type</span>
               <select name="error_type">
-                ${renderSelectOptions(filters.errorType, asArray(asRecord(recentErrors.available_filters).error_type))}
+                ${renderFilterSelectOptions(filters.errorType, asArray(asRecord(recentErrors.available_filters).error_type))}
               </select>
             </label>
           </div>
@@ -115,7 +113,7 @@ export async function renderLogs(app, token) {
             <label class="field">
               <span>Recent event limit</span>
               <select name="limit">
-                ${["5", "8", "12", "20"].map((value) => renderOption(value, filters.limit || DEFAULT_LIMIT)).join("")}
+                ${renderStaticSelectOptions(filters.limit || DEFAULT_LIMIT, ["5", "8", "12", "20"])}
               </select>
             </label>
             <span class="muted">Filters scope the request/error context panels, tail-derived request links, and the tail viewer in one place.</span>
@@ -538,23 +536,23 @@ function readLogsFilters() {
 function buildLogsEventQuery(filters) {
     const params = new URLSearchParams();
     params.set("limit", filters.limit || DEFAULT_LIMIT);
-    setIfPresent(params, "request_id", filters.requestId);
-    setIfPresent(params, "provider", filters.provider);
-    setIfPresent(params, "method", filters.method);
-    setIfPresent(params, "status_code", filters.statusCode);
-    setIfPresent(params, "error_type", filters.errorType);
+    setQueryParamIfPresent(params, "request_id", filters.requestId);
+    setQueryParamIfPresent(params, "provider", filters.provider);
+    setQueryParamIfPresent(params, "method", filters.method);
+    setQueryParamIfPresent(params, "status_code", filters.statusCode);
+    setQueryParamIfPresent(params, "error_type", filters.errorType);
     return params.toString();
 }
 function buildLogsUrl(filters) {
     const params = new URLSearchParams();
-    setIfPresent(params, "lines", filters.lines, DEFAULT_LINES);
-    setIfPresent(params, "query", filters.query);
-    setIfPresent(params, "request_id", filters.requestId);
-    setIfPresent(params, "provider", filters.provider);
-    setIfPresent(params, "method", filters.method);
-    setIfPresent(params, "status_code", filters.statusCode);
-    setIfPresent(params, "error_type", filters.errorType);
-    setIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
+    setQueryParamIfPresent(params, "lines", filters.lines, DEFAULT_LINES);
+    setQueryParamIfPresent(params, "query", filters.query);
+    setQueryParamIfPresent(params, "request_id", filters.requestId);
+    setQueryParamIfPresent(params, "provider", filters.provider);
+    setQueryParamIfPresent(params, "method", filters.method);
+    setQueryParamIfPresent(params, "status_code", filters.statusCode);
+    setQueryParamIfPresent(params, "error_type", filters.errorType);
+    setQueryParamIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
     const query = params.toString();
     return query ? `/admin/logs?${query}` : "/admin/logs";
 }
@@ -617,23 +615,6 @@ function buildTrafficUrlForRequest(requestId) {
     }
     const query = params.toString();
     return query ? `/admin/traffic?${query}` : "/admin/traffic";
-}
-function renderSelectOptions(selected, values) {
-    return [renderOption("", selected, "All"), ...uniqueOptions(values).map((value) => renderOption(value, selected))].join("");
-}
-function renderOption(value, selected, label) {
-    const normalizedValue = String(value ?? "");
-    return `<option value="${escapeHtml(normalizedValue)}" ${selected === normalizedValue ? "selected" : ""}>${escapeHtml(label ?? normalizedValue)}</option>`;
-}
-function uniqueOptions(values) {
-    return Array.from(new Set(values
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean))).sort((left, right) => left.localeCompare(right));
-}
-function setIfPresent(params, key, value, skipValue = "") {
-    if (value && value !== skipValue) {
-        params.set(key, value);
-    }
 }
 function buildTailContextRows(lines, filters, requestLookup, errorLookup) {
     const rows = [];
@@ -795,7 +776,7 @@ function describeStreamPhase(phase) {
         return { label: "streaming", tone: "good", buttonLabel: "Stop live stream" };
     }
     if (phase === "stopping") {
-        return { label: "stopping", tone: "warn", buttonLabel: "Stopping…" };
+        return { label: "stopping", tone: "warn", buttonLabel: "Stopping..." };
     }
     if (phase === "error") {
         return { label: "error", tone: "warn", buttonLabel: "Restart live stream" };
@@ -843,7 +824,7 @@ function truncateText(value, maxLength) {
     if (value.length <= maxLength) {
         return value;
     }
-    return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
+    return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 function indexEventsByRequestId(events) {
     const index = new Map();
