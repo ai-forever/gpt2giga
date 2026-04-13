@@ -23,7 +23,11 @@ def make_app(config=None):
 def test_console_routes_are_available():
     client = TestClient(make_app())
 
-    assert client.get("/admin/setup").status_code == 200
+    response = client.get("/admin/setup")
+    assert response.status_code == 200
+    assert "/admin/assets/admin/console.css" in response.text
+    assert "/admin/assets/admin/index.js" in response.text
+
     assert client.get("/admin/settings").status_code == 200
     assert client.get("/admin/keys").status_code == 200
     assert client.get("/admin/logs").status_code == 200

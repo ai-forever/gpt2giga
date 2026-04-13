@@ -52,6 +52,8 @@ uv run pre-commit install
 | Path | Purpose | Notes |
 |---|---|---|
 | `gpt2giga/` | Main application package | Routers, protocol transforms, config, middleware |
+| `gpt2giga/frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `gpt2giga/static/admin/` |
+| `gpt2giga/static/admin/` | Compiled admin frontend assets | Served at `/admin/assets/admin/*` |
 | `tests/` | Test suite | Organized into `unit/`, `integration/`, and `smoke/` to mirror layers and external APIs |
 | `examples/` | Runnable SDK examples | OpenAI chat/responses/files/batches, Anthropic, embeddings, agents |
 | `docs/` | Project documentation | Integration guides currently live in `docs/integrations/` |

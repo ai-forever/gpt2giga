@@ -1,10 +1,12 @@
 """FastAPI application factory and HTTP wiring."""
 
+from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import RedirectResponse
+from starlette.staticfiles import StaticFiles
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
 from gpt2giga.api.admin.access import build_admin_access_verifier
@@ -63,6 +65,16 @@ def _register_exception_handlers(app: FastAPI) -> None:
             message=exc.message,
             details=exc.details,
         )
+
+
+def _mount_admin_assets(app: FastAPI) -> None:
+    """Mount static assets used by the admin console."""
+    assets_dir = Path(__file__).resolve().parents[1] / "static"
+    app.mount(
+        "/admin/assets",
+        StaticFiles(directory=assets_dir),
+        name="admin-assets",
+    )
 
 
 def _register_middlewares(app: FastAPI, config) -> None:
@@ -216,6 +228,7 @@ def create_app(
     if logger_factory is not None:
         app.state.logger_factory = logger_factory
 
+    _mount_admin_assets(app)
     _register_exception_handlers(app)
     _register_middlewares(app, config)
     _register_root_redirect(app, config=config, is_prod_mode=is_prod_mode)

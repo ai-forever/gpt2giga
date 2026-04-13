@@ -199,6 +199,16 @@ def test_openapi_json_available_in_dev_mode():
     assert "minimal" in chat_examples
 
 
+def test_admin_static_assets_are_served():
+    app = create_app(config=_default_config())
+    client = TestClient(app)
+
+    response = client.get("/admin/assets/admin/index.js")
+
+    assert response.status_code == 200
+    assert "AdminApp" in response.text
+
+
 def test_translate_endpoint_converts_openai_chat_to_gemini(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 

@@ -1,0 +1,10 @@
+{
+  "name": "gpt2giga",
+  "private": true,
+  "scripts": {
+    "build:admin": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2"
+  }
+}

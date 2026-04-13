@@ -80,7 +80,9 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/admin/runtime.py` | `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities` |
 | `api/admin/logs.py` | `/admin/api/logs`, `/admin/api/logs/stream`, legacy `/logs*` compatibility shims |
 | `api/admin/ui.py` | `/admin` operator UI |
-| `templates/admin.html` | Admin UI shell with runtime overview and embedded log viewer |
+| `frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `static/admin/` |
+| `static/admin/` | Compiled admin console assets | Served at `/admin/assets/admin/*` |
+| `templates/console.html` | Thin admin UI shell | Loads compiled CSS/JS for the console |
 
 ## API Layout
 

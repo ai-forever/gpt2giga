@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "strict": true,
+    "noEmitOnError": true,
+    "skipLibCheck": true,
+    "rootDir": "gpt2giga/frontend",
+    "outDir": "gpt2giga/static",
+    "verbatimModuleSyntax": true
+  },
+  "include": ["gpt2giga/frontend/**/*.ts"]
+}

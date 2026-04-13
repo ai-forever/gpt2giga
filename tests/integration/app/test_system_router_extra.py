@@ -176,13 +176,14 @@ def test_logs_ip_allowlist_xforwardedfor(temp_log_file):
 
 
 def test_admin_ui_warning_banner():
-    """Verify the warning banner is present in the admin UI."""
+    """Verify the admin UI shell loads the modular frontend assets."""
     app = make_app()
     client = TestClient(app)
     resp = client.get("/admin")
     assert resp.status_code == 200
-    assert "Control-plane config is not persisted yet" in resp.text
-    assert "GigaChat credentials are not configured yet" in resp.text
+    assert 'id="alerts"' in resp.text
+    assert "/admin/assets/admin/console.css" in resp.text
+    assert "/admin/assets/admin/index.js" in resp.text
 
 
 def test_admin_runtime_endpoint():
