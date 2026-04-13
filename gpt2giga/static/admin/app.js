@@ -5,6 +5,8 @@ import { toErrorMessage } from "./utils.js";
 import { PAGE_RENDERERS } from "./pages/index.js";
 const ADMIN_KEY_STORAGE = "gpt2giga.adminKey";
 const GATEWAY_KEY_STORAGE = "gpt2giga.gatewayKey";
+const ADMIN_KEY_COOKIE = "gpt2giga_admin_key";
+const ADMIN_KEY_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 export class AdminApp {
     pageContent = this.requireElement("page-content");
     alertsNode = this.requireElement("alerts");
@@ -30,7 +32,7 @@ export class AdminApp {
         this.apiClient = new AdminApiClient(() => this.adminKeyInput.value, () => this.gatewayKeyInput.value);
         this.hydrateKeysFromQuery();
         this.saveAuthButton.addEventListener("click", () => {
-            localStorage.setItem(ADMIN_KEY_STORAGE, this.adminKeyInput.value.trim());
+            this.persistAdminKey(this.adminKeyInput.value.trim());
             localStorage.setItem(GATEWAY_KEY_STORAGE, this.gatewayKeyInput.value.trim());
             this.pushAlert("Saved API keys in browser local storage.", "info");
         });
@@ -85,6 +87,10 @@ export class AdminApp {
     saveGatewayKey(value) {
         this.gatewayKeyInput.value = value;
         localStorage.setItem(GATEWAY_KEY_STORAGE, value);
+    }
+    saveAdminKey(value) {
+        this.adminKeyInput.value = value;
+        this.persistAdminKey(value);
     }
     async render(page = this.currentPage()) {
         this.renderToken += 1;
@@ -168,7 +174,7 @@ export class AdminApp {
             return;
         }
         this.adminKeyInput.value = queryKey;
-        localStorage.setItem(ADMIN_KEY_STORAGE, queryKey);
+        this.persistAdminKey(queryKey);
         const storedGatewayKey = localStorage.getItem(GATEWAY_KEY_STORAGE)?.trim();
         if (!storedGatewayKey) {
             this.gatewayKeyInput.value = queryKey;
@@ -224,5 +230,10 @@ export class AdminApp {
             throw new Error(`Missing required element #${id}`);
         }
         return node;
+    }
+    persistAdminKey(value) {
+        localStorage.setItem(ADMIN_KEY_STORAGE, value);
+        const secure = window.location.protocol === "https:" ? "; Secure" : "";
+        document.cookie = `${ADMIN_KEY_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=${ADMIN_KEY_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
     }
 }

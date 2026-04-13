@@ -13,6 +13,8 @@ import { PAGE_RENDERERS } from "./pages/index.js";
 
 const ADMIN_KEY_STORAGE = "gpt2giga.adminKey";
 const GATEWAY_KEY_STORAGE = "gpt2giga.gatewayKey";
+const ADMIN_KEY_COOKIE = "gpt2giga_admin_key";
+const ADMIN_KEY_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 type CleanupFn = () => void | Promise<void>;
 
@@ -47,7 +49,7 @@ export class AdminApp {
 
     this.hydrateKeysFromQuery();
     this.saveAuthButton.addEventListener("click", () => {
-      localStorage.setItem(ADMIN_KEY_STORAGE, this.adminKeyInput.value.trim());
+      this.persistAdminKey(this.adminKeyInput.value.trim());
       localStorage.setItem(GATEWAY_KEY_STORAGE, this.gatewayKeyInput.value.trim());
       this.pushAlert("Saved API keys in browser local storage.", "info");
     });
@@ -113,6 +115,11 @@ export class AdminApp {
   saveGatewayKey(value: string): void {
     this.gatewayKeyInput.value = value;
     localStorage.setItem(GATEWAY_KEY_STORAGE, value);
+  }
+
+  saveAdminKey(value: string): void {
+    this.adminKeyInput.value = value;
+    this.persistAdminKey(value);
   }
 
   async render(page = this.currentPage()): Promise<void> {
@@ -223,7 +230,7 @@ export class AdminApp {
     }
 
     this.adminKeyInput.value = queryKey;
-    localStorage.setItem(ADMIN_KEY_STORAGE, queryKey);
+    this.persistAdminKey(queryKey);
 
     const storedGatewayKey = localStorage.getItem(GATEWAY_KEY_STORAGE)?.trim();
     if (!storedGatewayKey) {
@@ -289,5 +296,11 @@ export class AdminApp {
       throw new Error(`Missing required element #${id}`);
     }
     return node as T;
+  }
+
+  private persistAdminKey(value: string): void {
+    localStorage.setItem(ADMIN_KEY_STORAGE, value);
+    const secure = window.location.protocol === "https:" ? "; Secure" : "";
+    document.cookie = `${ADMIN_KEY_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=${ADMIN_KEY_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
   }
 }

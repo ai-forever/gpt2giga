@@ -70,6 +70,7 @@ export async function renderKeys(app, token) {
             json: {},
         });
         const nextGlobal = asRecord(response.global);
+        app.saveAdminKey(String(nextGlobal.value ?? ""));
         app.saveGatewayKey(String(nextGlobal.value ?? ""));
         app.queueAlert(`Global key rotated. New value: ${String(nextGlobal.value ?? "")}`, "warn");
         await app.render("keys");

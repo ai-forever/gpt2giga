@@ -36,6 +36,7 @@ _admin_api_key_query = APIKeyQuery(
     name="x-api-key", scheme_name="Admin API key query", auto_error=False
 )
 _admin_bearer_scheme = HTTPBearer(auto_error=False)
+ADMIN_AUTH_COOKIE_NAME = "gpt2giga_admin_key"
 
 _BOOTSTRAP_ADMIN_API_ROUTES = {
     "/admin/api/setup",
@@ -113,6 +114,8 @@ def build_admin_access_verifier():
             query_param=query_param,
             bearer=bearer,
         )
+        if provided_key is None:
+            provided_key = request.cookies.get(ADMIN_AUTH_COOKIE_NAME)
         config = get_config_from_state(request.app.state)
         bootstrap_required = requires_admin_bootstrap(config)
 

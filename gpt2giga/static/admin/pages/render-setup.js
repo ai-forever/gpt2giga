@@ -335,6 +335,7 @@ export async function renderSetup(app, token) {
             json: { value: input?.value.trim() || null },
         });
         const nextGlobal = asRecord(response.global);
+        app.saveAdminKey(String(nextGlobal.value ?? ""));
         app.saveGatewayKey(String(nextGlobal.value ?? ""));
         app.queueAlert(`Global gateway key created. New value: ${String(nextGlobal.value ?? "")}`, "warn");
         await app.render("setup");

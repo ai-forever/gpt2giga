@@ -17,6 +17,7 @@ from gpt2giga.api.tags import (
     TAG_RESPONSES,
     provider_tag,
 )
+from gpt2giga.api.admin.access import ADMIN_AUTH_COOKIE_NAME
 from gpt2giga.app.factory import create_app
 from gpt2giga.app.run import run as run_app
 from gpt2giga.core.app_meta import check_port_available
@@ -371,6 +372,8 @@ def test_prod_mode_keeps_admin_routes_protected_and_disables_legacy_logs_routes(
     assert client.get("/admin").status_code == 401
     assert client.get("/admin/api/runtime").status_code == 401
     assert client.get("/admin", headers={"x-api-key": "k"}).status_code == 200
+    client.cookies.set(ADMIN_AUTH_COOKIE_NAME, "k")
+    assert client.get("/admin").status_code == 200
     runtime = client.get("/admin/api/runtime", headers={"x-api-key": "k"})
     assert runtime.status_code == 200
     assert runtime.json()["admin_enabled"] is True
