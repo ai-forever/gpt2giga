@@ -260,9 +260,12 @@ def responses_openapi_extra() -> Dict[str, Any]:
     minimal_schema: Dict[str, Any] = {
         "title": "ResponsesRequestMinimal",
         "type": "object",
-        "required": ["model", "input"],
+        "required": ["input"],
         "properties": {
-            "model": {"type": "string", "description": "Model id."},
+            "model": {
+                "type": "string",
+                "description": "Model id. Optional when continuing via `conversation.id` or `previous_response_id`.",
+            },
             "input": {
                 "description": "Input text or multi-item conversation input.",
                 "oneOf": [
@@ -282,7 +285,7 @@ def responses_openapi_extra() -> Dict[str, Any]:
     full_schema: Dict[str, Any] = {
         "title": "ResponsesRequestFull",
         "type": "object",
-        "required": ["model", "input"],
+        "required": ["input"],
         "properties": {
             **minimal_schema["properties"],
             "instructions": {
@@ -313,6 +316,15 @@ def responses_openapi_extra() -> Dict[str, Any]:
             "tool_choice": {
                 "description": "Tool choice (best effort).",
                 "oneOf": [{"type": "string"}, {"type": "object"}],
+            },
+            "store": {
+                "type": "boolean",
+                "description": "When true or omitted, enables GigaChat stateful storage for Responses v2. Set false to force stateless execution.",
+            },
+            "storage": {
+                "type": "object",
+                "description": "Best-effort passthrough to GigaChat `storage` (`thread_id`, `limit`, `metadata`). Boolean form is not supported.",
+                "additionalProperties": True,
             },
             "previous_response_id": {
                 "type": "string",
@@ -358,10 +370,14 @@ def responses_openapi_extra() -> Dict[str, Any]:
     }
 
     description = (
-        "**Required**: `model`, `input`.\n\n"
+        "**Required**: `input`.\n\n"
         "**Notes**:\n"
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
-        "- `previous_response_id` and `conversation.id` continue an in-memory thread; continuity does not survive proxy restarts.\n"
+        "- Responses v2 enables GigaChat stateful storage by default; use `store=false` to disable it.\n"
+        "- `model` may be omitted when continuing via `conversation.id` or `previous_response_id`.\n"
+        "- `previous_response_id` continues proxy-tracked thread metadata and does not survive proxy restarts.\n"
+        "- `conversation.id` directly targets an existing GigaChat thread.\n"
+        "- Optional `storage` is passed through best-effort to GigaChat for `limit` / `metadata` / `thread_id`.\n"
         "- Unknown optional parameters are accepted on a best-effort basis."
     )
     return _request_body_oneof(

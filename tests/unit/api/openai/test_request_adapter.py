@@ -67,6 +67,19 @@ def test_build_normalized_responses_request_preserves_function_history_items():
     }
 
 
+def test_build_normalized_responses_request_allows_missing_model_for_thread_continuation():
+    request = build_normalized_responses_request(
+        {
+            "input": "continue",
+            "previous_response_id": "resp_prev",
+        }
+    )
+
+    assert request.model is None
+    assert request.input == "continue"
+    assert request.options["previous_response_id"] == "resp_prev"
+
+
 def test_build_normalized_embeddings_request_keeps_additional_options():
     request = build_normalized_embeddings_request(
         {

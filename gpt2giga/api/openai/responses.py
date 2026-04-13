@@ -35,7 +35,11 @@ async def responses(request: Request):
         payload,
         logger=get_logger_from_state(app_state),
     )
-    set_request_audit_model(request, data.model)
+    request_model = responses_service.resolve_request_model(
+        data,
+        response_store=response_store,
+    )
+    set_request_audit_model(request, request_model)
 
     if not data.stream:
         response = await responses_service.create_response(
@@ -47,7 +51,7 @@ async def responses(request: Request):
         annotate_request_audit_from_payload(
             request,
             response,
-            fallback_model=data.model,
+            fallback_model=request_model,
         )
         return response
 

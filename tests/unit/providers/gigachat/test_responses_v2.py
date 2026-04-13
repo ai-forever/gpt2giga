@@ -232,7 +232,6 @@ async def test_prepare_response_v2_resolves_previous_response_id():
     transformer = RequestTransformer(ProxyConfig(), logger)
     chat = await transformer.prepare_response_v2(
         {
-            "model": "gpt-x",
             "input": "hello",
             "previous_response_id": "resp_prev",
         },
@@ -241,6 +240,56 @@ async def test_prepare_response_v2_resolves_previous_response_id():
 
     payload = chat.model_dump(exclude_none=True, by_alias=True)
     assert payload["storage"]["thread_id"] == "thread-9"
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_enables_stateful_storage_by_default():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    chat = await transformer.prepare_response_v2(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+        }
+    )
+
+    payload = chat.model_dump(exclude_none=True, by_alias=True)
+    assert payload["storage"] == {}
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_allows_missing_model_with_conversation():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    chat = await transformer.prepare_response_v2(
+        {
+            "input": "hello",
+            "conversation": {"id": "thread-1"},
+        }
+    )
+
+    payload = chat.model_dump(exclude_none=True, by_alias=True)
+    assert payload["storage"]["thread_id"] == "thread-1"
+    assert "model" not in payload
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_maps_storage_limit_and_metadata():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    chat = await transformer.prepare_response_v2(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "storage": {
+                "limit": 5,
+                "metadata": {"topic": "demo"},
+            },
+        }
+    )
+
+    payload = chat.model_dump(exclude_none=True, by_alias=True)
+    assert payload["storage"] == {
+        "limit": 5,
+        "metadata": {"topic": "demo"},
+    }
 
 
 @pytest.mark.asyncio
@@ -267,6 +316,22 @@ async def test_prepare_response_v2_omits_storage_without_thread():
     assert payload["messages"][0]["content"] == [
         {"text": "what's in this image?", "files": [{"id": "img-1"}]}
     ]
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_rejects_boolean_storage():
+    transformer = RequestTransformer(ProxyConfig(), logger)
+    with pytest.raises(HTTPException) as exc_info:
+        await transformer.prepare_response_v2(
+            {
+                "model": "gpt-x",
+                "input": "hello",
+                "storage": True,
+            }
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["error"]["param"] == "storage"
 
 
 @pytest.mark.asyncio
@@ -424,6 +489,7 @@ def test_response_processor_process_response_api_v2_maps_text_and_fields():
     assert out["output"][0]["content"][0]["text"] == "Paris"
     assert "store" not in out
     assert response_store[out["id"]]["thread_id"] == "thread-1"
+    assert response_store[out["id"]]["model"] == "gpt-x"
 
 
 def test_response_processor_process_response_api_v2_maps_function_and_builtin_tool():

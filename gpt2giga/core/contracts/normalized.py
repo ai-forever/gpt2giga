@@ -153,7 +153,7 @@ class NormalizedResponsesRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    model: str
+    model: str | None = None
     input: str | list[ResponsesInputItem] | None = None
     instructions: str | None = None
     stream: bool = False
@@ -163,7 +163,8 @@ class NormalizedResponsesRequest(BaseModel):
     def to_backend_payload(self) -> dict[str, Any]:
         """Render the canonical Responses request into the backend payload."""
         payload = deepcopy(self.options)
-        payload["model"] = self.model
+        if isinstance(self.model, str) and self.model:
+            payload["model"] = self.model
         if self.instructions is not None:
             payload["instructions"] = self.instructions
         if self.input is not None:

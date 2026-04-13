@@ -34,6 +34,7 @@ class MockResponse:
 class FakeGigachat:
     def __init__(self):
         self.last_responses_method = None
+        self.last_chat_v2 = None
 
     async def achat(self, chat):
         self.last_responses_method = "v1"
@@ -55,16 +56,17 @@ class FakeGigachat:
 
     async def achat_v2(self, chat):
         self.last_responses_method = "v2"
+        self.last_chat_v2 = chat
         storage = chat.get("storage")
         thread_id = None
+        text = "stateless"
         if isinstance(storage, dict):
             thread_id = storage.get("thread_id")
-
-        if thread_id == "thread-1":
-            text = "continued"
-        else:
-            thread_id = "thread-1"
-            text = "ok"
+            if thread_id == "thread-1":
+                text = "continued"
+            else:
+                thread_id = "thread-1"
+                text = "ok"
 
         return MockResponse(
             {
@@ -180,6 +182,8 @@ class FakeRequestTransformer:
         response_store=None,
     ):
         self.last_mode = "v2"
+        storage = _get_option(data, "storage")
+        store = _get_option(data, "store")
         thread_id = None
         conversation = _get_option(data, "conversation")
         if isinstance(conversation, dict):
@@ -190,10 +194,19 @@ class FakeRequestTransformer:
                 metadata = response_store.get(previous_response_id, {})
                 thread_id = metadata.get("thread_id")
 
+        storage_payload = None
+        if isinstance(storage, dict):
+            storage_payload = dict(storage)
+        elif thread_id or store is not False:
+            storage_payload = {}
+
+        if storage_payload is not None and thread_id:
+            storage_payload["thread_id"] = thread_id
+
         return {
             "model": _get_model(data),
             "messages": [{"role": "user", "content": [{"text": _get_input(data)}]}],
-            "storage": {"thread_id": thread_id} if thread_id else True,
+            **({"storage": storage_payload} if storage_payload is not None else {}),
         }
 
 
@@ -233,6 +246,7 @@ def test_responses_non_stream():
     assert body["status"] == "completed"
     assert body["conversation"] == {"id": "thread-1"}
     assert "store" not in body
+    assert app.state.gigachat_client.last_chat_v2["storage"] == {}
 
 
 def test_responses_non_stream_v1_mode_uses_legacy_backend_path():
@@ -286,14 +300,54 @@ def test_responses_non_stream_previous_response_id_reuses_thread():
         "/responses",
         json={
             "input": "continue",
-            "model": "gpt-x",
             "previous_response_id": first_body["id"],
         },
     )
     assert second.status_code == 200
     second_body = second.json()
     assert second_body["conversation"] == first_body["conversation"]
+    assert second_body["model"] == "gpt-x"
     assert second_body["output"][0]["content"][0]["text"] == "continued"
+
+
+def test_responses_non_stream_conversation_reuses_thread_without_model():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
+    client = TestClient(app)
+
+    first = client.post("/responses", json={"input": "hi", "model": "gpt-x"})
+    assert first.status_code == 200
+    first_body = first.json()
+
+    second = client.post(
+        "/responses",
+        json={
+            "input": "continue",
+            "conversation": first_body["conversation"],
+        },
+    )
+    assert second.status_code == 200
+    second_body = second.json()
+    assert second_body["conversation"] == first_body["conversation"]
+    assert second_body["model"] == "gpt-x"
+    assert second_body["output"][0]["content"][0]["text"] == "continued"
+
+
+def test_responses_non_stream_store_false_disables_gigachat_storage():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
+    client = TestClient(app)
+
+    resp = client.post(
+        "/responses",
+        json={"input": "hi", "model": "gpt-x", "store": False},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body.get("conversation") is None
+    assert app.state.gigachat_client.last_chat_v2.get("storage") is None
 
 
 def test_responses_stream_returns_sse_events():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, AsyncGenerator
 
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from gpt2giga.app.dependencies import (
@@ -46,6 +47,78 @@ class ResponsesService:
         """Return ``True`` when Responses should use the v2 backend path."""
         return self.backend_mode == "v2"
 
+    @staticmethod
+    def _invalid_request(
+        message: str,
+        *,
+        param: str | None = None,
+        code: str | None = None,
+    ) -> HTTPException:
+        return HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "message": message,
+                    "type": "invalid_request_error",
+                    "param": param,
+                    "code": code,
+                }
+            },
+        )
+
+    def resolve_request_model(
+        self,
+        data: ResponsesRequestData,
+        *,
+        response_store: ResponsesMetadataStore | None = None,
+    ) -> str | None:
+        """Resolve the effective request model for audit and response shaping."""
+        explicit_model = get_request_model(data, default="")
+        if explicit_model:
+            return explicit_model
+
+        request_payload = to_backend_payload(data)
+        previous_response_id = request_payload.get("previous_response_id")
+        if not isinstance(previous_response_id, str) or not previous_response_id:
+            return None
+
+        metadata = response_store.get(previous_response_id) if response_store else None
+        if not isinstance(metadata, dict):
+            return None
+
+        stored_model = metadata.get("model")
+        return stored_model if isinstance(stored_model, str) and stored_model else None
+
+    def _validate_request_context(
+        self,
+        data: ResponsesRequestData,
+        *,
+        response_store: ResponsesMetadataStore | None = None,
+    ) -> None:
+        """Ensure the request carries enough state to execute safely."""
+        if self.resolve_request_model(data, response_store=response_store):
+            return
+
+        if not self.uses_v2_backend:
+            raise self._invalid_request("`model` is required.", param="model")
+
+        request_payload = to_backend_payload(data)
+        conversation = request_payload.get("conversation")
+        if (
+            isinstance(conversation, dict)
+            and isinstance(conversation.get("id"), str)
+            and conversation["id"]
+        ):
+            return
+
+        if request_payload.get("previous_response_id") is not None:
+            return
+
+        raise self._invalid_request(
+            "`model` is required unless continuing via `conversation.id` or `previous_response_id`.",
+            param="model",
+        )
+
     async def prepare_request(
         self,
         data: ResponsesRequestData,
@@ -71,7 +144,11 @@ class ResponsesService:
         response_store: ResponsesMetadataStore | None = None,
     ) -> ResponsesResponseData:
         """Execute a non-streaming Responses API request."""
+        self._validate_request_context(data, response_store=response_store)
+        request_model = self.resolve_request_model(data, response_store=response_store)
         request_payload = to_backend_payload(data)
+        if request_model and not request_payload.get("model"):
+            request_payload["model"] = request_model
         prepared_request = await self.prepare_request(
             data,
             giga_client=giga_client,
@@ -82,7 +159,7 @@ class ResponsesService:
             return self.response_processor.process_response_api_v2(
                 request_payload,
                 response,
-                get_request_model(data),
+                request_model or "unknown",
                 response_id,
                 response_store=response_store,
             )
@@ -90,7 +167,7 @@ class ResponsesService:
         return self.response_processor.process_response_api(
             request_payload,
             response,
-            get_request_model(data),
+            request_model or "unknown",
             response_id,
         )
 
@@ -109,7 +186,11 @@ class ResponsesService:
             if response_store is not None
             else get_response_store(request)
         )
+        self._validate_request_context(data, response_store=resolved_store)
+        request_model = self.resolve_request_model(data, response_store=resolved_store)
         request_payload = to_backend_payload(data)
+        if request_model and not request_payload.get("model"):
+            request_payload["model"] = request_model
         prepared_request = await self.prepare_request(
             data,
             giga_client=giga_client,

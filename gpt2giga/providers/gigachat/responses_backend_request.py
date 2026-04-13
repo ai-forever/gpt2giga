@@ -55,9 +55,9 @@ class ResponsesV2BackendRequestMixin:
             "additional_fields": self._merge_additional_fields(request_data),
         }
 
-        thread_id = self._resolve_response_thread_id(request_data, response_store)
-        if thread_id:
-            payload["storage"] = ChatV2Storage(thread_id=thread_id)
+        storage = self._resolve_response_storage(request_data, response_store)
+        if storage is not None:
+            payload["storage"] = ChatV2Storage(**storage)
 
         if not payload["messages"]:
             raise self._invalid_request(

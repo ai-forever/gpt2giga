@@ -122,6 +122,7 @@ def build_normalized_responses_request(
 ) -> NormalizedResponsesRequest:
     """Build a canonical internal request from an OpenAI Responses payload."""
     request_payload = deepcopy(payload)
+    raw_model = request_payload.get("model")
     tools = _build_normalized_tools(request_payload)
     functions = _build_functions(request_payload, logger=logger)
     options = deepcopy(request_payload)
@@ -134,7 +135,7 @@ def build_normalized_responses_request(
     if functions is not None:
         options["functions"] = functions
     return NormalizedResponsesRequest(
-        model=str(request_payload.get("model", "unknown")),
+        model=raw_model if isinstance(raw_model, str) and raw_model else None,
         input=_normalize_responses_input(request_payload),
         instructions=request_payload.get("instructions"),
         stream=bool(request_payload.get("stream", False)),

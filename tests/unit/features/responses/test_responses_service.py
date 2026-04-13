@@ -150,6 +150,36 @@ async def test_responses_service_create_response_uses_runtime_contracts():
 
 
 @pytest.mark.asyncio
+async def test_responses_service_reuses_stored_model_for_thread_continuation():
+    request_preparer = FakeRequestPreparer()
+    response_processor = FakeResponseProcessor()
+    service = ResponsesService(
+        request_preparer,
+        response_processor,
+        backend_mode="v2",
+    )
+    giga_client = FakeClient()
+    response_store = {"resp_prev": {"thread_id": "thread-9", "model": "gpt-x"}}
+    data = NormalizedResponsesRequest(
+        model=None,
+        input="hi",
+        options={"previous_response_id": "resp_prev"},
+    )
+
+    result = await service.create_response(
+        data,
+        giga_client=giga_client,
+        response_id="resp-2",
+        response_store=response_store,
+    )
+
+    assert request_preparer.prepared_with == (data, giga_client, response_store)
+    assert response_processor.processed_with[0]["model"] == "gpt-x"
+    assert response_processor.processed_with[2:] == ("gpt-x", "resp-2", response_store)
+    assert result["request_model"] == "gpt-x"
+
+
+@pytest.mark.asyncio
 async def test_get_responses_service_from_state_builds_from_legacy_runtime_services():
     request_preparer = FakeRequestPreparer()
     response_processor = FakeResponseProcessor()

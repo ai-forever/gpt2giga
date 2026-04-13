@@ -105,8 +105,12 @@ class ResponsesResultBuilderMixin:
         response_id = response.get("id")
         conversation = response.get("conversation") or {}
         thread_id = conversation.get("id")
+        model = response.get("model")
         if isinstance(response_id, str) and isinstance(thread_id, str) and thread_id:
-            response_store[response_id] = {"thread_id": thread_id}
+            metadata = {"thread_id": thread_id}
+            if isinstance(model, str) and model:
+                metadata["model"] = model
+            response_store[response_id] = metadata
 
     def process_response_api(
         self,
