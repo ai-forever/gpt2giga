@@ -408,6 +408,40 @@ def test_openapi_only_includes_enabled_providers(monkeypatch):
     assert "/v1beta/models/{model}:generateContent" not in schema["paths"]
 
 
+def test_openapi_groups_routes_by_function_instead_of_provider(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(proxy=ProxySettings(enabled_providers=["all"]))
+    client = TestClient(create_app(config=cfg))
+
+    response = client.get("/openapi.json")
+
+    assert response.status_code == 200
+    schema = response.json()
+    tag_names = {tag["name"] for tag in schema["tags"]}
+
+    assert {
+        "Chat",
+        "Responses",
+        "Embeddings",
+        "Models",
+        "Files",
+        "Batches",
+    } <= tag_names
+    assert "OpenAI" not in tag_names
+    assert "V1" not in tag_names
+    assert "V1 Anthropic" not in tag_names
+    assert "V1beta Gemini" not in tag_names
+    assert schema["paths"]["/chat/completions"]["post"]["tags"] == ["Chat"]
+    assert schema["paths"]["/v1/chat/completions"]["post"]["tags"] == ["Chat"]
+    assert schema["paths"]["/messages"]["post"]["tags"] == ["Chat"]
+    assert schema["paths"]["/messages/count_tokens"]["post"]["tags"] == ["Count Tokens"]
+    assert schema["paths"]["/v1beta/models/{model}:batchEmbedContents"]["post"][
+        "tags"
+    ] == ["Embeddings"]
+    assert schema["paths"]["/model/info"]["get"]["tags"] == ["Models"]
+
+
 def test_admin_recent_requests_endpoint_collects_runtime_events(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 

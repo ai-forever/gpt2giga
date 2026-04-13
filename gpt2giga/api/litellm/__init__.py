@@ -6,7 +6,7 @@ _router: APIRouter | None = None
 
 
 def _build_router() -> APIRouter:
-    router = APIRouter(tags=["LiteLLM"])
+    router = APIRouter()
 
     from gpt2giga.api.litellm.models import router as models_router
 

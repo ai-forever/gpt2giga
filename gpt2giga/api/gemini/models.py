@@ -6,11 +6,12 @@ from fastapi import APIRouter, Request
 
 from gpt2giga.api.gemini.request import normalize_model_name
 from gpt2giga.api.gemini.response import gemini_exceptions_handler
+from gpt2giga.api.tags import TAG_MODELS
 from gpt2giga.features.models import get_models_service_from_state
 from gpt2giga.providers.gemini import gemini_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=["Gemini"])
+router = APIRouter(tags=[TAG_MODELS])
 
 
 @router.get("/models")

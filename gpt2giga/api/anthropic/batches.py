@@ -12,6 +12,7 @@ from gpt2giga.api.anthropic.response import (
     _anthropic_http_exception,
     _build_anthropic_response,
 )
+from gpt2giga.api.tags import TAG_BATCHES
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.features.batches import get_batches_service_from_state
@@ -24,7 +25,7 @@ from gpt2giga.providers.anthropic import (
 )
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=["Anthropic"])
+router = APIRouter(tags=[TAG_BATCHES])
 
 
 def _rfc3339_from_timestamp(timestamp: Optional[int]) -> Optional[str]:

@@ -15,6 +15,7 @@ from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
 from gpt2giga.api.middleware.rquid_context import RquidMiddleware
 from gpt2giga.api.system import metrics_router, system_router
+from gpt2giga.api.tags import OPENAPI_TAGS
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
@@ -180,6 +181,7 @@ def create_app(
         lifespan=lifespan,
         title="Gpt2Giga converter proxy",
         version=app_version_getter(),
+        openapi_tags=OPENAPI_TAGS,
         redirect_slashes=False,
         docs_url=None if is_prod_mode else "/docs",
         redoc_url=None if is_prod_mode else "/redoc",

@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request
 
 from gpt2giga.api.openai.openapi import batches_openapi_extra
+from gpt2giga.api.tags import TAG_BATCHES
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.features.batches import get_batches_service_from_state
@@ -13,7 +14,7 @@ from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=["OpenAI"])
+router = APIRouter(tags=[TAG_BATCHES])
 
 
 @router.post("/batches", openapi_extra=batches_openapi_extra())

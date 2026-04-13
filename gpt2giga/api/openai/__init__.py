@@ -6,7 +6,7 @@ _router: APIRouter | None = None
 
 
 def _build_router() -> APIRouter:
-    router = APIRouter(tags=["OpenAI"])
+    router = APIRouter()
 
     from gpt2giga.api.openai.batches import router as batches_router
     from gpt2giga.api.openai.chat import router as chat_router

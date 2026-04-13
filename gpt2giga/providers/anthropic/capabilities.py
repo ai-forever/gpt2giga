@@ -141,7 +141,6 @@ ANTHROPIC_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderMountSpec(
             router_factory=_load_anthropic_router,
             prefix="/v1",
-            tags=("V1 Anthropic",),
         ),
         ProviderMountSpec(router_factory=_load_anthropic_router),
     ),

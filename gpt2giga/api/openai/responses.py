@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.api.openai.openapi import responses_openapi_extra
+from gpt2giga.api.tags import TAG_RESPONSES
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.app.observability import (
     annotate_request_audit_from_payload,
@@ -17,7 +18,7 @@ from gpt2giga.features.responses.store import get_response_store
 from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=["OpenAI"])
+router = APIRouter(tags=[TAG_RESPONSES])
 
 
 @router.post("/responses", openapi_extra=responses_openapi_extra())

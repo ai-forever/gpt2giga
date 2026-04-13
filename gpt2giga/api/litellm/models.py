@@ -2,12 +2,13 @@ from typing import Optional
 
 from fastapi import APIRouter, Request
 
+from gpt2giga.api.tags import TAG_MODELS
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.features.models import get_models_service_from_state
 from gpt2giga.features.models.contracts import ModelDescriptor
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=["LiteLLM"])
+router = APIRouter(tags=[TAG_MODELS])
 
 
 def _model_info_entry(model: ModelDescriptor) -> dict[str, object]:

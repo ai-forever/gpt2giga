@@ -6,7 +6,7 @@ _router: APIRouter | None = None
 
 
 def _build_router() -> APIRouter:
-    router = APIRouter(tags=["Gemini"])
+    router = APIRouter()
 
     from gpt2giga.api.gemini.content import router as content_router
     from gpt2giga.api.gemini.models import router as models_router

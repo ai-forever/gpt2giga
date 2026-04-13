@@ -115,7 +115,6 @@ GEMINI_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderMountSpec(
             router_factory=_load_gemini_router,
             prefix="/v1beta",
-            tags=("V1beta Gemini",),
             auth_policy="gemini",
         ),
     ),

@@ -160,12 +160,10 @@ OPENAI_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderMountSpec(
             router_factory=_load_openai_router,
             prefix="/v1",
-            tags=("V1",),
         ),
         ProviderMountSpec(
             router_factory=_load_litellm_router,
             prefix="/v1",
-            tags=("V1 LiteLLM",),
         ),
         ProviderMountSpec(router_factory=_load_litellm_router),
     ),

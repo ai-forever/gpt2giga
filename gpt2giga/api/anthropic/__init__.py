@@ -6,7 +6,7 @@ _router: APIRouter | None = None
 
 
 def _build_router() -> APIRouter:
-    router = APIRouter(tags=["Anthropic"])
+    router = APIRouter()
 
     from gpt2giga.api.anthropic.batches import router as batches_router
     from gpt2giga.api.anthropic.messages import router as messages_router
