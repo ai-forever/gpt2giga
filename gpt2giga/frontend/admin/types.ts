@@ -33,6 +33,7 @@ export interface DiffEntry {
 export interface PendingChangeSummary {
   changedFields: string[];
   restartFields: string[];
+  liveFields: string[];
   secretFields: string[];
 }
 

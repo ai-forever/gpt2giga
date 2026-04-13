@@ -249,6 +249,12 @@ open http://localhost:8090
 - better handling для secret fields
 - более явное разделение persisted vs runtime-applied state
 
+После текущего прохода сюда уже добавилось:
+
+- `Setup` и `Settings` теперь не просто считают pending changes, а явно делят их на `applies live` и `restart after save`
+- secret-поля теперь лучше читаются в change summary как отдельная masked-update группа, а не как безымянное изменение где-то в diff
+- во время save/test/rollback сама form surface уходит в busy state, поэтому у оператора меньше двусмысленности насчёт того, какая секция сейчас выполняет действие
+
 ### 5. Сделать compile step частью привычного workflow
 
 Новый фронтенд теперь имеет build step:

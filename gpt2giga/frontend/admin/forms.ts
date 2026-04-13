@@ -132,10 +132,15 @@ export async function withBusyState<T>({
     disabled: control.disabled,
   }));
   const originalLabel = button?.textContent ?? "";
+  const busyRoot = root instanceof HTMLElement ? root : null;
 
   controlStates.forEach(({ control }) => {
     control.disabled = true;
   });
+  if (busyRoot) {
+    busyRoot.setAttribute("data-busy", "true");
+    busyRoot.setAttribute("aria-busy", "true");
+  }
   if (button) {
     button.textContent = pendingLabel;
     button.setAttribute("aria-busy", "true");
@@ -147,6 +152,10 @@ export async function withBusyState<T>({
     controlStates.forEach(({ control, disabled }) => {
       control.disabled = disabled;
     });
+    if (busyRoot) {
+      busyRoot.removeAttribute("data-busy");
+      busyRoot.removeAttribute("aria-busy");
+    }
     if (button) {
       button.textContent = originalLabel;
       button.removeAttribute("aria-busy");
@@ -233,6 +242,7 @@ export function summarizePendingChanges(entries: DiffEntry[]): PendingChangeSumm
   return {
     changedFields,
     restartFields: changedFields.filter((field) => RESTART_SENSITIVE_FIELDS.has(field)),
+    liveFields: changedFields.filter((field) => !RESTART_SENSITIVE_FIELDS.has(field)),
     secretFields: changedFields.filter((field) => SECRET_FIELDS.has(field)),
   };
 }

@@ -255,14 +255,17 @@ export function renderFormChangeSummary(
     options?.idleMessage ?? "No pending changes. This section matches the persisted runtime values.";
   const changeCount = summary.changedFields.length;
   const restartCount = summary.restartFields.length;
+  const liveCount = summary.liveFields.length;
   const secretCount = summary.secretFields.length;
 
   const headline =
     changeCount === 0
       ? idleMessage
-      : restartCount > 0
-        ? `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. ${restartCount} change${restartCount === 1 ? "" : "s"} require a restart before mounted routes fully reflect them.`
-        : `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. This section can be persisted and applied without a restart.`;
+      : restartCount > 0 && liveCount > 0
+        ? `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. ${liveCount} apply live after save, while ${restartCount} still require a restart before mounted routes fully reflect them.`
+        : restartCount > 0
+          ? `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. Save persists them now, but route posture still needs a restart before it fully matches the target state.`
+          : `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. This section can be persisted and applied without a restart.`;
 
   const previewFields = summary.changedFields.slice(0, 5);
   const remainingFields = summary.changedFields.length - previewFields.length;
@@ -274,6 +277,7 @@ export function renderFormChangeSummary(
       <div class="pill-row">
         ${pill(changeCount === 0 ? "Status: clean" : `Changed fields: ${changeCount}`, changeCount === 0 ? "good" : "default")}
         ${restartCount > 0 ? pill(`Restart-sensitive: ${restartCount}`, "warn") : pill("Runtime apply: live", "good")}
+        ${liveCount > 0 ? pill(`Live after save: ${liveCount}`, "good") : ""}
         ${secretCount > 0 ? pill(`Secrets touched: ${secretCount}`, "warn") : ""}
       </div>
       ${
@@ -291,6 +295,36 @@ export function renderFormChangeSummary(
                 ${remainingFields > 0 ? pill(`+${remainingFields} more`) : ""}
               </div>
             `
+          : ""
+      }
+      ${
+        restartCount > 0
+          ? renderPendingFieldGroup(
+              "Restart after save",
+              summary.restartFields,
+              "Mounted routes and runtime posture will not fully match these changes until the process restarts.",
+              "warn",
+            )
+          : ""
+      }
+      ${
+        liveCount > 0
+          ? renderPendingFieldGroup(
+              "Applies live",
+              summary.liveFields,
+              "These changes take effect as soon as the section is persisted.",
+              "good",
+            )
+          : ""
+      }
+      ${
+        secretCount > 0
+          ? renderPendingFieldGroup(
+              "Masked secret updates",
+              summary.secretFields,
+              "Secret values stay masked after save, but this shows which secret surfaces will rotate or clear.",
+              "default",
+            )
           : ""
       }
       ${options?.note ? `<p class="muted">${escapeHtml(options.note)}</p>` : ""}
@@ -318,4 +352,27 @@ function formatDiffValue(value: unknown): string {
     return `<code>${escapeHtml(JSON.stringify(value))}</code>`;
   }
   return escapeHtml(String(value));
+}
+
+function renderPendingFieldGroup(
+  label: string,
+  fields: string[],
+  note: string,
+  tone: "default" | "good" | "warn",
+): string {
+  if (!fields.length) {
+    return "";
+  }
+
+  return `
+    <div class="change-group">
+      <div class="change-group__header">
+        <strong>${escapeHtml(label)}</strong>
+        <span class="muted">${escapeHtml(note)}</span>
+      </div>
+      <div class="pill-row">
+        ${fields.map((field) => pill(humanizeField(field), tone)).join("")}
+      </div>
+    </div>
+  `;
 }

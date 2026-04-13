@@ -397,6 +397,16 @@ code {
   line-height: 1.5;
 }
 
+[data-busy="true"] {
+  opacity: 0.8;
+}
+
+[data-busy="true"] .banner,
+[data-busy="true"] .surface,
+[data-busy="true"] .field-note {
+  filter: saturate(0.84);
+}
+
 .checkbox-field {
   display: flex;
   align-items: flex-start;
@@ -514,6 +524,18 @@ code {
 
 .surface--dark .muted {
   color: rgba(239, 247, 241, 0.72);
+}
+
+.change-group {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.change-group__header {
+  display: grid;
+  gap: 4px;
 }
 
 .surface__header {
