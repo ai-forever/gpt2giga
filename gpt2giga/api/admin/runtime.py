@@ -222,7 +222,7 @@ def _build_config_summary(proxy: object) -> dict[str, dict[str, object]]:
             "api_key_auth": proxy.enable_api_key_auth,
             "scoped_api_keys_configured": len(proxy.scoped_api_keys),
             "governance_limits_configured": len(proxy.governance_limits),
-            "admin_enabled": proxy.mode != "PROD",
+            "admin_enabled": True,
         },
         "providers": {
             "enabled_providers": list(proxy.enabled_providers),
@@ -298,7 +298,7 @@ def _build_capability_matrix(
                 "name": "admin",
                 "display_name": "Admin",
                 "surface": "admin",
-                "enabled": config.proxy_settings.mode != "PROD",
+                "enabled": True,
                 "capabilities": [
                     "ui",
                     "setup",
@@ -447,7 +447,7 @@ def _runtime_summary(request: Request) -> dict[str, object]:
         "enable_images": proxy.enable_images,
         "logs_ip_allowlist_enabled": bool(proxy.logs_ip_allowlist),
         "log_redact_sensitive": proxy.log_redact_sensitive,
-        "admin_enabled": not is_prod_mode,
+        "admin_enabled": True,
         "state": _collect_state_status(request),
     }
 
@@ -568,7 +568,7 @@ async def get_admin_capabilities(request: Request):
             ],
         },
         "admin": {
-            "enabled": config.proxy_settings.mode != "PROD",
+            "enabled": True,
             "capabilities": [
                 "ui",
                 "setup",
@@ -616,7 +616,11 @@ async def get_admin_capabilities(request: Request):
                 "/admin/api/logs",
                 "/admin/api/logs/stream",
             ],
-            "legacy_routes": ["/logs", "/logs/stream", "/logs/html"],
+            "legacy_routes": (
+                ["/logs", "/logs/stream", "/logs/html"]
+                if config.proxy_settings.mode != "PROD"
+                else []
+            ),
         },
     }
 

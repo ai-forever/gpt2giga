@@ -149,10 +149,10 @@ def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -
 
     app.include_router(system_router)
     app.include_router(metrics_router, dependencies=api_dependencies)
+    app.include_router(admin_api_router, dependencies=api_dependencies)
+    app.include_router(admin_router, dependencies=api_dependencies)
 
     if not is_prod_mode:
-        app.include_router(admin_api_router, dependencies=api_dependencies)
-        app.include_router(admin_router, dependencies=api_dependencies)
         app.include_router(legacy_logs_router, dependencies=api_dependencies)
 
 

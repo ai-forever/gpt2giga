@@ -14,6 +14,7 @@ from gpt2giga.app.dependencies import (
     ensure_runtime_dependencies,
     get_config_from_state,
     get_logger_from_state,
+    get_runtime_providers,
     get_runtime_stores,
 )
 from gpt2giga.app.wiring import reload_runtime_services
@@ -298,6 +299,60 @@ def _build_updated_config(
     )
 
 
+def _resolve_gigachat_factory(request: Request):
+    """Resolve the active GigaChat client factory for admin test calls."""
+    providers = get_runtime_providers(request.app.state)
+    factory_getter = providers.gigachat_factory_getter
+    if callable(factory_getter):
+        return factory_getter()
+    return providers.gigachat_factory
+
+
+async def _test_gigachat_settings(
+    request: Request,
+    *,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Run a non-persistent upstream connectivity check with candidate settings."""
+    current = get_config_from_state(request.app.state)
+    updated = _build_updated_config(current, gigachat_updates=payload)
+    logger = get_logger_from_state(request.app.state)
+    gigachat_factory = _resolve_gigachat_factory(request)
+    if gigachat_factory is None:
+        from gigachat import GigaChat
+
+        gigachat_factory = GigaChat
+
+    client = gigachat_factory(**updated.gigachat_settings.model_dump())
+    try:
+        models_response = await client.aget_models()
+        raw_models = list(getattr(models_response, "data", []) or [])
+        sample_models: list[str] = []
+        for model in raw_models[:5]:
+            model_id = getattr(model, "id", None) or getattr(model, "name", None)
+            if model_id is not None:
+                sample_models.append(str(model_id))
+        return {
+            "ok": True,
+            "model_count": len(raw_models),
+            "sample_models": sample_models,
+            "gigachat_api_mode": current.proxy_settings.gigachat_api_mode,
+        }
+    except Exception as exc:  # pragma: no cover - exercised in integration tests
+        if logger is not None:
+            logger.warning(f"GigaChat connection test failed: {exc}")
+        return {
+            "ok": False,
+            "error_type": exc.__class__.__name__,
+            "error": str(exc),
+            "gigachat_api_mode": current.proxy_settings.gigachat_api_mode,
+        }
+    finally:
+        close = getattr(client, "aclose", None)
+        if callable(close):
+            await close()
+
+
 async def _apply_updated_config(
     request: Request,
     updated_config: ProxyConfig,
@@ -399,6 +454,18 @@ async def update_gigachat_settings(
         "values": _build_gigachat_settings(updated.gigachat_settings),
         **result,
     }
+
+
+@admin_settings_api_router.post("/admin/api/settings/gigachat/test")
+@exceptions_handler
+async def test_gigachat_settings(
+    request: Request,
+    payload: dict[str, Any] = Body(...),
+):
+    """Test candidate GigaChat settings without persisting them."""
+    verify_logs_ip_allowlist(request)
+    _validate_known_fields(payload, "gigachat")
+    return await _test_gigachat_settings(request, payload=payload)
 
 
 @admin_settings_api_router.get("/admin/api/settings/security")

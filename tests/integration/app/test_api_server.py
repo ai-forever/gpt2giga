@@ -180,11 +180,21 @@ def test_prod_mode_forces_auth_dependency():
     assert response.status_code == 401
 
 
-def test_prod_mode_disables_admin_and_legacy_logs_routes():
+def test_prod_mode_keeps_admin_routes_protected_and_disables_legacy_logs_routes():
     app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD", api_key="k")))
     client = TestClient(app)
-    assert client.get("/admin").status_code == 404
-    assert client.get("/admin/api/runtime").status_code == 404
+
+    assert client.get("/admin").status_code == 401
+    assert client.get("/admin/api/runtime").status_code == 401
+    assert client.get("/admin", headers={"x-api-key": "k"}).status_code == 200
+    runtime = client.get("/admin/api/runtime", headers={"x-api-key": "k"})
+    assert runtime.status_code == 200
+    assert runtime.json()["admin_enabled"] is True
+    capabilities = client.get("/admin/api/capabilities", headers={"x-api-key": "k"})
+    assert capabilities.status_code == 200
+    assert capabilities.json()["admin"]["enabled"] is True
+    assert capabilities.json()["admin"]["legacy_routes"] == []
+
     assert client.get("/logs").status_code == 404
     assert client.get("/logs/stream").status_code == 404
     assert client.get("/logs/html").status_code == 404

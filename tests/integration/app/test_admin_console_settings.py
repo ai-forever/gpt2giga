@@ -71,6 +71,80 @@ def test_gigachat_settings_update_is_persisted(tmp_path, monkeypatch):
     assert "gigachat-secret" not in raw
 
 
+def test_gigachat_settings_test_endpoint_reports_success(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    app = make_app()
+
+    class FakeModel:
+        def __init__(self, model_id):
+            self.id = model_id
+
+    class FakeGigaChat:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def aget_models(self):
+            return type(
+                "Result",
+                (),
+                {"data": [FakeModel("GigaChat"), FakeModel("GigaChat-Max")]},
+            )()
+
+        async def aclose(self):
+            return None
+
+    app.state.providers.gigachat_factory = FakeGigaChat
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/settings/gigachat/test",
+        json={
+            "credentials": "gigachat-secret",
+            "scope": "GIGACHAT_API_PERS",
+            "model": "GigaChat-Max",
+            "verify_ssl_certs": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["model_count"] == 2
+    assert "GigaChat-Max" in payload["sample_models"]
+
+
+def test_gigachat_settings_test_endpoint_reports_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    app = make_app()
+
+    class FakeBrokenGigaChat:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def aget_models(self):
+            raise RuntimeError("upstream auth failed")
+
+        async def aclose(self):
+            return None
+
+    app.state.providers.gigachat_factory = FakeBrokenGigaChat
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/settings/gigachat/test",
+        json={
+            "credentials": "gigachat-secret",
+            "scope": "GIGACHAT_API_PERS",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "RuntimeError"
+    assert payload["error"] == "upstream auth failed"
+
+
 def test_scoped_key_create_rotate_and_delete(tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
     client = TestClient(make_app())

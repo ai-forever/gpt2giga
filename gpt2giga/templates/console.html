@@ -723,6 +723,19 @@
           .filter(Boolean);
       }
 
+      function collectGigachatPayload(form) {
+        return {
+          model: form.model.value.trim() || null,
+          scope: form.scope.value.trim() || null,
+          base_url: form.base_url.value.trim() || null,
+          auth_url: form.auth_url.value.trim() || null,
+          credentials: form.credentials.value.trim() || null,
+          access_token: form.access_token.value.trim() || null,
+          verify_ssl_certs: form.verify_ssl_certs.value === "true",
+          timeout: form.timeout && form.timeout.value ? Number(form.timeout.value) : null,
+        };
+      }
+
       async function renderSetup() {
         const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
           apiFetch("/admin/api/setup"),
@@ -835,7 +848,10 @@
               </div>
               <label><span>Verify SSL</span><select name="verify_ssl_certs"><option value="true" ${gigachat.values.verify_ssl_certs ? "selected" : ""}>on</option><option value="false" ${!gigachat.values.verify_ssl_certs ? "selected" : ""}>off</option></select></label>
               <div class="banner">Current credentials preview: ${escapeHtml(gigachat.values.credentials_preview || "not configured")}.</div>
-              <button>Save GigaChat step</button>
+              <div class="toolbar">
+                <button type="submit">Save GigaChat step</button>
+                <button type="button" class="secondary" id="setup-gigachat-test">Test connection</button>
+              </div>
             </form>`,
             "wide-panel span-4",
           )}
@@ -928,15 +944,7 @@
           const response = await apiFetch("/admin/api/settings/gigachat", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: form.model.value.trim() || null,
-              scope: form.scope.value.trim() || null,
-              base_url: form.base_url.value.trim() || null,
-              auth_url: form.auth_url.value.trim() || null,
-              credentials: form.credentials.value.trim() || null,
-              access_token: form.access_token.value.trim() || null,
-              verify_ssl_certs: form.verify_ssl_certs.value === "true",
-            }),
+            body: JSON.stringify(collectGigachatPayload(form)),
           });
           pushAlert(
             response.restart_required
@@ -945,6 +953,21 @@
             response.restart_required ? "warn" : "info",
           );
           renderRoute("setup");
+        });
+
+        document.getElementById("setup-gigachat-test").addEventListener("click", async () => {
+          const form = document.getElementById("setup-gigachat-form");
+          const result = await apiFetch("/admin/api/settings/gigachat/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(collectGigachatPayload(form)),
+          });
+          pushAlert(
+            result.ok
+              ? `GigaChat connection ok. Models visible: ${result.model_count}.`
+              : `GigaChat connection failed: ${result.error_type}: ${result.error}`,
+            result.ok ? "info" : "danger",
+          );
         });
 
         document.getElementById("setup-security-form").addEventListener("submit", async (event) => {
@@ -1070,7 +1093,10 @@
                 </label>
               </div>
               <div class="banner">Stored credentials stay hidden after save. Current preview: ${escapeHtml(gigachat.values.credentials_preview || "not configured")}.</div>
-              <button>Save GigaChat settings</button>
+              <div class="toolbar">
+                <button type="submit">Save GigaChat settings</button>
+                <button type="button" class="secondary" id="gigachat-test">Test connection</button>
+              </div>
             </form>`,
             "wide-panel span-6",
           )}
@@ -1129,13 +1155,7 @@
           event.preventDefault();
           const form = event.currentTarget;
           const payload = {
-            model: form.model.value.trim() || null,
-            scope: form.scope.value.trim() || null,
-            base_url: form.base_url.value.trim() || null,
-            auth_url: form.auth_url.value.trim() || null,
-            credentials: form.credentials.value.trim() || null,
-            access_token: form.access_token.value.trim() || null,
-            verify_ssl_certs: form.verify_ssl_certs.value === "true",
+            ...collectGigachatPayload(form),
             timeout: form.timeout.value ? Number(form.timeout.value) : null,
           };
           const response = await apiFetch("/admin/api/settings/gigachat", {
@@ -1145,6 +1165,21 @@
           });
           pushAlert(response.restart_required ? "GigaChat settings saved. Restart required." : "GigaChat settings saved and runtime reloaded.");
           renderRoute("settings");
+        });
+
+        document.getElementById("gigachat-test").addEventListener("click", async () => {
+          const form = document.getElementById("gigachat-form");
+          const result = await apiFetch("/admin/api/settings/gigachat/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(collectGigachatPayload(form)),
+          });
+          pushAlert(
+            result.ok
+              ? `GigaChat connection ok. Models visible: ${result.model_count}.`
+              : `GigaChat connection failed: ${result.error_type}: ${result.error}`,
+            result.ok ? "info" : "danger",
+          );
         });
 
         document.getElementById("security-form").addEventListener("submit", async (event) => {
