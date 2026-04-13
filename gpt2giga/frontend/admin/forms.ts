@@ -33,6 +33,38 @@ type FormControlElement =
   | HTMLSelectElement
   | HTMLTextAreaElement;
 
+interface ValidationOptions {
+  report?: boolean;
+}
+
+interface SecretFieldBindingOptions {
+  form: HTMLFormElement;
+  fieldName: string;
+  clearFieldName: string;
+  preview: string;
+}
+
+interface SecretFieldState {
+  intent: "keep" | "replace" | "clear";
+  message: string;
+}
+
+export interface PlannedApplyState {
+  effectiveSummary: PendingChangeSummary;
+  blockedLiveFields: string[];
+}
+
+export interface RuntimeImpactDescriptor {
+  label: string;
+  tone: "good" | "warn";
+  detail: string;
+}
+
+export interface PersistOutcomeDescriptor {
+  message: string;
+  tone: "info" | "warn";
+}
+
 export function buildApplicationPayload(form: HTMLFormElement): Record<string, unknown> {
   const fields = form.elements as typeof form.elements & {
     mode: HTMLSelectElement;
@@ -109,6 +141,132 @@ export function bindValidityReset(
     field.addEventListener("input", resetValidity);
     field.addEventListener("change", resetValidity);
   });
+}
+
+export function validateRequiredCsvField(
+  field: HTMLInputElement | null | undefined,
+  message: string,
+  options?: ValidationOptions,
+): string {
+  if (!field) {
+    return "";
+  }
+  const error = parseCsv(field.value).length > 0 ? "" : message;
+  field.setCustomValidity(error);
+  if (error && options?.report) {
+    field.reportValidity();
+  }
+  return error;
+}
+
+export function validatePositiveNumberField(
+  field: HTMLInputElement | null | undefined,
+  message: string,
+  options?: ValidationOptions,
+): string {
+  if (!field) {
+    return "";
+  }
+  const rawValue = field.value.trim();
+  let error = "";
+  if (rawValue) {
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      error = message;
+    }
+  }
+  field.setCustomValidity(error);
+  if (error && options?.report) {
+    field.reportValidity();
+  }
+  return error;
+}
+
+export function validateJsonArrayField(
+  field: HTMLTextAreaElement | null | undefined,
+  value: unknown,
+  {
+    invalidMessage,
+    nonArrayMessage,
+    report,
+  }: {
+    invalidMessage: string;
+    nonArrayMessage: string;
+    report?: boolean;
+  },
+): string {
+  if (!field) {
+    return "";
+  }
+  const error =
+    value === INVALID_JSON
+      ? invalidMessage
+      : !Array.isArray(value)
+        ? nonArrayMessage
+        : "";
+  field.setCustomValidity(error);
+  if (error && report) {
+    field.reportValidity();
+  }
+  return error;
+}
+
+export function bindSecretFieldBehavior(
+  options: SecretFieldBindingOptions,
+): () => SecretFieldState | null {
+  const textarea = options.form.elements.namedItem(options.fieldName);
+  const clearToggle = options.form.elements.namedItem(options.clearFieldName);
+  if (!(textarea instanceof HTMLTextAreaElement) || !(clearToggle instanceof HTMLInputElement)) {
+    return () => null;
+  }
+
+  const note = textarea.closest(".stack")?.querySelector<HTMLElement>(".field-note");
+  const originalPlaceholder = textarea.placeholder;
+  const preview = options.preview || "not configured";
+
+  const sync = (): SecretFieldState => {
+    const hasValue = textarea.value.trim().length > 0;
+    if (hasValue) {
+      clearToggle.checked = false;
+      clearToggle.disabled = true;
+      textarea.disabled = false;
+      textarea.placeholder = originalPlaceholder;
+      if (note) {
+        note.textContent = `Stored preview: ${preview}. Pending action: replace the stored secret on save.`;
+      }
+      return {
+        intent: "replace",
+        message: "A new secret is staged and will replace the stored value on save.",
+      };
+    }
+
+    clearToggle.disabled = false;
+    if (clearToggle.checked) {
+      textarea.disabled = true;
+      textarea.placeholder = "Uncheck clear to paste a replacement secret";
+      if (note) {
+        note.textContent = `Stored preview: ${preview}. Pending action: clear the stored secret on save.`;
+      }
+      return {
+        intent: "clear",
+        message: "The stored secret will be removed when this section is saved.",
+      };
+    }
+
+    textarea.disabled = false;
+    textarea.placeholder = originalPlaceholder;
+    if (note) {
+      note.textContent = `Stored preview: ${preview}. Pending action: keep the stored secret unless you paste a replacement.`;
+    }
+    return {
+      intent: "keep",
+      message: "The stored secret remains unchanged unless you paste a replacement.",
+    };
+  };
+
+  textarea.addEventListener("input", sync);
+  clearToggle.addEventListener("change", sync);
+  return sync;
 }
 
 export async function withBusyState<T>({
@@ -201,6 +359,68 @@ export function collectGigachatPayload(form: HTMLFormElement): Record<string, un
   }
 
   return payload;
+}
+
+export function planPendingApply(summary: PendingChangeSummary): PlannedApplyState {
+  if (summary.restartFields.length === 0) {
+    return {
+      effectiveSummary: summary,
+      blockedLiveFields: [],
+    };
+  }
+
+  return {
+    effectiveSummary: {
+      ...summary,
+      liveFields: [],
+    },
+    blockedLiveFields: [...summary.liveFields],
+  };
+}
+
+export function describePendingRuntimeImpact(plan: PlannedApplyState): RuntimeImpactDescriptor {
+  if (plan.effectiveSummary.changedFields.length === 0) {
+    return {
+      label: "Runtime matches persisted target",
+      tone: "good",
+      detail: "The current form matches the saved control-plane state.",
+    };
+  }
+  if (plan.effectiveSummary.restartFields.length > 0) {
+    return {
+      label: "Runtime keeps current config until restart",
+      tone: "warn",
+      detail:
+        "This save batch includes restart-sensitive fields, so the persisted target updates now but the running process keeps the previous runtime config until restart.",
+    };
+  }
+  return {
+    label: "Runtime updates immediately after save",
+    tone: "good",
+    detail: "This change set can be persisted and reloaded without restarting the process.",
+  };
+}
+
+export function describePersistOutcome(
+  sectionLabel: string,
+  response: Record<string, unknown>,
+): PersistOutcomeDescriptor {
+  if (response.restart_required) {
+    return {
+      message: `${sectionLabel} saved. Persisted target updated, but the running process keeps the previous runtime config until restart.`,
+      tone: "warn",
+    };
+  }
+  if (response.applied_runtime) {
+    return {
+      message: `${sectionLabel} saved and applied to the running process.`,
+      tone: "info",
+    };
+  }
+  return {
+    message: `${sectionLabel} saved.`,
+    tone: "info",
+  };
 }
 
 export function buildPendingDiffEntries(

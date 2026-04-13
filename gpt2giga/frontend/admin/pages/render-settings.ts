@@ -2,11 +2,18 @@ import type { AdminApp } from "../app.js";
 import {
   INVALID_JSON,
   bindValidityReset,
+  bindSecretFieldBehavior,
   buildApplicationPayload,
   buildPendingDiffEntries,
   buildSecurityPayload,
   collectGigachatPayload,
+  describePendingRuntimeImpact,
+  describePersistOutcome,
+  planPendingApply,
   summarizePendingChanges,
+  validateJsonArrayField,
+  validatePositiveNumberField,
+  validateRequiredCsvField,
   withBusyState,
 } from "../forms.js";
 import {
@@ -16,10 +23,71 @@ import {
   renderFormChangeSummary,
   renderJson,
   renderSecretField,
+  pill,
 } from "../templates.js";
-import { asArray, asRecord, csv, escapeHtml, formatTimestamp, parseCsv } from "../utils.js";
+import {
+  asArray,
+  asRecord,
+  csv,
+  escapeHtml,
+  formatTimestamp,
+  humanizeField,
+  toErrorMessage,
+} from "../utils.js";
 
 const LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"];
+
+type InlineStatus = {
+  tone: "info" | "warn" | "danger";
+  message: string;
+};
+
+function renderSectionStatus({
+  summary,
+  controlPlane,
+  note,
+  validationMessage,
+  actionState,
+}: {
+  summary: ReturnType<typeof summarizePendingChanges>;
+  controlPlane: Record<string, unknown>;
+  note: string;
+  validationMessage?: string;
+  actionState?: InlineStatus | null;
+}): string {
+  const plannedApply = planPendingApply(summary);
+  const runtimeImpact = describePendingRuntimeImpact(plannedApply);
+  const persisted = Boolean(controlPlane.persisted);
+  const persistedLabel =
+    persisted && controlPlane.updated_at
+      ? `Persisted target: ${formatTimestamp(controlPlane.updated_at)}`
+      : "Persisted target: not saved yet";
+
+  return `
+    <div class="stack">
+      ${actionState ? banner(actionState.message, actionState.tone) : ""}
+      ${renderFormChangeSummary(plannedApply.effectiveSummary, {
+        note,
+        validationMessage,
+      })}
+      <div class="pill-row">
+        ${pill(persistedLabel, persisted ? "default" : "warn")}
+        ${pill(runtimeImpact.label, runtimeImpact.tone)}
+        ${
+          plannedApply.blockedLiveFields.length
+            ? pill(`Live-capable if isolated: ${plannedApply.blockedLiveFields.length}`)
+            : ""
+        }
+      </div>
+      ${
+        plannedApply.blockedLiveFields.length
+          ? `<p class="muted">These fields can reload live on their own, but this save batch still waits for restart: ${escapeHtml(plannedApply.blockedLiveFields.map((field) => humanizeField(field)).join(", "))}.</p>`
+          : ""
+      }
+      <p class="muted">${escapeHtml(runtimeImpact.detail)}</p>
+    </div>
+  `;
+}
 
 export async function renderSettings(app: AdminApp, token: number): Promise<void> {
   const [application, gigachat, security, revisionsPayload] = await Promise.all([
@@ -36,6 +104,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
   const applicationValues = asRecord(application.values);
   const gigachatValues = asRecord(gigachat.values);
   const securityValues = asRecord(security.values);
+  const controlPlaneStatus = asRecord(application.control_plane);
   const revisions = asArray<Record<string, unknown>>(revisionsPayload.revisions);
 
   app.setHeroActions(
@@ -47,7 +116,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       "Application",
       `
         <form id="application-form" class="stack">
-          ${banner("Keep at least one provider enabled. Mode, runtime backend, auth and CORS-adjacent changes may require a restart.")}
+          ${banner("Saving always updates the persisted control-plane target. Runtime only reloads immediately when this batch contains no restart-sensitive fields.")}
           <div id="settings-application-status"></div>
           <div class="dual-grid">
             <label class="field">
@@ -117,7 +186,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       "GigaChat",
       `
         <form id="gigachat-form" class="stack">
-          ${banner("Secrets stay masked after save. Leave secret fields blank to preserve the stored value; use the clear toggle only when you want to remove it.")}
+          ${banner("Connection tests use the candidate values without persisting them. Saving updates the persisted target first, then reloads runtime only when no restart-sensitive fields are present.")}
           <div id="settings-gigachat-status"></div>
           <div class="dual-grid">
             <label class="field"><span>Model</span><input name="model" value="${escapeHtml(gigachatValues.model ?? "")}" /></label>
@@ -178,7 +247,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
           <label class="field"><span>Logs IP allowlist</span><input name="logs_ip_allowlist" value="${escapeHtml(csv(securityValues.logs_ip_allowlist))}" /></label>
           <label class="field"><span>CORS origins</span><input name="cors_allow_origins" value="${escapeHtml(csv(securityValues.cors_allow_origins))}" /></label>
           <label class="field"><span>Governance limits (JSON array)</span><textarea name="governance_limits">${escapeHtml(JSON.stringify(securityValues.governance_limits ?? [], null, 2))}</textarea></label>
-          ${banner("Changes to auth and CORS are persisted immediately but require a restart before the mounted routes fully reflect them.", "warn")}
+          ${banner("Auth and CORS always save to the control plane first. If this batch includes restart-sensitive fields, the running process keeps the previous posture until restart.", "warn")}
           <button class="button" type="submit">Save security settings</button>
         </form>
       `,
@@ -190,6 +259,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       revisions.length
         ? `
             <div class="stack">
+              <div id="settings-revisions-status"></div>
               ${revisions
                 .map((revision) => {
                   const revisionId = String(revision.revision_id ?? "");
@@ -229,6 +299,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
   const gigachatStatusNode = app.pageContent.querySelector<HTMLElement>("#settings-gigachat-status");
   const securityStatusNode = app.pageContent.querySelector<HTMLElement>("#settings-security-status");
   const pendingDiffNode = app.pageContent.querySelector<HTMLElement>("#settings-pending-diff");
+  const revisionsStatusNode = app.pageContent.querySelector<HTMLElement>("#settings-revisions-status");
   if (
     !applicationForm ||
     !gigachatForm ||
@@ -236,7 +307,8 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     !applicationStatusNode ||
     !gigachatStatusNode ||
     !securityStatusNode ||
-    !pendingDiffNode
+    !pendingDiffNode ||
+    !revisionsStatusNode
   ) {
     return;
   }
@@ -256,56 +328,47 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     securityFields.governance_limits,
   );
 
-  const validateEnabledProviders = () => {
-    if (parseCsv(applicationFields.enabled_providers.value).length > 0) {
-      applicationFields.enabled_providers.setCustomValidity("");
-      return true;
-    }
-    applicationFields.enabled_providers.setCustomValidity("Provide at least one enabled provider.");
-    applicationFields.enabled_providers.reportValidity();
-    return false;
-  };
+  const syncCredentialsSecret = bindSecretFieldBehavior({
+    form: gigachatForm,
+    fieldName: "credentials",
+    clearFieldName: "clear_credentials",
+    preview: String(gigachatValues.credentials_preview ?? "not configured"),
+  });
+  const syncAccessTokenSecret = bindSecretFieldBehavior({
+    form: gigachatForm,
+    fieldName: "access_token",
+    clearFieldName: "clear_access_token",
+    preview: String(gigachatValues.access_token_preview ?? "not configured"),
+  });
 
-  const validateGigachatTimeout = () => {
-    const timeoutField = gigachatFields.timeout;
-    if (!timeoutField) {
-      return true;
-    }
-    const rawValue = timeoutField.value.trim();
-    if (!rawValue) {
-      timeoutField.setCustomValidity("");
-      return true;
-    }
-    const numeric = Number(rawValue);
-    if (Number.isFinite(numeric) && numeric > 0) {
-      timeoutField.setCustomValidity("");
-      return true;
-    }
-    timeoutField.setCustomValidity("Timeout must be a positive number of seconds.");
-    timeoutField.reportValidity();
-    return false;
-  };
+  let applicationActionState: InlineStatus | null = null;
+  let gigachatActionState: InlineStatus | null = null;
+  let securityActionState: InlineStatus | null = null;
+  let revisionsActionState: InlineStatus | null = null;
 
-  const validateSecurityPayload = (
+  const getApplicationValidationMessage = (report = false) =>
+    validateRequiredCsvField(
+      applicationFields.enabled_providers,
+      "Provide at least one enabled provider.",
+      { report },
+    );
+
+  const getGigachatValidationMessage = (report = false) =>
+    validatePositiveNumberField(
+      gigachatFields.timeout,
+      "Timeout must be a positive number of seconds.",
+      { report },
+    );
+
+  const getSecurityValidationMessage = (
     payload: Record<string, unknown> & { governance_limits: unknown },
-  ) => {
-    if (payload.governance_limits === INVALID_JSON) {
-      securityFields.governance_limits.setCustomValidity(
-        "Governance limits must be valid JSON.",
-      );
-      securityFields.governance_limits.reportValidity();
-      return "Governance limits JSON is invalid.";
-    }
-    if (!Array.isArray(payload.governance_limits)) {
-      securityFields.governance_limits.setCustomValidity(
-        "Governance limits must be a JSON array of rule descriptors.",
-      );
-      securityFields.governance_limits.reportValidity();
-      return "Governance limits must be a JSON array.";
-    }
-    securityFields.governance_limits.setCustomValidity("");
-    return "";
-  };
+    report = false,
+  ) =>
+    validateJsonArrayField(securityFields.governance_limits, payload.governance_limits, {
+      invalidMessage: "Governance limits must be valid JSON.",
+      nonArrayMessage: "Governance limits must be a JSON array of rule descriptors.",
+      report,
+    });
 
   const refreshPendingDiff = () => {
     const applicationEntries = buildPendingDiffEntries(
@@ -319,40 +382,66 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       collectGigachatPayload(gigachatForm),
     );
     const securityPayload = buildSecurityPayload(securityForm);
-    const securityValidationError =
-      securityPayload.governance_limits === INVALID_JSON
-        ? "Governance limits JSON is invalid. Fix it before saving the security section."
-        : !Array.isArray(securityPayload.governance_limits)
-          ? "Governance limits must stay a JSON array."
-          : "";
-    applicationStatusNode.innerHTML = renderFormChangeSummary(
-      summarizePendingChanges(applicationEntries),
-      {
-        note: "Mode, provider and runtime-store posture changes are the main restart-sensitive controls here.",
-      },
+    const securityEntries = buildPendingDiffEntries("security", securityValues, securityPayload);
+    const applicationValidationMessage = getApplicationValidationMessage();
+    const gigachatValidationMessage = getGigachatValidationMessage();
+    const securityValidationMessage = getSecurityValidationMessage(securityPayload);
+    const secretStates = [syncCredentialsSecret(), syncAccessTokenSecret()].flatMap((state) =>
+      state ? [state] : [],
     );
-    gigachatStatusNode.innerHTML = renderFormChangeSummary(
-      summarizePendingChanges(gigachatEntries),
-      {
-        note: "Secret rotation stays masked after save, but the pending field list still shows which credential surfaces will change.",
-      },
-    );
-    securityStatusNode.innerHTML = renderFormChangeSummary(
-      summarizePendingChanges(buildPendingDiffEntries("security", securityValues, securityPayload)),
-      {
-        note: "Auth and CORS changes can persist before the mounted route posture fully catches up.",
-        validationMessage: securityValidationError || undefined,
-      },
-    );
+    const stagedSecretMessages = secretStates
+      .filter((state) => state.intent !== "keep")
+      .map((state) => state.message);
+
+    applicationStatusNode.innerHTML = renderSectionStatus({
+      summary: summarizePendingChanges(applicationEntries),
+      controlPlane: controlPlaneStatus,
+      note: "Mode, provider routing, runtime-store backend and auth-adjacent controls are the main restart-sensitive levers here.",
+      validationMessage: applicationValidationMessage || undefined,
+      actionState: applicationActionState,
+    });
+    gigachatStatusNode.innerHTML = renderSectionStatus({
+      summary: summarizePendingChanges(gigachatEntries),
+      controlPlane: controlPlaneStatus,
+      note: stagedSecretMessages.length
+        ? `Connection tests never persist the form. ${stagedSecretMessages.join(" ")}`
+        : "Connection tests never persist the form. Secret values stay masked after save.",
+      validationMessage: gigachatValidationMessage || undefined,
+      actionState: gigachatActionState,
+    });
+    securityStatusNode.innerHTML = renderSectionStatus({
+      summary: summarizePendingChanges(securityEntries),
+      controlPlane: controlPlaneStatus,
+      note: "Saved security changes always update the persisted target first. Runtime posture only changes immediately when the whole batch is restart-safe.",
+      validationMessage: securityValidationMessage || undefined,
+      actionState: securityActionState,
+    });
+    revisionsStatusNode.innerHTML = revisionsActionState
+      ? banner(revisionsActionState.message, revisionsActionState.tone)
+      : banner(
+          "Rollback restores the persisted target from history first. Runtime only follows immediately when the restored diff is restart-safe.",
+        );
+
+    const validationMessages = [
+      applicationValidationMessage,
+      gigachatValidationMessage,
+      securityValidationMessage
+        ? (
+            securityPayload.governance_limits === INVALID_JSON
+              ? "Governance limits JSON is invalid. Fix it before saving the security section."
+              : "Governance limits must stay a JSON array."
+          )
+        : "",
+    ].filter(Boolean);
     pendingDiffNode.innerHTML = `
-      ${securityValidationError ? banner(securityValidationError, "danger") : ""}
+      ${validationMessages.map((message) => banner(message, "danger")).join("")}
       ${renderDiffSections(
         {
           application: applicationEntries,
           gigachat: gigachatEntries,
-          security: buildPendingDiffEntries("security", securityValues, securityPayload),
+          security: securityEntries,
         },
-        "Forms currently match the persisted runtime values.",
+        "Forms currently match the persisted control-plane target.",
       )}
     `;
   };
@@ -365,7 +454,8 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
 
   applicationForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!validateEnabledProviders()) {
+    if (getApplicationValidationMessage(true)) {
+      refreshPendingDiff();
       return;
     }
     const submitter = (event as SubmitEvent).submitter;
@@ -373,29 +463,44 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       submitter instanceof HTMLButtonElement
         ? submitter
         : applicationForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-    await withBusyState({
-      root: applicationForm,
-      button,
-      pendingLabel: "Saving…",
-      action: async () => {
-        const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/application", {
-          method: "PUT",
-          json: buildApplicationPayload(applicationForm),
-        });
-        app.queueAlert(
-          response.restart_required
-            ? "Application settings saved. Restart required for part of the change set."
-            : "Application settings saved and applied.",
-          response.restart_required ? "warn" : "info",
-        );
-        await app.render("settings");
-      },
-    });
+    applicationActionState = {
+      tone: "info",
+      message:
+        "Saving application settings. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
+    };
+    refreshPendingDiff();
+    try {
+      await withBusyState({
+        root: applicationForm,
+        button,
+        pendingLabel: "Saving…",
+        action: async () => {
+          const response = await app.api.json<Record<string, unknown>>(
+            "/admin/api/settings/application",
+            {
+              method: "PUT",
+              json: buildApplicationPayload(applicationForm),
+            },
+          );
+          const outcome = describePersistOutcome("Application settings", response);
+          app.queueAlert(outcome.message, outcome.tone);
+          await app.render("settings");
+        },
+      });
+    } catch (error) {
+      applicationActionState = {
+        tone: "danger",
+        message: `Application settings failed to save: ${toErrorMessage(error)}`,
+      };
+      refreshPendingDiff();
+      app.pushAlert(applicationActionState.message, "danger");
+    }
   });
 
   gigachatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!validateGigachatTimeout()) {
+    if (getGigachatValidationMessage(true)) {
+      refreshPendingDiff();
       return;
     }
     const submitter = (event as SubmitEvent).submitter;
@@ -403,55 +508,94 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       submitter instanceof HTMLButtonElement
         ? submitter
         : gigachatForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-    await withBusyState({
-      root: gigachatForm,
-      button,
-      pendingLabel: "Saving…",
-      action: async () => {
-        const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat", {
-          method: "PUT",
-          json: collectGigachatPayload(gigachatForm),
-        });
-        app.queueAlert(
-          response.restart_required
-            ? "GigaChat settings saved. Restart required."
-            : "GigaChat settings saved and runtime reloaded.",
-          response.restart_required ? "warn" : "info",
-        );
-        await app.render("settings");
-      },
-    });
+    gigachatActionState = {
+      tone: "info",
+      message:
+        "Saving GigaChat settings. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
+    };
+    refreshPendingDiff();
+    try {
+      await withBusyState({
+        root: gigachatForm,
+        button,
+        pendingLabel: "Saving…",
+        action: async () => {
+          const response = await app.api.json<Record<string, unknown>>(
+            "/admin/api/settings/gigachat",
+            {
+              method: "PUT",
+              json: collectGigachatPayload(gigachatForm),
+            },
+          );
+          const outcome = describePersistOutcome("GigaChat settings", response);
+          app.queueAlert(outcome.message, outcome.tone);
+          await app.render("settings");
+        },
+      });
+    } catch (error) {
+      gigachatActionState = {
+        tone: "danger",
+        message: `GigaChat settings failed to save: ${toErrorMessage(error)}`,
+      };
+      refreshPendingDiff();
+      app.pushAlert(gigachatActionState.message, "danger");
+    }
   });
 
   document.getElementById("gigachat-test")?.addEventListener("click", async (event) => {
-    if (!validateGigachatTimeout()) {
+    if (getGigachatValidationMessage(true)) {
+      refreshPendingDiff();
       return;
     }
     const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
-    await withBusyState({
-      root: gigachatForm,
-      button,
-      pendingLabel: "Testing…",
-      action: async () => {
-        const result = await app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat/test", {
-          method: "POST",
-          json: collectGigachatPayload(gigachatForm),
-        });
-        app.pushAlert(
-          result.ok
-            ? `GigaChat connection ok. Models visible: ${String(result.model_count ?? 0)}.`
-            : `GigaChat connection failed: ${String(result.error_type ?? "Error")}: ${String(result.error ?? "unknown error")}`,
-          result.ok ? "info" : "danger",
-        );
-      },
-    });
+    gigachatActionState = {
+      tone: "info",
+      message:
+        "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save.",
+    };
+    refreshPendingDiff();
+    try {
+      await withBusyState({
+        root: gigachatForm,
+        button,
+        pendingLabel: "Testing…",
+        action: async () => {
+          const result = await app.api.json<Record<string, unknown>>(
+            "/admin/api/settings/gigachat/test",
+            {
+              method: "POST",
+              json: collectGigachatPayload(gigachatForm),
+            },
+          );
+          gigachatActionState = result.ok
+            ? {
+                tone: "info",
+                message: `Connection ok. Models visible: ${String(result.model_count ?? 0)}. Candidate values were tested but not persisted.`,
+              }
+            : {
+                tone: "danger",
+                message: `Connection failed: ${String(result.error_type ?? "Error")}: ${String(result.error ?? "unknown error")}. Persisted values remain unchanged.`,
+              };
+          refreshPendingDiff();
+          app.pushAlert(gigachatActionState.message, gigachatActionState.tone);
+        },
+      });
+    } catch (error) {
+      gigachatActionState = {
+        tone: "danger",
+        message: `GigaChat connection test failed: ${toErrorMessage(error)}`,
+      };
+      refreshPendingDiff();
+      app.pushAlert(gigachatActionState.message, "danger");
+    }
   });
 
   securityForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const payload = buildSecurityPayload(securityForm);
-    const validationError = validateSecurityPayload(payload);
+    const validationError = getSecurityValidationMessage(payload, true);
     if (validationError) {
+      refreshPendingDiff();
       app.pushAlert(validationError, "danger");
       return;
     }
@@ -460,24 +604,38 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       submitter instanceof HTMLButtonElement
         ? submitter
         : securityForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-    await withBusyState({
-      root: securityForm,
-      button,
-      pendingLabel: "Saving…",
-      action: async () => {
-        const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/security", {
-          method: "PUT",
-          json: payload,
-        });
-        app.queueAlert(
-          response.restart_required
-            ? "Security settings saved. Restart required."
-            : "Security settings saved and applied.",
-          response.restart_required ? "warn" : "info",
-        );
-        await app.render("settings");
-      },
-    });
+    securityActionState = {
+      tone: "info",
+      message:
+        "Saving security settings. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
+    };
+    refreshPendingDiff();
+    try {
+      await withBusyState({
+        root: securityForm,
+        button,
+        pendingLabel: "Saving…",
+        action: async () => {
+          const response = await app.api.json<Record<string, unknown>>(
+            "/admin/api/settings/security",
+            {
+              method: "PUT",
+              json: payload,
+            },
+          );
+          const outcome = describePersistOutcome("Security settings", response);
+          app.queueAlert(outcome.message, outcome.tone);
+          await app.render("settings");
+        },
+      });
+    } catch (error) {
+      securityActionState = {
+        tone: "danger",
+        message: `Security settings failed to save: ${toErrorMessage(error)}`,
+      };
+      refreshPendingDiff();
+      app.pushAlert(securityActionState.message, "danger");
+    }
   });
 
   app.pageContent.querySelectorAll<HTMLElement>("[data-rollback-revision]").forEach((button) => {
@@ -490,23 +648,33 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
         return;
       }
       const actionButton = button instanceof HTMLButtonElement ? button : null;
-      await withBusyState({
-        button: actionButton,
-        pendingLabel: "Rolling back…",
-        action: async () => {
-          const response = await app.api.json<Record<string, unknown>>(
-            `/admin/api/settings/revisions/${revisionId}/rollback`,
-            { method: "POST" },
-          );
-          app.queueAlert(
-            response.restart_required
-              ? `Revision ${revisionId} restored. Restart required for part of the rollback.`
-              : `Revision ${revisionId} restored and applied.`,
-            response.restart_required ? "warn" : "info",
-          );
-          await app.render("settings");
-        },
-      });
+      revisionsActionState = {
+        tone: "warn",
+        message: `Restoring revision ${revisionId}. The persisted target changes first; runtime only follows immediately if the rollback is restart-safe.`,
+      };
+      refreshPendingDiff();
+      try {
+        await withBusyState({
+          button: actionButton,
+          pendingLabel: "Rolling back…",
+          action: async () => {
+            const response = await app.api.json<Record<string, unknown>>(
+              `/admin/api/settings/revisions/${revisionId}/rollback`,
+              { method: "POST" },
+            );
+            const outcome = describePersistOutcome(`Revision ${revisionId}`, response);
+            app.queueAlert(outcome.message, outcome.tone);
+            await app.render("settings");
+          },
+        });
+      } catch (error) {
+        revisionsActionState = {
+          tone: "danger",
+          message: `Rollback for revision ${revisionId} failed: ${toErrorMessage(error)}`,
+        };
+        refreshPendingDiff();
+        app.pushAlert(revisionsActionState.message, "danger");
+      }
     });
   });
 }

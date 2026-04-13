@@ -26,24 +26,92 @@ export async function renderSystem(app, token) {
     const serviceState = asRecord(runtimeState.services);
     const providerState = asRecord(runtimeState.providers);
     const storeState = asRecord(runtimeState.stores);
-    app.setHeroActions(`<button class="button button--secondary" id="copy-diagnostics" type="button">Copy diagnostics JSON</button>`);
+    const readyServiceCount = countTruthyEntries(serviceState);
+    const readyProviderCount = countTruthyEntries(providerState);
+    const systemWarnings = buildSystemWarnings(setup, runtime, warnings, readyServiceCount);
+    app.setHeroActions(`
+    <button class="button button--secondary" id="copy-diagnostics" type="button">Copy diagnostics JSON</button>
+    <a class="button button--secondary" href="/admin/settings">Open settings</a>
+    <a class="button button--secondary" href="/admin/providers">Open providers</a>
+    <a class="button button--secondary" href="/admin/logs">Open logs</a>
+  `);
     app.setContent(`
-    ${kpi("Version", String(runtime.app_version ?? "n/a"))}
-    ${kpi("Mode", String(runtime.mode ?? "n/a"))}
-    ${kpi("Routes", formatNumber(routeRows.length))}
-    ${kpi("Store", String(runtime.runtime_store_backend ?? "n/a"))}
-    ${card("Operational picture", `
-        <div class="triple-grid">
-          <section class="surface stack">
-            <div class="surface__header">
-              <h4>Setup readiness</h4>
-              ${pill(setup.setup_complete ? "complete" : "in progress", setup.setup_complete ? "good" : "warn")}
-            </div>
-            ${warnings.map((warning) => banner(warning, "warn")).join("")}
-            ${renderStatLines([
+    ${kpi("Setup", setup.setup_complete ? "complete" : "in progress")}
+    ${kpi("Warnings", formatNumber(systemWarnings.length))}
+    ${kpi("Ready services", formatNumber(readyServiceCount))}
+    ${kpi("Mounted routes", formatNumber(routeRows.length))}
+    ${card("Executive summary", `
+        <div class="stack">
+          ${systemWarnings.length ? systemWarnings.join("") : banner("No high-signal runtime blockers are visible from the current system snapshot.", "info")}
+          ${renderDefinitionList([
+        {
+            label: "Version and mode",
+            value: `${String(runtime.app_version ?? "n/a")} / ${String(runtime.mode ?? "n/a")}`,
+            note: setup.setup_complete
+                ? "Setup is complete and the control-plane summary is stable."
+                : "Bootstrap and setup still need operator attention.",
+        },
+        {
+            label: "Persisted config",
+            value: setup.persisted ? "present" : "defaults only",
+            note: setup.persisted
+                ? "Runtime has a persisted control-plane source of truth."
+                : "Save Settings if you need restart-safe config.",
+        },
+        {
+            label: "Provider posture",
+            value: runtimeProviders.join(", ") || "none",
+            note: `${formatNumber(readyProviderCount)} provider-layer dependencies are currently wired.`,
+        },
+        {
+            label: "Diagnostics reach",
+            value: `${formatNumber(routeRows.length)} mounted routes`,
+            note: runtime.docs_enabled
+                ? "Docs/OpenAPI are exposed in the current runtime."
+                : "Docs/OpenAPI are disabled in the current runtime.",
+        },
+    ], "System summary is unavailable.")}
+        </div>
+      `, "panel panel--span-4")}
+    ${card("Immediate actions", `
+        <div class="stack">
+          <div class="toolbar">
+            <a class="button" href="${escapeHtml(setup.setup_complete ? "/admin/settings" : "/admin/setup")}">
+              ${escapeHtml(setup.setup_complete ? "Review settings" : "Finish setup")}
+            </a>
+            <a class="button button--secondary" href="/admin/providers">Providers</a>
+            <a class="button button--secondary" href="/admin/traffic">Traffic</a>
+          </div>
+          ${renderDefinitionList([
+        {
+            label: "Setup",
+            value: setup.setup_complete ? "Stable" : "Needs completion",
+            note: "Setup is still the best place to close bootstrap or missing-credential gaps.",
+        },
+        {
+            label: "Settings",
+            value: "Runtime edits",
+            note: "Use Settings for persisted changes to auth, providers, and logging posture.",
+        },
+        {
+            label: "Logs and Traffic",
+            value: "Live diagnostics",
+            note: "Use these when the runtime summary looks healthy but requests still fail in practice.",
+        },
+    ], "No action guidance is available.")}
+        </div>
+      `, "panel panel--span-4")}
+    ${card("Route coverage", renderDefinitionList(routeSummaries.map((group) => ({
+        label: group.label,
+        value: formatNumber(group.count),
+        note: group.samples.length ? group.samples.join(", ") : "No routes in this group.",
+    })), "No mounted routes were reported by the admin API."), "panel panel--span-4")}
+    ${card("Readiness", `
+        <div class="stack">
+          ${renderStatLines([
         {
             label: "Persisted control-plane config",
-            value: setup.persisted ? "yes" : "no",
+            value: setup.persisted ? "ready" : "missing",
             tone: setup.persisted ? "good" : "warn",
         },
         {
@@ -57,51 +125,26 @@ export async function renderSystem(app, token) {
             tone: setup.security_ready ? "good" : "warn",
         },
         {
-            label: "Setup status",
-            value: setup.setup_complete ? "complete" : "in progress",
-            tone: setup.setup_complete ? "good" : "warn",
+            label: "Service wiring",
+            value: `${formatNumber(readyServiceCount)} ready`,
+            tone: readyServiceCount ? "good" : "warn",
         },
-    ], "Setup status is unavailable.")}
-          </section>
-          <section class="surface stack">
-            <div class="surface__header">
-              <h4>Runtime state</h4>
-              ${pill(`${formatNumber(countTruthyEntries(serviceState))} ready`, countTruthyEntries(serviceState) ? "good" : "warn")}
-            </div>
-            <div>
-              <span class="eyebrow">Services</span>
-              ${renderBooleanSection(serviceState)}
-            </div>
-            <div>
-              <span class="eyebrow">Providers</span>
-              ${renderBooleanSection(providerState)}
-            </div>
-            <div>
-              <span class="eyebrow">Stores</span>
-              ${renderSummarySection(storeState)}
-            </div>
-          </section>
-          <section class="surface stack">
-            <div class="surface__header">
-              <h4>Route coverage</h4>
-              ${pill(`${formatNumber(routeRows.length)} mounted`)}
-            </div>
-            ${renderDefinitionList(routeSummaries.map((group) => ({
-        label: group.label,
-        value: formatNumber(group.count),
-        note: group.samples.length ? group.samples.join(", ") : "No routes in this group.",
-    })), "No mounted routes were reported by the admin API.")}
-          </section>
-        </div>
-        ${setupSteps.length
+        {
+            label: "Provider wiring",
+            value: `${formatNumber(readyProviderCount)} ready`,
+            tone: readyProviderCount ? "good" : "warn",
+        },
+    ], "Readiness metadata is unavailable.")}
+          ${setupSteps.length
         ? `
-                <div class="stack">
-                  <span class="eyebrow">Checklist</span>
-                  ${renderSetupSteps(setupSteps)}
-                </div>
-              `
+                  <div class="stack">
+                    <span class="eyebrow">Checklist</span>
+                    ${renderSetupSteps(setupSteps)}
+                  </div>
+                `
         : ""}
-      `, "panel panel--span-12")}
+        </div>
+      `, "panel panel--span-4")}
     ${card("Runtime posture", renderDefinitionList([
         {
             label: "Auth required",
@@ -136,6 +179,32 @@ export async function renderSystem(app, token) {
             value: runtime.enable_images ? "enabled" : "disabled",
         },
     ], "Runtime posture metadata is unavailable."), "panel panel--span-4")}
+    ${card("Config highlights", renderDefinitionList(buildConfigHighlightItems(configSummary, runtime, setup, storeState), "No config highlights were reported."), "panel panel--span-4")}
+    ${card("Runtime state detail", `
+        <div class="dual-grid">
+          <section class="surface stack">
+            <div class="surface__header">
+              <h4>Services</h4>
+              ${pill(`${formatNumber(readyServiceCount)} ready`, readyServiceCount ? "good" : "warn")}
+            </div>
+            ${renderBooleanSection(serviceState)}
+          </section>
+          <section class="surface stack">
+            <div class="surface__header">
+              <h4>Providers</h4>
+              ${pill(`${formatNumber(readyProviderCount)} ready`, readyProviderCount ? "good" : "warn")}
+            </div>
+            ${renderBooleanSection(providerState)}
+          </section>
+          <section class="surface stack">
+            <div class="surface__header">
+              <h4>Stores</h4>
+              ${pill(String(storeState.backend ?? "n/a"))}
+            </div>
+            ${renderSummarySection(storeState)}
+          </section>
+        </div>
+      `, "panel panel--span-12")}
     ${card("Effective config", `
         <div class="dual-grid">
           ${Object.entries(configSummary)
@@ -156,7 +225,7 @@ export async function renderSystem(app, token) {
     })
         .join("")}
         </div>
-      `, "panel panel--span-8")}
+      `, "panel panel--span-12")}
     ${card("Diagnostics bundle", `
         <div class="stack">
           <p class="muted">
@@ -206,6 +275,73 @@ function buildRouteSummaries(routes) {
         samples: [...new Set(groups[key])].slice(0, 3),
     }));
 }
+function buildSystemWarnings(setup, runtime, setupWarnings, readyServiceCount) {
+    const warnings = setupWarnings.map((warning) => banner(warning, "warn"));
+    if (!setup.persisted) {
+        warnings.push(banner("Control-plane state is not persisted. A restart can revert the operator posture back to defaults.", "warn"));
+    }
+    if (!runtime.auth_required) {
+        warnings.push(banner("Gateway auth is currently open. Review security posture before treating this runtime as externally reachable.", "warn"));
+    }
+    if (runtime.docs_enabled && runtime.mode === "DEV") {
+        warnings.push(banner("Docs and OpenAPI are exposed in DEV mode. Useful for operators, but this remains a softer system posture than hardened PROD.", "info"));
+    }
+    if (readyServiceCount === 0) {
+        warnings.push(banner("No feature services are wired in app state. Mounted routes may exist, but request handling will not be operational.", "warn"));
+    }
+    return warnings;
+}
+function buildConfigHighlightItems(configSummary, runtime, setup, storeState) {
+    const network = asRecord(configSummary.network);
+    const providers = asRecord(configSummary.providers);
+    const features = asRecord(configSummary.features);
+    const logging = asRecord(configSummary.logging);
+    const limits = asRecord(configSummary.limits);
+    return [
+        {
+            label: "Bind and mode",
+            value: String(network.bind ?? "n/a"),
+            note: `Mode ${String(network.mode ?? runtime.mode ?? "n/a")} with ${runtime.docs_enabled ? "docs exposed" : "docs disabled"}.`,
+        },
+        {
+            label: "Provider backend",
+            value: String(providers.gigachat_api_mode ?? "n/a"),
+            note: `${asArray(providers.enabled_providers).map(String).join(", ") || "No enabled providers"} using ${String(providers.runtime_store_backend ?? "n/a")} storage.`,
+        },
+        {
+            label: "Security posture",
+            value: setup.security_ready ? "ready" : "pending",
+            note: `${formatNumber(network.scoped_api_keys_configured ?? 0)} scoped keys and ${formatNumber(network.governance_limits_configured ?? 0)} governance limits are configured.`,
+        },
+        {
+            label: "Feature flags",
+            value: renderEnabledList([
+                features.pass_model ? "pass_model" : "",
+                features.pass_token ? "pass_token" : "",
+                features.enable_reasoning ? "reasoning" : "",
+                features.enable_images ? "images" : "",
+            ]),
+            note: "These are the main protocol/runtime toggles changing operator-facing behavior.",
+        },
+        {
+            label: "Logging",
+            value: String(logging.log_level ?? "n/a"),
+            note: logging.logs_ip_allowlist_enabled
+                ? "Logs surface is allowlisted."
+                : "Logs surface is open wherever admin access is allowed.",
+        },
+        {
+            label: "Runtime stores",
+            value: String(storeState.backend ?? "n/a"),
+            note: `${formatNumber(storeState.recent_requests ?? 0)} recent requests and ${formatNumber(storeState.recent_errors ?? 0)} recent errors are retained.`,
+        },
+        {
+            label: "Limits snapshot",
+            value: formatNumber(limits.max_request_body_bytes ?? 0),
+            note: `Recent request ring retains ${formatNumber(limits.recent_requests_max_items ?? 0)} items.`,
+        },
+    ];
+}
 function classifyRoute(path) {
     if (path.startsWith("/admin")) {
         return "admin";
@@ -237,6 +373,10 @@ function renderSummarySection(section) {
         value: summarizeValue(value),
         tone: typeof value === "boolean" && value ? "good" : "default",
     })), "No summary entries were reported.");
+}
+function renderEnabledList(items) {
+    const filtered = items.filter(Boolean);
+    return filtered.length ? filtered.join(", ") : "none";
 }
 function summarizeValue(value) {
     if (value === null || value === undefined || value === "") {

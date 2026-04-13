@@ -575,6 +575,16 @@ code {
   margin-bottom: 14px;
 }
 
+.playground-preset[data-active="true"] {
+  background: var(--panel-dark);
+  color: #f8f5ef;
+  border-color: transparent;
+}
+
+.playground-output {
+  min-height: 280px;
+}
+
 .code-block + .code-block {
   margin-top: 12px;
 }
