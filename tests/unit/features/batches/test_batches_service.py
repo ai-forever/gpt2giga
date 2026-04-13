@@ -241,6 +241,42 @@ async def test_batches_service_rejects_responses_batches():
 
 
 @pytest.mark.asyncio
+async def test_batches_service_accepts_embeddings_batches():
+    service = BatchesService(
+        FakeRequestTransformer(),
+        embeddings_model="EmbeddingsGigaR",
+        gigachat_api_mode="v2",
+    )
+    giga_client = FakeBatchesClient()
+
+    await service.create_batch_from_rows(
+        [
+            {
+                "custom_id": "req-1",
+                "method": "POST",
+                "url": "/v1/embeddings",
+                "body": {
+                    "model": "text-embedding-3-small",
+                    "input": "hello",
+                },
+            }
+        ],
+        endpoint="/v1/embeddings",
+        completion_window="24h",
+        giga_client=giga_client,
+        batch_store={},
+        file_store={},
+    )
+
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert giga_client.last_batch_method == "embedder"
+    assert translated_line["request"] == {
+        "input": ["hello"],
+        "model": "EmbeddingsGigaR",
+    }
+
+
+@pytest.mark.asyncio
 async def test_batches_service_uses_v1_transformer_for_chat_batches_when_mode_is_v2():
     service = BatchesService(
         FakeRequestTransformer(),

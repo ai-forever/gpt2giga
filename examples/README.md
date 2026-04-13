@@ -48,12 +48,14 @@ uv run python examples/anthropic/messages.py
 
 # Anthropic Message Batches API
 uv run python examples/anthropic/message_batches.py
+uv run python examples/anthropic/message_batches_from_jsonl.py
 
 # Gemini Developer API
 uv run python examples/gemini/generate_content.py
 uv run python examples/gemini/files.py
 uv run python examples/gemini/batches.py
 uv run python examples/gemini/structured_output.py
+uv run python examples/gemini/embeddings.py
 
 # Provider-to-provider translation
 uv run python examples/translate/openai_to_anthropic.py
@@ -90,3 +92,6 @@ WEATHER_API_KEY=... uv run python examples/agents/weather_agent.py
 - `examples/agents/openai_agents.py` и `examples/agents/weather_agent.py` требуют `uv sync --group integrations`.
 - `examples/agents/weather_agent.py` дополнительно использует `WEATHER_API_KEY`.
 - `examples/gemini/`: Gemini Developer API через официальный `google-genai` SDK.
+- OpenAI examples покрывают и `batches`, и `embeddings`.
+- Anthropic examples покрывают `messages` и `message batches`; embeddings-совместимого route в проекте сейчас нет.
+- Gemini examples покрывают и `batchGenerateContent`, и embeddings.

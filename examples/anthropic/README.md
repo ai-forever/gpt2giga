@@ -36,6 +36,7 @@ Anthropic SDK не входит в обязательные зависимост
 uv run python examples/anthropic/messages.py
 uv run python examples/anthropic/messages_stream.py
 uv run python examples/anthropic/message_batches.py
+uv run python examples/anthropic/message_batches_from_jsonl.py
 ```
 
 ## Что есть в папке
@@ -43,9 +44,14 @@ uv run python examples/anthropic/message_batches.py
 - `messages.py`: базовый запрос (не стрим)
 - `messages_stream.py`: streaming
 - `message_batches.py`: Message Batches API
+- `message_batches_from_jsonl.py`: Message Batches API c чтением готового `message_batches.jsonl`
 - `message_batches.jsonl`: готовые строки batch-запросов в формате `custom_id` + `params` для сборки поля `requests`
 - `multi_turn.py`: многоходовый диалог
 - `system_prompt.py`: системный промпт
 - `function_calling.py`: tool use / function calling
 - `reasoning.py`: extended thinking (`thinking`) → `reasoning_effort`
 - `image_url.py`, `base64_image.py`: изображения (URL и base64)
+
+## Что сейчас недоступно
+
+- Отдельного Anthropic-compatible embeddings endpoint в `gpt2giga` сейчас нет, поэтому embeddings-примера для Anthropic SDK в этой папке нет.

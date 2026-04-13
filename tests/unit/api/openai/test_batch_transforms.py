@@ -51,6 +51,24 @@ async def test_transform_batch_input_file_uses_client_default_model_when_missing
     assert row["request"]["model"] == "GigaChat-2-Max"
 
 
+@pytest.mark.asyncio
+async def test_transform_batch_input_file_maps_embeddings_batches_to_embedder_payload():
+    transformer = RequestTransformer(ProxyConfig(), logger=logger)
+    giga_client = SimpleNamespace(_settings=SimpleNamespace(model=None))
+    content = b'{"custom_id":"req-1","method":"POST","url":"/v1/embeddings","body":{"model":"text-embedding-3-small","input":"hello"}}\n'
+
+    result = await transform_batch_input_file(
+        content,
+        target=get_batch_target("/v1/embeddings"),
+        request_transformer=transformer,
+        giga_client=giga_client,
+        embeddings_model="EmbeddingsGigaR",
+    )
+
+    row = json.loads(result.decode("utf-8").strip())
+    assert row["request"] == {"input": ["hello"], "model": "EmbeddingsGigaR"}
+
+
 def test_resolve_batch_model_prefers_request_model():
     giga_client = SimpleNamespace(_settings=SimpleNamespace(model="GigaChat-2-Max"))
 

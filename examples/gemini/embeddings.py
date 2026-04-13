@@ -8,14 +8,18 @@ client = genai.Client(
     http_options=types.HttpOptions(base_url="http://localhost:8090"),
 )
 
+model_name = "EmbeddingsGigaR"
+texts = [
+    "hello from gpt2giga",
+    "gemini compatibility layer",
+]
+
+print("Using embeddings model:", model_name)
 response = client.models.embed_content(
-    model="EmbeddingsGigaR",
-    contents=[
-        "hello from gpt2giga",
-        "gemini compatibility layer",
-    ],
+    model=model_name,
+    contents=texts,
 )
 
-for index, embedding in enumerate(response.embeddings):
+for index, (source_text, embedding) in enumerate(zip(texts, response.embeddings)):
     preview = embedding.values[:5] if embedding.values else []
-    print(f"{index}: {preview}")
+    print(f"{index}: {source_text!r} -> {preview}")

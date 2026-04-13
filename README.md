@@ -272,8 +272,8 @@ sequenceDiagram
   - Batches API: [`examples/openai/batches/README.md`](examples/openai/batches/README.md)
   - Embeddings API: [`examples/openai/embeddings/README.md`](examples/openai/embeddings/README.md)
   - Models API: [`examples/openai/models/README.md`](examples/openai/models/README.md)
-- Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
-- Gemini Python SDK (`google-genai`): [`examples/gemini/README.md`](./examples/gemini/README.md)
+- Anthropic Python SDK (Messages API + Message Batches API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
+- Gemini Python SDK (`google-genai`, включая batches и embeddings): [`examples/gemini/README.md`](./examples/gemini/README.md)
 - Agents SDK examples: [`examples/agents/README.md`](./examples/agents/README.md)
 - Индекс всех примеров: [`examples/README.md`](./examples/README.md)
 

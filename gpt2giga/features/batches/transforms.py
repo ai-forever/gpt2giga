@@ -29,6 +29,16 @@ _BATCH_TARGETS = {
         method="chat_completions",
         kind="chat",
     ),
+    "/v1/embeddings": BatchTarget(
+        endpoint="/v1/embeddings",
+        method="embedder",
+        kind="embeddings",
+    ),
+    "/embeddings": BatchTarget(
+        endpoint="/v1/embeddings",
+        method="embedder",
+        kind="embeddings",
+    ),
 }
 
 BATCH_CHAT_V2_FALLBACK_WARNING = (
@@ -53,7 +63,7 @@ def get_batch_target(endpoint: str) -> BatchTarget:
                 "error": {
                     "message": (
                         "Unsupported batch endpoint. Supported values are "
-                        "`/v1/chat/completions`."
+                        "`/v1/chat/completions` and `/v1/embeddings`."
                     ),
                     "type": "invalid_request_error",
                     "param": "endpoint",

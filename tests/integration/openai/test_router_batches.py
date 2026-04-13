@@ -395,6 +395,53 @@ def test_batches_endpoints_force_v1_chat_batches_when_global_mode_is_v2():
     assert translated_line["request"]["messages"][0]["content"] == "hello"
 
 
+def test_batches_endpoints_translate_embeddings_flow():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
+    giga_client = app.state.gigachat_client
+    client = TestClient(app)
+
+    input_line = {
+        "custom_id": "req-1",
+        "method": "POST",
+        "url": "/v1/embeddings",
+        "body": {
+            "model": "text-embedding-3-small",
+            "input": "hello",
+        },
+    }
+    upload = client.post(
+        "/files",
+        data={"purpose": "batch"},
+        files={
+            "file": (
+                "batch.jsonl",
+                (json.dumps(input_line) + "\n").encode("utf-8"),
+                "application/json",
+            )
+        },
+    )
+
+    created = client.post(
+        "/batches",
+        json={
+            "completion_window": "24h",
+            "endpoint": "/v1/embeddings",
+            "input_file_id": upload.json()["id"],
+        },
+    )
+
+    assert created.status_code == 200
+    assert "warnings" not in created.json()
+    assert giga_client.last_batch_method == "embedder"
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert translated_line["request"] == {
+        "input": ["hello"],
+        "model": "EmbeddingsGigaR",
+    }
+
+
 def test_batches_endpoints_reject_non_chat_batch_targets():
     app = make_app()
     client = TestClient(app)
@@ -432,7 +479,7 @@ def test_batches_endpoints_reject_non_chat_batch_targets():
     assert created.status_code == 400
     assert (
         created.json()["detail"]["error"]["message"]
-        == "Unsupported batch endpoint. Supported values are `/v1/chat/completions`."
+        == "Unsupported batch endpoint. Supported values are `/v1/chat/completions` and `/v1/embeddings`."
     )
 
 
@@ -452,3 +499,5 @@ def test_openapi_includes_examples_for_files_and_batches():
         "application/json"
     ]["examples"]
     assert "minimal" in batch_examples
+    assert "embeddings_batch" in batch_examples
+    assert batch_examples["embeddings_batch"]["value"]["endpoint"] == "/v1/embeddings"

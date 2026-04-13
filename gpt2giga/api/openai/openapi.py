@@ -462,7 +462,7 @@ def batches_openapi_extra() -> Dict[str, Any]:
             },
             "endpoint": {
                 "type": "string",
-                "enum": ["/v1/chat/completions"],
+                "enum": ["/v1/chat/completions", "/v1/embeddings"],
                 "description": "OpenAI endpoint to batch.",
             },
             "input_file_id": {
@@ -498,9 +498,10 @@ def batches_openapi_extra() -> Dict[str, Any]:
         "**Notes**:\n"
         "- Input JSONL is accepted in OpenAI batch format and translated before "
         "submission to GigaChat.\n"
-        "- Supported endpoint: `/v1/chat/completions`.\n"
-        "- If `GPT2GIGA_GIGACHAT_API_MODE=v2`, batch requests still use the "
-        "GigaChat v1 backend until v2 batching support is implemented."
+        "- Supported endpoints: `/v1/chat/completions` and `/v1/embeddings`.\n"
+        "- If `GPT2GIGA_GIGACHAT_API_MODE=v2`, `/v1/chat/completions` batch "
+        "requests still use the GigaChat v1 backend until v2 batching support is "
+        "implemented."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -515,6 +516,16 @@ def batches_openapi_extra() -> Dict[str, Any]:
             "endpoint": "/v1/chat/completions",
             "input_file_id": "file-abc123",
             "metadata": {"source": "nightly-job"},
+        },
+        extra_examples={
+            "embeddings_batch": {
+                "summary": "Batch over the Embeddings API",
+                "value": {
+                    "completion_window": "24h",
+                    "endpoint": "/v1/embeddings",
+                    "input_file_id": "file-embed123",
+                },
+            }
         },
         description=description,
     )
