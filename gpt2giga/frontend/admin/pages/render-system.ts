@@ -1,4 +1,4 @@
-import type { AdminApp } from "../app";
+import type { AdminApp } from "../app.js";
 import {
   banner,
   card,
@@ -6,8 +6,8 @@ import {
   renderSetupSteps,
   renderStatLines,
   renderTable,
-} from "../templates";
-import { asArray, asRecord, escapeHtml, formatNumber } from "../utils";
+} from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatNumber } from "../utils.js";
 
 type RouteRow = Record<string, unknown>;
 

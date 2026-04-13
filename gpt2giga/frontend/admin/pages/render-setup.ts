@@ -1,7 +1,7 @@
-import type { AdminApp } from "../app";
-import { collectGigachatPayload } from "../forms";
-import { banner, card, pill, renderSetupSteps } from "../templates";
-import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils";
+import type { AdminApp } from "../app.js";
+import { collectGigachatPayload } from "../forms.js";
+import { banner, card, pill, renderSetupSteps } from "../templates.js";
+import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils.js";
 
 export async function renderSetup(app: AdminApp, token: number): Promise<void> {
   const [setup, runtime, application, gigachat, security, keys] = await Promise.all([

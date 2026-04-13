@@ -1,5 +1,5 @@
-import type { DiffEntry } from "./types";
-import { normalizeComparableValue, parseCsv, safeJsonParse } from "./utils";
+import type { DiffEntry } from "./types.js";
+import { normalizeComparableValue, parseCsv, safeJsonParse } from "./utils.js";
 
 export const INVALID_JSON = "__invalid__";
 

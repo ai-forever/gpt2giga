@@ -1,6 +1,6 @@
-import type { AdminApp } from "../app";
-import { card, kpi, renderStatLines, renderTable } from "../templates";
-import { asArray, asRecord, escapeHtml, formatNumber } from "../utils";
+import type { AdminApp } from "../app.js";
+import { card, kpi, renderStatLines, renderTable } from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatNumber } from "../utils.js";
 
 type ProviderRow = Record<string, unknown>;
 type RouteRow = Record<string, unknown>;

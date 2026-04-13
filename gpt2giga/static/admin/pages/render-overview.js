@@ -1,5 +1,5 @@
-import { card, kpi, renderJson } from "../templates";
-import { asArray, asRecord } from "../utils";
+import { card, kpi, renderJson } from "../templates.js";
+import { asArray, asRecord } from "../utils.js";
 export async function renderOverview(app, token) {
     const [runtime, setup, usageKeys, usageProviders, errors] = await Promise.all([
         app.api.json("/admin/api/runtime"),

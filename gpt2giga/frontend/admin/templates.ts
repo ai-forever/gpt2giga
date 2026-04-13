@@ -1,5 +1,5 @@
-import type { DiffEntry, SetupStep } from "./types";
-import { escapeHtml, humanizeField } from "./utils";
+import type { DiffEntry, SetupStep } from "./types.js";
+import { escapeHtml, humanizeField } from "./utils.js";
 
 interface StatLineItem {
   label: string;

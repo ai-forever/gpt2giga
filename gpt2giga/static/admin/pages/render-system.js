@@ -1,5 +1,5 @@
-import { banner, card, kpi, renderSetupSteps, renderStatLines, renderTable, } from "../templates";
-import { asArray, asRecord, escapeHtml, formatNumber } from "../utils";
+import { banner, card, kpi, renderSetupSteps, renderStatLines, renderTable, } from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatNumber } from "../utils.js";
 export async function renderSystem(app, token) {
     const [runtime, config, routes, setup] = await Promise.all([
         app.api.json("/admin/api/runtime"),

@@ -1,4 +1,4 @@
-import type { PageId, RouteMeta } from "./types";
+import type { PageId, RouteMeta } from "./types.js";
 
 export const PAGE_META: Record<PageId, RouteMeta> = {
   overview: {

@@ -1,5 +1,5 @@
-import { card, kpi, renderEmptyState, renderJson, renderStatLines, renderTable, } from "../templates";
-import { asArray, asRecord, escapeHtml, formatDurationMs, formatNumber, formatTimestamp, } from "../utils";
+import { card, kpi, renderEmptyState, renderJson, renderStatLines, renderTable, } from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatDurationMs, formatNumber, formatTimestamp, } from "../utils.js";
 const DEFAULT_LIMIT = "25";
 export async function renderTraffic(app, token) {
     const filters = readTrafficFilters();

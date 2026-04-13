@@ -1,13 +1,13 @@
-import { renderFilesBatches } from "./render-files-batches";
-import { renderKeys } from "./render-keys";
-import { renderLogs } from "./render-logs";
-import { renderOverview } from "./render-overview";
-import { renderPlayground } from "./render-playground";
-import { renderProviders } from "./render-providers";
-import { renderSettings } from "./render-settings";
-import { renderSetup } from "./render-setup";
-import { renderSystem } from "./render-system";
-import { renderTraffic } from "./render-traffic";
+import { renderFilesBatches } from "./render-files-batches.js";
+import { renderKeys } from "./render-keys.js";
+import { renderLogs } from "./render-logs.js";
+import { renderOverview } from "./render-overview.js";
+import { renderPlayground } from "./render-playground.js";
+import { renderProviders } from "./render-providers.js";
+import { renderSettings } from "./render-settings.js";
+import { renderSetup } from "./render-setup.js";
+import { renderSystem } from "./render-system.js";
+import { renderTraffic } from "./render-traffic.js";
 export const PAGE_RENDERERS = {
     overview: renderOverview,
     setup: renderSetup,

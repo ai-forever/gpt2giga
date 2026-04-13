@@ -1,4 +1,4 @@
-import type { AdminApp } from "../app";
+import type { AdminApp } from "../app.js";
 import {
   card,
   kpi,
@@ -6,7 +6,7 @@ import {
   renderJson,
   renderStatLines,
   renderTable,
-} from "../templates";
+} from "../templates.js";
 import {
   asArray,
   asRecord,
@@ -14,7 +14,7 @@ import {
   formatDurationMs,
   formatNumber,
   formatTimestamp,
-} from "../utils";
+} from "../utils.js";
 
 interface TrafficFilters {
   limit: string;

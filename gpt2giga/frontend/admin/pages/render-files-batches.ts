@@ -1,5 +1,5 @@
-import type { AdminApp } from "../app";
-import { card, kpi } from "../templates";
+import type { AdminApp } from "../app.js";
+import { card, kpi } from "../templates.js";
 import {
   asArray,
   asRecord,
@@ -7,7 +7,7 @@ import {
   formatBytes,
   formatTimestamp,
   safeJsonParse,
-} from "../utils";
+} from "../utils.js";
 
 export async function renderFilesBatches(app: AdminApp, token: number): Promise<void> {
   const [filesPayload, batchesPayload] = await Promise.all([

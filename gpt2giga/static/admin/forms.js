@@ -1,4 +1,4 @@
-import { normalizeComparableValue, parseCsv, safeJsonParse } from "./utils";
+import { normalizeComparableValue, parseCsv, safeJsonParse } from "./utils.js";
 export const INVALID_JSON = "__invalid__";
 export function buildApplicationPayload(form) {
     const fields = form.elements;

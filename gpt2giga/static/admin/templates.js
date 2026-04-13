@@ -1,4 +1,4 @@
-import { escapeHtml, humanizeField } from "./utils";
+import { escapeHtml, humanizeField } from "./utils.js";
 export function banner(message, tone = "info") {
     const toneClass = tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
     return `<div class="${toneClass}">${escapeHtml(message)}</div>`;

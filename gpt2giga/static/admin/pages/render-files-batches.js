@@ -1,5 +1,5 @@
-import { card, kpi } from "../templates";
-import { asArray, asRecord, escapeHtml, formatBytes, formatTimestamp, safeJsonParse, } from "../utils";
+import { card, kpi } from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatBytes, formatTimestamp, safeJsonParse, } from "../utils.js";
 export async function renderFilesBatches(app, token) {
     const [filesPayload, batchesPayload] = await Promise.all([
         app.api.json("/v1/files?order=desc&limit=100", {}, true),

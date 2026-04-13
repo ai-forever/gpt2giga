@@ -1,5 +1,5 @@
-import { card, renderJson } from "../templates";
-import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils";
+import { card, renderJson } from "../templates.js";
+import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils.js";
 export async function renderKeys(app, token) {
     const keys = await app.api.json("/admin/api/keys");
     if (!app.isCurrentRender(token)) {

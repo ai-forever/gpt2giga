@@ -1,8 +1,8 @@
-import { AdminApiClient } from "./api";
-import { PAGE_META, isConsolePathname, pageFromLocation, pathForPage } from "./routes";
-import { renderLoadingGrid } from "./templates";
-import { toErrorMessage } from "./utils";
-import { PAGE_RENDERERS } from "./pages/index";
+import { AdminApiClient } from "./api.js";
+import { PAGE_META, isConsolePathname, pageFromLocation, pathForPage } from "./routes.js";
+import { renderLoadingGrid } from "./templates.js";
+import { toErrorMessage } from "./utils.js";
+import { PAGE_RENDERERS } from "./pages/index.js";
 const ADMIN_KEY_STORAGE = "gpt2giga.adminKey";
 const GATEWAY_KEY_STORAGE = "gpt2giga.gatewayKey";
 export class AdminApp {

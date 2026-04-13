@@ -1,6 +1,6 @@
-import type { AdminApp } from "../app";
-import { card, renderJson } from "../templates";
-import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils";
+import type { AdminApp } from "../app.js";
+import { card, renderJson } from "../templates.js";
+import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils.js";
 
 export async function renderKeys(app: AdminApp, token: number): Promise<void> {
   const keys = await app.api.json<Record<string, unknown>>("/admin/api/keys");

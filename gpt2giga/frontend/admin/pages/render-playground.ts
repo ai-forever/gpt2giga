@@ -1,4 +1,4 @@
-import type { AdminApp } from "../app";
+import type { AdminApp } from "../app.js";
 
 interface PlaygroundRequest {
   url: string;

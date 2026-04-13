@@ -1,13 +1,13 @@
-import type { AdminApp } from "../app";
+import type { AdminApp } from "../app.js";
 import {
   INVALID_JSON,
   buildApplicationPayload,
   buildPendingDiffEntries,
   buildSecurityPayload,
   collectGigachatPayload,
-} from "../forms";
-import { banner, card, renderDiffSections, renderJson } from "../templates";
-import { asArray, asRecord, csv, escapeHtml, formatTimestamp } from "../utils";
+} from "../forms.js";
+import { banner, card, renderDiffSections, renderJson } from "../templates.js";
+import { asArray, asRecord, csv, escapeHtml, formatTimestamp } from "../utils.js";
 
 const LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"];
 

@@ -207,6 +207,12 @@ def test_admin_static_assets_are_served():
 
     assert response.status_code == 200
     assert "AdminApp" in response.text
+    assert 'from "./app.js"' in response.text
+
+    app_module = client.get("/admin/assets/admin/app.js")
+
+    assert app_module.status_code == 200
+    assert 'from "./api.js"' in app_module.text
 
 
 def test_translate_endpoint_converts_openai_chat_to_gemini(monkeypatch):

@@ -1,6 +1,6 @@
-import { INVALID_JSON, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, } from "../forms";
-import { banner, card, renderDiffSections, renderJson } from "../templates";
-import { asArray, asRecord, csv, escapeHtml, formatTimestamp } from "../utils";
+import { INVALID_JSON, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, } from "../forms.js";
+import { banner, card, renderDiffSections, renderJson } from "../templates.js";
+import { asArray, asRecord, csv, escapeHtml, formatTimestamp } from "../utils.js";
 const LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"];
 export async function renderSettings(app, token) {
     const [application, gigachat, security, revisionsPayload] = await Promise.all([

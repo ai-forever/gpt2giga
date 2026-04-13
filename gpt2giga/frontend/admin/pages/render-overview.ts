@@ -1,7 +1,7 @@
-import type { AdminApp } from "../app";
-import { card, kpi, renderJson } from "../templates";
-import type { RuntimePayload, SetupPayload } from "../types";
-import { asArray, asRecord } from "../utils";
+import type { AdminApp } from "../app.js";
+import { card, kpi, renderJson } from "../templates.js";
+import type { RuntimePayload, SetupPayload } from "../types.js";
+import { asArray, asRecord } from "../utils.js";
 
 export async function renderOverview(app: AdminApp, token: number): Promise<void> {
   const [runtime, setup, usageKeys, usageProviders, errors] = await Promise.all([

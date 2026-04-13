@@ -1,4 +1,4 @@
-import type { AdminApp } from "../app";
+import type { AdminApp } from "../app.js";
 
 export async function renderLogs(app: AdminApp, token: number): Promise<void> {
   if (!app.isCurrentRender(token)) {

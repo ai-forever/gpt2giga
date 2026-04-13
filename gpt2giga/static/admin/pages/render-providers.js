@@ -1,5 +1,5 @@
-import { card, kpi, renderStatLines, renderTable } from "../templates";
-import { asArray, asRecord, escapeHtml, formatNumber } from "../utils";
+import { card, kpi, renderStatLines, renderTable } from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatNumber } from "../utils.js";
 export async function renderProviders(app, token) {
     const [capabilities, routes, runtime] = await Promise.all([
         app.api.json("/admin/api/capabilities"),

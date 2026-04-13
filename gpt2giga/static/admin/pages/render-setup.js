@@ -1,6 +1,6 @@
-import { collectGigachatPayload } from "../forms";
-import { banner, card, pill, renderSetupSteps } from "../templates";
-import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils";
+import { collectGigachatPayload } from "../forms.js";
+import { banner, card, pill, renderSetupSteps } from "../templates.js";
+import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils.js";
 export async function renderSetup(app, token) {
     const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
         app.api.json("/admin/api/setup"),
