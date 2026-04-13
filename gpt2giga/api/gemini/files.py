@@ -20,7 +20,7 @@ from gpt2giga.api.gemini.request import (
     read_gemini_request_json,
 )
 from gpt2giga.api.gemini.response import gemini_exceptions_handler
-from gpt2giga.api.tags import TAG_FILES
+from gpt2giga.api.tags import PROVIDER_GEMINI, TAG_FILES, provider_tag
 from gpt2giga.app.dependencies import get_runtime_stores
 from gpt2giga.core.http.form_body import read_request_multipart
 from gpt2giga.features.batches.store import (
@@ -31,8 +31,8 @@ from gpt2giga.features.files import get_files_service_from_state
 from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=[TAG_FILES])
-upload_router = APIRouter(tags=[TAG_FILES])
+router = APIRouter(tags=[provider_tag(TAG_FILES, PROVIDER_GEMINI)])
+upload_router = APIRouter(tags=[provider_tag(TAG_FILES, PROVIDER_GEMINI)])
 
 
 def _timestamp_to_rfc3339(timestamp: int | None) -> str | None:

@@ -3,13 +3,13 @@
 from fastapi import APIRouter, Request
 from openai.pagination import AsyncPage
 
-from gpt2giga.api.tags import TAG_MODELS
+from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_MODELS, provider_tag
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.features.models import get_models_service_from_state
 from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=[TAG_MODELS])
+router = APIRouter(tags=[provider_tag(TAG_MODELS, PROVIDER_OPENAI)])
 
 
 @router.get("/models")

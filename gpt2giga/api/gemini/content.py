@@ -23,7 +23,13 @@ from gpt2giga.api.gemini.response import (
     gemini_exceptions_handler,
 )
 from gpt2giga.api.gemini.streaming import stream_gemini_generate_content
-from gpt2giga.api.tags import TAG_CHAT, TAG_COUNT_TOKENS, TAG_EMBEDDINGS
+from gpt2giga.api.tags import (
+    PROVIDER_GEMINI,
+    TAG_CHAT,
+    TAG_COUNT_TOKENS,
+    TAG_EMBEDDINGS,
+    provider_tag,
+)
 from gpt2giga.app.dependencies import (
     get_logger_from_state,
 )
@@ -59,7 +65,7 @@ def _ensure_route_model_matches_body(route_model: str, body_model: str | None) -
 @router.post(
     "/models/{model}:generateContent",
     openapi_extra=gemini_generate_content_openapi_extra(),
-    tags=[TAG_CHAT],
+    tags=[provider_tag(TAG_CHAT, PROVIDER_GEMINI)],
 )
 @gemini_exceptions_handler
 async def generate_content(model: str, request: Request):
@@ -102,7 +108,7 @@ async def generate_content(model: str, request: Request):
 @router.post(
     "/models/{model}:streamGenerateContent",
     openapi_extra=gemini_generate_content_openapi_extra(),
-    tags=[TAG_CHAT],
+    tags=[provider_tag(TAG_CHAT, PROVIDER_GEMINI)],
 )
 @gemini_exceptions_handler
 async def stream_generate_content(model: str, request: Request):
@@ -143,7 +149,7 @@ async def stream_generate_content(model: str, request: Request):
 @router.post(
     "/models/{model}:countTokens",
     openapi_extra=gemini_count_tokens_openapi_extra(),
-    tags=[TAG_COUNT_TOKENS],
+    tags=[provider_tag(TAG_COUNT_TOKENS, PROVIDER_GEMINI)],
 )
 @gemini_exceptions_handler
 async def count_tokens(model: str, request: Request):
@@ -172,7 +178,7 @@ async def count_tokens(model: str, request: Request):
 @router.post(
     "/models/{model}:batchEmbedContents",
     openapi_extra=gemini_batch_embed_contents_openapi_extra(),
-    tags=[TAG_EMBEDDINGS],
+    tags=[provider_tag(TAG_EMBEDDINGS, PROVIDER_GEMINI)],
 )
 @gemini_exceptions_handler
 async def batch_embed_contents(model: str, request: Request):
@@ -200,7 +206,10 @@ async def batch_embed_contents(model: str, request: Request):
     return build_batch_embed_contents_response(result)
 
 
-@router.post("/models/{model}:embedContent", tags=[TAG_EMBEDDINGS])
+@router.post(
+    "/models/{model}:embedContent",
+    tags=[provider_tag(TAG_EMBEDDINGS, PROVIDER_GEMINI)],
+)
 @gemini_exceptions_handler
 async def embed_content(model: str, request: Request):
     """Gemini REST alias for single-item embeddings."""

@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request, Response
 
 from gpt2giga.api.openai.openapi import files_openapi_extra
-from gpt2giga.api.tags import TAG_FILES
+from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_FILES, provider_tag
 from gpt2giga.app.dependencies import get_response_processor_from_state
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.form_body import read_request_multipart
@@ -15,7 +15,7 @@ from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=[TAG_FILES])
+router = APIRouter(tags=[provider_tag(TAG_FILES, PROVIDER_OPENAI)])
 
 
 @router.post("/files", openapi_extra=files_openapi_extra())

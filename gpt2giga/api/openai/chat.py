@@ -4,7 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.api.openai.openapi import chat_completions_openapi_extra
-from gpt2giga.api.tags import TAG_CHAT
+from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_CHAT, provider_tag
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.app.observability import (
     annotate_request_audit_from_payload,
@@ -17,7 +17,7 @@ from gpt2giga.features.chat.service import get_chat_service_from_state
 from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=[TAG_CHAT])
+router = APIRouter(tags=[provider_tag(TAG_CHAT, PROVIDER_OPENAI)])
 
 
 @router.post("/chat/completions", openapi_extra=chat_completions_openapi_extra())

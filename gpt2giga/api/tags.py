@@ -1,5 +1,9 @@
 """Shared OpenAPI tag names and ordering."""
 
+from __future__ import annotations
+
+from collections.abc import Collection
+
 TAG_CHAT = "Chat"
 TAG_RESPONSES = "Responses"
 TAG_EMBEDDINGS = "Embeddings"
@@ -11,38 +15,56 @@ TAG_TRANSLATIONS = "Translations"
 TAG_SYSTEM = "System"
 TAG_ADMIN = "Admin"
 
-OPENAPI_TAGS = [
-    {
-        "name": TAG_CHAT,
-        "description": (
-            "Text generation endpoints across OpenAI, Anthropic, and Gemini "
-            "compatibility layers."
+PROVIDER_OPENAI = "OpenAI"
+PROVIDER_ANTHROPIC = "Anthropic"
+PROVIDER_GEMINI = "Gemini"
+
+_PROVIDER_ORDER = (
+    PROVIDER_OPENAI,
+    PROVIDER_ANTHROPIC,
+    PROVIDER_GEMINI,
+)
+_PROVIDER_KEYS = {
+    PROVIDER_OPENAI: "openai",
+    PROVIDER_ANTHROPIC: "anthropic",
+    PROVIDER_GEMINI: "gemini",
+}
+_CAPABILITY_ORDER = (
+    TAG_CHAT,
+    TAG_RESPONSES,
+    TAG_EMBEDDINGS,
+    TAG_MODELS,
+    TAG_FILES,
+    TAG_BATCHES,
+    TAG_COUNT_TOKENS,
+)
+_PROVIDER_CAPABILITY_DESCRIPTIONS = {
+    PROVIDER_OPENAI: {
+        TAG_CHAT: "OpenAI-compatible chat completion endpoints.",
+        TAG_RESPONSES: "OpenAI-compatible Responses API endpoints.",
+        TAG_EMBEDDINGS: "OpenAI-compatible embedding creation endpoints.",
+        TAG_MODELS: (
+            "OpenAI-compatible model discovery endpoints, including LiteLLM "
+            "model-info routes."
         ),
+        TAG_FILES: "OpenAI-compatible file upload and retrieval endpoints.",
+        TAG_BATCHES: "OpenAI-compatible batch creation and retrieval endpoints.",
     },
-    {
-        "name": TAG_RESPONSES,
-        "description": "OpenAI-compatible Responses API endpoints.",
+    PROVIDER_ANTHROPIC: {
+        TAG_CHAT: "Anthropic Messages API compatible endpoints.",
+        TAG_BATCHES: "Anthropic message batch endpoints.",
+        TAG_COUNT_TOKENS: "Anthropic token counting endpoints.",
     },
-    {
-        "name": TAG_EMBEDDINGS,
-        "description": "Embedding creation endpoints across supported APIs.",
+    PROVIDER_GEMINI: {
+        TAG_CHAT: "Gemini Developer API content generation endpoints.",
+        TAG_EMBEDDINGS: "Gemini Developer API embedding endpoints.",
+        TAG_MODELS: "Gemini Developer API model discovery endpoints.",
+        TAG_FILES: "Gemini Developer API file upload and retrieval endpoints.",
+        TAG_BATCHES: "Gemini Developer API batch endpoints.",
+        TAG_COUNT_TOKENS: "Gemini Developer API token counting endpoints.",
     },
-    {
-        "name": TAG_MODELS,
-        "description": "Model discovery and model metadata endpoints.",
-    },
-    {
-        "name": TAG_FILES,
-        "description": "File upload, listing, retrieval, and content access endpoints.",
-    },
-    {
-        "name": TAG_BATCHES,
-        "description": "Batch creation, listing, retrieval, and results endpoints.",
-    },
-    {
-        "name": TAG_COUNT_TOKENS,
-        "description": "Token counting endpoints for Anthropic and Gemini compatibility.",
-    },
+}
+_STATIC_OPENAPI_TAGS = [
     {
         "name": TAG_TRANSLATIONS,
         "description": (
@@ -59,3 +81,52 @@ OPENAPI_TAGS = [
         "description": "Operator and runtime administration endpoints.",
     },
 ]
+_TAG_PROVIDER_ALIASES = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "gemini",
+    "litellm": "openai",
+    "system": "system",
+    "admin": "admin",
+}
+
+
+def provider_tag(capability: str, provider: str) -> str:
+    """Build a provider-scoped OpenAPI tag."""
+    return f"{capability} {provider}"
+
+
+def build_openapi_tags(enabled_providers: Collection[str]) -> list[dict[str, str]]:
+    """Build ordered OpenAPI tag metadata for the enabled providers."""
+    enabled = set(enabled_providers)
+    tags: list[dict[str, str]] = []
+    for capability in _CAPABILITY_ORDER:
+        for provider in _PROVIDER_ORDER:
+            provider_key = _PROVIDER_KEYS[provider]
+            if provider_key not in enabled:
+                continue
+            description = _PROVIDER_CAPABILITY_DESCRIPTIONS[provider].get(capability)
+            if description is None:
+                continue
+            tags.append(
+                {
+                    "name": provider_tag(capability, provider),
+                    "description": description,
+                }
+            )
+    return [*tags, *_STATIC_OPENAPI_TAGS]
+
+
+def resolve_tag_provider(tag: str) -> str | None:
+    """Resolve a normalized provider key from a route tag."""
+    normalized = tag.strip().lower()
+    aliased = _TAG_PROVIDER_ALIASES.get(normalized)
+    if aliased is not None:
+        return aliased
+    for provider, provider_key in _PROVIDER_KEYS.items():
+        if normalized.endswith(f" {provider.lower()}"):
+            return provider_key
+    return None
+
+
+OPENAPI_TAGS = build_openapi_tags(_PROVIDER_KEYS.values())

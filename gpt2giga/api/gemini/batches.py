@@ -20,7 +20,7 @@ from gpt2giga.api.gemini.response import (
     build_generate_content_response,
     gemini_exceptions_handler,
 )
-from gpt2giga.api.tags import TAG_BATCHES
+from gpt2giga.api.tags import PROVIDER_GEMINI, TAG_BATCHES, provider_tag
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.features.batches import get_batches_service_from_state
@@ -30,7 +30,7 @@ from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.gemini import gemini_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=[TAG_BATCHES])
+router = APIRouter(tags=[provider_tag(TAG_BATCHES, PROVIDER_GEMINI)])
 
 _GENERATE_CONTENT_BATCH_TYPE = (
     "type.googleapis.com/google.ai.generativelanguage.v1beta.GenerateContentBatch"

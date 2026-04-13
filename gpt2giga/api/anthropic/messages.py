@@ -9,7 +9,12 @@ from gpt2giga.api.anthropic.openapi import (
 )
 from gpt2giga.api.anthropic.response import _build_anthropic_response
 from gpt2giga.api.anthropic.streaming import _stream_anthropic_generator
-from gpt2giga.api.tags import TAG_CHAT, TAG_COUNT_TOKENS
+from gpt2giga.api.tags import (
+    PROVIDER_ANTHROPIC,
+    TAG_CHAT,
+    TAG_COUNT_TOKENS,
+    provider_tag,
+)
 from gpt2giga.app.dependencies import (
     get_logger_from_state,
 )
@@ -30,7 +35,7 @@ router = APIRouter()
 @router.post(
     "/messages/count_tokens",
     openapi_extra=anthropic_count_tokens_openapi_extra(),
-    tags=[TAG_COUNT_TOKENS],
+    tags=[provider_tag(TAG_COUNT_TOKENS, PROVIDER_ANTHROPIC)],
 )
 @exceptions_handler
 async def count_tokens(request: Request):
@@ -52,7 +57,7 @@ async def count_tokens(request: Request):
 @router.post(
     "/messages",
     openapi_extra=anthropic_messages_openapi_extra(),
-    tags=[TAG_CHAT],
+    tags=[provider_tag(TAG_CHAT, PROVIDER_ANTHROPIC)],
 )
 @exceptions_handler
 async def messages(request: Request):

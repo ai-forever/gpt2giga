@@ -3,14 +3,14 @@
 from fastapi import APIRouter, Request
 
 from gpt2giga.api.openai.openapi import embeddings_openapi_extra
-from gpt2giga.api.tags import TAG_EMBEDDINGS
+from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_EMBEDDINGS, provider_tag
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.json_body import read_request_json
 from gpt2giga.features.embeddings import get_embeddings_service_from_state
 from gpt2giga.providers.openai import openai_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
-router = APIRouter(tags=[TAG_EMBEDDINGS])
+router = APIRouter(tags=[provider_tag(TAG_EMBEDDINGS, PROVIDER_OPENAI)])
 
 
 @router.post("/embeddings", openapi_extra=embeddings_openapi_extra())

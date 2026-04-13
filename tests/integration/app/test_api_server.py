@@ -3,6 +3,19 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
 
+from gpt2giga.api.tags import (
+    PROVIDER_ANTHROPIC,
+    PROVIDER_GEMINI,
+    PROVIDER_OPENAI,
+    TAG_BATCHES,
+    TAG_CHAT,
+    TAG_COUNT_TOKENS,
+    TAG_EMBEDDINGS,
+    TAG_FILES,
+    TAG_MODELS,
+    TAG_RESPONSES,
+    provider_tag,
+)
 from gpt2giga.app.factory import create_app
 from gpt2giga.app.run import run as run_app
 from gpt2giga.core.app_meta import check_port_available
@@ -511,7 +524,7 @@ def test_openapi_only_includes_enabled_providers(monkeypatch):
     assert "/v1beta/models/{model}:generateContent" not in schema["paths"]
 
 
-def test_openapi_groups_routes_by_function_instead_of_provider(monkeypatch):
+def test_openapi_groups_routes_by_provider_and_function(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 
     cfg = ProxyConfig(proxy=ProxySettings(enabled_providers=["all"]))
@@ -524,25 +537,42 @@ def test_openapi_groups_routes_by_function_instead_of_provider(monkeypatch):
     tag_names = {tag["name"] for tag in schema["tags"]}
 
     assert {
-        "Chat",
-        "Responses",
-        "Embeddings",
-        "Models",
-        "Files",
-        "Batches",
+        provider_tag(TAG_CHAT, PROVIDER_OPENAI),
+        provider_tag(TAG_CHAT, PROVIDER_ANTHROPIC),
+        provider_tag(TAG_CHAT, PROVIDER_GEMINI),
+        provider_tag(TAG_RESPONSES, PROVIDER_OPENAI),
+        provider_tag(TAG_EMBEDDINGS, PROVIDER_OPENAI),
+        provider_tag(TAG_EMBEDDINGS, PROVIDER_GEMINI),
+        provider_tag(TAG_MODELS, PROVIDER_OPENAI),
+        provider_tag(TAG_MODELS, PROVIDER_GEMINI),
+        provider_tag(TAG_FILES, PROVIDER_OPENAI),
+        provider_tag(TAG_FILES, PROVIDER_GEMINI),
+        provider_tag(TAG_BATCHES, PROVIDER_OPENAI),
+        provider_tag(TAG_BATCHES, PROVIDER_ANTHROPIC),
+        provider_tag(TAG_BATCHES, PROVIDER_GEMINI),
+        provider_tag(TAG_COUNT_TOKENS, PROVIDER_ANTHROPIC),
+        provider_tag(TAG_COUNT_TOKENS, PROVIDER_GEMINI),
     } <= tag_names
-    assert "OpenAI" not in tag_names
-    assert "V1" not in tag_names
-    assert "V1 Anthropic" not in tag_names
-    assert "V1beta Gemini" not in tag_names
-    assert schema["paths"]["/chat/completions"]["post"]["tags"] == ["Chat"]
-    assert schema["paths"]["/v1/chat/completions"]["post"]["tags"] == ["Chat"]
-    assert schema["paths"]["/messages"]["post"]["tags"] == ["Chat"]
-    assert schema["paths"]["/messages/count_tokens"]["post"]["tags"] == ["Count Tokens"]
+    assert "Chat" not in tag_names
+    assert "Embeddings" not in tag_names
+    assert schema["paths"]["/chat/completions"]["post"]["tags"] == [
+        provider_tag(TAG_CHAT, PROVIDER_OPENAI)
+    ]
+    assert schema["paths"]["/v1/chat/completions"]["post"]["tags"] == [
+        provider_tag(TAG_CHAT, PROVIDER_OPENAI)
+    ]
+    assert schema["paths"]["/messages"]["post"]["tags"] == [
+        provider_tag(TAG_CHAT, PROVIDER_ANTHROPIC)
+    ]
+    assert schema["paths"]["/messages/count_tokens"]["post"]["tags"] == [
+        provider_tag(TAG_COUNT_TOKENS, PROVIDER_ANTHROPIC)
+    ]
     assert schema["paths"]["/v1beta/models/{model}:batchEmbedContents"]["post"][
         "tags"
-    ] == ["Embeddings"]
-    assert schema["paths"]["/model/info"]["get"]["tags"] == ["Models"]
+    ] == [provider_tag(TAG_EMBEDDINGS, PROVIDER_GEMINI)]
+    assert schema["paths"]["/model/info"]["get"]["tags"] == [
+        provider_tag(TAG_MODELS, PROVIDER_OPENAI)
+    ]
 
 
 def test_admin_recent_requests_endpoint_collects_runtime_events(monkeypatch):

@@ -9,6 +9,7 @@ from typing import AsyncIterator, Callable
 from fastapi.routing import APIRoute
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from gpt2giga.api.tags import resolve_tag_provider
 from gpt2giga.app.observability import (
     RequestAuditEvent,
     get_request_audit_metadata,
@@ -24,15 +25,6 @@ _IGNORED_PREFIXES = (
     "/redoc",
     "/openapi.json",
 )
-
-_TAG_TO_PROVIDER = {
-    "openai": "openai",
-    "anthropic": "anthropic",
-    "gemini": "gemini",
-    "litellm": "openai",
-    "system": "system",
-    "admin": "admin",
-}
 
 
 class ObservabilityMiddleware(BaseHTTPMiddleware):
@@ -187,7 +179,7 @@ def _resolve_provider(route: object) -> str | None:
     if not isinstance(route, APIRoute):
         return None
     for tag in route.tags or []:
-        resolved = _TAG_TO_PROVIDER.get(str(tag).lower())
+        resolved = resolve_tag_provider(str(tag))
         if resolved is not None:
             return resolved
     return None

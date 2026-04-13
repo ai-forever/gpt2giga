@@ -2,14 +2,15 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from fastapi import FastAPI
-from fastapi import Request
 from fastapi import HTTPException
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 from starlette.testclient import TestClient
 
 from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_CHAT, provider_tag
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.observability import (
     set_request_audit_error,
@@ -181,11 +182,11 @@ def test_observability_middleware_records_recent_requests_and_errors():
     ensure_runtime_dependencies(test_app.state, config=ProxyConfig())
     test_app.add_middleware(ObservabilityMiddleware)
 
-    @test_app.get("/ok", tags=["OpenAI"])
+    @test_app.get("/ok", tags=[provider_tag(TAG_CHAT, PROVIDER_OPENAI)])
     def ok():
         return {"ok": True}
 
-    @test_app.get("/boom", tags=["OpenAI"])
+    @test_app.get("/boom", tags=[provider_tag(TAG_CHAT, PROVIDER_OPENAI)])
     def boom():
         raise HTTPException(status_code=418, detail="teapot")
 
@@ -271,7 +272,7 @@ def test_observability_middleware_aggregates_usage_by_api_key_and_provider():
     ensure_runtime_dependencies(test_app.state, config=ProxyConfig())
     test_app.add_middleware(ObservabilityMiddleware)
 
-    @test_app.post("/chat/completions", tags=["OpenAI"])
+    @test_app.post("/chat/completions", tags=[provider_tag(TAG_CHAT, PROVIDER_OPENAI)])
     async def chat(request: Request):
         request.state.api_key_context = SimpleNamespace(
             name="sdk-openai",
