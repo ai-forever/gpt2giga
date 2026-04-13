@@ -503,7 +503,7 @@
         settings: {
           eyebrow: "Settings",
           title: "Split configuration editor",
-          subtitle: "Application, GigaChat and security settings with persisted control-plane storage.",
+          subtitle: "Application, GigaChat and security settings with persisted storage, diffs and rollback.",
         },
         keys: {
           eyebrow: "Keys",
@@ -625,13 +625,137 @@
           .join("")}</div>`;
       }
 
+      function humanizeField(field) {
+        return String(field || "")
+          .split("_")
+          .filter(Boolean)
+          .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+          .join(" ");
+      }
+
+      function normalizeComparableValue(value) {
+        if (Array.isArray(value)) {
+          return value.map((item) => normalizeComparableValue(item));
+        }
+        if (value && typeof value === "object") {
+          return Object.keys(value)
+            .sort()
+            .reduce((result, key) => {
+              result[key] = normalizeComparableValue(value[key]);
+              return result;
+            }, {});
+        }
+        return value ?? null;
+      }
+
+      function formatDiffValue(value) {
+        if (value === null || value === undefined || value === "") {
+          return '<span class="muted">empty</span>';
+        }
+        if (typeof value === "object") {
+          return `<code>${escapeHtml(JSON.stringify(value))}</code>`;
+        }
+        if (Array.isArray(value)) {
+          return `<code>${escapeHtml(JSON.stringify(value))}</code>`;
+        }
+        return escapeHtml(String(value));
+      }
+
+      function renderDiffTable(entries, emptyMessage = "No changes.") {
+        if (!entries || !entries.length) {
+          return `<p class="muted">${escapeHtml(emptyMessage)}</p>`;
+        }
+        return `<table>
+          <thead><tr><th>Field</th><th>Current</th><th>Next</th></tr></thead>
+          <tbody>
+            ${entries
+              .map(
+                (entry) => `<tr>
+                  <td>${escapeHtml(humanizeField(entry.field))}</td>
+                  <td>${formatDiffValue(entry.current)}</td>
+                  <td>${formatDiffValue(entry.target)}</td>
+                </tr>`,
+              )
+              .join("")}
+          </tbody>
+        </table>`;
+      }
+
+      function renderDiffSections(diff, emptyMessage = "No changes.") {
+        const sections = Object.entries(diff || {}).filter(([, entries]) => entries && entries.length);
+        if (!sections.length) {
+          return `<p class="muted">${escapeHtml(emptyMessage)}</p>`;
+        }
+        return sections
+          .map(
+            ([section, entries]) => `
+              <div class="stack">
+                <div class="pill">${escapeHtml(humanizeField(section))}</div>
+                ${renderDiffTable(entries)}
+              </div>
+            `,
+          )
+          .join("");
+      }
+
+      function buildApplicationPayload(form) {
+        return {
+          mode: form.mode.value,
+          gigachat_api_mode: form.gigachat_api_mode.value,
+          enabled_providers: parseCsv(form.enabled_providers.value),
+          embeddings: form.embeddings.value.trim(),
+          enable_telemetry: form.enable_telemetry.value === "true",
+          pass_model: form.pass_model.value === "true",
+          pass_token: form.pass_token.value === "true",
+          enable_reasoning: form.enable_reasoning.value === "true",
+          observability_sinks: parseCsv(form.observability_sinks.value),
+          log_level: form.log_level.value,
+        };
+      }
+
+      function buildSecurityPayload(form) {
+        return {
+          enable_api_key_auth: form.enable_api_key_auth.value === "true",
+          logs_ip_allowlist: parseCsv(form.logs_ip_allowlist.value),
+          cors_allow_origins: parseCsv(form.cors_allow_origins.value),
+          governance_limits: safeJsonParse(form.governance_limits.value || "[]", "__invalid__"),
+        };
+      }
+
+      function buildPendingDiffEntries(section, currentValues, payload) {
+        return Object.entries(payload)
+          .filter(([, value]) => value !== "__invalid__")
+          .flatMap(([field, target]) => {
+            let current = currentValues[field];
+            if (section === "gigachat" && field === "credentials") {
+              current = currentValues.credentials_configured
+                ? currentValues.credentials_preview || "configured"
+                : "not configured";
+              target = target ? "updated secret" : "clear secret";
+            } else if (section === "gigachat" && field === "access_token") {
+              current = currentValues.access_token_configured
+                ? currentValues.access_token_preview || "configured"
+                : "not configured";
+              target = target ? "updated secret" : "clear secret";
+            }
+            if (
+              JSON.stringify(normalizeComparableValue(current)) ===
+              JSON.stringify(normalizeComparableValue(target))
+            ) {
+              return [];
+            }
+            return [{ field, current, target }];
+          });
+      }
+
       function formatTimestamp(value) {
         if (value === null || value === undefined || value === "") {
           return "n/a";
         }
         const numeric = Number(value);
         if (!Number.isFinite(numeric)) {
-          return String(value);
+          const parsed = new Date(value);
+          return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
         }
         return new Date(numeric * 1000).toLocaleString();
       }
@@ -1085,10 +1209,11 @@
       }
 
       async function renderSettings() {
-        const [application, gigachat, security] = await Promise.all([
+        const [application, gigachat, security, revisions] = await Promise.all([
           apiFetch("/admin/api/settings/application"),
           apiFetch("/admin/api/settings/gigachat"),
           apiFetch("/admin/api/settings/security"),
+          apiFetch("/admin/api/settings/revisions?limit=6"),
         ]);
         heroActions.innerHTML = `<button class="secondary" id="reload-settings">Reload values</button>`;
 
@@ -1189,38 +1314,90 @@
               <label>CORS origins
                 <input name="cors_allow_origins" value="${escapeHtml(csv(security.values.cors_allow_origins))}" />
               </label>
-              <label>Governance limits (JSON array)
-                <textarea name="governance_limits">${escapeHtml(JSON.stringify(security.values.governance_limits || [], null, 2))}</textarea>
-              </label>
+                <label>Governance limits (JSON array)
+                  <textarea name="governance_limits">${escapeHtml(JSON.stringify(security.values.governance_limits || [], null, 2))}</textarea>
+                </label>
               <div class="banner warn">Changes to auth and CORS are persisted immediately but require a restart before the mounted routes fully reflect them.</div>
               <button>Save security settings</button>
             </form>`,
-            "wide-panel span-6",
+            "wide-panel span-4",
+          )}
+          ${card(
+            "Pending diff before apply",
+            `<div id="settings-pending-diff" class="stack"></div>`,
+            "wide-panel span-4",
+          )}
+          ${card(
+            "Recent revisions",
+            revisions.revisions.length
+              ? `<div class="stack">
+                  ${revisions.revisions
+                    .map(
+                      (revision) => `<div class="step-card stack">
+                        <div class="toolbar">
+                          <div class="pill">${escapeHtml(formatTimestamp(revision.updated_at))}</div>
+                          <div class="pill">${escapeHtml((revision.sections || []).join(", ") || "no field diff")}</div>
+                          <button class="secondary" data-rollback-revision="${escapeHtml(revision.revision_id)}">Rollback</button>
+                        </div>
+                        ${
+                          revision.restored_from_revision_id
+                            ? `<div class="banner">Rollback snapshot from revision ${escapeHtml(revision.restored_from_revision_id)}.</div>`
+                            : ""
+                        }
+                        ${renderDiffSections(revision.diff, "Revision matches the current runtime config.")}
+                      </div>`,
+                    )
+                    .join("")}
+                </div>`
+              : `<p>No persisted revisions yet. Save a settings change to start revision history.</p>`,
+            "wide-panel span-4",
           )}
           ${card(
             "Control-plane status",
             `<pre>${escapeHtml(JSON.stringify(application.control_plane, null, 2))}</pre>`,
-            "wide-panel span-6",
+            "wide-panel span-12",
           )}
         `;
 
         document.getElementById("reload-settings").addEventListener("click", () => renderRoute("settings"));
+        const applicationForm = document.getElementById("application-form");
+        const gigachatForm = document.getElementById("gigachat-form");
+        const securityForm = document.getElementById("security-form");
+        const pendingDiffNode = document.getElementById("settings-pending-diff");
 
-        document.getElementById("application-form").addEventListener("submit", async (event) => {
+        function refreshPendingDiff() {
+          const applicationEntries = buildPendingDiffEntries(
+            "application",
+            application.values,
+            buildApplicationPayload(applicationForm),
+          );
+          const gigachatEntries = buildPendingDiffEntries("gigachat", gigachat.values, {
+            ...collectGigachatPayload(gigachatForm),
+            timeout: gigachatForm.timeout.value ? Number(gigachatForm.timeout.value) : null,
+          });
+          const securityPayload = buildSecurityPayload(securityForm);
+          pendingDiffNode.innerHTML = `
+            ${securityPayload.governance_limits === "__invalid__" ? `<div class="banner danger">Governance limits JSON is invalid. Fix it before saving the security section.</div>` : ""}
+            ${renderDiffSections(
+              {
+                application: applicationEntries,
+                gigachat: gigachatEntries,
+                security: buildPendingDiffEntries("security", security.values, securityPayload),
+              },
+              "Forms currently match the persisted runtime values.",
+            )}
+          `;
+        }
+
+        refreshPendingDiff();
+        for (const form of [applicationForm, gigachatForm, securityForm]) {
+          form.addEventListener("input", refreshPendingDiff);
+          form.addEventListener("change", refreshPendingDiff);
+        }
+
+        applicationForm.addEventListener("submit", async (event) => {
           event.preventDefault();
-          const form = event.currentTarget;
-          const payload = {
-            mode: form.mode.value,
-            gigachat_api_mode: form.gigachat_api_mode.value,
-            enabled_providers: parseCsv(form.enabled_providers.value),
-            embeddings: form.embeddings.value.trim(),
-            enable_telemetry: form.enable_telemetry.value === "true",
-            pass_model: form.pass_model.value === "true",
-            pass_token: form.pass_token.value === "true",
-            enable_reasoning: form.enable_reasoning.value === "true",
-            observability_sinks: parseCsv(form.observability_sinks.value),
-            log_level: form.log_level.value,
-          };
+          const payload = buildApplicationPayload(event.currentTarget);
           const response = await apiFetch("/admin/api/settings/application", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -1230,12 +1407,11 @@
           renderRoute("settings");
         });
 
-        document.getElementById("gigachat-form").addEventListener("submit", async (event) => {
+        gigachatForm.addEventListener("submit", async (event) => {
           event.preventDefault();
-          const form = event.currentTarget;
           const payload = {
-            ...collectGigachatPayload(form),
-            timeout: form.timeout.value ? Number(form.timeout.value) : null,
+            ...collectGigachatPayload(event.currentTarget),
+            timeout: event.currentTarget.timeout.value ? Number(event.currentTarget.timeout.value) : null,
           };
           const response = await apiFetch("/admin/api/settings/gigachat", {
             method: "PUT",
@@ -1261,15 +1437,13 @@
           );
         });
 
-        document.getElementById("security-form").addEventListener("submit", async (event) => {
+        securityForm.addEventListener("submit", async (event) => {
           event.preventDefault();
-          const form = event.currentTarget;
-          const payload = {
-            enable_api_key_auth: form.enable_api_key_auth.value === "true",
-            logs_ip_allowlist: parseCsv(form.logs_ip_allowlist.value),
-            cors_allow_origins: parseCsv(form.cors_allow_origins.value),
-            governance_limits: JSON.parse(form.governance_limits.value || "[]"),
-          };
+          const payload = buildSecurityPayload(event.currentTarget);
+          if (payload.governance_limits === "__invalid__") {
+            pushAlert("Governance limits JSON is invalid.", "danger");
+            return;
+          }
           const response = await apiFetch("/admin/api/settings/security", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -1278,6 +1452,28 @@
           pushAlert(response.restart_required ? "Security settings saved. Restart required." : "Security settings saved and applied.", response.restart_required ? "warn" : "info");
           renderRoute("settings");
         });
+
+        for (const button of pageContent.querySelectorAll("[data-rollback-revision]")) {
+          button.addEventListener("click", async () => {
+            const revisionId = button.getAttribute("data-rollback-revision");
+            if (!revisionId) {
+              return;
+            }
+            if (!window.confirm(`Rollback settings to revision ${revisionId}?`)) {
+              return;
+            }
+            const response = await apiFetch(`/admin/api/settings/revisions/${revisionId}/rollback`, {
+              method: "POST",
+            });
+            pushAlert(
+              response.restart_required
+                ? `Revision ${revisionId} restored. Restart required for part of the rollback.`
+                : `Revision ${revisionId} restored and applied.`,
+              response.restart_required ? "warn" : "info",
+            );
+            renderRoute("settings");
+          });
+        }
       }
 
       async function renderKeys() {

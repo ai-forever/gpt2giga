@@ -11,13 +11,15 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.core.config.settings import GigaChatCLI, ProxyConfig, ProxySettings
 
 CONTROL_PLANE_VERSION = 1
 CONTROL_PLANE_DIR_ENV = "GPT2GIGA_CONTROL_PLANE_DIR"
 _CONTROL_FILE_NAME = "control-plane.json"
 _CONTROL_KEY_FILE_NAME = "control-plane.key"
 _BOOTSTRAP_TOKEN_FILE_NAME = "bootstrap-token"
+_REVISIONS_DIR_NAME = "revisions"
+_MAX_REVISIONS = 12
 _PROXY_SECRET_FIELDS = {"api_key", "scoped_api_keys"}
 _GIGACHAT_SECRET_FIELDS = {
     "access_token",
@@ -60,6 +62,11 @@ def get_control_plane_bootstrap_token_file() -> Path:
     return get_control_plane_dir() / _BOOTSTRAP_TOKEN_FILE_NAME
 
 
+def get_control_plane_revisions_dir() -> Path:
+    """Return the directory containing persisted control-plane revisions."""
+    return get_control_plane_dir() / _REVISIONS_DIR_NAME
+
+
 def has_persisted_control_plane() -> bool:
     """Return whether a persisted control-plane payload exists."""
     return get_control_plane_file().exists()
@@ -68,6 +75,17 @@ def has_persisted_control_plane() -> bool:
 def _ensure_control_plane_dir() -> Path:
     """Create the control-plane directory with private permissions."""
     directory = get_control_plane_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
+    return directory
+
+
+def _ensure_control_plane_revisions_dir() -> Path:
+    """Create the control-plane revisions directory with private permissions."""
+    directory = get_control_plane_revisions_dir()
     directory.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(directory, 0o700)
@@ -106,6 +124,12 @@ def _normalize_secret_value(value: Any) -> Any:
     if isinstance(value, tuple):
         return [_normalize_secret_value(item) for item in value]
     return value
+
+
+def _new_revision_id() -> str:
+    """Return a sortable identifier for a persisted config snapshot."""
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return f"{timestamp}-{secrets.token_hex(4)}"
 
 
 def _load_fernet(*, create: bool) -> Fernet | None:
@@ -208,6 +232,8 @@ def load_control_plane_payload() -> dict[str, Any]:
             "proxy": {},
             "gigachat": {},
             "secrets": {"proxy": {}, "gigachat": {}},
+            "change": {},
+            "revision_id": None,
             "updated_at": None,
         }
 
@@ -218,13 +244,16 @@ def load_control_plane_payload() -> dict[str, Any]:
     payload.setdefault("secrets", {})
     payload["secrets"].setdefault("proxy", {})
     payload["secrets"].setdefault("gigachat", {})
+    payload.setdefault("change", {})
+    payload.setdefault("revision_id", None)
     payload.setdefault("updated_at", None)
     return payload
 
 
-def load_control_plane_overrides() -> tuple[dict[str, Any], dict[str, Any]]:
-    """Load decrypted proxy and GigaChat overrides from control-plane storage."""
-    payload = load_control_plane_payload()
+def load_control_plane_overrides_from_payload(
+    payload: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load decrypted proxy and GigaChat overrides from a raw payload."""
     proxy = dict(payload.get("proxy") or {})
     gigachat = dict(payload.get("gigachat") or {})
     secrets_section = payload.get("secrets") or {}
@@ -243,21 +272,45 @@ def load_control_plane_overrides() -> tuple[dict[str, Any], dict[str, Any]]:
     return proxy, gigachat
 
 
+def load_control_plane_overrides() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load decrypted proxy and GigaChat overrides from control-plane storage."""
+    return load_control_plane_overrides_from_payload(load_control_plane_payload())
+
+
+def build_proxy_config_from_control_plane_payload(
+    payload: dict[str, Any],
+    *,
+    env_path: Path | None = None,
+) -> ProxyConfig:
+    """Build a validated runtime config from a persisted control-plane payload."""
+    proxy_overrides, gigachat_overrides = load_control_plane_overrides_from_payload(
+        payload
+    )
+    proxy = ProxySettings.model_validate(proxy_overrides)
+    gigachat = GigaChatCLI.model_validate(gigachat_overrides)
+    return ProxyConfig(
+        proxy=proxy.model_dump(),
+        gigachat=gigachat.model_dump(),
+        env_path=env_path,
+    )
+
+
 def apply_control_plane_overrides(config: ProxyConfig) -> ProxyConfig:
     """Overlay persisted UI-managed settings onto the runtime config."""
     if not has_persisted_control_plane():
         return config
 
-    proxy_overrides, gigachat_overrides = load_control_plane_overrides()
+    persisted = build_proxy_config_from_control_plane_payload(
+        load_control_plane_payload(),
+        env_path=config.env_path,
+    )
     proxy_payload = config.proxy_settings.model_dump()
-    proxy_payload.update(proxy_overrides)
+    proxy_payload.update(persisted.proxy_settings.model_dump())
     gigachat_payload = config.gigachat_settings.model_dump()
-    gigachat_payload.update(gigachat_overrides)
+    gigachat_payload.update(persisted.gigachat_settings.model_dump())
 
     return ProxyConfig(
-        proxy=proxy_payload,
-        gigachat=gigachat_payload,
-        env_path=config.env_path,
+        proxy=proxy_payload, gigachat=gigachat_payload, env_path=config.env_path
     )
 
 
@@ -292,9 +345,13 @@ def requires_admin_bootstrap(config: ProxyConfig) -> bool:
     )
 
 
-def persist_control_plane_config(config: ProxyConfig) -> Path:
-    """Persist the current runtime config for future UI-managed startups."""
-    _ensure_control_plane_dir()
+def _build_control_plane_payload(
+    config: ProxyConfig,
+    *,
+    changed_fields: set[str] | None = None,
+    restored_from_revision_id: str | None = None,
+) -> dict[str, Any]:
+    """Build the encrypted payload written to control-plane storage."""
     fernet = _load_fernet(create=True)
     assert fernet is not None
 
@@ -312,18 +369,89 @@ def persist_control_plane_config(config: ProxyConfig) -> Path:
         if gigachat.get(field) not in (None, "", [])
     }
 
-    payload = {
+    change: dict[str, Any] = {}
+    if changed_fields:
+        change["changed_fields"] = sorted(changed_fields)
+    if restored_from_revision_id:
+        change["restored_from_revision_id"] = restored_from_revision_id
+
+    return {
         "version": CONTROL_PLANE_VERSION,
+        "revision_id": _new_revision_id(),
         "proxy": proxy,
         "gigachat": gigachat,
         "secrets": {
             "proxy": proxy_secrets,
             "gigachat": gigachat_secrets,
         },
+        "change": change,
         "updated_at": _utc_now(),
     }
+
+
+def _write_control_plane_revision(payload: dict[str, Any]) -> None:
+    """Persist a revision snapshot alongside the active control-plane payload."""
+    revision_id = payload.get("revision_id")
+    if not revision_id:
+        return
+
+    revisions_dir = _ensure_control_plane_revisions_dir()
+    _write_json(revisions_dir / f"{revision_id}.json", payload)
+
+    revision_files = sorted(revisions_dir.glob("*.json"), reverse=True)
+    for stale_file in revision_files[_MAX_REVISIONS:]:
+        try:
+            stale_file.unlink()
+        except OSError:
+            continue
+
+
+def list_control_plane_revisions(limit: int = 10) -> list[dict[str, Any]]:
+    """Return recent persisted control-plane revisions."""
+    revisions_dir = get_control_plane_revisions_dir()
+    if not revisions_dir.exists():
+        return []
+
+    payloads: list[dict[str, Any]] = []
+    for path in sorted(revisions_dir.glob("*.json"), reverse=True):
+        payload = _read_json(path)
+        payload.setdefault("revision_id", path.stem)
+        payload.setdefault("change", {})
+        payload.setdefault("updated_at", None)
+        payloads.append(payload)
+        if len(payloads) >= limit:
+            break
+    return payloads
+
+
+def load_control_plane_revision_payload(revision_id: str) -> dict[str, Any]:
+    """Load a specific persisted control-plane revision."""
+    path = get_control_plane_revisions_dir() / f"{revision_id}.json"
+    if not path.exists():
+        raise FileNotFoundError(revision_id)
+    payload = _read_json(path)
+    payload.setdefault("revision_id", revision_id)
+    payload.setdefault("change", {})
+    payload.setdefault("updated_at", None)
+    return payload
+
+
+def persist_control_plane_config(
+    config: ProxyConfig,
+    *,
+    changed_fields: set[str] | None = None,
+    restored_from_revision_id: str | None = None,
+) -> Path:
+    """Persist the current runtime config for future UI-managed startups."""
+    _ensure_control_plane_dir()
+    payload = _build_control_plane_payload(
+        config,
+        changed_fields=changed_fields,
+        restored_from_revision_id=restored_from_revision_id,
+    )
     path = get_control_plane_file()
     _write_json(path, payload)
+    _write_control_plane_revision(payload)
     if is_control_plane_setup_complete(config):
         clear_bootstrap_token()
     return path

@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from gpt2giga.api.admin import admin_api_router, admin_router
 from gpt2giga.api.system import system_router
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.core.config.control_plane import load_control_plane_overrides
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
@@ -177,3 +178,40 @@ def test_scoped_key_create_rotate_and_delete(tmp_path, monkeypatch):
     delete_response = client.delete("/admin/api/keys/scoped/sdk-openai")
     assert delete_response.status_code == 200
     assert delete_response.json()["deleted"] == "sdk-openai"
+
+
+def test_settings_revisions_endpoint_and_rollback(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    first_rotate = client.post(
+        "/admin/api/keys/global/rotate",
+        json={"value": "first-global-key"},
+    )
+    assert first_rotate.status_code == 200
+
+    second_rotate = client.post(
+        "/admin/api/keys/global/rotate",
+        json={"value": "second-global-key"},
+    )
+    assert second_rotate.status_code == 200
+
+    revisions_response = client.get("/admin/api/settings/revisions?limit=5")
+    assert revisions_response.status_code == 200
+    revisions_payload = revisions_response.json()
+    assert len(revisions_payload["revisions"]) >= 2
+
+    previous_revision = revisions_payload["revisions"][1]
+    assert previous_revision["changed_fields"] == ["api_key"]
+
+    rollback_response = client.post(
+        f"/admin/api/settings/revisions/{previous_revision['revision_id']}/rollback"
+    )
+    assert rollback_response.status_code == 200
+    rollback_payload = rollback_response.json()
+    assert (
+        rollback_payload["rolled_back_revision_id"] == previous_revision["revision_id"]
+    )
+
+    proxy_overrides, _ = load_control_plane_overrides()
+    assert proxy_overrides["api_key"] == "first-global-key"

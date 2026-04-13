@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 
@@ -19,7 +19,10 @@ from gpt2giga.app.dependencies import (
 )
 from gpt2giga.app.wiring import reload_runtime_services
 from gpt2giga.core.config.control_plane import (
+    build_proxy_config_from_control_plane_payload,
     build_control_plane_status,
+    list_control_plane_revisions,
+    load_control_plane_revision_payload,
     persist_control_plane_config,
 )
 from gpt2giga.core.config.settings import GigaChatCLI, ProxyConfig, ProxySettings
@@ -116,6 +119,14 @@ _SECTION_FIELDS = {
     "application": _APPLICATION_FIELDS,
     "gigachat": _GIGACHAT_FIELDS,
     "security": _SECURITY_FIELDS,
+}
+_SECRET_FIELDS = {
+    "api_key",
+    "scoped_api_keys",
+    "access_token",
+    "credentials",
+    "password",
+    "key_file_password",
 }
 
 
@@ -268,6 +279,22 @@ def _build_keys_payload(request: Request) -> dict[str, Any]:
     }
 
 
+def _normalize_compare_value(value: Any) -> Any:
+    """Normalize settings values for stable equality checks."""
+    if hasattr(value, "get_secret_value"):
+        return value.get_secret_value()
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_compare_value(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, list):
+        return [_normalize_compare_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_normalize_compare_value(item) for item in value]
+    return value
+
+
 def _validate_known_fields(payload: dict[str, Any], section: str) -> None:
     unknown = sorted(set(payload) - _SECTION_FIELDS[section])
     if unknown:
@@ -306,6 +333,124 @@ def _resolve_gigachat_factory(request: Request):
     if callable(factory_getter):
         return factory_getter()
     return providers.gigachat_factory
+
+
+def _build_settings_snapshot(config: ProxyConfig) -> dict[str, Any]:
+    """Build the safe, UI-facing snapshot of all settings sections."""
+    return {
+        "application": _build_application_settings(config.proxy_settings),
+        "gigachat": _build_gigachat_settings(config.gigachat_settings),
+        "security": _build_security_settings(config.proxy_settings),
+    }
+
+
+def _field_value_for_section(
+    config: ProxyConfig,
+    *,
+    section: str,
+    field: str,
+) -> Any:
+    """Return the raw setting value for a section field."""
+    if section == "gigachat":
+        return _normalize_compare_value(
+            config.gigachat_settings.model_dump().get(field)
+        )
+    return _normalize_compare_value(config.proxy_settings.model_dump().get(field))
+
+
+def _display_diff_value(section: str, field: str, value: Any) -> Any:
+    """Return a safe display value for settings diffs."""
+    if field not in _SECRET_FIELDS:
+        return value
+
+    if field == "scoped_api_keys":
+        items = value or []
+        names = sorted(
+            str(item.get("name"))
+            for item in items
+            if isinstance(item, dict) and item.get("name")
+        )
+        return {"count": len(items), "names": names}
+
+    if field in {"api_key", "credentials", "access_token"}:
+        return {
+            "configured": value not in (None, ""),
+            "preview": _mask_secret(value),
+        }
+
+    return {"configured": value not in (None, "")}
+
+
+def _build_section_diff(
+    current: ProxyConfig,
+    target: ProxyConfig,
+    *,
+    section: str,
+) -> list[dict[str, Any]]:
+    """Return the per-field diff for a settings section."""
+    entries: list[dict[str, Any]] = []
+    for field in sorted(_SECTION_FIELDS[section]):
+        current_value = _field_value_for_section(current, section=section, field=field)
+        target_value = _field_value_for_section(target, section=section, field=field)
+        if current_value == target_value:
+            continue
+        entries.append(
+            {
+                "field": field,
+                "current": _display_diff_value(section, field, current_value),
+                "target": _display_diff_value(section, field, target_value),
+            }
+        )
+    return entries
+
+
+def _build_settings_diff(
+    current: ProxyConfig,
+    target: ProxyConfig,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return a safe per-section diff between two runtime configs."""
+    return {
+        section: _build_section_diff(current, target, section=section)
+        for section in _SECTION_FIELDS
+    }
+
+
+def _collect_changed_fields(
+    current: ProxyConfig,
+    target: ProxyConfig,
+) -> set[str]:
+    """Collect all changed settings fields between two configs."""
+    changed_fields: set[str] = set()
+    for section_diffs in _build_settings_diff(current, target).values():
+        changed_fields.update(entry["field"] for entry in section_diffs)
+    return changed_fields
+
+
+def _build_revision_entry(
+    current: ProxyConfig,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Build a safe revision entry with a diff against the current config."""
+    target = build_proxy_config_from_control_plane_payload(
+        payload,
+        env_path=current.env_path,
+    )
+    diff = _build_settings_diff(current, target)
+    changed_fields = payload.get("change", {}).get("changed_fields") or sorted(
+        _collect_changed_fields(current, target)
+    )
+    sections = [section for section, entries in diff.items() if entries]
+    return {
+        "revision_id": payload.get("revision_id"),
+        "updated_at": payload.get("updated_at"),
+        "changed_fields": changed_fields,
+        "restored_from_revision_id": payload.get("change", {}).get(
+            "restored_from_revision_id"
+        ),
+        "sections": sections,
+        "snapshot": _build_settings_snapshot(target),
+        "diff": diff,
+    }
 
 
 async def _test_gigachat_settings(
@@ -358,10 +503,15 @@ async def _apply_updated_config(
     updated_config: ProxyConfig,
     *,
     changed_fields: set[str],
+    restored_from_revision_id: str | None = None,
 ) -> dict[str, Any]:
     app = request.app
     logger = get_logger_from_state(app.state)
-    persist_path = persist_control_plane_config(updated_config)
+    persist_path = persist_control_plane_config(
+        updated_config,
+        changed_fields=changed_fields,
+        restored_from_revision_id=restored_from_revision_id,
+    )
     ensure_runtime_dependencies(app.state, config=updated_config, logger=logger)
 
     restart_required = bool(changed_fields & _RESTART_REQUIRED_FIELDS)
@@ -500,6 +650,60 @@ async def update_security_settings(
     return {
         "section": "security",
         "values": _build_security_settings(updated.proxy_settings),
+        **result,
+    }
+
+
+@admin_settings_api_router.get("/admin/api/settings/revisions")
+@exceptions_handler
+async def get_settings_revisions(
+    request: Request,
+    limit: int = Query(default=6, ge=1, le=20),
+):
+    """Return recent control-plane revisions with safe diffs."""
+    verify_logs_ip_allowlist(request)
+    current = get_config_from_state(request.app.state)
+    revisions = [
+        _build_revision_entry(current, payload)
+        for payload in list_control_plane_revisions(limit=limit)
+    ]
+    return {
+        "current": _build_settings_snapshot(current),
+        "revisions": revisions,
+        "control_plane": _control_summary(request),
+    }
+
+
+@admin_settings_api_router.post("/admin/api/settings/revisions/{revision_id}/rollback")
+@exceptions_handler
+async def rollback_settings_revision(
+    request: Request,
+    revision_id: str,
+):
+    """Rollback runtime settings to a previous persisted revision."""
+    verify_logs_ip_allowlist(request)
+    current = get_config_from_state(request.app.state)
+    try:
+        payload = load_control_plane_revision_payload(revision_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Revision not found") from exc
+
+    updated = build_proxy_config_from_control_plane_payload(
+        payload,
+        env_path=current.env_path,
+    )
+    diff = _build_settings_diff(current, updated)
+    changed_fields = _collect_changed_fields(current, updated)
+    result = await _apply_updated_config(
+        request,
+        updated,
+        changed_fields=changed_fields,
+        restored_from_revision_id=revision_id,
+    )
+    return {
+        "rolled_back_revision_id": revision_id,
+        "values": _build_settings_snapshot(updated),
+        "diff": diff,
         **result,
     }
 
