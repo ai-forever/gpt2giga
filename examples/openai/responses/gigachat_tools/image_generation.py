@@ -5,7 +5,7 @@ client = OpenAI(base_url="http://localhost:8090", api_key="0")
 
 with client.responses.stream(
     model="gpt-4.1-mini",
-    input="Generate an image of gray tabby cat hugging an otter with an orange scarf",
+    input="Нарисуй красивую картинку с космосом",
     tools=[{"type": "image_generation"}],
     store=False,
 ) as stream:
@@ -19,5 +19,5 @@ image_data = [
 
 if image_data:
     image_base64 = image_data[0]
-    with open("cat_and_otter.png", "wb") as f:
+    with open("cosmos.png", "wb") as f:
         f.write(base64.b64decode(image_base64))
