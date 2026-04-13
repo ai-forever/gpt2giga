@@ -13,6 +13,19 @@ class ResponsesOutputItemsMixin:
     """Build Responses API output items from normalized GigaChat payloads."""
 
     @staticmethod
+    def _looks_like_generated_image_files(files: list[Any]) -> bool:
+        """Return True when file parts look like model-generated image outputs."""
+        for file_desc in files:
+            if not isinstance(file_desc, dict):
+                continue
+            if file_desc.get("target") == "image":
+                return True
+            mime = file_desc.get("mime")
+            if isinstance(mime, str) and mime.startswith("image/"):
+                return True
+        return False
+
+    @staticmethod
     def _create_message_item(text: Optional[str], response_id: str) -> dict:
         return {
             "type": "message",
@@ -277,28 +290,43 @@ class ResponsesOutputItemsMixin:
                             last_tool_item = None
 
                 files = part.get("files")
-                if isinstance(files, list) and last_tool_item is not None:
-                    if last_tool_item.get("type") == "image_generation_call":
-                        first_file = next(
-                            (
-                                file_desc.get("id")
+                if isinstance(files, list):
+                    if last_tool_item is not None:
+                        if last_tool_item.get("type") == "image_generation_call":
+                            first_file = next(
+                                (
+                                    file_desc.get("id")
+                                    for file_desc in files
+                                    if isinstance(file_desc, dict)
+                                    and isinstance(file_desc.get("id"), str)
+                                ),
+                                None,
+                            )
+                            if first_file:
+                                last_tool_item["result"] = first_file
+                        elif last_tool_item.get("type") == "code_interpreter_call":
+                            images = [
+                                {"type": "image", "url": file_desc["id"]}
                                 for file_desc in files
                                 if isinstance(file_desc, dict)
                                 and isinstance(file_desc.get("id"), str)
-                            ),
-                            None,
+                            ]
+                            if images:
+                                last_tool_item["outputs"] = images
+                    elif cls._looks_like_generated_image_files(files):
+                        flush_text()
+                        mapped_item = cls._build_builtin_tool_output_item(
+                            tool_name="image_generate",
+                            item_id=f"tool_{tools_state_id or message_id}_{part_index}",
+                            tools_state_id=tools_state_id,
+                            response_status=response_status,
+                            raw_status="completed",
+                            related_files=files,
+                            additional_data=additional_data,
                         )
-                        if first_file:
-                            last_tool_item["result"] = first_file
-                    elif last_tool_item.get("type") == "code_interpreter_call":
-                        images = [
-                            {"type": "image", "url": file_desc["id"]}
-                            for file_desc in files
-                            if isinstance(file_desc, dict)
-                            and isinstance(file_desc.get("id"), str)
-                        ]
-                        if images:
-                            last_tool_item["outputs"] = images
+                        if mapped_item is not None:
+                            output.append(mapped_item)
+                            last_tool_item = mapped_item
 
             flush_text()
 

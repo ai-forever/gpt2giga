@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import traceback
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Optional, Protocol, TypeAlias, TypeVar
 
 import gigachat
@@ -228,6 +228,19 @@ def map_chat_stream_chunk(
     )
 
 
+def _looks_like_generated_image_files(files: list[Any]) -> bool:
+    """Return True when file parts look like model-generated image outputs."""
+    for file_desc in files:
+        if not isinstance(file_desc, dict):
+            continue
+        if file_desc.get("target") == "image":
+            return True
+        mime = file_desc.get("mime")
+        if isinstance(mime, str) and mime.startswith("image/"):
+            return True
+    return False
+
+
 async def iter_responses_stream_chunks(
     giga_client: Any,
     chat_messages: PreparedResponsesRequest,
@@ -236,6 +249,7 @@ async def iter_responses_stream_chunks(
     response_id: str,
 ) -> AsyncIterator[ResponsesStreamChunk]:
     """Yield provider-normalized Responses API stream chunks."""
+    last_tool_state: dict[str, ResponsesToolUpdate] = {}
     try:
         async for chunk in giga_client.astream_v2(chat_messages):
             chunk_dict = response_processor._safe_model_dump(chunk)
@@ -251,6 +265,7 @@ async def iter_responses_stream_chunks(
                     chunk_dict,
                     response_processor=response_processor,
                     response_id=response_id,
+                    last_tool_state=last_tool_state,
                 ),
             )
     except gigachat.exceptions.GigaChatException as exc:
@@ -262,6 +277,7 @@ def _collect_responses_updates(
     *,
     response_processor: GigaChatResponsesStreamProcessor,
     response_id: str,
+    last_tool_state: dict[str, ResponsesToolUpdate],
 ) -> list[ResponsesStreamUpdate]:
     updates: list[ResponsesStreamUpdate] = []
     raw_additional_data = chunk_dict.get("additional_data")
@@ -278,7 +294,7 @@ def _collect_responses_updates(
         )
         message_key = message_id
         tools_state_id = message.get("tools_state_id")
-        last_tool_update: ResponsesToolUpdate | None = None
+        last_tool_update: ResponsesToolUpdate | None = last_tool_state.get(message_key)
 
         for part_index, part in enumerate(message.get("content") or []):
             if not isinstance(part, dict):
@@ -345,21 +361,61 @@ def _collect_responses_updates(
                             output_item=output_item,
                             raw_status=tool_execution.get("status"),
                         )
-                        updates.append(last_tool_update)
+                        last_tool_state[message_key] = last_tool_update
+                        updates.append(
+                            replace(last_tool_update, output_item=dict(output_item))
+                        )
 
             files = part.get("files")
-            if isinstance(files, list) and last_tool_update is not None:
-                output_item = response_processor._build_builtin_tool_output_item(
-                    tool_name=last_tool_update.tool_name,
-                    item_id=last_tool_update.item_id,
-                    tools_state_id=last_tool_update.tools_state_id,
-                    response_status="in_progress",
-                    raw_status=last_tool_update.raw_status,
-                    related_files=files,
-                    additional_data=additional_data,
-                )
-                if output_item is not None:
-                    last_tool_update.output_item = output_item
+            if isinstance(files, list):
+                if last_tool_update is None and _looks_like_generated_image_files(
+                    files
+                ):
+                    item_id = f"tool_{tools_state_id or message_id}_{part_index}"
+                    output_item = response_processor._build_builtin_tool_output_item(
+                        tool_name="image_generate",
+                        item_id=item_id,
+                        tools_state_id=(
+                            str(tools_state_id) if tools_state_id is not None else None
+                        ),
+                        response_status="in_progress",
+                        raw_status="completed",
+                        related_files=files,
+                        additional_data=additional_data,
+                    )
+                    if output_item is not None:
+                        last_tool_update = ResponsesToolUpdate(
+                            tool_key=f"{tools_state_id or message_id}:image_generate",
+                            item_id=item_id,
+                            tool_name="image_generate",
+                            tools_state_id=(
+                                str(tools_state_id)
+                                if tools_state_id is not None
+                                else None
+                            ),
+                            output_item=output_item,
+                            raw_status="completed",
+                        )
+                        last_tool_state[message_key] = last_tool_update
+                        updates.append(
+                            replace(last_tool_update, output_item=dict(output_item))
+                        )
+                elif last_tool_update is not None:
+                    output_item = response_processor._build_builtin_tool_output_item(
+                        tool_name=last_tool_update.tool_name,
+                        item_id=last_tool_update.item_id,
+                        tools_state_id=last_tool_update.tools_state_id,
+                        response_status="in_progress",
+                        raw_status=last_tool_update.raw_status,
+                        related_files=files,
+                        additional_data=additional_data,
+                    )
+                    if output_item is not None:
+                        last_tool_update.output_item = output_item
+                        last_tool_state[message_key] = last_tool_update
+                        updates.append(
+                            replace(last_tool_update, output_item=dict(output_item))
+                        )
 
     return updates
 

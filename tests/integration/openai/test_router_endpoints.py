@@ -177,6 +177,68 @@ class FakeGigachat:
     def astream_v2(self, chat):
         async def gen():
             self.last_responses_method = "v2"
+            tools = chat.get("tools") or []
+            has_image_generation = any(
+                tool == {"image_generate": {}}
+                or (isinstance(tool, dict) and tool.get("type") == "image_generation")
+                for tool in tools
+            )
+            if has_image_generation:
+                yield MockResponse(
+                    {
+                        "model": "gpt-x",
+                        "created_at": 123,
+                        "thread_id": "thread-1",
+                        "messages": [
+                            {
+                                "message_id": "msg-1",
+                                "role": "assistant",
+                                "tools_state_id": "tool-1",
+                                "content": [
+                                    {
+                                        "tool_execution": {
+                                            "name": "image_generate",
+                                            "status": "generating",
+                                        }
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                )
+                yield MockResponse(
+                    {
+                        "model": "gpt-x",
+                        "created_at": 123,
+                        "thread_id": "thread-1",
+                        "messages": [
+                            {
+                                "message_id": "msg-1",
+                                "role": "assistant",
+                                "tools_state_id": "tool-1",
+                                "content": [
+                                    {
+                                        "files": [
+                                            {
+                                                "id": "file-img-1",
+                                                "mime": "image/jpeg",
+                                                "target": "image",
+                                            }
+                                        ]
+                                    }
+                                ],
+                            }
+                        ],
+                        "finish_reason": "stop",
+                        "usage": {
+                            "input_tokens": 1,
+                            "input_tokens_details": {"cached_tokens": 0},
+                            "output_tokens": 1,
+                            "total_tokens": 2,
+                        },
+                    }
+                )
+                return
             yield MockResponse(
                 {
                     "model": "gpt-x",
@@ -450,6 +512,32 @@ def test_responses_stream_returns_sse_events():
     assert "event: response.created" in body
     assert "event: response.in_progress" in body
     assert "event: response.output_text.delta" in body
+    assert "event: response.completed" in body
+
+
+def test_responses_stream_image_generation_hydrates_file_to_base64():
+    app = make_app(
+        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
+    )
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/responses",
+        json={
+            "input": "draw a cat",
+            "model": "gpt-x",
+            "tools": [{"type": "image_generation"}],
+            "stream": True,
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        body = "".join(resp.iter_text())
+
+    assert "event: response.created" in body
+    assert '"id": "resp_' in body
+    assert "event: response.image_generation_call.completed" in body
+    assert '"result": "b64:file-img-1"' in body
     assert "event: response.completed" in body
 
 

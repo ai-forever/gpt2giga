@@ -675,6 +675,77 @@ class FakeResponsesClientBuiltinIncomplete:
         return gen()
 
 
+class FakeResponsesClientImageGeneration:
+    def astream_v2(self, chat):
+        async def gen():
+            yield make_chunk(
+                {
+                    "model": "gpt-x",
+                    "created_at": 123,
+                    "thread_id": "thread-img",
+                    "messages": [
+                        {
+                            "message_id": "msg-img",
+                            "role": "assistant",
+                            "tools_state_id": "tool-1",
+                            "content": [
+                                {
+                                    "tool_execution": {
+                                        "name": "image_generate",
+                                        "status": "generating",
+                                    }
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+            yield make_chunk(
+                {
+                    "model": "gpt-x",
+                    "created_at": 123,
+                    "thread_id": "thread-img",
+                    "messages": [
+                        {
+                            "message_id": "msg-img",
+                            "role": "assistant",
+                            "tools_state_id": "tool-1",
+                            "content": [
+                                {
+                                    "files": [
+                                        {
+                                            "id": "file-img-1",
+                                            "mime": "image/jpeg",
+                                            "target": "image",
+                                        }
+                                    ]
+                                }
+                            ],
+                        }
+                    ],
+                }
+            )
+            yield make_chunk(
+                {
+                    "model": "gpt-x",
+                    "created_at": 123,
+                    "thread_id": "thread-img",
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 10,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                }
+            )
+
+        return gen()
+
+    async def aget_file_content(self, file_id):
+        return SimpleNamespace(content=f"b64:{file_id}")
+
+
 @pytest.mark.asyncio
 async def test_stream_responses_generator_function_call():
     req = FakeRequest(FakeResponsesClientFunctionCall())
@@ -777,3 +848,33 @@ async def test_stream_responses_generator_emits_builtin_tool_progress_and_incomp
     assert event_type == "response.incomplete"
     assert data["response"]["status"] == "incomplete"
     assert data["response"]["incomplete_details"] == {"reason": "max_output_tokens"}
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_hydrates_image_generation_results():
+    req = FakeRequest(FakeResponsesClientImageGeneration())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(
+        req, chat, response_id="img_stream_test"
+    ):
+        lines.append(line)
+
+    event_type, data = parse_sse(lines[0])
+    assert event_type == "response.created"
+    assert data["response"]["id"] == "resp_img_stream_test"
+
+    event_type, data = parse_sse(lines[3])
+    assert event_type == "response.image_generation_call.generating"
+
+    event_type, data = parse_sse(lines[4])
+    assert event_type == "response.image_generation_call.completed"
+
+    event_type, data = parse_sse(lines[5])
+    assert event_type == "response.output_item.done"
+    assert data["item"]["result"] == "b64:file-img-1"
+
+    event_type, data = parse_sse(lines[6])
+    assert event_type == "response.completed"
+    assert data["response"]["id"] == "resp_img_stream_test"
+    assert data["response"]["output"][0]["result"] == "b64:file-img-1"

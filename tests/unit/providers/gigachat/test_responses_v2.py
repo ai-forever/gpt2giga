@@ -4,6 +4,10 @@ from loguru import logger
 
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.providers.gigachat import RequestTransformer, ResponseProcessor
+from gpt2giga.providers.gigachat.streaming import (
+    ResponsesToolUpdate,
+    _collect_responses_updates,
+)
 
 
 @pytest.mark.asyncio
@@ -541,6 +545,151 @@ def test_response_processor_process_response_api_v2_maps_function_and_builtin_to
     assert out["output"][1]["type"] == "web_search_call"
     assert out["output"][1]["status"] == "completed"
     assert out["output"][1]["action"]["query"] == "weather"
+
+
+def test_response_processor_process_response_api_v2_maps_orphan_image_files():
+    processor = ResponseProcessor(logger)
+    out = processor.process_response_api_v2(
+        {"model": "gpt-x", "input": "draw a cat"},
+        MockResponse(
+            {
+                "model": "gpt-x",
+                "thread_id": "thread-img",
+                "created_at": 123,
+                "messages": [
+                    {
+                        "message_id": "msg-1",
+                        "role": "assistant",
+                        "tools_state_id": "state-1",
+                        "content": [
+                            {
+                                "files": [
+                                    {
+                                        "id": "orphan-img-1",
+                                        "mime": "image/jpeg",
+                                        "target": "image",
+                                    }
+                                ]
+                            },
+                            {"text": "Готово."},
+                        ],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 1,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens": 2,
+                    "total_tokens": 3,
+                },
+            }
+        ),
+        gpt_model="gpt-x",
+        response_id="v2-orphan-img",
+    )
+
+    img_items = [
+        item
+        for item in out["output"]
+        if isinstance(item, dict) and item.get("type") == "image_generation_call"
+    ]
+    assert len(img_items) == 1
+    assert img_items[0]["result"] == "orphan-img-1"
+    texts: list[str] = []
+    for item in out["output"]:
+        if isinstance(item, dict) and item.get("type") == "message":
+            for part in item.get("content") or []:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    texts.append(part["text"])
+    assert any("Готово." in t for t in texts)
+
+
+def test_collect_responses_updates_carries_tool_state_across_chunks():
+    processor = ResponseProcessor(logger)
+    state: dict[str, ResponsesToolUpdate] = {}
+    chunk_tool = {
+        "messages": [
+            {
+                "message_id": "m1",
+                "role": "assistant",
+                "tools_state_id": "ts-1",
+                "content": [
+                    {"tool_execution": {"name": "image_generate", "status": "success"}}
+                ],
+            }
+        ]
+    }
+    chunk_files = {
+        "messages": [
+            {
+                "message_id": "m1",
+                "role": "assistant",
+                "tools_state_id": "ts-1",
+                "content": [
+                    {
+                        "files": [
+                            {
+                                "id": "file-stream-1",
+                                "mime": "image/jpeg",
+                                "target": "image",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+    u1 = _collect_responses_updates(
+        chunk_tool,
+        response_processor=processor,
+        response_id="rid",
+        last_tool_state=state,
+    )
+    assert len(u1) == 1
+    u2 = _collect_responses_updates(
+        chunk_files,
+        response_processor=processor,
+        response_id="rid",
+        last_tool_state=state,
+    )
+    assert len(u2) == 1
+    assert u2[0].output_item.get("type") == "image_generation_call"
+    assert u2[0].output_item.get("result") == "file-stream-1"
+
+
+def test_collect_responses_updates_emits_second_update_when_files_same_chunk():
+    processor = ResponseProcessor(logger)
+    state: dict[str, ResponsesToolUpdate] = {}
+    chunk = {
+        "messages": [
+            {
+                "message_id": "m1",
+                "role": "assistant",
+                "tools_state_id": "ts-1",
+                "content": [
+                    {"tool_execution": {"name": "image_generate", "status": "success"}},
+                    {
+                        "files": [
+                            {
+                                "id": "file-same-chunk",
+                                "mime": "image/jpeg",
+                                "target": "image",
+                            }
+                        ]
+                    },
+                ],
+            }
+        ]
+    }
+    updates = _collect_responses_updates(
+        chunk,
+        response_processor=processor,
+        response_id="rid",
+        last_tool_state=state,
+    )
+    assert len(updates) == 2
+    assert updates[0].output_item.get("result") is None
+    assert updates[1].output_item.get("result") == "file-same-chunk"
 
 
 def test_response_processor_process_response_api_v2_marks_incomplete():

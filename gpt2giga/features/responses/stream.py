@@ -336,6 +336,7 @@ async def stream_responses_generator(
     thread_id: Optional[str] = None
     usage: Optional[dict] = None
     finish_reason: Optional[str] = None
+    hydrated_image_results: dict[str, str] = {}
 
     output_items: list[dict] = []
     output_meta: list[dict[str, str]] = []
@@ -489,6 +490,34 @@ async def stream_responses_generator(
             )
         ]
 
+    async def hydrate_image_generation_result(item: dict[str, Any]) -> dict[str, Any]:
+        if item.get("type") != "image_generation_call":
+            return item
+
+        file_id = item.get("result")
+        if not isinstance(file_id, str) or not file_id:
+            return item
+
+        cached_result = hydrated_image_results.get(file_id)
+        if cached_result is not None:
+            item["result"] = cached_result
+            return item
+
+        get_file_content = getattr(giga_client, "aget_file_content", None)
+        if not callable(get_file_content):
+            return item
+
+        try:
+            file_response = await get_file_content(file_id=file_id)
+        except Exception:
+            return item
+
+        file_content = getattr(file_response, "content", None)
+        if isinstance(file_content, str) and file_content:
+            hydrated_image_results[file_id] = file_content
+            item["result"] = file_content
+        return item
+
     try:
         if giga_client is None:
             giga_client = get_gigachat_client(request)
@@ -600,6 +629,9 @@ async def stream_responses_generator(
                     continue
 
                 if isinstance(update, ResponsesToolUpdate):
+                    update.output_item = await hydrate_image_generation_result(
+                        update.output_item
+                    )
                     state = ensure_tool_state(
                         update.tool_key,
                         item_id=update.item_id,
