@@ -1,5 +1,5 @@
-import { banner, card, kpi, renderSetupSteps, renderStatLines, renderTable, } from "../templates.js";
-import { asArray, asRecord, escapeHtml, formatNumber } from "../utils.js";
+import { banner, card, kpi, pill, renderDefinitionList, renderSetupSteps, renderStatLines, } from "../templates.js";
+import { asArray, asRecord, escapeHtml, formatNumber, humanizeField } from "../utils.js";
 export async function renderSystem(app, token) {
     const [runtime, config, routes, setup] = await Promise.all([
         app.api.json("/admin/api/runtime"),
@@ -12,95 +12,112 @@ export async function renderSystem(app, token) {
     }
     const diagnostics = { runtime, config, routes, setup };
     const routeRows = asArray(routes.routes);
-    const routeCounts = summarizeRoutes(routeRows);
+    const routeSummaries = buildRouteSummaries(routeRows);
     const runtimeState = asRecord(runtime.state);
     const configSummary = asRecord(config.summary);
     const warnings = asArray(setup.warnings).map(String);
+    const setupSteps = asArray(setup.wizard_steps).map((step) => ({
+        id: String(step.id ?? ""),
+        label: String(step.label ?? "Step"),
+        description: String(step.description ?? ""),
+        ready: Boolean(step.ready),
+    }));
+    const runtimeProviders = asArray(runtime.enabled_providers).map(String);
+    const serviceState = asRecord(runtimeState.services);
+    const providerState = asRecord(runtimeState.providers);
+    const storeState = asRecord(runtimeState.stores);
     app.setHeroActions(`<button class="button button--secondary" id="copy-diagnostics" type="button">Copy diagnostics JSON</button>`);
     app.setContent(`
     ${kpi("Version", String(runtime.app_version ?? "n/a"))}
     ${kpi("Mode", String(runtime.mode ?? "n/a"))}
     ${kpi("Routes", formatNumber(routeRows.length))}
     ${kpi("Store", String(runtime.runtime_store_backend ?? "n/a"))}
-    ${card("Setup readiness", `
-        <div class="stack">
-          ${warnings.map((warning) => banner(warning, "warn")).join("")}
-          ${renderStatLines([
+    ${card("Operational picture", `
+        <div class="triple-grid">
+          <section class="surface stack">
+            <div class="surface__header">
+              <h4>Setup readiness</h4>
+              ${pill(setup.setup_complete ? "complete" : "in progress", setup.setup_complete ? "good" : "warn")}
+            </div>
+            ${warnings.map((warning) => banner(warning, "warn")).join("")}
+            ${renderStatLines([
         {
             label: "Persisted control-plane config",
             value: setup.persisted ? "yes" : "no",
             tone: setup.persisted ? "good" : "warn",
         },
         {
-            label: "GigaChat credentials ready",
+            label: "GigaChat credentials",
             value: setup.gigachat_ready ? "ready" : "missing",
             tone: setup.gigachat_ready ? "good" : "warn",
         },
         {
-            label: "Security bootstrap ready",
+            label: "Security bootstrap",
             value: setup.security_ready ? "ready" : "pending",
             tone: setup.security_ready ? "good" : "warn",
         },
         {
-            label: "Setup completed",
+            label: "Setup status",
             value: setup.setup_complete ? "complete" : "in progress",
             tone: setup.setup_complete ? "good" : "warn",
         },
     ], "Setup status is unavailable.")}
-          ${renderSetupSteps(asArray(setup.wizard_steps).map((step) => ({
-        id: String(step.id ?? ""),
-        label: String(step.label ?? "Step"),
-        description: String(step.description ?? ""),
-        ready: Boolean(step.ready),
-    })))}
-        </div>
-      `, "panel panel--span-5")}
-    ${card("Runtime state", `
-        <div class="stack">
-          <div>
-            <span class="eyebrow">Services</span>
-            ${renderBooleanSection(asRecord(runtimeState.services))}
-          </div>
-          <div>
-            <span class="eyebrow">Providers</span>
-            ${renderBooleanSection(asRecord(runtimeState.providers))}
-          </div>
-          <div>
-            <span class="eyebrow">Stores</span>
-            ${renderSummarySection(asRecord(runtimeState.stores))}
-          </div>
-        </div>
-      `, "panel panel--span-4")}
-    ${card("Route posture", renderStatLines([
-        { label: "Admin routes", value: formatNumber(routeCounts.admin), tone: "good" },
-        { label: "OpenAI routes", value: formatNumber(routeCounts.openai) },
-        { label: "Anthropic routes", value: formatNumber(routeCounts.anthropic) },
-        { label: "Gemini routes", value: formatNumber(routeCounts.gemini) },
-        { label: "System routes", value: formatNumber(routeCounts.system) },
-        { label: "Docs / OpenAPI", value: runtime.docs_enabled ? "exposed" : "disabled" },
-    ], "Mounted route summary is unavailable."), "panel panel--span-3")}
-    ${card("Effective config summary", Object.entries(configSummary)
-        .map(([sectionName, sectionValue]) => `
-            <div class="stack">
-              <span class="eyebrow">${escapeHtml(sectionName)}</span>
-              ${renderSummarySection(asRecord(sectionValue))}
+          </section>
+          <section class="surface stack">
+            <div class="surface__header">
+              <h4>Runtime state</h4>
+              ${pill(`${formatNumber(countTruthyEntries(serviceState))} ready`, countTruthyEntries(serviceState) ? "good" : "warn")}
             </div>
-          `)
-        .join(""), "panel panel--span-7")}
-    ${card("Runtime posture", renderStatLines([
+            <div>
+              <span class="eyebrow">Services</span>
+              ${renderBooleanSection(serviceState)}
+            </div>
+            <div>
+              <span class="eyebrow">Providers</span>
+              ${renderBooleanSection(providerState)}
+            </div>
+            <div>
+              <span class="eyebrow">Stores</span>
+              ${renderSummarySection(storeState)}
+            </div>
+          </section>
+          <section class="surface stack">
+            <div class="surface__header">
+              <h4>Route coverage</h4>
+              ${pill(`${formatNumber(routeRows.length)} mounted`)}
+            </div>
+            ${renderDefinitionList(routeSummaries.map((group) => ({
+        label: group.label,
+        value: formatNumber(group.count),
+        note: group.samples.length ? group.samples.join(", ") : "No routes in this group.",
+    })), "No mounted routes were reported by the admin API.")}
+          </section>
+        </div>
+        ${setupSteps.length
+        ? `
+                <div class="stack">
+                  <span class="eyebrow">Checklist</span>
+                  ${renderSetupSteps(setupSteps)}
+                </div>
+              `
+        : ""}
+      `, "panel panel--span-12")}
+    ${card("Runtime posture", renderDefinitionList([
         {
             label: "Auth required",
             value: runtime.auth_required ? "yes" : "no",
-            tone: runtime.auth_required ? "good" : "warn",
         },
         {
             label: "Enabled providers",
-            value: asArray(runtime.enabled_providers).map(String).join(", ") || "none",
+            value: runtimeProviders.join(", ") || "none",
+        },
+        {
+            label: "Docs / OpenAPI",
+            value: runtime.docs_enabled ? "exposed" : "disabled",
         },
         {
             label: "Telemetry",
             value: runtime.telemetry_enabled ? "enabled" : "disabled",
-            tone: runtime.telemetry_enabled ? "good" : "default",
         },
         {
             label: "Governance limits",
@@ -111,27 +128,47 @@ export async function renderSystem(app, token) {
             value: runtime.logs_ip_allowlist_enabled ? "configured" : "open",
         },
         {
-            label: "Reasoning / Images",
-            value: `${runtime.enable_reasoning ? "reasoning on" : "reasoning off"} · ${runtime.enable_images ? "images on" : "images off"}`,
+            label: "Reasoning",
+            value: runtime.enable_reasoning ? "enabled" : "disabled",
         },
-    ], "Runtime posture metadata is unavailable."), "panel panel--span-5")}
-    ${card("Mounted routes", renderTable([
-        { label: "Path" },
-        { label: "Methods" },
-        { label: "Tags" },
-        { label: "Schema" },
-    ], routeRows.map((row) => [
-        `<strong>${escapeHtml(String(row.path ?? "n/a"))}</strong><br /><span class="muted">${escapeHtml(String(row.name ?? "unnamed"))}</span>`,
-        escapeHtml(asArray(row.methods).map(String).join(", ") || "n/a"),
-        escapeHtml(asArray(row.tags).map(String).join(", ") || "none"),
-        escapeHtml(row.include_in_schema ? "included" : "hidden"),
-    ]), "No mounted routes were reported by the admin API."), "panel panel--span-7")}
-    ${card("Diagnostics export", `
-        <div class="stack">
-          <p class="muted">This bundle contains runtime, config, setup and route state exactly as reported by the admin APIs.</p>
-          <pre class="code-block code-block--tall" id="system-diagnostics">${escapeHtml(JSON.stringify(diagnostics, null, 2))}</pre>
+        {
+            label: "Images",
+            value: runtime.enable_images ? "enabled" : "disabled",
+        },
+    ], "Runtime posture metadata is unavailable."), "panel panel--span-4")}
+    ${card("Effective config", `
+        <div class="dual-grid">
+          ${Object.entries(configSummary)
+        .map(([sectionName, sectionValue]) => {
+        const sectionRecord = asRecord(sectionValue);
+        return `
+                <section class="surface stack">
+                  <div class="surface__header">
+                    <h4>${escapeHtml(humanizeField(sectionName))}</h4>
+                    ${pill(`${formatNumber(Object.keys(sectionRecord).length)} fields`)}
+                  </div>
+                  ${renderDefinitionList(Object.entries(sectionRecord).map(([key, value]) => ({
+            label: humanizeField(key),
+            value: summarizeValue(value),
+        })), "No summary entries were reported.")}
+                </section>
+              `;
+    })
+        .join("")}
         </div>
-      `, "panel panel--span-5")}
+      `, "panel panel--span-8")}
+    ${card("Diagnostics bundle", `
+        <div class="stack">
+          <p class="muted">
+            Copy the full runtime, config, setup, and route payload when you need a precise
+            snapshot for debugging.
+          </p>
+          <details class="surface details-disclosure">
+            <summary>Preview raw diagnostics JSON</summary>
+            <pre class="code-block code-block--tall" id="system-diagnostics">${escapeHtml(JSON.stringify(diagnostics, null, 2))}</pre>
+          </details>
+        </div>
+      `, "panel panel--span-12")}
   `);
     document.getElementById("copy-diagnostics")?.addEventListener("click", async () => {
         try {
@@ -143,33 +180,49 @@ export async function renderSystem(app, token) {
         }
     });
 }
-function summarizeRoutes(routes) {
-    const counts = {
-        admin: 0,
-        openai: 0,
-        anthropic: 0,
-        gemini: 0,
-        system: 0,
+function buildRouteSummaries(routes) {
+    const groups = {
+        admin: [],
+        openai: [],
+        anthropic: [],
+        gemini: [],
+        system: [],
     };
     routes.forEach((route) => {
         const path = String(route.path ?? "");
-        if (path.startsWith("/admin")) {
-            counts.admin += 1;
-        }
-        else if (path.startsWith("/messages")) {
-            counts.anthropic += 1;
-        }
-        else if (path.startsWith("/v1beta")) {
-            counts.gemini += 1;
-        }
-        else if (path === "/health" || path === "/ping" || path === "/metrics") {
-            counts.system += 1;
-        }
-        else {
-            counts.openai += 1;
-        }
+        groups[classifyRoute(path)].push(path);
     });
-    return counts;
+    const descriptors = [
+        { key: "admin", label: "Admin routes" },
+        { key: "openai", label: "OpenAI routes" },
+        { key: "anthropic", label: "Anthropic routes" },
+        { key: "gemini", label: "Gemini routes" },
+        { key: "system", label: "System routes" },
+    ];
+    return descriptors.map(({ key, label }) => ({
+        key,
+        label,
+        count: groups[key].length,
+        samples: [...new Set(groups[key])].slice(0, 3),
+    }));
+}
+function classifyRoute(path) {
+    if (path.startsWith("/admin")) {
+        return "admin";
+    }
+    if (path.startsWith("/messages")) {
+        return "anthropic";
+    }
+    if (path.startsWith("/v1beta")) {
+        return "gemini";
+    }
+    if (path === "/health" || path === "/ping" || path === "/metrics") {
+        return "system";
+    }
+    return "openai";
+}
+function countTruthyEntries(section) {
+    return Object.values(section).filter(Boolean).length;
 }
 function renderBooleanSection(section) {
     return renderStatLines(Object.entries(section).map(([key, value]) => ({

@@ -557,6 +557,24 @@ code {
   align-items: center;
 }
 
+.details-disclosure {
+  padding: 18px;
+}
+
+.details-disclosure summary {
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.details-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.details-disclosure[open] summary {
+  margin-bottom: 14px;
+}
+
 .code-block + .code-block {
   margin-top: 12px;
 }

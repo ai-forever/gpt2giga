@@ -16,6 +16,12 @@ interface FilesBatchesFilters {
   endpoint: string;
 }
 
+interface FilesBatchesRouteState {
+  selectedFileId: string;
+  selectedBatchId: string;
+  composeInputFileId: string;
+}
+
 interface DefinitionItem {
   label: string;
   value: string;
@@ -156,8 +162,13 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
             <div id="files-batches-summary">
               ${renderDefinitionList(buildIdleSelectionSummary(filteredFiles.length, files.length, filteredBatches.length, batches.length, filters), "No selection yet.")}
             </div>
-            <div class="toolbar" id="files-batches-actions">
-              <span class="muted">Select a file or batch to unlock context-aware actions.</span>
+            <div id="files-batches-workflow">
+              ${renderDefinitionList(buildIdleWorkflowSummary(), "No workflow state reported.")}
+            </div>
+            <div id="files-batches-actions">
+              <div class="toolbar">
+                <span class="muted">Select a file or batch to unlock context-aware actions.</span>
+              </div>
             </div>
             <div id="files-batches-detail-summary">
               ${renderDefinitionList(
@@ -168,7 +179,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
                 "No detail payload loaded.",
               )}
             </div>
-            <pre class="code-block" id="files-batches-detail">No selection yet.</pre>
+            <pre class="code-block code-block--tall" id="files-batches-detail">No selection yet.</pre>
             <div id="files-batches-content-summary">
               ${renderDefinitionList(
                 [
@@ -178,7 +189,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
                 "No file content loaded.",
               )}
             </div>
-            <pre class="code-block" id="files-batches-content">No file content loaded.</pre>
+            <pre class="code-block code-block--tall" id="files-batches-content">No file content loaded.</pre>
           </div>
         </div>
       `,
@@ -245,7 +256,9 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
                           <td>
                             <div class="toolbar">
                               <button class="button button--secondary" data-batch-view="${escapeHtml(id)}" type="button">Inspect</button>
-                              <button class="button button--secondary" ${outputFile ? `data-batch-output="${escapeHtml(outputFile)}"` : "disabled"} type="button">Output</button>
+                              <button class="button button--secondary" ${item.input_file_id ? `data-batch-input="${escapeHtml(id)}"` : 'disabled title="Input file metadata is missing"'} type="button">Input</button>
+                              <button class="button button--secondary" ${item.input_file_id ? `data-batch-input-preview="${escapeHtml(id)}"` : 'disabled title="Input preview is unavailable without an input file"'} type="button">Preview input</button>
+                              <button class="button button--secondary" ${outputFile ? `data-batch-output="${escapeHtml(outputFile)}"` : 'disabled title="Output unlocks when the batch exposes output_file_id"'} type="button">Output</button>
                             </div>
                           </td>
                         </tr>
@@ -264,6 +277,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
   const detailNode = app.pageContent.querySelector<HTMLPreElement>("#files-batches-detail");
   const contentNode = app.pageContent.querySelector<HTMLPreElement>("#files-batches-content");
   const summaryNode = app.pageContent.querySelector<HTMLElement>("#files-batches-summary");
+  const workflowNode = app.pageContent.querySelector<HTMLElement>("#files-batches-workflow");
   const detailSummaryNode = app.pageContent.querySelector<HTMLElement>("#files-batches-detail-summary");
   const contentSummaryNode = app.pageContent.querySelector<HTMLElement>("#files-batches-content-summary");
   const actionNode = app.pageContent.querySelector<HTMLElement>("#files-batches-actions");
@@ -275,6 +289,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
     !detailNode ||
     !contentNode ||
     !summaryNode ||
+    !workflowNode ||
     !detailSummaryNode ||
     !contentSummaryNode ||
     !actionNode ||
@@ -296,6 +311,10 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
     setDefinitionBlock(summaryNode, items, "No selection yet.");
   };
 
+  const setWorkflowSummary = (items: DefinitionItem[]): void => {
+    setDefinitionBlock(workflowNode, items, "No workflow state reported.");
+  };
+
   const setDetailSummary = (items: DefinitionItem[]): void => {
     setDefinitionBlock(detailSummaryNode, items, "No detail payload loaded.");
   };
@@ -305,7 +324,43 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
   };
 
   const updateInspectorActions = (): void => {
-    actionNode.innerHTML = renderInspectorActions(selection);
+    actionNode.innerHTML = renderInspectorActions(selection, fileLookup, batchLookup, batches);
+  };
+
+  const runWorkflowAction = async <T>({
+    button,
+    root,
+    pendingLabel,
+    pendingSummary,
+    successSummary,
+    action,
+  }: {
+    button?: HTMLButtonElement | null;
+    root?: Element | DocumentFragment | null;
+    pendingLabel: string;
+    pendingSummary: DefinitionItem[];
+    successSummary: (result: T) => DefinitionItem[];
+    action: () => Promise<T>;
+  }): Promise<T> => {
+    setWorkflowSummary(pendingSummary);
+    try {
+      const result = await withBusyState({
+        root,
+        button,
+        pendingLabel,
+        action,
+      });
+      setWorkflowSummary(successSummary(result));
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setWorkflowSummary([
+        { label: "Workflow state", value: "Action failed" },
+        { label: "Failed step", value: pendingSummary[0]?.value ?? "Unknown action" },
+        { label: "Reason", value: firstErrorLine(message) },
+      ]);
+      throw error;
+    }
   };
 
   const focusBatchComposer = (fileId: string): void => {
@@ -329,6 +384,15 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
       { label: "Endpoint target", value: "Choose an endpoint in the batch form" },
     ]);
     detailNode.textContent = `Selected ${fileId} as batch input.`;
+    setWorkflowSummary([
+      { label: "Workflow state", value: "Batch input primed" },
+      { label: "Input file", value: fileId },
+      {
+        label: "Next step",
+        value: "Create batch",
+        note: "The batch form is prefilled so you can queue a new job immediately.",
+      },
+    ]);
     updateInspectorActions();
     batchInput.focus();
   };
@@ -339,6 +403,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
     options?: {
       label?: string;
       support?: string;
+      relatedBatch?: BatchRecord | null;
     },
   ): Promise<void> => {
     const source = fileLookup.get(fileId);
@@ -353,21 +418,70 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
       },
     ]);
     contentNode.textContent = "Loading file content…";
-    await withBusyState({
+    await runWorkflowAction({
+      button,
+      root: actionNode,
       button,
       pendingLabel: "Loading…",
+      pendingSummary: [
+        { label: "Workflow state", value: "Loading preview" },
+        { label: "Preview target", value: fileId },
+        { label: "Surface", value: label, note: options?.support ?? String(source?.filename ?? fileId) },
+      ],
+      successSummary: (text) => [
+        { label: "Workflow state", value: "Preview ready" },
+        { label: "Preview target", value: fileId },
+        {
+          label: "Surface",
+          value: label,
+          note: summarizePreviewOutcome(text),
+        },
+      ],
       action: async () => {
         const text = await app.api.text(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
-        setContentSummary(buildContentPreviewSummary(text, fileId, label, options?.support ?? String(source?.filename ?? fileId)));
+        setContentSummary(
+          buildContentPreviewSummary(text, fileId, label, {
+            support: options?.support ?? String(source?.filename ?? fileId),
+            file: source,
+            relatedBatch: options?.relatedBatch ?? null,
+          }),
+        );
         contentNode.textContent = text;
+        return text;
       },
     });
   };
 
   const inspectFile = async (fileId: string, button: HTMLButtonElement | null): Promise<void> => {
-    await withBusyState({
+    await runWorkflowAction({
+      button,
+      root: actionNode,
       button,
       pendingLabel: "Loading…",
+      pendingSummary: [
+        { label: "Workflow state", value: "Loading file metadata" },
+        { label: "Selected file", value: fileId },
+        { label: "Next step", value: "Populate inspector" },
+      ],
+      successSummary: (payload) => {
+        const source = fileLookup.get(fileId) ?? payload;
+        const linkedBatches = getLinkedBatchesForFile(fileId, batches);
+        const latestBatch = linkedBatches[0];
+        return [
+          { label: "Workflow state", value: "File selected" },
+          { label: "Selected file", value: fileId },
+          {
+            label: "Batch context",
+            value: `${linkedBatches.length} linked batch${linkedBatches.length === 1 ? "" : "es"}`,
+            note: latestBatch ? `Latest: ${String(latestBatch.id ?? "unknown")} (${String(latestBatch.status ?? "unknown")})` : "No linked batch records yet.",
+          },
+          {
+            label: "Next step",
+            value: linkedBatches.length ? "Inspect linked batch or preview content" : "Preview content or use for batch",
+            note: String(source.filename ?? fileId),
+          },
+        ];
+      },
       action: async () => {
         const payload = await app.api.json<Record<string, unknown>>(
           `/v1/files/${encodeURIComponent(fileId)}`,
@@ -375,6 +489,8 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
           true,
         );
         const source = fileLookup.get(fileId) ?? payload;
+        const linkedBatches = getLinkedBatchesForFile(fileId, batches);
+        const readyOutputs = linkedBatches.filter((batch) => Boolean(String(batch.output_file_id ?? ""))).length;
         selection = { kind: "file", fileId };
         setSummary([
           { label: "Selection", value: "File" },
@@ -386,14 +502,21 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
             value: formatTimestamp(source.created_at),
             note: formatBytes(source.bytes),
           },
+          {
+            label: "Batch linkage",
+            value: `${linkedBatches.length} linked batch${linkedBatches.length === 1 ? "" : "es"}`,
+            note: readyOutputs ? `${readyOutputs} output file${readyOutputs === 1 ? "" : "s"} ready` : "No completed output linked yet.",
+          },
         ]);
         setDetailSummary([
           { label: "Detail surface", value: "File metadata" },
-          { label: "Linked batches", value: String(countLinkedBatches(fileId, batches)) },
+          { label: "Linked batches", value: String(linkedBatches.length) },
           { label: "Stored bytes", value: formatBytes(source.bytes) },
+          { label: "Status", value: String(source.status ?? "processed") },
         ]);
         detailNode.textContent = JSON.stringify(payload, null, 2);
         updateInspectorActions();
+        return payload;
       },
     });
   };
@@ -402,9 +525,34 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
     batchId: string,
     button: HTMLButtonElement | null,
   ): Promise<void> => {
-    await withBusyState({
+    await runWorkflowAction({
+      button,
+      root: actionNode,
       button,
       pendingLabel: "Loading…",
+      pendingSummary: [
+        { label: "Workflow state", value: "Loading batch metadata" },
+        { label: "Selected batch", value: batchId },
+        { label: "Next step", value: "Populate lifecycle inspector" },
+      ],
+      successSummary: (payload) => {
+        const source = batchLookup.get(batchId) ?? payload;
+        const requestCounts = summarizeBatchRequestCounts(source.request_counts);
+        return [
+          { label: "Workflow state", value: "Batch selected" },
+          { label: "Selected batch", value: batchId },
+          {
+            label: "Lifecycle",
+            value: humanizeBatchLifecycle(source.status),
+            note: requestCounts,
+          },
+          {
+            label: "Next step",
+            value: selection.outputFileId ? "Preview output or inspect input" : "Preview input and refresh status",
+            note: buildBatchActionHint(source),
+          },
+        ];
+      },
       action: async () => {
         const payload = await app.api.json<Record<string, unknown>>(
           `/v1/batches/${encodeURIComponent(batchId)}`,
@@ -436,9 +584,11 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
           { label: "Lifecycle posture", value: humanizeBatchLifecycle(source.status) },
           { label: "Input file", value: inputFileId || "missing" },
           { label: "Output file", value: outputFileId || "not ready" },
+          { label: "Requests", value: summarizeBatchRequestCounts(source.request_counts) },
         ]);
         detailNode.textContent = JSON.stringify(payload, null, 2);
         updateInspectorActions();
+        return payload;
       },
     });
   };

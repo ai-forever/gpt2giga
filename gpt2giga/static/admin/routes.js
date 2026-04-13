@@ -36,8 +36,8 @@ export const PAGE_META = {
     },
     providers: {
         eyebrow: "Providers",
-        title: "Mounted surfaces",
-        subtitle: "See which provider groups are enabled, what routes exist, and which capabilities are live.",
+        title: "Provider surfaces",
+        subtitle: "Enabled providers, backend posture, and live capability coverage in one view.",
     },
     "files-batches": {
         eyebrow: "Files & Batches",
@@ -46,8 +46,8 @@ export const PAGE_META = {
     },
     system: {
         eyebrow: "System",
-        title: "Runtime and setup internals",
-        subtitle: "Config source, mounted routes, and stateful backend diagnostics.",
+        title: "System posture",
+        subtitle: "Readiness, runtime health, effective config, and diagnostics for this gateway.",
     },
 };
 export const PAGE_ORDER = Object.keys(PAGE_META);

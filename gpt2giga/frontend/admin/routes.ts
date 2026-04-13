@@ -45,9 +45,9 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
   },
   providers: {
     eyebrow: "Providers",
-    title: "Mounted surfaces",
+    title: "Provider surfaces",
     subtitle:
-      "See which provider groups are enabled, what routes exist, and which capabilities are live.",
+      "Enabled providers, backend posture, and live capability coverage in one view.",
   },
   "files-batches": {
     eyebrow: "Files & Batches",
@@ -57,9 +57,9 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
   },
   system: {
     eyebrow: "System",
-    title: "Runtime and setup internals",
+    title: "System posture",
     subtitle:
-      "Config source, mounted routes, and stateful backend diagnostics.",
+      "Readiness, runtime health, effective config, and diagnostics for this gateway.",
   },
 };
 
