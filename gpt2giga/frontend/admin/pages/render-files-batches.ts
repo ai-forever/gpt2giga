@@ -22,6 +22,23 @@ interface FilesBatchesRouteState {
   composeInputFileId: string;
 }
 
+interface FilePreview {
+  kind: "text" | "image" | "binary";
+  filename: string;
+  mimeType: string;
+  textFallback: string;
+  byteLength: number;
+  lineCount: number;
+  formatLabel: string;
+  formatNote: string;
+  contentKind?: string;
+  contentKindNote?: string;
+  sampleLabel?: string;
+  sampleValue?: string;
+  sampleNote?: string;
+  dimensionsNote?: string;
+}
+
 interface DefinitionItem {
   label: string;
   value: string;
@@ -189,6 +206,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
                 "No file content loaded.",
               )}
             </div>
+            <div id="files-batches-media"></div>
             <pre class="code-block code-block--tall" id="files-batches-content">No file content loaded.</pre>
           </div>
         </div>
@@ -276,6 +294,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
 
   const detailNode = app.pageContent.querySelector<HTMLPreElement>("#files-batches-detail");
   const contentNode = app.pageContent.querySelector<HTMLPreElement>("#files-batches-content");
+  const mediaNode = app.pageContent.querySelector<HTMLElement>("#files-batches-media");
   const summaryNode = app.pageContent.querySelector<HTMLElement>("#files-batches-summary");
   const workflowNode = app.pageContent.querySelector<HTMLElement>("#files-batches-workflow");
   const detailSummaryNode = app.pageContent.querySelector<HTMLElement>("#files-batches-detail-summary");
@@ -288,6 +307,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
   if (
     !detailNode ||
     !contentNode ||
+    !mediaNode ||
     !summaryNode ||
     !workflowNode ||
     !detailSummaryNode ||
@@ -302,6 +322,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
   }
 
   let selection: InspectorSelection = { kind: "idle" };
+  let previewObjectUrl: string | null = null;
 
   const setDefinitionBlock = (node: HTMLElement, items: DefinitionItem[], emptyMessage: string): void => {
     node.innerHTML = renderDefinitionList(items, emptyMessage);
@@ -321,6 +342,14 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
 
   const setContentSummary = (items: DefinitionItem[]): void => {
     setDefinitionBlock(contentSummaryNode, items, "No file content loaded.");
+  };
+
+  const clearMediaPreview = (): void => {
+    mediaNode.innerHTML = "";
+    if (previewObjectUrl) {
+      URL.revokeObjectURL(previewObjectUrl);
+      previewObjectUrl = null;
+    }
   };
 
   const updateInspectorActions = (): void => {
@@ -417,9 +446,9 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
         note: options?.support ?? String(source?.filename ?? fileId),
       },
     ]);
+    clearMediaPreview();
     contentNode.textContent = "Loading file content…";
     await runWorkflowAction({
-      button,
       root: actionNode,
       button,
       pendingLabel: "Loading…",
@@ -428,33 +457,50 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
         { label: "Preview target", value: fileId },
         { label: "Surface", value: label, note: options?.support ?? String(source?.filename ?? fileId) },
       ],
-      successSummary: (text) => [
+      successSummary: (preview) => [
         { label: "Workflow state", value: "Preview ready" },
         { label: "Preview target", value: fileId },
         {
           label: "Surface",
           value: label,
-          note: summarizePreviewOutcome(text),
+          note: summarizePreviewOutcome(preview),
         },
       ],
       action: async () => {
-        const text = await app.api.text(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
+        const response = await app.api.raw(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
         setContentSummary(
-          buildContentPreviewSummary(text, fileId, label, {
+          buildContentPreviewSummary(preview, fileId, label, {
             support: options?.support ?? String(source?.filename ?? fileId),
             file: source,
             relatedBatch: options?.relatedBatch ?? null,
           }),
         );
-        contentNode.textContent = text;
-        return text;
+        if (preview.kind === "image") {
+          const blob = new Blob([bytes], { type: preview.mimeType });
+          previewObjectUrl = URL.createObjectURL(blob);
+          mediaNode.innerHTML = `
+            <figure class="surface">
+              <img
+                alt="${escapeHtml(preview.filename)}"
+                src="${escapeHtml(previewObjectUrl)}"
+                style="display:block;max-width:100%;height:auto;border-radius:12px;"
+              />
+            </figure>
+          `;
+          contentNode.textContent = preview.textFallback;
+        } else {
+          clearMediaPreview();
+          contentNode.textContent = preview.textFallback;
+        }
+        return preview;
       },
     });
   };
 
   const inspectFile = async (fileId: string, button: HTMLButtonElement | null): Promise<void> => {
     await runWorkflowAction({
-      button,
       root: actionNode,
       button,
       pendingLabel: "Loading…",
@@ -526,7 +572,6 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
     button: HTMLButtonElement | null,
   ): Promise<void> => {
     await runWorkflowAction({
-      button,
       root: actionNode,
       button,
       pendingLabel: "Loading…",
@@ -641,10 +686,24 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
         ? submitter
         : form.querySelector<HTMLButtonElement>('button[type="submit"]');
 
-    await withBusyState({
+    await runWorkflowAction({
       root: form,
       button,
       pendingLabel: "Uploading…",
+      pendingSummary: [
+        { label: "Workflow state", value: "Uploading file" },
+        { label: "Purpose", value: fields.purpose.value },
+        { label: "Source", value: upload.name, note: formatBytes(upload.size) },
+      ],
+      successSummary: (response) => [
+        { label: "Workflow state", value: "File uploaded" },
+        { label: "File id", value: String(response.id ?? "unknown") },
+        {
+          label: "Next step",
+          value: "Inspect or use for batch",
+          note: "The page refreshes into the new file selection so the inspector stays on the fresh upload.",
+        },
+      ],
       action: async () => {
         const body = new FormData();
         body.set("purpose", fields.purpose.value);
@@ -655,7 +714,19 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
           true,
         );
         app.queueAlert(`Uploaded file ${String(response.id ?? "")}.`, "info");
+        const routeState = readFilesBatchesRouteState();
+        window.history.replaceState(
+          {},
+          "",
+          buildFilesBatchesUrl(filters, {
+            ...routeState,
+            selectedFileId: String(response.id ?? ""),
+            composeInputFileId: String(response.id ?? ""),
+            selectedBatchId: "",
+          }),
+        );
         await app.render("files-batches");
+        return response;
       },
     });
   });
@@ -684,10 +755,24 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
         ? submitter
         : form.querySelector<HTMLButtonElement>('button[type="submit"]');
 
-    await withBusyState({
+    await runWorkflowAction({
       root: form,
       button,
       pendingLabel: "Creating…",
+      pendingSummary: [
+        { label: "Workflow state", value: "Creating batch" },
+        { label: "Input file", value: fields.input_file_id.value.trim() || "missing" },
+        { label: "Endpoint", value: fields.endpoint.value },
+      ],
+      successSummary: (response) => [
+        { label: "Workflow state", value: "Batch created" },
+        { label: "Batch id", value: String(response.id ?? "unknown") },
+        {
+          label: "Next step",
+          value: "Inspect lifecycle",
+          note: "The page refreshes into the new batch selection so output polling starts from the inspector.",
+        },
+      ],
       action: async () => {
         const response = await app.api.json<Record<string, unknown>>(
           "/v1/batches",
@@ -706,7 +791,18 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
           `Created batch ${String(response.id ?? "")} for ${String(response.endpoint ?? "")}.`,
           "info",
         );
+        const routeState = readFilesBatchesRouteState();
+        window.history.replaceState(
+          {},
+          "",
+          buildFilesBatchesUrl(filters, {
+            ...routeState,
+            selectedBatchId: String(response.id ?? ""),
+            selectedFileId: "",
+          }),
+        );
         await app.render("files-batches");
+        return response;
       },
     });
   });
@@ -744,15 +840,67 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
       await inspectFile(selection.inputFileId, button);
       return;
     }
+    if (action === "preview-batch-input" && selection.inputFileId && selection.batchId) {
+      await previewFileContent(selection.inputFileId, button, {
+        label: "Batch input preview",
+        support: `Batch ${selection.batchId}`,
+        relatedBatch: batchLookup.get(selection.batchId) ?? null,
+      });
+      return;
+    }
+    if (action === "use-batch-input" && selection.inputFileId) {
+      focusBatchComposer(selection.inputFileId);
+      return;
+    }
     if (action === "batch-output" && selection.outputFileId && selection.batchId) {
       await previewFileContent(selection.outputFileId, button, {
         label: "Batch output preview",
         support: `Batch ${selection.batchId}`,
+        relatedBatch: batchLookup.get(selection.batchId) ?? null,
       });
       return;
     }
     if (action === "inspect-output-file" && selection.outputFileId) {
       await inspectFile(selection.outputFileId, button);
+      return;
+    }
+    if (action === "inspect-linked-batch" && selection.fileId) {
+      const latestBatch = getLatestLinkedBatch(selection.fileId, batches);
+      if (latestBatch) {
+        await inspectBatch(String(latestBatch.id ?? ""), button);
+      }
+      return;
+    }
+    if (action === "preview-linked-output" && selection.fileId) {
+      const latestOutputBatch = getLatestOutputBatch(selection.fileId, batches);
+      const outputFileId = String(latestOutputBatch?.output_file_id ?? "");
+      if (!outputFileId) {
+        return;
+      }
+      selection = {
+        kind: "batch",
+        batchId: String(latestOutputBatch?.id ?? ""),
+        inputFileId: String(latestOutputBatch?.input_file_id ?? "") || undefined,
+        outputFileId,
+      };
+      setSummary([
+        { label: "Selection", value: "Linked batch output" },
+        { label: "Output file", value: outputFileId },
+        { label: "Batch id", value: String(latestOutputBatch?.id ?? "unknown") },
+        { label: "Endpoint", value: String(latestOutputBatch?.endpoint ?? "n/a") },
+      ]);
+      setDetailSummary([
+        { label: "Detail surface", value: "Latest linked output" },
+        { label: "Batch id", value: String(latestOutputBatch?.id ?? "unknown") },
+        { label: "Output file", value: outputFileId },
+        { label: "Requests", value: summarizeBatchRequestCounts(latestOutputBatch?.request_counts) },
+      ]);
+      updateInspectorActions();
+      await previewFileContent(outputFileId, button, {
+        label: "Latest linked output",
+        support: `Batch ${String(latestOutputBatch?.id ?? "unknown")}`,
+        relatedBatch: latestOutputBatch ?? null,
+      });
     }
   });
 
@@ -794,9 +942,15 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
         return;
       }
       await withBusyState({
+        root: item.parentElement,
         button: item instanceof HTMLButtonElement ? item : null,
         pendingLabel: "Deleting…",
         action: async () => {
+          setWorkflowSummary([
+            { label: "Workflow state", value: "Deleting file" },
+            { label: "File id", value: fileId },
+            { label: "Next step", value: "Refresh inventory" },
+          ]);
           await app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
           app.queueAlert(`Deleted file ${fileId}.`, "info");
           await app.render("files-batches");
@@ -839,9 +993,62 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
       await previewFileContent(fileId, item instanceof HTMLButtonElement ? item : null, {
         label: "Batch output preview",
         support: `Batch ${String(batch?.id ?? "unknown")}`,
+        relatedBatch: batch ?? null,
       });
     });
   });
+
+  app.pageContent.querySelectorAll<HTMLElement>("[data-batch-input]").forEach((item) => {
+    item.addEventListener("click", async () => {
+      const batchId = item.dataset.batchInput;
+      const batch = batchLookup.get(batchId ?? "");
+      const inputFileId = String(batch?.input_file_id ?? "");
+      if (!inputFileId) {
+        return;
+      }
+      await inspectFile(inputFileId, item instanceof HTMLButtonElement ? item : null);
+    });
+  });
+
+  app.pageContent.querySelectorAll<HTMLElement>("[data-batch-input-preview]").forEach((item) => {
+    item.addEventListener("click", async () => {
+      const batchId = item.dataset.batchInputPreview;
+      const batch = batchLookup.get(batchId ?? "");
+      const inputFileId = String(batch?.input_file_id ?? "");
+      if (!inputFileId) {
+        return;
+      }
+      selection = {
+        kind: "batch",
+        batchId: String(batch?.id ?? ""),
+        inputFileId: inputFileId || undefined,
+        outputFileId: String(batch?.output_file_id ?? "") || undefined,
+      };
+      updateInspectorActions();
+      await previewFileContent(inputFileId, item instanceof HTMLButtonElement ? item : null, {
+        label: "Batch input preview",
+        support: `Batch ${String(batch?.id ?? "unknown")}`,
+        relatedBatch: batch ?? null,
+      });
+    });
+  });
+
+  const routeState = readFilesBatchesRouteState();
+  if (routeState.composeInputFileId) {
+    batchInput.value = routeState.composeInputFileId;
+    setWorkflowSummary([
+      { label: "Workflow state", value: "Batch composer primed" },
+      { label: "Input file", value: routeState.composeInputFileId },
+      { label: "Next step", value: "Choose endpoint and create batch" },
+    ]);
+  }
+  if (routeState.selectedBatchId && batchLookup.has(routeState.selectedBatchId)) {
+    await inspectBatch(routeState.selectedBatchId, null);
+    return;
+  }
+  if (routeState.selectedFileId && fileLookup.has(routeState.selectedFileId)) {
+    await inspectFile(routeState.selectedFileId, null);
+  }
 }
 
 function buildIdleSelectionSummary(
@@ -859,31 +1066,129 @@ function buildIdleSelectionSummary(
   ];
 }
 
-function renderInspectorActions(selection: InspectorSelection): string {
+function buildIdleWorkflowSummary(): DefinitionItem[] {
+  return [
+    { label: "Workflow state", value: "Idle" },
+    { label: "Current posture", value: "No pending file or batch action" },
+    {
+      label: "Next step",
+      value: "Inspect inventory",
+      note: "Select a file or batch to unlock preview and lifecycle actions.",
+    },
+  ];
+}
+
+function renderInspectorActions(
+  selection: InspectorSelection,
+  fileLookup: Map<string, FileRecord>,
+  batchLookup: Map<string, BatchRecord>,
+  batches: BatchRecord[],
+): string {
   if (selection.kind === "file" && selection.fileId) {
+    const source = fileLookup.get(selection.fileId);
+    const latestBatch = getLatestLinkedBatch(selection.fileId, batches);
+    const latestOutputBatch = getLatestOutputBatch(selection.fileId, batches);
     return `
-      <button class="button button--secondary" data-inspector-action="inspect-file" type="button">Refresh metadata</button>
-      <button class="button button--secondary" data-inspector-action="preview-file" type="button">Preview content</button>
-      <button class="button" data-inspector-action="use-file" type="button">Use for batch</button>
+      <div class="toolbar">
+        <button class="button button--secondary" data-inspector-action="inspect-file" type="button">Refresh metadata</button>
+        <button class="button button--secondary" data-inspector-action="preview-file" type="button">Preview content</button>
+        <button class="button" data-inspector-action="use-file" type="button">Use for batch</button>
+        <button class="button button--secondary" ${latestBatch ? 'data-inspector-action="inspect-linked-batch"' : 'disabled title="No linked batch record yet"'} type="button">Inspect latest batch</button>
+        <button class="button button--secondary" ${latestOutputBatch ? 'data-inspector-action="preview-linked-output"' : 'disabled title="No linked output file yet"'} type="button">Preview latest output</button>
+      </div>
+      <p class="muted">
+        ${escapeHtml(
+          source
+            ? `${String(source.filename ?? selection.fileId)} can feed a new batch immediately. Linked batch actions unlock as downstream jobs appear.`
+            : "This file can be previewed, queued as batch input, or handed off into the latest linked batch context.",
+        )}
+      </p>
     `;
   }
   if (selection.kind === "batch" && selection.batchId) {
+    const source = batchLookup.get(selection.batchId);
     return `
-      <button class="button button--secondary" data-inspector-action="inspect-batch" type="button">Refresh batch</button>
-      <button class="button button--secondary" ${selection.inputFileId ? 'data-inspector-action="batch-input"' : "disabled"} type="button">Inspect input</button>
-      <button class="button button--secondary" ${selection.outputFileId ? 'data-inspector-action="inspect-output-file"' : "disabled"} type="button">Inspect output file</button>
-      <button class="button" ${selection.outputFileId ? 'data-inspector-action="batch-output"' : "disabled"} type="button">Preview output</button>
+      <div class="toolbar">
+        <button class="button button--secondary" data-inspector-action="inspect-batch" type="button">Refresh batch</button>
+        <button class="button button--secondary" ${selection.inputFileId ? 'data-inspector-action="batch-input"' : 'disabled title="Input file metadata is missing"'} type="button">Inspect input</button>
+        <button class="button button--secondary" ${selection.inputFileId ? 'data-inspector-action="preview-batch-input"' : 'disabled title="Input preview is unavailable without an input file"'} type="button">Preview input</button>
+        <button class="button button--secondary" ${selection.inputFileId ? 'data-inspector-action="use-batch-input"' : 'disabled title="Input file is required to retry this batch"'} type="button">Queue with input</button>
+        <button class="button button--secondary" ${selection.outputFileId ? 'data-inspector-action="inspect-output-file"' : 'disabled title="Output metadata appears after the provider creates output_file_id"'} type="button">Inspect output file</button>
+        <button class="button" ${selection.outputFileId ? 'data-inspector-action="batch-output"' : 'disabled title="Output preview unlocks after completion"'} type="button">Preview output</button>
+      </div>
+      <p class="muted">${escapeHtml(buildBatchActionHint(source))}</p>
     `;
   }
-  return `<span class="muted">Select a file or batch to unlock context-aware actions.</span>`;
+  return `
+    <div class="toolbar">
+      <span class="muted">Select a file or batch to unlock context-aware actions.</span>
+    </div>
+  `;
 }
 
 function buildContentPreviewSummary(
-  text: string,
+  preview: FilePreview,
   fileId: string,
   label: string,
-  support?: string,
+  options?: {
+    support?: string;
+    file?: FileRecord;
+    relatedBatch?: BatchRecord | null;
+  },
 ): DefinitionItem[] {
+  const summary: DefinitionItem[] = [
+    { label: "Preview surface", value: label, note: options?.support },
+    { label: "File id", value: fileId },
+    { label: "Format", value: preview.formatLabel, note: preview.formatNote },
+    {
+      label: preview.kind === "image" ? "Binary size" : "Payload size",
+      value:
+        preview.kind === "image"
+          ? formatBytes(preview.byteLength)
+          : `${preview.lineCount} line${preview.lineCount === 1 ? "" : "s"}`,
+      note:
+        preview.kind === "image"
+          ? preview.dimensionsNote ?? "Rendered as image preview."
+          : formatBytes(preview.byteLength),
+    },
+  ];
+
+  if (preview.contentKind) {
+    summary.push({
+      label: "Content posture",
+      value: preview.contentKind,
+      note: preview.contentKindNote,
+    });
+  }
+
+  if (preview.sampleValue) {
+    summary.push({
+      label: preview.sampleLabel ?? "Sample",
+      value: preview.sampleValue,
+      note: preview.sampleNote,
+    });
+  }
+
+  if (options?.file) {
+    summary.push({
+      label: "Stored file",
+      value: String(options.file.filename ?? fileId),
+      note: String(options.file.purpose ?? "user_data"),
+    });
+  }
+
+  if (options?.relatedBatch) {
+    summary.push({
+      label: "Batch context",
+      value: String(options.relatedBatch.id ?? "unknown"),
+      note: String(options.relatedBatch.status ?? "unknown"),
+    });
+  }
+
+  return summary;
+}
+
+function analyzeContentText(text: string): Omit<FilePreview, "kind" | "filename" | "mimeType" | "textFallback" | "dimensionsNote"> {
   const lines = text ? text.split(/\r?\n/).length : 0;
   const nonEmptyLines = text
     .split(/\r?\n/)
@@ -893,6 +1198,11 @@ function buildContentPreviewSummary(
   const json = trimmed ? safeJsonParse(trimmed, INVALID_JSON) : INVALID_JSON;
   let formatLabel = "text";
   let formatNote = lines <= 1 ? "single payload" : "plain text or JSON fragments";
+  let contentKind: string | undefined;
+  let contentKindNote: string | undefined;
+  let sampleLabel: string | undefined;
+  let sampleValue: string | undefined;
+  let sampleNote: string | undefined;
 
   if (json !== INVALID_JSON) {
     if (Array.isArray(json)) {
@@ -900,9 +1210,16 @@ function buildContentPreviewSummary(
       formatLabel = "json array";
       formatNote = `${records.length} top-level item${records.length === 1 ? "" : "s"}`;
     } else if (json && typeof json === "object") {
-      const fieldCount = Object.keys(json as Record<string, unknown>).length;
+      const objectValue = json as Record<string, unknown>;
+      const fieldCount = Object.keys(objectValue).length;
       formatLabel = "json object";
       formatNote = `${fieldCount} top-level field${fieldCount === 1 ? "" : "s"}`;
+      sampleLabel = "Top-level keys";
+      sampleValue = Object.keys(objectValue).slice(0, 3).join(", ") || "none";
+      if ("data" in objectValue && Array.isArray(objectValue.data)) {
+        contentKind = "List payload";
+        contentKindNote = `${objectValue.data.length} entries`;
+      }
     } else {
       formatLabel = "json scalar";
     }
@@ -910,20 +1227,43 @@ function buildContentPreviewSummary(
     nonEmptyLines.length > 0 &&
     nonEmptyLines.every((line) => safeJsonParse(line, INVALID_JSON) !== INVALID_JSON)
   ) {
+    const parsedLines: unknown[] = nonEmptyLines
+      .map((line) => safeJsonParse(line, INVALID_JSON))
+      .filter((row) => row !== INVALID_JSON);
     formatLabel = "jsonl";
     formatNote = `${nonEmptyLines.length} record${nonEmptyLines.length === 1 ? "" : "s"}`;
+    const inputRows = parsedLines.filter((row): row is Record<string, unknown> => isBatchInputRow(row));
+    const outputRows = parsedLines.filter((row): row is Record<string, unknown> => isBatchOutputRow(row));
+    if (inputRows.length === parsedLines.length) {
+      const sampleRow = inputRows[0] ?? {};
+      contentKind = "Batch input";
+      contentKindNote = `${inputRows.length} queued request${inputRows.length === 1 ? "" : "s"}`;
+      sampleLabel = "Sample request";
+      sampleValue = String(sampleRow.custom_id ?? sampleRow.id ?? "batch-request");
+      sampleNote = `${String(sampleRow.method ?? "POST")} ${String(sampleRow.url ?? "/v1/chat/completions")}`;
+    } else if (outputRows.length === parsedLines.length) {
+      const errorCount = outputRows.filter((row) => Boolean(row.error)).length;
+      const successCount = outputRows.length - errorCount;
+      const sampleRow = outputRows[0] ?? {};
+      contentKind = "Batch output";
+      contentKindNote = `${successCount} success · ${errorCount} error`;
+      sampleLabel = "Sample result";
+      sampleValue = String(sampleRow.custom_id ?? sampleRow.id ?? "batch-result");
+      sampleNote = errorCount ? "Contains at least one failed row." : "Rows decode cleanly into transformed results.";
+    }
   }
 
-  return [
-    { label: "Preview surface", value: label, note: support },
-    { label: "File id", value: fileId },
-    { label: "Format", value: formatLabel, note: formatNote },
-    {
-      label: "Payload size",
-      value: `${lines} line${lines === 1 ? "" : "s"}`,
-      note: formatBytes(new TextEncoder().encode(text).length),
-    },
-  ];
+  return {
+    formatLabel,
+    formatNote,
+    lineCount: lines,
+    byteLength: new TextEncoder().encode(text).length,
+    contentKind,
+    contentKindNote,
+    sampleLabel,
+    sampleValue,
+    sampleNote,
+  };
 }
 
 function readFilesBatchesFilters(): FilesBatchesFilters {
@@ -936,12 +1276,27 @@ function readFilesBatchesFilters(): FilesBatchesFilters {
   };
 }
 
-function buildFilesBatchesUrl(filters: FilesBatchesFilters): string {
+function readFilesBatchesRouteState(): FilesBatchesRouteState {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    selectedFileId: params.get("selected_file") || "",
+    selectedBatchId: params.get("selected_batch") || "",
+    composeInputFileId: params.get("compose_input") || "",
+  };
+}
+
+function buildFilesBatchesUrl(
+  filters: FilesBatchesFilters,
+  routeState?: Partial<FilesBatchesRouteState>,
+): string {
   const params = new URLSearchParams();
   setIfPresent(params, "query", filters.query);
   setIfPresent(params, "purpose", filters.purpose);
   setIfPresent(params, "batch_status", filters.batchStatus);
   setIfPresent(params, "endpoint", filters.endpoint);
+  setIfPresent(params, "selected_file", routeState?.selectedFileId ?? "");
+  setIfPresent(params, "selected_batch", routeState?.selectedBatchId ?? "");
+  setIfPresent(params, "compose_input", routeState?.composeInputFileId ?? "");
   const query = params.toString();
   return query ? `/admin/files-batches?${query}` : "/admin/files-batches";
 }
@@ -1010,12 +1365,224 @@ function setIfPresent(params: URLSearchParams, key: string, value: string): void
   }
 }
 
-function countLinkedBatches(fileId: string, batches: BatchRecord[]): number {
-  return batches.filter((batch) => {
-    const inputFileId = String(batch.input_file_id ?? "");
-    const outputFileId = String(batch.output_file_id ?? "");
-    return inputFileId === fileId || outputFileId === fileId;
-  }).length;
+function firstErrorLine(message: string): string {
+  return message.split("\n").map((line) => line.trim()).find(Boolean) ?? "Unknown error";
+}
+
+function summarizePreviewOutcome(preview: FilePreview): string {
+  return [
+    preview.formatLabel,
+    preview.contentKind,
+    preview.kind === "image"
+      ? formatBytes(preview.byteLength)
+      : `${preview.lineCount} line${preview.lineCount === 1 ? "" : "s"}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function buildFilePreview(bytes: Uint8Array, filename: string): FilePreview {
+  const imageMimeType = detectImageMimeType(bytes, filename);
+  if (imageMimeType) {
+    return {
+      kind: "image",
+      filename,
+      mimeType: imageMimeType,
+      textFallback: `Binary image preview loaded for ${filename}.\nMIME type: ${imageMimeType}\nSize: ${formatBytes(bytes.length)}`,
+      byteLength: bytes.length,
+      lineCount: 0,
+      formatLabel: "image",
+      formatNote: imageMimeType,
+      contentKind: "Image asset",
+      contentKindNote: "Rendered inline so the operator can inspect the payload without opening raw bytes.",
+      sampleLabel: "Filename",
+      sampleValue: filename,
+      dimensionsNote: "Image preview available inline.",
+    };
+  }
+
+  const decoded = decodeBytesAsText(bytes);
+  if (decoded.isText) {
+    const analysis = analyzeContentText(decoded.text);
+    return {
+      kind: "text",
+      filename,
+      mimeType: inferTextMimeType(filename, decoded.text),
+      textFallback: decoded.text,
+      ...analysis,
+    };
+  }
+
+  return {
+    kind: "binary",
+    filename,
+    mimeType: "application/octet-stream",
+    textFallback: renderBinaryPreview(bytes),
+    byteLength: bytes.length,
+    lineCount: 1,
+    formatLabel: "binary",
+    formatNote: "Non-text payload",
+    contentKind: "Binary asset",
+    contentKindNote: "Rendered as a short byte preview instead of lossy text decoding.",
+    sampleLabel: "Magic bytes",
+    sampleValue: renderHexPrefix(bytes),
+    sampleNote: filename,
+  };
+}
+
+function detectImageMimeType(bytes: Uint8Array, filename: string): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  if (bytes.length >= 6) {
+    const header = String.fromCharCode(...bytes.slice(0, 6));
+    if (header === "GIF87a" || header === "GIF89a") {
+      return "image/gif";
+    }
+  }
+
+  const lowerFilename = filename.toLowerCase();
+  if (lowerFilename.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+
+  return null;
+}
+
+function decodeBytesAsText(bytes: Uint8Array): { isText: boolean; text: string } {
+  const sample = bytes.slice(0, Math.min(bytes.length, 2048));
+  const binaryLike = sample.filter((value) => value === 0 || value < 0x09).length;
+  if (sample.length > 0 && binaryLike / sample.length > 0.02) {
+    return { isText: false, text: "" };
+  }
+
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  const replacementCount = Array.from(text).filter((char) => char === "\ufffd").length;
+  const ratio = text.length ? replacementCount / text.length : 0;
+  return { isText: ratio < 0.02, text };
+}
+
+function inferTextMimeType(filename: string, text: string): string {
+  const lowerFilename = filename.toLowerCase();
+  if (lowerFilename.endsWith(".jsonl")) {
+    return "application/jsonl";
+  }
+  if (lowerFilename.endsWith(".json")) {
+    return "application/json";
+  }
+  if (lowerFilename.endsWith(".svg") || text.trimStart().startsWith("<svg")) {
+    return "image/svg+xml";
+  }
+  return "text/plain";
+}
+
+function renderBinaryPreview(bytes: Uint8Array): string {
+  return [
+    "Binary file preview",
+    `Size: ${formatBytes(bytes.length)}`,
+    `Magic bytes: ${renderHexPrefix(bytes)}`,
+    "Raw text preview is suppressed to avoid mojibake.",
+  ].join("\n");
+}
+
+function renderHexPrefix(bytes: Uint8Array, limit = 16): string {
+  return Array.from(bytes.slice(0, limit))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join(" ");
+}
+
+function getLinkedBatchesForFile(fileId: string, batches: BatchRecord[]): BatchRecord[] {
+  return batches
+    .filter((batch) => {
+      const inputFileId = String(batch.input_file_id ?? "");
+      const outputFileId = String(batch.output_file_id ?? "");
+      return inputFileId === fileId || outputFileId === fileId;
+    })
+    .sort((left, right) => Number(right.created_at ?? 0) - Number(left.created_at ?? 0));
+}
+
+function getLatestLinkedBatch(fileId: string, batches: BatchRecord[]): BatchRecord | null {
+  return getLinkedBatchesForFile(fileId, batches)[0] ?? null;
+}
+
+function getLatestOutputBatch(fileId: string, batches: BatchRecord[]): BatchRecord | null {
+  return (
+    getLinkedBatchesForFile(fileId, batches).find((batch) => Boolean(String(batch.output_file_id ?? ""))) ??
+    null
+  );
+}
+
+function summarizeBatchRequestCounts(value: unknown): string {
+  if (!value || typeof value !== "object") {
+    return "counts unavailable";
+  }
+  const counts = value as Record<string, unknown>;
+  const total = Number(counts.total ?? counts.request_count ?? 0);
+  const completed = Number(counts.completed ?? counts.succeeded ?? 0);
+  const failed = Number(counts.failed ?? counts.error ?? 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    return "counts unavailable";
+  }
+  return `${completed}/${total} completed${failed > 0 ? ` · ${failed} failed` : ""}`;
+}
+
+function buildBatchActionHint(batch: BatchRecord | undefined): string {
+  if (!batch) {
+    return "Refresh this batch to load lifecycle posture and linked input/output files.";
+  }
+  const status = String(batch.status ?? "unknown");
+  const outputFileId = String(batch.output_file_id ?? "");
+  if (outputFileId) {
+    return `Batch ${String(batch.id ?? "unknown")} is ${status}; output preview is available from ${outputFileId}.`;
+  }
+  if (isAttentionBatchStatus(status)) {
+    return `Batch ${String(batch.id ?? "unknown")} needs operator follow-up. Inspect the input payload and refresh metadata for the latest error posture.`;
+  }
+  return `Batch ${String(batch.id ?? "unknown")} is ${status}. Preview the input payload now and refresh until output_file_id appears.`;
+}
+
+function isBatchInputRow(value: unknown): boolean {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      ("body" in (value as Record<string, unknown>) || "request" in (value as Record<string, unknown>)),
+  );
+}
+
+function isBatchOutputRow(value: unknown): boolean {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      ("response" in (value as Record<string, unknown>) ||
+        "error" in (value as Record<string, unknown>) ||
+        "custom_id" in (value as Record<string, unknown>)),
+  );
 }
 
 function isAttentionBatchStatus(value: unknown): boolean {
