@@ -96,6 +96,63 @@ def test_gigachat_settings_update_is_persisted(tmp_path, monkeypatch):
     assert "gigachat-secret" not in raw
 
 
+def test_gigachat_settings_partial_update_preserves_existing_secret(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    first_response = client.put(
+        "/admin/api/settings/gigachat",
+        json={
+            "credentials": "gigachat-secret",
+            "scope": "GIGACHAT_API_PERS",
+            "model": "GigaChat-Max",
+            "verify_ssl_certs": True,
+        },
+    )
+    assert first_response.status_code == 200
+
+    second_response = client.put(
+        "/admin/api/settings/gigachat",
+        json={
+            "model": "GigaChat-Pro",
+        },
+    )
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert second_payload["values"]["model"] == "GigaChat-Pro"
+    assert second_payload["values"]["credentials_configured"] is True
+
+    get_response = client.get("/admin/api/settings/gigachat")
+    assert get_response.status_code == 200
+    assert get_response.json()["values"]["credentials_configured"] is True
+
+
+def test_gigachat_settings_null_secret_clears_existing_secret(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    first_response = client.put(
+        "/admin/api/settings/gigachat",
+        json={
+            "credentials": "gigachat-secret",
+            "scope": "GIGACHAT_API_PERS",
+        },
+    )
+    assert first_response.status_code == 200
+
+    clear_response = client.put(
+        "/admin/api/settings/gigachat",
+        json={
+            "credentials": None,
+        },
+    )
+    assert clear_response.status_code == 200
+    clear_payload = clear_response.json()
+    assert clear_payload["values"]["credentials_configured"] is False
+
+
 def test_gigachat_settings_test_endpoint_reports_success(tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
     app = make_app()

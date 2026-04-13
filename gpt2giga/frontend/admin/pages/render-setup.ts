@@ -1,7 +1,15 @@
 import type { AdminApp } from "../app.js";
-import { collectGigachatPayload } from "../forms.js";
-import { banner, card, pill, renderSetupSteps } from "../templates.js";
+import { bindValidityReset, collectGigachatPayload, withBusyState } from "../forms.js";
+import { banner, card, pill, renderSecretField, renderSetupSteps } from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils.js";
+
+type SetupApplicationFormElements = HTMLFormControlsCollection & {
+  enabled_providers: HTMLInputElement;
+};
+
+type SetupGigachatFormElements = HTMLFormControlsCollection & {
+  timeout?: HTMLInputElement;
+};
 
 export async function renderSetup(app: AdminApp, token: number): Promise<void> {
   const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
@@ -119,6 +127,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       "Step 2 · Application posture",
       `
         <form id="setup-application-form" class="stack">
+          ${banner("Keep at least one provider enabled. Switching mode, runtime store backend or pass-token posture can require a restart.")}
           <div class="dual-grid">
             <label class="field">
               <span>Mode</span>
@@ -190,6 +199,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       "Step 3 · GigaChat auth",
       `
         <form id="setup-gigachat-form" class="stack">
+          ${banner("Leave secret fields blank to keep the stored value. Paste a new secret to replace it, or use the clear toggle only when you want to remove it.")}
           <div class="dual-grid">
             <label class="field"><span>Model</span><input name="model" value="${escapeHtml(gigachatValues.model ?? "")}" /></label>
             <label class="field"><span>Scope</span><input name="scope" value="${escapeHtml(gigachatValues.scope ?? "")}" /></label>
@@ -199,8 +209,22 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
             <label class="field"><span>Auth URL</span><input name="auth_url" value="${escapeHtml(gigachatValues.auth_url ?? "")}" /></label>
           </div>
           <div class="dual-grid">
-            <label class="field"><span>Credentials</span><textarea name="credentials" placeholder="Paste GigaChat credentials"></textarea></label>
-            <label class="field"><span>Access token</span><textarea name="access_token" placeholder="Optional access token"></textarea></label>
+            ${renderSecretField({
+              name: "credentials",
+              label: "Credentials",
+              placeholder: "Paste new GigaChat credentials to replace the stored secret",
+              preview: String(gigachatValues.credentials_preview ?? "not configured"),
+              clearControlName: "clear_credentials",
+              clearLabel: "Clear stored credentials on save",
+            })}
+            ${renderSecretField({
+              name: "access_token",
+              label: "Access token",
+              placeholder: "Paste a new access token to replace the stored secret",
+              preview: String(gigachatValues.access_token_preview ?? "not configured"),
+              clearControlName: "clear_access_token",
+              clearLabel: "Clear stored access token on save",
+            })}
           </div>
           <label class="field">
             <span>Verify SSL</span>
@@ -209,7 +233,10 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
               <option value="false" ${!gigachatValues.verify_ssl_certs ? "selected" : ""}>off</option>
             </select>
           </label>
-          ${banner(`Current credentials preview: ${String(gigachatValues.credentials_preview ?? "not configured")}.`)}
+          <label class="field">
+            <span>Timeout</span>
+            <input name="timeout" type="number" min="1" step="1" value="${escapeHtml(gigachatValues.timeout ?? "")}" />
+          </label>
           <div class="toolbar">
             <button class="button" type="submit">Save GigaChat step</button>
             <button class="button button--secondary" id="setup-gigachat-test" type="button">Test connection</button>
@@ -223,6 +250,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       `
         <div class="stack">
           <form id="setup-security-form" class="stack">
+            ${banner("Gateway auth and CORS persist immediately, but mounted routes may still require a restart before posture fully matches the saved config.", "warn")}
             <label class="field">
               <span>Enable gateway API key auth</span>
               <select name="enable_api_key_auth">
@@ -292,30 +320,84 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
   });
 
   const claimForm = app.pageContent.querySelector<HTMLFormElement>("#setup-claim-form");
+  const applicationForm = app.pageContent.querySelector<HTMLFormElement>("#setup-application-form");
+  const gigachatForm = app.pageContent.querySelector<HTMLFormElement>("#setup-gigachat-form");
+  const securityForm = app.pageContent.querySelector<HTMLFormElement>("#setup-security-form");
+  const applicationFields = applicationForm?.elements as SetupApplicationFormElements | undefined;
+  const gigachatFields = gigachatForm?.elements as SetupGigachatFormElements | undefined;
+  bindValidityReset(applicationFields?.enabled_providers, gigachatFields?.timeout);
+
+  const validateEnabledProviders = () => {
+    const field = applicationFields?.enabled_providers;
+    if (!field) {
+      return false;
+    }
+    if (parseCsv(field.value).length > 0) {
+      field.setCustomValidity("");
+      return true;
+    }
+    field.setCustomValidity("Provide at least one enabled provider.");
+    field.reportValidity();
+    return false;
+  };
+
+  const validateGigachatTimeout = () => {
+    const field = gigachatFields?.timeout;
+    if (!field) {
+      return true;
+    }
+    const rawValue = field.value.trim();
+    if (!rawValue) {
+      field.setCustomValidity("");
+      return true;
+    }
+    const numeric = Number(rawValue);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      field.setCustomValidity("");
+      return true;
+    }
+    field.setCustomValidity("Timeout must be a positive number of seconds.");
+    field.reportValidity();
+    return false;
+  };
+
   claimForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const operatorLabel = (form.elements.namedItem("operator_label") as HTMLInputElement).value.trim();
-    const response = await app.api.json<Record<string, unknown>>("/admin/api/setup/claim", {
-      method: "POST",
-      json: {
-        operator_label: operatorLabel || null,
+    const submitter = (event as SubmitEvent).submitter;
+    const button =
+      submitter instanceof HTMLButtonElement
+        ? submitter
+        : form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    await withBusyState({
+      root: form,
+      button,
+      pendingLabel: "Claiming…",
+      action: async () => {
+        const response = await app.api.json<Record<string, unknown>>("/admin/api/setup/claim", {
+          method: "POST",
+          json: {
+            operator_label: operatorLabel || null,
+          },
+        });
+        const nextClaim = asRecord(response.claim);
+        app.queueAlert(
+          nextClaim.operator_label
+            ? `Instance claimed by ${String(nextClaim.operator_label)}.`
+            : "Instance claim recorded.",
+          "info",
+        );
+        await app.render("setup");
       },
     });
-    const nextClaim = asRecord(response.claim);
-    app.queueAlert(
-      nextClaim.operator_label
-        ? `Instance claimed by ${String(nextClaim.operator_label)}.`
-        : "Instance claim recorded.",
-      "info",
-    );
-    await app.render("setup");
   });
 
-  app.pageContent
-    .querySelector<HTMLFormElement>("#setup-application-form")
-    ?.addEventListener("submit", async (event) => {
+  applicationForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (!validateEnabledProviders()) {
+        return;
+      }
       const form = event.currentTarget as HTMLFormElement;
       const fields = form.elements as typeof form.elements & {
         mode: HTMLSelectElement;
@@ -328,67 +410,101 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
         pass_model: HTMLSelectElement;
         pass_token: HTMLSelectElement;
       };
-      const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/application", {
-        method: "PUT",
-        json: {
-          mode: fields.mode.value,
-          gigachat_api_mode: fields.gigachat_api_mode.value,
-          enabled_providers: parseCsv(fields.enabled_providers.value),
-          observability_sinks: parseCsv(fields.observability_sinks.value),
-          runtime_store_backend: fields.runtime_store_backend.value,
-          runtime_store_namespace: fields.runtime_store_namespace.value.trim(),
-          enable_telemetry: fields.enable_telemetry.value === "true",
-          pass_model: fields.pass_model.value === "true",
-          pass_token: fields.pass_token.value === "true",
+      const submitter = (event as SubmitEvent).submitter;
+      const button =
+        submitter instanceof HTMLButtonElement
+          ? submitter
+          : form.querySelector<HTMLButtonElement>('button[type="submit"]');
+      await withBusyState({
+        root: form,
+        button,
+        pendingLabel: "Saving…",
+        action: async () => {
+          const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/application", {
+            method: "PUT",
+            json: {
+              mode: fields.mode.value,
+              gigachat_api_mode: fields.gigachat_api_mode.value,
+              enabled_providers: parseCsv(fields.enabled_providers.value),
+              observability_sinks: parseCsv(fields.observability_sinks.value),
+              runtime_store_backend: fields.runtime_store_backend.value,
+              runtime_store_namespace: fields.runtime_store_namespace.value.trim(),
+              enable_telemetry: fields.enable_telemetry.value === "true",
+              pass_model: fields.pass_model.value === "true",
+              pass_token: fields.pass_token.value === "true",
+            },
+          });
+          app.queueAlert(
+            response.restart_required
+              ? "Application bootstrap step saved. Restart required for part of the change set."
+              : "Application bootstrap step saved and applied.",
+            response.restart_required ? "warn" : "info",
+          );
+          await app.render("setup");
         },
       });
-      app.queueAlert(
-        response.restart_required
-          ? "Application bootstrap step saved. Restart required for part of the change set."
-          : "Application bootstrap step saved and applied.",
-        response.restart_required ? "warn" : "info",
-      );
-      await app.render("setup");
     });
 
-  app.pageContent
-    .querySelector<HTMLFormElement>("#setup-gigachat-form")
-    ?.addEventListener("submit", async (event) => {
+  gigachatForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (!validateGigachatTimeout()) {
+        return;
+      }
       const form = event.currentTarget as HTMLFormElement;
-      const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat", {
-        method: "PUT",
-        json: collectGigachatPayload(form),
+      const submitter = (event as SubmitEvent).submitter;
+      const button =
+        submitter instanceof HTMLButtonElement
+          ? submitter
+          : form.querySelector<HTMLButtonElement>('button[type="submit"]');
+      await withBusyState({
+        root: form,
+        button,
+        pendingLabel: "Saving…",
+        action: async () => {
+          const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat", {
+            method: "PUT",
+            json: collectGigachatPayload(form),
+          });
+          app.queueAlert(
+            response.restart_required
+              ? "GigaChat bootstrap step saved. Restart required."
+              : "GigaChat bootstrap step saved and runtime reloaded.",
+            response.restart_required ? "warn" : "info",
+          );
+          await app.render("setup");
+        },
       });
-      app.queueAlert(
-        response.restart_required
-          ? "GigaChat bootstrap step saved. Restart required."
-          : "GigaChat bootstrap step saved and runtime reloaded.",
-        response.restart_required ? "warn" : "info",
-      );
-      await app.render("setup");
     });
 
-  document.getElementById("setup-gigachat-test")?.addEventListener("click", async () => {
-    const form = app.pageContent.querySelector<HTMLFormElement>("#setup-gigachat-form");
+  document.getElementById("setup-gigachat-test")?.addEventListener("click", async (event) => {
+    const form = gigachatForm;
     if (!form) {
       return;
     }
-    const result = await app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat/test", {
-      method: "POST",
-      json: collectGigachatPayload(form),
+    if (!validateGigachatTimeout()) {
+      return;
+    }
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    await withBusyState({
+      root: form,
+      button,
+      pendingLabel: "Testing…",
+      action: async () => {
+        const result = await app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat/test", {
+          method: "POST",
+          json: collectGigachatPayload(form),
+        });
+        app.pushAlert(
+          result.ok
+            ? `GigaChat connection ok. Models visible: ${String(result.model_count ?? 0)}.`
+            : `GigaChat connection failed: ${String(result.error_type ?? "Error")}: ${String(result.error ?? "unknown error")}`,
+          result.ok ? "info" : "danger",
+        );
+      },
     });
-    app.pushAlert(
-      result.ok
-        ? `GigaChat connection ok. Models visible: ${String(result.model_count ?? 0)}.`
-        : `GigaChat connection failed: ${String(result.error_type ?? "Error")}: ${String(result.error ?? "unknown error")}`,
-      result.ok ? "info" : "danger",
-    );
   });
 
-  app.pageContent
-    .querySelector<HTMLFormElement>("#setup-security-form")
-    ?.addEventListener("submit", async (event) => {
+  securityForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = event.currentTarget as HTMLFormElement;
       const fields = form.elements as typeof form.elements & {
@@ -396,33 +512,52 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
         cors_allow_origins: HTMLInputElement;
         logs_ip_allowlist: HTMLInputElement;
       };
-      const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/security", {
-        method: "PUT",
-        json: {
-          enable_api_key_auth: fields.enable_api_key_auth.value === "true",
-          cors_allow_origins: parseCsv(fields.cors_allow_origins.value),
-          logs_ip_allowlist: parseCsv(fields.logs_ip_allowlist.value),
+      const submitter = (event as SubmitEvent).submitter;
+      const button =
+        submitter instanceof HTMLButtonElement
+          ? submitter
+          : form.querySelector<HTMLButtonElement>('button[type="submit"]');
+      await withBusyState({
+        root: form,
+        button,
+        pendingLabel: "Saving…",
+        action: async () => {
+          const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/security", {
+            method: "PUT",
+            json: {
+              enable_api_key_auth: fields.enable_api_key_auth.value === "true",
+              cors_allow_origins: parseCsv(fields.cors_allow_origins.value),
+              logs_ip_allowlist: parseCsv(fields.logs_ip_allowlist.value),
+            },
+          });
+          app.queueAlert(
+            response.restart_required
+              ? "Security bootstrap step saved. Restart required."
+              : "Security bootstrap step saved and applied.",
+            response.restart_required ? "warn" : "info",
+          );
+          await app.render("setup");
         },
       });
-      app.queueAlert(
-        response.restart_required
-          ? "Security bootstrap step saved. Restart required."
-          : "Security bootstrap step saved and applied.",
-        response.restart_required ? "warn" : "info",
-      );
-      await app.render("setup");
     });
 
-  document.getElementById("setup-create-global-key")?.addEventListener("click", async () => {
+  document.getElementById("setup-create-global-key")?.addEventListener("click", async (event) => {
     const input = document.getElementById("setup-global-key-value") as HTMLInputElement | null;
-    const response = await app.api.json<Record<string, unknown>>("/admin/api/keys/global/rotate", {
-      method: "POST",
-      json: { value: input?.value.trim() || null },
+    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
+    await withBusyState({
+      button,
+      pendingLabel: "Creating…",
+      action: async () => {
+        const response = await app.api.json<Record<string, unknown>>("/admin/api/keys/global/rotate", {
+          method: "POST",
+          json: { value: input?.value.trim() || null },
+        });
+        const nextGlobal = asRecord(response.global);
+        app.saveAdminKey(String(nextGlobal.value ?? ""));
+        app.saveGatewayKey(String(nextGlobal.value ?? ""));
+        app.queueAlert(`Global gateway key created. New value: ${String(nextGlobal.value ?? "")}`, "warn");
+        await app.render("setup");
+      },
     });
-    const nextGlobal = asRecord(response.global);
-    app.saveAdminKey(String(nextGlobal.value ?? ""));
-    app.saveGatewayKey(String(nextGlobal.value ?? ""));
-    app.queueAlert(`Global gateway key created. New value: ${String(nextGlobal.value ?? "")}`, "warn");
-    await app.render("setup");
   });
 }

@@ -2,6 +2,13 @@ import type { DiffEntry } from "./types.js";
 import { normalizeComparableValue, parseCsv, safeJsonParse } from "./utils.js";
 
 export const INVALID_JSON = "__invalid__";
+const FORM_CONTROL_SELECTOR = "button, input, select, textarea";
+
+type FormControlElement =
+  | HTMLButtonElement
+  | HTMLInputElement
+  | HTMLSelectElement
+  | HTMLTextAreaElement;
 
 export function buildApplicationPayload(form: HTMLFormElement): Record<string, unknown> {
   const fields = form.elements as typeof form.elements & {
@@ -49,6 +56,64 @@ export function buildSecurityPayload(
   };
 }
 
+export function bindValidityReset(
+  ...fields: Array<FormControlElement | null | undefined>
+): void {
+  fields.forEach((field) => {
+    if (!field) {
+      return;
+    }
+    const resetValidity = () => {
+      field.setCustomValidity("");
+    };
+    field.addEventListener("input", resetValidity);
+    field.addEventListener("change", resetValidity);
+  });
+}
+
+export async function withBusyState<T>({
+  root,
+  button,
+  pendingLabel,
+  action,
+}: {
+  root?: Element | DocumentFragment | null;
+  button?: HTMLButtonElement | null;
+  pendingLabel: string;
+  action: () => Promise<T>;
+}): Promise<T> {
+  const controls = root
+    ? Array.from(root.querySelectorAll<FormControlElement>(FORM_CONTROL_SELECTOR))
+    : button
+      ? [button]
+      : [];
+  const controlStates = controls.map((control) => ({
+    control,
+    disabled: control.disabled,
+  }));
+  const originalLabel = button?.textContent ?? "";
+
+  controlStates.forEach(({ control }) => {
+    control.disabled = true;
+  });
+  if (button) {
+    button.textContent = pendingLabel;
+    button.setAttribute("aria-busy", "true");
+  }
+
+  try {
+    return await action();
+  } finally {
+    controlStates.forEach(({ control, disabled }) => {
+      control.disabled = disabled;
+    });
+    if (button) {
+      button.textContent = originalLabel;
+      button.removeAttribute("aria-busy");
+    }
+  }
+}
+
 export function collectGigachatPayload(form: HTMLFormElement): Record<string, unknown> {
   const fields = form.elements as typeof form.elements & {
     model: HTMLInputElement;
@@ -57,20 +122,36 @@ export function collectGigachatPayload(form: HTMLFormElement): Record<string, un
     auth_url: HTMLInputElement;
     credentials: HTMLTextAreaElement;
     access_token: HTMLTextAreaElement;
+    clear_credentials?: HTMLInputElement;
+    clear_access_token?: HTMLInputElement;
     verify_ssl_certs: HTMLSelectElement;
     timeout?: HTMLInputElement;
   };
 
-  return {
+  const payload: Record<string, unknown> = {
     model: fields.model.value.trim() || null,
     scope: fields.scope.value.trim() || null,
     base_url: fields.base_url.value.trim() || null,
     auth_url: fields.auth_url.value.trim() || null,
-    credentials: fields.credentials.value.trim() || null,
-    access_token: fields.access_token.value.trim() || null,
     verify_ssl_certs: fields.verify_ssl_certs.value === "true",
     timeout: fields.timeout && fields.timeout.value ? Number(fields.timeout.value) : null,
   };
+
+  const credentials = fields.credentials.value.trim();
+  if (credentials) {
+    payload.credentials = credentials;
+  } else if (fields.clear_credentials?.checked) {
+    payload.credentials = null;
+  }
+
+  const accessToken = fields.access_token.value.trim();
+  if (accessToken) {
+    payload.access_token = accessToken;
+  } else if (fields.clear_access_token?.checked) {
+    payload.access_token = null;
+  }
+
+  return payload;
 }
 
 export function buildPendingDiffEntries(

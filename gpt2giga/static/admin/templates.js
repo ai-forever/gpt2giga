@@ -46,6 +46,24 @@ export function renderStatLines(items, emptyMessage = "Nothing to show.") {
     </div>
   `;
 }
+export function renderSecretField(options) {
+    return `
+    <div class="stack">
+      <label class="field">
+        <span>${escapeHtml(options.label)}</span>
+        <textarea name="${escapeHtml(options.name)}" placeholder="${escapeHtml(options.placeholder)}"></textarea>
+      </label>
+      <p class="field-note">
+        Stored preview: <strong>${escapeHtml(options.preview || "not configured")}</strong>.
+        Leave blank to keep the current secret; paste a new value to replace it.
+      </p>
+      <label class="checkbox-field">
+        <input name="${escapeHtml(options.clearControlName)}" type="checkbox" />
+        <span>${escapeHtml(options.clearLabel)}</span>
+      </label>
+    </div>
+  `;
+}
 export function renderTable(columns, rows, emptyMessage = "No rows available.") {
     if (!rows.length) {
         return renderEmptyState(emptyMessage);

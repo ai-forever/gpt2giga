@@ -12,6 +12,15 @@ interface TableColumn {
   className?: string;
 }
 
+interface SecretFieldOptions {
+  name: string;
+  label: string;
+  placeholder: string;
+  preview: string;
+  clearControlName: string;
+  clearLabel: string;
+}
+
 export function banner(message: string, tone: "info" | "warn" | "danger" = "info"): string {
   const toneClass =
     tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
@@ -65,6 +74,25 @@ export function renderStatLines(items: StatLineItem[], emptyMessage = "Nothing t
           `;
         })
         .join("")}
+    </div>
+  `;
+}
+
+export function renderSecretField(options: SecretFieldOptions): string {
+  return `
+    <div class="stack">
+      <label class="field">
+        <span>${escapeHtml(options.label)}</span>
+        <textarea name="${escapeHtml(options.name)}" placeholder="${escapeHtml(options.placeholder)}"></textarea>
+      </label>
+      <p class="field-note">
+        Stored preview: <strong>${escapeHtml(options.preview || "not configured")}</strong>.
+        Leave blank to keep the current secret; paste a new value to replace it.
+      </p>
+      <label class="checkbox-field">
+        <input name="${escapeHtml(options.clearControlName)}" type="checkbox" />
+        <span>${escapeHtml(options.clearLabel)}</span>
+      </label>
     </div>
   `;
 }

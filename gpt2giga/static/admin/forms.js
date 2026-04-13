@@ -1,5 +1,6 @@
 import { normalizeComparableValue, parseCsv, safeJsonParse } from "./utils.js";
 export const INVALID_JSON = "__invalid__";
+const FORM_CONTROL_SELECTOR = "button, input, select, textarea";
 export function buildApplicationPayload(form) {
     const fields = form.elements;
     return {
@@ -24,18 +25,74 @@ export function buildSecurityPayload(form) {
         governance_limits: safeJsonParse(fields.governance_limits.value || "[]", INVALID_JSON),
     };
 }
+export function bindValidityReset(...fields) {
+    fields.forEach((field) => {
+        if (!field) {
+            return;
+        }
+        const resetValidity = () => {
+            field.setCustomValidity("");
+        };
+        field.addEventListener("input", resetValidity);
+        field.addEventListener("change", resetValidity);
+    });
+}
+export async function withBusyState({ root, button, pendingLabel, action, }) {
+    const controls = root
+        ? Array.from(root.querySelectorAll(FORM_CONTROL_SELECTOR))
+        : button
+            ? [button]
+            : [];
+    const controlStates = controls.map((control) => ({
+        control,
+        disabled: control.disabled,
+    }));
+    const originalLabel = button?.textContent ?? "";
+    controlStates.forEach(({ control }) => {
+        control.disabled = true;
+    });
+    if (button) {
+        button.textContent = pendingLabel;
+        button.setAttribute("aria-busy", "true");
+    }
+    try {
+        return await action();
+    }
+    finally {
+        controlStates.forEach(({ control, disabled }) => {
+            control.disabled = disabled;
+        });
+        if (button) {
+            button.textContent = originalLabel;
+            button.removeAttribute("aria-busy");
+        }
+    }
+}
 export function collectGigachatPayload(form) {
     const fields = form.elements;
-    return {
+    const payload = {
         model: fields.model.value.trim() || null,
         scope: fields.scope.value.trim() || null,
         base_url: fields.base_url.value.trim() || null,
         auth_url: fields.auth_url.value.trim() || null,
-        credentials: fields.credentials.value.trim() || null,
-        access_token: fields.access_token.value.trim() || null,
         verify_ssl_certs: fields.verify_ssl_certs.value === "true",
         timeout: fields.timeout && fields.timeout.value ? Number(fields.timeout.value) : null,
     };
+    const credentials = fields.credentials.value.trim();
+    if (credentials) {
+        payload.credentials = credentials;
+    }
+    else if (fields.clear_credentials?.checked) {
+        payload.credentials = null;
+    }
+    const accessToken = fields.access_token.value.trim();
+    if (accessToken) {
+        payload.access_token = accessToken;
+    }
+    else if (fields.clear_access_token?.checked) {
+        payload.access_token = null;
+    }
+    return payload;
 }
 export function buildPendingDiffEntries(section, currentValues, payload) {
     return Object.entries(payload)
