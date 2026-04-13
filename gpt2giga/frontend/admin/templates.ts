@@ -21,6 +21,12 @@ interface SecretFieldOptions {
   clearLabel: string;
 }
 
+interface DefinitionItem {
+  label: string;
+  value: string;
+  note?: string;
+}
+
 export function banner(message: string, tone: "info" | "warn" | "danger" = "info"): string {
   const toneClass =
     tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
@@ -54,6 +60,33 @@ export function renderJson(data: unknown): string {
 
 export function renderEmptyState(message: string): string {
   return `<p class="muted">${escapeHtml(message)}</p>`;
+}
+
+export function renderDefinitionList(
+  items: DefinitionItem[],
+  emptyMessage = "Nothing to show.",
+): string {
+  if (!items.length) {
+    return renderEmptyState(emptyMessage);
+  }
+
+  return `
+    <dl class="definition-list">
+      ${items
+        .map(
+          (item) => `
+            <div class="definition-list__row">
+              <dt>${escapeHtml(item.label)}</dt>
+              <dd>
+                <strong>${escapeHtml(item.value)}</strong>
+                ${item.note ? `<span class="muted">${escapeHtml(item.note)}</span>` : ""}
+              </dd>
+            </div>
+          `,
+        )
+        .join("")}
+    </dl>
+  `;
 }
 
 export function renderStatLines(items: StatLineItem[], emptyMessage = "Nothing to show."): string {

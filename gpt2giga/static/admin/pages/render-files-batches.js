@@ -1,6 +1,7 @@
-import { card, kpi } from "../templates.js";
-import { asArray, asRecord, escapeHtml, formatBytes, formatTimestamp, safeJsonParse, } from "../utils.js";
+import { card, kpi, renderDefinitionList } from "../templates.js";
+import { asArray, escapeHtml, formatBytes, formatTimestamp, safeJsonParse, } from "../utils.js";
 export async function renderFilesBatches(app, token) {
+    const filters = readFilesBatchesFilters();
     const [filesPayload, batchesPayload] = await Promise.all([
         app.api.json("/v1/files?order=desc&limit=100", {}, true),
         app.api.json("/v1/batches?limit=100", {}, true),
@@ -10,17 +11,54 @@ export async function renderFilesBatches(app, token) {
     }
     const files = asArray(filesPayload.data);
     const batches = asArray(batchesPayload.data);
-    const completedBatches = batches.filter((batch) => batch.status === "completed").length;
-    const activeBatches = batches.length - completedBatches;
+    const filteredFiles = files.filter((item) => matchesFile(item, filters));
+    const filteredBatches = batches.filter((item) => matchesBatch(item, filters));
+    const completedBatches = filteredBatches.filter((batch) => batch.status === "completed").length;
+    const activeBatches = filteredBatches.length - completedBatches;
+    const fileLookup = new Map(files.map((item) => [String(item.id ?? ""), item]));
+    const batchLookup = new Map(batches.map((item) => [String(item.id ?? ""), item]));
     app.setHeroActions(`
+    <button class="button button--secondary" id="reset-files-batches-filters" type="button">Reset filters</button>
     <button class="button button--secondary" id="refresh-files-batches" type="button">Refresh inventory</button>
     <a class="button" href="/admin/playground">Open playground</a>
   `);
     app.setContent(`
-    ${kpi("Files", files.length)}
-    ${kpi("Batches", batches.length)}
+    ${kpi("Files shown", `${filteredFiles.length}/${files.length}`)}
+    ${kpi("Batches shown", `${filteredBatches.length}/${batches.length}`)}
     ${kpi("Completed", completedBatches)}
     ${kpi("Active", activeBatches)}
+    ${card("Inventory filters", `
+        <form id="files-batches-filters-form" class="stack">
+          <div class="quad-grid">
+            <label class="field">
+              <span>Search</span>
+              <input name="query" value="${escapeHtml(filters.query)}" placeholder="Filter by id, filename, or metadata label" />
+            </label>
+            <label class="field">
+              <span>File purpose</span>
+              <select name="purpose">
+                ${renderSelectOptions(filters.purpose, uniqueOptions(files.map((item) => item.purpose)))}
+              </select>
+            </label>
+            <label class="field">
+              <span>Batch status</span>
+              <select name="batch_status">
+                ${renderSelectOptions(filters.batchStatus, uniqueOptions(batches.map((item) => item.status)))}
+              </select>
+            </label>
+            <label class="field">
+              <span>Endpoint</span>
+              <select name="endpoint">
+                ${renderSelectOptions(filters.endpoint, uniqueOptions(batches.map((item) => item.endpoint)))}
+              </select>
+            </label>
+          </div>
+          <div class="toolbar">
+            <button class="button" type="submit">Apply filters</button>
+            <span class="muted">Filters work on the loaded gateway inventory so inspection stays local and immediate.</span>
+          </div>
+        </form>
+      `, "panel panel--span-12")}
     ${card("Upload file", `
         <form id="files-upload-form" class="stack">
           <label class="field">
@@ -56,13 +94,22 @@ export async function renderFilesBatches(app, token) {
         </form>
       `, "panel panel--span-4")}
     ${card("Inspector", `
-        <div class="stack">
-          <div class="banner">Select a file or batch to inspect metadata. Loading file content is separate so large JSONL payloads stay explicit.</div>
-          <pre class="code-block" id="files-batches-detail">No selection yet.</pre>
-          <pre class="code-block" id="files-batches-content">No file content loaded.</pre>
+        <div class="surface">
+          <div class="stack">
+            <div id="files-batches-summary">
+              ${renderDefinitionList([
+        { label: "Selection", value: "No file or batch selected" },
+        { label: "Files shown", value: `${filteredFiles.length}/${files.length}` },
+        { label: "Batches shown", value: `${filteredBatches.length}/${batches.length}` },
+        { label: "Filters", value: summarizeFilters(filters) || "No active filters" },
+    ], "No selection yet.")}
+            </div>
+            <pre class="code-block" id="files-batches-detail">No selection yet.</pre>
+            <pre class="code-block" id="files-batches-content">No file content loaded.</pre>
+          </div>
         </div>
       `, "panel panel--span-4")}
-    ${card("Stored files", files.length
+    ${card("Stored files", filteredFiles.length
         ? `
             <div class="table-wrap">
               <table>
@@ -70,7 +117,7 @@ export async function renderFilesBatches(app, token) {
                   <tr><th>File</th><th>Purpose</th><th>Size</th><th>Created</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
-                  ${files
+                  ${filteredFiles
             .map((item) => {
             const id = String(item.id ?? "");
             return `
@@ -81,7 +128,7 @@ export async function renderFilesBatches(app, token) {
                           <td>${escapeHtml(formatTimestamp(item.created_at))}</td>
                           <td>
                             <div class="toolbar">
-                              <button class="button button--secondary" data-file-view="${escapeHtml(id)}" type="button">View</button>
+                              <button class="button button--secondary" data-file-view="${escapeHtml(id)}" type="button">Inspect</button>
                               <button class="button button--secondary" data-file-use="${escapeHtml(id)}" type="button">Use for batch</button>
                               <button class="button button--secondary" data-file-content="${escapeHtml(id)}" type="button">Content</button>
                               <button class="button button--danger" data-file-delete="${escapeHtml(id)}" type="button">Delete</button>
@@ -95,8 +142,8 @@ export async function renderFilesBatches(app, token) {
               </table>
             </div>
           `
-        : "<p>No files uploaded yet.</p>", "panel panel--span-6")}
-    ${card("Batch jobs", batches.length
+        : "<p>No files matched the current filters.</p>", "panel panel--span-6")}
+    ${card("Batch jobs", filteredBatches.length
         ? `
             <div class="table-wrap">
               <table>
@@ -104,7 +151,7 @@ export async function renderFilesBatches(app, token) {
                   <tr><th>Batch</th><th>Status</th><th>Endpoint</th><th>Output</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
-                  ${batches
+                  ${filteredBatches
             .map((item) => {
             const id = String(item.id ?? "");
             const outputFile = String(item.output_file_id ?? "");
@@ -116,7 +163,7 @@ export async function renderFilesBatches(app, token) {
                           <td>${escapeHtml(outputFile || "n/a")}</td>
                           <td>
                             <div class="toolbar">
-                              <button class="button button--secondary" data-batch-view="${escapeHtml(id)}" type="button">View</button>
+                              <button class="button button--secondary" data-batch-view="${escapeHtml(id)}" type="button">Inspect</button>
                               <button class="button button--secondary" ${outputFile ? `data-batch-output="${escapeHtml(outputFile)}"` : "disabled"} type="button">Output</button>
                             </div>
                           </td>
@@ -128,17 +175,41 @@ export async function renderFilesBatches(app, token) {
               </table>
             </div>
           `
-        : "<p>No batch jobs yet.</p>", "panel panel--span-6")}
+        : "<p>No batches matched the current filters.</p>", "panel panel--span-6")}
   `);
     const detailNode = app.pageContent.querySelector("#files-batches-detail");
     const contentNode = app.pageContent.querySelector("#files-batches-content");
+    const summaryNode = app.pageContent.querySelector("#files-batches-summary");
     const batchInput = app.pageContent.querySelector("#batch-input-file-id");
-    if (!detailNode || !contentNode || !batchInput) {
+    const filtersForm = app.pageContent.querySelector("#files-batches-filters-form");
+    if (!detailNode || !contentNode || !summaryNode || !batchInput || !filtersForm) {
         return;
     }
     document.getElementById("refresh-files-batches")?.addEventListener("click", () => {
         void app.render("files-batches");
     });
+    document
+        .getElementById("reset-files-batches-filters")
+        ?.addEventListener("click", () => {
+        window.history.replaceState({}, "", "/admin/files-batches");
+        void app.render("files-batches");
+    });
+    filtersForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const fields = form.elements;
+        const nextFilters = {
+            query: fields.query.value.trim(),
+            purpose: fields.purpose.value,
+            batchStatus: fields.batch_status.value,
+            endpoint: fields.endpoint.value,
+        };
+        window.history.replaceState({}, "", buildFilesBatchesUrl(nextFilters));
+        void app.render("files-batches");
+    });
+    const setSummary = (items) => {
+        summaryNode.innerHTML = renderDefinitionList(items, "No selection yet.");
+    };
     app.pageContent
         .querySelector("#files-upload-form")
         ?.addEventListener("submit", async (event) => {
@@ -190,6 +261,18 @@ export async function renderFilesBatches(app, token) {
                 return;
             }
             const payload = await app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, {}, true);
+            const source = fileLookup.get(fileId) ?? payload;
+            setSummary([
+                { label: "Selection", value: "File" },
+                { label: "File id", value: fileId },
+                { label: "Purpose", value: String(source.purpose ?? "user_data") },
+                { label: "Filename", value: String(source.filename ?? fileId) },
+                {
+                    label: "Created",
+                    value: formatTimestamp(source.created_at),
+                    note: formatBytes(source.bytes),
+                },
+            ]);
             detailNode.textContent = JSON.stringify(payload, null, 2);
         });
     });
@@ -199,7 +282,15 @@ export async function renderFilesBatches(app, token) {
             if (!fileId) {
                 return;
             }
+            const source = fileLookup.get(fileId);
             batchInput.value = fileId;
+            setSummary([
+                { label: "Selection", value: "Batch input ready" },
+                { label: "File id", value: fileId },
+                { label: "Purpose", value: String(source?.purpose ?? "batch") },
+                { label: "Filename", value: String(source?.filename ?? fileId) },
+                { label: "Next step", value: "Create batch", note: "The input field has been populated for the batch form." },
+            ]);
             detailNode.textContent = `Selected ${fileId} as batch input.`;
             batchInput.focus();
         });
@@ -210,6 +301,13 @@ export async function renderFilesBatches(app, token) {
             if (!fileId) {
                 return;
             }
+            const source = fileLookup.get(fileId);
+            setSummary([
+                { label: "Selection", value: "File content preview" },
+                { label: "File id", value: fileId },
+                { label: "Filename", value: String(source?.filename ?? fileId) },
+                { label: "Purpose", value: String(source?.purpose ?? "user_data") },
+            ]);
             contentNode.textContent = "Loading file content…";
             contentNode.textContent = await app.api.text(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
         });
@@ -232,6 +330,18 @@ export async function renderFilesBatches(app, token) {
                 return;
             }
             const payload = await app.api.json(`/v1/batches/${encodeURIComponent(batchId)}`, {}, true);
+            const source = batchLookup.get(batchId) ?? payload;
+            setSummary([
+                { label: "Selection", value: "Batch" },
+                { label: "Batch id", value: batchId },
+                { label: "Status", value: String(source.status ?? "unknown") },
+                { label: "Endpoint", value: String(source.endpoint ?? "n/a") },
+                {
+                    label: "Output file",
+                    value: String(source.output_file_id ?? "n/a"),
+                    note: String(source.input_file_id ?? "no input file"),
+                },
+            ]);
             detailNode.textContent = JSON.stringify(payload, null, 2);
         });
     });
@@ -241,8 +351,86 @@ export async function renderFilesBatches(app, token) {
             if (!fileId) {
                 return;
             }
+            const batch = batches.find((item) => String(item.output_file_id ?? "") === fileId);
+            setSummary([
+                { label: "Selection", value: "Batch output" },
+                { label: "Output file", value: fileId },
+                { label: "Batch id", value: String(batch?.id ?? "unknown") },
+                { label: "Endpoint", value: String(batch?.endpoint ?? "n/a") },
+            ]);
             contentNode.textContent = "Loading batch output…";
             contentNode.textContent = await app.api.text(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
         });
     });
+}
+function readFilesBatchesFilters() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        query: params.get("query") || "",
+        purpose: params.get("purpose") || "",
+        batchStatus: params.get("batch_status") || "",
+        endpoint: params.get("endpoint") || "",
+    };
+}
+function buildFilesBatchesUrl(filters) {
+    const params = new URLSearchParams();
+    setIfPresent(params, "query", filters.query);
+    setIfPresent(params, "purpose", filters.purpose);
+    setIfPresent(params, "batch_status", filters.batchStatus);
+    setIfPresent(params, "endpoint", filters.endpoint);
+    const query = params.toString();
+    return query ? `/admin/files-batches?${query}` : "/admin/files-batches";
+}
+function matchesFile(item, filters) {
+    if (filters.purpose && String(item.purpose ?? "") !== filters.purpose) {
+        return false;
+    }
+    if (!filters.query) {
+        return true;
+    }
+    const query = filters.query.toLowerCase();
+    return [item.id, item.filename, item.purpose]
+        .map((value) => String(value ?? "").toLowerCase())
+        .some((value) => value.includes(query));
+}
+function matchesBatch(item, filters) {
+    if (filters.batchStatus && String(item.status ?? "") !== filters.batchStatus) {
+        return false;
+    }
+    if (filters.endpoint && String(item.endpoint ?? "") !== filters.endpoint) {
+        return false;
+    }
+    if (!filters.query) {
+        return true;
+    }
+    const query = filters.query.toLowerCase();
+    return [item.id, item.input_file_id, item.output_file_id, item.endpoint]
+        .map((value) => String(value ?? "").toLowerCase())
+        .some((value) => value.includes(query));
+}
+function summarizeFilters(filters) {
+    return [
+        filters.query ? `text=${filters.query}` : "",
+        filters.purpose ? `purpose=${filters.purpose}` : "",
+        filters.batchStatus ? `status=${filters.batchStatus}` : "",
+        filters.endpoint ? `endpoint=${filters.endpoint}` : "",
+    ]
+        .filter(Boolean)
+        .join(" · ");
+}
+function renderSelectOptions(selected, values) {
+    return [renderOption("", selected, "All"), ...values.map((value) => renderOption(value, selected))].join("");
+}
+function renderOption(value, selected, label) {
+    return `<option value="${escapeHtml(value)}" ${selected === value ? "selected" : ""}>${escapeHtml(label ?? value)}</option>`;
+}
+function uniqueOptions(values) {
+    return Array.from(new Set(values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean))).sort((left, right) => left.localeCompare(right));
+}
+function setIfPresent(params, key, value) {
+    if (value) {
+        params.set(key, value);
+    }
 }

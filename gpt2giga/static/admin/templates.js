@@ -26,6 +26,26 @@ export function renderJson(data) {
 export function renderEmptyState(message) {
     return `<p class="muted">${escapeHtml(message)}</p>`;
 }
+export function renderDefinitionList(items, emptyMessage = "Nothing to show.") {
+    if (!items.length) {
+        return renderEmptyState(emptyMessage);
+    }
+    return `
+    <dl class="definition-list">
+      ${items
+        .map((item) => `
+            <div class="definition-list__row">
+              <dt>${escapeHtml(item.label)}</dt>
+              <dd>
+                <strong>${escapeHtml(item.value)}</strong>
+                ${item.note ? `<span class="muted">${escapeHtml(item.note)}</span>` : ""}
+              </dd>
+            </div>
+          `)
+        .join("")}
+    </dl>
+  `;
+}
 export function renderStatLines(items, emptyMessage = "Nothing to show.") {
     if (!items.length) {
         return renderEmptyState(emptyMessage);
