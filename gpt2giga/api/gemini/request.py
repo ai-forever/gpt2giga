@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 from typing import Any, Iterable, Optional
 
 from fastapi import Request
@@ -190,7 +191,6 @@ def _raise_if_unsupported_part(part: Any) -> None:
         return
     unsupported_fields = (
         "inlineData",
-        "fileData",
         "executableCode",
         "codeExecutionResult",
         "videoMetadata",
@@ -202,6 +202,36 @@ def _raise_if_unsupported_part(part: Any) -> None:
                 status="INVALID_ARGUMENT",
                 message=f"Gemini part `{field}` is not supported by this proxy yet.",
             )
+
+
+def normalize_file_name(name: str | None) -> str:
+    """Normalize a Gemini file resource name or bare id to a file id."""
+    value = (name or "").strip().strip("/")
+    if value.startswith("files/"):
+        return value.split("/", 1)[1]
+    return value
+
+
+def extract_file_id_from_uri(uri: str | None) -> str | None:
+    """Extract a Gemini file id from a resource name or proxy URI."""
+    value = (uri or "").strip()
+    if not value:
+        return None
+    if value.startswith("files/"):
+        return normalize_file_name(value)
+
+    parsed = urlsplit(value)
+    path = parsed.path.rstrip("/")
+    if "/files/" not in path:
+        return None
+
+    file_id = path.rsplit("/files/", maxsplit=1)[-1]
+    if not file_id:
+        return None
+    file_id = file_id.split("/", 1)[0]
+    file_id = file_id.split(":", 1)[0]
+    normalized = normalize_file_name(file_id)
+    return normalized or None
 
 
 def _normalize_contents(contents: Any) -> list[dict[str, Any]]:

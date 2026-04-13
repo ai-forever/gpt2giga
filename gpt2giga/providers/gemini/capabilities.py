@@ -93,6 +93,12 @@ def _load_gemini_router():
     return gemini_router
 
 
+def _load_gemini_upload_router():
+    from gpt2giga.api.gemini.files import upload_router as gemini_upload_router
+
+    return gemini_upload_router
+
+
 GEMINI_PROVIDER_DESCRIPTOR = ProviderDescriptor(
     name="gemini",
     display_name="Gemini",
@@ -101,9 +107,19 @@ GEMINI_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         "stream_generate_content",
         "count_tokens",
         "batch_embed_contents",
+        "files",
+        "batches",
         "models",
     ),
     routes=(
+        "/upload/v1beta/files",
+        "/v1beta/files",
+        "/v1beta/files/{file}",
+        "/v1beta/files/{file}:download",
+        "/v1beta/batches",
+        "/v1beta/batches/{batch}",
+        "/v1beta/batches/{batch}:cancel",
+        "/v1beta/models/{model}:batchGenerateContent",
         "/v1beta/models",
         "/v1beta/models/{model}",
         "/v1beta/models/{model}:generateContent",
@@ -115,6 +131,11 @@ GEMINI_PROVIDER_DESCRIPTOR = ProviderDescriptor(
         ProviderMountSpec(
             router_factory=_load_gemini_router,
             prefix="/v1beta",
+            auth_policy="gemini",
+        ),
+        ProviderMountSpec(
+            router_factory=_load_gemini_upload_router,
+            prefix="/upload/v1beta",
             auth_policy="gemini",
         ),
     ),

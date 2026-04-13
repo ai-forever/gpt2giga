@@ -8,6 +8,7 @@ from typing import Any
 
 from gpt2giga.api.gemini.request import (
     GeminiAPIError,
+    extract_file_id_from_uri,
     _extract_text_from_parts,
     _extract_text_from_system_instruction,
     _get_function_parameters_schema,
@@ -56,13 +57,13 @@ def _build_normalized_messages(
         for part in parts:
             _raise_if_unsupported_part(part)
 
-        text_parts: list[str] = []
+        content_parts: list[dict[str, Any]] = []
         tool_calls: list[dict[str, Any]] = []
         tool_messages: list[NormalizedMessage] = []
 
         for index, part in enumerate(parts):
             if isinstance(part, str):
-                text_parts.append(part)
+                content_parts.append({"type": "text", "text": part})
                 continue
             if not isinstance(part, dict):
                 raise GeminiAPIError(
@@ -73,7 +74,35 @@ def _build_normalized_messages(
 
             text = part.get("text")
             if isinstance(text, str):
-                text_parts.append(text)
+                content_parts.append({"type": "text", "text": text})
+                continue
+
+            file_data = part.get("fileData")
+            if isinstance(file_data, dict):
+                file_uri = file_data.get("fileUri") or file_data.get("file_uri")
+                file_id = extract_file_id_from_uri(file_uri)
+                file_payload: dict[str, Any] = {}
+                if file_id:
+                    file_payload["file_id"] = file_id
+                elif isinstance(file_uri, str) and file_uri:
+                    file_payload["file_url"] = file_uri
+
+                filename = file_data.get("displayName") or file_data.get("display_name")
+                if isinstance(filename, str) and filename:
+                    file_payload["filename"] = filename
+                mime_type = file_data.get("mimeType") or file_data.get("mime_type")
+                if isinstance(mime_type, str) and mime_type:
+                    file_payload["mime_type"] = mime_type
+
+                if not file_payload:
+                    raise GeminiAPIError(
+                        status_code=400,
+                        status="INVALID_ARGUMENT",
+                        message=(
+                            "Gemini part `fileData` must include a valid `fileUri`."
+                        ),
+                    )
+                content_parts.append({"type": "file", "file": file_payload})
                 continue
 
             function_call = part.get("functionCall")
@@ -108,18 +137,35 @@ def _build_normalized_messages(
                 )
 
         if role == "model":
+            normalized_content: str | list[dict[str, Any]] = ""
+            if content_parts:
+                text_only = all(part.get("type") == "text" for part in content_parts)
+                if text_only:
+                    normalized_content = "\n".join(
+                        part.get("text", "") for part in content_parts
+                    )
+                else:
+                    normalized_content = content_parts
             normalized_messages.append(
                 NormalizedMessage(
                     role="assistant",
-                    content="\n".join(text_parts) if text_parts else "",
+                    content=normalized_content,
                     tool_calls=tool_calls,
                 )
             )
             continue
 
-        if text_parts:
+        if content_parts:
+            text_only = all(part.get("type") == "text" for part in content_parts)
             normalized_messages.append(
-                NormalizedMessage(role="user", content="\n".join(text_parts))
+                NormalizedMessage(
+                    role="user",
+                    content=(
+                        "\n".join(part.get("text", "") for part in content_parts)
+                        if text_only
+                        else content_parts
+                    ),
+                )
             )
         normalized_messages.extend(tool_messages)
 

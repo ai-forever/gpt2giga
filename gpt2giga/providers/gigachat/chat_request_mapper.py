@@ -248,10 +248,16 @@ class RequestTransformerMessagesMixin:
 
             if ctype == "file" and processor is not None and content_part.get("file"):
                 file_payload = content_part["file"]
+                file_id = file_payload.get("file_id")
+                if isinstance(file_id, str) and file_id:
+                    attachments.append(file_id)
+                    continue
                 filename = file_payload.get("filename")
-                file_data = file_payload.get("file_data")
-                if file_data is not None:
-                    await append_uploaded_attachment(file_data, filename=filename)
+                file_source = file_payload.get("file_data") or file_payload.get(
+                    "file_url"
+                )
+                if file_source is not None:
+                    await append_uploaded_attachment(file_source, filename=filename)
 
         if len(attachments) > max_attachments:
             self.logger.warning(

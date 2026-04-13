@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import json
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.api.gemini import router
+from gpt2giga.api.gemini.files import upload_router
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.providers.gigachat import ResponseProcessor
@@ -26,13 +29,74 @@ class FakeTokensCount:
         self.tokens = tokens
 
 
+class FakeUploadedFile:
+    def __init__(
+        self,
+        file_id: str,
+        *,
+        bytes_: int,
+        created_at: int,
+        filename: str,
+        purpose: str,
+    ):
+        self.id_ = file_id
+        self.bytes_ = bytes_
+        self.created_at = created_at
+        self.filename = filename
+        self.purpose = purpose
+
+
+class FakeDeletedFile:
+    def __init__(self, file_id: str):
+        self.id_ = file_id
+        self.deleted = True
+
+
+class FakeBatch:
+    def __init__(
+        self,
+        batch_id: str,
+        *,
+        output_file_id: str | None = None,
+        status: str = "completed",
+        created_at: int = 123,
+        updated_at: int = 124,
+    ):
+        self.id_ = batch_id
+        self.method = "chat_completions"
+        self.status = status
+        self.output_file_id = output_file_id
+        self.created_at = created_at
+        self.updated_at = updated_at
+        self.request_counts = SimpleNamespace(
+            total=1,
+            completed=1 if status == "completed" else 0,
+            failed=0,
+        )
+
+
+class FakeBatches:
+    def __init__(self, batches):
+        self.batches = batches
+
+
+class FakeFileContent:
+    def __init__(self, content: bytes):
+        self.content = base64.b64encode(content).decode("utf-8")
+
+
 class FakeGigaChat:
     def __init__(self):
         self.last_method = None
         self.last_embedding_texts = None
         self.last_embedding_model = None
         self.last_token_texts = None
+        self.last_batch_content = None
+        self.last_batch_method = None
         self._response_v2 = None
+        self._created_at = 100
+        self.files = {}
+        self.batches = {}
         self._response = {
             "choices": [
                 {
@@ -183,6 +247,82 @@ class FakeGigaChat:
             ]
         }
 
+    async def aupload_file(self, file, purpose):
+        filename, content, _content_type = file
+        file_id = f"file-{len(self.files) + 1}"
+        uploaded = FakeUploadedFile(
+            file_id,
+            bytes_=len(content),
+            created_at=self._created_at,
+            filename=filename or file_id,
+            purpose=purpose,
+        )
+        self.files[file_id] = {
+            "content": content,
+            "object": uploaded,
+        }
+        self._created_at += 1
+        return uploaded
+
+    async def aget_files(self):
+        return SimpleNamespace(
+            data=[file_data["object"] for file_data in self.files.values()]
+        )
+
+    async def aget_file(self, file):
+        return self.files[file]["object"]
+
+    async def adelete_file(self, file):
+        self.files.pop(file, None)
+        return FakeDeletedFile(file)
+
+    async def aget_file_content(self, file_id):
+        return FakeFileContent(self.files[file_id]["content"])
+
+    async def acreate_batch(self, file, method):
+        self.last_batch_content = file
+        self.last_batch_method = method
+        output_file_id = "file-output-1"
+        output_payload = {
+            "id": "req-1",
+            "result": {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "done",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        }
+        self.files[output_file_id] = {
+            "content": (json.dumps(output_payload) + "\n").encode("utf-8"),
+            "object": FakeUploadedFile(
+                output_file_id,
+                bytes_=len(json.dumps(output_payload)) + 1,
+                created_at=self._created_at,
+                filename="batch-output.jsonl",
+                purpose="general",
+            ),
+        }
+        batch = FakeBatch("batch-1", output_file_id=output_file_id)
+        self.batches[batch.id_] = batch
+        self._created_at += 1
+        return batch
+
+    async def aget_batches(self, batch_id=None):
+        if batch_id is None:
+            return FakeBatches(list(self.batches.values()))
+        batch = self.batches.get(batch_id)
+        return FakeBatches([batch] if batch else [])
+
     async def aget_models(self):
         return SimpleNamespace(
             data=[
@@ -234,6 +374,7 @@ class FakeRequestTransformer:
 
 def make_app():
     app = FastAPI()
+    app.include_router(upload_router, prefix="/upload/v1beta")
     app.include_router(router)
     app.state.gigachat_client = FakeGigaChat()
     app.state.request_transformer = FakeRequestTransformer()
@@ -692,3 +833,168 @@ def test_models_list_and_get():
     assert get_response.status_code == 200
     assert get_response.json()["name"] == "models/GigaChat-2-Max"
     assert embedding_response.json()["supportedGenerationMethods"] == ["embedContent"]
+
+
+def test_files_routes_roundtrip_and_generate_content_supports_file_data():
+    app = make_app()
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/files",
+        files={"file": ("notes.txt", b"hello from file", "text/plain")},
+        data={"displayName": "Meeting Notes"},
+    )
+
+    assert create_response.status_code == 200
+    file_payload = create_response.json()["file"]
+    file_name = file_payload["name"]
+    file_id = file_name.split("/", 1)[1]
+    assert file_payload["displayName"] == "Meeting Notes"
+    assert file_payload["mimeType"] == "text/plain"
+    assert file_payload["state"] == "ACTIVE"
+
+    list_response = client.get("/files")
+    assert list_response.status_code == 200
+    assert list_response.json()["files"][0]["name"] == file_name
+
+    get_response = client.get(f"/files/{file_id}")
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == file_name
+
+    download_response = client.get(f"/files/{file_id}:download")
+    assert download_response.status_code == 200
+    assert download_response.content == b"hello from file"
+
+    prompt_response = client.post(
+        "/models/gemini-test:generateContent",
+        json={
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": "Summarize"},
+                        {
+                            "fileData": {
+                                "mimeType": "text/plain",
+                                "fileUri": file_payload["uri"],
+                            }
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+
+    assert prompt_response.status_code == 200
+    assert prompt_response.json()["candidates"][0]["content"]["parts"][0]["text"] == (
+        "Hello!"
+    )
+    assert app.state.request_transformer.last_data["messages"][0]["content"] == [
+        {"type": "text", "text": "Summarize"},
+        {
+            "type": "file",
+            "file": {
+                "file_id": file_id,
+                "mime_type": "text/plain",
+            },
+        },
+    ]
+
+    delete_response = client.delete(f"/files/{file_id}")
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {}
+
+
+def test_resumable_file_upload_flow():
+    app = make_app()
+    client = TestClient(app)
+
+    start = client.post(
+        "/upload/v1beta/files",
+        headers={
+            "X-Goog-Upload-Protocol": "resumable",
+            "X-Goog-Upload-Command": "start",
+            "X-Goog-Upload-Header-Content-Type": "text/plain",
+        },
+        json={"file": {"displayName": "poem.txt"}},
+    )
+
+    assert start.status_code == 200
+    upload_url = start.headers["X-Goog-Upload-Url"]
+
+    finalize = client.post(
+        upload_url,
+        headers={"X-Goog-Upload-Command": "upload, finalize"},
+        content=b"roses are red",
+    )
+
+    assert finalize.status_code == 200
+    file_payload = finalize.json()["file"]
+    assert file_payload["displayName"] == "poem.txt"
+    assert client.get(
+        f"/files/{file_payload['name'].split('/', 1)[1]}:download"
+    ).content == (b"roses are red")
+
+
+def test_batch_generate_content_routes_and_download_results():
+    app = make_app()
+    giga_client = app.state.gigachat_client
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/models/gemini-test:batchGenerateContent",
+        json={
+            "batch": {
+                "displayName": "integration-batch",
+                "inputConfig": {
+                    "requests": {
+                        "requests": [
+                            {
+                                "request": {
+                                    "contents": [
+                                        {
+                                            "role": "user",
+                                            "parts": [{"text": "Hello batch"}],
+                                        }
+                                    ]
+                                },
+                                "metadata": {"requestLabel": "row-1"},
+                            }
+                        ]
+                    }
+                },
+            }
+        },
+    )
+
+    assert create_response.status_code == 200
+    operation = create_response.json()
+    assert operation["name"] == "batches/batch-1"
+    assert operation["done"] is True
+    assert operation["response"]["output"]["responsesFile"] == "files/file-output-1"
+
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert translated_line["request"]["messages"] == [
+        {"role": "user", "content": "Hello batch"}
+    ]
+
+    list_response = client.get("/batches")
+    assert list_response.status_code == 200
+    assert list_response.json()["operations"][0]["name"] == "batches/batch-1"
+
+    get_response = client.get("/batches/batch-1")
+    assert get_response.status_code == 200
+    assert get_response.json()["metadata"]["displayName"] == "integration-batch"
+
+    output_response = client.get("/files/file-output-1:download")
+    assert output_response.status_code == 200
+    output_line = json.loads(output_response.text.strip())
+    assert output_line["metadata"] == {"requestLabel": "row-1"}
+    assert (
+        output_line["response"]["candidates"][0]["content"]["parts"][0]["text"]
+        == "done"
+    )
+
+    cancel_response = client.post("/batches/batch-1:cancel")
+    assert cancel_response.status_code == 501
+    assert cancel_response.json()["error"]["status"] == "UNIMPLEMENTED"

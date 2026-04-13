@@ -169,16 +169,16 @@ class BatchesService:
         limit: int | None = None,
     ) -> dict[str, Any]:
         """List OpenAI-compatible batches."""
-        batches = await giga_client.aget_batches()
-        data = []
-        for batch in batches.batches:
-            record = self._sync_batch_record(
-                batch,
-                self._build_openai_metadata(batch.id_, batch_store),
-                batch_store=batch_store,
-                file_store=file_store,
-            )
-            data.append(build_openai_batch_object(record["batch"], record["metadata"]))
+        records = await self.list_batch_records(
+            giga_client=giga_client,
+            batch_store=batch_store,
+            file_store=file_store,
+            default_metadata_factory=self._build_openai_metadata,
+        )
+        data = [
+            build_openai_batch_object(record["batch"], record["metadata"])
+            for record in records
+        ]
         paged, has_more = _paginate_items(data, after, limit)
         return {"data": paged, "has_more": has_more, "object": "list"}
 
@@ -191,8 +191,14 @@ class BatchesService:
         file_store: FilesMetadataStore | None = None,
     ) -> BatchResponseData:
         """Return OpenAI-compatible batch metadata."""
-        batches = await giga_client.aget_batches(batch_id=batch_id)
-        if not batches.batches:
+        record = await self.get_batch_record(
+            batch_id,
+            giga_client=giga_client,
+            batch_store=batch_store,
+            file_store=file_store,
+            default_metadata_factory=self._build_openai_metadata,
+        )
+        if record is None:
             raise HTTPException(
                 status_code=404,
                 detail={
@@ -204,13 +210,62 @@ class BatchesService:
                     }
                 },
             )
-        record = self._sync_batch_record(
+        return build_openai_batch_object(record["batch"], record["metadata"])
+
+    async def list_batch_records(
+        self,
+        *,
+        giga_client: BatchesUpstreamClient,
+        batch_store: BatchesMetadataStore | None = None,
+        file_store: FilesMetadataStore | None = None,
+        default_metadata_factory: Any | None = None,
+    ) -> list[BatchRecord]:
+        """List provider batch records with synced local metadata."""
+        batches = await giga_client.aget_batches()
+        records: list[BatchRecord] = []
+        for batch in batches.batches:
+            metadata = self._get_batch_metadata(batch.id_, batch_store)
+            if metadata is None:
+                if callable(default_metadata_factory):
+                    metadata = default_metadata_factory(batch.id_, batch_store)
+                else:
+                    metadata = {}
+            records.append(
+                self._sync_batch_record(
+                    batch,
+                    metadata,
+                    batch_store=batch_store,
+                    file_store=file_store,
+                )
+            )
+        return records
+
+    async def get_batch_record(
+        self,
+        batch_id: str,
+        *,
+        giga_client: BatchesUpstreamClient,
+        batch_store: BatchesMetadataStore | None = None,
+        file_store: FilesMetadataStore | None = None,
+        default_metadata_factory: Any | None = None,
+    ) -> BatchRecord | None:
+        """Return a provider batch record with synced local metadata."""
+        batches = await giga_client.aget_batches(batch_id=batch_id)
+        if not batches.batches:
+            return None
+
+        metadata = self._get_batch_metadata(batch_id, batch_store)
+        if metadata is None:
+            if callable(default_metadata_factory):
+                metadata = default_metadata_factory(batch_id, batch_store)
+            else:
+                metadata = {}
+        return self._sync_batch_record(
             batches.batches[0],
-            self._build_openai_metadata(batch_id, batch_store),
+            metadata,
             batch_store=batch_store,
             file_store=file_store,
         )
-        return build_openai_batch_object(record["batch"], record["metadata"])
 
     async def list_anthropic_batches(
         self,

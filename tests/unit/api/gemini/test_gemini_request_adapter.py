@@ -103,6 +103,40 @@ def test_build_count_tokens_and_embeddings_requests():
     assert single_request.input == ["solo"]
 
 
+def test_build_normalized_chat_request_supports_file_data_parts():
+    request = build_normalized_chat_request(
+        {
+            "model": "models/gemini-2.5-pro",
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": "Summarize this file"},
+                        {
+                            "fileData": {
+                                "mimeType": "text/plain",
+                                "fileUri": "http://testserver/files/file-1",
+                            }
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert request.messages[0].role == "user"
+    assert request.messages[0].content == [
+        {"type": "text", "text": "Summarize this file"},
+        {
+            "type": "file",
+            "file": {
+                "file_id": "file-1",
+                "mime_type": "text/plain",
+            },
+        },
+    ]
+
+
 def test_serialize_normalized_chat_request_builds_gemini_payload():
     payload, warnings = serialize_normalized_chat_request(
         NormalizedChatRequest(
