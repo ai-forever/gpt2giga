@@ -6,7 +6,9 @@ from loguru import logger
 
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.features.batches.transforms import (
+    BATCH_CHAT_V2_FALLBACK_WARNING,
     _resolve_batch_model,
+    get_batch_warnings,
     get_batch_target,
     transform_batch_input_file,
 )
@@ -56,3 +58,10 @@ def test_resolve_batch_model_prefers_request_model():
         _resolve_batch_model({"model": "GigaChat-2-Pro"}, giga_client)
         == "GigaChat-2-Pro"
     )
+
+
+def test_get_batch_warnings_reports_v2_chat_fallback():
+    assert get_batch_warnings(
+        target=get_batch_target("/v1/chat/completions"),
+        gigachat_api_mode="v2",
+    ) == [BATCH_CHAT_V2_FALLBACK_WARNING]

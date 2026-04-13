@@ -29,27 +29,12 @@ _BATCH_TARGETS = {
         method="chat_completions",
         kind="chat",
     ),
-    "/v1/responses": BatchTarget(
-        endpoint="/v1/responses",
-        method="chat_completions",
-        kind="responses",
-    ),
-    "/responses": BatchTarget(
-        endpoint="/v1/responses",
-        method="chat_completions",
-        kind="responses",
-    ),
-    "/v1/embeddings": BatchTarget(
-        endpoint="/v1/embeddings",
-        method="embedder",
-        kind="embeddings",
-    ),
-    "/embeddings": BatchTarget(
-        endpoint="/v1/embeddings",
-        method="embedder",
-        kind="embeddings",
-    ),
 }
+
+BATCH_CHAT_V2_FALLBACK_WARNING = (
+    "Batching currently supports only `/v1/chat/completions` on the GigaChat v1 "
+    "backend. `GPT2GIGA_GIGACHAT_API_MODE=v2` will fall back to v1 for this batch."
+)
 
 _BATCH_STATUS_MAP = {
     "created": "validating",
@@ -68,8 +53,7 @@ def get_batch_target(endpoint: str) -> BatchTarget:
                 "error": {
                     "message": (
                         "Unsupported batch endpoint. Supported values are "
-                        "`/v1/chat/completions`, `/v1/responses`, and "
-                        "`/v1/embeddings`."
+                        "`/v1/chat/completions`."
                     ),
                     "type": "invalid_request_error",
                     "param": "endpoint",
@@ -78,6 +62,13 @@ def get_batch_target(endpoint: str) -> BatchTarget:
             },
         )
     return target
+
+
+def get_batch_warnings(*, target: BatchTarget, gigachat_api_mode: str) -> list[str]:
+    """Return compatibility warnings for a batch request."""
+    if target.kind == "chat" and gigachat_api_mode == "v2":
+        return [BATCH_CHAT_V2_FALLBACK_WARNING]
+    return []
 
 
 def map_openai_file_purpose(purpose: str) -> str:
@@ -146,19 +137,9 @@ async def transform_batch_input_file(
             )
 
         if target.kind == "chat":
-            if gigachat_api_mode == "v2":
-                transformed_body = await request_transformer.prepare_chat_completion_v2(
-                    body, giga_client
-                )
-                if hasattr(transformed_body, "model_dump"):
-                    transformed_body = transformed_body.model_dump(
-                        exclude_none=True,
-                        by_alias=True,
-                    )
-            else:
-                transformed_body = await request_transformer.prepare_chat_completion(
-                    body, giga_client
-                )
+            transformed_body = await request_transformer.prepare_chat_completion(
+                body, giga_client
+            )
             batch_model = _resolve_batch_model(body, giga_client)
             if batch_model and "model" not in transformed_body:
                 transformed_body["model"] = batch_model

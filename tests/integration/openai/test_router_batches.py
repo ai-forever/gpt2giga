@@ -7,6 +7,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.features.batches.transforms import BATCH_CHAT_V2_FALLBACK_WARNING
 from gpt2giga.providers.gigachat import ResponseProcessor
 from gpt2giga.api.openai import router
 
@@ -350,7 +351,7 @@ def test_batches_create_defaults_completion_window_to_24h():
     assert created.json()["completion_window"] == "24h"
 
 
-def test_batches_endpoints_translate_responses_batches_with_v2_by_default():
+def test_batches_endpoints_force_v1_chat_batches_when_global_mode_is_v2():
     app = make_app(
         config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
     )
@@ -360,10 +361,10 @@ def test_batches_endpoints_translate_responses_batches_with_v2_by_default():
     input_line = {
         "custom_id": "req-1",
         "method": "POST",
-        "url": "/v1/responses",
+        "url": "/v1/chat/completions",
         "body": {
             "model": "gpt-x",
-            "input": "hello",
+            "messages": [{"role": "user", "content": "hello"}],
         },
     }
     upload = client.post(
@@ -382,22 +383,20 @@ def test_batches_endpoints_translate_responses_batches_with_v2_by_default():
         "/batches",
         json={
             "completion_window": "24h",
-            "endpoint": "/v1/responses",
+            "endpoint": "/v1/chat/completions",
             "input_file_id": upload.json()["id"],
         },
     )
 
     assert created.status_code == 200
+    assert created.json()["warnings"] == [BATCH_CHAT_V2_FALLBACK_WARNING]
     translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
-    assert translated_line["request"]["translated"] == "responses-v2"
-    assert translated_line["request"]["messages"][0]["content"][0]["text"] == "hello"
+    assert translated_line["request"]["translated"] == "chat"
+    assert translated_line["request"]["messages"][0]["content"] == "hello"
 
 
-def test_batches_endpoints_translate_responses_batches_with_v1_mode():
-    app = make_app(
-        config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v1"}})
-    )
-    giga_client = app.state.gigachat_client
+def test_batches_endpoints_reject_non_chat_batch_targets():
+    app = make_app()
     client = TestClient(app)
 
     input_line = {
@@ -430,10 +429,11 @@ def test_batches_endpoints_translate_responses_batches_with_v1_mode():
         },
     )
 
-    assert created.status_code == 200
-    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
-    assert translated_line["request"]["translated"] == "responses-v1"
-    assert translated_line["request"]["messages"][0]["content"] == "hello"
+    assert created.status_code == 400
+    assert (
+        created.json()["detail"]["error"]["message"]
+        == "Unsupported batch endpoint. Supported values are `/v1/chat/completions`."
+    )
 
 
 def test_openapi_includes_examples_for_files_and_batches():
@@ -452,6 +452,3 @@ def test_openapi_includes_examples_for_files_and_batches():
         "application/json"
     ]["examples"]
     assert "minimal" in batch_examples
-    assert "responses_batch" in batch_examples
-    assert batch_examples["responses_batch"]["value"]["endpoint"] == "/v1/responses"
-    assert "embeddings_batch" in batch_examples

@@ -25,6 +25,7 @@ from gpt2giga.features.batches.contracts import (
 )
 from gpt2giga.features.batches.transforms import (
     build_openai_batch_object,
+    get_batch_warnings,
     get_batch_target,
     transform_batch_input_file,
 )
@@ -96,7 +97,14 @@ class BatchesService:
             batch_store=batch_store,
             file_store=file_store,
         )
-        return build_openai_batch_object(record["batch"], record["metadata"])
+        response = build_openai_batch_object(record["batch"], record["metadata"])
+        warnings = get_batch_warnings(
+            target=get_batch_target(record["metadata"]["endpoint"]),
+            gigachat_api_mode=self.gigachat_api_mode,
+        )
+        if warnings:
+            response["warnings"] = warnings
+        return response
 
     async def create_batch_from_rows(
         self,

@@ -3,12 +3,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from gpt2giga.features.batches.service import (
     BatchesService,
     get_batches_service_from_state,
 )
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.features.batches.transforms import BATCH_CHAT_V2_FALLBACK_WARNING
 
 
 class FakeBatch:
@@ -206,7 +208,7 @@ async def test_batches_service_list_anthropic_batches_filters_by_metadata():
 
 
 @pytest.mark.asyncio
-async def test_batches_service_uses_v1_transformer_for_responses_batches():
+async def test_batches_service_rejects_responses_batches():
     service = BatchesService(
         FakeRequestTransformer(),
         embeddings_model="EmbeddingsGigaR",
@@ -214,64 +216,32 @@ async def test_batches_service_uses_v1_transformer_for_responses_batches():
     )
     giga_client = FakeBatchesClient()
 
-    await service.create_batch_from_rows(
-        [
-            {
-                "custom_id": "req-1",
-                "method": "POST",
-                "url": "/v1/responses",
-                "body": {
-                    "model": "gpt-x",
-                    "input": "hello",
-                },
-            }
-        ],
-        endpoint="/v1/responses",
-        completion_window="24h",
-        giga_client=giga_client,
-        batch_store={},
-        file_store={},
-    )
+    with pytest.raises(HTTPException) as exc_info:
+        await service.create_batch_from_rows(
+            [
+                {
+                    "custom_id": "req-1",
+                    "method": "POST",
+                    "url": "/v1/responses",
+                    "body": {
+                        "model": "gpt-x",
+                        "input": "hello",
+                    },
+                }
+            ],
+            endpoint="/v1/responses",
+            completion_window="24h",
+            giga_client=giga_client,
+            batch_store={},
+            file_store={},
+        )
 
-    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
-    assert translated_line["request"]["translated"] == "responses-v1"
-
-
-@pytest.mark.asyncio
-async def test_batches_service_uses_v2_transformer_for_responses_batches():
-    service = BatchesService(
-        FakeRequestTransformer(),
-        embeddings_model="EmbeddingsGigaR",
-        gigachat_api_mode="v2",
-    )
-    giga_client = FakeBatchesClient()
-
-    await service.create_batch_from_rows(
-        [
-            {
-                "custom_id": "req-1",
-                "method": "POST",
-                "url": "/v1/responses",
-                "body": {
-                    "model": "gpt-x",
-                    "input": "hello",
-                },
-            }
-        ],
-        endpoint="/v1/responses",
-        completion_window="24h",
-        giga_client=giga_client,
-        batch_store={},
-        file_store={},
-    )
-
-    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
-    assert translated_line["request"]["translated"] == "responses-v2"
-    assert translated_line["request"]["messages"][0]["content"][0]["text"] == "hello"
+    assert exc_info.value.status_code == 400
+    assert "Unsupported batch endpoint" in exc_info.value.detail["error"]["message"]
 
 
 @pytest.mark.asyncio
-async def test_batches_service_uses_v2_transformer_for_chat_batches():
+async def test_batches_service_uses_v1_transformer_for_chat_batches_when_mode_is_v2():
     service = BatchesService(
         FakeRequestTransformer(),
         embeddings_model="EmbeddingsGigaR",
@@ -299,7 +269,29 @@ async def test_batches_service_uses_v2_transformer_for_chat_batches():
     )
 
     translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
-    assert translated_line["request"]["translated"] == "chat-v2"
+    assert translated_line["request"]["translated"] == "chat-v1"
+
+
+@pytest.mark.asyncio
+async def test_batches_service_create_batch_adds_v2_fallback_warning():
+    service = BatchesService(
+        FakeRequestTransformer(),
+        embeddings_model="EmbeddingsGigaR",
+        gigachat_api_mode="v2",
+    )
+    giga_client = FakeBatchesClient()
+
+    result = await service.create_batch(
+        {
+            "endpoint": "/v1/chat/completions",
+            "input_file_id": "input-file-1",
+        },
+        giga_client=giga_client,
+        batch_store={},
+        file_store={},
+    )
+
+    assert result["warnings"] == [BATCH_CHAT_V2_FALLBACK_WARNING]
 
 
 def test_get_batches_service_from_state_builds_service_from_config():
