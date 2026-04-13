@@ -7,6 +7,7 @@ TAG_MODELS = "Models"
 TAG_FILES = "Files"
 TAG_BATCHES = "Batches"
 TAG_COUNT_TOKENS = "Count Tokens"
+TAG_TRANSLATIONS = "Translations"
 TAG_SYSTEM = "System"
 TAG_ADMIN = "Admin"
 
@@ -41,6 +42,13 @@ OPENAPI_TAGS = [
     {
         "name": TAG_COUNT_TOKENS,
         "description": "Token counting endpoints for Anthropic and Gemini compatibility.",
+    },
+    {
+        "name": TAG_TRANSLATIONS,
+        "description": (
+            "Provider-to-provider request translation endpoints that convert one "
+            "compatibility payload into another without calling the upstream API."
+        ),
     },
     {
         "name": TAG_SYSTEM,

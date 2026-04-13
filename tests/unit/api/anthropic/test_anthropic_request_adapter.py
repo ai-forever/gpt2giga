@@ -1,6 +1,12 @@
 from gpt2giga.api.anthropic.request_adapter import (
     build_normalized_chat_request,
     build_token_count_texts,
+    serialize_normalized_chat_request,
+)
+from gpt2giga.core.contracts import (
+    NormalizedChatRequest,
+    NormalizedMessage,
+    NormalizedTool,
 )
 
 
@@ -92,3 +98,80 @@ def test_build_token_count_texts_collects_visible_texts_and_tool_definitions():
     assert "Hello" in texts
     assert "Hi there" in texts
     assert any("lookup_weather" in text for text in texts)
+
+
+def test_serialize_normalized_chat_request_builds_anthropic_payload():
+    payload, warnings = serialize_normalized_chat_request(
+        NormalizedChatRequest(
+            model="claude-test",
+            messages=[
+                NormalizedMessage(role="system", content="Be brief"),
+                NormalizedMessage(role="user", content="Hello"),
+                NormalizedMessage(
+                    role="assistant",
+                    content="Checking",
+                    tool_calls=[
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "lookup_weather",
+                                "arguments": '{"city":"Moscow"}',
+                            },
+                        }
+                    ],
+                ),
+                NormalizedMessage(
+                    role="tool",
+                    name="lookup_weather",
+                    tool_call_id="call_1",
+                    content='{"forecast":"sunny"}',
+                ),
+            ],
+            stream=True,
+            tools=[
+                NormalizedTool(
+                    name="lookup_weather",
+                    description="Look up weather.",
+                    parameters={"type": "object", "properties": {}},
+                )
+            ],
+            options={
+                "max_tokens": 128,
+                "temperature": 0.3,
+                "stop": ["END"],
+                "reasoning_effort": "medium",
+                "function_call": {"name": "lookup_weather"},
+                "presence_penalty": 1,
+            },
+        )
+    )
+
+    assert payload["model"] == "claude-test"
+    assert payload["system"] == "Be brief"
+    assert payload["stream"] is True
+    assert payload["max_tokens"] == 128
+    assert payload["temperature"] == 0.3
+    assert payload["stop_sequences"] == ["END"]
+    assert payload["thinking"] == {"type": "enabled", "budget_tokens": 4000}
+    assert payload["tool_choice"] == {"type": "tool", "name": "lookup_weather"}
+    assert payload["tools"][0]["name"] == "lookup_weather"
+    assert payload["messages"][0] == {
+        "role": "user",
+        "content": [{"type": "text", "text": "Hello"}],
+    }
+    assert payload["messages"][1]["role"] == "assistant"
+    assert payload["messages"][1]["content"][1]["type"] == "tool_use"
+    assert payload["messages"][2] == {
+        "role": "user",
+        "content": [
+            {
+                "type": "tool_result",
+                "tool_use_id": "call_1",
+                "content": {"forecast": "sunny"},
+            }
+        ],
+    }
+    assert warnings == [
+        "Anthropic translation ignored unsupported options: presence_penalty"
+    ]

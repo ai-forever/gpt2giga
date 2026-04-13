@@ -143,6 +143,8 @@ def test_openapi_json_available_in_dev_mode():
     assert response.status_code == 200
     schema = response.json()
     assert "/chat/completions" in schema["paths"]
+    assert "/translate" in schema["paths"]
+    assert "/v1/translate" in schema["paths"]
     assert "/messages" in schema["paths"]
     assert "/v1beta/models/{model}:generateContent" in schema["paths"]
     assert "/metrics" in schema["paths"]
@@ -155,6 +157,107 @@ def test_openapi_json_available_in_dev_mode():
         "content"
     ]["application/json"]["examples"]
     assert "minimal" in chat_examples
+
+
+def test_translate_endpoint_converts_openai_chat_to_gemini(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    with TestClient(create_app(config=_default_config())) as client:
+        response = client.post(
+            "/translate",
+            json={
+                "from": "openai",
+                "to": "gemini",
+                "kind": "chat",
+                "payload": {
+                    "model": "gpt-4.1-mini",
+                    "messages": [
+                        {"role": "system", "content": "Answer briefly."},
+                        {"role": "user", "content": "Hello"},
+                    ],
+                    "temperature": 0.2,
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["from"] == "openai"
+    assert body["to"] == "gemini"
+    assert body["kind"] == "chat"
+    assert body["endpoint"] == "/v1beta/models/gpt-4.1-mini:generateContent"
+    assert body["payload"]["model"] == "models/gpt-4.1-mini"
+    assert body["payload"]["systemInstruction"] == {
+        "parts": [{"text": "Answer briefly."}]
+    }
+    assert body["payload"]["contents"] == [
+        {"role": "user", "parts": [{"text": "Hello"}]}
+    ]
+    assert body["payload"]["generationConfig"]["temperature"] == 0.2
+    assert body["warnings"] == []
+
+
+def test_v1_translate_endpoint_converts_openai_chat_to_gigachat(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    with TestClient(create_app(config=_default_config())) as client:
+        response = client.post(
+            "/v1/translate",
+            json={
+                "from": "openai",
+                "to": "gigachat",
+                "payload": {
+                    "model": "GigaChat-2-Max",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "temperature": 0.1,
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["from"] == "openai"
+    assert body["to"] == "gigachat"
+    assert body["kind"] == "chat"
+    assert "endpoint" not in body
+    assert "model" not in body["payload"]
+    assert body["payload"]["stream"] is False
+    assert body["payload"]["temperature"] == 0.1
+    assert body["payload"]["messages"] == [{"role": "user", "content": "Hello"}]
+
+
+def test_translate_endpoint_rejects_non_text_translation_to_gigachat(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    with TestClient(create_app(config=_default_config())) as client:
+        response = client.post(
+            "/translate",
+            json={
+                "from": "openai",
+                "to": "gigachat",
+                "payload": {
+                    "model": "GigaChat-2-Max",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": "data:image/png;base64,SGVsbG8=",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+        )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]["error"]["code"] == "unsupported_translation_content"
+    )
 
 
 def test_prod_mode_requires_api_key(monkeypatch):

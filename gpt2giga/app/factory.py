@@ -16,6 +16,7 @@ from gpt2giga.api.middleware.request_validation import RequestValidationMiddlewa
 from gpt2giga.api.middleware.rquid_context import RquidMiddleware
 from gpt2giga.api.system import metrics_router, system_router
 from gpt2giga.api.tags import OPENAPI_TAGS
+from gpt2giga.api.translate import router as translate_router
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
@@ -80,6 +81,7 @@ def _register_middlewares(app: FastAPI, config) -> None:
             "embeddings",
             "responses",
             "messages",
+            "translate",
             "model",
             "files",
             "batches",
@@ -149,6 +151,8 @@ def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -
             )
 
     app.include_router(system_router)
+    app.include_router(translate_router, dependencies=api_dependencies)
+    app.include_router(translate_router, prefix="/v1", dependencies=api_dependencies)
     app.include_router(metrics_router, dependencies=api_dependencies)
     app.include_router(admin_api_router, dependencies=api_dependencies)
     app.include_router(admin_router, dependencies=api_dependencies)

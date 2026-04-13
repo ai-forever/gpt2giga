@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from copy import deepcopy
 from typing import Any
 
 from gpt2giga.api.anthropic.request import _extract_tool_definitions_text
@@ -294,3 +295,248 @@ def build_token_count_texts(payload: dict[str, Any]) -> list[str]:
         texts.extend(_extract_tool_definitions_text(payload["tools"]))
 
     return texts
+
+
+def serialize_normalized_chat_request(
+    request: NormalizedChatRequest,
+) -> tuple[dict[str, Any], list[str]]:
+    """Render a canonical chat request as an Anthropic Messages payload."""
+    system_texts: list[str] = []
+    messages: list[dict[str, Any]] = []
+
+    for message in request.messages:
+        if message.role == "system":
+            system_text = _stringify_message_content(message.content)
+            if system_text:
+                system_texts.append(system_text)
+            continue
+
+        if message.role == "assistant":
+            blocks = _assistant_message_to_anthropic_blocks(message)
+            _append_anthropic_message(messages, role="assistant", content=blocks)
+            continue
+
+        if message.role == "user":
+            blocks = _user_message_to_anthropic_blocks(message)
+            _append_anthropic_message(messages, role="user", content=blocks)
+            continue
+
+        if message.role in {"tool", "function"}:
+            _append_anthropic_message(
+                messages,
+                role="user",
+                content=[_tool_message_to_anthropic_block(message)],
+            )
+            continue
+
+        text = _stringify_message_content(message.content)
+        if text:
+            _append_anthropic_message(
+                messages,
+                role=message.role,
+                content=[{"type": "text", "text": text}],
+            )
+
+    payload: dict[str, Any] = {
+        "model": request.model,
+        "messages": messages,
+    }
+    warnings: list[str] = []
+
+    if system_texts:
+        payload["system"] = "\n\n".join(system_texts)
+    if request.stream:
+        payload["stream"] = True
+
+    _set_if_present(payload, "max_tokens", request.options, "max_tokens")
+    _set_if_present(payload, "temperature", request.options, "temperature")
+    _set_if_present(payload, "top_p", request.options, "top_p")
+
+    stop_sequences = request.options.get("stop")
+    if stop_sequences is not None:
+        payload["stop_sequences"] = deepcopy(stop_sequences)
+
+    reasoning_effort = request.options.get("reasoning_effort")
+    if reasoning_effort in {"low", "medium", "high"}:
+        budget_tokens = {"low": 1024, "medium": 4000, "high": 10000}[reasoning_effort]
+        payload["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": budget_tokens,
+        }
+
+    if request.tools:
+        payload["tools"] = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": deepcopy(tool.parameters),
+            }
+            for tool in request.tools
+        ]
+
+    function_call = request.options.get("function_call")
+    if isinstance(function_call, dict):
+        tool_name = function_call.get("name")
+        if isinstance(tool_name, str) and tool_name:
+            payload["tool_choice"] = {"type": "tool", "name": tool_name}
+
+    ignored_options = sorted(
+        set(request.options)
+        - {
+            "function_call",
+            "functions",
+            "max_tokens",
+            "reasoning_effort",
+            "stop",
+            "temperature",
+            "top_p",
+        }
+    )
+    if ignored_options:
+        warnings.append(
+            "Anthropic translation ignored unsupported options: "
+            + ", ".join(ignored_options)
+        )
+
+    return payload, warnings
+
+
+def _append_anthropic_message(
+    messages: list[dict[str, Any]],
+    *,
+    role: str,
+    content: list[dict[str, Any]],
+) -> None:
+    if not content:
+        return
+    if messages and messages[-1]["role"] == role:
+        messages[-1]["content"].extend(content)
+        return
+    messages.append({"role": role, "content": content})
+
+
+def _assistant_message_to_anthropic_blocks(
+    message: NormalizedMessage,
+) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    text = _stringify_message_content(message.content)
+    if text:
+        blocks.append({"type": "text", "text": text})
+
+    for tool_call in message.tool_calls:
+        if not isinstance(tool_call, dict):
+            continue
+        function = tool_call.get("function")
+        if not isinstance(function, dict):
+            continue
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": tool_call.get("id", f"call_{uuid.uuid4()}"),
+                "name": function.get("name", ""),
+                "input": _decode_json_object(function.get("arguments")),
+            }
+        )
+
+    return blocks
+
+
+def _user_message_to_anthropic_blocks(
+    message: NormalizedMessage,
+) -> list[dict[str, Any]]:
+    content = message.content
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}] if content else []
+    if not isinstance(content, list):
+        text = _stringify_message_content(content)
+        return [{"type": "text", "text": text}] if text else []
+
+    blocks: list[dict[str, Any]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if part_type == "text":
+            text = part.get("text")
+            if isinstance(text, str) and text:
+                blocks.append({"type": "text", "text": text})
+            continue
+        if part_type == "image_url":
+            image_url = part.get("image_url")
+            if not isinstance(image_url, dict):
+                continue
+            url = image_url.get("url")
+            if not isinstance(url, str) or not url:
+                continue
+            source = _image_url_to_anthropic_source(url)
+            if source is not None:
+                blocks.append({"type": "image", "source": source})
+            continue
+        raise ValueError(f"Unsupported Anthropic content part type: {part_type}")
+    return blocks
+
+
+def _tool_message_to_anthropic_block(
+    message: NormalizedMessage,
+) -> dict[str, Any]:
+    return {
+        "type": "tool_result",
+        "tool_use_id": message.tool_call_id or f"toolu_{uuid.uuid4()}",
+        "content": _decode_json_value(message.content),
+    }
+
+
+def _image_url_to_anthropic_source(url: str) -> dict[str, Any] | None:
+    if url.startswith("data:") and ";base64," in url:
+        prefix, data = url.split(",", 1)
+        media_type = prefix[5:].split(";", 1)[0] or "image/png"
+        return {
+            "type": "base64",
+            "media_type": media_type,
+            "data": data,
+        }
+    return {"type": "url", "url": url}
+
+
+def _stringify_message_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = [
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict)
+            and part.get("type") == "text"
+            and isinstance(part.get("text"), str)
+        ]
+        return "\n".join(text for text in texts if text)
+    if content is None:
+        return ""
+    return str(content)
+
+
+def _decode_json_object(value: Any) -> dict[str, Any]:
+    decoded = _decode_json_value(value)
+    if isinstance(decoded, dict):
+        return decoded
+    return {"value": decoded}
+
+
+def _decode_json_value(value: Any) -> Any:
+    if not isinstance(value, str):
+        return deepcopy(value)
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+def _set_if_present(
+    payload: dict[str, Any],
+    payload_key: str,
+    options: dict[str, Any],
+    option_key: str,
+) -> None:
+    value = options.get(option_key)
+    if value is not None:
+        payload[payload_key] = deepcopy(value)
