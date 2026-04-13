@@ -7,8 +7,8 @@ response = client.responses.create(
     model="gpt-4.1-mini",
     input="Generate an image of gray tabby cat hugging an otter with an orange scarf",
     tools=[{"type": "image_generation"}],
+    store=False,
 )
-print(response)
 image_data = [
     output.result
     for output in response.output
