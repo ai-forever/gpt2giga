@@ -7,9 +7,7 @@ import {
   buildPendingDiffEntries,
   buildSecurityPayload,
   collectGigachatPayload,
-  describePendingRuntimeImpact,
   describePersistOutcome,
-  planPendingApply,
   summarizePendingChanges,
   validateJsonArrayField,
   validatePositiveNumberField,
@@ -19,11 +17,13 @@ import {
 import {
   banner,
   card,
+  renderBooleanSelectOptions,
+  renderControlPlaneSectionStatus,
   renderDiffSections,
-  renderFormChangeSummary,
   renderJson,
   renderSecretField,
   pill,
+  renderStaticSelectOptions,
 } from "../templates.js";
 import {
   asArray,
@@ -31,7 +31,6 @@ import {
   csv,
   escapeHtml,
   formatTimestamp,
-  humanizeField,
   toErrorMessage,
 } from "../utils.js";
 
@@ -41,53 +40,6 @@ type InlineStatus = {
   tone: "info" | "warn" | "danger";
   message: string;
 };
-
-function renderSectionStatus({
-  summary,
-  controlPlane,
-  note,
-  validationMessage,
-  actionState,
-}: {
-  summary: ReturnType<typeof summarizePendingChanges>;
-  controlPlane: Record<string, unknown>;
-  note: string;
-  validationMessage?: string;
-  actionState?: InlineStatus | null;
-}): string {
-  const plannedApply = planPendingApply(summary);
-  const runtimeImpact = describePendingRuntimeImpact(plannedApply);
-  const persisted = Boolean(controlPlane.persisted);
-  const persistedLabel =
-    persisted && controlPlane.updated_at
-      ? `Persisted target: ${formatTimestamp(controlPlane.updated_at)}`
-      : "Persisted target: not saved yet";
-
-  return `
-    <div class="stack">
-      ${actionState ? banner(actionState.message, actionState.tone) : ""}
-      ${renderFormChangeSummary(plannedApply.effectiveSummary, {
-        note,
-        validationMessage,
-      })}
-      <div class="pill-row">
-        ${pill(persistedLabel, persisted ? "default" : "warn")}
-        ${pill(runtimeImpact.label, runtimeImpact.tone)}
-        ${
-          plannedApply.blockedLiveFields.length
-            ? pill(`Live-capable if isolated: ${plannedApply.blockedLiveFields.length}`)
-            : ""
-        }
-      </div>
-      ${
-        plannedApply.blockedLiveFields.length
-          ? `<p class="muted">These fields can reload live on their own, but this save batch still waits for restart: ${escapeHtml(plannedApply.blockedLiveFields.map((field) => humanizeField(field)).join(", "))}.</p>`
-          : ""
-      }
-      <p class="muted">${escapeHtml(runtimeImpact.detail)}</p>
-    </div>
-  `;
-}
 
 export async function renderSettings(app: AdminApp, token: number): Promise<void> {
   const [application, gigachat, security, revisionsPayload] = await Promise.all([
@@ -122,15 +74,13 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
             <label class="field">
               <span>Mode</span>
               <select name="mode">
-                <option value="DEV" ${applicationValues.mode === "DEV" ? "selected" : ""}>DEV</option>
-                <option value="PROD" ${applicationValues.mode === "PROD" ? "selected" : ""}>PROD</option>
+                ${renderStaticSelectOptions(String(applicationValues.mode ?? ""), ["DEV", "PROD"])}
               </select>
             </label>
             <label class="field">
               <span>GigaChat API mode</span>
               <select name="gigachat_api_mode">
-                <option value="v1" ${applicationValues.gigachat_api_mode === "v1" ? "selected" : ""}>v1</option>
-                <option value="v2" ${applicationValues.gigachat_api_mode === "v2" ? "selected" : ""}>v2</option>
+                ${renderStaticSelectOptions(String(applicationValues.gigachat_api_mode ?? ""), ["v1", "v2"])}
               </select>
             </label>
           </div>
@@ -142,29 +92,25 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
             <label class="field">
               <span>Telemetry</span>
               <select name="enable_telemetry">
-                <option value="true" ${applicationValues.enable_telemetry ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.enable_telemetry ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.enable_telemetry))}
               </select>
             </label>
             <label class="field">
               <span>Pass model</span>
               <select name="pass_model">
-                <option value="true" ${applicationValues.pass_model ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.pass_model ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.pass_model))}
               </select>
             </label>
             <label class="field">
               <span>Pass token</span>
               <select name="pass_token">
-                <option value="true" ${applicationValues.pass_token ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.pass_token ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.pass_token))}
               </select>
             </label>
             <label class="field">
               <span>Reasoning</span>
               <select name="enable_reasoning">
-                <option value="true" ${applicationValues.enable_reasoning ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.enable_reasoning ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.enable_reasoning))}
               </select>
             </label>
           </div>
@@ -173,7 +119,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
             <label class="field">
               <span>Log level</span>
               <select name="log_level">
-                ${LOG_LEVELS.map((level) => `<option value="${level}" ${applicationValues.log_level === level ? "selected" : ""}>${level}</option>`).join("")}
+                ${renderStaticSelectOptions(String(applicationValues.log_level ?? ""), LOG_LEVELS)}
               </select>
             </label>
           </div>
@@ -218,8 +164,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
             <label class="field">
               <span>Verify SSL</span>
               <select name="verify_ssl_certs">
-                <option value="true" ${gigachatValues.verify_ssl_certs ? "selected" : ""}>on</option>
-                <option value="false" ${!gigachatValues.verify_ssl_certs ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(gigachatValues.verify_ssl_certs))}
               </select>
             </label>
             <label class="field"><span>Timeout</span><input name="timeout" type="number" min="1" step="1" value="${escapeHtml(gigachatValues.timeout ?? "")}" /></label>
@@ -240,8 +185,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
           <label class="field">
             <span>Enable API key auth</span>
             <select name="enable_api_key_auth">
-              <option value="true" ${securityValues.enable_api_key_auth ? "selected" : ""}>on</option>
-              <option value="false" ${!securityValues.enable_api_key_auth ? "selected" : ""}>off</option>
+              ${renderBooleanSelectOptions(Boolean(securityValues.enable_api_key_auth))}
             </select>
           </label>
           <label class="field"><span>Logs IP allowlist</span><input name="logs_ip_allowlist" value="${escapeHtml(csv(securityValues.logs_ip_allowlist))}" /></label>
@@ -393,25 +337,28 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       .filter((state) => state.intent !== "keep")
       .map((state) => state.message);
 
-    applicationStatusNode.innerHTML = renderSectionStatus({
+    applicationStatusNode.innerHTML = renderControlPlaneSectionStatus({
       summary: summarizePendingChanges(applicationEntries),
-      controlPlane: controlPlaneStatus,
+      persisted: Boolean(controlPlaneStatus.persisted),
+      updatedAt: controlPlaneStatus.updated_at,
       note: "Mode, provider routing, runtime-store backend and auth-adjacent controls are the main restart-sensitive levers here.",
       validationMessage: applicationValidationMessage || undefined,
       actionState: applicationActionState,
     });
-    gigachatStatusNode.innerHTML = renderSectionStatus({
+    gigachatStatusNode.innerHTML = renderControlPlaneSectionStatus({
       summary: summarizePendingChanges(gigachatEntries),
-      controlPlane: controlPlaneStatus,
+      persisted: Boolean(controlPlaneStatus.persisted),
+      updatedAt: controlPlaneStatus.updated_at,
       note: stagedSecretMessages.length
         ? `Connection tests never persist the form. ${stagedSecretMessages.join(" ")}`
         : "Connection tests never persist the form. Secret values stay masked after save.",
       validationMessage: gigachatValidationMessage || undefined,
       actionState: gigachatActionState,
     });
-    securityStatusNode.innerHTML = renderSectionStatus({
+    securityStatusNode.innerHTML = renderControlPlaneSectionStatus({
       summary: summarizePendingChanges(securityEntries),
-      controlPlane: controlPlaneStatus,
+      persisted: Boolean(controlPlaneStatus.persisted),
+      updatedAt: controlPlaneStatus.updated_at,
       note: "Saved security changes always update the persisted target first. Runtime posture only changes immediately when the whole batch is restart-safe.",
       validationMessage: securityValidationMessage || undefined,
       actionState: securityActionState,

@@ -17,6 +17,27 @@ export function parseCsv(value: string): string[] {
     .filter(Boolean);
 }
 
+export function uniqueSortedStrings(values: unknown[]): string[] {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim())
+        .filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right));
+}
+
+export function setQueryParamIfPresent(
+  params: URLSearchParams,
+  key: string,
+  value: string,
+  skipValue = "",
+): void {
+  if (value && value !== skipValue) {
+    params.set(key, value);
+  }
+}
+
 export function safeJsonParse<T>(value: string, fallback: T): T {
   try {
     return JSON.parse(value) as T;

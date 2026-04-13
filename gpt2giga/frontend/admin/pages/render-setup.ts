@@ -5,9 +5,7 @@ import {
   buildApplicationPayload,
   buildPendingDiffEntries,
   collectGigachatPayload,
-  describePendingRuntimeImpact,
   describePersistOutcome,
-  planPendingApply,
   summarizePendingChanges,
   validatePositiveNumberField,
   validateRequiredCsvField,
@@ -17,8 +15,10 @@ import {
   banner,
   card,
   pill,
-  renderFormChangeSummary,
+  renderBooleanSelectOptions,
+  renderControlPlaneSectionStatus,
   renderSecretField,
+  renderStaticSelectOptions,
   renderSetupSteps,
 } from "../templates.js";
 import {
@@ -26,8 +26,6 @@ import {
   asRecord,
   csv,
   escapeHtml,
-  formatTimestamp,
-  humanizeField,
   parseCsv,
   toErrorMessage,
 } from "../utils.js";
@@ -44,54 +42,6 @@ type InlineStatus = {
   tone: "info" | "warn" | "danger";
   message: string;
 };
-
-function renderSectionStatus({
-  summary,
-  persisted,
-  updatedAt,
-  note,
-  validationMessage,
-  actionState,
-}: {
-  summary: ReturnType<typeof summarizePendingChanges>;
-  persisted: boolean;
-  updatedAt: unknown;
-  note: string;
-  validationMessage?: string;
-  actionState?: InlineStatus | null;
-}): string {
-  const plannedApply = planPendingApply(summary);
-  const runtimeImpact = describePendingRuntimeImpact(plannedApply);
-  const persistedLabel =
-    persisted && updatedAt
-      ? `Persisted target: ${formatTimestamp(updatedAt)}`
-      : "Persisted target: not saved yet";
-
-  return `
-    <div class="stack">
-      ${actionState ? banner(actionState.message, actionState.tone) : ""}
-      ${renderFormChangeSummary(plannedApply.effectiveSummary, {
-        note,
-        validationMessage,
-      })}
-      <div class="pill-row">
-        ${pill(persistedLabel, persisted ? "default" : "warn")}
-        ${pill(runtimeImpact.label, runtimeImpact.tone)}
-        ${
-          plannedApply.blockedLiveFields.length
-            ? pill(`Live-capable if isolated: ${plannedApply.blockedLiveFields.length}`)
-            : ""
-        }
-      </div>
-      ${
-        plannedApply.blockedLiveFields.length
-          ? `<p class="muted">These fields can reload live on their own, but this save batch still waits for restart: ${escapeHtml(plannedApply.blockedLiveFields.map((field) => humanizeField(field)).join(", "))}.</p>`
-          : ""
-      }
-      <p class="muted">${escapeHtml(runtimeImpact.detail)}</p>
-    </div>
-  `;
-}
 
 export async function renderSetup(app: AdminApp, token: number): Promise<void> {
   const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
@@ -217,15 +167,13 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
             <label class="field">
               <span>Mode</span>
               <select name="mode">
-                <option value="DEV" ${applicationValues.mode === "DEV" ? "selected" : ""}>DEV</option>
-                <option value="PROD" ${applicationValues.mode === "PROD" ? "selected" : ""}>PROD</option>
+                ${renderStaticSelectOptions(String(applicationValues.mode ?? ""), ["DEV", "PROD"])}
               </select>
             </label>
             <label class="field">
               <span>GigaChat API mode</span>
               <select name="gigachat_api_mode">
-                <option value="v1" ${applicationValues.gigachat_api_mode === "v1" ? "selected" : ""}>v1</option>
-                <option value="v2" ${applicationValues.gigachat_api_mode === "v2" ? "selected" : ""}>v2</option>
+                ${renderStaticSelectOptions(String(applicationValues.gigachat_api_mode ?? ""), ["v1", "v2"])}
               </select>
             </label>
           </div>
@@ -243,8 +191,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
             <label class="field">
               <span>Runtime store backend</span>
               <select name="runtime_store_backend">
-                <option value="memory" ${applicationValues.runtime_store_backend === "memory" ? "selected" : ""}>memory</option>
-                <option value="sqlite" ${applicationValues.runtime_store_backend === "sqlite" ? "selected" : ""}>sqlite</option>
+                ${renderStaticSelectOptions(String(applicationValues.runtime_store_backend ?? ""), ["memory", "sqlite"])}
               </select>
             </label>
             <label class="field">
@@ -256,22 +203,19 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
             <label class="field">
               <span>Telemetry</span>
               <select name="enable_telemetry">
-                <option value="true" ${applicationValues.enable_telemetry ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.enable_telemetry ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.enable_telemetry))}
               </select>
             </label>
             <label class="field">
               <span>Pass model</span>
               <select name="pass_model">
-                <option value="true" ${applicationValues.pass_model ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.pass_model ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.pass_model))}
               </select>
             </label>
             <label class="field">
               <span>Pass token</span>
               <select name="pass_token">
-                <option value="true" ${applicationValues.pass_token ? "selected" : ""}>on</option>
-                <option value="false" ${!applicationValues.pass_token ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(applicationValues.pass_token))}
               </select>
             </label>
           </div>
@@ -315,8 +259,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
           <label class="field">
             <span>Verify SSL</span>
             <select name="verify_ssl_certs">
-              <option value="true" ${gigachatValues.verify_ssl_certs ? "selected" : ""}>on</option>
-              <option value="false" ${!gigachatValues.verify_ssl_certs ? "selected" : ""}>off</option>
+              ${renderBooleanSelectOptions(Boolean(gigachatValues.verify_ssl_certs))}
             </select>
           </label>
           <label class="field">
@@ -341,8 +284,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
             <label class="field">
               <span>Enable gateway API key auth</span>
               <select name="enable_api_key_auth">
-                <option value="true" ${securityValues.enable_api_key_auth ? "selected" : ""}>on</option>
-                <option value="false" ${!securityValues.enable_api_key_auth ? "selected" : ""}>off</option>
+                ${renderBooleanSelectOptions(Boolean(securityValues.enable_api_key_auth))}
               </select>
             </label>
             <label class="field">
@@ -499,7 +441,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       .map((state) => state.message);
 
     if (applicationStatusNode) {
-      applicationStatusNode.innerHTML = renderSectionStatus({
+      applicationStatusNode.innerHTML = renderControlPlaneSectionStatus({
         summary: summarizePendingChanges(applicationEntries),
         persisted,
         updatedAt: persistedUpdatedAt,
@@ -509,7 +451,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       });
     }
     if (gigachatStatusNode) {
-      gigachatStatusNode.innerHTML = renderSectionStatus({
+      gigachatStatusNode.innerHTML = renderControlPlaneSectionStatus({
         summary: summarizePendingChanges(gigachatEntries),
         persisted,
         updatedAt: persistedUpdatedAt,
@@ -521,7 +463,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       });
     }
     if (securityStatusNode) {
-      securityStatusNode.innerHTML = renderSectionStatus({
+      securityStatusNode.innerHTML = renderControlPlaneSectionStatus({
         summary: summarizePendingChanges(securityEntries),
         persisted,
         updatedAt: persistedUpdatedAt,

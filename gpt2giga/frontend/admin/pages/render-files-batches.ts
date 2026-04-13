@@ -1,12 +1,20 @@
 import type { AdminApp } from "../app.js";
 import { withBusyState } from "../forms.js";
-import { card, kpi, pill, renderDefinitionList } from "../templates.js";
+import {
+  card,
+  kpi,
+  pill,
+  renderDefinitionList,
+  renderFilterSelectOptions,
+  renderStaticSelectOptions,
+} from "../templates.js";
 import {
   asArray,
   escapeHtml,
   formatBytes,
   formatTimestamp,
   safeJsonParse,
+  setQueryParamIfPresent,
 } from "../utils.js";
 
 interface FilesBatchesFilters {
@@ -105,19 +113,19 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
             <label class="field">
               <span>File purpose</span>
               <select name="purpose">
-                ${renderSelectOptions(filters.purpose, uniqueOptions(files.map((item) => item.purpose)))}
+                ${renderFilterSelectOptions(filters.purpose, files.map((item) => item.purpose))}
               </select>
             </label>
             <label class="field">
               <span>Batch status</span>
               <select name="batch_status">
-                ${renderSelectOptions(filters.batchStatus, uniqueOptions(batches.map((item) => item.status)))}
+                ${renderFilterSelectOptions(filters.batchStatus, batches.map((item) => item.status))}
               </select>
             </label>
             <label class="field">
               <span>Endpoint</span>
               <select name="endpoint">
-                ${renderSelectOptions(filters.endpoint, uniqueOptions(batches.map((item) => item.endpoint)))}
+                ${renderFilterSelectOptions(filters.endpoint, batches.map((item) => item.endpoint))}
               </select>
             </label>
           </div>
@@ -136,9 +144,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
           <label class="field">
             <span>Purpose</span>
             <select name="purpose">
-              <option value="batch">batch</option>
-              <option value="assistants">assistants</option>
-              <option value="user_data">user_data</option>
+              ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
             </select>
           </label>
           <label class="field">
@@ -158,9 +164,7 @@ export async function renderFilesBatches(app: AdminApp, token: number): Promise<
           <label class="field">
             <span>Endpoint</span>
             <select name="endpoint">
-              <option value="/v1/chat/completions">/v1/chat/completions</option>
-              <option value="/v1/responses">/v1/responses</option>
-              <option value="/v1/embeddings">/v1/embeddings</option>
+              ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
             </select>
           </label>
           <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required /></label>
@@ -1290,13 +1294,13 @@ function buildFilesBatchesUrl(
   routeState?: Partial<FilesBatchesRouteState>,
 ): string {
   const params = new URLSearchParams();
-  setIfPresent(params, "query", filters.query);
-  setIfPresent(params, "purpose", filters.purpose);
-  setIfPresent(params, "batch_status", filters.batchStatus);
-  setIfPresent(params, "endpoint", filters.endpoint);
-  setIfPresent(params, "selected_file", routeState?.selectedFileId ?? "");
-  setIfPresent(params, "selected_batch", routeState?.selectedBatchId ?? "");
-  setIfPresent(params, "compose_input", routeState?.composeInputFileId ?? "");
+  setQueryParamIfPresent(params, "query", filters.query);
+  setQueryParamIfPresent(params, "purpose", filters.purpose);
+  setQueryParamIfPresent(params, "batch_status", filters.batchStatus);
+  setQueryParamIfPresent(params, "endpoint", filters.endpoint);
+  setQueryParamIfPresent(params, "selected_file", routeState?.selectedFileId ?? "");
+  setQueryParamIfPresent(params, "selected_batch", routeState?.selectedBatchId ?? "");
+  setQueryParamIfPresent(params, "compose_input", routeState?.composeInputFileId ?? "");
   const query = params.toString();
   return query ? `/admin/files-batches?${query}` : "/admin/files-batches";
 }
@@ -1339,30 +1343,6 @@ function summarizeFilters(filters: FilesBatchesFilters): string {
   ]
     .filter(Boolean)
     .join(" · ");
-}
-
-function renderSelectOptions(selected: string, values: string[]): string {
-  return [renderOption("", selected, "All"), ...values.map((value) => renderOption(value, selected))].join("");
-}
-
-function renderOption(value: string, selected: string, label?: string): string {
-  return `<option value="${escapeHtml(value)}" ${selected === value ? "selected" : ""}>${escapeHtml(label ?? value)}</option>`;
-}
-
-function uniqueOptions(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean),
-    ),
-  ).sort((left, right) => left.localeCompare(right));
-}
-
-function setIfPresent(params: URLSearchParams, key: string, value: string): void {
-  if (value) {
-    params.set(key, value);
-  }
 }
 
 function firstErrorLine(message: string): string {

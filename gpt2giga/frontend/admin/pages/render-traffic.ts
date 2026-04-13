@@ -3,6 +3,8 @@ import {
   card,
   kpi,
   renderDefinitionList,
+  renderFilterSelectOptions,
+  renderStaticSelectOptions,
   renderStatLines,
   renderTable,
 } from "../templates.js";
@@ -13,6 +15,7 @@ import {
   formatDurationMs,
   formatNumber,
   formatTimestamp,
+  setQueryParamIfPresent,
 } from "../utils.js";
 
 interface TrafficFilters {
@@ -90,35 +93,35 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
             <label class="field">
               <span>Provider</span>
               <select name="provider">
-                ${renderSelectOptions(
+                ${renderFilterSelectOptions(
                   filters.provider,
-                  uniqueOptions([
+                  [
                     ...asArray<unknown>(asRecord(requests.available_filters).provider),
                     ...asArray<unknown>(asRecord(errors.available_filters).provider),
                     ...asArray<unknown>(asRecord(usageKeys.available_filters).provider),
                     ...asArray<unknown>(asRecord(usageProviders.available_filters).provider),
-                  ]),
+                  ],
                 )}
               </select>
             </label>
             <label class="field">
               <span>Model</span>
               <select name="model">
-                ${renderSelectOptions(
+                ${renderFilterSelectOptions(
                   filters.model,
-                  uniqueOptions([
+                  [
                     ...asArray<unknown>(asRecord(requests.available_filters).model),
                     ...asArray<unknown>(asRecord(errors.available_filters).model),
                     ...asArray<unknown>(asRecord(usageKeys.available_filters).model),
                     ...asArray<unknown>(asRecord(usageProviders.available_filters).model),
-                  ]),
+                  ],
                 )}
               </select>
             </label>
             <label class="field">
               <span>Limit</span>
               <select name="limit">
-                ${["10", "25", "50", "100"].map((value) => renderOption(value, filters.limit, value)).join("")}
+                ${renderStaticSelectOptions(filters.limit, ["10", "25", "50", "100"])}
               </select>
             </label>
           </div>
@@ -126,24 +129,24 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
             <label class="field">
               <span>Endpoint</span>
               <select name="endpoint">
-                ${renderSelectOptions(filters.endpoint, asArray<unknown>(asRecord(requests.available_filters).endpoint))}
+                ${renderFilterSelectOptions(filters.endpoint, asArray<unknown>(asRecord(requests.available_filters).endpoint))}
               </select>
             </label>
             <label class="field">
               <span>Method</span>
               <select name="method">
-                ${renderSelectOptions(filters.method, asArray<unknown>(asRecord(requests.available_filters).method))}
+                ${renderFilterSelectOptions(filters.method, asArray<unknown>(asRecord(requests.available_filters).method))}
               </select>
             </label>
             <label class="field">
               <span>Status code</span>
               <select name="status_code">
-                ${renderSelectOptions(
+                ${renderFilterSelectOptions(
                   filters.statusCode,
-                  uniqueOptions([
+                  [
                     ...asArray<unknown>(asRecord(requests.available_filters).status_code),
                     ...asArray<unknown>(asRecord(errors.available_filters).status_code),
-                  ]),
+                  ],
                 )}
               </select>
             </label>
@@ -152,19 +155,19 @@ export async function renderTraffic(app: AdminApp, token: number): Promise<void>
             <label class="field">
               <span>Error type</span>
               <select name="error_type">
-                ${renderSelectOptions(filters.errorType, asArray<unknown>(asRecord(errors.available_filters).error_type))}
+                ${renderFilterSelectOptions(filters.errorType, asArray<unknown>(asRecord(errors.available_filters).error_type))}
               </select>
             </label>
             <label class="field">
               <span>Key source</span>
               <select name="source">
-                ${renderSelectOptions(filters.source, asArray<unknown>(asRecord(usageKeys.available_filters).source))}
+                ${renderFilterSelectOptions(filters.source, asArray<unknown>(asRecord(usageKeys.available_filters).source))}
               </select>
             </label>
             <label class="field">
               <span>API key name</span>
               <select name="api_key_name">
-                ${renderSelectOptions(
+                ${renderFilterSelectOptions(
                   filters.apiKeyName,
                   asArray<unknown>(asRecord(usageProviders.available_filters).api_key_name),
                 )}
@@ -734,78 +737,48 @@ function readTrafficFilters(): TrafficFilters {
 function buildEventQuery(filters: TrafficFilters): string {
   const params = new URLSearchParams();
   params.set("limit", filters.limit || DEFAULT_LIMIT);
-  setIfPresent(params, "request_id", filters.requestId);
-  setIfPresent(params, "provider", filters.provider);
-  setIfPresent(params, "endpoint", filters.endpoint);
-  setIfPresent(params, "method", filters.method);
-  setIfPresent(params, "status_code", filters.statusCode);
-  setIfPresent(params, "model", filters.model);
-  setIfPresent(params, "error_type", filters.errorType);
+  setQueryParamIfPresent(params, "request_id", filters.requestId);
+  setQueryParamIfPresent(params, "provider", filters.provider);
+  setQueryParamIfPresent(params, "endpoint", filters.endpoint);
+  setQueryParamIfPresent(params, "method", filters.method);
+  setQueryParamIfPresent(params, "status_code", filters.statusCode);
+  setQueryParamIfPresent(params, "model", filters.model);
+  setQueryParamIfPresent(params, "error_type", filters.errorType);
   return params.toString();
 }
 
 function buildUsageKeysQuery(filters: TrafficFilters): string {
   const params = new URLSearchParams();
   params.set("limit", filters.limit || DEFAULT_LIMIT);
-  setIfPresent(params, "provider", filters.provider);
-  setIfPresent(params, "model", filters.model);
-  setIfPresent(params, "source", filters.source);
+  setQueryParamIfPresent(params, "provider", filters.provider);
+  setQueryParamIfPresent(params, "model", filters.model);
+  setQueryParamIfPresent(params, "source", filters.source);
   return params.toString();
 }
 
 function buildUsageProvidersQuery(filters: TrafficFilters): string {
   const params = new URLSearchParams();
   params.set("limit", filters.limit || DEFAULT_LIMIT);
-  setIfPresent(params, "provider", filters.provider);
-  setIfPresent(params, "model", filters.model);
-  setIfPresent(params, "api_key_name", filters.apiKeyName);
+  setQueryParamIfPresent(params, "provider", filters.provider);
+  setQueryParamIfPresent(params, "model", filters.model);
+  setQueryParamIfPresent(params, "api_key_name", filters.apiKeyName);
   return params.toString();
 }
 
 function buildTrafficUrl(filters: TrafficFilters): string {
   const params = new URLSearchParams();
-  setIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
-  setIfPresent(params, "request_id", filters.requestId);
-  setIfPresent(params, "provider", filters.provider);
-  setIfPresent(params, "endpoint", filters.endpoint);
-  setIfPresent(params, "method", filters.method);
-  setIfPresent(params, "status_code", filters.statusCode);
-  setIfPresent(params, "model", filters.model);
-  setIfPresent(params, "error_type", filters.errorType);
-  setIfPresent(params, "source", filters.source);
-  setIfPresent(params, "api_key_name", filters.apiKeyName);
+  setQueryParamIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
+  setQueryParamIfPresent(params, "request_id", filters.requestId);
+  setQueryParamIfPresent(params, "provider", filters.provider);
+  setQueryParamIfPresent(params, "endpoint", filters.endpoint);
+  setQueryParamIfPresent(params, "method", filters.method);
+  setQueryParamIfPresent(params, "status_code", filters.statusCode);
+  setQueryParamIfPresent(params, "model", filters.model);
+  setQueryParamIfPresent(params, "error_type", filters.errorType);
+  setQueryParamIfPresent(params, "source", filters.source);
+  setQueryParamIfPresent(params, "api_key_name", filters.apiKeyName);
   const query = params.toString();
   return query ? `/admin/traffic?${query}` : "/admin/traffic";
-}
-
-function setIfPresent(
-  params: URLSearchParams,
-  key: string,
-  value: string,
-  skipValue = "",
-): void {
-  if (value && value !== skipValue) {
-    params.set(key, value);
-  }
-}
-
-function renderSelectOptions(selected: string, values: unknown[]): string {
-  return [renderOption("", selected, "All"), ...uniqueOptions(values).map((value) => renderOption(value, selected))].join("");
-}
-
-function renderOption(value: unknown, selected: string, label?: string): string {
-  const normalizedValue = String(value ?? "");
-  return `<option value="${escapeHtml(normalizedValue)}" ${selected === normalizedValue ? "selected" : ""}>${escapeHtml(label ?? normalizedValue)}</option>`;
-}
-
-function uniqueOptions(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean),
-    ),
-  ).sort((left, right) => left.localeCompare(right));
 }
 
 function renderStatusSummary(event: TrafficEvent): string {

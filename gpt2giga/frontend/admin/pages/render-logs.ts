@@ -4,6 +4,8 @@ import {
   kpi,
   pill,
   renderDefinitionList,
+  renderFilterSelectOptions,
+  renderStaticSelectOptions,
   renderTable,
 } from "../templates.js";
 import {
@@ -13,6 +15,7 @@ import {
   formatDurationMs,
   formatNumber,
   formatTimestamp,
+  setQueryParamIfPresent,
   toErrorMessage,
 } from "../utils.js";
 
@@ -106,9 +109,7 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
             <label class="field">
               <span>Tail lines</span>
               <select name="lines">
-                ${["100", "150", "250", "500", "1000"]
-                  .map((value) => renderOption(value, filters.lines || DEFAULT_LINES))
-                  .join("")}
+                ${renderStaticSelectOptions(filters.lines || DEFAULT_LINES, ["100", "150", "250", "500", "1000"])}
               </select>
             </label>
             <label class="field">
@@ -139,43 +140,43 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
             <label class="field">
               <span>Provider</span>
               <select name="provider">
-                ${renderSelectOptions(
+                ${renderFilterSelectOptions(
                   filters.provider,
-                  uniqueOptions([
+                  [
                     ...asArray<unknown>(asRecord(recentRequests.available_filters).provider),
                     ...asArray<unknown>(asRecord(recentErrors.available_filters).provider),
-                  ]),
+                  ],
                 )}
               </select>
             </label>
             <label class="field">
               <span>Method</span>
               <select name="method">
-                ${renderSelectOptions(
+                ${renderFilterSelectOptions(
                   filters.method,
-                  uniqueOptions([
+                  [
                     ...asArray<unknown>(asRecord(recentRequests.available_filters).method),
                     ...asArray<unknown>(asRecord(recentErrors.available_filters).method),
-                  ]),
+                  ],
                 )}
               </select>
             </label>
             <label class="field">
               <span>Status code</span>
               <select name="status_code">
-                ${renderSelectOptions(
+                ${renderFilterSelectOptions(
                   filters.statusCode,
-                  uniqueOptions([
+                  [
                     ...asArray<unknown>(asRecord(recentRequests.available_filters).status_code),
                     ...asArray<unknown>(asRecord(recentErrors.available_filters).status_code),
-                  ]),
+                  ],
                 )}
               </select>
             </label>
             <label class="field">
               <span>Error type</span>
               <select name="error_type">
-                ${renderSelectOptions(
+                ${renderFilterSelectOptions(
                   filters.errorType,
                   asArray<unknown>(asRecord(recentErrors.available_filters).error_type),
                 )}
@@ -186,7 +187,7 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
             <label class="field">
               <span>Recent event limit</span>
               <select name="limit">
-                ${["5", "8", "12", "20"].map((value) => renderOption(value, filters.limit || DEFAULT_LIMIT)).join("")}
+                ${renderStaticSelectOptions(filters.limit || DEFAULT_LIMIT, ["5", "8", "12", "20"])}
               </select>
             </label>
             <span class="muted">Filters scope the request/error context panels, tail-derived request links, and the tail viewer in one place.</span>
@@ -731,24 +732,24 @@ function readLogsFilters(): LogsFilters {
 function buildLogsEventQuery(filters: LogsFilters): string {
   const params = new URLSearchParams();
   params.set("limit", filters.limit || DEFAULT_LIMIT);
-  setIfPresent(params, "request_id", filters.requestId);
-  setIfPresent(params, "provider", filters.provider);
-  setIfPresent(params, "method", filters.method);
-  setIfPresent(params, "status_code", filters.statusCode);
-  setIfPresent(params, "error_type", filters.errorType);
+  setQueryParamIfPresent(params, "request_id", filters.requestId);
+  setQueryParamIfPresent(params, "provider", filters.provider);
+  setQueryParamIfPresent(params, "method", filters.method);
+  setQueryParamIfPresent(params, "status_code", filters.statusCode);
+  setQueryParamIfPresent(params, "error_type", filters.errorType);
   return params.toString();
 }
 
 function buildLogsUrl(filters: LogsFilters): string {
   const params = new URLSearchParams();
-  setIfPresent(params, "lines", filters.lines, DEFAULT_LINES);
-  setIfPresent(params, "query", filters.query);
-  setIfPresent(params, "request_id", filters.requestId);
-  setIfPresent(params, "provider", filters.provider);
-  setIfPresent(params, "method", filters.method);
-  setIfPresent(params, "status_code", filters.statusCode);
-  setIfPresent(params, "error_type", filters.errorType);
-  setIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
+  setQueryParamIfPresent(params, "lines", filters.lines, DEFAULT_LINES);
+  setQueryParamIfPresent(params, "query", filters.query);
+  setQueryParamIfPresent(params, "request_id", filters.requestId);
+  setQueryParamIfPresent(params, "provider", filters.provider);
+  setQueryParamIfPresent(params, "method", filters.method);
+  setQueryParamIfPresent(params, "status_code", filters.statusCode);
+  setQueryParamIfPresent(params, "error_type", filters.errorType);
+  setQueryParamIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
   const query = params.toString();
   return query ? `/admin/logs?${query}` : "/admin/logs";
 }
@@ -827,36 +828,6 @@ function buildTrafficUrlForRequest(requestId: string): string {
   }
   const query = params.toString();
   return query ? `/admin/traffic?${query}` : "/admin/traffic";
-}
-
-function renderSelectOptions(selected: string, values: unknown[]): string {
-  return [renderOption("", selected, "All"), ...uniqueOptions(values).map((value) => renderOption(value, selected))].join("");
-}
-
-function renderOption(value: unknown, selected: string, label?: string): string {
-  const normalizedValue = String(value ?? "");
-  return `<option value="${escapeHtml(normalizedValue)}" ${selected === normalizedValue ? "selected" : ""}>${escapeHtml(label ?? normalizedValue)}</option>`;
-}
-
-function uniqueOptions(values: unknown[]): string[] {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => String(value ?? "").trim())
-        .filter(Boolean),
-    ),
-  ).sort((left, right) => left.localeCompare(right));
-}
-
-function setIfPresent(
-  params: URLSearchParams,
-  key: string,
-  value: string,
-  skipValue = "",
-): void {
-  if (value && value !== skipValue) {
-    params.set(key, value);
-  }
 }
 
 function buildTailContextRows(
