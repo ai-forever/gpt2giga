@@ -30,6 +30,12 @@ export interface DiffEntry {
   target: unknown;
 }
 
+export interface PendingChangeSummary {
+  changedFields: string[];
+  restartFields: string[];
+  secretFields: string[];
+}
+
 export interface SetupStep {
   id?: string;
   label: string;

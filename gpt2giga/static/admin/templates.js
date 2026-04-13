@@ -172,6 +172,41 @@ export function renderDiffSections(diff, emptyMessage = "No changes.") {
       `)
         .join("");
 }
+export function renderFormChangeSummary(summary, options) {
+    const idleMessage = options?.idleMessage ?? "No pending changes. This section matches the persisted runtime values.";
+    const changeCount = summary.changedFields.length;
+    const restartCount = summary.restartFields.length;
+    const secretCount = summary.secretFields.length;
+    const headline = changeCount === 0
+        ? idleMessage
+        : restartCount > 0
+            ? `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. ${restartCount} change${restartCount === 1 ? "" : "s"} require a restart before mounted routes fully reflect them.`
+            : `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. This section can be persisted and applied without a restart.`;
+    const previewFields = summary.changedFields.slice(0, 5);
+    const remainingFields = summary.changedFields.length - previewFields.length;
+    return `
+    <div class="surface stack">
+      ${options?.validationMessage ? banner(options.validationMessage, "danger") : ""}
+      ${banner(headline, changeCount === 0 ? "info" : restartCount > 0 ? "warn" : "info")}
+      <div class="pill-row">
+        ${pill(changeCount === 0 ? "Status: clean" : `Changed fields: ${changeCount}`, changeCount === 0 ? "good" : "default")}
+        ${restartCount > 0 ? pill(`Restart-sensitive: ${restartCount}`, "warn") : pill("Runtime apply: live", "good")}
+        ${secretCount > 0 ? pill(`Secrets touched: ${secretCount}`, "warn") : ""}
+      </div>
+      ${previewFields.length
+        ? `
+              <div class="pill-row">
+                ${previewFields
+            .map((field) => pill(humanizeField(field), summary.restartFields.includes(field) ? "warn" : "default"))
+            .join("")}
+                ${remainingFields > 0 ? pill(`+${remainingFields} more`) : ""}
+              </div>
+            `
+        : ""}
+      ${options?.note ? `<p class="muted">${escapeHtml(options.note)}</p>` : ""}
+    </div>
+  `;
+}
 export function renderLoadingGrid() {
     return `
     <article class="panel panel--span-12">

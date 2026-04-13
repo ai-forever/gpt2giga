@@ -1,6 +1,20 @@
 import type { AdminApp } from "../app.js";
-import { bindValidityReset, collectGigachatPayload, withBusyState } from "../forms.js";
-import { banner, card, pill, renderSecretField, renderSetupSteps } from "../templates.js";
+import {
+  bindValidityReset,
+  buildApplicationPayload,
+  buildPendingDiffEntries,
+  collectGigachatPayload,
+  summarizePendingChanges,
+  withBusyState,
+} from "../forms.js";
+import {
+  banner,
+  card,
+  pill,
+  renderFormChangeSummary,
+  renderSecretField,
+  renderSetupSteps,
+} from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, parseCsv } from "../utils.js";
 
 type SetupApplicationFormElements = HTMLFormControlsCollection & {
@@ -128,6 +142,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       `
         <form id="setup-application-form" class="stack">
           ${banner("Keep at least one provider enabled. Switching mode, runtime store backend or pass-token posture can require a restart.")}
+          <div id="setup-application-status"></div>
           <div class="dual-grid">
             <label class="field">
               <span>Mode</span>
@@ -200,6 +215,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       `
         <form id="setup-gigachat-form" class="stack">
           ${banner("Leave secret fields blank to keep the stored value. Paste a new secret to replace it, or use the clear toggle only when you want to remove it.")}
+          <div id="setup-gigachat-status"></div>
           <div class="dual-grid">
             <label class="field"><span>Model</span><input name="model" value="${escapeHtml(gigachatValues.model ?? "")}" /></label>
             <label class="field"><span>Scope</span><input name="scope" value="${escapeHtml(gigachatValues.scope ?? "")}" /></label>
@@ -251,6 +267,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
         <div class="stack">
           <form id="setup-security-form" class="stack">
             ${banner("Gateway auth and CORS persist immediately, but mounted routes may still require a restart before posture fully matches the saved config.", "warn")}
+            <div id="setup-security-status"></div>
             <label class="field">
               <span>Enable gateway API key auth</span>
               <select name="enable_api_key_auth">
@@ -323,6 +340,9 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
   const applicationForm = app.pageContent.querySelector<HTMLFormElement>("#setup-application-form");
   const gigachatForm = app.pageContent.querySelector<HTMLFormElement>("#setup-gigachat-form");
   const securityForm = app.pageContent.querySelector<HTMLFormElement>("#setup-security-form");
+  const applicationStatusNode = app.pageContent.querySelector<HTMLElement>("#setup-application-status");
+  const gigachatStatusNode = app.pageContent.querySelector<HTMLElement>("#setup-gigachat-status");
+  const securityStatusNode = app.pageContent.querySelector<HTMLElement>("#setup-security-status");
   const applicationFields = applicationForm?.elements as SetupApplicationFormElements | undefined;
   const gigachatFields = gigachatForm?.elements as SetupGigachatFormElements | undefined;
   bindValidityReset(applicationFields?.enabled_providers, gigachatFields?.timeout);
@@ -361,6 +381,76 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
     return false;
   };
 
+  const buildSecurityStepPayload = (form: HTMLFormElement) => {
+    const fields = form.elements as typeof form.elements & {
+      enable_api_key_auth: HTMLSelectElement;
+      cors_allow_origins: HTMLInputElement;
+      logs_ip_allowlist: HTMLInputElement;
+    };
+    return {
+      enable_api_key_auth: fields.enable_api_key_auth.value === "true",
+      cors_allow_origins: parseCsv(fields.cors_allow_origins.value),
+      logs_ip_allowlist: parseCsv(fields.logs_ip_allowlist.value),
+    };
+  };
+
+  const refreshStepStatuses = () => {
+    if (!applicationForm || !gigachatForm || !securityForm) {
+      return;
+    }
+
+    applicationStatusNode?.replaceChildren();
+    gigachatStatusNode?.replaceChildren();
+    securityStatusNode?.replaceChildren();
+
+    const applicationEntries = buildPendingDiffEntries(
+      "application",
+      applicationValues,
+      buildApplicationPayload(applicationForm),
+    );
+    const gigachatEntries = buildPendingDiffEntries(
+      "gigachat",
+      gigachatValues,
+      collectGigachatPayload(gigachatForm),
+    );
+    const securityEntries = buildPendingDiffEntries(
+      "security",
+      securityValues,
+      buildSecurityStepPayload(securityForm),
+    );
+
+    if (applicationStatusNode) {
+      applicationStatusNode.innerHTML = renderFormChangeSummary(
+        summarizePendingChanges(applicationEntries),
+        {
+          note: "Use this step for runtime posture and provider routing. Restart-sensitive controls are called out before you save.",
+        },
+      );
+    }
+    if (gigachatStatusNode) {
+      gigachatStatusNode.innerHTML = renderFormChangeSummary(
+        summarizePendingChanges(gigachatEntries),
+        {
+          note: "Testing the connection here does not persist the form; only save once the pending state looks correct.",
+        },
+      );
+    }
+    if (securityStatusNode) {
+      securityStatusNode.innerHTML = renderFormChangeSummary(
+        summarizePendingChanges(securityEntries),
+        {
+          note: "Gateway auth posture and CORS are the main restart-sensitive controls in this step.",
+        },
+      );
+    }
+  };
+
+  refreshStepStatuses();
+  [applicationForm, gigachatForm, securityForm].forEach((form) => {
+    form?.addEventListener("input", refreshStepStatuses);
+    form?.addEventListener("change", refreshStepStatuses);
+  });
+
   claimForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
@@ -394,87 +484,69 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
   });
 
   applicationForm?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (!validateEnabledProviders()) {
-        return;
-      }
-      const form = event.currentTarget as HTMLFormElement;
-      const fields = form.elements as typeof form.elements & {
-        mode: HTMLSelectElement;
-        gigachat_api_mode: HTMLSelectElement;
-        enabled_providers: HTMLInputElement;
-        observability_sinks: HTMLInputElement;
-        runtime_store_backend: HTMLSelectElement;
-        runtime_store_namespace: HTMLInputElement;
-        enable_telemetry: HTMLSelectElement;
-        pass_model: HTMLSelectElement;
-        pass_token: HTMLSelectElement;
-      };
-      const submitter = (event as SubmitEvent).submitter;
-      const button =
-        submitter instanceof HTMLButtonElement
-          ? submitter
-          : form.querySelector<HTMLButtonElement>('button[type="submit"]');
-      await withBusyState({
-        root: form,
-        button,
-        pendingLabel: "Saving…",
-        action: async () => {
-          const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/application", {
+    event.preventDefault();
+    if (!validateEnabledProviders()) {
+      return;
+    }
+    const form = event.currentTarget as HTMLFormElement;
+    const submitter = (event as SubmitEvent).submitter;
+    const button =
+      submitter instanceof HTMLButtonElement
+        ? submitter
+        : form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    await withBusyState({
+      root: form,
+      button,
+      pendingLabel: "Saving…",
+      action: async () => {
+        const response = await app.api.json<Record<string, unknown>>(
+          "/admin/api/settings/application",
+          {
             method: "PUT",
-            json: {
-              mode: fields.mode.value,
-              gigachat_api_mode: fields.gigachat_api_mode.value,
-              enabled_providers: parseCsv(fields.enabled_providers.value),
-              observability_sinks: parseCsv(fields.observability_sinks.value),
-              runtime_store_backend: fields.runtime_store_backend.value,
-              runtime_store_namespace: fields.runtime_store_namespace.value.trim(),
-              enable_telemetry: fields.enable_telemetry.value === "true",
-              pass_model: fields.pass_model.value === "true",
-              pass_token: fields.pass_token.value === "true",
-            },
-          });
-          app.queueAlert(
-            response.restart_required
-              ? "Application bootstrap step saved. Restart required for part of the change set."
-              : "Application bootstrap step saved and applied.",
-            response.restart_required ? "warn" : "info",
-          );
-          await app.render("setup");
-        },
-      });
+            json: buildApplicationPayload(form),
+          },
+        );
+        app.queueAlert(
+          response.restart_required
+            ? "Application bootstrap step saved. Restart required for part of the change set."
+            : "Application bootstrap step saved and applied.",
+          response.restart_required ? "warn" : "info",
+        );
+        await app.render("setup");
+      },
     });
+  });
 
   gigachatForm?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (!validateGigachatTimeout()) {
-        return;
-      }
-      const form = event.currentTarget as HTMLFormElement;
-      const submitter = (event as SubmitEvent).submitter;
-      const button =
-        submitter instanceof HTMLButtonElement
-          ? submitter
-          : form.querySelector<HTMLButtonElement>('button[type="submit"]');
-      await withBusyState({
-        root: form,
-        button,
-        pendingLabel: "Saving…",
-        action: async () => {
-          const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat", {
-            method: "PUT",
-            json: collectGigachatPayload(form),
-          });
-          app.queueAlert(
-            response.restart_required
-              ? "GigaChat bootstrap step saved. Restart required."
-              : "GigaChat bootstrap step saved and runtime reloaded.",
-            response.restart_required ? "warn" : "info",
-          );
-          await app.render("setup");
-        },
-      });
+    event.preventDefault();
+    if (!validateGigachatTimeout()) {
+      return;
+    }
+    const form = event.currentTarget as HTMLFormElement;
+    const submitter = (event as SubmitEvent).submitter;
+    const button =
+      submitter instanceof HTMLButtonElement
+        ? submitter
+        : form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    await withBusyState({
+      root: form,
+      button,
+      pendingLabel: "Saving…",
+      action: async () => {
+        const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat", {
+          method: "PUT",
+          json: collectGigachatPayload(form),
+        });
+        app.queueAlert(
+          response.restart_required
+            ? "GigaChat bootstrap step saved. Restart required."
+            : "GigaChat bootstrap step saved and runtime reloaded.",
+          response.restart_required ? "warn" : "info",
+        );
+        await app.render("setup");
+      },
     });
+  });
 
   document.getElementById("setup-gigachat-test")?.addEventListener("click", async (event) => {
     const form = gigachatForm;
@@ -505,41 +577,35 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
   });
 
   securityForm?.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const form = event.currentTarget as HTMLFormElement;
-      const fields = form.elements as typeof form.elements & {
-        enable_api_key_auth: HTMLSelectElement;
-        cors_allow_origins: HTMLInputElement;
-        logs_ip_allowlist: HTMLInputElement;
-      };
-      const submitter = (event as SubmitEvent).submitter;
-      const button =
-        submitter instanceof HTMLButtonElement
-          ? submitter
-          : form.querySelector<HTMLButtonElement>('button[type="submit"]');
-      await withBusyState({
-        root: form,
-        button,
-        pendingLabel: "Saving…",
-        action: async () => {
-          const response = await app.api.json<Record<string, unknown>>("/admin/api/settings/security", {
+    event.preventDefault();
+    const form = event.currentTarget as HTMLFormElement;
+    const submitter = (event as SubmitEvent).submitter;
+    const button =
+      submitter instanceof HTMLButtonElement
+        ? submitter
+        : form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    await withBusyState({
+      root: form,
+      button,
+      pendingLabel: "Saving…",
+      action: async () => {
+        const response = await app.api.json<Record<string, unknown>>(
+          "/admin/api/settings/security",
+          {
             method: "PUT",
-            json: {
-              enable_api_key_auth: fields.enable_api_key_auth.value === "true",
-              cors_allow_origins: parseCsv(fields.cors_allow_origins.value),
-              logs_ip_allowlist: parseCsv(fields.logs_ip_allowlist.value),
-            },
-          });
-          app.queueAlert(
-            response.restart_required
-              ? "Security bootstrap step saved. Restart required."
-              : "Security bootstrap step saved and applied.",
-            response.restart_required ? "warn" : "info",
-          );
-          await app.render("setup");
-        },
-      });
+            json: buildSecurityStepPayload(form),
+          },
+        );
+        app.queueAlert(
+          response.restart_required
+            ? "Security bootstrap step saved. Restart required."
+            : "Security bootstrap step saved and applied.",
+          response.restart_required ? "warn" : "info",
+        );
+        await app.render("setup");
+      },
     });
+  });
 
   document.getElementById("setup-create-global-key")?.addEventListener("click", async (event) => {
     const input = document.getElementById("setup-global-key-value") as HTMLInputElement | null;

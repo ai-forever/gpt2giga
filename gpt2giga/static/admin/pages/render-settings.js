@@ -1,5 +1,5 @@
-import { INVALID_JSON, bindValidityReset, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, withBusyState, } from "../forms.js";
-import { banner, card, renderDiffSections, renderJson, renderSecretField } from "../templates.js";
+import { INVALID_JSON, bindValidityReset, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, summarizePendingChanges, withBusyState, } from "../forms.js";
+import { banner, card, renderDiffSections, renderFormChangeSummary, renderJson, renderSecretField, } from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, formatTimestamp, parseCsv } from "../utils.js";
 const LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"];
 export async function renderSettings(app, token) {
@@ -21,6 +21,7 @@ export async function renderSettings(app, token) {
     ${card("Application", `
         <form id="application-form" class="stack">
           ${banner("Keep at least one provider enabled. Mode, runtime backend, auth and CORS-adjacent changes may require a restart.")}
+          <div id="settings-application-status"></div>
           <div class="dual-grid">
             <label class="field">
               <span>Mode</span>
@@ -86,6 +87,7 @@ export async function renderSettings(app, token) {
     ${card("GigaChat", `
         <form id="gigachat-form" class="stack">
           ${banner("Secrets stay masked after save. Leave secret fields blank to preserve the stored value; use the clear toggle only when you want to remove it.")}
+          <div id="settings-gigachat-status"></div>
           <div class="dual-grid">
             <label class="field"><span>Model</span><input name="model" value="${escapeHtml(gigachatValues.model ?? "")}" /></label>
             <label class="field"><span>Scope</span><input name="scope" value="${escapeHtml(gigachatValues.scope ?? "")}" /></label>
@@ -130,6 +132,7 @@ export async function renderSettings(app, token) {
       `, "panel panel--span-6")}
     ${card("Security", `
         <form id="security-form" class="stack">
+          <div id="settings-security-status"></div>
           <label class="field">
             <span>Enable API key auth</span>
             <select name="enable_api_key_auth">
@@ -177,8 +180,17 @@ export async function renderSettings(app, token) {
     const applicationForm = app.pageContent.querySelector("#application-form");
     const gigachatForm = app.pageContent.querySelector("#gigachat-form");
     const securityForm = app.pageContent.querySelector("#security-form");
+    const applicationStatusNode = app.pageContent.querySelector("#settings-application-status");
+    const gigachatStatusNode = app.pageContent.querySelector("#settings-gigachat-status");
+    const securityStatusNode = app.pageContent.querySelector("#settings-security-status");
     const pendingDiffNode = app.pageContent.querySelector("#settings-pending-diff");
-    if (!applicationForm || !gigachatForm || !securityForm || !pendingDiffNode) {
+    if (!applicationForm ||
+        !gigachatForm ||
+        !securityForm ||
+        !applicationStatusNode ||
+        !gigachatStatusNode ||
+        !securityStatusNode ||
+        !pendingDiffNode) {
         return;
     }
     const applicationFields = applicationForm.elements;
@@ -236,6 +248,16 @@ export async function renderSettings(app, token) {
             : !Array.isArray(securityPayload.governance_limits)
                 ? "Governance limits must stay a JSON array."
                 : "";
+        applicationStatusNode.innerHTML = renderFormChangeSummary(summarizePendingChanges(applicationEntries), {
+            note: "Mode, provider and runtime-store posture changes are the main restart-sensitive controls here.",
+        });
+        gigachatStatusNode.innerHTML = renderFormChangeSummary(summarizePendingChanges(gigachatEntries), {
+            note: "Secret rotation stays masked after save, but the pending field list still shows which credential surfaces will change.",
+        });
+        securityStatusNode.innerHTML = renderFormChangeSummary(summarizePendingChanges(buildPendingDiffEntries("security", securityValues, securityPayload)), {
+            note: "Auth and CORS changes can persist before the mounted route posture fully catches up.",
+            validationMessage: securityValidationError || undefined,
+        });
         pendingDiffNode.innerHTML = `
       ${securityValidationError ? banner(securityValidationError, "danger") : ""}
       ${renderDiffSections({
