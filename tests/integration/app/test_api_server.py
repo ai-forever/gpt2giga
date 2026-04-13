@@ -44,15 +44,17 @@ def _default_config() -> ProxyConfig:
 def test_root_redirect():
     app = create_app(config=_default_config())
     client = TestClient(app)
-    response = client.get("/")
-    assert response.status_code == 200
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/admin"
 
 
 def test_root_head_allowed():
     app = create_app(config=_default_config())
     client = TestClient(app)
-    response = client.head("/")
-    assert response.status_code == 200
+    response = client.head("/", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/admin"
 
 
 def test_cors_headers_present():

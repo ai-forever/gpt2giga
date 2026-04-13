@@ -112,10 +112,10 @@ def _register_root_redirect(app: FastAPI, *, is_prod_mode: bool) -> None:
     """Register the root redirect or health-like response."""
 
     @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
-    async def docs_redirect():
+    async def root_redirect():
         if is_prod_mode:
             return {"status": "ok", "mode": "PROD"}
-        return RedirectResponse(url="/docs")
+        return RedirectResponse(url="/admin")
 
 
 def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -> None:
