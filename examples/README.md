@@ -19,6 +19,7 @@
   - Models API: [`examples/openai/models/README.md`](openai/models/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./anthropic/README.md)
 - Gemini Python SDK (`google-genai`): [`examples/gemini/README.md`](./gemini/README.md)
+- Translation examples: [`examples/translate/README.md`](translate/README.md)
 - Agents SDK examples: [`examples/agents/README.md`](agents/README.md)
 
 ## Запуск примеров (из корня репозитория)
@@ -52,6 +53,17 @@ uv run python examples/anthropic/message_batches.py
 uv run python examples/gemini/generate_content.py
 uv run python examples/gemini/structured_output.py
 
+# Provider-to-provider translation
+uv run python examples/translate/openai_to_anthropic.py
+uv run python examples/translate/openai_to_gemini.py
+uv run python examples/translate/openai_to_gigachat.py
+uv run python examples/translate/anthropic_to_openai.py
+uv run python examples/translate/anthropic_to_gemini.py
+uv run python examples/translate/anthropic_to_gigachat.py
+uv run python examples/translate/gemini_to_openai.py
+uv run python examples/translate/gemini_to_anthropic.py
+uv run python examples/translate/gemini_to_gigachat.py
+
 # Agents SDK examples
 uv sync --group integrations
 uv run python examples/agents/openai_agents.py
@@ -68,6 +80,7 @@ WEATHER_API_KEY=... uv run python examples/agents/weather_agent.py
 - `examples/openai/models/`: models listing/retrieval example
 - `examples/anthropic/`: Anthropic Messages and Message Batches examples
 - `examples/gemini/`: Gemini Developer API examples
+- `examples/translate/`: provider-to-provider translation examples
 - `examples/agents/`: OpenAI Agents SDK and tool-driven weather agent examples
 
 ## Дополнительно
