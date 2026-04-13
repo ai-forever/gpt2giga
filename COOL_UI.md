@@ -228,7 +228,7 @@ open http://localhost:8090
 
 Ближайшие UI-улучшения высокого сигнала:
 
-- deeper linking request/error/log contexts
+- deeper linking individual tail lines into structured request context beyond the new `request_id` handoff
 - better traffic summaries вместо raw JSON everywhere
 - richer files/batches lifecycle actions и preview ergonomics
 
@@ -236,6 +236,8 @@ open http://localhost:8090
 
 - `Logs` теперь имеет filters, live stream status и нормальный SSE parsing без протокольного шума в `pre`
 - `Logs` теперь умеет инспектировать recent request/error context рядом с tail surface
+- `Logs` теперь умеет pin конкретный `request_id`, и тот же pin тащит оператора в `Traffic` без ручного копирования фильтров
+- `Traffic` теперь умеет принимать `request_id` как часть recent-events filter contract и даёт обратный handoff в `Logs` из payload inspector
 - `Files & Batches` теперь имеет inventory filters и более читаемый inspector summary
 - `Files & Batches` теперь показывает payload format/size summary для preview и ведёт через selection -> inspect -> preview/output -> batch handoff
 

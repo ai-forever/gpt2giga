@@ -69,6 +69,7 @@ def record_request_event(state: Any, event: RequestAuditEvent) -> None:
 def filter_request_events(
     events: list[RequestAuditEvent],
     *,
+    request_id: str | None = None,
     provider: str | None = None,
     endpoint: str | None = None,
     method: str | None = None,
@@ -78,6 +79,8 @@ def filter_request_events(
 ) -> list[RequestAuditEvent]:
     """Filter request events by normalized admin filter fields."""
     filtered = events
+    if request_id is not None:
+        filtered = [item for item in filtered if item.get("request_id") == request_id]
     if provider is not None:
         filtered = [item for item in filtered if item.get("provider") == provider]
     if endpoint is not None:
@@ -97,6 +100,7 @@ def query_request_events(
     feed: EventFeed,
     *,
     limit: int | None = None,
+    request_id: str | None = None,
     provider: str | None = None,
     endpoint: str | None = None,
     method: str | None = None,
@@ -108,6 +112,7 @@ def query_request_events(
     filters = {
         key: value
         for key, value in {
+            "request_id": request_id,
             "provider": provider,
             "endpoint": endpoint,
             "method": method,
@@ -123,6 +128,7 @@ def query_request_events(
 
     return filter_request_events(
         feed.recent(limit=limit),
+        request_id=request_id,
         provider=provider,
         endpoint=endpoint,
         method=method,

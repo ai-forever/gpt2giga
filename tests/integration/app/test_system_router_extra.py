@@ -305,6 +305,7 @@ def test_admin_recent_endpoints_support_extended_filters():
     resp = client.get(
         "/admin/api/errors/recent",
         params={
+            "request_id": "req-gemini",
             "provider": "gemini",
             "method": "POST",
             "status_code": 429,
@@ -318,6 +319,7 @@ def test_admin_recent_endpoints_support_extended_filters():
     assert payload["count"] == 1
     assert payload["events"][0]["request_id"] == "req-gemini"
     assert payload["filters"] == {
+        "request_id": "req-gemini",
         "provider": "gemini",
         "endpoint": None,
         "method": "POST",
@@ -343,6 +345,7 @@ def test_admin_recent_endpoints_return_empty_payload_by_default():
         "kind": "requests",
         "limit": 50,
         "filters": {
+            "request_id": None,
             "provider": None,
             "endpoint": None,
             "method": None,
@@ -366,6 +369,7 @@ def test_admin_recent_endpoints_return_empty_payload_by_default():
         "kind": "errors",
         "limit": 50,
         "filters": {
+            "request_id": None,
             "provider": None,
             "endpoint": None,
             "method": None,
@@ -527,11 +531,16 @@ def test_admin_recent_endpoints_support_sqlite_backend_queries(tmp_path):
     client = TestClient(app)
     resp = client.get(
         "/admin/api/errors/recent",
-        params={"provider": "gemini", "status_code": 429},
+        params={
+            "request_id": "req-gemini-1",
+            "provider": "gemini",
+            "status_code": 429,
+        },
     )
 
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["count"] == 1
     assert payload["events"][0]["request_id"] == "req-gemini-1"
+    assert payload["filters"]["request_id"] == "req-gemini-1"
     assert payload["available_filters"]["provider"] == ["gemini", "openai"]

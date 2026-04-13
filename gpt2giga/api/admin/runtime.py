@@ -615,6 +615,7 @@ def _recent_events_payload(
     *,
     kind: str,
     limit: int,
+    request_id: str | None,
     provider: str | None,
     endpoint: str | None,
     method: str | None,
@@ -632,6 +633,7 @@ def _recent_events_payload(
     events = query_request_events(
         feed,
         limit=limit,
+        request_id=_normalize_optional_text(request_id),
         provider=_normalize_optional_text(provider),
         endpoint=_normalize_optional_text(endpoint),
         method=_normalize_optional_text(method),
@@ -645,6 +647,7 @@ def _recent_events_payload(
         "kind": kind,
         "limit": limit,
         "filters": {
+            "request_id": _normalize_optional_text(request_id),
             "provider": _normalize_optional_text(provider),
             "endpoint": _normalize_optional_text(endpoint),
             "method": _normalize_optional_text(method),
@@ -670,6 +673,7 @@ async def get_admin_metrics(request: Request):
 async def get_admin_recent_requests(
     request: Request,
     limit: int = Query(default=50, ge=1, le=500),
+    request_id: str | None = Query(default=None),
     provider: str | None = Query(default=None),
     endpoint: str | None = Query(default=None),
     method: str | None = Query(default=None),
@@ -683,6 +687,7 @@ async def get_admin_recent_requests(
         request,
         kind="requests",
         limit=limit,
+        request_id=request_id,
         provider=provider,
         endpoint=endpoint,
         method=method,
@@ -697,6 +702,7 @@ async def get_admin_recent_requests(
 async def get_admin_recent_errors(
     request: Request,
     limit: int = Query(default=50, ge=1, le=500),
+    request_id: str | None = Query(default=None),
     provider: str | None = Query(default=None),
     endpoint: str | None = Query(default=None),
     method: str | None = Query(default=None),
@@ -710,6 +716,7 @@ async def get_admin_recent_errors(
         request,
         kind="errors",
         limit=limit,
+        request_id=request_id,
         provider=provider,
         endpoint=endpoint,
         method=method,

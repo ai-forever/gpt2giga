@@ -19,6 +19,7 @@ import {
 interface LogsFilters {
   lines: string;
   query: string;
+  requestId: string;
   provider: string;
   method: string;
   statusCode: string;
@@ -58,7 +59,7 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
   `);
   app.setContent(`
     ${kpi("Tail lines", filters.lines || DEFAULT_LINES)}
-    ${kpi("Matching lines", countMatchingLines(rawLogLines, filters.query))}
+    ${kpi("Matching lines", countMatchingLines(rawLogLines, filters))}
     ${kpi("Recent errors", formatNumber(errorEvents.length))}
     ${kpi("Recent requests", formatNumber(requestEvents.length))}
     ${card(
@@ -78,6 +79,26 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
               <span>Text match</span>
               <input name="query" value="${escapeHtml(filters.query)}" placeholder="Filter the rendered tail client-side" />
             </label>
+          </div>
+          <div class="dual-grid">
+            <label class="field">
+              <span>Request id</span>
+              <input
+                name="request_id"
+                value="${escapeHtml(filters.requestId)}"
+                placeholder="Pin one request across logs and traffic"
+              />
+            </label>
+            <div class="surface">
+              <div class="stack">
+                <h4>Request scope</h4>
+                <p class="muted">
+                  Request pinning narrows the recent request/error context panels and also filters the
+                  rendered tail by the same request id, so one link from Traffic can carry the full
+                  investigation context.
+                </p>
+              </div>
+            </div>
           </div>
           <div class="quad-grid">
             <label class="field">
@@ -137,7 +158,9 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
           </div>
           <div class="toolbar">
             <button class="button" type="submit">Apply filters</button>
-            <a class="button button--secondary" href="/admin/traffic">Open traffic</a>
+            <a class="button button--secondary" href="${escapeHtml(filters.requestId ? buildTrafficUrlForRequest(filters.requestId) : "/admin/traffic")}">
+              ${escapeHtml(filters.requestId ? "Open pinned traffic" : "Open traffic")}
+            </a>
           </div>
         </form>
       `,
@@ -178,9 +201,19 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
                 [
                   { label: "Selection", value: "No event selected" },
                   { label: "Filters", value: summarizeActiveFilters(filters) || "No event filters" },
+                  {
+                    label: "Request scope",
+                    value: filters.requestId || "Recent log window",
+                    note: filters.requestId
+                      ? "The rendered tail and event panels are pinned to one request id."
+                      : "Select a request or error row to pin its traffic context.",
+                  },
                 ],
                 "No event selected yet.",
               )}
+            </div>
+            <div class="toolbar" id="logs-selection-actions">
+              ${renderLogSelectionActions(null, filters)}
             </div>
             <pre class="code-block" id="logs-detail">${escapeHtml(
               JSON.stringify(
@@ -210,12 +243,12 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
               </div>
               <div class="surface__meta">
                 <span class="pill" id="logs-match-count">${escapeHtml(
-                  `${countMatchingLines(rawLogLines, filters.query)} matches`,
+                  `${countMatchingLines(rawLogLines, filters)} matches`,
                 )}</span>
               </div>
             </div>
             <pre class="code-block code-block--tall" id="log-output">${escapeHtml(
-              formatRenderedLogOutput(rawLogLines, filters.query),
+              formatRenderedLogOutput(rawLogLines, filters),
             )}</pre>
           </div>
         </div>
@@ -286,6 +319,7 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
   const autoScrollToggle = app.pageContent.querySelector<HTMLInputElement>("#logs-auto-scroll");
   const detailNode = app.pageContent.querySelector<HTMLPreElement>("#logs-detail");
   const summaryNode = app.pageContent.querySelector<HTMLElement>("#logs-selection-summary");
+  const actionsNode = app.pageContent.querySelector<HTMLElement>("#logs-selection-actions");
   if (
     !refreshButton ||
     !resetFiltersButton ||
@@ -298,14 +332,15 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
     !streamNote ||
     !autoScrollToggle ||
     !detailNode ||
-    !summaryNode
+    !summaryNode ||
+    !actionsNode
   ) {
     return;
   }
 
   const setRenderedLogs = (): void => {
-    const rendered = formatRenderedLogOutput(rawLogLines, filters.query);
-    const matchingLines = countMatchingLines(rawLogLines, filters.query);
+    const rendered = formatRenderedLogOutput(rawLogLines, filters);
+    const matchingLines = countMatchingLines(rawLogLines, filters);
     logOutput.textContent = rendered;
     matchCount.textContent = `${matchingLines} matches`;
     if (autoScroll) {
@@ -426,6 +461,7 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
     const fields = form.elements as typeof form.elements & {
       lines: HTMLSelectElement;
       query: HTMLInputElement;
+      request_id: HTMLInputElement;
       provider: HTMLSelectElement;
       method: HTMLSelectElement;
       status_code: HTMLSelectElement;
@@ -436,6 +472,7 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
     const nextFilters: LogsFilters = {
       lines: fields.lines.value || DEFAULT_LINES,
       query: fields.query.value.trim(),
+      requestId: fields.request_id.value.trim(),
       provider: fields.provider.value,
       method: fields.method.value,
       statusCode: fields.status_code.value,
@@ -444,6 +481,31 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
     };
     window.history.replaceState({}, "", buildLogsUrl(nextFilters));
     void app.render("logs");
+  });
+
+  actionsNode.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const button = target.closest<HTMLButtonElement>("[data-log-action]");
+    if (!button) {
+      return;
+    }
+    const action = button.dataset.logAction;
+    if (action === "scope-request") {
+      const requestId = button.dataset.requestId?.trim();
+      if (!requestId) {
+        return;
+      }
+      window.history.replaceState({}, "", buildLogsUrl({ ...filters, requestId }));
+      void app.render("logs");
+      return;
+    }
+    if (action === "clear-request-scope") {
+      window.history.replaceState({}, "", buildLogsUrl({ ...filters, requestId: "" }));
+      void app.render("logs");
+    }
   });
 
   const inspectPayloads: Record<"request" | "error", LogEvent[]> = {
@@ -481,6 +543,7 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
         ],
         "No event selected yet.",
       );
+      actionsNode.innerHTML = renderLogSelectionActions(String(item.request_id ?? ""), filters);
       detailNode.textContent = JSON.stringify(item, null, 2);
     });
   });
@@ -494,6 +557,7 @@ function readLogsFilters(): LogsFilters {
   return {
     lines: params.get("lines") || DEFAULT_LINES,
     query: params.get("query") || "",
+    requestId: params.get("request_id") || "",
     provider: params.get("provider") || "",
     method: params.get("method") || "",
     statusCode: params.get("status_code") || "",
@@ -505,6 +569,7 @@ function readLogsFilters(): LogsFilters {
 function buildLogsEventQuery(filters: LogsFilters): string {
   const params = new URLSearchParams();
   params.set("limit", filters.limit || DEFAULT_LIMIT);
+  setIfPresent(params, "request_id", filters.requestId);
   setIfPresent(params, "provider", filters.provider);
   setIfPresent(params, "method", filters.method);
   setIfPresent(params, "status_code", filters.statusCode);
@@ -516,6 +581,7 @@ function buildLogsUrl(filters: LogsFilters): string {
   const params = new URLSearchParams();
   setIfPresent(params, "lines", filters.lines, DEFAULT_LINES);
   setIfPresent(params, "query", filters.query);
+  setIfPresent(params, "request_id", filters.requestId);
   setIfPresent(params, "provider", filters.provider);
   setIfPresent(params, "method", filters.method);
   setIfPresent(params, "status_code", filters.statusCode);
@@ -533,25 +599,31 @@ function normalizeLogText(text: string): string[] {
     .slice(-MAX_LOG_LINES);
 }
 
-function formatRenderedLogOutput(lines: string[], query: string): string {
-  const filtered = filterLogLines(lines, query);
+function formatRenderedLogOutput(lines: string[], filters: LogsFilters): string {
+  const filtered = filterLogLines(lines, filters);
   return filtered.length ? filtered.join("\n") : "No log lines matched the current filters.";
 }
 
-function filterLogLines(lines: string[], query: string): string[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
+function filterLogLines(lines: string[], filters: LogsFilters): string[] {
+  const normalizedNeedles = [filters.query, filters.requestId]
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (!normalizedNeedles.length) {
     return lines;
   }
-  return lines.filter((line) => line.toLowerCase().includes(normalizedQuery));
+  return lines.filter((line) => {
+    const normalizedLine = line.toLowerCase();
+    return normalizedNeedles.every((needle) => normalizedLine.includes(needle));
+  });
 }
 
-function countMatchingLines(lines: string[], query: string): string {
-  return formatNumber(filterLogLines(lines, query).length);
+function countMatchingLines(lines: string[], filters: LogsFilters): string {
+  return formatNumber(filterLogLines(lines, filters).length);
 }
 
 function summarizeActiveFilters(filters: LogsFilters): string {
   const active = [
+    filters.requestId ? `request=${filters.requestId}` : "",
     filters.provider ? `provider=${filters.provider}` : "",
     filters.method ? `method=${filters.method}` : "",
     filters.statusCode ? `status=${filters.statusCode}` : "",
@@ -559,6 +631,40 @@ function summarizeActiveFilters(filters: LogsFilters): string {
     filters.query ? `text=${filters.query}` : "",
   ].filter(Boolean);
   return active.join(" · ");
+}
+
+function renderLogSelectionActions(requestId: string | null, filters: LogsFilters): string {
+  const actions: string[] = [];
+
+  if (requestId) {
+    actions.push(
+      `<a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForRequest(requestId))}">Open traffic for request</a>`,
+    );
+    if (filters.requestId !== requestId) {
+      actions.push(
+        `<button class="button" data-log-action="scope-request" data-request-id="${escapeHtml(requestId)}" type="button">Pin this request</button>`,
+      );
+    }
+  }
+
+  if (filters.requestId) {
+    actions.push(
+      '<button class="button button--secondary" data-log-action="clear-request-scope" type="button">Clear request pin</button>',
+    );
+  }
+
+  return actions.length
+    ? actions.join("")
+    : '<span class="muted">Select a request or error row to open the matching traffic context.</span>';
+}
+
+function buildTrafficUrlForRequest(requestId: string): string {
+  const params = new URLSearchParams();
+  if (requestId.trim()) {
+    params.set("request_id", requestId.trim());
+  }
+  const query = params.toString();
+  return query ? `/admin/traffic?${query}` : "/admin/traffic";
 }
 
 function renderSelectOptions(selected: string, values: unknown[]): string {

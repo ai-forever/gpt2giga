@@ -1,4 +1,4 @@
-import { card, kpi, renderEmptyState, renderJson, renderStatLines, renderTable, } from "../templates.js";
+import { card, kpi, renderDefinitionList, renderStatLines, renderTable, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatDurationMs, formatNumber, formatTimestamp, } from "../utils.js";
 const DEFAULT_LIMIT = "25";
 export async function renderTraffic(app, token) {
@@ -17,15 +17,19 @@ export async function renderTraffic(app, token) {
     const keyEntries = asArray(usageKeys.entries);
     const providerEntries = asArray(usageProviders.entries);
     const providerSummary = asRecord(usageProviders.summary);
+    const requestPinned = Boolean(filters.requestId);
+    const scopeSummary = buildTrafficScopeSummary(filters, requestEvents, errorEvents, providerEntries, providerSummary);
     app.setHeroActions(`
     <button class="button button--secondary" id="reset-traffic-filters" type="button">Reset filters</button>
-    <a class="button" href="/admin/logs">Open logs</a>
+    <a class="button" href="${escapeHtml(filters.requestId ? buildLogsUrlForRequest(filters.requestId) : "/admin/logs")}">
+      ${escapeHtml(filters.requestId ? "Open pinned logs" : "Open logs")}
+    </a>
   `);
     app.setContent(`
-    ${kpi("Requests", formatNumber(providerSummary.request_count ?? 0))}
-    ${kpi("Errors", formatNumber(providerSummary.error_count ?? 0))}
-    ${kpi("Tokens", formatNumber(providerSummary.total_tokens ?? 0))}
-    ${kpi("Providers", formatNumber(providerEntries.length))}
+    ${kpi(requestPinned ? "Pinned requests" : "Requests", formatNumber(scopeSummary.requestCount))}
+    ${kpi(requestPinned ? "Pinned errors" : "Errors", formatNumber(scopeSummary.errorCount))}
+    ${kpi(requestPinned ? "Pinned tokens" : "Tokens", formatNumber(scopeSummary.totalTokens))}
+    ${kpi(requestPinned ? "Providers in scope" : "Providers", formatNumber(scopeSummary.providerCount))}
     ${card("Traffic filters", `
         <form id="traffic-filters-form" class="stack">
           <div class="triple-grid">
@@ -101,6 +105,26 @@ export async function renderTraffic(app, token) {
               </select>
             </label>
           </div>
+          <div class="dual-grid">
+            <label class="field">
+              <span>Request id</span>
+              <input
+                name="request_id"
+                value="${escapeHtml(filters.requestId)}"
+                placeholder="Pin one request across recent traffic surfaces"
+              />
+            </label>
+            <div class="surface">
+              <div class="stack">
+                <h4>Request pinning</h4>
+                <p class="muted">
+                  Request id filters lock the recent request/error tables and payload inspector to one
+                  audit event. Usage rollups stay provider/model/key-oriented because they are aggregated
+                  counters, not per-request records.
+                </p>
+              </div>
+            </div>
+          </div>
           <div class="toolbar">
             <button class="button" type="submit">Apply filters</button>
             <span class="muted">Filters apply across recent events and usage summaries using the same admin APIs.</span>
@@ -130,6 +154,12 @@ export async function renderTraffic(app, token) {
         { label: "Usage key rows", value: formatNumber(keyEntries.length) },
         { label: "Usage provider rows", value: formatNumber(providerEntries.length) },
     ], "No traffic rows are loaded yet.")}
+          <div id="traffic-selection-summary">
+            ${renderDefinitionList(buildTrafficSelectionSummary(filters), "Select a request, error, or usage row.")}
+          </div>
+          <div class="toolbar" id="traffic-selection-actions">
+            ${renderTrafficSelectionActions(null, filters)}
+          </div>
           <pre class="code-block code-block--tall" id="traffic-detail">${escapeHtml(JSON.stringify({
         active_filters: filters,
         usage_summary: providerSummary,
@@ -151,7 +181,9 @@ export async function renderTraffic(app, token) {
         `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
         `<button class="button button--secondary" data-traffic-detail="${index}" data-traffic-kind="error" type="button">View</button>`,
     ]), "No recent errors matched the selected filters."), "panel panel--span-8")}
-    ${card("Usage summary", renderStatLines([
+    ${card("Usage summary", `
+        ${requestPinned ? '<div class="banner banner--warn">Usage rollups below still follow provider/model/key filters, but request-id pinning only scopes recent request and error feeds.</div>' : ""}
+        ${renderStatLines([
         {
             label: "Successful requests",
             value: formatNumber(providerSummary.success_count ?? 0),
@@ -167,7 +199,8 @@ export async function renderTraffic(app, token) {
             label: "Completion tokens",
             value: formatNumber(providerSummary.completion_tokens ?? 0),
         },
-    ], "Usage totals are empty."), "panel panel--span-4")}
+    ], "Usage totals are empty.")}
+      `, "panel panel--span-4")}
     ${card("Usage by key", renderTable([
         { label: "Key" },
         { label: "Traffic" },
@@ -197,15 +230,24 @@ export async function renderTraffic(app, token) {
   `);
     const detailNode = app.pageContent.querySelector("#traffic-detail");
     const filtersForm = app.pageContent.querySelector("#traffic-filters-form");
-    if (!detailNode || !filtersForm) {
+    const summaryNode = app.pageContent.querySelector("#traffic-selection-summary");
+    const actionNode = app.pageContent.querySelector("#traffic-selection-actions");
+    if (!detailNode || !filtersForm || !summaryNode || !actionNode) {
         return;
     }
+    const setSelectionSummary = (items) => {
+        summaryNode.innerHTML = renderDefinitionList(items, "Select a request, error, or usage row.");
+    };
+    const setSelectionActions = (requestId) => {
+        actionNode.innerHTML = renderTrafficSelectionActions(requestId, filters);
+    };
     filtersForm.addEventListener("submit", (event) => {
         event.preventDefault();
         const form = event.currentTarget;
         const fields = form.elements;
         const nextFilters = {
             limit: fields.limit.value || DEFAULT_LIMIT,
+            requestId: fields.request_id.value.trim(),
             provider: fields.provider.value,
             endpoint: fields.endpoint.value,
             method: fields.method.value,
@@ -221,6 +263,30 @@ export async function renderTraffic(app, token) {
     document.getElementById("reset-traffic-filters")?.addEventListener("click", () => {
         window.history.replaceState({}, "", "/admin/traffic");
         void app.render("traffic");
+    });
+    actionNode.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+            return;
+        }
+        const button = target.closest("[data-traffic-action]");
+        if (!button) {
+            return;
+        }
+        const action = button.dataset.trafficAction;
+        if (action === "scope-request") {
+            const requestId = button.dataset.requestId?.trim();
+            if (!requestId) {
+                return;
+            }
+            window.history.replaceState({}, "", buildTrafficUrl({ ...filters, requestId }));
+            void app.render("traffic");
+            return;
+        }
+        if (action === "clear-request-scope") {
+            window.history.replaceState({}, "", buildTrafficUrl({ ...filters, requestId: "" }));
+            void app.render("traffic");
+        }
     });
     const inspectPayloads = {
         request: requestEvents,
@@ -241,13 +307,138 @@ export async function renderTraffic(app, token) {
                 return;
             }
             detailNode.textContent = JSON.stringify(item, null, 2);
+            if (kind === "request" || kind === "error") {
+                const requestId = String(item.request_id ?? "");
+                setSelectionSummary([
+                    { label: "Selection", value: kind === "error" ? "Recent error" : "Recent request" },
+                    { label: "Request id", value: requestId || "n/a" },
+                    { label: "Provider", value: String(item.provider ?? "unknown") },
+                    {
+                        label: "Route",
+                        value: `${String(item.method ?? "GET")} ${String(item.endpoint ?? item.path ?? "n/a")}`,
+                    },
+                    { label: "Status", value: formatNumber(item.status_code ?? 0) },
+                    {
+                        label: "Timing",
+                        value: formatDurationMs(item.stream_duration_ms ?? item.duration_ms),
+                        note: kind === "error"
+                            ? String(item.error_type ?? "request failed")
+                            : String(item.model ?? "no model"),
+                    },
+                ]);
+                setSelectionActions(requestId || null);
+                return;
+            }
+            setSelectionSummary([
+                {
+                    label: "Selection",
+                    value: kind === "key" ? "Usage by key" : "Usage by provider",
+                },
+                {
+                    label: kind === "key" ? "Key" : "Provider",
+                    value: String(item.name ?? item.provider ?? "unknown"),
+                },
+                {
+                    label: "Requests",
+                    value: formatNumber(item.request_count ?? 0),
+                    note: `${formatNumber(item.error_count ?? 0)} errors`,
+                },
+                { label: "Tokens", value: formatNumber(item.total_tokens ?? 0) },
+                {
+                    label: "Breakdown",
+                    value: kind === "key"
+                        ? joinObjectKeys(item.providers)
+                        : joinObjectKeys(item.api_keys),
+                    note: joinObjectKeys(item.models),
+                },
+            ]);
+            setSelectionActions(null);
         });
     });
+}
+function buildTrafficScopeSummary(filters, requestEvents, errorEvents, providerEntries, providerSummary) {
+    if (!filters.requestId) {
+        return {
+            requestCount: Number(providerSummary.request_count ?? 0),
+            errorCount: Number(providerSummary.error_count ?? 0),
+            totalTokens: Number(providerSummary.total_tokens ?? 0),
+            providerCount: providerEntries.length,
+        };
+    }
+    const providers = new Set([...requestEvents, ...errorEvents]
+        .map((item) => String(item.provider ?? "").trim())
+        .filter(Boolean));
+    const totalTokens = requestEvents.reduce((sum, item) => {
+        const usage = asRecord(item.token_usage);
+        return sum + Number(usage.total_tokens ?? 0);
+    }, 0);
+    return {
+        requestCount: requestEvents.length,
+        errorCount: errorEvents.length,
+        totalTokens,
+        providerCount: providers.size,
+    };
+}
+function buildTrafficSelectionSummary(filters) {
+    return [
+        { label: "Selection", value: "No row selected" },
+        { label: "Filters", value: summarizeTrafficFilters(filters) || "No active filters" },
+        {
+            label: "Request scope",
+            value: filters.requestId || "Recent request window",
+            note: filters.requestId
+                ? "Pinned traffic tables are scoped to one request id."
+                : "Select a request or error row to pin its traffic context.",
+        },
+        {
+            label: "Usage rollups",
+            value: filters.requestId ? "Provider/model/key filtered only" : "Aligned with the current filters",
+        },
+    ];
+}
+function renderTrafficSelectionActions(requestId, filters) {
+    const actions = [];
+    if (requestId) {
+        actions.push(`<a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(requestId))}">Open logs for request</a>`);
+        if (filters.requestId !== requestId) {
+            actions.push(`<button class="button" data-traffic-action="scope-request" data-request-id="${escapeHtml(requestId)}" type="button">Pin this request</button>`);
+        }
+    }
+    if (filters.requestId) {
+        actions.push('<button class="button button--secondary" data-traffic-action="clear-request-scope" type="button">Clear request pin</button>');
+    }
+    return actions.length
+        ? actions.join("")
+        : '<span class="muted">Select a request or error row to jump into the matching log context.</span>';
+}
+function buildLogsUrlForRequest(requestId) {
+    const params = new URLSearchParams();
+    if (requestId.trim()) {
+        params.set("request_id", requestId.trim());
+    }
+    const query = params.toString();
+    return query ? `/admin/logs?${query}` : "/admin/logs";
+}
+function summarizeTrafficFilters(filters) {
+    return [
+        filters.requestId ? `request=${filters.requestId}` : "",
+        filters.provider ? `provider=${filters.provider}` : "",
+        filters.endpoint ? `endpoint=${filters.endpoint}` : "",
+        filters.method ? `method=${filters.method}` : "",
+        filters.statusCode ? `status=${filters.statusCode}` : "",
+        filters.model ? `model=${filters.model}` : "",
+        filters.errorType ? `error=${filters.errorType}` : "",
+        filters.source ? `source=${filters.source}` : "",
+        filters.apiKeyName ? `key=${filters.apiKeyName}` : "",
+    ]
+        .filter(Boolean)
+        .join(" · ");
 }
 function readTrafficFilters() {
     const params = new URLSearchParams(window.location.search);
     return {
         limit: params.get("limit") || DEFAULT_LIMIT,
+        requestId: params.get("request_id") || "",
         provider: params.get("provider") || "",
         endpoint: params.get("endpoint") || "",
         method: params.get("method") || "",
@@ -261,6 +452,7 @@ function readTrafficFilters() {
 function buildEventQuery(filters) {
     const params = new URLSearchParams();
     params.set("limit", filters.limit || DEFAULT_LIMIT);
+    setIfPresent(params, "request_id", filters.requestId);
     setIfPresent(params, "provider", filters.provider);
     setIfPresent(params, "endpoint", filters.endpoint);
     setIfPresent(params, "method", filters.method);
@@ -288,6 +480,7 @@ function buildUsageProvidersQuery(filters) {
 function buildTrafficUrl(filters) {
     const params = new URLSearchParams();
     setIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
+    setIfPresent(params, "request_id", filters.requestId);
     setIfPresent(params, "provider", filters.provider);
     setIfPresent(params, "endpoint", filters.endpoint);
     setIfPresent(params, "method", filters.method);
