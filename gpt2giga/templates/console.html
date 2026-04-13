@@ -440,6 +440,7 @@
           <a href="/admin/playground">Playground</a>
           <a href="/admin/traffic">Traffic</a>
           <a href="/admin/providers">Providers</a>
+          <a href="/admin/files-batches">Files &amp; Batches</a>
           <a href="/admin/system">System</a>
         </nav>
         <div class="auth-box">
@@ -529,6 +530,11 @@
           title: "Mounted surfaces",
           subtitle: "See which provider groups are enabled, what routes exist and which capabilities are live.",
         },
+        "files-batches": {
+          eyebrow: "Files & Batches",
+          title: "Files and batch jobs",
+          subtitle: "Upload JSONL inputs, inspect stored files and launch OpenAI-compatible batch jobs from the console.",
+        },
         system: {
           eyebrow: "System",
           title: "Runtime and setup internals",
@@ -617,6 +623,64 @@
             </div>`,
           )
           .join("")}</div>`;
+      }
+
+      function formatTimestamp(value) {
+        if (value === null || value === undefined || value === "") {
+          return "n/a";
+        }
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return String(value);
+        }
+        return new Date(numeric * 1000).toLocaleString();
+      }
+
+      function formatBytes(value) {
+        const numeric = Number(value || 0);
+        if (!Number.isFinite(numeric) || numeric <= 0) {
+          return "0 B";
+        }
+        const units = ["B", "KB", "MB", "GB"];
+        let size = numeric;
+        let unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.length - 1) {
+          size /= 1024;
+          unitIndex += 1;
+        }
+        const precision = size >= 100 || unitIndex === 0 ? 0 : 1;
+        return `${size.toFixed(precision)} ${units[unitIndex]}`;
+      }
+
+      function safeJsonParse(value, fallback = null) {
+        try {
+          return JSON.parse(value);
+        } catch {
+          return fallback;
+        }
+      }
+
+      async function gatewayFetch(url, options = {}) {
+        const headers = {
+          ...(options.headers || {}),
+          ...authHeaders(true),
+        };
+        const response = await fetch(url, { ...options, headers });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`${url} -> ${response.status}\n${text}`);
+        }
+        return response;
+      }
+
+      async function gatewayJson(url, options = {}) {
+        const response = await gatewayFetch(url, options);
+        return response.json();
+      }
+
+      async function gatewayText(url, options = {}) {
+        const response = await gatewayFetch(url, options);
+        return response.text();
       }
 
       async function loadGlobalStatus() {
@@ -1481,6 +1545,224 @@
         });
       }
 
+      async function renderFilesBatches() {
+        const [filesPayload, batchesPayload] = await Promise.all([
+          gatewayJson("/v1/files?order=desc&limit=100"),
+          gatewayJson("/v1/batches?limit=100"),
+        ]);
+        const files = filesPayload.data || [];
+        const batches = batchesPayload.data || [];
+        const completedBatches = batches.filter((batch) => batch.status === "completed").length;
+        const activeBatches = batches.filter((batch) => batch.status !== "completed").length;
+
+        heroActions.innerHTML = `
+          <button class="secondary" id="refresh-files-batches">Refresh inventory</button>
+          <a href="/admin/playground"><button>Open playground</button></a>
+        `;
+
+        pageContent.innerHTML = `
+          ${kpi("Files", files.length)}
+          ${kpi("Batches", batches.length)}
+          ${kpi("Completed", completedBatches)}
+          ${kpi("Active", activeBatches)}
+          ${card(
+            "Upload file",
+            `<form id="files-upload-form" class="stack">
+              <label>Purpose
+                <select name="purpose">
+                  <option value="batch">batch</option>
+                  <option value="assistants">assistants</option>
+                  <option value="user_data">user_data</option>
+                </select>
+              </label>
+              <label>File
+                <input name="file" type="file" required />
+              </label>
+              <div class="banner">Uploads go through the OpenAI-compatible gateway surface and use the gateway API key from the rail.</div>
+              <button type="submit">Upload file</button>
+            </form>`,
+            "wide-panel span-4",
+          )}
+          ${card(
+            "Create batch",
+            `<form id="batch-create-form" class="stack">
+              <label>Endpoint
+                <select name="endpoint">
+                  <option value="/v1/chat/completions">/v1/chat/completions</option>
+                  <option value="/v1/responses">/v1/responses</option>
+                  <option value="/v1/embeddings">/v1/embeddings</option>
+                </select>
+              </label>
+              <label>Input file id
+                <input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required />
+              </label>
+              <label>Metadata (optional JSON object)
+                <textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea>
+              </label>
+              <div class="banner warn">Batch creation expects an uploaded JSONL file in OpenAI batch input format.</div>
+              <button type="submit">Create batch job</button>
+            </form>`,
+            "wide-panel span-4",
+          )}
+          ${card(
+            "Inspector",
+            `<div class="stack">
+              <div class="banner">Select a file or batch to inspect metadata. Loading file content is separate so large JSONL payloads stay explicit.</div>
+              <pre id="files-batches-detail">No selection yet.</pre>
+              <pre id="files-batches-content">No file content loaded.</pre>
+            </div>`,
+            "wide-panel span-4",
+          )}
+          ${card(
+            "Stored files",
+            files.length
+              ? `<table><thead><tr><th>File</th><th>Purpose</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead><tbody>
+                  ${files
+                    .map(
+                      (item) => `<tr>
+                        <td><strong>${escapeHtml(item.filename || item.id)}</strong><br /><span class="muted">${escapeHtml(item.id)}</span></td>
+                        <td>${escapeHtml(item.purpose || "user_data")}</td>
+                        <td>${escapeHtml(formatBytes(item.bytes))}</td>
+                        <td>${escapeHtml(formatTimestamp(item.created_at))}</td>
+                        <td class="toolbar">
+                          <button type="button" class="secondary" data-file-view="${escapeHtml(item.id)}">View</button>
+                          <button type="button" class="secondary" data-file-use="${escapeHtml(item.id)}">Use for batch</button>
+                          <button type="button" class="secondary" data-file-content="${escapeHtml(item.id)}">Content</button>
+                          <button type="button" class="danger" data-file-delete="${escapeHtml(item.id)}">Delete</button>
+                        </td>
+                      </tr>`,
+                    )
+                    .join("")}</tbody></table>`
+              : "<p>No files uploaded yet.</p>",
+            "wide-panel span-6",
+          )}
+          ${card(
+            "Batch jobs",
+            batches.length
+              ? `<table><thead><tr><th>Batch</th><th>Status</th><th>Endpoint</th><th>Output</th><th>Actions</th></tr></thead><tbody>
+                  ${batches
+                    .map(
+                      (item) => `<tr>
+                        <td><strong>${escapeHtml(item.id)}</strong><br /><span class="muted">${escapeHtml(item.input_file_id || "no input file")}</span></td>
+                        <td>${escapeHtml(item.status || "unknown")}</td>
+                        <td>${escapeHtml(item.endpoint || "n/a")}</td>
+                        <td>${escapeHtml(item.output_file_id || "n/a")}</td>
+                        <td class="toolbar">
+                          <button type="button" class="secondary" data-batch-view="${escapeHtml(item.id)}">View</button>
+                          <button type="button" class="secondary" ${item.output_file_id ? `data-batch-output="${escapeHtml(item.output_file_id)}"` : "disabled"}>Output</button>
+                        </td>
+                      </tr>`,
+                    )
+                    .join("")}</tbody></table>`
+              : "<p>No batch jobs yet.</p>",
+            "wide-panel span-6",
+          )}
+        `;
+
+        const detailNode = document.getElementById("files-batches-detail");
+        const contentNode = document.getElementById("files-batches-content");
+        const batchInput = document.getElementById("batch-input-file-id");
+
+        document.getElementById("refresh-files-batches").addEventListener("click", () => renderRoute("files-batches"));
+
+        document.getElementById("files-upload-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const upload = form.file.files[0];
+          if (!upload) {
+            pushAlert("Choose a file before uploading.", "warn");
+            return;
+          }
+          const body = new FormData();
+          body.set("purpose", form.purpose.value);
+          body.set("file", upload, upload.name);
+          const response = await gatewayJson("/v1/files", {
+            method: "POST",
+            body,
+          });
+          pushAlert(`Uploaded file ${response.id}.`, "info");
+          renderRoute("files-batches");
+        });
+
+        document.getElementById("batch-create-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const form = event.currentTarget;
+          const metadataText = form.metadata.value.trim();
+          const metadata = metadataText ? safeJsonParse(metadataText, "__invalid__") : undefined;
+          if (metadata === "__invalid__" || (metadata !== undefined && (metadata === null || Array.isArray(metadata) || typeof metadata !== "object"))) {
+            pushAlert("Batch metadata must be a JSON object.", "danger");
+            return;
+          }
+          const response = await gatewayJson("/v1/batches", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              endpoint: form.endpoint.value,
+              input_file_id: form.input_file_id.value.trim(),
+              completion_window: "24h",
+              metadata,
+            }),
+          });
+          pushAlert(`Created batch ${response.id} for ${response.endpoint}.`, "info");
+          renderRoute("files-batches");
+        });
+
+        for (const button of pageContent.querySelectorAll("[data-file-view]")) {
+          button.addEventListener("click", async () => {
+            const fileId = button.getAttribute("data-file-view");
+            const payload = await gatewayJson(`/v1/files/${encodeURIComponent(fileId)}`);
+            detailNode.textContent = JSON.stringify(payload, null, 2);
+          });
+        }
+
+        for (const button of pageContent.querySelectorAll("[data-file-use]")) {
+          button.addEventListener("click", async () => {
+            const fileId = button.getAttribute("data-file-use");
+            batchInput.value = fileId;
+            detailNode.textContent = `Selected ${fileId} as batch input.`;
+            batchInput.focus();
+          });
+        }
+
+        for (const button of pageContent.querySelectorAll("[data-file-content]")) {
+          button.addEventListener("click", async () => {
+            const fileId = button.getAttribute("data-file-content");
+            contentNode.textContent = "Loading file content…";
+            contentNode.textContent = await gatewayText(`/v1/files/${encodeURIComponent(fileId)}/content`);
+          });
+        }
+
+        for (const button of pageContent.querySelectorAll("[data-file-delete]")) {
+          button.addEventListener("click", async () => {
+            const fileId = button.getAttribute("data-file-delete");
+            await gatewayJson(`/v1/files/${encodeURIComponent(fileId)}`, {
+              method: "DELETE",
+            });
+            pushAlert(`Deleted file ${fileId}.`, "info");
+            renderRoute("files-batches");
+          });
+        }
+
+        for (const button of pageContent.querySelectorAll("[data-batch-view]")) {
+          button.addEventListener("click", async () => {
+            const batchId = button.getAttribute("data-batch-view");
+            const payload = await gatewayJson(`/v1/batches/${encodeURIComponent(batchId)}`);
+            detailNode.textContent = JSON.stringify(payload, null, 2);
+          });
+        }
+
+        for (const button of pageContent.querySelectorAll("[data-batch-output]")) {
+          button.addEventListener("click", async () => {
+            const fileId = button.getAttribute("data-batch-output");
+            if (!fileId) {
+              return;
+            }
+            contentNode.textContent = "Loading batch output…";
+            contentNode.textContent = await gatewayText(`/v1/files/${encodeURIComponent(fileId)}/content`);
+          });
+        }
+      }
+
       async function renderTraffic() {
         const [requests, errors, usageKeys, usageProviders] = await Promise.all([
           apiFetch("/admin/api/requests/recent?limit=20"),
@@ -1547,6 +1829,7 @@
           if (page === "playground") return renderPlayground();
           if (page === "traffic") return renderTraffic();
           if (page === "providers") return renderProviders();
+          if (page === "files-batches") return renderFilesBatches();
           return renderSystem();
         } catch (error) {
           pageContent.innerHTML = card(

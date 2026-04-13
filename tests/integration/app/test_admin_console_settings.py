@@ -27,6 +27,7 @@ def test_console_routes_are_available():
     assert client.get("/admin/keys").status_code == 200
     assert client.get("/admin/logs").status_code == 200
     assert client.get("/admin/playground").status_code == 200
+    assert client.get("/admin/files-batches").status_code == 200
 
 
 def test_setup_endpoint_reports_persisted_status(tmp_path, monkeypatch):

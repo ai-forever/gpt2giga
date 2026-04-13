@@ -28,6 +28,78 @@ from gpt2giga.providers import list_provider_descriptors
 
 admin_runtime_api_router = APIRouter(tags=["Admin"])
 
+_ADMIN_UI_ROUTES = (
+    "/admin",
+    "/admin/overview",
+    "/admin/setup",
+    "/admin/settings",
+    "/admin/keys",
+    "/admin/logs",
+    "/admin/playground",
+    "/admin/traffic",
+    "/admin/providers",
+    "/admin/files-batches",
+    "/admin/system",
+)
+
+_ADMIN_CAPABILITIES = (
+    "ui",
+    "setup",
+    "version",
+    "config",
+    "runtime",
+    "routes",
+    "recent_requests",
+    "recent_errors",
+    "usage_by_key",
+    "usage_by_provider",
+    "settings_application",
+    "settings_gigachat",
+    "settings_security",
+    "keys",
+    "files_batches",
+    "logs",
+    "logs_stream",
+)
+
+_ADMIN_API_ROUTES = (
+    "/admin/api/setup",
+    "/admin/api/version",
+    "/admin/api/config",
+    "/admin/api/runtime",
+    "/admin/api/routes",
+    "/admin/api/capabilities",
+    "/admin/api/requests/recent",
+    "/admin/api/errors/recent",
+    "/admin/api/usage/keys",
+    "/admin/api/usage/providers",
+    "/admin/api/settings/application",
+    "/admin/api/settings/gigachat",
+    "/admin/api/settings/security",
+    "/admin/api/keys",
+    "/admin/api/logs",
+    "/admin/api/logs/stream",
+)
+
+
+def _admin_capability_list(*, metrics_enabled: bool) -> list[str]:
+    """Return the admin capability list exposed in runtime metadata."""
+    return [
+        *_ADMIN_CAPABILITIES[:14],
+        *([] if not metrics_enabled else ["metrics"]),
+        *_ADMIN_CAPABILITIES[14:],
+    ]
+
+
+def _admin_route_list(*, metrics_enabled: bool) -> list[str]:
+    """Return the admin routes exposed in runtime metadata."""
+    return [
+        *_ADMIN_UI_ROUTES,
+        *_ADMIN_API_ROUTES[:14],
+        *([] if not metrics_enabled else ["/admin/api/metrics"]),
+        *_ADMIN_API_ROUTES[14:],
+    ]
+
 
 def _normalize_optional_text(value: str | None) -> str | None:
     """Normalize empty query-string values into ``None``."""
@@ -299,55 +371,9 @@ def _build_capability_matrix(
                 "display_name": "Admin",
                 "surface": "admin",
                 "enabled": True,
-                "capabilities": [
-                    "ui",
-                    "setup",
-                    "version",
-                    "config",
-                    "runtime",
-                    "routes",
-                    "recent_requests",
-                    "recent_errors",
-                    "usage_by_key",
-                    "usage_by_provider",
-                    "settings_application",
-                    "settings_gigachat",
-                    "settings_security",
-                    "keys",
-                    *([] if not metrics_enabled else ["metrics"]),
-                    "logs",
-                    "logs_stream",
-                ],
-                "routes": [
-                    "/admin",
-                    "/admin/overview",
-                    "/admin/setup",
-                    "/admin/settings",
-                    "/admin/keys",
-                    "/admin/logs",
-                    "/admin/playground",
-                    "/admin/traffic",
-                    "/admin/providers",
-                    "/admin/system",
-                    "/admin/api/setup",
-                    "/admin/api/version",
-                    "/admin/api/config",
-                    "/admin/api/runtime",
-                    "/admin/api/routes",
-                    "/admin/api/capabilities",
-                    "/admin/api/requests/recent",
-                    "/admin/api/errors/recent",
-                    "/admin/api/usage/keys",
-                    "/admin/api/usage/providers",
-                    "/admin/api/settings/application",
-                    "/admin/api/settings/gigachat",
-                    "/admin/api/settings/security",
-                    "/admin/api/keys",
-                    *([] if not metrics_enabled else ["/admin/api/metrics"]),
-                    "/admin/api/logs",
-                    "/admin/api/logs/stream",
-                ],
-                "route_count": 25 + int(metrics_enabled),
+                "capabilities": _admin_capability_list(metrics_enabled=metrics_enabled),
+                "routes": _admin_route_list(metrics_enabled=metrics_enabled),
+                "route_count": len(_admin_route_list(metrics_enabled=metrics_enabled)),
             },
         ]
     )
@@ -569,53 +595,8 @@ async def get_admin_capabilities(request: Request):
         },
         "admin": {
             "enabled": True,
-            "capabilities": [
-                "ui",
-                "setup",
-                "version",
-                "config",
-                "runtime",
-                "routes",
-                "recent_requests",
-                "recent_errors",
-                "usage_by_key",
-                "usage_by_provider",
-                "settings_application",
-                "settings_gigachat",
-                "settings_security",
-                "keys",
-                *([] if not metrics_enabled else ["metrics"]),
-                "logs",
-                "logs_stream",
-            ],
-            "routes": [
-                "/admin",
-                "/admin/setup",
-                "/admin/settings",
-                "/admin/keys",
-                "/admin/logs",
-                "/admin/playground",
-                "/admin/traffic",
-                "/admin/providers",
-                "/admin/system",
-                "/admin/api/setup",
-                "/admin/api/version",
-                "/admin/api/config",
-                "/admin/api/runtime",
-                "/admin/api/routes",
-                "/admin/api/capabilities",
-                "/admin/api/requests/recent",
-                "/admin/api/errors/recent",
-                "/admin/api/usage/keys",
-                "/admin/api/usage/providers",
-                "/admin/api/settings/application",
-                "/admin/api/settings/gigachat",
-                "/admin/api/settings/security",
-                "/admin/api/keys",
-                *([] if not metrics_enabled else ["/admin/api/metrics"]),
-                "/admin/api/logs",
-                "/admin/api/logs/stream",
-            ],
+            "capabilities": _admin_capability_list(metrics_enabled=metrics_enabled),
+            "routes": _admin_route_list(metrics_enabled=metrics_enabled),
             "legacy_routes": (
                 ["/logs", "/logs/stream", "/logs/html"]
                 if config.proxy_settings.mode != "PROD"

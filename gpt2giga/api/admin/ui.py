@@ -25,6 +25,7 @@ _CONSOLE_PAGES = (
     "/admin/playground",
     "/admin/traffic",
     "/admin/providers",
+    "/admin/files-batches",
     "/admin/system",
 )
 

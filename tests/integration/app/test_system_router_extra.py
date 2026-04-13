@@ -55,6 +55,7 @@ def test_admin_ui_ok():
     assert "gpt2giga Console" in resp.text
     assert "Gateway Console" in resp.text
     assert "Playground" in resp.text
+    assert "Files &amp; Batches" in resp.text
 
 
 def test_legacy_logs_html_redirects_to_admin():
@@ -214,6 +215,8 @@ def test_admin_capabilities_reflect_enabled_providers():
     assert payload["providers"]["gemini"]["enabled"] is True
     matrix_names = {row["name"] for row in payload["matrix"]["rows"]}
     assert {"openai", "anthropic", "gemini", "system", "admin"} <= matrix_names
+    assert "/admin/files-batches" in payload["admin"]["routes"]
+    assert "files_batches" in payload["admin"]["capabilities"]
 
 
 def test_admin_config_exposes_grouped_safe_summary():
