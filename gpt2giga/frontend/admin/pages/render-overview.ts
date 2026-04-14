@@ -1,9 +1,6 @@
 import type { AdminApp } from "../app.js";
 import {
-  banner,
   card,
-  kpi,
-  pill,
   renderDefinitionList,
   renderStatLines,
   renderTable,
@@ -48,8 +45,6 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
   const errorCount = Number(summary.error_count ?? 0);
   const totalTokens = Number(summary.total_tokens ?? 0);
   const topProvider = providerEntries[0] ?? null;
-  const topKey = keyEntries[0] ?? null;
-  const warnings = buildOverviewWarnings(setupRecord, runtimeRecord, errorCount);
 
   app.setHeroActions(
     setup.setup_complete
@@ -66,30 +61,63 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
   );
 
   app.setContent(`
-    ${kpi("Setup", setup.setup_complete ? "complete" : "needs action")}
-    ${kpi("Requests", formatNumber(requestCount))}
-    ${kpi("Error rate", formatPercent(errorCount, requestCount))}
-    ${kpi("Providers", formatNumber(enabledProviders.length))}
     ${card(
-      "Executive summary",
+      "Gateway status",
       `
-        <div class="stack">
-          ${warnings.length ? warnings.join("") : banner("No urgent operator blockers were detected.", "info")}
+        <div class="overview-intro">
+          <section class="overview-callout">
+            <span class="eyebrow">Current posture</span>
+            <h4 class="overview-callout__title">
+              ${escapeHtml(
+                setup.setup_complete
+                  ? "Gateway is ready for guided operator work."
+                  : "Gateway still needs a first-run pass.",
+              )}
+            </h4>
+            <p class="muted">
+              ${escapeHtml(
+                setup.setup_complete
+                  ? "Core bootstrap steps are in place. Focus on smoke traffic, logs, and provider coverage."
+                  : "Finish persisted settings, configure GigaChat credentials, and close the auth bootstrap before treating the gateway as production-ready.",
+              )}
+            </p>
+          </section>
+          <div class="overview-stat-grid">
+            ${renderOverviewMetric(
+              "Setup",
+              setup.setup_complete ? "Complete" : "Needs action",
+              setup.setup_complete ? "Bootstrap and security are in place." : "Open Setup to finish the first-run flow.",
+              setup.setup_complete ? "good" : "warn",
+            )}
+            ${renderOverviewMetric(
+              "Requests",
+              formatNumber(requestCount),
+              `${formatNumber(totalTokens)} total tokens observed.`,
+            )}
+            ${renderOverviewMetric(
+              "Error rate",
+              formatPercent(errorCount, requestCount),
+              errorCount > 0 ? `${formatNumber(errorCount)} recent errors need inspection.` : "No recent errors in the usage rollup.",
+              errorCount > 0 ? "warn" : "good",
+            )}
+            ${renderOverviewMetric(
+              "Providers",
+              formatNumber(enabledProviders.length),
+              topProvider
+                ? `${String(topProvider.provider ?? "Unknown")} is currently the busiest provider.`
+                : "No provider traffic has been recorded yet.",
+            )}
+          </div>
           ${renderDefinitionList(
             [
               {
-                label: "Setup posture",
-                value: setup.setup_complete ? "Ready for operator traffic" : "Bootstrap still open",
-                note: setup.setup_complete
-                  ? "Setup, security, and GigaChat bootstrap are complete."
-                  : "Finish setup before treating this gateway as production-ready.",
-              },
-              {
                 label: "Runtime mode",
                 value: String(runtime.mode ?? "n/a"),
-                note: runtimeRecord.docs_enabled
-                  ? "Docs and OpenAPI are exposed in the current runtime."
-                  : "Docs and OpenAPI are disabled in the current runtime.",
+                note: setup.setup_complete
+                  ? runtimeRecord.docs_enabled
+                    ? "Docs remain exposed in the current runtime."
+                    : "Docs are disabled in the current runtime."
+                  : "Use DEV mode for bootstrap, then harden before production exposure.",
               },
               {
                 label: "Provider mix",
@@ -111,12 +139,12 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
           )}
         </div>
       `,
-      "panel panel--span-5",
+      "panel panel--span-8",
     )}
     ${card(
-      "Immediate actions",
+      "Next steps",
       `
-        <div class="stack">
+        <div class="stack overview-aside">
           <div class="toolbar">
             <a class="button" href="${escapeHtml(setup.setup_complete ? "/admin/playground" : "/admin/setup")}">
               ${escapeHtml(setup.setup_complete ? "Run smoke request" : "Finish setup")}
@@ -124,178 +152,88 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
             <a class="button button--secondary" href="/admin/traffic">Inspect traffic</a>
             <a class="button button--secondary" href="/admin/logs">Inspect logs</a>
           </div>
+          ${renderStatLines(
+            [
+              {
+                label: "Persisted config",
+                value: setup.persisted ? "ready" : "missing",
+                tone: setup.persisted ? "good" : "warn",
+              },
+              {
+                label: "GigaChat credentials",
+                value: setup.gigachat_ready ? "ready" : "missing",
+                tone: setup.gigachat_ready ? "good" : "warn",
+              },
+              {
+                label: "Security bootstrap",
+                value: setup.security_ready ? "ready" : "pending",
+                tone: setup.security_ready ? "good" : "warn",
+              },
+              {
+                label: "Gateway auth",
+                value: runtimeRecord.auth_required ? "required" : "open",
+                tone: runtimeRecord.auth_required ? "good" : "warn",
+              },
+              {
+                label: "Telemetry",
+                value: runtime.telemetry_enabled ? "enabled" : "disabled",
+                tone: runtime.telemetry_enabled ? "good" : "default",
+              },
+            ],
+            "No readiness metadata is available.",
+          )}
           ${renderDefinitionList(
             [
               {
-                label: "Setup and secrets",
-                value: setup.setup_complete ? "Stable" : "Needs review",
-                note: "Use Setup for bootstrap flow and Settings for persisted runtime edits.",
+                label: "Focused page",
+                value: setup.setup_complete ? "Playground or logs" : "Setup",
+                note: setup.setup_complete
+                  ? "Start with one smoke request, then open logs only if something fails."
+                  : "Complete bootstrap and credentials before digging into the rest of the console.",
               },
               {
-                label: "Gateway keys",
-                value: formatNumber(setup.scoped_api_keys_configured ?? 0),
-                note: topKey
-                  ? `${String(topKey.name ?? "Top key")} is currently the busiest key surface.`
-                  : "No per-key traffic has been recorded yet.",
-              },
-              {
-                label: "Operator drilldown",
-                value: recentErrors.length ? "Start from recent errors" : "Start from playground",
-                note: recentErrors.length
-                  ? "Logs and Traffic both support request-id handoff from the error list below."
-                  : "Use Playground to generate a first smoke request without leaving the console.",
+                label: "Providers",
+                value: enabledProviders.join(", ") || "none",
+                note: topProvider
+                  ? `${String(topProvider.provider ?? "unknown")} is currently the most visible provider.`
+                  : "No provider traffic has been recorded yet.",
               },
             ],
             "No action summary is available.",
           )}
         </div>
       `,
-      "panel panel--span-3",
-    )}
-    ${card(
-      "Readiness signals",
-      renderStatLines(
-        [
-          {
-            label: "Persisted control-plane config",
-            value: setup.persisted ? "ready" : "missing",
-            tone: setup.persisted ? "good" : "warn",
-          },
-          {
-            label: "GigaChat credentials",
-            value: setup.gigachat_ready ? "ready" : "missing",
-            tone: setup.gigachat_ready ? "good" : "warn",
-          },
-          {
-            label: "Security bootstrap",
-            value: setup.security_ready ? "ready" : "pending",
-            tone: setup.security_ready ? "good" : "warn",
-          },
-          {
-            label: "Gateway auth",
-            value: runtimeRecord.auth_required ? "required" : "open",
-            tone: runtimeRecord.auth_required ? "good" : "warn",
-          },
-          {
-            label: "Telemetry",
-            value: runtime.telemetry_enabled ? "enabled" : "disabled",
-            tone: runtime.telemetry_enabled ? "good" : "default",
-          },
-          {
-            label: "Scoped API keys",
-            value: formatNumber(setup.scoped_api_keys_configured ?? 0),
-          },
-        ],
-        "No readiness metadata is available.",
-      ),
       "panel panel--span-4",
     )}
-    ${card(
-      "Provider mix",
-      renderTable(
-        [
-          { label: "Provider" },
-          { label: "Traffic" },
-          { label: "Tokens" },
-          { label: "Coverage" },
-        ],
-        providerEntries.map((entry) => [
-          `<strong>${escapeHtml(String(entry.provider ?? "unknown"))}</strong><br /><span class="muted">${escapeHtml(formatTimestamp(entry.last_seen_at))}</span>`,
-          `${escapeHtml(formatNumber(entry.request_count ?? 0))} req<br /><span class="muted">${escapeHtml(formatNumber(entry.error_count ?? 0))} errors</span>`,
-          `${escapeHtml(formatNumber(entry.total_tokens ?? 0))}<br /><span class="muted">${escapeHtml(formatNumber(entry.prompt_tokens ?? 0))} prompt / ${escapeHtml(formatNumber(entry.completion_tokens ?? 0))} completion</span>`,
-          `<span class="muted">${escapeHtml(joinObjectKeys(entry.models))}</span><br /><span class="muted">${escapeHtml(joinObjectKeys(entry.api_keys))}</span>`,
-        ]),
-        "No provider usage has been recorded yet.",
-      ),
-      "panel panel--span-6",
-    )}
-    ${card(
-      "Key pressure",
-      renderTable(
-        [
-          { label: "API key" },
-          { label: "Traffic" },
-          { label: "Providers" },
-          { label: "Models" },
-        ],
-        keyEntries.map((entry) => [
-          `<strong>${escapeHtml(String(entry.name ?? "unnamed"))}</strong><br /><span class="muted">${escapeHtml(String(entry.source ?? "unknown"))}</span>`,
-          `${escapeHtml(formatNumber(entry.request_count ?? 0))} req<br /><span class="muted">${escapeHtml(formatNumber(entry.error_count ?? 0))} errors</span>`,
-          `<span class="muted">${escapeHtml(joinObjectKeys(entry.providers))}</span>`,
-          `<span class="muted">${escapeHtml(joinObjectKeys(entry.models))}</span>`,
-        ]),
-        "No API-key usage has been recorded yet.",
-      ),
-      "panel panel--span-6",
-    )}
-    ${card(
-      "Recent errors",
+    ${
       recentErrors.length
-        ? renderTable(
-            [
-              { label: "When" },
-              { label: "Route" },
-              { label: "Failure" },
-              { label: "Context" },
-              { label: "Handoff" },
-            ],
-            recentErrors.map((event) => {
-              const requestId = String(event.request_id ?? "").trim();
-              return [
-                `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(requestId || "no request id")}</span>`,
-                `${escapeHtml(String(event.provider ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(event.method ?? "GET"))} ${escapeHtml(String(event.endpoint ?? event.path ?? "n/a"))}</span>`,
-                `<strong>${escapeHtml(String(event.error_type ?? "HTTP error"))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
-                `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
-                renderRecentErrorActions(requestId),
-              ];
-            }),
-            "No recent errors recorded.",
+        ? card(
+            "Recent errors",
+            renderTable(
+              [
+                { label: "When" },
+                { label: "Route" },
+                { label: "Failure" },
+                { label: "Context" },
+                { label: "Handoff" },
+              ],
+              recentErrors.map((event) => {
+                const requestId = String(event.request_id ?? "").trim();
+                return [
+                  `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(requestId || "no request id")}</span>`,
+                  `${escapeHtml(String(event.provider ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(event.method ?? "GET"))} ${escapeHtml(String(event.endpoint ?? event.path ?? "n/a"))}</span>`,
+                  `<strong>${escapeHtml(String(event.error_type ?? "HTTP error"))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
+                  `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
+                  renderRecentErrorActions(requestId),
+                ];
+              }),
+              "No recent errors recorded.",
+            ),
+            "panel panel--span-12",
           )
-        : "<p>No recent errors recorded.</p>",
-      "panel panel--span-12",
-    )}
+        : ""
+    }
   `);
-}
-
-function buildOverviewWarnings(
-  setup: Record<string, unknown>,
-  runtime: Record<string, unknown>,
-  errorCount: number,
-): string[] {
-  const warnings: string[] = [];
-  if (!setup.persisted) {
-    warnings.push(
-      banner(
-        "Control-plane config is not persisted yet. Zero-env restarts will fall back to defaults until Settings is saved.",
-        "warn",
-      ),
-    );
-  }
-  if (!setup.gigachat_ready) {
-    warnings.push(
-      banner(
-        "GigaChat credentials are still missing. Playground and live provider traffic will fail until setup is completed.",
-        "warn",
-      ),
-    );
-  }
-  if (!setup.security_ready || !runtime.auth_required) {
-    warnings.push(
-      banner(
-        "Gateway security posture is still open. Review API key bootstrap before exposing the proxy outside a trusted network.",
-        "warn",
-      ),
-    );
-  }
-  if (errorCount > 0) {
-    warnings.push(
-      banner(
-        `${formatNumber(errorCount)} recent errors were recorded. Start with the recent error table or jump into Logs/Traffic handoff.`,
-        "warn",
-      ),
-    );
-  }
-  return warnings;
 }
 
 function joinObjectKeys(value: unknown): string {
@@ -338,4 +276,25 @@ function buildTrafficUrlForRequest(requestId: string): string {
   }
   const query = params.toString();
   return query ? `/admin/traffic?${query}` : "/admin/traffic";
+}
+
+function renderOverviewMetric(
+  label: string,
+  value: string,
+  note: string,
+  tone: "default" | "good" | "warn" = "default",
+): string {
+  const toneClass =
+    tone === "good"
+      ? "overview-metric overview-metric--good"
+      : tone === "warn"
+        ? "overview-metric overview-metric--warn"
+        : "overview-metric";
+  return `
+    <article class="${toneClass}">
+      <span class="overview-metric__label">${escapeHtml(label)}</span>
+      <strong class="overview-metric__value">${escapeHtml(value)}</strong>
+      <span class="overview-metric__note">${escapeHtml(note)}</span>
+    </article>
+  `;
 }

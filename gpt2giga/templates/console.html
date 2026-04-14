@@ -16,43 +16,58 @@
         </div>
 
         <section class="rail-section">
-          <div class="status-chip">
-            <strong>Mode</strong>
-            <span id="mode-chip">...</span>
-          </div>
-          <div class="status-chip">
-            <strong>Backend</strong>
-            <span id="backend-chip">...</span>
-          </div>
-          <div class="status-chip">
-            <strong>Config</strong>
-            <span id="persisted-chip">...</span>
+          <span class="rail-section__label">Runtime</span>
+          <div class="rail-status-grid">
+            <div class="status-chip">
+              <strong>Mode</strong>
+              <span id="mode-chip">...</span>
+            </div>
+            <div class="status-chip">
+              <strong>Backend</strong>
+              <span id="backend-chip">...</span>
+            </div>
+            <div class="status-chip">
+              <strong>Config</strong>
+              <span id="persisted-chip">...</span>
+            </div>
           </div>
         </section>
 
         <nav class="console-nav" id="nav">
-          <a href="/admin">Overview</a>
-          <a href="/admin/setup">Setup</a>
-          <a href="/admin/settings">Settings</a>
-          <a href="/admin/keys">API Keys</a>
-          <a href="/admin/logs">Logs</a>
-          <a href="/admin/playground">Playground</a>
-          <a href="/admin/traffic">Traffic</a>
-          <a href="/admin/providers">Providers</a>
-          <a href="/admin/files-batches">Files &amp; Batches</a>
-          <a href="/admin/system">System</a>
+          <div class="nav-group">
+            <span class="nav-group__label">Control</span>
+            <a href="/admin">Overview</a>
+            <a href="/admin/setup">Setup</a>
+            <a href="/admin/settings">Settings</a>
+            <a href="/admin/keys">API Keys</a>
+            <a href="/admin/playground">Playground</a>
+          </div>
+          <div class="nav-group">
+            <span class="nav-group__label">Observe</span>
+            <a href="/admin/logs">Logs</a>
+            <a href="/admin/traffic">Traffic</a>
+            <a href="/admin/providers">Providers</a>
+            <a href="/admin/files-batches">Files &amp; Batches</a>
+            <a href="/admin/system">System</a>
+          </div>
         </nav>
 
         <section class="rail-section auth-panel">
-          <label class="field">
-            <span>Admin API key / bootstrap token</span>
-            <input id="admin-key-input" type="password" placeholder="Admin key or first-run bootstrap token" />
-          </label>
-          <label class="field">
-            <span>Gateway API key</span>
-            <input id="gateway-key-input" type="password" placeholder="Used by playground and gateway calls" />
-          </label>
-          <button class="button button--secondary" id="save-auth" type="button">Save keys locally</button>
+          <details class="details-disclosure rail-disclosure" id="auth-disclosure">
+            <summary>Browser keys</summary>
+            <p class="field-note">Stored only in this browser for admin access and playground requests.</p>
+            <div class="stack">
+              <label class="field">
+                <span>Admin API key / bootstrap token</span>
+                <input id="admin-key-input" type="password" placeholder="Admin key or first-run bootstrap token" />
+              </label>
+              <label class="field">
+                <span>Gateway API key</span>
+                <input id="gateway-key-input" type="password" placeholder="Used by playground and gateway calls" />
+              </label>
+              <button class="button button--secondary" id="save-auth" type="button">Save keys locally</button>
+            </div>
+          </details>
         </section>
       </aside>
 

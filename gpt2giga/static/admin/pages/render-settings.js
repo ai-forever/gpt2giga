@@ -1,7 +1,13 @@
-import { INVALID_JSON, bindValidityReset, bindSecretFieldBehavior, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, describePersistOutcome, summarizePendingChanges, validateJsonArrayField, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
-import { banner, card, renderBooleanSelectOptions, renderControlPlaneSectionStatus, renderDiffSections, renderJson, renderSecretField, pill, renderStaticSelectOptions, } from "../templates.js";
+import { bindValidityReset, bindSecretFieldBehavior, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, describePersistOutcome, summarizePendingChanges, validateJsonArrayField, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
+import { banner, card, pill, renderBooleanSelectOptions, renderControlPlaneSectionStatus, renderDiffSections, renderSecretField, renderStaticSelectOptions, } from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, formatTimestamp, toErrorMessage, } from "../utils.js";
 const LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"];
+const SETTINGS_SECTIONS = [
+    "application",
+    "gigachat",
+    "security",
+    "history",
+];
 export async function renderSettings(app, token) {
     const [application, gigachat, security, revisionsPayload] = await Promise.all([
         app.api.json("/admin/api/settings/application"),
@@ -17,8 +23,17 @@ export async function renderSettings(app, token) {
     const securityValues = asRecord(security.values);
     const controlPlaneStatus = asRecord(application.control_plane);
     const revisions = asArray(revisionsPayload.revisions);
+    const selectedSection = getSelectedSettingsSection();
     app.setHeroActions(`<button class="button button--secondary" id="reload-settings" type="button">Reload values</button>`);
     app.setContent(`
+    ${card("Settings", `
+        <div class="stack">
+          <p class="muted">Settings are split into focused sections. One group is visible at a time.</p>
+          <div class="settings-switcher" id="settings-switcher">
+            ${SETTINGS_SECTIONS.map((section) => renderSectionButton(section, selectedSection)).join("")}
+          </div>
+        </div>
+      `, "panel panel--span-12")}
     ${card("Application", `
         <form id="application-form" class="stack">
           ${banner("Saving always updates the persisted control-plane target. Runtime only reloads immediately when this batch contains no restart-sensitive fields.")}
@@ -78,7 +93,7 @@ export async function renderSettings(app, token) {
           </div>
           <button class="button" type="submit">Save application settings</button>
         </form>
-      `, "panel panel--span-6")}
+      `, sectionPanelClass(selectedSection === "application", "panel panel--span-12"))}
     ${card("GigaChat", `
         <form id="gigachat-form" class="stack">
           ${banner("Connection tests use the candidate values without persisting them. Saving updates the persisted target first, then reloads runtime only when no restart-sensitive fields are present.")}
@@ -123,7 +138,7 @@ export async function renderSettings(app, token) {
             <button class="button button--secondary" id="gigachat-test" type="button">Test connection</button>
           </div>
         </form>
-      `, "panel panel--span-6")}
+      `, sectionPanelClass(selectedSection === "gigachat", "panel panel--span-12"))}
     ${card("Security", `
         <form id="security-form" class="stack">
           <div id="settings-security-status"></div>
@@ -139,12 +154,10 @@ export async function renderSettings(app, token) {
           ${banner("Auth and CORS always save to the control plane first. If this batch includes restart-sensitive fields, the running process keeps the previous posture until restart.", "warn")}
           <button class="button" type="submit">Save security settings</button>
         </form>
-      `, "panel panel--span-4")}
-    ${card("Pending diff before apply", `<div id="settings-pending-diff" class="stack"></div>`, "panel panel--span-4")}
+      `, sectionPanelClass(selectedSection === "security", "panel panel--span-12"))}
     ${card("Recent revisions", revisions.length
         ? `
             <div class="stack">
-              <div id="settings-revisions-status"></div>
               ${revisions
             .map((revision) => {
             const revisionId = String(revision.revision_id ?? "");
@@ -165,11 +178,30 @@ export async function renderSettings(app, token) {
             .join("")}
             </div>
           `
-        : `<p>No persisted revisions yet. Save a settings change to start revision history.</p>`, "panel panel--span-4")}
-    ${card("Control-plane status", renderJson(application.control_plane ?? {}), "panel panel--span-12")}
+        : `<p>No persisted revisions yet. Save a settings change to start revision history.</p>`, sectionPanelClass(selectedSection === "history", "panel panel--span-8"))}
+    ${card("Persistence", `
+        <div class="stack">
+          <div id="settings-revisions-status"></div>
+          <div class="stat-line"><strong>Persisted target</strong><span class="muted">${Boolean(controlPlaneStatus.persisted) ? "saved" : "not saved yet"}</span></div>
+          <div class="stat-line"><strong>Last update</strong><span class="muted">${escapeHtml(controlPlaneStatus.updated_at ? formatTimestamp(controlPlaneStatus.updated_at) : "n/a")}</span></div>
+          <p class="muted">Rollback restores the persisted target first. Runtime follows immediately only when the restored change set is restart-safe.</p>
+        </div>
+      `, sectionPanelClass(selectedSection === "history", "panel panel--span-4"))}
   `);
     document.getElementById("reload-settings")?.addEventListener("click", () => {
         void app.render("settings");
+    });
+    app.pageContent.querySelectorAll("[data-settings-section]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const section = button.dataset.settingsSection;
+            if (!section) {
+                return;
+            }
+            const url = new URL(window.location.href);
+            url.searchParams.set("section", section);
+            window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}`);
+            void app.render("settings");
+        });
     });
     const applicationForm = app.pageContent.querySelector("#application-form");
     const gigachatForm = app.pageContent.querySelector("#gigachat-form");
@@ -177,7 +209,6 @@ export async function renderSettings(app, token) {
     const applicationStatusNode = app.pageContent.querySelector("#settings-application-status");
     const gigachatStatusNode = app.pageContent.querySelector("#settings-gigachat-status");
     const securityStatusNode = app.pageContent.querySelector("#settings-security-status");
-    const pendingDiffNode = app.pageContent.querySelector("#settings-pending-diff");
     const revisionsStatusNode = app.pageContent.querySelector("#settings-revisions-status");
     if (!applicationForm ||
         !gigachatForm ||
@@ -185,7 +216,6 @@ export async function renderSettings(app, token) {
         !applicationStatusNode ||
         !gigachatStatusNode ||
         !securityStatusNode ||
-        !pendingDiffNode ||
         !revisionsStatusNode) {
         return;
     }
@@ -216,7 +246,7 @@ export async function renderSettings(app, token) {
         nonArrayMessage: "Governance limits must be a JSON array of rule descriptors.",
         report,
     });
-    const refreshPendingDiff = () => {
+    const refreshSectionStatus = () => {
         const applicationEntries = buildPendingDiffEntries("application", applicationValues, buildApplicationPayload(applicationForm));
         const gigachatEntries = buildPendingDiffEntries("gigachat", gigachatValues, collectGigachatPayload(gigachatForm));
         const securityPayload = buildSecurityPayload(securityForm);
@@ -256,34 +286,17 @@ export async function renderSettings(app, token) {
         });
         revisionsStatusNode.innerHTML = revisionsActionState
             ? banner(revisionsActionState.message, revisionsActionState.tone)
-            : banner("Rollback restores the persisted target from history first. Runtime only follows immediately when the restored diff is restart-safe.");
-        const validationMessages = [
-            applicationValidationMessage,
-            gigachatValidationMessage,
-            securityValidationMessage
-                ? (securityPayload.governance_limits === INVALID_JSON
-                    ? "Governance limits JSON is invalid. Fix it before saving the security section."
-                    : "Governance limits must stay a JSON array.")
-                : "",
-        ].filter(Boolean);
-        pendingDiffNode.innerHTML = `
-      ${validationMessages.map((message) => banner(message, "danger")).join("")}
-      ${renderDiffSections({
-            application: applicationEntries,
-            gigachat: gigachatEntries,
-            security: securityEntries,
-        }, "Forms currently match the persisted control-plane target.")}
-    `;
+            : banner("Use history only when you need to restore a known-good persisted snapshot.");
     };
-    refreshPendingDiff();
+    refreshSectionStatus();
     [applicationForm, gigachatForm, securityForm].forEach((form) => {
-        form.addEventListener("input", refreshPendingDiff);
-        form.addEventListener("change", refreshPendingDiff);
+        form.addEventListener("input", refreshSectionStatus);
+        form.addEventListener("change", refreshSectionStatus);
     });
     applicationForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (getApplicationValidationMessage(true)) {
-            refreshPendingDiff();
+            refreshSectionStatus();
             return;
         }
         const submitter = event.submitter;
@@ -294,7 +307,7 @@ export async function renderSettings(app, token) {
             tone: "info",
             message: "Saving application settings. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
         };
-        refreshPendingDiff();
+        refreshSectionStatus();
         try {
             await withBusyState({
                 root: applicationForm,
@@ -316,14 +329,14 @@ export async function renderSettings(app, token) {
                 tone: "danger",
                 message: `Application settings failed to save: ${toErrorMessage(error)}`,
             };
-            refreshPendingDiff();
+            refreshSectionStatus();
             app.pushAlert(applicationActionState.message, "danger");
         }
     });
     gigachatForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (getGigachatValidationMessage(true)) {
-            refreshPendingDiff();
+            refreshSectionStatus();
             return;
         }
         const submitter = event.submitter;
@@ -334,7 +347,7 @@ export async function renderSettings(app, token) {
             tone: "info",
             message: "Saving GigaChat settings. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
         };
-        refreshPendingDiff();
+        refreshSectionStatus();
         try {
             await withBusyState({
                 root: gigachatForm,
@@ -356,13 +369,13 @@ export async function renderSettings(app, token) {
                 tone: "danger",
                 message: `GigaChat settings failed to save: ${toErrorMessage(error)}`,
             };
-            refreshPendingDiff();
+            refreshSectionStatus();
             app.pushAlert(gigachatActionState.message, "danger");
         }
     });
     document.getElementById("gigachat-test")?.addEventListener("click", async (event) => {
         if (getGigachatValidationMessage(true)) {
-            refreshPendingDiff();
+            refreshSectionStatus();
             return;
         }
         const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
@@ -370,7 +383,7 @@ export async function renderSettings(app, token) {
             tone: "info",
             message: "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save.",
         };
-        refreshPendingDiff();
+        refreshSectionStatus();
         try {
             await withBusyState({
                 root: gigachatForm,
@@ -390,7 +403,7 @@ export async function renderSettings(app, token) {
                             tone: "danger",
                             message: `Connection failed: ${String(result.error_type ?? "Error")}: ${String(result.error ?? "unknown error")}. Persisted values remain unchanged.`,
                         };
-                    refreshPendingDiff();
+                    refreshSectionStatus();
                     app.pushAlert(gigachatActionState.message, gigachatActionState.tone);
                 },
             });
@@ -400,7 +413,7 @@ export async function renderSettings(app, token) {
                 tone: "danger",
                 message: `GigaChat connection test failed: ${toErrorMessage(error)}`,
             };
-            refreshPendingDiff();
+            refreshSectionStatus();
             app.pushAlert(gigachatActionState.message, "danger");
         }
     });
@@ -409,7 +422,7 @@ export async function renderSettings(app, token) {
         const payload = buildSecurityPayload(securityForm);
         const validationError = getSecurityValidationMessage(payload, true);
         if (validationError) {
-            refreshPendingDiff();
+            refreshSectionStatus();
             app.pushAlert(validationError, "danger");
             return;
         }
@@ -421,7 +434,7 @@ export async function renderSettings(app, token) {
             tone: "info",
             message: "Saving security settings. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
         };
-        refreshPendingDiff();
+        refreshSectionStatus();
         try {
             await withBusyState({
                 root: securityForm,
@@ -443,7 +456,7 @@ export async function renderSettings(app, token) {
                 tone: "danger",
                 message: `Security settings failed to save: ${toErrorMessage(error)}`,
             };
-            refreshPendingDiff();
+            refreshSectionStatus();
             app.pushAlert(securityActionState.message, "danger");
         }
     });
@@ -461,7 +474,7 @@ export async function renderSettings(app, token) {
                 tone: "warn",
                 message: `Restoring revision ${revisionId}. The persisted target changes first; runtime only follows immediately if the rollback is restart-safe.`,
             };
-            refreshPendingDiff();
+            refreshSectionStatus();
             try {
                 await withBusyState({
                     button: actionButton,
@@ -479,9 +492,35 @@ export async function renderSettings(app, token) {
                     tone: "danger",
                     message: `Rollback for revision ${revisionId} failed: ${toErrorMessage(error)}`,
                 };
-                refreshPendingDiff();
+                refreshSectionStatus();
                 app.pushAlert(revisionsActionState.message, "danger");
             }
         });
     });
+}
+function getSelectedSettingsSection() {
+    const value = new URLSearchParams(window.location.search).get("section");
+    return SETTINGS_SECTIONS.includes(value)
+        ? value
+        : "application";
+}
+function renderSectionButton(section, selectedSection) {
+    const labels = {
+        application: "Basics",
+        gigachat: "GigaChat",
+        security: "Security",
+        history: "History",
+    };
+    return `
+    <button
+      class="section-tab ${section === selectedSection ? "section-tab--active" : ""}"
+      data-settings-section="${escapeHtml(section)}"
+      type="button"
+    >
+      ${escapeHtml(labels[section])}
+    </button>
+  `;
+}
+function sectionPanelClass(isVisible, baseClass) {
+    return isVisible ? baseClass : `${baseClass} is-hidden`;
 }

@@ -27,6 +27,7 @@ export class AdminApp {
   private readonly modeChip = this.requireElement<HTMLElement>("mode-chip");
   private readonly backendChip = this.requireElement<HTMLElement>("backend-chip");
   private readonly persistedChip = this.requireElement<HTMLElement>("persisted-chip");
+  private readonly authDisclosure = document.getElementById("auth-disclosure") as HTMLDetailsElement | null;
   private readonly pageEyebrow = this.requireElement<HTMLElement>("page-eyebrow");
   private readonly pageTitle = this.requireElement<HTMLElement>("page-title");
   private readonly pageSubtitle = this.requireElement<HTMLElement>("page-subtitle");
@@ -42,6 +43,9 @@ export class AdminApp {
     this.adminKeyInput.value = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
     this.gatewayKeyInput.value =
       localStorage.getItem(GATEWAY_KEY_STORAGE) || this.adminKeyInput.value;
+    if (!this.adminKeyInput.value || !this.gatewayKeyInput.value) {
+      this.authDisclosure?.setAttribute("open", "open");
+    }
     this.apiClient = new AdminApiClient(
       () => this.adminKeyInput.value,
       () => this.gatewayKeyInput.value,
@@ -183,12 +187,6 @@ export class AdminApp {
       this.backendChip.textContent = String(runtime.gigachat_api_mode ?? "n/a");
       this.persistedChip.textContent = setup.persisted ? "persisted" : "defaults";
 
-      if (!setup.persisted) {
-        this.pushAlert(
-          "Control-plane config is not persisted yet. Save settings to make zero-env restarts work.",
-          "warn",
-        );
-      }
       if (!setup.gigachat_ready) {
         this.pushAlert(
           "GigaChat credentials are not configured yet. Playground calls will fail until the GigaChat section is filled.",
@@ -206,12 +204,6 @@ export class AdminApp {
         this.pushAlert(
           "PROD bootstrap mode is active. Until setup is complete, admin access is limited to localhost or the bootstrap token.",
           "warn",
-        );
-      }
-      if (runtime.mode === "DEV") {
-        this.pushAlert(
-          "Console is running in DEV mode. /admin and docs are available, which is convenient but not hardened.",
-          "info",
         );
       }
     } catch (error) {

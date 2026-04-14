@@ -16,6 +16,7 @@ export class AdminApp {
     modeChip = this.requireElement("mode-chip");
     backendChip = this.requireElement("backend-chip");
     persistedChip = this.requireElement("persisted-chip");
+    authDisclosure = document.getElementById("auth-disclosure");
     pageEyebrow = this.requireElement("page-eyebrow");
     pageTitle = this.requireElement("page-title");
     pageSubtitle = this.requireElement("page-subtitle");
@@ -29,6 +30,9 @@ export class AdminApp {
         this.adminKeyInput.value = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
         this.gatewayKeyInput.value =
             localStorage.getItem(GATEWAY_KEY_STORAGE) || this.adminKeyInput.value;
+        if (!this.adminKeyInput.value || !this.gatewayKeyInput.value) {
+            this.authDisclosure?.setAttribute("open", "open");
+        }
         this.apiClient = new AdminApiClient(() => this.adminKeyInput.value, () => this.gatewayKeyInput.value);
         this.hydrateKeysFromQuery();
         this.saveAuthButton.addEventListener("click", () => {
@@ -143,9 +147,6 @@ export class AdminApp {
             this.modeChip.textContent = String(runtime.mode ?? "n/a");
             this.backendChip.textContent = String(runtime.gigachat_api_mode ?? "n/a");
             this.persistedChip.textContent = setup.persisted ? "persisted" : "defaults";
-            if (!setup.persisted) {
-                this.pushAlert("Control-plane config is not persisted yet. Save settings to make zero-env restarts work.", "warn");
-            }
             if (!setup.gigachat_ready) {
                 this.pushAlert("GigaChat credentials are not configured yet. Playground calls will fail until the GigaChat section is filled.", "warn");
             }
@@ -155,9 +156,6 @@ export class AdminApp {
             const bootstrap = setup.bootstrap;
             if (bootstrap?.required) {
                 this.pushAlert("PROD bootstrap mode is active. Until setup is complete, admin access is limited to localhost or the bootstrap token.", "warn");
-            }
-            if (runtime.mode === "DEV") {
-                this.pushAlert("Console is running in DEV mode. /admin and docs are available, which is convenient but not hardened.", "info");
             }
         }
         catch (error) {
