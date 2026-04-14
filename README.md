@@ -102,7 +102,7 @@ docker compose -f deploy/compose/base.yaml --profile DEV up -d
 | Посмотреть поддержку API по провайдерам | [docs/api-compatibility.md](./docs/api-compatibility.md) |
 | Подключить редактор, агента или reverse proxy | [docs/integrations/README.md](./docs/integrations/README.md) |
 | Запустить runnable-примеры SDK | [examples/README.md](./examples/README.md) |
-| Понять архитектуру приложения | [ARCHITECTURE_v2.md](./ARCHITECTURE_v2.md) |
+| Понять архитектуру приложения | [docs/architecture.md](./docs/architecture.md) |
 | Добавить новый provider | [docs/how-to-add-provider.md](./docs/how-to-add-provider.md) |
 
 ## Примеры

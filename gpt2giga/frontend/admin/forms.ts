@@ -44,7 +44,7 @@ interface SecretFieldBindingOptions {
   preview: string;
 }
 
-interface SecretFieldState {
+export interface SecretFieldState {
   intent: "keep" | "replace" | "clear";
   message: string;
 }

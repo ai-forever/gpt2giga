@@ -1,5 +1,6 @@
-import { bindValidityReset, bindSecretFieldBehavior, buildApplicationPayload, buildPendingDiffEntries, collectGigachatPayload, describePersistOutcome, summarizePendingChanges, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
-import { banner, card, pill, renderBooleanSelectOptions, renderControlPlaneSectionStatus, renderSecretField, renderStaticSelectOptions, renderSetupSteps, } from "../templates.js";
+import { bindValidityReset, buildApplicationPayload, buildPendingDiffEntries, collectGigachatPayload, describePersistOutcome, summarizePendingChanges, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
+import { bindGigachatSecretFields, renderApplicationSection, renderGigachatSection, } from "./control-plane-sections.js";
+import { banner, card, pill, renderBooleanSelectOptions, renderControlPlaneSectionStatus, renderSetupSteps, } from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, parseCsv, toErrorMessage, } from "../utils.js";
 export async function renderSetup(app, token) {
     const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
@@ -89,115 +90,24 @@ export async function renderSetup(app, token) {
             : ""}
         </div>
       `, "panel panel--span-4")}
-    ${card("Step 2 · Application posture", `
-        <form id="setup-application-form" class="stack">
-          ${banner("Saving always updates the persisted control-plane target. Runtime only reloads immediately when this bootstrap step stays restart-safe.")}
-          <div id="setup-application-status"></div>
-          <div class="dual-grid">
-            <label class="field">
-              <span>Mode</span>
-              <select name="mode">
-                ${renderStaticSelectOptions(String(applicationValues.mode ?? ""), ["DEV", "PROD"])}
-              </select>
-            </label>
-            <label class="field">
-              <span>GigaChat API mode</span>
-              <select name="gigachat_api_mode">
-                ${renderStaticSelectOptions(String(applicationValues.gigachat_api_mode ?? ""), ["v1", "v2"])}
-              </select>
-            </label>
-          </div>
-          <div class="dual-grid">
-            <label class="field">
-              <span>Enabled providers</span>
-              <input name="enabled_providers" value="${escapeHtml(csv(applicationValues.enabled_providers))}" />
-            </label>
-            <label class="field">
-              <span>Observability sinks</span>
-              <input name="observability_sinks" value="${escapeHtml(csv(applicationValues.observability_sinks))}" />
-            </label>
-          </div>
-          <div class="dual-grid">
-            <label class="field">
-              <span>Runtime store backend</span>
-              <select name="runtime_store_backend">
-                ${renderStaticSelectOptions(String(applicationValues.runtime_store_backend ?? ""), ["memory", "sqlite"])}
-              </select>
-            </label>
-            <label class="field">
-              <span>Runtime namespace</span>
-              <input name="runtime_store_namespace" value="${escapeHtml(applicationValues.runtime_store_namespace ?? "")}" />
-            </label>
-          </div>
-          <div class="triple-grid">
-            <label class="field">
-              <span>Telemetry</span>
-              <select name="enable_telemetry">
-                ${renderBooleanSelectOptions(Boolean(applicationValues.enable_telemetry))}
-              </select>
-            </label>
-            <label class="field">
-              <span>Pass model</span>
-              <select name="pass_model">
-                ${renderBooleanSelectOptions(Boolean(applicationValues.pass_model))}
-              </select>
-            </label>
-            <label class="field">
-              <span>Pass token</span>
-              <select name="pass_token">
-                ${renderBooleanSelectOptions(Boolean(applicationValues.pass_token))}
-              </select>
-            </label>
-          </div>
-          <button class="button" type="submit">Save application step</button>
-        </form>
-      `, "panel panel--span-4")}
-    ${card("Step 3 · GigaChat auth", `
-        <form id="setup-gigachat-form" class="stack">
-          ${banner("Connection tests use the candidate values without persisting them. Saving updates the persisted target first, then reloads runtime only when the batch is restart-safe.")}
-          <div id="setup-gigachat-status"></div>
-          <div class="dual-grid">
-            <label class="field"><span>Model</span><input name="model" value="${escapeHtml(gigachatValues.model ?? "")}" /></label>
-            <label class="field"><span>Scope</span><input name="scope" value="${escapeHtml(gigachatValues.scope ?? "")}" /></label>
-          </div>
-          <div class="dual-grid">
-            <label class="field"><span>Base URL</span><input name="base_url" value="${escapeHtml(gigachatValues.base_url ?? "")}" /></label>
-            <label class="field"><span>Auth URL</span><input name="auth_url" value="${escapeHtml(gigachatValues.auth_url ?? "")}" /></label>
-          </div>
-          <div class="dual-grid">
-            ${renderSecretField({
-        name: "credentials",
-        label: "Credentials",
-        placeholder: "Paste new GigaChat credentials to replace the stored secret",
-        preview: String(gigachatValues.credentials_preview ?? "not configured"),
-        clearControlName: "clear_credentials",
-        clearLabel: "Clear stored credentials on save",
-    })}
-            ${renderSecretField({
-        name: "access_token",
-        label: "Access token",
-        placeholder: "Paste a new access token to replace the stored secret",
-        preview: String(gigachatValues.access_token_preview ?? "not configured"),
-        clearControlName: "clear_access_token",
-        clearLabel: "Clear stored access token on save",
-    })}
-          </div>
-          <label class="field">
-            <span>Verify SSL</span>
-            <select name="verify_ssl_certs">
-              ${renderBooleanSelectOptions(Boolean(gigachatValues.verify_ssl_certs))}
-            </select>
-          </label>
-          <label class="field">
-            <span>Timeout</span>
-            <input name="timeout" type="number" min="1" step="1" value="${escapeHtml(gigachatValues.timeout ?? "")}" />
-          </label>
-          <div class="toolbar">
-            <button class="button" type="submit">Save GigaChat step</button>
-            <button class="button button--secondary" id="setup-gigachat-test" type="button">Test connection</button>
-          </div>
-        </form>
-      `, "panel panel--span-4")}
+    ${card("Step 2 · Application posture", renderApplicationSection({
+        bannerMessage: "Saving always updates the persisted control-plane target. Runtime only reloads immediately when this bootstrap step stays restart-safe.",
+        formId: "setup-application-form",
+        statusId: "setup-application-status",
+        submitLabel: "Save application step",
+        values: applicationValues,
+        variant: "setup",
+    }), "panel panel--span-4")}
+    ${card("Step 3 · GigaChat auth", renderGigachatSection({
+        bannerMessage: "Connection tests use the candidate values without persisting them. Saving updates the persisted target first, then reloads runtime only when the batch is restart-safe.",
+        formId: "setup-gigachat-form",
+        statusId: "setup-gigachat-status",
+        submitLabel: "Save GigaChat step",
+        testButtonId: "setup-gigachat-test",
+        testButtonLabel: "Test connection",
+        values: gigachatValues,
+        variant: "setup",
+    }), "panel panel--span-4")}
     ${card("Step 4 · Security bootstrap", `
         <div class="stack">
           <form id="setup-security-form" class="stack">
@@ -267,22 +177,7 @@ export async function renderSetup(app, token) {
     const applicationFields = applicationForm?.elements;
     const gigachatFields = gigachatForm?.elements;
     bindValidityReset(applicationFields?.enabled_providers, gigachatFields?.timeout);
-    const syncCredentialsSecret = gigachatForm
-        ? bindSecretFieldBehavior({
-            form: gigachatForm,
-            fieldName: "credentials",
-            clearFieldName: "clear_credentials",
-            preview: String(gigachatValues.credentials_preview ?? "not configured"),
-        })
-        : () => null;
-    const syncAccessTokenSecret = gigachatForm
-        ? bindSecretFieldBehavior({
-            form: gigachatForm,
-            fieldName: "access_token",
-            clearFieldName: "clear_access_token",
-            preview: String(gigachatValues.access_token_preview ?? "not configured"),
-        })
-        : () => null;
+    const [syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(gigachatForm ?? null, gigachatValues);
     let applicationActionState = null;
     let gigachatActionState = null;
     let securityActionState = null;
