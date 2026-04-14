@@ -54,12 +54,15 @@ export function buildApplicationPayload(form) {
 }
 export function buildSecurityPayload(form) {
     const fields = form.elements;
-    return {
+    const payload = {
         enable_api_key_auth: fields.enable_api_key_auth.value === "true",
         logs_ip_allowlist: parseCsv(fields.logs_ip_allowlist.value),
         cors_allow_origins: parseCsv(fields.cors_allow_origins.value),
-        governance_limits: safeJsonParse(fields.governance_limits.value || "[]", INVALID_JSON),
     };
+    if (fields.governance_limits) {
+        payload.governance_limits = safeJsonParse(fields.governance_limits.value || "[]", INVALID_JSON);
+    }
+    return payload;
 }
 export function bindValidityReset(...fields) {
     fields.forEach((field) => {

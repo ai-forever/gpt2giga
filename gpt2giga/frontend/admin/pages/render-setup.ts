@@ -2,6 +2,7 @@ import type { AdminApp } from "../app.js";
 import {
   bindValidityReset,
   buildApplicationPayload,
+  buildSecurityPayload,
   buildPendingDiffEntries,
   collectGigachatPayload,
   describePersistOutcome,
@@ -14,12 +15,12 @@ import {
   bindGigachatSecretFields,
   renderApplicationSection,
   renderGigachatSection,
+  renderSecuritySection,
 } from "./control-plane-sections.js";
 import {
-  banner,
   card,
   pill,
-  renderBooleanSelectOptions,
+  banner,
   renderControlPlaneSectionStatus,
   renderSetupSteps,
 } from "../templates.js";
@@ -191,25 +192,15 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       "Step 4 · Security bootstrap",
       `
         <div class="stack">
-          <form id="setup-security-form" class="stack">
-            ${banner("Security bootstrap saves to the control plane first. If this step includes restart-sensitive changes, the running process keeps the previous posture until restart.", "warn")}
-            <div id="setup-security-status"></div>
-            <label class="field">
-              <span>Enable gateway API key auth</span>
-              <select name="enable_api_key_auth">
-                ${renderBooleanSelectOptions(Boolean(securityValues.enable_api_key_auth))}
-              </select>
-            </label>
-            <label class="field">
-              <span>CORS origins</span>
-              <input name="cors_allow_origins" value="${escapeHtml(csv(securityValues.cors_allow_origins))}" />
-            </label>
-            <label class="field">
-              <span>Logs IP allowlist</span>
-              <input name="logs_ip_allowlist" value="${escapeHtml(csv(securityValues.logs_ip_allowlist))}" />
-            </label>
-            <button class="button" type="submit">Save security step</button>
-          </form>
+          ${renderSecuritySection({
+            bannerMessage:
+              "Security bootstrap saves to the control plane first. If this step includes restart-sensitive changes, the running process keeps the previous posture until restart.",
+            formId: "setup-security-form",
+            statusId: "setup-security-status",
+            submitLabel: "Save security step",
+            values: securityValues,
+            variant: "setup",
+          })}
           <div class="dual-grid">
             <div class="stack">
               ${pill(`Global key: ${globalKey.configured ? "configured" : "missing"}`)}
@@ -295,19 +286,6 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       { report },
     );
 
-  const buildSecurityStepPayload = (form: HTMLFormElement) => {
-    const fields = form.elements as typeof form.elements & {
-      enable_api_key_auth: HTMLSelectElement;
-      cors_allow_origins: HTMLInputElement;
-      logs_ip_allowlist: HTMLInputElement;
-    };
-    return {
-      enable_api_key_auth: fields.enable_api_key_auth.value === "true",
-      cors_allow_origins: parseCsv(fields.cors_allow_origins.value),
-      logs_ip_allowlist: parseCsv(fields.logs_ip_allowlist.value),
-    };
-  };
-
   const refreshStepStatuses = () => {
     if (!applicationForm || !gigachatForm || !securityForm) {
       return;
@@ -330,7 +308,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
     const securityEntries = buildPendingDiffEntries(
       "security",
       securityValues,
-      buildSecurityStepPayload(securityForm),
+      buildSecurityPayload(securityForm),
     );
     const applicationValidationMessage = getApplicationValidationMessage();
     const gigachatValidationMessage = getGigachatValidationMessage();
@@ -580,7 +558,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
             "/admin/api/settings/security",
             {
               method: "PUT",
-              json: buildSecurityStepPayload(form),
+              json: buildSecurityPayload(form),
             },
           );
           const outcome = describePersistOutcome("Security bootstrap step", response);

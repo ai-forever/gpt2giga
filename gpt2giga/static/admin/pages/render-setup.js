@@ -1,6 +1,6 @@
-import { bindValidityReset, buildApplicationPayload, buildPendingDiffEntries, collectGigachatPayload, describePersistOutcome, summarizePendingChanges, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
-import { bindGigachatSecretFields, renderApplicationSection, renderGigachatSection, } from "./control-plane-sections.js";
-import { banner, card, pill, renderBooleanSelectOptions, renderControlPlaneSectionStatus, renderSetupSteps, } from "../templates.js";
+import { bindValidityReset, buildApplicationPayload, buildSecurityPayload, buildPendingDiffEntries, collectGigachatPayload, describePersistOutcome, summarizePendingChanges, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
+import { bindGigachatSecretFields, renderApplicationSection, renderGigachatSection, renderSecuritySection, } from "./control-plane-sections.js";
+import { card, pill, banner, renderControlPlaneSectionStatus, renderSetupSteps, } from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, parseCsv, toErrorMessage, } from "../utils.js";
 export async function renderSetup(app, token) {
     const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
@@ -110,25 +110,14 @@ export async function renderSetup(app, token) {
     }), "panel panel--span-4")}
     ${card("Step 4 · Security bootstrap", `
         <div class="stack">
-          <form id="setup-security-form" class="stack">
-            ${banner("Security bootstrap saves to the control plane first. If this step includes restart-sensitive changes, the running process keeps the previous posture until restart.", "warn")}
-            <div id="setup-security-status"></div>
-            <label class="field">
-              <span>Enable gateway API key auth</span>
-              <select name="enable_api_key_auth">
-                ${renderBooleanSelectOptions(Boolean(securityValues.enable_api_key_auth))}
-              </select>
-            </label>
-            <label class="field">
-              <span>CORS origins</span>
-              <input name="cors_allow_origins" value="${escapeHtml(csv(securityValues.cors_allow_origins))}" />
-            </label>
-            <label class="field">
-              <span>Logs IP allowlist</span>
-              <input name="logs_ip_allowlist" value="${escapeHtml(csv(securityValues.logs_ip_allowlist))}" />
-            </label>
-            <button class="button" type="submit">Save security step</button>
-          </form>
+          ${renderSecuritySection({
+        bannerMessage: "Security bootstrap saves to the control plane first. If this step includes restart-sensitive changes, the running process keeps the previous posture until restart.",
+        formId: "setup-security-form",
+        statusId: "setup-security-status",
+        submitLabel: "Save security step",
+        values: securityValues,
+        variant: "setup",
+    })}
           <div class="dual-grid">
             <div class="stack">
               ${pill(`Global key: ${globalKey.configured ? "configured" : "missing"}`)}
@@ -183,14 +172,6 @@ export async function renderSetup(app, token) {
     let securityActionState = null;
     const getApplicationValidationMessage = (report = false) => validateRequiredCsvField(applicationFields?.enabled_providers, "Provide at least one enabled provider.", { report });
     const getGigachatValidationMessage = (report = false) => validatePositiveNumberField(gigachatFields?.timeout, "Timeout must be a positive number of seconds.", { report });
-    const buildSecurityStepPayload = (form) => {
-        const fields = form.elements;
-        return {
-            enable_api_key_auth: fields.enable_api_key_auth.value === "true",
-            cors_allow_origins: parseCsv(fields.cors_allow_origins.value),
-            logs_ip_allowlist: parseCsv(fields.logs_ip_allowlist.value),
-        };
-    };
     const refreshStepStatuses = () => {
         if (!applicationForm || !gigachatForm || !securityForm) {
             return;
@@ -200,7 +181,7 @@ export async function renderSetup(app, token) {
         securityStatusNode?.replaceChildren();
         const applicationEntries = buildPendingDiffEntries("application", applicationValues, buildApplicationPayload(applicationForm));
         const gigachatEntries = buildPendingDiffEntries("gigachat", gigachatValues, collectGigachatPayload(gigachatForm));
-        const securityEntries = buildPendingDiffEntries("security", securityValues, buildSecurityStepPayload(securityForm));
+        const securityEntries = buildPendingDiffEntries("security", securityValues, buildSecurityPayload(securityForm));
         const applicationValidationMessage = getApplicationValidationMessage();
         const gigachatValidationMessage = getGigachatValidationMessage();
         const secretStates = [syncCredentialsSecret(), syncAccessTokenSecret()].flatMap((state) => state ? [state] : []);
@@ -421,7 +402,7 @@ export async function renderSetup(app, token) {
                 action: async () => {
                     const response = await app.api.json("/admin/api/settings/security", {
                         method: "PUT",
-                        json: buildSecurityStepPayload(form),
+                        json: buildSecurityPayload(form),
                     });
                     const outcome = describePersistOutcome("Security bootstrap step", response);
                     app.queueAlert(outcome.message, outcome.tone);

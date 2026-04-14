@@ -89,6 +89,28 @@ export function renderGigachatSection(options) {
     </form>
   `;
 }
+export function renderSecuritySection(options) {
+    const governanceField = options.variant === "settings"
+        ? `<label class="field"><span>Governance limits (JSON array)</span><textarea name="governance_limits">${escapeHtml(JSON.stringify(options.values.governance_limits ?? [], null, 2))}</textarea></label>`
+        : "";
+    const authLabel = options.variant === "setup" ? "Enable gateway API key auth" : "Enable API key auth";
+    return `
+    <form id="${escapeHtml(options.formId)}" class="stack">
+      <div id="${escapeHtml(options.statusId)}"></div>
+      <label class="field">
+        <span>${escapeHtml(authLabel)}</span>
+        <select name="enable_api_key_auth">
+          ${renderBooleanSelectOptions(Boolean(options.values.enable_api_key_auth))}
+        </select>
+      </label>
+      <label class="field"><span>Logs IP allowlist</span><input name="logs_ip_allowlist" value="${escapeHtml(csv(options.values.logs_ip_allowlist))}" /></label>
+      <label class="field"><span>CORS origins</span><input name="cors_allow_origins" value="${escapeHtml(csv(options.values.cors_allow_origins))}" /></label>
+      ${governanceField}
+      <div class="banner banner--warn">${escapeHtml(options.bannerMessage)}</div>
+      <button class="button" type="submit">${escapeHtml(options.submitLabel)}</button>
+    </form>
+  `;
+}
 export function bindGigachatSecretFields(form, values) {
     if (!form) {
         return [() => null, () => null];

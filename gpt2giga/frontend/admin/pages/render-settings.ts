@@ -16,12 +16,12 @@ import {
   bindGigachatSecretFields,
   renderApplicationSection,
   renderGigachatSection,
+  renderSecuritySection,
 } from "./control-plane-sections.js";
 import {
   banner,
   card,
   pill,
-  renderBooleanSelectOptions,
   renderControlPlaneSectionStatus,
   renderDiffSections,
 } from "../templates.js";
@@ -114,22 +114,15 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     )}
     ${card(
       "Security",
-      `
-        <form id="security-form" class="stack">
-          <div id="settings-security-status"></div>
-          <label class="field">
-            <span>Enable API key auth</span>
-            <select name="enable_api_key_auth">
-              ${renderBooleanSelectOptions(Boolean(securityValues.enable_api_key_auth))}
-            </select>
-          </label>
-          <label class="field"><span>Logs IP allowlist</span><input name="logs_ip_allowlist" value="${escapeHtml(csv(securityValues.logs_ip_allowlist))}" /></label>
-          <label class="field"><span>CORS origins</span><input name="cors_allow_origins" value="${escapeHtml(csv(securityValues.cors_allow_origins))}" /></label>
-          <label class="field"><span>Governance limits (JSON array)</span><textarea name="governance_limits">${escapeHtml(JSON.stringify(securityValues.governance_limits ?? [], null, 2))}</textarea></label>
-          ${banner("Auth and CORS always save to the control plane first. If this batch includes restart-sensitive fields, the running process keeps the previous posture until restart.", "warn")}
-          <button class="button" type="submit">Save security settings</button>
-        </form>
-      `,
+      renderSecuritySection({
+        bannerMessage:
+          "Auth and CORS always save to the control plane first. If this batch includes restart-sensitive fields, the running process keeps the previous posture until restart.",
+        formId: "security-form",
+        statusId: "settings-security-status",
+        submitLabel: "Save security settings",
+        values: securityValues,
+        variant: "settings",
+      }),
       sectionPanelClass(selectedSection === "security", "panel panel--span-12"),
     )}
     ${card(
@@ -252,7 +245,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     );
 
   const getSecurityValidationMessage = (
-    payload: Record<string, unknown> & { governance_limits: unknown },
+    payload: Record<string, unknown> & { governance_limits?: unknown },
     report = false,
   ) =>
     validateJsonArrayField(securityFields.governance_limits, payload.governance_limits, {

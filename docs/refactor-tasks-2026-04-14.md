@@ -2,6 +2,10 @@
 
 Date: 2026-04-14
 
+## Working rule
+
+- [ ] After each completed refactor slice, create a separate commit before moving to the next slice.
+
 ## Phase 0: quick wins
 
 - [x] Remove stale documentation links and align repo navigation.
