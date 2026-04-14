@@ -13,6 +13,12 @@ import {
   withBusyState,
 } from "../forms.js";
 import {
+  getSubmitterButton,
+  persistControlPlaneSection,
+  testGigachatConnection,
+  type InlineStatus,
+} from "./control-plane-actions.js";
+import {
   bindGigachatSecretFields,
   renderApplicationSection,
   renderGigachatSection,
@@ -33,11 +39,6 @@ import {
   formatTimestamp,
   toErrorMessage,
 } from "../utils.js";
-
-type InlineStatus = {
-  tone: "info" | "warn" | "danger";
-  message: string;
-};
 
 type SettingsSection = "application" | "gigachat" | "security" | "history";
 
@@ -322,43 +323,22 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       refreshSectionStatus();
       return;
     }
-    const submitter = (event as SubmitEvent).submitter;
-    const button =
-      submitter instanceof HTMLButtonElement
-        ? submitter
-        : applicationForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-    applicationActionState = {
-      tone: "info",
-      message:
+    await persistControlPlaneSection({
+      app,
+      form: applicationForm,
+      button: getSubmitterButton(event as SubmitEvent, applicationForm),
+      endpoint: "/admin/api/settings/application",
+      payload: buildApplicationPayload(applicationForm),
+      refreshStatus: refreshSectionStatus,
+      setActionState: (state) => {
+        applicationActionState = state;
+      },
+      pendingMessage:
         "Saving application settings. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
-    };
-    refreshSectionStatus();
-    try {
-      await withBusyState({
-        root: applicationForm,
-        button,
-        pendingLabel: "Saving…",
-        action: async () => {
-          const response = await app.api.json<Record<string, unknown>>(
-            "/admin/api/settings/application",
-            {
-              method: "PUT",
-              json: buildApplicationPayload(applicationForm),
-            },
-          );
-          const outcome = describePersistOutcome("Application settings", response);
-          app.queueAlert(outcome.message, outcome.tone);
-          await app.render("settings");
-        },
-      });
-    } catch (error) {
-      applicationActionState = {
-        tone: "danger",
-        message: `Application settings failed to save: ${toErrorMessage(error)}`,
-      };
-      refreshSectionStatus();
-      app.pushAlert(applicationActionState.message, "danger");
-    }
+      outcomeLabel: "Application settings",
+      failurePrefix: "Application settings failed to save",
+      rerenderPage: "settings",
+    });
   });
 
   gigachatForm.addEventListener("submit", async (event) => {
@@ -367,43 +347,22 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       refreshSectionStatus();
       return;
     }
-    const submitter = (event as SubmitEvent).submitter;
-    const button =
-      submitter instanceof HTMLButtonElement
-        ? submitter
-        : gigachatForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-    gigachatActionState = {
-      tone: "info",
-      message:
+    await persistControlPlaneSection({
+      app,
+      form: gigachatForm,
+      button: getSubmitterButton(event as SubmitEvent, gigachatForm),
+      endpoint: "/admin/api/settings/gigachat",
+      payload: collectGigachatPayload(gigachatForm),
+      refreshStatus: refreshSectionStatus,
+      setActionState: (state) => {
+        gigachatActionState = state;
+      },
+      pendingMessage:
         "Saving GigaChat settings. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
-    };
-    refreshSectionStatus();
-    try {
-      await withBusyState({
-        root: gigachatForm,
-        button,
-        pendingLabel: "Saving…",
-        action: async () => {
-          const response = await app.api.json<Record<string, unknown>>(
-            "/admin/api/settings/gigachat",
-            {
-              method: "PUT",
-              json: collectGigachatPayload(gigachatForm),
-            },
-          );
-          const outcome = describePersistOutcome("GigaChat settings", response);
-          app.queueAlert(outcome.message, outcome.tone);
-          await app.render("settings");
-        },
-      });
-    } catch (error) {
-      gigachatActionState = {
-        tone: "danger",
-        message: `GigaChat settings failed to save: ${toErrorMessage(error)}`,
-      };
-      refreshSectionStatus();
-      app.pushAlert(gigachatActionState.message, "danger");
-    }
+      outcomeLabel: "GigaChat settings",
+      failurePrefix: "GigaChat settings failed to save",
+      rerenderPage: "settings",
+    });
   });
 
   document.getElementById("gigachat-test")?.addEventListener("click", async (event) => {
@@ -411,47 +370,18 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       refreshSectionStatus();
       return;
     }
-    const button = event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null;
-    gigachatActionState = {
-      tone: "info",
-      message:
+    await testGigachatConnection({
+      app,
+      form: gigachatForm,
+      button: event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null,
+      payload: collectGigachatPayload(gigachatForm),
+      refreshStatus: refreshSectionStatus,
+      setActionState: (state) => {
+        gigachatActionState = state;
+      },
+      pendingMessage:
         "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save.",
-    };
-    refreshSectionStatus();
-    try {
-      await withBusyState({
-        root: gigachatForm,
-        button,
-        pendingLabel: "Testing…",
-        action: async () => {
-          const result = await app.api.json<Record<string, unknown>>(
-            "/admin/api/settings/gigachat/test",
-            {
-              method: "POST",
-              json: collectGigachatPayload(gigachatForm),
-            },
-          );
-          gigachatActionState = result.ok
-            ? {
-                tone: "info",
-                message: `Connection ok. Models visible: ${String(result.model_count ?? 0)}. Candidate values were tested but not persisted.`,
-              }
-            : {
-                tone: "danger",
-                message: `Connection failed: ${String(result.error_type ?? "Error")}: ${String(result.error ?? "unknown error")}. Persisted values remain unchanged.`,
-              };
-          refreshSectionStatus();
-          app.pushAlert(gigachatActionState.message, gigachatActionState.tone);
-        },
-      });
-    } catch (error) {
-      gigachatActionState = {
-        tone: "danger",
-        message: `GigaChat connection test failed: ${toErrorMessage(error)}`,
-      };
-      refreshSectionStatus();
-      app.pushAlert(gigachatActionState.message, "danger");
-    }
+    });
   });
 
   securityForm.addEventListener("submit", async (event) => {
@@ -463,43 +393,22 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       app.pushAlert(validationError, "danger");
       return;
     }
-    const submitter = (event as SubmitEvent).submitter;
-    const button =
-      submitter instanceof HTMLButtonElement
-        ? submitter
-        : securityForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-    securityActionState = {
-      tone: "info",
-      message:
+    await persistControlPlaneSection({
+      app,
+      form: securityForm,
+      button: getSubmitterButton(event as SubmitEvent, securityForm),
+      endpoint: "/admin/api/settings/security",
+      payload,
+      refreshStatus: refreshSectionStatus,
+      setActionState: (state) => {
+        securityActionState = state;
+      },
+      pendingMessage:
         "Saving security settings. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
-    };
-    refreshSectionStatus();
-    try {
-      await withBusyState({
-        root: securityForm,
-        button,
-        pendingLabel: "Saving…",
-        action: async () => {
-          const response = await app.api.json<Record<string, unknown>>(
-            "/admin/api/settings/security",
-            {
-              method: "PUT",
-              json: payload,
-            },
-          );
-          const outcome = describePersistOutcome("Security settings", response);
-          app.queueAlert(outcome.message, outcome.tone);
-          await app.render("settings");
-        },
-      });
-    } catch (error) {
-      securityActionState = {
-        tone: "danger",
-        message: `Security settings failed to save: ${toErrorMessage(error)}`,
-      };
-      refreshSectionStatus();
-      app.pushAlert(securityActionState.message, "danger");
-    }
+      outcomeLabel: "Security settings",
+      failurePrefix: "Security settings failed to save",
+      rerenderPage: "settings",
+    });
   });
 
   app.pageContent.querySelectorAll<HTMLElement>("[data-rollback-revision]").forEach((button) => {
