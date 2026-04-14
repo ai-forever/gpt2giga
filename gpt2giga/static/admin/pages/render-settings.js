@@ -1,7 +1,8 @@
-import { bindValidityReset, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, describePersistOutcome, summarizePendingChanges, validateJsonArrayField, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
+import { bindValidityReset, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, describePersistOutcome, validateJsonArrayField, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
 import { getSubmitterButton, persistControlPlaneSection, testGigachatConnection, } from "./control-plane-actions.js";
 import { bindGigachatSecretFields, renderApplicationSection, renderGigachatSection, renderSecuritySection, } from "./control-plane-sections.js";
-import { banner, card, pill, renderControlPlaneSectionStatus, renderDiffSections, } from "../templates.js";
+import { collectSecretFieldMessages, renderControlPlaneStatusNode, renderInlineBannerStatus, } from "./control-plane-status.js";
+import { banner, card, pill, renderDiffSections, } from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, formatTimestamp, toErrorMessage, } from "../utils.js";
 const SETTINGS_SECTIONS = [
     "application",
@@ -149,20 +150,20 @@ export async function renderSettings(app, token) {
         const applicationValidationMessage = getApplicationValidationMessage();
         const gigachatValidationMessage = getGigachatValidationMessage();
         const securityValidationMessage = getSecurityValidationMessage(securityPayload);
-        const secretStates = [syncCredentialsSecret(), syncAccessTokenSecret()].flatMap((state) => state ? [state] : []);
-        const stagedSecretMessages = secretStates
-            .filter((state) => state.intent !== "keep")
-            .map((state) => state.message);
-        applicationStatusNode.innerHTML = renderControlPlaneSectionStatus({
-            summary: summarizePendingChanges(applicationEntries),
+        const stagedSecretMessages = collectSecretFieldMessages([
+            syncCredentialsSecret(),
+            syncAccessTokenSecret(),
+        ]);
+        renderControlPlaneStatusNode(applicationStatusNode, {
+            entries: applicationEntries,
             persisted: Boolean(controlPlaneStatus.persisted),
             updatedAt: controlPlaneStatus.updated_at,
             note: "Mode, provider routing, runtime-store backend and auth-adjacent controls are the main restart-sensitive levers here.",
             validationMessage: applicationValidationMessage || undefined,
             actionState: applicationActionState,
         });
-        gigachatStatusNode.innerHTML = renderControlPlaneSectionStatus({
-            summary: summarizePendingChanges(gigachatEntries),
+        renderControlPlaneStatusNode(gigachatStatusNode, {
+            entries: gigachatEntries,
             persisted: Boolean(controlPlaneStatus.persisted),
             updatedAt: controlPlaneStatus.updated_at,
             note: stagedSecretMessages.length
@@ -171,17 +172,15 @@ export async function renderSettings(app, token) {
             validationMessage: gigachatValidationMessage || undefined,
             actionState: gigachatActionState,
         });
-        securityStatusNode.innerHTML = renderControlPlaneSectionStatus({
-            summary: summarizePendingChanges(securityEntries),
+        renderControlPlaneStatusNode(securityStatusNode, {
+            entries: securityEntries,
             persisted: Boolean(controlPlaneStatus.persisted),
             updatedAt: controlPlaneStatus.updated_at,
             note: "Saved security changes always update the persisted target first. Runtime posture only changes immediately when the whole batch is restart-safe.",
             validationMessage: securityValidationMessage || undefined,
             actionState: securityActionState,
         });
-        revisionsStatusNode.innerHTML = revisionsActionState
-            ? banner(revisionsActionState.message, revisionsActionState.tone)
-            : banner("Use history only when you need to restore a known-good persisted snapshot.");
+        renderInlineBannerStatus(revisionsStatusNode, revisionsActionState, "Use history only when you need to restore a known-good persisted snapshot.");
     };
     refreshSectionStatus();
     [applicationForm, gigachatForm, securityForm].forEach((form) => {

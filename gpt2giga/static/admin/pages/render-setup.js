@@ -1,7 +1,8 @@
-import { bindValidityReset, buildApplicationPayload, buildSecurityPayload, buildPendingDiffEntries, collectGigachatPayload, summarizePendingChanges, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
+import { bindValidityReset, buildApplicationPayload, buildSecurityPayload, buildPendingDiffEntries, collectGigachatPayload, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
 import { getSubmitterButton, persistControlPlaneSection, testGigachatConnection, } from "./control-plane-actions.js";
 import { bindGigachatSecretFields, renderApplicationSection, renderGigachatSection, renderSecuritySection, } from "./control-plane-sections.js";
-import { card, pill, banner, renderControlPlaneSectionStatus, renderSetupSteps, } from "../templates.js";
+import { collectSecretFieldMessages, renderControlPlaneStatusNode, } from "./control-plane-status.js";
+import { card, pill, banner, renderSetupSteps, } from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, parseCsv, toErrorMessage, } from "../utils.js";
 export async function renderSetup(app, token) {
     const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
@@ -185,41 +186,35 @@ export async function renderSetup(app, token) {
         const securityEntries = buildPendingDiffEntries("security", securityValues, buildSecurityPayload(securityForm));
         const applicationValidationMessage = getApplicationValidationMessage();
         const gigachatValidationMessage = getGigachatValidationMessage();
-        const secretStates = [syncCredentialsSecret(), syncAccessTokenSecret()].flatMap((state) => state ? [state] : []);
-        const stagedSecretMessages = secretStates
-            .filter((state) => state.intent !== "keep")
-            .map((state) => state.message);
-        if (applicationStatusNode) {
-            applicationStatusNode.innerHTML = renderControlPlaneSectionStatus({
-                summary: summarizePendingChanges(applicationEntries),
-                persisted,
-                updatedAt: persistedUpdatedAt,
-                note: "Use this step for runtime posture and provider routing. Restart-sensitive controls are called out before you save.",
-                validationMessage: applicationValidationMessage || undefined,
-                actionState: applicationActionState,
-            });
-        }
-        if (gigachatStatusNode) {
-            gigachatStatusNode.innerHTML = renderControlPlaneSectionStatus({
-                summary: summarizePendingChanges(gigachatEntries),
-                persisted,
-                updatedAt: persistedUpdatedAt,
-                note: stagedSecretMessages.length
-                    ? `Testing the connection here does not persist the form. ${stagedSecretMessages.join(" ")}`
-                    : "Testing the connection here does not persist the form; save only after the pending state looks correct.",
-                validationMessage: gigachatValidationMessage || undefined,
-                actionState: gigachatActionState,
-            });
-        }
-        if (securityStatusNode) {
-            securityStatusNode.innerHTML = renderControlPlaneSectionStatus({
-                summary: summarizePendingChanges(securityEntries),
-                persisted,
-                updatedAt: persistedUpdatedAt,
-                note: "Gateway auth posture and CORS are the main restart-sensitive controls in this step.",
-                actionState: securityActionState,
-            });
-        }
+        const stagedSecretMessages = collectSecretFieldMessages([
+            syncCredentialsSecret(),
+            syncAccessTokenSecret(),
+        ]);
+        renderControlPlaneStatusNode(applicationStatusNode, {
+            entries: applicationEntries,
+            persisted,
+            updatedAt: persistedUpdatedAt,
+            note: "Use this step for runtime posture and provider routing. Restart-sensitive controls are called out before you save.",
+            validationMessage: applicationValidationMessage || undefined,
+            actionState: applicationActionState,
+        });
+        renderControlPlaneStatusNode(gigachatStatusNode, {
+            entries: gigachatEntries,
+            persisted,
+            updatedAt: persistedUpdatedAt,
+            note: stagedSecretMessages.length
+                ? `Testing the connection here does not persist the form. ${stagedSecretMessages.join(" ")}`
+                : "Testing the connection here does not persist the form; save only after the pending state looks correct.",
+            validationMessage: gigachatValidationMessage || undefined,
+            actionState: gigachatActionState,
+        });
+        renderControlPlaneStatusNode(securityStatusNode, {
+            entries: securityEntries,
+            persisted,
+            updatedAt: persistedUpdatedAt,
+            note: "Gateway auth posture and CORS are the main restart-sensitive controls in this step.",
+            actionState: securityActionState,
+        });
     };
     refreshStepStatuses();
     [applicationForm, gigachatForm, securityForm].forEach((form) => {

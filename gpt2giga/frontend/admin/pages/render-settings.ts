@@ -6,7 +6,6 @@ import {
   buildSecurityPayload,
   collectGigachatPayload,
   describePersistOutcome,
-  summarizePendingChanges,
   validateJsonArrayField,
   validatePositiveNumberField,
   validateRequiredCsvField,
@@ -25,10 +24,14 @@ import {
   renderSecuritySection,
 } from "./control-plane-sections.js";
 import {
+  collectSecretFieldMessages,
+  renderControlPlaneStatusNode,
+  renderInlineBannerStatus,
+} from "./control-plane-status.js";
+import {
   banner,
   card,
   pill,
-  renderControlPlaneSectionStatus,
   renderDiffSections,
 } from "../templates.js";
 import {
@@ -271,23 +274,21 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     const applicationValidationMessage = getApplicationValidationMessage();
     const gigachatValidationMessage = getGigachatValidationMessage();
     const securityValidationMessage = getSecurityValidationMessage(securityPayload);
-    const secretStates = [syncCredentialsSecret(), syncAccessTokenSecret()].flatMap((state) =>
-      state ? [state] : [],
-    );
-    const stagedSecretMessages = secretStates
-      .filter((state) => state.intent !== "keep")
-      .map((state) => state.message);
+    const stagedSecretMessages = collectSecretFieldMessages([
+      syncCredentialsSecret(),
+      syncAccessTokenSecret(),
+    ]);
 
-    applicationStatusNode.innerHTML = renderControlPlaneSectionStatus({
-      summary: summarizePendingChanges(applicationEntries),
+    renderControlPlaneStatusNode(applicationStatusNode, {
+      entries: applicationEntries,
       persisted: Boolean(controlPlaneStatus.persisted),
       updatedAt: controlPlaneStatus.updated_at,
       note: "Mode, provider routing, runtime-store backend and auth-adjacent controls are the main restart-sensitive levers here.",
       validationMessage: applicationValidationMessage || undefined,
       actionState: applicationActionState,
     });
-    gigachatStatusNode.innerHTML = renderControlPlaneSectionStatus({
-      summary: summarizePendingChanges(gigachatEntries),
+    renderControlPlaneStatusNode(gigachatStatusNode, {
+      entries: gigachatEntries,
       persisted: Boolean(controlPlaneStatus.persisted),
       updatedAt: controlPlaneStatus.updated_at,
       note: stagedSecretMessages.length
@@ -296,19 +297,19 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       validationMessage: gigachatValidationMessage || undefined,
       actionState: gigachatActionState,
     });
-    securityStatusNode.innerHTML = renderControlPlaneSectionStatus({
-      summary: summarizePendingChanges(securityEntries),
+    renderControlPlaneStatusNode(securityStatusNode, {
+      entries: securityEntries,
       persisted: Boolean(controlPlaneStatus.persisted),
       updatedAt: controlPlaneStatus.updated_at,
       note: "Saved security changes always update the persisted target first. Runtime posture only changes immediately when the whole batch is restart-safe.",
       validationMessage: securityValidationMessage || undefined,
       actionState: securityActionState,
     });
-    revisionsStatusNode.innerHTML = revisionsActionState
-      ? banner(revisionsActionState.message, revisionsActionState.tone)
-      : banner(
-          "Use history only when you need to restore a known-good persisted snapshot.",
-        );
+    renderInlineBannerStatus(
+      revisionsStatusNode,
+      revisionsActionState,
+      "Use history only when you need to restore a known-good persisted snapshot.",
+    );
   };
 
   refreshSectionStatus();
