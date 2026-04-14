@@ -77,6 +77,43 @@ def _normalize_optional_string_list(value):
     return value
 
 
+def _normalize_string_map(value):
+    """Normalize string maps from ENV/CLI friendly forms."""
+    if value is None or value == "":
+        return {}
+
+    if isinstance(value, dict):
+        return {
+            str(key).strip(): str(item).strip()
+            for key, item in value.items()
+            if str(key).strip() and item is not None and str(item).strip()
+        }
+
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return {}
+        try:
+            decoded = json.loads(normalized)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, dict):
+            return _normalize_string_map(decoded)
+        result: dict[str, str] = {}
+        for item in normalized.split(","):
+            part = item.strip()
+            if not part or "=" not in part:
+                continue
+            key, raw_value = part.split("=", 1)
+            key = key.strip()
+            raw_value = raw_value.strip()
+            if key and raw_value:
+                result[key] = raw_value
+        return result
+
+    return value
+
+
 class ScopedAPIKeySettings(BaseModel):
     """Optional API key with narrowed access scopes."""
 
@@ -300,9 +337,55 @@ class ProxySettings(BaseSettings):
         default_factory=lambda: ["prometheus"],
         description=(
             "Список observability sink-ов для нормализованных request events. "
-            "Встроенный sink: prometheus. Кастомные sink-и вроде otlp или "
-            "langfuse можно зарегистрировать через app.telemetry registry."
+            "Встроенные sink-и: prometheus, otlp, langfuse. Кастомные sink-и "
+            "можно регистрировать через app.telemetry registry."
         ),
+    )
+    otlp_traces_endpoint: str | None = Field(
+        default=None,
+        description=(
+            "Полный OTLP/HTTP endpoint для trace export-а, например "
+            "http://otel-collector:4318/v1/traces."
+        ),
+    )
+    otlp_headers: Annotated[dict[str, str], NoDecode] = Field(
+        default_factory=dict,
+        description=(
+            "Дополнительные HTTP headers для OTLP export-а. Поддерживает JSON "
+            "object или CSV вида `Header=Value,Another=Value`."
+        ),
+    )
+    otlp_timeout_seconds: float = Field(
+        default=5.0,
+        ge=0.1,
+        le=60.0,
+        description="Таймаут одного OTLP export HTTP request в секундах.",
+    )
+    otlp_max_pending_requests: int = Field(
+        default=256,
+        ge=1,
+        le=10_000,
+        description="Максимум in-flight OTLP export requests перед drop-ом новых событий.",
+    )
+    otlp_service_name: str = Field(
+        default="gpt2giga",
+        description="service.name resource attribute для OTLP/Langfuse exporters.",
+    )
+    langfuse_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL Langfuse instance-а без суффикса endpoint-а, например "
+            "http://langfuse-web:3000."
+        ),
+    )
+    langfuse_public_key: str | None = Field(
+        default=None,
+        description="Langfuse public key для OTLP ingest auth.",
+    )
+    langfuse_secret_key: str | None = Field(
+        default=None,
+        description="Langfuse secret key для OTLP ingest auth.",
+        repr=False,
     )
     recent_requests_max_items: int = Field(
         default=200,
@@ -498,6 +581,29 @@ class ProxySettings(BaseSettings):
             return _normalize_parts(parts)
 
         return value
+
+    @field_validator(
+        "otlp_traces_endpoint",
+        "langfuse_base_url",
+        "langfuse_public_key",
+        "langfuse_secret_key",
+        mode="before",
+    )
+    @classmethod
+    def normalize_optional_strings(cls, value):
+        """Normalize blank string settings to ``None``."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        return value
+
+    @field_validator("otlp_headers", mode="before")
+    @classmethod
+    def normalize_otlp_headers(cls, value):
+        """Normalize OTLP header maps from ENV/CLI friendly forms."""
+        return _normalize_string_map(value)
 
     @field_validator("scoped_api_keys", mode="before")
     @classmethod

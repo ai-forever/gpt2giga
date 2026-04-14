@@ -120,6 +120,30 @@ def test_proxy_settings_observability_sinks_can_be_disabled(monkeypatch):
     assert s.observability_sinks == []
 
 
+def test_proxy_settings_otlp_headers_from_env_json(monkeypatch):
+    monkeypatch.setenv(
+        "GPT2GIGA_OTLP_HEADERS",
+        '{"Authorization":"Bearer token","X-Scope-OrgID":"tenant-a"}',
+    )
+    s = ProxySettings()
+    assert s.otlp_headers == {
+        "Authorization": "Bearer token",
+        "X-Scope-OrgID": "tenant-a",
+    }
+
+
+def test_proxy_settings_otlp_headers_from_env_csv(monkeypatch):
+    monkeypatch.setenv(
+        "GPT2GIGA_OTLP_HEADERS",
+        "Authorization=Bearer token,X-Scope-OrgID=tenant-a",
+    )
+    s = ProxySettings()
+    assert s.otlp_headers == {
+        "Authorization": "Bearer token",
+        "X-Scope-OrgID": "tenant-a",
+    }
+
+
 def test_proxy_settings_scoped_api_keys_from_env_json(monkeypatch):
     monkeypatch.setenv(
         "GPT2GIGA_SCOPED_API_KEYS",

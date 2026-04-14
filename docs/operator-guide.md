@@ -92,9 +92,15 @@ GPT2GIGA_GIGACHAT_API_MODE=v2
 GPT2GIGA_OBSERVABILITY_SINKS=prometheus
 GPT2GIGA_OBSERVABILITY_SINKS=none
 GPT2GIGA_OBSERVABILITY_SINKS=prometheus,otlp
+GPT2GIGA_OTLP_TRACES_ENDPOINT=http://otel-collector:4318/v1/traces
+GPT2GIGA_LANGFUSE_BASE_URL=http://langfuse-web:3000
+GPT2GIGA_LANGFUSE_PUBLIC_KEY=pk-lf-...
+GPT2GIGA_LANGFUSE_SECRET_KEY=sk-lf-...
 ```
 
 `prometheus` включает `/metrics` и `/admin/api/metrics`.
+`otlp` экспортирует trace spans через OTLP/HTTP.
+`langfuse` отправляет те же spans в Langfuse через его OTLP endpoint.
 
 ### `GPT2GIGA_GOVERNANCE_LIMITS`
 
@@ -196,6 +202,9 @@ GPT2GIGA_MODE=DEV
 
 - `deploy/compose/base.yaml` — обычный single-instance запуск;
 - `deploy/compose/multiple.yaml` — несколько инстансов с разными моделями;
+- `deploy/compose/observability-prometheus.yaml` — preset для Prometheus scrape `/metrics`;
+- `deploy/compose/observability-otlp.yaml` — preset для локального OpenTelemetry Collector;
+- `deploy/compose/observability-langfuse.yaml` — локальный Langfuse stack для trace inspection;
 - `deploy/compose/observability.yaml` — запуск через mitmproxy для debug/SSE inspection;
 - `deploy/compose/traefik.yaml` — reverse proxy и несколько инстансов.
 
@@ -212,6 +221,16 @@ GPT2GIGA_MODE=DEV
 GPT2GIGA_ENABLED_PROVIDERS=openai,gemini
 GPT2GIGA_GIGACHAT_API_MODE=v2
 ```
+
+Примеры запуска observability preset-ов:
+
+```bash
+docker compose -f deploy/compose/base.yaml -f deploy/compose/observability-prometheus.yaml --profile DEV up -d
+docker compose -f deploy/compose/base.yaml -f deploy/compose/observability-otlp.yaml --profile DEV up -d
+docker compose -f deploy/compose/base.yaml -f deploy/compose/observability-langfuse.yaml --profile DEV up -d
+```
+
+`observability-langfuse.yaml` использует локальные dev-секреты по умолчанию. Для staging/production их нужно заменить.
 
 ```bash
 docker compose -f deploy/compose/base.yaml --profile DEV up -d
@@ -294,6 +313,18 @@ GPT2GIGA_ENABLE_TELEMETRY=false
 
 Это оставит working recent request/error feeds для `/admin`, но выключит
 Prometheus/OTLP/Langfuse fan-out и сделает `/metrics` недоступным.
+
+Встроенные telemetry sink-и:
+
+- `prometheus` — in-process counters/histograms с публикацией на `/metrics`;
+- `otlp` — OTLP/HTTP trace export в Collector/APM backend;
+- `langfuse` — OTLP/HTTP export напрямую в Langfuse.
+
+Готовые compose override-файлы:
+
+- `deploy/compose/observability-prometheus.yaml`
+- `deploy/compose/observability-otlp.yaml`
+- `deploy/compose/observability-langfuse.yaml`
 
 Scaffolding для custom runtime backend-ов и compose-примеры для Redis/Postgres/S3:
 

@@ -1,0 +1,22 @@
+services:
+  gpt2giga-prod:
+    environment:
+      GPT2GIGA_OBSERVABILITY_SINKS: "otlp"
+      GPT2GIGA_OTLP_TRACES_ENDPOINT: "http://otel-collector:4318/v1/traces"
+
+  gpt2giga-dev:
+    environment:
+      GPT2GIGA_OBSERVABILITY_SINKS: "otlp"
+      GPT2GIGA_OTLP_TRACES_ENDPOINT: "http://otel-collector:4318/v1/traces"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    restart: unless-stopped
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+    ports:
+      - "127.0.0.1:${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"
+      - "127.0.0.1:${OTEL_COLLECTOR_METRICS_PORT:-8888}:8888"
+    volumes:
+      - ./observability/otel-collector-debug.yaml:/etc/otelcol-contrib/config.yaml:ro

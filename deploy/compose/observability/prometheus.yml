@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: gpt2giga
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - gpt2giga-dev:8090
+          - gpt2giga-prod:8090

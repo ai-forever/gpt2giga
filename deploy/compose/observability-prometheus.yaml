@@ -1,0 +1,24 @@
+services:
+  gpt2giga-prod:
+    environment:
+      GPT2GIGA_OBSERVABILITY_SINKS: "prometheus"
+
+  gpt2giga-dev:
+    environment:
+      GPT2GIGA_OBSERVABILITY_SINKS: "prometheus"
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+volumes:
+  prometheus-data:
