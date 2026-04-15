@@ -6,6 +6,8 @@ x-gpt2giga-common: &gpt2giga-common
     dockerfile: Dockerfile
     args:
       PYTHON_VERSION: "3.13"
+  env_file:
+    - ${GPT2GIGA_COMPOSE_ENV_FILE:-../../.env}
   container_name: gpt2giga
   environment:
     GPT2GIGA_HOST: "0.0.0.0"

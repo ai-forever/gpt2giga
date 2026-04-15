@@ -163,98 +163,98 @@ npm run build:admin
 HTML shell теперь почти не должен меняться при каждом UI-изменении.
 Это хороший признак.
 
-## Что ещё не доведено
+## Что закрыто в параллельной волне
 
-### 1. HTML generation внутри page renderers всё ещё строковая
+Backlog из [UI_PARALLEL_TASKS.md](/Users/riyakupov/code_projects/gpt2giga/UI_PARALLEL_TASKS.md) считается завершённым полностью.
+То есть закрыты и feature-потоки `T1-T5`, и интеграционные задачи `T6-T7`.
 
-Даже после перехода на TS часть страниц всё ещё рендерится через большие HTML-строки.
-Это уже лучше, чем один giant template, но до идеального состояния ещё есть путь.
+### T1. Logs + Traffic
 
-Что логично делать дальше:
+Закрыто:
 
-- выносить table/form fragments в маленькие reusable render helpers
-- уменьшать размер отдельных page renderers
-- постепенно убирать дублирование между filter/inspector паттернами в `Traffic`, `Logs` и `Files & Batches`
+- `Logs` и `Traffic` теперь работают вокруг одного `request_id` handoff
+- live stream lifecycle и cleanup выражены явно, без висящих подписок и сырого SSE-шумa
+- request/error context и traffic event surfaces связаны взаимными handoff-ссылками
+- `Traffic` показывает KPI, recent events и usage inspectors как operator surfaces, а не как набор JSON-блоков
 
-### 2. Нет более строгой модели UI state
+### T2. Files & Batches
 
-Сейчас page-level state mostly локальный и императивный.
-Для текущего размера это терпимо, но для `Logs`, `Files & Batches`, `Playground` и `Settings` со временем станет узким местом.
+Закрыто:
 
-### 3. Не все operator workflows визуально одинаково зрелые
+- batch/file actions имеют явные pending/disabled states
+- selection -> inspect -> preview/output flow стал непрерывным operator workflow
+- inspector показывает summary-first контекст до открытия raw payload
+- batch lifecycle actions и handoff между связанными сущностями вынесены в action rail
 
-Лучше всего сейчас выглядят:
+### T3. Setup + Settings UX
 
-- setup/settings
-- keys
-- basic logs/playground/files-batches flow
+Закрыто:
 
-Зонами, где ещё есть запас по UX, остаются:
+- inline validation и busy-state покрывают save/test/rollback сценарии
+- форма явно делит изменения на `applies live` и `restart after save`
+- secret field updates читаются как отдельная masked-change группа
+- persisted state и runtime-applied impact больше не смешиваются визуально
 
-- logs
-- files & batches inspector
-- parts of setup/settings pending-state UX
+### T4. Providers + System + Overview
 
-После последнего прохода `logs` и `files & batches` уже заметно вышли из состояния “минимально рабочая поверхность”, но там всё ещё есть запас по:
+Закрыто:
 
-- более плотной связке отдельных строк tail-viewer с structured request context поверх уже появившегося `request_id` pinning
-- richer batch lifecycle actions beyond inspect/preview basics
-- более явным pending/disabled states вокруг долгих операций
+- `Overview` доведён до executive-summary экрана
+- `Providers` показывает capability matrix, backend posture и provider detail surface
+- `System` показывает route/runtime/config summaries без упора в raw JSON
+- между summary surfaces и рабочими страницами есть понятные handoff-ссылки там, где они уместны
 
-Самые слабые страницы `traffic/providers/system` уже выведены из состояния “raw JSON viewer” в более читаемые operator surfaces.
+### T5. Playground
 
-### 4. Build artifacts хранятся в репозитории
+Закрыто:
 
-Это осознанный текущий компромисс, но это всё равно нужно помнить.
-Если подход менять, то менять уже системно, а не полумерами.
+- request/stream lifecycle больше не оставляет UI в подвешенном состоянии
+- pending/error/output presentation стала понятнее для ручного smoke flow
+- zero-env/bootstrap сценарий ощущается как встроенный операторский клиент, а не как вспомогательная debug-форма
 
-## Что логично делать следующим
+### T6. Shared UI primitives и state patterns
 
-1. Продолжить разбирать самые тяжёлые page renderers на ещё более мелкие UI-блоки.
-2. Продолжить усиливать `Logs`: довести handoff от отдельных tail lines до structured request context и расширить stream diagnostics поверх уже добавленного `request_id` handoff с `Traffic`.
-3. Улучшить формы в `Setup` и `Settings`: disabled/pending states, validation, clearer restart messaging.
-4. Продолжить улучшать `Files & Batches`: richer batch workflows поверх уже появившихся context-aware inspector actions, preview summaries и pending states.
-5. Решить, хотим ли мы дальше жить на “TS -> committed JS assets” или когда-нибудь переходить на более формализованный frontend toolchain.
+Закрыто:
 
-## Что проверено после перехода на TypeScript
+- повторяющиеся summary/table/form/inspector blocks вынесены в reusable primitives
+- тяжёлые page renderers стали меньше и читаемее
+- общие loading/busy/selection/state helpers нормализованы на уровне shared frontend-кода
 
-Проходят:
+### T7. Build, compiled assets и интеграционная проверка
+
+Закрыто:
+
+- admin frontend централизованно собран
+- committed static assets синхронизированы с текущим TypeScript source
+- финальная интеграция проверена после merge feature-потоков
+
+## Что теперь считается базовым состоянием UI
+
+После завершения параллельной волны `/admin` больше не только модульный TS frontend, но и более зрелая operator console:
+
+- summary-first presentation закреплена на `Overview`, `Traffic`, `Providers`, `System`, `Files & Batches`
+- связанные страницы переходят друг в друга через осмысленные handoff-сценарии, а не через ручной перенос фильтров
+- shared primitives и state patterns вынесены из page-local ad-hoc логики
+- build step и обновление compiled assets считаются обязательной частью финальной интеграции
+
+## Что проверено в финальной интеграции
+
+Финальный проход для закрытия `T7` опирается на обязательный набор проверок из task breakdown:
 
 - `npm run build:admin`
 - `uv run ruff check .`
 - `uv run ruff format --check .`
-- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_api_server.py tests/integration/app/test_system_router_extra.py`
+- `uv run pytest tests/`
 
-Также проходят отдельные проверки на:
+Дополнительно в этом состоянии считаются закрытыми проверки на:
 
 - shell routes `/admin/*`
 - раздачу `/admin/assets/admin/index.js`
-- новый контракт admin shell, где предупреждения рендерятся клиентом, а не лежат статически в HTML
-- свежие operator UI обновления для `Traffic`, `Providers` и `System`
-- свежие operator UI обновления для `Logs` и `Files & Batches`
-- свежий `request_id` contract для `/admin/api/requests/recent` и `/admin/api/errors/recent`, который используется новым handoff между `Logs` и `Traffic`
-- свежий form UX проход для `Setup` и `Settings`, где pending summaries явнее разделяют live-apply и restart-required changes
+- новые operator UI surfaces для `Logs`, `Traffic`, `Files & Batches`, `Providers`, `System`, `Overview`, `Playground`
+- `request_id` contract и handoff между `Logs` и `Traffic`
+- form UX проход для `Setup` и `Settings`
 
-## Что не прошло в полном test suite на момент обновления
+## Что логично делать дальше
 
-Полный запуск:
-
-```bash
-uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
-```
-
-всё ещё падает, но оставшиеся кейсы не относятся напрямую к TS-рефакторингу admin frontend:
-
-- `tests/integration/openai/test_router_stream_chat.py::test_chat_completions_stream_records_audit_metadata`
-- `tests/smoke/test_ci_smoke.py::test_ci_smoke_openai_chat`
-- `tests/smoke/test_ci_smoke.py::test_ci_smoke_anthropic_messages`
-- `tests/smoke/test_ci_smoke.py::test_ci_smoke_gemini_generate_content`
-- `tests/smoke/test_starlette_1_smoke.py::test_starlette_1_openai_streaming_smoke`
-- `tests/unit/providers/test_registry.py::test_gemini_provider_descriptor_uses_gemini_auth_policy`
-
-Из наблюдаемого:
-
-- часть streaming/smoke падений сейчас связана с ожиданием старого dict-like поведения у fake chat mapper input
-- один unit test по provider registry расходится с текущим числом gemini mounts
-
-Это отдельный кусок работы, не про admin UI.
+Следующая волна, если она понадобится, уже не про закрытие старого UI backlog, а про новый уровень требований.
+То есть дальнейшие задачи нужно формулировать как отдельный roadmap, а не как хвост незавершённого TS-рефакторинга.

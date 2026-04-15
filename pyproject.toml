@@ -25,12 +25,23 @@ dependencies = [
     "cryptography>=46.0.5",
 ]
 
+[project.optional-dependencies]
+ui = [
+    "gpt2giga-ui==1.0.0rc0",
+]
+
 [project.scripts]
 gpt2giga = "gpt2giga:run"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = [
+  "gpt2giga/static/**",
+  "gpt2giga/templates/**",
+]
 
 
 [tool.coverage.run]
@@ -67,6 +78,7 @@ formatter-cmds = ["black $file"]
 
 [tool.uv.sources]
 gigachat = { path = "gigachat-0.2.2a1-py3-none-any.whl" }
+gpt2giga-ui = { path = "packages/gpt2giga-ui" }
 [dependency-groups]
 dev = [
     "black (>=26.3.1,<27.0.0)",

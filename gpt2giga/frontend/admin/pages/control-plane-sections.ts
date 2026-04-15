@@ -103,6 +103,18 @@ export function renderGigachatSection(options: GigachatSectionOptions): string {
         <label class="field"><span>Auth URL</span><input name="auth_url" value="${escapeHtml(options.values.auth_url ?? "")}" /></label>
       </div>
       <div class="dual-grid">
+        <label class="field">
+          <span>CA bundle file</span>
+          <input name="ca_bundle_file" placeholder="/certs/company-root.pem" value="${escapeHtml(options.values.ca_bundle_file ?? "")}" />
+        </label>
+        <label class="field">
+          <span>Verify SSL</span>
+          <select name="verify_ssl_certs">
+            ${renderBooleanSelectOptions(Boolean(options.values.verify_ssl_certs))}
+          </select>
+        </label>
+      </div>
+      <div class="dual-grid">
         ${renderSecretField({
           name: "credentials",
           label: "Credentials",
@@ -121,12 +133,6 @@ export function renderGigachatSection(options: GigachatSectionOptions): string {
         })}
       </div>
       <div class="${options.variant === "setup" ? "stack" : "dual-grid"}">
-        <label class="field">
-          <span>Verify SSL</span>
-          <select name="verify_ssl_certs">
-            ${renderBooleanSelectOptions(Boolean(options.values.verify_ssl_certs))}
-          </select>
-        </label>
         ${timeoutField}
       </div>
       <div class="toolbar">

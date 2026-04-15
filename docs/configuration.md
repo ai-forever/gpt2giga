@@ -121,6 +121,7 @@ docker compose -f deploy/compose/base.yaml --profile DEV up -d
 | `GIGACHAT_USER`, `GIGACHAT_PASSWORD` | Альтернативная авторизация логином и паролем |
 | `GIGACHAT_TIMEOUT` | Таймаут запросов к GigaChat |
 | `GIGACHAT_VERIFY_SSL_CERTS` | Проверка TLS-сертификатов upstream GigaChat |
+| `GIGACHAT_CA_BUNDLE_FILE` | Путь к PEM CA bundle для corporate/self-signed TLS chain |
 | `GIGACHAT_MAX_CONNECTIONS` | Предел одновременных подключений |
 | `GIGACHAT_MAX_RETRIES` | Retry count для временных ошибок |
 

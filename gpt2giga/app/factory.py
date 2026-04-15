@@ -22,6 +22,7 @@ from gpt2giga.api.middleware.rquid_context import RquidMiddleware
 from gpt2giga.api.system import metrics_router, system_router
 from gpt2giga.api.tags import build_openapi_tags
 from gpt2giga.api.translate import router as translate_router
+from gpt2giga.app.admin_ui import get_admin_ui_resources, is_admin_ui_enabled
 from gpt2giga.app.cli import load_config
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.lifespan import lifespan
@@ -67,9 +68,10 @@ def _register_exception_handlers(app: FastAPI) -> None:
         )
 
 
-def _mount_admin_assets(app: FastAPI) -> None:
+def _mount_admin_assets(app: FastAPI, *, assets_dir: Path | None) -> None:
     """Mount static assets used by the admin console."""
-    assets_dir = Path(__file__).resolve().parents[1] / "static"
+    if assets_dir is None:
+        return
     app.mount(
         "/admin/assets",
         StaticFiles(directory=assets_dir),
@@ -122,22 +124,35 @@ def _register_middlewares(app: FastAPI, config) -> None:
     app.add_middleware(ObservabilityMiddleware)
 
 
-def _register_root_redirect(app: FastAPI, *, config, is_prod_mode: bool) -> None:
+def _register_root_redirect(
+    app: FastAPI,
+    *,
+    config,
+    is_prod_mode: bool,
+    ui_enabled: bool,
+) -> None:
     """Register the root redirect or health-like response."""
 
     @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
     async def root_redirect():
         if is_prod_mode:
             return {"status": "ok", "mode": "PROD"}
-        target = "/admin"
+        target = "/admin" if ui_enabled else app.docs_url
+        if target is None:
+            return {"status": "ok", "mode": config.proxy_settings.mode}
         if config.proxy_settings.enable_api_key_auth and config.proxy_settings.api_key:
-            target = (
-                f"{target}?{urlencode({'x-api-key': config.proxy_settings.api_key})}"
-            )
+            if target == "/admin":
+                target = f"{target}?{urlencode({'x-api-key': config.proxy_settings.api_key})}"
         return RedirectResponse(url=target)
 
 
-def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -> None:
+def _register_routes(
+    app: FastAPI,
+    *,
+    auth_required: bool,
+    is_prod_mode: bool,
+    ui_enabled: bool,
+) -> None:
     """Mount all API routers with the current auth policy."""
     config = app.state.config
     api_dependencies = (
@@ -183,7 +198,8 @@ def _register_routes(app: FastAPI, *, auth_required: bool, is_prod_mode: bool) -
     app.include_router(translate_router, prefix="/v1", dependencies=api_dependencies)
     app.include_router(metrics_router, dependencies=api_dependencies)
     app.include_router(admin_api_router, dependencies=admin_dependencies)
-    app.include_router(admin_router, dependencies=admin_dependencies)
+    if ui_enabled:
+        app.include_router(admin_router, dependencies=admin_dependencies)
 
     if not is_prod_mode:
         app.include_router(legacy_logs_router, dependencies=api_dependencies)
@@ -203,6 +219,8 @@ def create_app(
     is_prod_mode = config.proxy_settings.mode == "PROD"
     auth_required = config.proxy_settings.enable_api_key_auth or is_prod_mode
     bootstrap_required = requires_admin_bootstrap(config)
+    admin_ui_resources = get_admin_ui_resources()
+    admin_ui_enabled = is_admin_ui_enabled(config)
 
     if auth_required and not config.proxy_settings.api_key and not bootstrap_required:
         raise RuntimeError(
@@ -225,12 +243,27 @@ def create_app(
 
     ensure_runtime_dependencies(app.state, config=config)
     app.state.config_loader = config_loader
+    app.state.admin_ui_enabled = admin_ui_enabled
+    app.state.admin_ui_installed = admin_ui_resources is not None
     if logger_factory is not None:
         app.state.logger_factory = logger_factory
 
-    _mount_admin_assets(app)
+    _mount_admin_assets(
+        app,
+        assets_dir=admin_ui_resources.static_dir if admin_ui_enabled else None,
+    )
     _register_exception_handlers(app)
     _register_middlewares(app, config)
-    _register_root_redirect(app, config=config, is_prod_mode=is_prod_mode)
-    _register_routes(app, auth_required=auth_required, is_prod_mode=is_prod_mode)
+    _register_root_redirect(
+        app,
+        config=config,
+        is_prod_mode=is_prod_mode,
+        ui_enabled=admin_ui_enabled,
+    )
+    _register_routes(
+        app,
+        auth_required=auth_required,
+        is_prod_mode=is_prod_mode,
+        ui_enabled=admin_ui_enabled,
+    )
     return app

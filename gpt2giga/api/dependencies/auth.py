@@ -19,6 +19,7 @@ from starlette.status import HTTP_401_UNAUTHORIZED, HTTP_403_FORBIDDEN
 
 from gpt2giga.api.gemini.request import normalize_model_name
 from gpt2giga.app.dependencies import get_config_from_state
+from gpt2giga.app.admin_ui import get_admin_setup_path
 from gpt2giga.core.config.control_plane import requires_admin_bootstrap
 from gpt2giga.core.config.settings import ScopedAPIKeySettings
 
@@ -209,11 +210,12 @@ async def verify_provided_api_key(
     config = get_config_from_state(request.app.state)
     proxy = config.proxy_settings
     expected_key = getattr(proxy, "api_key", None)
+    setup_path = get_admin_setup_path(config)
     if not provided_key:
         if not expected_key and requires_admin_bootstrap(config):
             raise HTTPException(
                 status_code=503,
-                detail="Instance setup is incomplete. Finish /admin/setup first.",
+                detail=f"Instance setup is incomplete. Finish {setup_path} first.",
             )
         raise HTTPException(
             status_code=HTTP_401_UNAUTHORIZED, detail="API key required"
@@ -222,7 +224,7 @@ async def verify_provided_api_key(
         if requires_admin_bootstrap(config):
             raise HTTPException(
                 status_code=503,
-                detail="Instance setup is incomplete. Finish /admin/setup first.",
+                detail=f"Instance setup is incomplete. Finish {setup_path} first.",
             )
         raise HTTPException(status_code=500, detail="API key not configured")
 

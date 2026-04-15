@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import anyio
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.app.admin_ui import (
+    get_admin_setup_path,
+    get_admin_ui_resources,
+    is_admin_ui_enabled,
+)
 from gpt2giga.app.dependencies import get_config_from_state
 from gpt2giga.core.config.control_plane import requires_admin_bootstrap
 from gpt2giga.core.errors import exceptions_handler
@@ -35,9 +38,11 @@ _CONSOLE_PAGES = (
 async def _get_console_html() -> str:
     global _CONSOLE_HTML  # noqa: PLW0603
     if _CONSOLE_HTML is None:
-        html_path = Path(__file__).resolve().parents[2] / "templates" / "console.html"
+        resources = get_admin_ui_resources()
+        if resources is None:
+            raise HTTPException(status_code=404, detail="Admin UI is not installed.")
         _CONSOLE_HTML = await anyio.to_thread.run_sync(
-            lambda: html_path.read_text(encoding="utf-8"),
+            lambda: resources.console_html_path.read_text(encoding="utf-8"),
         )
     return _CONSOLE_HTML
 
@@ -45,8 +50,11 @@ async def _get_console_html() -> str:
 async def _serve_console(request: Request) -> Response:
     verify_logs_ip_allowlist(request)
     config = get_config_from_state(request.app.state)
-    if requires_admin_bootstrap(config) and request.url.path != "/admin/setup":
-        return RedirectResponse(url="/admin/setup")
+    if not is_admin_ui_enabled(config):
+        raise HTTPException(status_code=404, detail="Admin UI is disabled.")
+    setup_path = get_admin_setup_path(config)
+    if requires_admin_bootstrap(config) and request.url.path != setup_path:
+        return RedirectResponse(url=setup_path)
     return HTMLResponse(await _get_console_html())
 
 

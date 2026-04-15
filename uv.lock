@@ -948,6 +948,11 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+ui = [
+    { name = "gpt2giga-ui" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "black" },
@@ -972,6 +977,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.3,<1" },
     { name = "gigachat", path = "gigachat-0.2.2a1-py3-none-any.whl" },
     { name = "google-genai", specifier = ">=1.70.0" },
+    { name = "gpt2giga-ui", marker = "extra == 'ui'", directory = "packages/gpt2giga-ui" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=2.3.0,<3" },
     { name = "pillow", specifier = ">=12.1.1,<13" },
@@ -982,6 +988,7 @@ requires-dist = [
     { name = "tiktoken", specifier = ">=0.12.0,<0.13" },
     { name = "uvicorn", specifier = ">=0.41.0,<1" },
 ]
+provides-extras = ["ui"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -997,6 +1004,11 @@ integrations = [
     { name = "openai-agents", specifier = ">=0.12.0,<1" },
     { name = "pyjwt", specifier = ">=2.12.0" },
 ]
+
+[[package]]
+name = "gpt2giga-ui"
+version = "1.0.0rc0"
+source = { directory = "packages/gpt2giga-ui" }
 
 [[package]]
 name = "griffelib"

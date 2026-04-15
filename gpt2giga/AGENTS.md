@@ -27,6 +27,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | Path | Role |
 |---|---|
 | `app/factory.py` | FastAPI app factory, middleware registration, router mounting |
+| `app/admin_ui.py` | Optional admin UI detection and `/admin` setup-path helpers |
 | `app/lifespan.py` | Startup/shutdown orchestration and runtime service lifecycle |
 | `app/wiring.py` | App-scoped runtime wiring for typed `app.state.services/stores/providers` |
 | `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
@@ -83,6 +84,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `static/admin/` |
 | `static/admin/` | Compiled admin console assets | Served at `/admin/assets/admin/*` |
 | `templates/console.html` | Thin admin UI shell | Loads compiled CSS/JS for the console |
+| `../packages/gpt2giga-ui/` | Optional UI distribution | Ships the compiled admin shell/assets used by `gpt2giga[ui]` |
 
 ## API Layout
 

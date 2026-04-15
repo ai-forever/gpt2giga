@@ -80,6 +80,7 @@ def test_gigachat_settings_update_is_persisted(tmp_path, monkeypatch):
             "credentials": "gigachat-secret",
             "scope": "GIGACHAT_API_PERS",
             "model": "GigaChat-Max",
+            "ca_bundle_file": "/certs/company-root.pem",
             "verify_ssl_certs": True,
         },
     )
@@ -89,6 +90,7 @@ def test_gigachat_settings_update_is_persisted(tmp_path, monkeypatch):
     assert payload["section"] == "gigachat"
     assert payload["values"]["credentials_configured"] is True
     assert payload["values"]["model"] == "GigaChat-Max"
+    assert payload["values"]["ca_bundle_file"] == "/certs/company-root.pem"
 
     control_file = tmp_path / "control-plane.json"
     assert control_file.exists()
@@ -184,6 +186,7 @@ def test_gigachat_settings_test_endpoint_reports_success(tmp_path, monkeypatch):
             "credentials": "gigachat-secret",
             "scope": "GIGACHAT_API_PERS",
             "model": "GigaChat-Max",
+            "ca_bundle_file": "/certs/company-root.pem",
             "verify_ssl_certs": True,
         },
     )
@@ -193,6 +196,45 @@ def test_gigachat_settings_test_endpoint_reports_success(tmp_path, monkeypatch):
     assert payload["ok"] is True
     assert payload["model_count"] == 2
     assert "GigaChat-Max" in payload["sample_models"]
+
+
+def test_gigachat_settings_test_endpoint_passes_ca_bundle_to_factory(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    app = make_app()
+
+    captured_kwargs = {}
+
+    class FakeModel:
+        def __init__(self, model_id):
+            self.id = model_id
+
+    class FakeGigaChat:
+        def __init__(self, **kwargs):
+            captured_kwargs.update(kwargs)
+
+        async def aget_models(self):
+            return type("Result", (), {"data": [FakeModel("GigaChat-Max")]})()
+
+        async def aclose(self):
+            return None
+
+    app.state.providers.gigachat_factory = FakeGigaChat
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/settings/gigachat/test",
+        json={
+            "credentials": "gigachat-secret",
+            "scope": "GIGACHAT_API_PERS",
+            "ca_bundle_file": "/certs/company-root.pem",
+            "verify_ssl_certs": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured_kwargs["ca_bundle_file"] == "/certs/company-root.pem"
 
 
 def test_gigachat_settings_test_endpoint_reports_failure(tmp_path, monkeypatch):

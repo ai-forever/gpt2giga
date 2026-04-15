@@ -182,90 +182,72 @@ open http://localhost:8090
 Это уже не “nice to have”, а полезный operator surface.
 Его надо развивать дальше, а не прятать.
 
-## Следующий уровень качества для UI
+## Что доведено после параллельной волны
 
-### 1. Сильнее отделить layout от page logic
+Backlog из [UI_PARALLEL_TASKS.md](/Users/riyakupov/code_projects/gpt2giga/UI_PARALLEL_TASKS.md) закрыт целиком, включая интеграционные `T6-T7`.
+Это значит, что console теперь прошла не только этап modular TypeScript migration, но и отдельный проход по зрелости operator workflows.
 
-Сейчас уже есть хороший первый шаг:
+### 1. Shared primitives и page structure
 
-- общий `AdminApp`
-- page registry
-- page renderers
+То, что раньше было намечено как следующий шаг, теперь уже считается базовым состоянием:
 
-Следующий шаг:
+- в `templates.ts` и связанных helper-модулях вынесены reusable summary/table/inspector blocks
+- самые тяжёлые page renderers стали короче и меньше завязаны на одноразовые HTML-строки
+- общие state/pending/selection patterns больше не размазаны случайно по страницам
 
-- более явные reusable view primitives
-- меньше ручной HTML-строки в page renderers
-- отдельные small render helpers для tables/forms/inspectors
+Именно это состояние теперь нужно сохранять: новые UI-изменения должны сначала ложиться в page-local код, а повторяющиеся части должны осознанно попадать в shared primitives.
 
-Последний проход уже двинул это в нужную сторону:
+### 2. Logs и Traffic работают как единый workflow
 
-- в `templates.ts` появился ещё один reusable summary/inspector primitive вместо page-local ad-hoc блоков
-- `Logs` и `Files & Batches` начали использовать summary-first surfaces, а не только raw JSON `pre`
-- `Files & Batches` получил context-aware inspector action rail и preview summaries для input/output content вместо одного немого `pre`
+Связка `Logs` + `Traffic` больше не выглядит как две соседние debug-страницы:
 
-### 2. Нормализовать page state
+- `Logs` даёт operator-oriented filters, live stream status, cleanup и request/error context рядом с tail surface
+- `request_id` handoff работает в обе стороны без ручного копирования фильтров
+- `Traffic` показывает KPI, recent events и usage inspectors в summary-first виде, а не как raw JSON-only presentation
 
-Сейчас state mostly локальный по страницам, что нормально для MVP.
-Но дальше полезно добавить более явные паттерны для:
+То есть console уже поддерживает нормальный путь: увидеть событие, pin нужный запрос, открыть structured context и перейти в соседнюю рабочую поверхность без потери состояния.
 
-- loading state
-- action pending state
-- optimistic UI / rerender
-- cleanup для stream/subscription flows
+### 3. Files & Batches стал полноценной operator surface
 
-Особенно важно для `Logs`, `Playground`, `Files & Batches`.
+Страница `Files & Batches` теперь закрывает не только базовый просмотр:
 
-После последнего шага:
+- есть явные pending/disabled states вокруг upload/create/delete/load действий
+- selection-driven inspector даёт action rail и summary до открытия raw payload
+- preview/output flow даёт читаемый format/size/context summary и доводит оператора до batch handoff
 
-- у `Logs` уже есть явный lifecycle для live stream state и cleanup
-- у `Files & Batches` уже есть локальный inventory filter state через URL/query-driven rerender
-- у `Files & Batches` уже есть явные pending states на upload/create/delete/load действиях и selection-driven inspector actions
+Эта страница теперь должна восприниматься как рабочий lifecycle UI, а не как витрина для JSON-объектов.
 
-Следующий уровень тут всё ещё нужен для более системных pending/optimistic patterns.
+### 4. Setup и Settings читаются как управляемые формы
 
-### 3. Улучшить logs и traffic workflows
+Формы доведены до более понятного operator UX:
 
-Ближайшие UI-улучшения высокого сигнала:
+- inline validation и busy-state снимают двусмысленность во время save/test/rollback
+- change summary явно разделяет `applies live` и `restart after save`
+- secret updates показываются как отдельный тип изменения, а не теряются внутри общего diff
+- persisted state и runtime-applied impact читаются как разные вещи
 
-- deeper linking individual tail lines into structured request context beyond the new `request_id` handoff
-- better traffic summaries вместо raw JSON everywhere
-- richer files/batches lifecycle actions и preview ergonomics
+Для control plane это важнее визуального слоя: оператор должен понимать не только что меняется, но и когда это реально вступит в силу.
 
-Часть этого уже сделана:
+### 5. Overview, Providers, System и Playground больше не сырой diagnostics слой
 
-- `Logs` теперь имеет filters, live stream status и нормальный SSE parsing без протокольного шума в `pre`
-- `Logs` теперь умеет инспектировать recent request/error context рядом с tail surface
-- `Logs` теперь умеет pin конкретный `request_id`, и тот же pin тащит оператора в `Traffic` без ручного копирования фильтров
-- `Traffic` теперь умеет принимать `request_id` как часть recent-events filter contract и даёт обратный handoff в `Logs` из payload inspector
-- `Files & Batches` теперь имеет inventory filters и более читаемый inspector summary
-- `Files & Batches` теперь показывает payload format/size summary для preview и ведёт через selection -> inspect -> preview/output -> batch handoff
+После завершения параллельной волны:
 
-### 4. Улучшить forms UX
+- `Overview` стал сильнее как executive-summary экран
+- `Providers` показывает capability matrix, backend posture и provider detail surfaces
+- `System` даёт route/runtime/config summaries с первого экрана, а полный JSON оставляет как inspection surface
+- `Playground` имеет более внятный request/stream lifecycle и ощущается как встроенный smoke client, а не как случайная debug-форма
 
-Нужны:
+Именно такая подача нужна для локального control plane: summary-first, с понятными handoff-ссылками в более глубокие workflow.
 
-- inline validation
-- disable buttons during submit
-- clearer restart-required messaging
-- better handling для secret fields
-- более явное разделение persisted vs runtime-applied state
+### 6. Build step закреплён как часть UI workflow
 
-После текущего прохода сюда уже добавилось:
-
-- `Setup` и `Settings` теперь не просто считают pending changes, а явно делят их на `applies live` и `restart after save`
-- secret-поля теперь лучше читаются в change summary как отдельная masked-update группа, а не как безымянное изменение где-то в diff
-- во время save/test/rollback сама form surface уходит в busy state, поэтому у оператора меньше двусмысленности насчёт того, какая секция сейчас выполняет действие
-
-### 5. Сделать compile step частью привычного workflow
-
-Новый фронтенд теперь имеет build step:
+Фронтенд теперь окончательно живёт по схеме:
 
 ```bash
 npm run build:admin
 ```
 
-Это нужно считать обязательной частью UI-изменений.
+Скомпилированные ассеты в `gpt2giga/static/admin/` обновляются как часть финальной интеграции, а не как побочный эффект случайной локальной сборки.
 
 ## Чего делать не надо
 

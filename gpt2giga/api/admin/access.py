@@ -25,6 +25,7 @@ from gpt2giga.api.dependencies.auth import (
     resolve_provided_api_key,
     verify_provided_api_key,
 )
+from gpt2giga.app.admin_ui import get_admin_setup_path
 from gpt2giga.app.dependencies import get_config_from_state
 from gpt2giga.core.config.control_plane import (
     load_bootstrap_token,
@@ -118,6 +119,7 @@ def build_admin_access_verifier():
             provided_key = request.cookies.get(ADMIN_AUTH_COOKIE_NAME)
         config = get_config_from_state(request.app.state)
         bootstrap_required = requires_admin_bootstrap(config)
+        setup_path = get_admin_setup_path(config)
 
         if bootstrap_required and _bootstrap_bypass_allowed(request, provided_key):
             return provided_key or "__bootstrap_local__"
@@ -136,12 +138,12 @@ def build_admin_access_verifier():
                     status_code=HTTP_401_UNAUTHORIZED,
                     detail=(
                         "Admin bootstrap access requires localhost or the bootstrap token "
-                        "until /admin/setup is complete."
+                        f"until {setup_path} is complete."
                     ),
                 )
             raise HTTPException(
                 status_code=HTTP_403_FORBIDDEN,
-                detail="This admin route is unavailable until /admin/setup is complete.",
+                detail=f"This admin route is unavailable until {setup_path} is complete.",
             )
 
         raise HTTPException(

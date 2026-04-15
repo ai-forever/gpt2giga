@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>gpt2giga Console</title>
+    <link rel="stylesheet" href="/admin/assets/admin/console.css" />
+  </head>
+  <body class="console-body">
+    <div class="console-shell">
+      <aside class="console-rail">
+        <div class="brand-block">
+          <span class="eyebrow">Gateway Console</span>
+          <h1>gpt2giga</h1>
+          <p>Operator surface for bootstrap, runtime, keys, logs, traffic, and test calls.</p>
+        </div>
+
+        <section class="rail-section">
+          <span class="rail-section__label">Runtime</span>
+          <div class="rail-status-grid">
+            <div class="status-chip">
+              <strong>Mode</strong>
+              <span id="mode-chip">...</span>
+            </div>
+            <div class="status-chip">
+              <strong>Backend</strong>
+              <span id="backend-chip">...</span>
+            </div>
+            <div class="status-chip">
+              <strong>Config</strong>
+              <span id="persisted-chip">...</span>
+            </div>
+          </div>
+        </section>
+
+        <nav class="console-nav" id="nav">
+          <div class="nav-group">
+            <span class="nav-group__label">Control</span>
+            <a href="/admin">Overview</a>
+            <a href="/admin/setup">Setup</a>
+            <a href="/admin/settings">Settings</a>
+            <a href="/admin/keys">API Keys</a>
+            <a href="/admin/playground">Playground</a>
+          </div>
+          <div class="nav-group">
+            <span class="nav-group__label">Observe</span>
+            <a href="/admin/logs">Logs</a>
+            <a href="/admin/traffic">Traffic</a>
+            <a href="/admin/providers">Providers</a>
+            <a href="/admin/files-batches">Files &amp; Batches</a>
+            <a href="/admin/system">System</a>
+          </div>
+        </nav>
+
+        <section class="rail-section auth-panel">
+          <details class="details-disclosure rail-disclosure" id="auth-disclosure">
+            <summary>Browser keys</summary>
+            <p class="field-note">Stored only in this browser for admin access and playground requests.</p>
+            <div class="stack">
+              <label class="field">
+                <span>Admin API key / bootstrap token</span>
+                <input id="admin-key-input" type="password" placeholder="Admin key or first-run bootstrap token" />
+              </label>
+              <label class="field">
+                <span>Gateway API key</span>
+                <input id="gateway-key-input" type="password" placeholder="Used by playground and gateway calls" />
+              </label>
+              <button class="button button--secondary" id="save-auth" type="button">Save keys locally</button>
+            </div>
+          </details>
+        </section>
+      </aside>
+
+      <main class="console-main">
+        <header class="console-hero">
+          <div class="stack">
+            <span class="eyebrow" id="page-eyebrow">Console</span>
+            <h2 id="page-title">Loading…</h2>
+            <p id="page-subtitle">Collecting runtime state and control-plane data.</p>
+          </div>
+          <div class="hero-actions" id="hero-actions"></div>
+        </header>
+
+        <section id="alerts" class="alert-stack" aria-live="polite"></section>
+        <section id="page-content" class="page-grid"></section>
+      </main>
+    </div>
+
+    <script type="module" src="/admin/assets/admin/index.js"></script>
+  </body>
+</html>

@@ -27,9 +27,12 @@ jobs:
           set -euo pipefail
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           PKG_VERSION="$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]["version"])')"
+          UI_PKG_VERSION="$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("packages/gpt2giga-ui/pyproject.toml").read_text("utf-8"))["project"]["version"])')"
           echo "Release tag: ${GITHUB_REF_NAME} (version=${TAG_VERSION})"
           echo "pyproject.toml version: ${PKG_VERSION}"
+          echo "packages/gpt2giga-ui/pyproject.toml version: ${UI_PKG_VERSION}"
           test "${TAG_VERSION}" = "${PKG_VERSION}"
+          test "${TAG_VERSION}" = "${UI_PKG_VERSION}"
 
       - name: Build sdist and wheel
         shell: bash
@@ -37,6 +40,7 @@ jobs:
           set -euo pipefail
           rm -rf dist
           uv build
+          (cd packages/gpt2giga-ui && uv build --out-dir ../../dist)
 
       - name: Publish to PyPI
         shell: bash

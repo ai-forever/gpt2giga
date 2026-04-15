@@ -6,7 +6,7 @@ from functools import cached_property
 from typing import Annotated, Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gpt2giga.core.config.security import SecuritySettings
@@ -282,6 +282,15 @@ class ProxySettings(BaseSettings):
     pass_token: bool = Field(
         default=False,
         description="Передавать токен из запроса в API",
+    )
+    disable_ui: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "disable_ui", "GPT2GIGA_DISABLE_UI", "DISABLE_UI"
+        ),
+        description=(
+            "Отключить HTML admin UI даже если установлен optional пакет gpt2giga-ui."
+        ),
     )
     enabled_providers: Annotated[list[ProviderName], NoDecode] = Field(
         default_factory=lambda: list(_ALL_ENABLED_PROVIDERS),

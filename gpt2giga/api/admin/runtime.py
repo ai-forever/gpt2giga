@@ -10,6 +10,7 @@ from starlette.requests import Request
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
 from gpt2giga.api.system.metrics import build_metrics_response
+from gpt2giga.app.admin_ui import is_admin_ui_enabled
 from gpt2giga.app.observability import (
     get_recent_error_feed_from_state,
     get_recent_request_feed_from_state,
@@ -86,19 +87,20 @@ _ADMIN_API_ROUTES = (
 )
 
 
-def _admin_capability_list(*, metrics_enabled: bool) -> list[str]:
+def _admin_capability_list(*, metrics_enabled: bool, ui_enabled: bool) -> list[str]:
     """Return the admin capability list exposed in runtime metadata."""
     return [
-        *_ADMIN_CAPABILITIES[:14],
+        *(["ui"] if ui_enabled else []),
+        *_ADMIN_CAPABILITIES[1:14],
         *([] if not metrics_enabled else ["metrics"]),
         *_ADMIN_CAPABILITIES[14:],
     ]
 
 
-def _admin_route_list(*, metrics_enabled: bool) -> list[str]:
+def _admin_route_list(*, metrics_enabled: bool, ui_enabled: bool) -> list[str]:
     """Return the admin routes exposed in runtime metadata."""
     return [
-        *_ADMIN_UI_ROUTES,
+        *([] if not ui_enabled else _ADMIN_UI_ROUTES),
         *_ADMIN_API_ROUTES[:14],
         *([] if not metrics_enabled else ["/admin/api/metrics"]),
         *_ADMIN_API_ROUTES[14:],
@@ -290,6 +292,7 @@ def _usage_payload(
 
 def _build_config_summary(proxy: object) -> dict[str, dict[str, object]]:
     """Build grouped config sections for the admin UI."""
+    ui_enabled = is_admin_ui_enabled(proxy)
     return {
         "network": {
             "mode": proxy.mode,
@@ -299,6 +302,7 @@ def _build_config_summary(proxy: object) -> dict[str, dict[str, object]]:
             "scoped_api_keys_configured": len(proxy.scoped_api_keys),
             "governance_limits_configured": len(proxy.governance_limits),
             "admin_enabled": True,
+            "admin_ui_enabled": ui_enabled,
         },
         "providers": {
             "enabled_providers": list(proxy.enabled_providers),
@@ -339,6 +343,7 @@ def _build_capability_matrix(
 ) -> dict[str, object]:
     """Build a compact capability matrix for admin UI rendering."""
     enabled_providers = set(config.proxy_settings.enabled_providers)
+    ui_enabled = is_admin_ui_enabled(config)
     rows = [
         {
             "name": descriptor.name,
@@ -375,9 +380,20 @@ def _build_capability_matrix(
                 "display_name": "Admin",
                 "surface": "admin",
                 "enabled": True,
-                "capabilities": _admin_capability_list(metrics_enabled=metrics_enabled),
-                "routes": _admin_route_list(metrics_enabled=metrics_enabled),
-                "route_count": len(_admin_route_list(metrics_enabled=metrics_enabled)),
+                "capabilities": _admin_capability_list(
+                    metrics_enabled=metrics_enabled,
+                    ui_enabled=ui_enabled,
+                ),
+                "routes": _admin_route_list(
+                    metrics_enabled=metrics_enabled,
+                    ui_enabled=ui_enabled,
+                ),
+                "route_count": len(
+                    _admin_route_list(
+                        metrics_enabled=metrics_enabled,
+                        ui_enabled=ui_enabled,
+                    )
+                ),
             },
         ]
     )
@@ -454,6 +470,7 @@ def _runtime_summary(request: Request) -> dict[str, object]:
     is_prod_mode = proxy.mode == "PROD"
     auth_required = proxy.enable_api_key_auth or is_prod_mode
     metrics_enabled = proxy.metrics_enabled
+    ui_enabled = is_admin_ui_enabled(config)
     return {
         "app_version": request.app.version or get_app_version(),
         "mode": proxy.mode,
@@ -478,6 +495,8 @@ def _runtime_summary(request: Request) -> dict[str, object]:
         "logs_ip_allowlist_enabled": bool(proxy.logs_ip_allowlist),
         "log_redact_sensitive": proxy.log_redact_sensitive,
         "admin_enabled": True,
+        "admin_ui_enabled": ui_enabled,
+        "disable_ui": proxy.disable_ui,
         "state": _collect_state_status(request),
     }
 
@@ -516,6 +535,7 @@ async def get_admin_config(request: Request):
         "max_text_file_size_bytes": proxy.max_text_file_size_bytes,
         "max_audio_image_total_size_bytes": proxy.max_audio_image_total_size_bytes,
         "enable_api_key_auth": proxy.enable_api_key_auth,
+        "disable_ui": proxy.disable_ui,
         "scoped_api_keys_configured": len(proxy.scoped_api_keys),
         "governance_limits_configured": len(proxy.governance_limits),
         "pass_model": proxy.pass_model,
@@ -599,8 +619,14 @@ async def get_admin_capabilities(request: Request):
         },
         "admin": {
             "enabled": True,
-            "capabilities": _admin_capability_list(metrics_enabled=metrics_enabled),
-            "routes": _admin_route_list(metrics_enabled=metrics_enabled),
+            "capabilities": _admin_capability_list(
+                metrics_enabled=metrics_enabled,
+                ui_enabled=is_admin_ui_enabled(config),
+            ),
+            "routes": _admin_route_list(
+                metrics_enabled=metrics_enabled,
+                ui_enabled=is_admin_ui_enabled(config),
+            ),
             "legacy_routes": (
                 ["/logs", "/logs/stream", "/logs/html"]
                 if config.proxy_settings.mode != "PROD"

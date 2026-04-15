@@ -60,6 +60,7 @@ sequenceDiagram
    ```
 
 После старта proxy по умолчанию доступен на `http://localhost:8090`.
+Swagger UI доступен на `http://localhost:8090/docs`, а HTML admin console ставится отдельно через `uv add "gpt2giga[ui]"` и тогда открывается по `http://localhost:8090/admin`.
 
 ### Docker / Compose
 
@@ -67,6 +68,10 @@ sequenceDiagram
 cp .env.example .env
 make compose-base-dev-d
 ```
+
+`deploy/compose/base.yaml` теперь читает корневой `.env` и как compose interpolation input, и как container `env_file`, поэтому `GIGACHAT_*` и `GPT2GIGA_*` реально попадают в процесс внутри контейнера.
+
+Если upstream GigaChat завернут корпоративным proxy или использует self-signed CA, не отключайте TLS-проверку в production. Вместо этого укажите `GIGACHAT_CA_BUNDLE_FILE` на PEM bundle внутри контейнера и смонтируйте сертификат bind-mount-ом, например в `/certs/company-root.pem`.
 
 Полная карта compose-сценариев, включая observability, multi-instance, Traefik и runtime backend examples: [deploy/README.md](./deploy/README.md).
 
@@ -80,7 +85,7 @@ make compose-base-dev-d
 | Anthropic-compatible | `http://localhost:8090` |
 | Gemini Developer API-compatible | `http://localhost:8090/v1beta` |
 
-В `DEV` режиме OpenAPI и Swagger UI доступны по `http://localhost:8090/docs`. В `PROD` они отключаются автоматически.
+В `DEV` режиме OpenAPI и Swagger UI доступны по `http://localhost:8090/docs`. Если установлен extra `ui` и не включён `GPT2GIGA_DISABLE_UI=true`, корень `/` ведёт на `/admin`; иначе `/` ведёт на `/docs`. В `PROD` docs отключаются автоматически.
 
 ## Что поддерживается
 

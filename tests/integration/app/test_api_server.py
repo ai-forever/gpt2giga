@@ -216,6 +216,34 @@ def test_admin_static_assets_are_served():
     assert 'from "./api.js"' in app_module.text
 
 
+def test_root_redirect_falls_back_to_docs_when_ui_is_disabled():
+    app = create_app(config=ProxyConfig(proxy=ProxySettings(disable_ui=True)))
+    client = TestClient(app)
+
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/docs"
+
+
+def test_disable_ui_skips_admin_html_routes_and_assets_but_keeps_admin_api():
+    app = create_app(config=ProxyConfig(proxy=ProxySettings(disable_ui=True)))
+    client = TestClient(app)
+
+    assert client.get("/admin").status_code == 404
+    assert client.get("/admin/assets/admin/index.js").status_code == 404
+
+    runtime = client.get("/admin/api/runtime")
+    assert runtime.status_code == 200
+    assert runtime.json()["admin_enabled"] is True
+    assert runtime.json()["admin_ui_enabled"] is False
+
+    capabilities = client.get("/admin/api/capabilities")
+    assert capabilities.status_code == 200
+    assert "ui" not in capabilities.json()["admin"]["capabilities"]
+    assert "/admin" not in capabilities.json()["admin"]["routes"]
+
+
 def test_translate_endpoint_converts_openai_chat_to_gemini(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 
