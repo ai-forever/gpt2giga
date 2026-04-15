@@ -27,6 +27,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | Path | Role |
 |---|---|
 | `app/factory.py` | FastAPI app factory, middleware registration, router mounting |
+| `app/admin_settings.py` | Domain services for admin setup, settings, revisions, and API-key management |
 | `app/admin_ui.py` | Optional admin UI detection and `/admin` setup-path helpers |
 | `app/admin_runtime.py` | Domain services that build admin runtime/config/capability/usage payloads |
 | `app/lifespan.py` | Startup/shutdown orchestration and runtime service lifecycle |
@@ -80,6 +81,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/*/openapi.py` | Provider-specific OpenAPI schema fragments colocated with routers |
 | `api/_openapi.py` | Shared OpenAPI request-body helper |
 | `api/admin/runtime.py` | Thin HTTP layer for `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities`, recent events, and usage endpoints |
+| `api/admin/settings.py` | Thin HTTP layer for `/admin/api/setup`, `/admin/api/settings/*`, revisions, and `/admin/api/keys*` |
 | `api/admin/logs.py` | `/admin/api/logs`, `/admin/api/logs/stream`, legacy `/logs*` compatibility shims |
 | `api/admin/ui.py` | `/admin` operator UI |
 | `frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `../packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` |

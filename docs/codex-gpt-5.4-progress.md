@@ -125,6 +125,26 @@
   - grouped config summary payload;
   - usage filtering + summary aggregation.
 - Обновил `gpt2giga/AGENTS.md`, чтобы repo map отражал новый app-level service module.
+- Продолжил разрез `gpt2giga/api/admin/settings.py` на domain-oriented app services.
+- Добавлен новый app-level модуль `gpt2giga/app/admin_settings.py` с двумя явными service-entrypoints:
+  - `AdminControlPlaneSettingsService` для setup/status, settings sections, revision diff/rollback и GigaChat test-connection flow;
+  - `AdminKeyManagementService` для global/scoped API-key lifecycle и usage-aware key payload-ов.
+- Перенёс из route-модуля в service layer:
+  - safe settings snapshot builders для `application`, `observability`, `gigachat`, `security`;
+  - section-level validate/update/apply/persist pipeline;
+  - revision diff, snapshot и rollback logic;
+  - GigaChat settings test flow;
+  - global/scoped API-key create/rotate/delete и list payload assembly.
+- Упростил `gpt2giga/api/admin/settings.py` до thin HTTP слоя:
+  - IP allowlist check;
+  - request body/query parsing;
+  - вызов соответствующего control-plane или key-management service entrypoint-а.
+- Добавил unit coverage на новый settings/key-management service slice:
+  - observability update payload;
+  - masked revision diff for secret fields;
+  - direct GigaChat factory test flow;
+  - scoped key lifecycle.
+- Обновил `gpt2giga/AGENTS.md`, чтобы repo map отражал новый `app/admin_settings.py` и тонкий `api/admin/settings.py`.
 
 ### Проверка
 
@@ -133,8 +153,16 @@
 - `uv run ruff format --check gpt2giga/app/admin_runtime.py gpt2giga/api/admin/runtime.py tests/unit/app/test_admin_runtime.py`
 - `uv run pytest tests/unit/app/test_admin_runtime.py tests/integration/app/test_system_router_extra.py -q`
 - `uv run pytest tests/integration/app/test_api_server.py -q`
+- `uv run ruff check gpt2giga/app/admin_settings.py gpt2giga/api/admin/settings.py tests/unit/app/test_admin_settings.py`
+- `uv run ruff format --check gpt2giga/app/admin_settings.py gpt2giga/api/admin/settings.py tests/unit/app/test_admin_settings.py`
+- `uv run pytest tests/unit/app/test_admin_settings.py tests/unit/app/test_admin_runtime.py -q`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q`
+- `uv run pytest tests/integration/app/test_api_server.py -q`
 
 ### Дальше
 
-- Продолжить Phase 2 на `gpt2giga/api/admin/settings.py`: вытащить snapshot/update/persist/test-key flows в отдельные control-plane services.
-- После `settings.py` перейти к extraction runtime snapshot/update reporting из более тяжёлых helper-блоков в `api/admin/runtime.py`, если останутся смешанные transport/domain обязанности.
+- Основной backend slice Phase 2 теперь закрыт: и `runtime.py`, и `settings.py` сведены к transport-level handlers поверх app-level services.
+- Следующий практический шаг по плану — Phase 3: убрать дубли между setup/settings control-plane flows и вынести shared form primitives для operator UI.
+- Внутри Phase 2 ещё остаётся необязательный follow-up:
+  - при желании дальше дробить `AdminControlPlaneSettingsService` на более узкие доменные сервисы (`revisions`, `gigachat test`, `keys`);
+  - но это уже можно делать только если появится реальный выигрыш по читаемости или по UI workflow.
