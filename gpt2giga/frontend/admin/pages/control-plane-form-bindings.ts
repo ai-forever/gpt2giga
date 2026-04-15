@@ -1,0 +1,143 @@
+import type { AdminApp } from "../app.js";
+import type { DiffEntry, PageId } from "../types.js";
+import { renderControlPlaneStatusNode } from "./control-plane-status.js";
+import {
+  getSubmitterButton,
+  persistControlPlaneSection,
+  testGigachatConnection,
+  type InlineStatus,
+} from "./control-plane-actions.js";
+
+type SectionPayload = Record<string, unknown>;
+
+interface ControlPlaneSectionSnapshot {
+  entries: DiffEntry[];
+  note: string;
+  payload: SectionPayload;
+  validationMessage: string;
+}
+
+interface ControlPlaneSectionFormOptions {
+  app: AdminApp;
+  buildEntries: (payload: SectionPayload) => DiffEntry[];
+  buildNote: (payload: SectionPayload) => string;
+  buildPayload: () => SectionPayload;
+  endpoint: string;
+  failurePrefix: string;
+  form: HTMLFormElement;
+  getValidationMessage?: (payload: SectionPayload, report?: boolean) => string;
+  onValidationError?: (message: string) => void;
+  outcomeLabel: string;
+  pendingLabel?: string;
+  pendingMessage: string;
+  persisted: boolean;
+  rerenderPage: PageId;
+  statusNode: HTMLElement;
+  updatedAt: unknown;
+}
+
+interface GigachatConnectionTestOptions {
+  app: AdminApp;
+  buildPayload: () => SectionPayload;
+  button: HTMLButtonElement | null;
+  form: HTMLFormElement;
+  getValidationMessage?: (payload: SectionPayload, report?: boolean) => string;
+  onValidationError?: (message: string) => void;
+  pendingMessage: string;
+  refreshStatus: () => void;
+  setActionState: (state: InlineStatus) => void;
+}
+
+export function bindControlPlaneSectionForm(
+  options: ControlPlaneSectionFormOptions,
+): {
+  refreshStatus: () => void;
+  setActionState: (state: InlineStatus | null) => void;
+} {
+  let actionState: InlineStatus | null = null;
+
+  const buildSnapshot = (report = false): ControlPlaneSectionSnapshot => {
+    const payload = options.buildPayload();
+    return {
+      payload,
+      entries: options.buildEntries(payload),
+      note: options.buildNote(payload),
+      validationMessage: options.getValidationMessage?.(payload, report) ?? "",
+    };
+  };
+
+  const refreshStatus = () => {
+    const snapshot = buildSnapshot();
+    renderControlPlaneStatusNode(options.statusNode, {
+      entries: snapshot.entries,
+      persisted: options.persisted,
+      updatedAt: options.updatedAt,
+      note: snapshot.note,
+      validationMessage: snapshot.validationMessage || undefined,
+      actionState,
+    });
+  };
+
+  options.form.addEventListener("input", refreshStatus);
+  options.form.addEventListener("change", refreshStatus);
+  options.form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const snapshot = buildSnapshot(true);
+    if (snapshot.validationMessage) {
+      refreshStatus();
+      options.onValidationError?.(snapshot.validationMessage);
+      return;
+    }
+    await persistControlPlaneSection({
+      app: options.app,
+      form: options.form,
+      button: getSubmitterButton(event as SubmitEvent, options.form),
+      endpoint: options.endpoint,
+      payload: snapshot.payload,
+      refreshStatus,
+      setActionState: (state) => {
+        actionState = state;
+      },
+      pendingMessage: options.pendingMessage,
+      pendingLabel: options.pendingLabel,
+      outcomeLabel: options.outcomeLabel,
+      failurePrefix: options.failurePrefix,
+      rerenderPage: options.rerenderPage,
+    });
+  });
+
+  refreshStatus();
+  return {
+    refreshStatus,
+    setActionState: (state) => {
+      actionState = state;
+    },
+  };
+}
+
+export function bindGigachatConnectionTestAction(
+  options: GigachatConnectionTestOptions,
+): void {
+  if (!options.button) {
+    return;
+  }
+
+  options.button.addEventListener("click", async () => {
+    const payload = options.buildPayload();
+    const validationMessage = options.getValidationMessage?.(payload, true) ?? "";
+    if (validationMessage) {
+      options.refreshStatus();
+      options.onValidationError?.(validationMessage);
+      return;
+    }
+    await testGigachatConnection({
+      app: options.app,
+      form: options.form,
+      button: options.button,
+      payload,
+      refreshStatus: options.refreshStatus,
+      setActionState: options.setActionState,
+      pendingMessage: options.pendingMessage,
+    });
+  });
+}

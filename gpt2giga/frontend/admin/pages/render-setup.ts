@@ -9,21 +9,20 @@ import {
   validateRequiredCsvField,
   withBusyState,
 } from "../forms.js";
+import { getSubmitterButton } from "./control-plane-actions.js";
 import {
-  getSubmitterButton,
-  persistControlPlaneSection,
-  testGigachatConnection,
-  type InlineStatus,
-} from "./control-plane-actions.js";
+  bindControlPlaneSectionForm,
+  bindGigachatConnectionTestAction,
+} from "./control-plane-form-bindings.js";
 import {
   bindGigachatSecretFields,
   renderApplicationSection,
   renderGigachatSection,
+  renderSetupObservabilityHandoff,
   renderSecuritySection,
 } from "./control-plane-sections.js";
 import {
   collectSecretFieldMessages,
-  renderControlPlaneStatusNode,
 } from "./control-plane-status.js";
 import {
   card,
@@ -34,10 +33,7 @@ import {
 import {
   asArray,
   asRecord,
-  csv,
   escapeHtml,
-  parseCsv,
-  toErrorMessage,
 } from "../utils.js";
 
 type SetupApplicationFormElements = HTMLFormControlsCollection & {
@@ -49,14 +45,16 @@ type SetupGigachatFormElements = HTMLFormControlsCollection & {
 };
 
 export async function renderSetup(app: AdminApp, token: number): Promise<void> {
-  const [setup, runtime, application, gigachat, security, keys] = await Promise.all([
-    app.api.json<Record<string, unknown>>("/admin/api/setup"),
-    app.api.json<Record<string, unknown>>("/admin/api/runtime"),
-    app.api.json<Record<string, unknown>>("/admin/api/settings/application"),
-    app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat"),
-    app.api.json<Record<string, unknown>>("/admin/api/settings/security"),
-    app.api.json<Record<string, unknown>>("/admin/api/keys"),
-  ]);
+  const [setup, runtime, application, observability, gigachat, security, keys] =
+    await Promise.all([
+      app.api.json<Record<string, unknown>>("/admin/api/setup"),
+      app.api.json<Record<string, unknown>>("/admin/api/runtime"),
+      app.api.json<Record<string, unknown>>("/admin/api/settings/application"),
+      app.api.json<Record<string, unknown>>("/admin/api/settings/observability"),
+      app.api.json<Record<string, unknown>>("/admin/api/settings/gigachat"),
+      app.api.json<Record<string, unknown>>("/admin/api/settings/security"),
+      app.api.json<Record<string, unknown>>("/admin/api/keys"),
+    ]);
 
   if (!app.isCurrentRender(token)) {
     return;
@@ -65,6 +63,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
   const claim = asRecord(setup.claim);
   const bootstrap = asRecord(setup.bootstrap);
   const applicationValues = asRecord(application.values);
+  const observabilityValues = asRecord(observability.values);
   const gigachatValues = asRecord(gigachat.values);
   const securityValues = asRecord(security.values);
   const globalKey = asRecord(asRecord(keys.global));
@@ -225,6 +224,11 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
       "panel panel--span-4",
     )}
     ${card(
+      "Optional · Observability",
+      renderSetupObservabilityHandoff(observabilityValues),
+      "panel panel--span-4",
+    )}
+    ${card(
       "Step 5 · Finish",
       `
         <div class="stack">
@@ -232,6 +236,7 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
           ${pill(`Persisted config: ${setup.persisted ? "yes" : "no"}`)}
           ${pill(`GigaChat ready: ${setup.gigachat_ready ? "yes" : "no"}`)}
           ${pill(`Security ready: ${setup.security_ready ? "yes" : "no"}`)}
+          ${pill(`Observability sinks: ${asArray<string>(observabilityValues.active_sinks).join(", ") || "none"}`)}
           ${
             setup.setup_complete
               ? banner("Bootstrap path is complete. The operator console can now be used as the main control plane.")
@@ -270,87 +275,19 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
     gigachatValues,
   );
 
-  let applicationActionState: InlineStatus | null = null;
-  let gigachatActionState: InlineStatus | null = null;
-  let securityActionState: InlineStatus | null = null;
-
-  const getApplicationValidationMessage = (report = false) =>
+  const getApplicationValidationMessage = (_payload: Record<string, unknown>, report = false) =>
     validateRequiredCsvField(
       applicationFields?.enabled_providers,
       "Provide at least one enabled provider.",
       { report },
     );
 
-  const getGigachatValidationMessage = (report = false) =>
+  const getGigachatValidationMessage = (_payload: Record<string, unknown>, report = false) =>
     validatePositiveNumberField(
       gigachatFields?.timeout,
       "Timeout must be a positive number of seconds.",
       { report },
     );
-
-  const refreshStepStatuses = () => {
-    if (!applicationForm || !gigachatForm || !securityForm) {
-      return;
-    }
-
-    applicationStatusNode?.replaceChildren();
-    gigachatStatusNode?.replaceChildren();
-    securityStatusNode?.replaceChildren();
-
-    const applicationEntries = buildPendingDiffEntries(
-      "application",
-      applicationValues,
-      buildApplicationPayload(applicationForm),
-    );
-    const gigachatEntries = buildPendingDiffEntries(
-      "gigachat",
-      gigachatValues,
-      collectGigachatPayload(gigachatForm),
-    );
-    const securityEntries = buildPendingDiffEntries(
-      "security",
-      securityValues,
-      buildSecurityPayload(securityForm),
-    );
-    const applicationValidationMessage = getApplicationValidationMessage();
-    const gigachatValidationMessage = getGigachatValidationMessage();
-    const stagedSecretMessages = collectSecretFieldMessages([
-      syncCredentialsSecret(),
-      syncAccessTokenSecret(),
-    ]);
-
-    renderControlPlaneStatusNode(applicationStatusNode, {
-      entries: applicationEntries,
-      persisted,
-      updatedAt: persistedUpdatedAt,
-      note: "Use this step for runtime posture and provider routing. Restart-sensitive controls are called out before you save.",
-      validationMessage: applicationValidationMessage || undefined,
-      actionState: applicationActionState,
-    });
-    renderControlPlaneStatusNode(gigachatStatusNode, {
-      entries: gigachatEntries,
-      persisted,
-      updatedAt: persistedUpdatedAt,
-      note: stagedSecretMessages.length
-        ? `Testing the connection here does not persist the form. ${stagedSecretMessages.join(" ")}`
-        : "Testing the connection here does not persist the form; save only after the pending state looks correct.",
-      validationMessage: gigachatValidationMessage || undefined,
-      actionState: gigachatActionState,
-    });
-    renderControlPlaneStatusNode(securityStatusNode, {
-      entries: securityEntries,
-      persisted,
-      updatedAt: persistedUpdatedAt,
-      note: "Gateway auth posture and CORS are the main restart-sensitive controls in this step.",
-      actionState: securityActionState,
-    });
-  };
-
-  refreshStepStatuses();
-  [applicationForm, gigachatForm, securityForm].forEach((form) => {
-    form?.addEventListener("input", refreshStepStatuses);
-    form?.addEventListener("change", refreshStepStatuses);
-  });
 
   claimForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -380,99 +317,85 @@ export async function renderSetup(app: AdminApp, token: number): Promise<void> {
     });
   });
 
-  applicationForm?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (getApplicationValidationMessage(true)) {
-      refreshStepStatuses();
-      return;
-    }
-    const form = event.currentTarget as HTMLFormElement;
-    await persistControlPlaneSection({
+  if (applicationForm && applicationStatusNode && gigachatForm && gigachatStatusNode && securityForm && securityStatusNode) {
+    bindControlPlaneSectionForm({
       app,
-      form,
-      button: getSubmitterButton(event as SubmitEvent, form),
+      form: applicationForm,
+      statusNode: applicationStatusNode,
+      persisted,
+      updatedAt: persistedUpdatedAt,
+      buildPayload: () => buildApplicationPayload(applicationForm),
+      buildEntries: (payload) =>
+        buildPendingDiffEntries("application", applicationValues, payload),
+      buildNote: () =>
+        "Use this step for runtime posture and provider routing. Restart-sensitive controls are called out before you save.",
+      getValidationMessage: getApplicationValidationMessage,
       endpoint: "/admin/api/settings/application",
-      payload: buildApplicationPayload(form),
-      refreshStatus: refreshStepStatuses,
-      setActionState: (state) => {
-        applicationActionState = state;
-      },
       pendingMessage:
         "Saving the application bootstrap step. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
       outcomeLabel: "Application bootstrap step",
       failurePrefix: "Application bootstrap step failed to save",
       rerenderPage: "setup",
     });
-  });
 
-  gigachatForm?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (getGigachatValidationMessage(true)) {
-      refreshStepStatuses();
-      return;
-    }
-    const form = event.currentTarget as HTMLFormElement;
-    await persistControlPlaneSection({
+    const gigachatBinding = bindControlPlaneSectionForm({
       app,
-      form,
-      button: getSubmitterButton(event as SubmitEvent, form),
-      endpoint: "/admin/api/settings/gigachat",
-      payload: collectGigachatPayload(form),
-      refreshStatus: refreshStepStatuses,
-      setActionState: (state) => {
-        gigachatActionState = state;
+      form: gigachatForm,
+      statusNode: gigachatStatusNode,
+      persisted,
+      updatedAt: persistedUpdatedAt,
+      buildPayload: () => collectGigachatPayload(gigachatForm),
+      buildEntries: (payload) => buildPendingDiffEntries("gigachat", gigachatValues, payload),
+      buildNote: () => {
+        const stagedSecretMessages = collectSecretFieldMessages([
+          syncCredentialsSecret(),
+          syncAccessTokenSecret(),
+        ]);
+        return stagedSecretMessages.length
+          ? `Testing the connection here does not persist the form. ${stagedSecretMessages.join(" ")}`
+          : "Testing the connection here does not persist the form; save only after the pending state looks correct.";
       },
+      getValidationMessage: getGigachatValidationMessage,
+      endpoint: "/admin/api/settings/gigachat",
       pendingMessage:
         "Saving the GigaChat bootstrap step. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
       outcomeLabel: "GigaChat bootstrap step",
       failurePrefix: "GigaChat bootstrap step failed to save",
       rerenderPage: "setup",
     });
-  });
 
-  document.getElementById("setup-gigachat-test")?.addEventListener("click", async (event) => {
-    const form = gigachatForm;
-    if (!form) {
-      return;
-    }
-    if (getGigachatValidationMessage(true)) {
-      refreshStepStatuses();
-      return;
-    }
-    await testGigachatConnection({
+    bindGigachatConnectionTestAction({
       app,
-      form,
-      button: event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null,
-      payload: collectGigachatPayload(form),
-      refreshStatus: refreshStepStatuses,
+      form: gigachatForm,
+      button: document.getElementById("setup-gigachat-test") as HTMLButtonElement | null,
+      buildPayload: () => collectGigachatPayload(gigachatForm),
+      getValidationMessage: getGigachatValidationMessage,
+      refreshStatus: gigachatBinding.refreshStatus,
       setActionState: (state) => {
-        gigachatActionState = state;
+        gigachatBinding.setActionState(state);
       },
       pendingMessage:
         "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save this step.",
     });
-  });
 
-  securityForm?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget as HTMLFormElement;
-    await persistControlPlaneSection({
+    bindControlPlaneSectionForm({
       app,
-      form,
-      button: getSubmitterButton(event as SubmitEvent, form),
+      form: securityForm,
+      statusNode: securityStatusNode,
+      persisted,
+      updatedAt: persistedUpdatedAt,
+      buildPayload: () => buildSecurityPayload(securityForm),
+      buildEntries: (payload) => buildPendingDiffEntries("security", securityValues, payload),
+      buildNote: () =>
+        "Gateway auth posture and CORS are the main restart-sensitive controls in this step.",
       endpoint: "/admin/api/settings/security",
-      payload: buildSecurityPayload(form),
-      refreshStatus: refreshStepStatuses,
-      setActionState: (state) => {
-        securityActionState = state;
-      },
       pendingMessage:
         "Saving the security bootstrap step. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
       outcomeLabel: "Security bootstrap step",
       failurePrefix: "Security bootstrap step failed to save",
       rerenderPage: "setup",
     });
-  });
+  }
 
   document.getElementById("setup-create-global-key")?.addEventListener("click", async (event) => {
     const input = document.getElementById("setup-global-key-value") as HTMLInputElement | null;

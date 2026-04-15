@@ -1,13 +1,11 @@
 import type { AdminApp } from "../app.js";
 import {
   bindValidityReset,
-  bindSecretFieldBehavior,
   buildApplicationPayload,
   buildObservabilityDiffEntries,
   buildObservabilityPayload,
   buildPendingDiffEntries,
   buildSecurityPayload,
-  bindReplaceableFieldBehavior,
   collectGigachatPayload,
   describePersistOutcome,
   validateJsonArrayField,
@@ -17,13 +15,15 @@ import {
   withBusyState,
 } from "../forms.js";
 import {
-  getSubmitterButton,
-  persistControlPlaneSection,
-  testGigachatConnection,
   type InlineStatus,
 } from "./control-plane-actions.js";
 import {
+  bindControlPlaneSectionForm,
+  bindGigachatConnectionTestAction,
+} from "./control-plane-form-bindings.js";
+import {
   bindGigachatSecretFields,
+  bindObservabilitySecretFields,
   renderApplicationSection,
   renderGigachatSection,
   renderObservabilitySection,
@@ -31,7 +31,6 @@ import {
 } from "./control-plane-sections.js";
 import {
   collectSecretFieldMessages,
-  renderControlPlaneStatusNode,
   renderInlineBannerStatus,
 } from "./control-plane-status.js";
 import {
@@ -264,38 +263,33 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     gigachatForm,
     gigachatValues,
   );
+  const {
+    syncOtlpHeadersField,
+    syncLangfusePublicKey,
+    syncLangfuseSecretKey,
+    syncPhoenixApiKey,
+  } = bindObservabilitySecretFields(observabilityForm, observabilityValues);
 
-  let applicationActionState: InlineStatus | null = null;
-  let observabilityActionState: InlineStatus | null = null;
-  let gigachatActionState: InlineStatus | null = null;
-  let securityActionState: InlineStatus | null = null;
   let revisionsActionState: InlineStatus | null = null;
 
-  const getApplicationValidationMessage = (report = false) =>
+  const getApplicationValidationMessage = (_payload: Record<string, unknown>, report = false) =>
     validateRequiredCsvField(
       applicationFields.enabled_providers,
       "Provide at least one enabled provider.",
       { report },
     );
 
-  const getGigachatValidationMessage = (report = false) =>
+  const getGigachatValidationMessage = (_payload: Record<string, unknown>, report = false) =>
     validatePositiveNumberField(
       gigachatFields.timeout,
       "Timeout must be a positive number of seconds.",
       { report },
     );
 
-  const getObservabilityValidationMessage = (report = false) =>
+  const getObservabilityValidationMessage = (payload: Record<string, unknown>, report = false) =>
     validateJsonObjectField(
       observabilityFields.otlp_headers,
-      (
-        (
-          buildObservabilityPayload(observabilityForm).otlp as Record<
-            string,
-            unknown
-          >
-        )?.headers ?? null
-      ) as unknown,
+      ((payload.otlp as Record<string, unknown>)?.headers ?? null) as unknown,
       {
         invalidMessage: "OTLP headers must be valid JSON.",
         nonObjectMessage: "OTLP headers must be a JSON object of header names to values.",
@@ -313,75 +307,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
       report,
     });
 
-  const refreshSectionStatus = () => {
-    const observabilityPayload = buildObservabilityPayload(observabilityForm);
-    const applicationEntries = buildPendingDiffEntries(
-      "application",
-      applicationValues,
-      buildApplicationPayload(applicationForm),
-    );
-    const gigachatEntries = buildPendingDiffEntries(
-      "gigachat",
-      gigachatValues,
-      collectGigachatPayload(gigachatForm),
-    );
-    const observabilityEntries = buildObservabilityDiffEntries(
-      observabilityValues,
-      observabilityPayload,
-    );
-    const securityPayload = buildSecurityPayload(securityForm);
-    const securityEntries = buildPendingDiffEntries("security", securityValues, securityPayload);
-    const applicationValidationMessage = getApplicationValidationMessage();
-    const observabilityValidationMessage = getObservabilityValidationMessage();
-    const gigachatValidationMessage = getGigachatValidationMessage();
-    const securityValidationMessage = getSecurityValidationMessage(securityPayload);
-    const stagedSecretMessages = collectSecretFieldMessages([
-      syncCredentialsSecret(),
-      syncAccessTokenSecret(),
-    ]);
-    const observabilityFieldMessages = collectSecretFieldMessages([
-      syncOtlpHeadersField(),
-      syncLangfusePublicKey(),
-      syncLangfuseSecretKey(),
-      syncPhoenixApiKey(),
-    ]);
-
-    renderControlPlaneStatusNode(applicationStatusNode, {
-      entries: applicationEntries,
-      persisted: Boolean(controlPlaneStatus.persisted),
-      updatedAt: controlPlaneStatus.updated_at,
-      note: "Mode, provider routing, runtime-store backend and auth-adjacent controls are the main restart-sensitive levers here.",
-      validationMessage: applicationValidationMessage || undefined,
-      actionState: applicationActionState,
-    });
-    renderControlPlaneStatusNode(observabilityStatusNode, {
-      entries: observabilityEntries,
-      persisted: Boolean(controlPlaneStatus.persisted),
-      updatedAt: controlPlaneStatus.updated_at,
-      note: observabilityFieldMessages.length
-        ? `Sink changes apply live when telemetry stays enabled. ${observabilityFieldMessages.join(" ")}`
-        : "Sink changes apply live and stay restart-safe unless a later backend slice marks them otherwise.",
-      validationMessage: observabilityValidationMessage || undefined,
-      actionState: observabilityActionState,
-    });
-    renderControlPlaneStatusNode(gigachatStatusNode, {
-      entries: gigachatEntries,
-      persisted: Boolean(controlPlaneStatus.persisted),
-      updatedAt: controlPlaneStatus.updated_at,
-      note: stagedSecretMessages.length
-        ? `Connection tests never persist the form. ${stagedSecretMessages.join(" ")}`
-        : "Connection tests never persist the form. Secret values stay masked after save.",
-      validationMessage: gigachatValidationMessage || undefined,
-      actionState: gigachatActionState,
-    });
-    renderControlPlaneStatusNode(securityStatusNode, {
-      entries: securityEntries,
-      persisted: Boolean(controlPlaneStatus.persisted),
-      updatedAt: controlPlaneStatus.updated_at,
-      note: "Saved security changes always update the persisted target first. Runtime posture only changes immediately when the whole batch is restart-safe.",
-      validationMessage: securityValidationMessage || undefined,
-      actionState: securityActionState,
-    });
+  const refreshRevisionsStatus = () => {
     renderInlineBannerStatus(
       revisionsStatusNode,
       revisionsActionState,
@@ -389,165 +315,117 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     );
   };
 
-  applicationForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (getApplicationValidationMessage(true)) {
-      refreshSectionStatus();
-      return;
-    }
-    await persistControlPlaneSection({
-      app,
-      form: applicationForm,
-      button: getSubmitterButton(event as SubmitEvent, applicationForm),
-      endpoint: "/admin/api/settings/application",
-      payload: buildApplicationPayload(applicationForm),
-      refreshStatus: refreshSectionStatus,
-      setActionState: (state) => {
-        applicationActionState = state;
-      },
-      pendingMessage:
-        "Saving application settings. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
-      outcomeLabel: "Application settings",
-      failurePrefix: "Application settings failed to save",
-      rerenderPage: "settings",
-    });
+  bindControlPlaneSectionForm({
+    app,
+    form: applicationForm,
+    statusNode: applicationStatusNode,
+    persisted: Boolean(controlPlaneStatus.persisted),
+    updatedAt: controlPlaneStatus.updated_at,
+    buildPayload: () => buildApplicationPayload(applicationForm),
+    buildEntries: (payload) => buildPendingDiffEntries("application", applicationValues, payload),
+    buildNote: () =>
+      "Mode, provider routing, runtime-store backend and auth-adjacent controls are the main restart-sensitive levers here.",
+    getValidationMessage: getApplicationValidationMessage,
+    endpoint: "/admin/api/settings/application",
+    pendingMessage:
+      "Saving application settings. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
+    outcomeLabel: "Application settings",
+    failurePrefix: "Application settings failed to save",
+    rerenderPage: "settings",
   });
 
-  const syncOtlpHeadersField = bindReplaceableFieldBehavior({
+  bindControlPlaneSectionForm({
+    app,
     form: observabilityForm,
-    fieldName: "otlp_headers",
-    clearFieldName: "otlp_clear_headers",
-    preview: renderConfiguredPreview(
-      asRecord(observabilityValues.otlp),
-      "header_names",
-      "headers_configured",
-    ),
-    clearPlaceholder: "Uncheck clear to paste a replacement header object",
-    noteReplace: "replace the stored OTLP headers on save.",
-    noteClear: "clear the stored OTLP headers on save.",
-    noteKeep: "keep the stored OTLP headers unless you paste a replacement JSON object.",
-    messageReplace: "A new OTLP headers object is staged and will replace the stored value on save.",
-    messageClear: "Stored OTLP headers will be removed when this section is saved.",
-    messageKeep: "Stored OTLP headers remain unchanged unless you paste a replacement JSON object.",
-  });
-  const syncLangfusePublicKey = bindSecretFieldBehavior({
-    form: observabilityForm,
-    fieldName: "langfuse_public_key",
-    clearFieldName: "langfuse_clear_public_key",
-    preview: String(asRecord(observabilityValues.langfuse).public_key_preview ?? "not configured"),
-  });
-  const syncLangfuseSecretKey = bindSecretFieldBehavior({
-    form: observabilityForm,
-    fieldName: "langfuse_secret_key",
-    clearFieldName: "langfuse_clear_secret_key",
-    preview: String(asRecord(observabilityValues.langfuse).secret_key_preview ?? "not configured"),
-  });
-  const syncPhoenixApiKey = bindSecretFieldBehavior({
-    form: observabilityForm,
-    fieldName: "phoenix_api_key",
-    clearFieldName: "phoenix_clear_api_key",
-    preview: String(asRecord(observabilityValues.phoenix).api_key_preview ?? "not configured"),
+    statusNode: observabilityStatusNode,
+    persisted: Boolean(controlPlaneStatus.persisted),
+    updatedAt: controlPlaneStatus.updated_at,
+    buildPayload: () => buildObservabilityPayload(observabilityForm),
+    buildEntries: (payload) => buildObservabilityDiffEntries(observabilityValues, payload),
+    buildNote: () => {
+      const observabilityFieldMessages = collectSecretFieldMessages([
+        syncOtlpHeadersField(),
+        syncLangfusePublicKey(),
+        syncLangfuseSecretKey(),
+        syncPhoenixApiKey(),
+      ]);
+      return observabilityFieldMessages.length
+        ? `Sink changes apply live when telemetry stays enabled. ${observabilityFieldMessages.join(" ")}`
+        : "Sink changes apply live and stay restart-safe unless a later backend slice marks them otherwise.";
+    },
+    getValidationMessage: getObservabilityValidationMessage,
+    endpoint: "/admin/api/settings/observability",
+    pendingMessage:
+      "Saving observability settings. The persisted target updates first, then live sinks reload without a restart.",
+    outcomeLabel: "Observability settings",
+    failurePrefix: "Observability settings failed to save",
+    rerenderPage: "settings",
   });
 
-  refreshSectionStatus();
-  [applicationForm, observabilityForm, gigachatForm, securityForm].forEach((form) => {
-    form.addEventListener("input", refreshSectionStatus);
-    form.addEventListener("change", refreshSectionStatus);
+  const gigachatBinding = bindControlPlaneSectionForm({
+    app,
+    form: gigachatForm,
+    statusNode: gigachatStatusNode,
+    persisted: Boolean(controlPlaneStatus.persisted),
+    updatedAt: controlPlaneStatus.updated_at,
+    buildPayload: () => collectGigachatPayload(gigachatForm),
+    buildEntries: (payload) => buildPendingDiffEntries("gigachat", gigachatValues, payload),
+    buildNote: () => {
+      const stagedSecretMessages = collectSecretFieldMessages([
+        syncCredentialsSecret(),
+        syncAccessTokenSecret(),
+      ]);
+      return stagedSecretMessages.length
+        ? `Connection tests never persist the form. ${stagedSecretMessages.join(" ")}`
+        : "Connection tests never persist the form. Secret values stay masked after save.";
+    },
+    getValidationMessage: getGigachatValidationMessage,
+    endpoint: "/admin/api/settings/gigachat",
+    pendingMessage:
+      "Saving GigaChat settings. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
+    outcomeLabel: "GigaChat settings",
+    failurePrefix: "GigaChat settings failed to save",
+    rerenderPage: "settings",
   });
 
-  observabilityForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (getObservabilityValidationMessage(true)) {
-      refreshSectionStatus();
-      return;
-    }
-    await persistControlPlaneSection({
-      app,
-      form: observabilityForm,
-      button: getSubmitterButton(event as SubmitEvent, observabilityForm),
-      endpoint: "/admin/api/settings/observability",
-      payload: buildObservabilityPayload(observabilityForm),
-      refreshStatus: refreshSectionStatus,
-      setActionState: (state) => {
-        observabilityActionState = state;
-      },
-      pendingMessage:
-        "Saving observability settings. The persisted target updates first, then live sinks reload without a restart.",
-      outcomeLabel: "Observability settings",
-      failurePrefix: "Observability settings failed to save",
-      rerenderPage: "settings",
-    });
+  bindGigachatConnectionTestAction({
+    app,
+    form: gigachatForm,
+    button: document.getElementById("gigachat-test") as HTMLButtonElement | null,
+    buildPayload: () => collectGigachatPayload(gigachatForm),
+    getValidationMessage: getGigachatValidationMessage,
+    refreshStatus: gigachatBinding.refreshStatus,
+    setActionState: (state) => {
+      gigachatBinding.setActionState(state);
+    },
+    pendingMessage:
+      "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save.",
   });
 
-  gigachatForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    if (getGigachatValidationMessage(true)) {
-      refreshSectionStatus();
-      return;
-    }
-    await persistControlPlaneSection({
-      app,
-      form: gigachatForm,
-      button: getSubmitterButton(event as SubmitEvent, gigachatForm),
-      endpoint: "/admin/api/settings/gigachat",
-      payload: collectGigachatPayload(gigachatForm),
-      refreshStatus: refreshSectionStatus,
-      setActionState: (state) => {
-        gigachatActionState = state;
-      },
-      pendingMessage:
-        "Saving GigaChat settings. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
-      outcomeLabel: "GigaChat settings",
-      failurePrefix: "GigaChat settings failed to save",
-      rerenderPage: "settings",
-    });
+  bindControlPlaneSectionForm({
+    app,
+    form: securityForm,
+    statusNode: securityStatusNode,
+    persisted: Boolean(controlPlaneStatus.persisted),
+    updatedAt: controlPlaneStatus.updated_at,
+    buildPayload: () => buildSecurityPayload(securityForm),
+    buildEntries: (payload) => buildPendingDiffEntries("security", securityValues, payload),
+    buildNote: () =>
+      "Saved security changes always update the persisted target first. Runtime posture only changes immediately when the whole batch is restart-safe.",
+    getValidationMessage: (payload, report = false) =>
+      getSecurityValidationMessage(payload, report),
+    onValidationError: (message) => {
+      app.pushAlert(message, "danger");
+    },
+    endpoint: "/admin/api/settings/security",
+    pendingMessage:
+      "Saving security settings. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
+    outcomeLabel: "Security settings",
+    failurePrefix: "Security settings failed to save",
+    rerenderPage: "settings",
   });
 
-  document.getElementById("gigachat-test")?.addEventListener("click", async (event) => {
-    if (getGigachatValidationMessage(true)) {
-      refreshSectionStatus();
-      return;
-    }
-    await testGigachatConnection({
-      app,
-      form: gigachatForm,
-      button: event.currentTarget instanceof HTMLButtonElement ? event.currentTarget : null,
-      payload: collectGigachatPayload(gigachatForm),
-      refreshStatus: refreshSectionStatus,
-      setActionState: (state) => {
-        gigachatActionState = state;
-      },
-      pendingMessage:
-        "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save.",
-    });
-  });
-
-  securityForm.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const payload = buildSecurityPayload(securityForm);
-    const validationError = getSecurityValidationMessage(payload, true);
-    if (validationError) {
-      refreshSectionStatus();
-      app.pushAlert(validationError, "danger");
-      return;
-    }
-    await persistControlPlaneSection({
-      app,
-      form: securityForm,
-      button: getSubmitterButton(event as SubmitEvent, securityForm),
-      endpoint: "/admin/api/settings/security",
-      payload,
-      refreshStatus: refreshSectionStatus,
-      setActionState: (state) => {
-        securityActionState = state;
-      },
-      pendingMessage:
-        "Saving security settings. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
-      outcomeLabel: "Security settings",
-      failurePrefix: "Security settings failed to save",
-      rerenderPage: "settings",
-    });
-  });
+  refreshRevisionsStatus();
 
   app.pageContent.querySelectorAll<HTMLElement>("[data-rollback-revision]").forEach((button) => {
     button.addEventListener("click", async () => {
@@ -563,7 +441,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
         tone: "warn",
         message: `Restoring revision ${revisionId}. The persisted target changes first; runtime only follows immediately if the rollback is restart-safe.`,
       };
-      refreshSectionStatus();
+      refreshRevisionsStatus();
       try {
         await withBusyState({
           button: actionButton,
@@ -583,7 +461,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
           tone: "danger",
           message: `Rollback for revision ${revisionId} failed: ${toErrorMessage(error)}`,
         };
-        refreshSectionStatus();
+        refreshRevisionsStatus();
         app.pushAlert(revisionsActionState.message, "danger");
       }
     });
@@ -618,16 +496,4 @@ function renderSectionButton(section: SettingsSection, selectedSection: Settings
 
 function sectionPanelClass(isVisible: boolean, baseClass: string): string {
   return isVisible ? baseClass : `${baseClass} is-hidden`;
-}
-
-function renderConfiguredPreview(
-  values: Record<string, unknown>,
-  namesField: string,
-  configuredField: string,
-): string {
-  const names = asArray<string>(values[namesField]);
-  if (names.length) {
-    return `configured (${names.join(", ")})`;
-  }
-  return Boolean(values[configuredField]) ? "configured" : "not configured";
 }

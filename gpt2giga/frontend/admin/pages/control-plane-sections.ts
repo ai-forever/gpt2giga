@@ -1,4 +1,5 @@
 import {
+  bindReplaceableFieldBehavior,
   bindSecretFieldBehavior,
   type SecretFieldState,
 } from "../forms.js";
@@ -380,6 +381,110 @@ export function bindGigachatSecretFields(
   ];
 }
 
+export function bindObservabilitySecretFields(
+  form: HTMLFormElement | null,
+  values: SectionValues,
+): {
+  syncLangfusePublicKey: () => SecretFieldState | null;
+  syncLangfuseSecretKey: () => SecretFieldState | null;
+  syncOtlpHeadersField: () => SecretFieldState | null;
+  syncPhoenixApiKey: () => SecretFieldState | null;
+} {
+  if (!form) {
+    return {
+      syncOtlpHeadersField: () => null,
+      syncLangfusePublicKey: () => null,
+      syncLangfuseSecretKey: () => null,
+      syncPhoenixApiKey: () => null,
+    };
+  }
+
+  return {
+    syncOtlpHeadersField: bindReplaceableFieldBehavior({
+      form,
+      fieldName: "otlp_headers",
+      clearFieldName: "otlp_clear_headers",
+      preview: renderHeaderPreview(asRecord(values.otlp)),
+      clearPlaceholder: "Uncheck clear to paste a replacement header object",
+      noteReplace: "replace the stored OTLP headers on save.",
+      noteClear: "clear the stored OTLP headers on save.",
+      noteKeep:
+        "keep the stored OTLP headers unless you paste a replacement JSON object.",
+      messageReplace:
+        "A new OTLP headers object is staged and will replace the stored value on save.",
+      messageClear: "Stored OTLP headers will be removed when this section is saved.",
+      messageKeep:
+        "Stored OTLP headers remain unchanged unless you paste a replacement JSON object.",
+    }),
+    syncLangfusePublicKey: bindSecretFieldBehavior({
+      form,
+      fieldName: "langfuse_public_key",
+      clearFieldName: "langfuse_clear_public_key",
+      preview: String(asRecord(values.langfuse).public_key_preview ?? "not configured"),
+    }),
+    syncLangfuseSecretKey: bindSecretFieldBehavior({
+      form,
+      fieldName: "langfuse_secret_key",
+      clearFieldName: "langfuse_clear_secret_key",
+      preview: String(asRecord(values.langfuse).secret_key_preview ?? "not configured"),
+    }),
+    syncPhoenixApiKey: bindSecretFieldBehavior({
+      form,
+      fieldName: "phoenix_api_key",
+      clearFieldName: "phoenix_clear_api_key",
+      preview: String(asRecord(values.phoenix).api_key_preview ?? "not configured"),
+    }),
+  };
+}
+
+export function renderSetupObservabilityHandoff(values: SectionValues): string {
+  const activeSinks = asArray<string>(values.active_sinks);
+  const sinkCards = asArray<Record<string, unknown>>(values.sinks);
+  const enabledSinks = sinkCards.filter((sink) => Boolean(sink.enabled));
+
+  const sinkSummaries = enabledSinks.length
+    ? enabledSinks
+        .map((sink) => {
+          const label = String(sink.label ?? sink.id ?? "Sink");
+          const missingFields = asArray<string>(sink.missing_fields);
+          if (Boolean(sink.configured)) {
+            return banner(`${label} is enabled and ready for live exports.`);
+          }
+          if (missingFields.length) {
+            return banner(
+              `${label} is enabled but still missing: ${missingFields.join(", ")}.`,
+              "warn",
+            );
+          }
+          return banner(`${label} is enabled but still incomplete.`, "warn");
+        })
+        .join("")
+    : banner(
+        "Observability is optional during bootstrap. Configure sink endpoints and credentials after the core gateway posture is ready.",
+      );
+
+  return `
+    <div class="stack">
+      <div class="pill-row">
+        ${pill(
+          `Telemetry: ${Boolean(values.enable_telemetry) ? "enabled" : "disabled"}`,
+          Boolean(values.enable_telemetry) ? "good" : "warn",
+        )}
+        ${pill(`Active sinks: ${activeSinks.length || 0}`, activeSinks.length ? "good" : "warn")}
+        ${pill(
+          Boolean(values.metrics_enabled) ? "Metrics endpoint: live" : "Metrics endpoint: disabled",
+          Boolean(values.metrics_enabled) ? "good" : "warn",
+        )}
+      </div>
+      ${sinkSummaries}
+      <p class="muted">Setup keeps observability outside the bootstrap-critical path. Use the dedicated settings section for OTLP headers, Langfuse keys, Phoenix routing, and later sink tuning.</p>
+      <div class="toolbar">
+        <a class="button button--secondary" href="/admin/settings?section=observability">Open observability settings</a>
+      </div>
+    </div>
+  `;
+}
+
 function renderSetupApplicationFields(values: SectionValues): string {
   return `
     <div class="dual-grid">
@@ -387,10 +492,7 @@ function renderSetupApplicationFields(values: SectionValues): string {
         <span>Enabled providers</span>
         <input name="enabled_providers" value="${escapeHtml(csv(values.enabled_providers))}" />
       </label>
-      <label class="field">
-        <span>Observability sinks</span>
-        <input name="observability_sinks" value="${escapeHtml(csv(values.observability_sinks))}" />
-      </label>
+      <label class="field"><span>Mode handoff</span><input value="Use full settings for observability and advanced routing." disabled /></label>
     </div>
     <div class="dual-grid">
       <label class="field">
@@ -405,12 +507,6 @@ function renderSetupApplicationFields(values: SectionValues): string {
       </label>
     </div>
     <div class="triple-grid">
-      <label class="field">
-        <span>Telemetry</span>
-        <select name="enable_telemetry">
-          ${renderBooleanSelectOptions(Boolean(values.enable_telemetry))}
-        </select>
-      </label>
       <label class="field">
         <span>Pass model</span>
         <select name="pass_model">

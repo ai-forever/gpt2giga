@@ -166,3 +166,34 @@
 - Внутри Phase 2 ещё остаётся необязательный follow-up:
   - при желании дальше дробить `AdminControlPlaneSettingsService` на более узкие доменные сервисы (`revisions`, `gigachat test`, `keys`);
   - но это уже можно делать только если появится реальный выигрыш по читаемости или по UI workflow.
+
+## Phase 3
+
+### Сделано
+
+- Добавлен общий frontend binder `gpt2giga/frontend/admin/pages/control-plane-form-bindings.ts` для control-plane form workflow:
+  - pending diff/status refresh;
+  - inline validation;
+  - save/persist flow;
+  - GigaChat test-connection action.
+- `render-setup.ts` и `render-settings.ts` переведены на этот общий binder вместо page-local дублирования submit/status logic.
+- Вынесены observability secret/replace handlers в общий helper `bindObservabilitySecretFields(...)`, чтобы secret-field behavior не жил только внутри `render-settings.ts`.
+- Упростил guided setup flow:
+  - убрал observability controls из setup application step;
+  - добавил отдельный `Optional · Observability` handoff card с live status по sink-ам и прямой ссылкой в `Settings → Observability`.
+- Setup и Settings теперь читаются как разные workflow:
+  - `Setup` ведёт через bootstrap-critical шаги;
+  - `Settings` остаётся полноценным day-2 editor для grouped sections, включая observability.
+- Пересобрал shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
+
+### Проверка
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q`
+
+### Дальше
+
+- Основной slice `Phase 3` начат и уже закрывает ключевую UX-проблему: setup больше не дублирует observability editor и использует те же control-plane form primitives, что и settings.
+- Следующий практический шаг по плану — продолжить `Phase 3/4` на тяжёлых admin pages:
+  - начать slice-архитектуру с `render-playground.ts`;
+  - затем аналогично разрезать `logs`, `traffic`, `files-batches`.
