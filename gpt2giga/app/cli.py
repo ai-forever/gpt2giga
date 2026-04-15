@@ -2,12 +2,36 @@
 
 import argparse
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import dotenv_values, find_dotenv
 
 from gpt2giga.core.app_meta import warn_sensitive_cli_args
 from gpt2giga.core.config.control_plane import apply_control_plane_overrides
 from gpt2giga.core.config.settings import ProxyConfig
+
+
+@contextmanager
+def _temporary_dotenv(env_path: str) -> Iterator[None]:
+    """Temporarily expose values from a dotenv file during config loading."""
+    resolved_env_path = find_dotenv(env_path)
+    if not resolved_env_path:
+        yield
+        return
+
+    added_keys: list[str] = []
+    for key, value in dotenv_values(resolved_env_path).items():
+        if not key or value is None or key in os.environ:
+            continue
+        os.environ[key] = value
+        added_keys.append(key)
+
+    try:
+        yield
+    finally:
+        for key in added_keys:
+            os.environ.pop(key, None)
 
 
 def load_config() -> ProxyConfig:
@@ -19,8 +43,6 @@ def load_config() -> ProxyConfig:
     args, _ = parser.parse_known_args()
 
     requested_env = args.env_path if args.env_path else f"{os.getcwd()}/.env"
-    env_path = find_dotenv(requested_env)
-    load_dotenv(env_path)
-
-    config = ProxyConfig()
+    with _temporary_dotenv(requested_env):
+        config = ProxyConfig()
     return apply_control_plane_overrides(config)

@@ -26,6 +26,10 @@ from gpt2giga.core.config.control_plane import (
     load_control_plane_revision_payload,
     persist_control_plane_config,
 )
+from gpt2giga.core.config.observability import (
+    ObservabilitySettings,
+    ObservabilitySettingsUpdate,
+)
 from gpt2giga.core.config.settings import GigaChatCLI, ProxyConfig, ProxySettings
 from gpt2giga.core.errors import exceptions_handler
 
@@ -346,6 +350,9 @@ def _build_settings_snapshot(config: ProxyConfig) -> dict[str, Any]:
     """Build the safe, UI-facing snapshot of all settings sections."""
     return {
         "application": _build_application_settings(config.proxy_settings),
+        "observability": ObservabilitySettings.from_proxy_settings(
+            config.proxy_settings
+        ).to_safe_payload(),
         "gigachat": _build_gigachat_settings(config.gigachat_settings),
         "security": _build_security_settings(config.proxy_settings),
     }
@@ -602,6 +609,44 @@ async def update_application_settings(
     return {
         "section": "application",
         "values": _build_application_settings(updated.proxy_settings),
+        **result,
+    }
+
+
+@admin_settings_api_router.get("/admin/api/settings/observability")
+@exceptions_handler
+async def get_observability_settings(request: Request):
+    """Return UI-facing grouped observability settings."""
+    verify_logs_ip_allowlist(request)
+    proxy = get_config_from_state(request.app.state).proxy_settings
+    return {
+        "section": "observability",
+        "values": ObservabilitySettings.from_proxy_settings(proxy).to_safe_payload(),
+        "control_plane": _control_summary(request),
+    }
+
+
+@admin_settings_api_router.put("/admin/api/settings/observability")
+@exceptions_handler
+async def update_observability_settings(
+    request: Request,
+    payload: ObservabilitySettingsUpdate,
+):
+    """Persist and apply grouped observability settings."""
+    verify_logs_ip_allowlist(request)
+    proxy_updates = payload.to_proxy_updates()
+    current = get_config_from_state(request.app.state)
+    updated = _build_updated_config(current, proxy_updates=proxy_updates)
+    result = await _apply_updated_config(
+        request,
+        updated,
+        changed_fields=set(proxy_updates),
+    )
+    return {
+        "section": "observability",
+        "values": ObservabilitySettings.from_proxy_settings(
+            updated.proxy_settings
+        ).to_safe_payload(),
         **result,
     }
 

@@ -23,6 +23,7 @@ dependencies = [
     "gigachat",
     "google-genai>=1.70.0",
     "cryptography>=46.0.5",
+    "opentelemetry-proto>=1.40.0,<2",
 ]
 
 [project.optional-dependencies]

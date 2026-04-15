@@ -1,3 +1,5 @@
+import os
+
 from loguru import logger as loguru_logger
 
 from gpt2giga.app.cli import load_config
@@ -40,6 +42,26 @@ def test_load_config_boolean_flags(monkeypatch):
     assert config.proxy_settings.use_https is True
     assert config.proxy_settings.pass_model is True
     assert config.gigachat_settings.verify_ssl_certs is False
+
+
+def test_load_config_env_path_does_not_leak_dotenv_into_process_env(
+    monkeypatch, tmp_path
+):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "GIGACHAT_CREDENTIALS=foobar\nGPT2GIGA_OBSERVABILITY_SINKS=phoenix\n"
+    )
+    monkeypatch.delenv("GIGACHAT_CREDENTIALS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_SINKS", raising=False)
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path / "control-plane"))
+    monkeypatch.setattr("sys.argv", ["prog", "--env-path", str(env_file)])
+
+    config = load_config()
+
+    assert config.gigachat_settings.credentials.get_secret_value() == "foobar"
+    assert config.proxy_settings.observability_sinks == ["phoenix"]
+    assert os.environ.get("GIGACHAT_CREDENTIALS") is None
+    assert os.environ.get("GPT2GIGA_OBSERVABILITY_SINKS") is None
 
 
 def test_warn_sensitive_cli_args_credentials(monkeypatch):

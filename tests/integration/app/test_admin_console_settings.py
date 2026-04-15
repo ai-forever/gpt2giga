@@ -155,6 +155,86 @@ def test_gigachat_settings_null_secret_clears_existing_secret(tmp_path, monkeypa
     assert clear_payload["values"]["credentials_configured"] is False
 
 
+def test_observability_settings_endpoint_returns_grouped_sink_cards():
+    client = TestClient(
+        make_app(
+            config=ProxyConfig(
+                proxy=ProxySettings(
+                    observability_sinks=["prometheus", "phoenix"],
+                    phoenix_base_url="http://phoenix:6006",
+                    phoenix_project_name="dev",
+                )
+            )
+        )
+    )
+
+    response = client.get("/admin/api/settings/observability")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["section"] == "observability"
+    assert payload["values"]["enable_telemetry"] is True
+    assert payload["values"]["metrics_enabled"] is True
+    sink_by_id = {sink["id"]: sink for sink in payload["values"]["sinks"]}
+    assert sink_by_id["prometheus"]["enabled"] is True
+    assert sink_by_id["phoenix"]["enabled"] is True
+    assert sink_by_id["phoenix"]["configured"] is True
+    assert sink_by_id["phoenix"]["settings"]["base_url"] == "http://phoenix:6006"
+    assert sink_by_id["phoenix"]["settings"]["project_name"] == "dev"
+    assert sink_by_id["langfuse"]["missing_fields"] == [
+        "base_url",
+        "public_key",
+        "secret_key",
+    ]
+
+
+def test_observability_settings_update_is_persisted(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    response = client.put(
+        "/admin/api/settings/observability",
+        json={
+            "enable_telemetry": True,
+            "active_sinks": ["prometheus", "otlp", "phoenix"],
+            "otlp": {
+                "traces_endpoint": "http://otel-collector:4318/v1/traces",
+                "headers": {"x-tenant": "demo"},
+                "service_name": "gpt2giga-dev",
+            },
+            "phoenix": {
+                "base_url": "http://phoenix:6006",
+                "project_name": "gpt2giga-local",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["section"] == "observability"
+    assert payload["restart_required"] is False
+    assert payload["applied_runtime"] is True
+    assert payload["values"]["active_sinks"] == ["prometheus", "otlp", "phoenix"]
+
+    sink_by_id = {sink["id"]: sink for sink in payload["values"]["sinks"]}
+    assert sink_by_id["otlp"]["enabled"] is True
+    assert sink_by_id["otlp"]["configured"] is True
+    assert sink_by_id["otlp"]["settings"]["traces_endpoint"] == (
+        "http://otel-collector:4318/v1/traces"
+    )
+    assert sink_by_id["otlp"]["settings"]["headers_configured"] is True
+    assert sink_by_id["otlp"]["settings"]["header_names"] == ["x-tenant"]
+    assert sink_by_id["phoenix"]["settings"]["base_url"] == "http://phoenix:6006"
+
+    get_response = client.get("/admin/api/settings/observability")
+    assert get_response.status_code == 200
+    assert get_response.json()["values"]["active_sinks"] == [
+        "prometheus",
+        "otlp",
+        "phoenix",
+    ]
+
+
 def test_gigachat_settings_test_endpoint_reports_success(tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
     app = make_app()
