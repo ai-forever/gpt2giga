@@ -23,6 +23,10 @@ const SECRET_FIELDS = new Set([
     "scoped_api_keys",
     "password",
     "key_file_password",
+    "otlp_headers",
+    "langfuse_public_key",
+    "langfuse_secret_key",
+    "phoenix_api_key",
 ]);
 export function buildApplicationPayload(form) {
     const fields = form.elements;
@@ -30,11 +34,15 @@ export function buildApplicationPayload(form) {
         mode: fields.mode.value,
         gigachat_api_mode: fields.gigachat_api_mode.value,
         enabled_providers: parseCsv(fields.enabled_providers.value),
-        enable_telemetry: fields.enable_telemetry.value === "true",
         pass_model: fields.pass_model.value === "true",
         pass_token: fields.pass_token.value === "true",
-        observability_sinks: parseCsv(fields.observability_sinks.value),
     };
+    if (fields.enable_telemetry) {
+        payload.enable_telemetry = fields.enable_telemetry.value === "true";
+    }
+    if (fields.observability_sinks) {
+        payload.observability_sinks = parseCsv(fields.observability_sinks.value);
+    }
     if (fields.embeddings) {
         payload.embeddings = fields.embeddings.value.trim();
     }
@@ -61,6 +69,63 @@ export function buildSecurityPayload(form) {
     };
     if (fields.governance_limits) {
         payload.governance_limits = safeJsonParse(fields.governance_limits.value || "[]", INVALID_JSON);
+    }
+    return payload;
+}
+export function buildObservabilityPayload(form) {
+    const fields = form.elements;
+    const payload = {
+        enable_telemetry: fields.enable_telemetry.value === "true",
+        active_sinks: [
+            fields.sink_prometheus.checked ? "prometheus" : null,
+            fields.sink_otlp.checked ? "otlp" : null,
+            fields.sink_langfuse.checked ? "langfuse" : null,
+            fields.sink_phoenix.checked ? "phoenix" : null,
+        ].filter((value) => Boolean(value)),
+        otlp: {
+            traces_endpoint: trimToNull(fields.otlp_traces_endpoint.value),
+            service_name: trimToNull(fields.otlp_service_name.value),
+            timeout_seconds: parseOptionalNumber(fields.otlp_timeout_seconds.value),
+            max_pending_requests: parseOptionalNumber(fields.otlp_max_pending_requests.value),
+        },
+        langfuse: {
+            base_url: trimToNull(fields.langfuse_base_url.value),
+        },
+        phoenix: {
+            base_url: trimToNull(fields.phoenix_base_url.value),
+            project_name: trimToNull(fields.phoenix_project_name.value),
+        },
+    };
+    const otlpPayload = payload.otlp;
+    const otlpHeaders = parseOptionalJsonObject(fields.otlp_headers.value);
+    if (otlpHeaders !== null) {
+        otlpPayload.headers = otlpHeaders;
+    }
+    else if (fields.otlp_clear_headers?.checked) {
+        otlpPayload.headers = null;
+    }
+    const langfusePayload = payload.langfuse;
+    const langfusePublicKey = fields.langfuse_public_key.value.trim();
+    if (langfusePublicKey) {
+        langfusePayload.public_key = langfusePublicKey;
+    }
+    else if (fields.langfuse_clear_public_key?.checked) {
+        langfusePayload.public_key = null;
+    }
+    const langfuseSecretKey = fields.langfuse_secret_key.value.trim();
+    if (langfuseSecretKey) {
+        langfusePayload.secret_key = langfuseSecretKey;
+    }
+    else if (fields.langfuse_clear_secret_key?.checked) {
+        langfusePayload.secret_key = null;
+    }
+    const phoenixPayload = payload.phoenix;
+    const phoenixApiKey = fields.phoenix_api_key.value.trim();
+    if (phoenixApiKey) {
+        phoenixPayload.api_key = phoenixApiKey;
+    }
+    else if (fields.phoenix_clear_api_key?.checked) {
+        phoenixPayload.api_key = null;
     }
     return payload;
 }
@@ -120,7 +185,23 @@ export function validateJsonArrayField(field, value, { invalidMessage, nonArrayM
     }
     return error;
 }
-export function bindSecretFieldBehavior(options) {
+export function validateJsonObjectField(field, value, { invalidMessage, nonObjectMessage, report, }) {
+    if (!field) {
+        return "";
+    }
+    const error = value === INVALID_JSON
+        ? invalidMessage
+        : value !== null &&
+            (!value || typeof value !== "object" || Array.isArray(value))
+            ? nonObjectMessage
+            : "";
+    field.setCustomValidity(error);
+    if (error && report) {
+        field.reportValidity();
+    }
+    return error;
+}
+export function bindReplaceableFieldBehavior(options) {
     const textarea = options.form.elements.namedItem(options.fieldName);
     const clearToggle = options.form.elements.namedItem(options.clearFieldName);
     if (!(textarea instanceof HTMLTextAreaElement) || !(clearToggle instanceof HTMLInputElement)) {
@@ -137,38 +218,50 @@ export function bindSecretFieldBehavior(options) {
             textarea.disabled = false;
             textarea.placeholder = originalPlaceholder;
             if (note) {
-                note.textContent = `Stored preview: ${preview}. Pending action: replace the stored secret on save.`;
+                note.textContent = `Stored preview: ${preview}. Pending action: ${options.noteReplace}`;
             }
             return {
                 intent: "replace",
-                message: "A new secret is staged and will replace the stored value on save.",
+                message: options.messageReplace,
             };
         }
         clearToggle.disabled = false;
         if (clearToggle.checked) {
             textarea.disabled = true;
-            textarea.placeholder = "Uncheck clear to paste a replacement secret";
+            textarea.placeholder = options.clearPlaceholder;
             if (note) {
-                note.textContent = `Stored preview: ${preview}. Pending action: clear the stored secret on save.`;
+                note.textContent = `Stored preview: ${preview}. Pending action: ${options.noteClear}`;
             }
             return {
                 intent: "clear",
-                message: "The stored secret will be removed when this section is saved.",
+                message: options.messageClear,
             };
         }
         textarea.disabled = false;
         textarea.placeholder = originalPlaceholder;
         if (note) {
-            note.textContent = `Stored preview: ${preview}. Pending action: keep the stored secret unless you paste a replacement.`;
+            note.textContent = `Stored preview: ${preview}. Pending action: ${options.noteKeep}`;
         }
         return {
             intent: "keep",
-            message: "The stored secret remains unchanged unless you paste a replacement.",
+            message: options.messageKeep,
         };
     };
     textarea.addEventListener("input", sync);
     clearToggle.addEventListener("change", sync);
     return sync;
+}
+export function bindSecretFieldBehavior(options) {
+    return bindReplaceableFieldBehavior({
+        ...options,
+        clearPlaceholder: "Uncheck clear to paste a replacement secret",
+        noteReplace: "replace the stored secret on save.",
+        noteClear: "clear the stored secret on save.",
+        noteKeep: "keep the stored secret unless you paste a replacement.",
+        messageReplace: "A new secret is staged and will replace the stored value on save.",
+        messageClear: "The stored secret will be removed when this section is saved.",
+        messageKeep: "The stored secret remains unchanged unless you paste a replacement.",
+    });
 }
 export async function withBusyState({ root, button, pendingLabel, action, }) {
     const controls = root
@@ -316,6 +409,55 @@ export function buildPendingDiffEntries(section, currentValues, payload) {
         return [{ field, current, target }];
     });
 }
+export function buildObservabilityDiffEntries(currentValues, payload) {
+    const entries = [];
+    const otlpCurrent = asComparableRecord(currentValues.otlp);
+    const langfuseCurrent = asComparableRecord(currentValues.langfuse);
+    const phoenixCurrent = asComparableRecord(currentValues.phoenix);
+    const otlpTarget = asComparableRecord(payload.otlp);
+    const langfuseTarget = asComparableRecord(payload.langfuse);
+    const phoenixTarget = asComparableRecord(payload.phoenix);
+    pushDiffEntry(entries, "enable_telemetry", currentValues.enable_telemetry, payload.enable_telemetry);
+    pushDiffEntry(entries, "active_sinks", currentValues.active_sinks, payload.active_sinks);
+    pushDiffEntry(entries, "otlp_traces_endpoint", otlpCurrent.traces_endpoint, otlpTarget.traces_endpoint);
+    pushDiffEntry(entries, "otlp_service_name", otlpCurrent.service_name, otlpTarget.service_name);
+    pushDiffEntry(entries, "otlp_timeout_seconds", otlpCurrent.timeout_seconds, otlpTarget.timeout_seconds);
+    pushDiffEntry(entries, "otlp_max_pending_requests", otlpCurrent.max_pending_requests, otlpTarget.max_pending_requests);
+    pushReplaceableDiffEntry(entries, {
+        field: "otlp_headers",
+        configured: Boolean(otlpCurrent.headers_configured),
+        preview: Array.isArray(otlpCurrent.header_names) && otlpCurrent.header_names.length > 0
+            ? `configured (${otlpCurrent.header_names.join(", ")})`
+            : "configured",
+        target: otlpTarget.headers,
+        replaceLabel: buildHeaderTargetLabel(otlpTarget.headers),
+    });
+    pushDiffEntry(entries, "langfuse_base_url", langfuseCurrent.base_url, langfuseTarget.base_url);
+    pushReplaceableDiffEntry(entries, {
+        field: "langfuse_public_key",
+        configured: Boolean(langfuseCurrent.public_key_configured),
+        preview: langfuseCurrent.public_key_preview,
+        target: langfuseTarget.public_key,
+        replaceLabel: "updated secret",
+    });
+    pushReplaceableDiffEntry(entries, {
+        field: "langfuse_secret_key",
+        configured: Boolean(langfuseCurrent.secret_key_configured),
+        preview: langfuseCurrent.secret_key_preview,
+        target: langfuseTarget.secret_key,
+        replaceLabel: "updated secret",
+    });
+    pushDiffEntry(entries, "phoenix_base_url", phoenixCurrent.base_url, phoenixTarget.base_url);
+    pushDiffEntry(entries, "phoenix_project_name", phoenixCurrent.project_name, phoenixTarget.project_name);
+    pushReplaceableDiffEntry(entries, {
+        field: "phoenix_api_key",
+        configured: Boolean(phoenixCurrent.api_key_configured),
+        preview: phoenixCurrent.api_key_preview,
+        target: phoenixTarget.api_key,
+        replaceLabel: "updated secret",
+    });
+    return entries;
+}
 export function summarizePendingChanges(entries) {
     const changedFields = entries.map((entry) => entry.field);
     return {
@@ -324,4 +466,59 @@ export function summarizePendingChanges(entries) {
         liveFields: changedFields.filter((field) => !RESTART_SENSITIVE_FIELDS.has(field)),
         secretFields: changedFields.filter((field) => SECRET_FIELDS.has(field)),
     };
+}
+function trimToNull(value) {
+    const normalized = value.trim();
+    return normalized || null;
+}
+function parseOptionalNumber(value) {
+    const normalized = value.trim();
+    if (!normalized) {
+        return null;
+    }
+    const numeric = Number(normalized);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+function parseOptionalJsonObject(value) {
+    const normalized = value.trim();
+    if (!normalized) {
+        return null;
+    }
+    const parsed = safeJsonParse(normalized, INVALID_JSON);
+    if (!parsed || parsed === INVALID_JSON || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return parsed === INVALID_JSON ? INVALID_JSON : INVALID_JSON;
+    }
+    return Object.entries(parsed).reduce((result, [key, item]) => {
+        result[key] = String(item);
+        return result;
+    }, {});
+}
+function asComparableRecord(value) {
+    return value && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : {};
+}
+function pushDiffEntry(entries, field, current, target) {
+    if (JSON.stringify(normalizeComparableValue(current)) ===
+        JSON.stringify(normalizeComparableValue(target))) {
+        return;
+    }
+    entries.push({ field, current, target });
+}
+function pushReplaceableDiffEntry(entries, options) {
+    if (options.target === undefined) {
+        return;
+    }
+    entries.push({
+        field: options.field,
+        current: options.configured ? options.preview || "configured" : "not configured",
+        target: options.target === null ? "clear value" : options.replaceLabel,
+    });
+}
+function buildHeaderTargetLabel(headers) {
+    if (!headers || typeof headers !== "object" || Array.isArray(headers)) {
+        return "updated headers";
+    }
+    const keys = Object.keys(headers);
+    return keys.length ? `updated headers (${keys.join(", ")})` : "updated headers";
 }

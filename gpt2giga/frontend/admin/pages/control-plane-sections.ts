@@ -3,11 +3,18 @@ import {
   type SecretFieldState,
 } from "../forms.js";
 import {
+  banner,
+  pill,
   renderBooleanSelectOptions,
   renderSecretField,
   renderStaticSelectOptions,
 } from "../templates.js";
-import { csv, escapeHtml } from "../utils.js";
+import {
+  asArray,
+  asRecord,
+  csv,
+  escapeHtml,
+} from "../utils.js";
 
 const LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"];
 
@@ -40,6 +47,14 @@ interface SecuritySectionOptions {
   submitLabel: string;
   values: SectionValues;
   variant: "setup" | "settings";
+}
+
+interface ObservabilitySectionOptions {
+  bannerMessage: string;
+  formId: string;
+  statusId: string;
+  submitLabel: string;
+  values: SectionValues;
 }
 
 export function renderApplicationSection(
@@ -170,6 +185,177 @@ export function renderSecuritySection(options: SecuritySectionOptions): string {
   `;
 }
 
+export function renderObservabilitySection(
+  options: ObservabilitySectionOptions,
+): string {
+  const sinkCards = asArray<Record<string, unknown>>(options.values.sinks);
+  const sinkById = new Map(
+    sinkCards
+      .map((sink) => [String(sink.id ?? ""), sink] as const)
+      .filter(([id]) => Boolean(id)),
+  );
+  const activeSinks = asArray<string>(options.values.active_sinks);
+  const otlp = asRecord(options.values.otlp);
+  const langfuse = asRecord(options.values.langfuse);
+  const phoenix = asRecord(options.values.phoenix);
+
+  return `
+    <form id="${escapeHtml(options.formId)}" class="stack">
+      <div class="stack">
+        <div class="banner">${escapeHtml(options.bannerMessage)}</div>
+        <div id="${escapeHtml(options.statusId)}"></div>
+      </div>
+      <div class="dual-grid">
+        <label class="field">
+          <span>Telemetry pipeline</span>
+          <select name="enable_telemetry">
+            ${renderBooleanSelectOptions(Boolean(options.values.enable_telemetry))}
+          </select>
+        </label>
+        <div class="stack">
+          ${pill(`Active sinks: ${activeSinks.length || 0}`, activeSinks.length ? "good" : "warn")}
+          ${pill(
+            Boolean(options.values.metrics_enabled) ? "Metrics endpoint: live" : "Metrics endpoint: disabled",
+            Boolean(options.values.metrics_enabled) ? "good" : "warn",
+          )}
+          <p class="muted">Each sink keeps its own settings. Enabling telemetry gates all exports, while sink toggles decide which integrations receive data.</p>
+        </div>
+      </div>
+      <div class="stack">
+        ${renderObservabilitySinkCard({
+          sink: sinkById.get("prometheus"),
+          title: "Prometheus",
+          description:
+            "Local metrics stay inside the gateway and can be scraped from the built-in endpoints.",
+          body: `
+            <label class="checkbox-field">
+              <input name="sink_prometheus" type="checkbox" ${activeSinks.includes("prometheus") ? "checked" : ""} />
+              <span>Enable Prometheus metrics sink</span>
+            </label>
+            <div class="dual-grid">
+              <div class="stack">
+                ${pill("Gateway: /metrics")}
+                ${pill("Admin: /admin/api/metrics")}
+              </div>
+              <p class="muted">No extra credentials are required. Prometheus follows telemetry changes live without restart.</p>
+            </div>
+          `,
+        })}
+        ${renderObservabilitySinkCard({
+          sink: sinkById.get("otlp"),
+          title: "OTLP / HTTP",
+          description:
+            "Send traces to an OpenTelemetry collector or compatible OTLP/HTTP endpoint.",
+          body: `
+            <label class="checkbox-field">
+              <input name="sink_otlp" type="checkbox" ${activeSinks.includes("otlp") ? "checked" : ""} />
+              <span>Enable OTLP sink</span>
+            </label>
+            <div class="dual-grid">
+              <label class="field">
+                <span>Traces endpoint</span>
+                <input name="otlp_traces_endpoint" placeholder="http://otel-collector:4318/v1/traces" value="${escapeHtml(otlp.traces_endpoint ?? "")}" />
+              </label>
+              <label class="field">
+                <span>Service name</span>
+                <input name="otlp_service_name" placeholder="gpt2giga" value="${escapeHtml(otlp.service_name ?? "")}" />
+              </label>
+            </div>
+            <div class="dual-grid">
+              <label class="field">
+                <span>Timeout seconds</span>
+                <input name="otlp_timeout_seconds" type="number" min="1" step="0.5" value="${escapeHtml(otlp.timeout_seconds ?? "")}" />
+              </label>
+              <label class="field">
+                <span>Max pending requests</span>
+                <input name="otlp_max_pending_requests" type="number" min="1" step="1" value="${escapeHtml(otlp.max_pending_requests ?? "")}" />
+              </label>
+            </div>
+            <div class="stack">
+              <label class="field">
+                <span>Headers override (JSON object)</span>
+                <textarea name="otlp_headers" placeholder='{"x-tenant":"demo","authorization":"Bearer ..."}'></textarea>
+              </label>
+              <p class="field-note">Stored preview: <strong>${escapeHtml(renderHeaderPreview(otlp))}</strong>. Leave blank to keep the current headers; paste a JSON object to replace them.</p>
+              <label class="checkbox-field">
+                <input name="otlp_clear_headers" type="checkbox" />
+                <span>Clear stored OTLP headers on save</span>
+              </label>
+            </div>
+          `,
+        })}
+        ${renderObservabilitySinkCard({
+          sink: sinkById.get("langfuse"),
+          title: "Langfuse",
+          description:
+            "Forward traces to Langfuse with base URL, public key, and secret key managed from the control plane.",
+          body: `
+            <label class="checkbox-field">
+              <input name="sink_langfuse" type="checkbox" ${activeSinks.includes("langfuse") ? "checked" : ""} />
+              <span>Enable Langfuse sink</span>
+            </label>
+            <label class="field">
+              <span>Base URL</span>
+              <input name="langfuse_base_url" placeholder="https://cloud.langfuse.com" value="${escapeHtml(langfuse.base_url ?? "")}" />
+            </label>
+            <div class="dual-grid">
+              ${renderSecretField({
+                name: "langfuse_public_key",
+                label: "Public key",
+                placeholder: "Paste a new Langfuse public key to replace the stored value",
+                preview: String(langfuse.public_key_preview ?? "not configured"),
+                clearControlName: "langfuse_clear_public_key",
+                clearLabel: "Clear stored public key on save",
+              })}
+              ${renderSecretField({
+                name: "langfuse_secret_key",
+                label: "Secret key",
+                placeholder: "Paste a new Langfuse secret key to replace the stored value",
+                preview: String(langfuse.secret_key_preview ?? "not configured"),
+                clearControlName: "langfuse_clear_secret_key",
+                clearLabel: "Clear stored secret key on save",
+              })}
+            </div>
+          `,
+        })}
+        ${renderObservabilitySinkCard({
+          sink: sinkById.get("phoenix"),
+          title: "Phoenix",
+          description:
+            "Push traces to Phoenix with an optional API key and project-level routing.",
+          body: `
+            <label class="checkbox-field">
+              <input name="sink_phoenix" type="checkbox" ${activeSinks.includes("phoenix") ? "checked" : ""} />
+              <span>Enable Phoenix sink</span>
+            </label>
+            <div class="dual-grid">
+              <label class="field">
+                <span>Base URL</span>
+                <input name="phoenix_base_url" placeholder="http://phoenix:6006" value="${escapeHtml(phoenix.base_url ?? "")}" />
+              </label>
+              <label class="field">
+                <span>Project name</span>
+                <input name="phoenix_project_name" placeholder="gpt2giga-local" value="${escapeHtml(phoenix.project_name ?? "")}" />
+              </label>
+            </div>
+            <div class="dual-grid">
+              ${renderSecretField({
+                name: "phoenix_api_key",
+                label: "API key",
+                placeholder: "Paste a new Phoenix API key to replace the stored value",
+                preview: String(phoenix.api_key_preview ?? "not configured"),
+                clearControlName: "phoenix_clear_api_key",
+                clearLabel: "Clear stored Phoenix API key on save",
+              })}
+            </div>
+          `,
+        })}
+      </div>
+      <button class="button" type="submit">${escapeHtml(options.submitLabel)}</button>
+    </form>
+  `;
+}
+
 export function bindGigachatSecretFields(
   form: HTMLFormElement | null,
   values: SectionValues,
@@ -249,12 +435,6 @@ function renderSettingsApplicationFields(values: SectionValues): string {
     </div>
     <div class="quad-grid">
       <label class="field">
-        <span>Telemetry</span>
-        <select name="enable_telemetry">
-          ${renderBooleanSelectOptions(Boolean(values.enable_telemetry))}
-        </select>
-      </label>
-      <label class="field">
         <span>Pass model</span>
         <select name="pass_model">
           ${renderBooleanSelectOptions(Boolean(values.pass_model))}
@@ -274,7 +454,6 @@ function renderSettingsApplicationFields(values: SectionValues): string {
       </label>
     </div>
     <div class="dual-grid">
-      <label class="field"><span>Observability sinks</span><input name="observability_sinks" value="${escapeHtml(csv(values.observability_sinks))}" /></label>
       <label class="field">
         <span>Log level</span>
         <select name="log_level">
@@ -283,4 +462,56 @@ function renderSettingsApplicationFields(values: SectionValues): string {
       </label>
     </div>
   `;
+}
+
+function renderObservabilitySinkCard(options: {
+  sink: Record<string, unknown> | undefined;
+  title: string;
+  description: string;
+  body: string;
+}): string {
+  const sink = options.sink ?? {};
+  const enabled = Boolean(sink.enabled);
+  const configured = Boolean(sink.configured);
+  const missingFields = asArray<string>(sink.missing_fields);
+  const liveApply = Boolean(sink.live_apply);
+  const restartRequired = Boolean(sink.restart_required);
+  const summary = enabled
+    ? configured
+      ? "Enabled and configured."
+      : missingFields.length
+        ? `Enabled, but still missing: ${missingFields.join(", ")}.`
+        : "Enabled, but still incomplete."
+    : "Disabled. Stored values remain available until you remove them.";
+
+  return `
+    <article class="step-card ${enabled ? "step-card--ready" : ""}">
+      <div class="stack">
+        <div class="toolbar">
+          <div class="stack">
+            <h4>${escapeHtml(options.title)}</h4>
+            <p class="muted">${escapeHtml(options.description)}</p>
+          </div>
+          <div class="stack">
+            ${pill(enabled ? "enabled" : "disabled", enabled ? "good" : "warn")}
+            ${pill(configured ? "configured" : "needs fields", configured ? "good" : "warn")}
+          </div>
+        </div>
+        ${banner(summary, enabled && !configured ? "warn" : "info")}
+        <div class="pill-row">
+          ${pill(liveApply ? "Live apply" : "Requires restart", liveApply ? "good" : "warn")}
+          ${restartRequired ? pill("Restart-sensitive", "warn") : pill("Restart-safe", "good")}
+          ${missingFields.length ? pill(`Missing: ${missingFields.join(", ")}`, "warn") : pill("Required fields satisfied", "good")}
+        </div>
+        ${options.body}
+      </div>
+    </article>
+  `;
+}
+
+function renderHeaderPreview(otlp: SectionValues): string {
+  if (Array.isArray(otlp.header_names) && otlp.header_names.length > 0) {
+    return `configured (${otlp.header_names.join(", ")})`;
+  }
+  return Boolean(otlp.headers_configured) ? "configured" : "not configured";
 }
