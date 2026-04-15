@@ -118,3 +118,52 @@ def test_langfuse_sink_requires_base_url_and_keys():
 
     with pytest.raises(RuntimeError, match="LANGFUSE_PUBLIC_KEY"):
         create_observability_hub(["langfuse"], config=config)
+
+
+def test_phoenix_sink_builds_otlp_endpoint_headers_and_project_name():
+    config = SimpleNamespace(
+        proxy_settings=SimpleNamespace(
+            observability_sinks=["phoenix"],
+            otlp_headers={"x-tenant": "team-a"},
+            otlp_timeout_seconds=5.0,
+            otlp_max_pending_requests=16,
+            otlp_service_name="gpt2giga",
+            runtime_store_namespace="test",
+            mode="DEV",
+            phoenix_base_url="http://phoenix:6006",
+            phoenix_api_key="phx-secret",
+            phoenix_project_name="gpt2giga-dev",
+        )
+    )
+
+    hub = create_observability_hub(["phoenix"], config=config)
+    sink = hub.get_sink("phoenix")
+
+    assert sink is not None
+    assert sink.name == "phoenix"
+    assert sink._endpoint == "http://phoenix:6006/v1/traces"
+    assert sink._headers == {
+        "x-tenant": "team-a",
+        "authorization": "Bearer phx-secret",
+    }
+    assert sink._resource_attributes["openinference.project.name"] == "gpt2giga-dev"
+
+
+def test_phoenix_sink_requires_base_url():
+    config = SimpleNamespace(
+        proxy_settings=SimpleNamespace(
+            observability_sinks=["phoenix"],
+            otlp_headers={},
+            otlp_timeout_seconds=5.0,
+            otlp_max_pending_requests=16,
+            otlp_service_name="gpt2giga",
+            runtime_store_namespace="test",
+            mode="DEV",
+            phoenix_base_url=None,
+            phoenix_api_key=None,
+            phoenix_project_name=None,
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="PHOENIX_BASE_URL"):
+        create_observability_hub(["phoenix"], config=config)

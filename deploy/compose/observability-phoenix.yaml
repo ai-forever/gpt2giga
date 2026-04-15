@@ -1,0 +1,31 @@
+services:
+  gpt2giga-prod:
+    environment:
+      GPT2GIGA_OBSERVABILITY_SINKS: "phoenix"
+      GPT2GIGA_PHOENIX_BASE_URL: "http://phoenix:6006"
+      GPT2GIGA_PHOENIX_API_KEY: ${PHOENIX_API_KEY:-}
+      GPT2GIGA_PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-gpt2giga}
+
+  gpt2giga-dev:
+    environment:
+      GPT2GIGA_OBSERVABILITY_SINKS: "phoenix"
+      GPT2GIGA_PHOENIX_BASE_URL: "http://phoenix:6006"
+      GPT2GIGA_PHOENIX_API_KEY: ${PHOENIX_API_KEY:-}
+      GPT2GIGA_PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-gpt2giga}
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    restart: unless-stopped
+    environment:
+      PHOENIX_WORKING_DIR: /mnt/data
+      PHOENIX_ENABLE_AUTH: ${PHOENIX_ENABLE_AUTH:-false}
+      PHOENIX_SECRET: ${PHOENIX_SECRET:-}
+      PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD: ${PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD:-adminadmin}
+    ports:
+      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
+      - "127.0.0.1:${PHOENIX_GRPC_PORT:-4317}:4317"
+    volumes:
+      - phoenix-data:/mnt/data
+
+volumes:
+  phoenix-data:

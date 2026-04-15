@@ -45,6 +45,7 @@
 | Base + Prometheus | `deploy/compose/base.yaml` + `deploy/compose/observability-prometheus.yaml` | `make compose-prometheus-dev-d` | `gpt2giga` + Prometheus на `9090` |
 | Base + OTLP collector | `deploy/compose/base.yaml` + `deploy/compose/observability-otlp.yaml` | `make compose-otlp-dev-d` | `gpt2giga` + OpenTelemetry Collector |
 | Base + Langfuse | `deploy/compose/base.yaml` + `deploy/compose/observability-langfuse.yaml` | `make compose-langfuse-dev-d` | `gpt2giga` + Langfuse + Postgres + ClickHouse + Redis + MinIO |
+| Base + Phoenix | `deploy/compose/base.yaml` + `deploy/compose/observability-phoenix.yaml` | `make compose-phoenix-dev-d` | `gpt2giga` + self-hosted Phoenix на `6006` |
 | Runtime backend: Redis | `deploy/compose/runtime-backends/redis.yaml` | `make compose-runtime-redis-up-d` | `gpt2giga` + Redis |
 | Runtime backend: Postgres | `deploy/compose/runtime-backends/postgres.yaml` | `make compose-runtime-postgres-up-d` | `gpt2giga` + Postgres |
 | Runtime backend: S3/MinIO | `deploy/compose/runtime-backends/s3.yaml` | `make compose-runtime-s3-up-d` | `gpt2giga` + MinIO |
@@ -129,6 +130,28 @@ make compose-langfuse-dev-d
 
 `observability-langfuse.yaml` использует локальные dev credentials по умолчанию.
 Для staging/production их нужно переопределить в `.env`.
+
+### Локально включить Phoenix
+
+В `.env` задайте sink:
+
+```dotenv
+GPT2GIGA_OBSERVABILITY_SINKS=phoenix
+```
+
+Запуск:
+
+```bash
+make compose-phoenix-dev-d
+```
+
+После старта:
+
+- `gpt2giga`: `http://localhost:8090`
+- `Phoenix UI`: `http://localhost:6006`
+
+`observability-phoenix.yaml` использует self-hosted Phoenix без auth по умолчанию.
+Если включаете `PHOENIX_ENABLE_AUTH=true`, после первого входа создайте system API key в Phoenix UI и задайте его как `GPT2GIGA_PHOENIX_API_KEY`, чтобы `gpt2giga` продолжил отправлять traces.
 
 ### Отладить SSE и upstream traffic
 

@@ -10,6 +10,7 @@
 	compose-prometheus-prod compose-prometheus-prod-d compose-prometheus-dev compose-prometheus-dev-d compose-prometheus-down \
 	compose-otlp-prod compose-otlp-prod-d compose-otlp-dev compose-otlp-dev-d compose-otlp-down \
 	compose-langfuse-prod compose-langfuse-prod-d compose-langfuse-dev compose-langfuse-dev-d compose-langfuse-down \
+	compose-phoenix-prod compose-phoenix-prod-d compose-phoenix-dev compose-phoenix-dev-d compose-phoenix-down \
 	compose-runtime-redis-up compose-runtime-redis-up-d compose-runtime-redis-down \
 	compose-runtime-postgres-up compose-runtime-postgres-up-d compose-runtime-postgres-down \
 	compose-runtime-s3-up compose-runtime-s3-up-d compose-runtime-s3-down \
@@ -31,6 +32,7 @@ COMPOSE_NGINX = deploy/compose/nginx.yaml
 COMPOSE_PROMETHEUS = deploy/compose/observability-prometheus.yaml
 COMPOSE_OTLP = deploy/compose/observability-otlp.yaml
 COMPOSE_LANGFUSE = deploy/compose/observability-langfuse.yaml
+COMPOSE_PHOENIX = deploy/compose/observability-phoenix.yaml
 COMPOSE_RUNTIME_REDIS = deploy/compose/runtime-backends/redis.yaml
 COMPOSE_RUNTIME_POSTGRES = deploy/compose/runtime-backends/postgres.yaml
 COMPOSE_RUNTIME_S3 = deploy/compose/runtime-backends/s3.yaml
@@ -44,6 +46,7 @@ NGINX_STACK = -f $(COMPOSE_NGINX)
 PROMETHEUS_STACK = -f $(COMPOSE_BASE) -f $(COMPOSE_PROMETHEUS)
 OTLP_STACK = -f $(COMPOSE_BASE) -f $(COMPOSE_OTLP)
 LANGFUSE_STACK = -f $(COMPOSE_BASE) -f $(COMPOSE_LANGFUSE)
+PHOENIX_STACK = -f $(COMPOSE_BASE) -f $(COMPOSE_PHOENIX)
 RUNTIME_REDIS_STACK = -f $(COMPOSE_RUNTIME_REDIS)
 RUNTIME_POSTGRES_STACK = -f $(COMPOSE_RUNTIME_POSTGRES)
 RUNTIME_S3_STACK = -f $(COMPOSE_RUNTIME_S3)
@@ -81,6 +84,7 @@ $(eval $(call compose_profile_stack_targets,compose-observe,$(OBSERVE_STACK)))
 $(eval $(call compose_profile_stack_targets,compose-prometheus,$(PROMETHEUS_STACK)))
 $(eval $(call compose_profile_stack_targets,compose-otlp,$(OTLP_STACK)))
 $(eval $(call compose_profile_stack_targets,compose-langfuse,$(LANGFUSE_STACK)))
+$(eval $(call compose_profile_stack_targets,compose-phoenix,$(PHOENIX_STACK)))
 
 $(eval $(call compose_plain_stack_targets,compose-traefik,$(TRAEFIK_STACK)))
 $(eval $(call compose_plain_stack_targets,compose-multiple,$(MULTIPLE_STACK)))
@@ -100,6 +104,7 @@ help:
 		"  make compose-prometheus-dev-d        # base + Prometheus" \
 		"  make compose-otlp-dev-d              # base + OpenTelemetry Collector" \
 		"  make compose-langfuse-dev-d          # base + Langfuse stack" \
+		"  make compose-phoenix-dev-d           # base + Phoenix" \
 		"  make compose-multiple-up-d           # several model-specific instances" \
 		"  make compose-observe-multiple-up-d   # several instances + mitmproxy" \
 		"  make compose-traefik-up-d            # several instances behind Traefik" \

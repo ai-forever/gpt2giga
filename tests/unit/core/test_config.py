@@ -126,10 +126,27 @@ def test_proxy_settings_observability_sinks_from_env_csv(monkeypatch):
     assert s.observability_sinks == ["prometheus", "otlp"]
 
 
+def test_proxy_settings_observability_sinks_supports_phoenix(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SINKS", "prometheus, phoenix")
+    s = ProxySettings()
+    assert s.observability_sinks == ["prometheus", "phoenix"]
+
+
 def test_proxy_settings_observability_sinks_can_be_disabled(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SINKS", " none ")
     s = ProxySettings()
     assert s.observability_sinks == []
+
+
+def test_proxy_settings_phoenix_fields_normalize_blank_values():
+    s = ProxySettings(
+        phoenix_base_url="  ",
+        phoenix_api_key="",
+        phoenix_project_name="   ",
+    )
+    assert s.phoenix_base_url is None
+    assert s.phoenix_api_key is None
+    assert s.phoenix_project_name is None
 
 
 def test_proxy_settings_otlp_headers_from_env_json(monkeypatch):

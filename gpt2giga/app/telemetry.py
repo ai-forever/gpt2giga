@@ -202,6 +202,12 @@ class LangfuseTraceSink(OtlpHttpTraceSink):
     name = "langfuse"
 
 
+class PhoenixTraceSink(OtlpHttpTraceSink):
+    """Export normalized request events to Phoenix via its OTLP/HTTP endpoint."""
+
+    name = "phoenix"
+
+
 class _CounterMetric:
     """Simple Prometheus counter implementation with labels."""
 
@@ -680,6 +686,18 @@ def _build_default_resource_attributes(config: Any | None) -> dict[str, Any]:
     return resource_attributes
 
 
+def _build_phoenix_resource_attributes(config: Any | None) -> dict[str, Any]:
+    resource_attributes = _build_default_resource_attributes(config)
+    proxy_settings = getattr(config, "proxy_settings", None)
+    project_name = getattr(proxy_settings, "phoenix_project_name", None)
+    normalized_project_name = (
+        str(project_name).strip() if project_name is not None else ""
+    )
+    if normalized_project_name:
+        resource_attributes["openinference.project.name"] = normalized_project_name
+    return resource_attributes
+
+
 def _build_otlp_headers(config: Any | None) -> dict[str, str]:
     proxy_settings = getattr(config, "proxy_settings", None)
     configured = getattr(proxy_settings, "otlp_headers", None)
@@ -732,6 +750,26 @@ def _build_langfuse_headers(config: Any | None) -> dict[str, str]:
     }
     proxy_settings_headers = _build_otlp_headers(config)
     headers.update(proxy_settings_headers)
+    return headers
+
+
+def _build_phoenix_endpoint(config: Any | None) -> str:
+    proxy_settings = getattr(config, "proxy_settings", None)
+    base_url = getattr(proxy_settings, "phoenix_base_url", None)
+    normalized = str(base_url).strip().rstrip("/") if base_url is not None else ""
+    if not normalized:
+        raise RuntimeError(
+            "Phoenix sink requires GPT2GIGA_PHOENIX_BASE_URL to be configured."
+        )
+    return f"{normalized}/v1/traces"
+
+
+def _build_phoenix_headers(config: Any | None) -> dict[str, str]:
+    proxy_settings = getattr(config, "proxy_settings", None)
+    api_key = str(getattr(proxy_settings, "phoenix_api_key", "") or "").strip()
+    headers = _build_otlp_headers(config)
+    if api_key:
+        headers["authorization"] = f"Bearer {api_key}"
     return headers
 
 
@@ -875,6 +913,30 @@ register_observability_sink(
                 5.0,
             ),
             attribute_enricher=_build_langfuse_attributes,
+        ),
+    )
+)
+register_observability_sink(
+    ObservabilitySinkDescriptor(
+        name="phoenix",
+        description="Built-in Phoenix OTLP/HTTP trace exporter.",
+        factory=lambda **kwargs: PhoenixTraceSink(
+            endpoint=_build_phoenix_endpoint(kwargs.get("config")),
+            headers=_build_phoenix_headers(kwargs.get("config")),
+            resource_attributes=_build_phoenix_resource_attributes(
+                kwargs.get("config")
+            ),
+            logger=kwargs.get("logger"),
+            max_pending_requests=getattr(
+                getattr(kwargs.get("config"), "proxy_settings", None),
+                "otlp_max_pending_requests",
+                256,
+            ),
+            timeout_seconds=getattr(
+                getattr(kwargs.get("config"), "proxy_settings", None),
+                "otlp_timeout_seconds",
+                5.0,
+            ),
         ),
     )
 )

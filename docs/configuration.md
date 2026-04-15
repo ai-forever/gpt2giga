@@ -78,6 +78,7 @@ docker compose -f deploy/compose/base.yaml --profile DEV up -d
 - `deploy/compose/observability-prometheus.yaml` — Prometheus scrape для `/metrics`;
 - `deploy/compose/observability-otlp.yaml` — OTLP Collector для trace export-а;
 - `deploy/compose/observability-langfuse.yaml` — локальный Langfuse stack;
+- `deploy/compose/observability-phoenix.yaml` — локальный Phoenix stack;
 - `deploy/compose/observability.yaml` — debug/inspection сценарии;
 - `deploy/compose/runtime-backends/README.md` — runtime store backends.
 
@@ -97,15 +98,18 @@ docker compose -f deploy/compose/base.yaml --profile DEV up -d
 | `GPT2GIGA_RUNTIME_STORE_BACKEND` | Где хранить runtime metadata: `memory` или `sqlite` |
 | `GPT2GIGA_RUNTIME_STORE_DSN` | Файл/DSN для runtime store backend-а |
 | `GPT2GIGA_ENABLE_TELEMETRY` | Включает fan-out в telemetry sinks |
-| `GPT2GIGA_OBSERVABILITY_SINKS` | Встроенные sinks: `prometheus`, `otlp`, `langfuse`, либо `none` |
+| `GPT2GIGA_OBSERVABILITY_SINKS` | Встроенные sinks: `prometheus`, `otlp`, `langfuse`, `phoenix`, либо `none` |
 | `GPT2GIGA_OTLP_TRACES_ENDPOINT` | Полный OTLP/HTTP traces endpoint (`.../v1/traces`) |
 | `GPT2GIGA_OTLP_HEADERS` | Дополнительные headers для OTLP export-а |
 | `GPT2GIGA_OTLP_TIMEOUT_SECONDS` | Таймаут одного OTLP export request |
 | `GPT2GIGA_OTLP_MAX_PENDING_REQUESTS` | Максимум in-flight OTLP exports |
-| `GPT2GIGA_OTLP_SERVICE_NAME` | `service.name` resource attribute для OTLP/Langfuse |
+| `GPT2GIGA_OTLP_SERVICE_NAME` | `service.name` resource attribute для OTLP/Langfuse/Phoenix |
 | `GPT2GIGA_LANGFUSE_BASE_URL` | Base URL Langfuse instance-а |
 | `GPT2GIGA_LANGFUSE_PUBLIC_KEY` | Public key для Langfuse ingest-а |
 | `GPT2GIGA_LANGFUSE_SECRET_KEY` | Secret key для Langfuse ingest-а |
+| `GPT2GIGA_PHOENIX_BASE_URL` | Base URL Phoenix instance-а |
+| `GPT2GIGA_PHOENIX_API_KEY` | API key для Phoenix ingest-а (`Authorization: Bearer ...`) |
+| `GPT2GIGA_PHOENIX_PROJECT_NAME` | Phoenix/OpenInference project name |
 | `GPT2GIGA_ENABLE_REASONING` | По умолчанию добавляет `reasoning_effort="high"` для GigaChat, если клиент не указал его явно |
 | `GPT2GIGA_CORS_ALLOW_ORIGINS` | CORS origins в JSON-массиве |
 | `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | Глобальный лимит размера request body |

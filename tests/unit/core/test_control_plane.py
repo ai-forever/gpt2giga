@@ -1,3 +1,5 @@
+import json
+
 from gpt2giga.core.config.control_plane import (
     apply_control_plane_overrides,
     build_proxy_config_from_control_plane_payload,
@@ -169,3 +171,99 @@ def test_load_control_plane_revision_payload_returns_saved_snapshot(
     assert (
         restored.gigachat_settings.credentials.get_secret_value() == "persisted-creds"
     )
+
+
+def test_apply_control_plane_overrides_legacy_payload_keeps_runtime_gigachat_env(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+
+    legacy_payload = {
+        "version": 1,
+        "proxy": {
+            "mode": "DEV",
+            "observability_sinks": ["prometheus"],
+            "runtime_store_backend": "memory",
+            "runtime_store_namespace": "gpt2giga",
+            "enable_telemetry": True,
+            "enabled_providers": ["openai", "anthropic", "gemini"],
+            "gigachat_api_mode": "v1",
+            "pass_model": False,
+            "pass_token": False,
+        },
+        "gigachat": {
+            "base_url": "https://gigachat.devices.sberbank.ru/api/v1",
+            "auth_url": "https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
+            "scope": "GIGACHAT_API_PERS",
+            "model": None,
+            "verify_ssl_certs": True,
+            "timeout": 30.0,
+        },
+        "secrets": {
+            "proxy": {},
+            "gigachat": {},
+        },
+        "change": {
+            "changed_fields": [
+                "enable_telemetry",
+                "enabled_providers",
+                "gigachat_api_mode",
+                "mode",
+                "observability_sinks",
+                "pass_model",
+                "pass_token",
+                "runtime_store_backend",
+                "runtime_store_namespace",
+            ]
+        },
+        "revision_id": "legacy-revision",
+        "updated_at": "2026-04-15T08:08:28.443991Z",
+    }
+
+    get_control_plane_file().write_text(
+        json.dumps(legacy_payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    runtime = ProxyConfig(
+        proxy=ProxySettings(mode="DEV"),
+        gigachat={
+            "credentials": "runtime-creds",
+            "model": "GigaChat-2-Max",
+            "verify_ssl_certs": False,
+        },
+    )
+    merged = apply_control_plane_overrides(runtime)
+
+    assert merged.gigachat_settings.credentials.get_secret_value() == "runtime-creds"
+    assert merged.gigachat_settings.model == "GigaChat-2-Max"
+    assert merged.gigachat_settings.verify_ssl_certs is False
+    assert merged.proxy_settings.observability_sinks == ["prometheus"]
+
+
+def test_persist_control_plane_config_keeps_managed_gigachat_fields_across_saves(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+
+    persist_control_plane_config(
+        ProxyConfig(
+            proxy=ProxySettings(mode="DEV"),
+            gigachat={"credentials": "persisted-creds", "model": "GigaChat-Max"},
+        ),
+        changed_fields={"credentials", "model"},
+    )
+    persist_control_plane_config(
+        ProxyConfig(
+            proxy=ProxySettings(mode="DEV", enable_reasoning=True),
+            gigachat={"credentials": "persisted-creds", "model": "GigaChat-Max"},
+        ),
+        changed_fields={"enable_reasoning"},
+    )
+
+    runtime = ProxyConfig(proxy=ProxySettings(mode="DEV"))
+    merged = apply_control_plane_overrides(runtime)
+
+    assert merged.proxy_settings.enable_reasoning is True
+    assert merged.gigachat_settings.credentials.get_secret_value() == "persisted-creds"
+    assert merged.gigachat_settings.model == "GigaChat-Max"

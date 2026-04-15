@@ -338,7 +338,7 @@ class ProxySettings(BaseSettings):
         default=True,
         description=(
             "Включить telemetry sink layer поверх request audit events. "
-            "False отключает fan-out в Prometheus/OTLP/Langfuse и оставляет "
+            "False отключает fan-out в Prometheus/OTLP/Langfuse/Phoenix и оставляет "
             "только recent request/error feeds для admin."
         ),
     )
@@ -346,7 +346,7 @@ class ProxySettings(BaseSettings):
         default_factory=lambda: ["prometheus"],
         description=(
             "Список observability sink-ов для нормализованных request events. "
-            "Встроенные sink-и: prometheus, otlp, langfuse. Кастомные sink-и "
+            "Встроенные sink-и: prometheus, otlp, langfuse, phoenix. Кастомные sink-и "
             "можно регистрировать через app.telemetry registry."
         ),
     )
@@ -378,7 +378,7 @@ class ProxySettings(BaseSettings):
     )
     otlp_service_name: str = Field(
         default="gpt2giga",
-        description="service.name resource attribute для OTLP/Langfuse exporters.",
+        description="service.name resource attribute для OTLP/Langfuse/Phoenix exporters.",
     )
     langfuse_base_url: str | None = Field(
         default=None,
@@ -395,6 +395,25 @@ class ProxySettings(BaseSettings):
         default=None,
         description="Langfuse secret key для OTLP ingest auth.",
         repr=False,
+    )
+    phoenix_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL Phoenix instance-а без суффикса /v1/traces, например "
+            "http://phoenix:6006."
+        ),
+    )
+    phoenix_api_key: str | None = Field(
+        default=None,
+        description="Phoenix API key для Authorization: Bearer ingest auth.",
+        repr=False,
+    )
+    phoenix_project_name: str | None = Field(
+        default=None,
+        description=(
+            "Опциональный Phoenix/OpenInference project name "
+            "(`openinference.project.name`)."
+        ),
     )
     recent_requests_max_items: int = Field(
         default=200,
@@ -596,6 +615,9 @@ class ProxySettings(BaseSettings):
         "langfuse_base_url",
         "langfuse_public_key",
         "langfuse_secret_key",
+        "phoenix_base_url",
+        "phoenix_api_key",
+        "phoenix_project_name",
         mode="before",
     )
     @classmethod
