@@ -14,11 +14,28 @@ from math import inf
 from typing import Any
 
 import aiohttp
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+    ExportTraceServiceRequest,
+)
+from opentelemetry.proto.common.v1.common_pb2 import (
+    AnyValue,
+    ArrayValue,
+    InstrumentationScope,
+    KeyValue,
+)
+from opentelemetry.proto.resource.v1.resource_pb2 import Resource
+from opentelemetry.proto.trace.v1.trace_pb2 import (
+    ResourceSpans,
+    ScopeSpans,
+    Span,
+    Status,
+)
 
 from collections import defaultdict
 
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 _OTLP_TRACES_CONTENT_TYPE = "application/json"
+_OTLP_PROTOBUF_TRACES_CONTENT_TYPE = "application/x-protobuf"
 _OTLP_HTTP_OK_STATUSES = {200, 202}
 _OTLP_SCOPE_NAME = "gpt2giga.observability"
 _OTLP_SCOPE_VERSION = "1.0.0"
@@ -83,6 +100,20 @@ class OtlpHttpTraceSink(ObservabilitySink):
         max_pending_requests: int = 256,
         timeout_seconds: float = 5.0,
         attribute_enricher: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
+        content_type: str = _OTLP_TRACES_CONTENT_TYPE,
+        payload_builder: (
+            Callable[
+                [
+                    Mapping[str, Any],
+                    Mapping[str, Any],
+                    str,
+                    str,
+                    Callable[[Mapping[str, Any]], dict[str, Any]] | None,
+                ],
+                Mapping[str, Any] | bytes,
+            ]
+            | None
+        ) = None,
     ) -> None:
         normalized_endpoint = str(endpoint).strip().rstrip("/")
         if not normalized_endpoint:
@@ -100,6 +131,8 @@ class OtlpHttpTraceSink(ObservabilitySink):
         self._max_pending_requests = max(1, int(max_pending_requests))
         self._timeout_seconds = max(0.1, float(timeout_seconds))
         self._attribute_enricher = attribute_enricher
+        self._content_type = str(content_type).strip() or _OTLP_TRACES_CONTENT_TYPE
+        self._payload_builder = payload_builder or _build_otlp_traces_payload
         self._session: aiohttp.ClientSession | None = None
         self._pending_tasks: set[asyncio.Task[None]] = set()
         self._drop_warning_emitted = False
@@ -155,7 +188,7 @@ class OtlpHttpTraceSink(ObservabilitySink):
             )
             return
 
-        payload = _build_otlp_traces_payload(
+        payload = self._payload_builder(
             event,
             resource_attributes=self._resource_attributes,
             scope_name=_OTLP_SCOPE_NAME,
@@ -166,14 +199,19 @@ class OtlpHttpTraceSink(ObservabilitySink):
         self._pending_tasks.add(task)
         task.add_done_callback(self._pending_tasks.discard)
 
-    async def _post_payload(self, payload: Mapping[str, Any]) -> None:
-        headers = {"content-type": _OTLP_TRACES_CONTENT_TYPE, **self._headers}
+    async def _post_payload(self, payload: Mapping[str, Any] | bytes) -> None:
+        headers = {"content-type": self._content_type, **self._headers}
         session = self._session
         if session is None or session.closed:
             return
+        request_kwargs = (
+            {"data": payload}
+            if isinstance(payload, (bytes, bytearray))
+            else {"json": payload}
+        )
         try:
             async with session.post(
-                self._endpoint, json=payload, headers=headers
+                self._endpoint, headers=headers, **request_kwargs
             ) as response:
                 if response.status in _OTLP_HTTP_OK_STATUSES:
                     self._drop_warning_emitted = False
@@ -573,6 +611,73 @@ def _build_otlp_traces_payload(
     }
 
 
+def _build_otlp_traces_protobuf_payload(
+    event: Mapping[str, Any],
+    *,
+    resource_attributes: Mapping[str, Any],
+    scope_name: str,
+    scope_version: str,
+    attribute_enricher: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
+) -> bytes:
+    started_at = _parse_event_started_at(event.get("created_at"))
+    duration_ms = max(0.0, float(event.get("duration_ms") or 0.0))
+    ended_at = started_at + timedelta(milliseconds=duration_ms)
+    span_attributes = _build_otlp_span_attributes(event)
+    if attribute_enricher is not None:
+        span_attributes.update(attribute_enricher(event))
+    error_type = _label_value(event.get("error_type"), default="")
+    status_code = _safe_int(event.get("status_code"), default=0)
+    end_time_unix_nano = _datetime_to_unix_nanos(ended_at)
+    span = Span(
+        trace_id=secrets.token_bytes(16),
+        span_id=secrets.token_bytes(8),
+        flags=1,
+        name=_build_span_name(event),
+        kind=2,
+        start_time_unix_nano=_datetime_to_unix_nanos(started_at),
+        end_time_unix_nano=end_time_unix_nano,
+        attributes=_serialize_otel_attributes_protobuf(span_attributes),
+        status=Status(
+            code=2 if _is_error_event(event) else 1,
+            message=error_type if _is_error_event(event) else "",
+        ),
+    )
+    if error_type:
+        span.events.append(
+            Span.Event(
+                name="exception",
+                time_unix_nano=end_time_unix_nano,
+                attributes=_serialize_otel_attributes_protobuf(
+                    {
+                        "exception.type": error_type,
+                        "exception.message": error_type,
+                        "http.response.status_code": status_code,
+                    }
+                ),
+            )
+        )
+
+    request = ExportTraceServiceRequest(
+        resource_spans=[
+            ResourceSpans(
+                resource=Resource(
+                    attributes=_serialize_otel_attributes_protobuf(resource_attributes)
+                ),
+                scope_spans=[
+                    ScopeSpans(
+                        scope=InstrumentationScope(
+                            name=scope_name,
+                            version=scope_version,
+                        ),
+                        spans=[span],
+                    )
+                ],
+            )
+        ]
+    )
+    return request.SerializeToString()
+
+
 def _build_otlp_span_attributes(event: Mapping[str, Any]) -> dict[str, Any]:
     attributes: dict[str, Any] = {
         "gpt2giga.provider_surface": _label_value(event.get("provider")),
@@ -696,6 +801,143 @@ def _build_phoenix_resource_attributes(config: Any | None) -> dict[str, Any]:
     if normalized_project_name:
         resource_attributes["openinference.project.name"] = normalized_project_name
     return resource_attributes
+
+
+def _build_phoenix_attributes(event: Mapping[str, Any]) -> dict[str, Any]:
+    attributes: dict[str, Any] = {
+        "openinference.span.kind": _resolve_openinference_span_kind(event),
+    }
+    session_id = _label_value(event.get("session_id"), default="")
+    if session_id:
+        attributes["session.id"] = session_id
+    model = _label_value(event.get("model"), default="")
+    if model:
+        attributes["llm.model_name"] = model
+        attributes["llm.system"] = "gigachat"
+        attributes["llm.provider"] = "gigachat"
+
+    input_value = _label_value(event.get("input_value"), default="")
+    if input_value:
+        attributes["input.value"] = input_value
+        input_mime_type = _label_value(event.get("input_mime_type"), default="")
+        if input_mime_type:
+            attributes["input.mime_type"] = input_mime_type
+
+    output_value = _label_value(event.get("output_value"), default="")
+    if output_value:
+        attributes["output.value"] = output_value
+        output_mime_type = _label_value(event.get("output_mime_type"), default="")
+        if output_mime_type:
+            attributes["output.mime_type"] = output_mime_type
+
+    _add_phoenix_message_attributes(
+        attributes,
+        "llm.input_messages",
+        event.get("input_messages"),
+    )
+    _add_phoenix_message_attributes(
+        attributes,
+        "llm.output_messages",
+        event.get("output_messages"),
+    )
+    _add_phoenix_tools_attributes(attributes, event.get("available_tools"))
+
+    invocation_parameters = _label_value(event.get("invocation_parameters"), default="")
+    if invocation_parameters:
+        attributes["llm.invocation_parameters"] = invocation_parameters
+
+    usage = event.get("token_usage")
+    if isinstance(usage, Mapping):
+        attributes["llm.token_count.prompt"] = _safe_int(
+            usage.get("prompt_tokens"), default=0
+        )
+        attributes["llm.token_count.completion"] = _safe_int(
+            usage.get("completion_tokens"), default=0
+        )
+        attributes["llm.token_count.total"] = _safe_int(
+            usage.get("total_tokens"), default=0
+        )
+    return attributes
+
+
+def _add_phoenix_message_attributes(
+    attributes: dict[str, Any],
+    prefix: str,
+    messages: Any,
+) -> None:
+    if not isinstance(messages, list):
+        return
+    for index, message in enumerate(messages):
+        if not isinstance(message, Mapping):
+            continue
+        role = _label_value(message.get("role"), default="")
+        content = _label_value(message.get("content"), default="")
+        if role:
+            attributes[f"{prefix}.{index}.message.role"] = role
+        if content:
+            attributes[f"{prefix}.{index}.message.content"] = content
+        name = _label_value(message.get("name"), default="")
+        if name:
+            attributes[f"{prefix}.{index}.message.name"] = name
+        tool_call_id = _label_value(message.get("tool_call_id"), default="")
+        if tool_call_id:
+            attributes[f"{prefix}.{index}.message.tool_call_id"] = tool_call_id
+        tool_calls = message.get("tool_calls")
+        if not isinstance(tool_calls, list):
+            continue
+        for tool_index, tool_call in enumerate(tool_calls):
+            if not isinstance(tool_call, Mapping):
+                continue
+            tool_call_id = _label_value(tool_call.get("id"), default="")
+            function_name = _label_value(tool_call.get("function_name"), default="")
+            function_arguments = _label_value(
+                tool_call.get("function_arguments"),
+                default="",
+            )
+            if tool_call_id:
+                attributes[
+                    f"{prefix}.{index}.message.tool_calls.{tool_index}.tool_call.id"
+                ] = tool_call_id
+            if function_name:
+                attributes[
+                    f"{prefix}.{index}.message.tool_calls.{tool_index}.tool_call.function.name"
+                ] = function_name
+            if function_arguments:
+                attributes[
+                    f"{prefix}.{index}.message.tool_calls.{tool_index}.tool_call.function.arguments"
+                ] = function_arguments
+
+
+def _add_phoenix_tools_attributes(
+    attributes: dict[str, Any],
+    tools: Any,
+) -> None:
+    if not isinstance(tools, list):
+        return
+    for index, tool in enumerate(tools):
+        if not isinstance(tool, Mapping):
+            continue
+        tool_type = _label_value(tool.get("type"), default="")
+        if tool_type:
+            attributes[f"llm.tools.{index}.tool.type"] = tool_type
+        tool_name = _label_value(tool.get("name"), default="")
+        if not tool_name and tool_type == "function":
+            function = tool.get("function")
+            if isinstance(function, Mapping):
+                tool_name = _label_value(function.get("name"), default="")
+        if tool_name:
+            attributes[f"llm.tools.{index}.tool.name"] = tool_name
+        tool_schema = json.dumps(tool, ensure_ascii=False, separators=(",", ":"))
+        attributes[f"llm.tools.{index}.tool.json_schema"] = tool_schema
+
+
+def _resolve_openinference_span_kind(event: Mapping[str, Any]) -> str:
+    endpoint = _label_value(event.get("endpoint"), default="")
+    if "embed" in endpoint:
+        return "EMBEDDING"
+    if endpoint:
+        return "LLM"
+    return "UNKNOWN"
 
 
 def _build_otlp_headers(config: Any | None) -> dict[str, str]:
@@ -834,6 +1076,41 @@ def _serialize_otel_attribute_value(value: Any) -> dict[str, Any] | None:
     return {"stringValue": str(value)}
 
 
+def _serialize_otel_attributes_protobuf(
+    attributes: Mapping[str, Any],
+) -> list[KeyValue]:
+    serialized: list[KeyValue] = []
+    for key in sorted(attributes):
+        if not str(key).strip():
+            continue
+        value = attributes[key]
+        serialized_value = _serialize_otel_attribute_value_protobuf(value)
+        if serialized_value is None:
+            continue
+        serialized.append(KeyValue(key=str(key), value=serialized_value))
+    return serialized
+
+
+def _serialize_otel_attribute_value_protobuf(value: Any) -> AnyValue | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return AnyValue(bool_value=value)
+    if isinstance(value, int):
+        return AnyValue(int_value=value)
+    if isinstance(value, float):
+        return AnyValue(double_value=value)
+    if isinstance(value, (list, tuple)):
+        values = [
+            serialized
+            for item in value
+            if (serialized := _serialize_otel_attribute_value_protobuf(item))
+            is not None
+        ]
+        return AnyValue(array_value=ArrayValue(values=values))
+    return AnyValue(string_value=str(value))
+
+
 def _is_error_event(event: Mapping[str, Any]) -> bool:
     return _safe_int(event.get("status_code"), default=0) >= 400 or bool(
         _label_value(event.get("error_type"), default="")
@@ -937,6 +1214,9 @@ register_observability_sink(
                 "otlp_timeout_seconds",
                 5.0,
             ),
+            attribute_enricher=_build_phoenix_attributes,
+            content_type=_OTLP_PROTOBUF_TRACES_CONTENT_TYPE,
+            payload_builder=_build_otlp_traces_protobuf_payload,
         ),
     )
 )

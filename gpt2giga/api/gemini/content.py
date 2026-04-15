@@ -34,6 +34,7 @@ from gpt2giga.app.dependencies import (
     get_logger_from_state,
 )
 from gpt2giga.app.observability import (
+    annotate_request_audit_request_payload,
     annotate_request_audit_from_payload,
     set_request_audit_model,
 )
@@ -71,6 +72,7 @@ def _ensure_route_model_matches_body(route_model: str, body_model: str | None) -
 async def generate_content(model: str, request: Request):
     """Gemini Developer API compatible generateContent endpoint."""
     data = await read_gemini_request_json(request)
+    annotate_request_audit_request_payload(request, data)
     normalized_model = _ensure_route_model_matches_body(model, data.get("model"))
     data["model"] = normalized_model
     set_request_audit_model(request, normalized_model)

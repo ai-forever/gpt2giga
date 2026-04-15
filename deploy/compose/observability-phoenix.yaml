@@ -19,11 +19,11 @@ services:
     environment:
       PHOENIX_WORKING_DIR: /mnt/data
       PHOENIX_ENABLE_AUTH: ${PHOENIX_ENABLE_AUTH:-false}
-      PHOENIX_SECRET: ${PHOENIX_SECRET:-}
+      PHOENIX_SECRET: ${PHOENIX_SECRET:-phoenix-local-secret-change-me-2026}
       PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD: ${PHOENIX_DEFAULT_ADMIN_INITIAL_PASSWORD:-adminadmin}
     ports:
-      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
-      - "127.0.0.1:${PHOENIX_GRPC_PORT:-4317}:4317"
+      - "${PHOENIX_PORT:-6006}:6006"
+      - "${PHOENIX_GRPC_PORT:-4317}:4317"
     volumes:
       - phoenix-data:/mnt/data
 

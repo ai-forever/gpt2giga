@@ -13,6 +13,9 @@ from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_CHAT, provider_tag
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.observability import (
+    annotate_request_audit_from_payload,
+    annotate_request_audit_request_payload,
+    get_request_audit_metadata,
     set_request_audit_error,
     set_request_audit_model,
     set_request_audit_usage,
@@ -304,3 +307,97 @@ def test_observability_middleware_aggregates_usage_by_api_key_and_provider():
     assert provider_usage["request_count"] == 1
     assert provider_usage["api_keys"]["sdk-openai"]["source"] == "scoped"
     assert provider_usage["endpoints"]["/chat/completions"]["request_count"] == 1
+
+
+def test_request_audit_extracts_responses_system_reasoning_and_tool_calls():
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    annotate_request_audit_request_payload(
+        request,
+        {
+            "model": "gpt-5",
+            "instructions": "Respond only with tool output.",
+            "reasoning": {"effort": "high", "summary": "auto"},
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "get_horoscope",
+                    "parameters": {"type": "object"},
+                }
+            ],
+            "input": [{"role": "user", "content": "What is my horoscope?"}],
+        },
+    )
+    annotate_request_audit_from_payload(
+        request,
+        {
+            "id": "resp_123",
+            "object": "response",
+            "output": [
+                {
+                    "type": "reasoning",
+                    "summary": [
+                        {"type": "summary_text", "text": "Need to call the tool."}
+                    ],
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_call_123",
+                    "call_id": "call_123",
+                    "name": "get_horoscope",
+                    "arguments": '{"sign":"Aquarius"}',
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": "Aquarius: ..."}],
+                },
+            ],
+        },
+    )
+
+    metadata = get_request_audit_metadata(request)
+
+    assert metadata["session_id"] == "resp_123"
+    assert metadata["input_messages"][0] == {
+        "role": "system",
+        "content": "Respond only with tool output.",
+    }
+    assert metadata["available_tools"][0]["name"] == "get_horoscope"
+    assert (
+        '"reasoning":{"effort":"high","summary":"auto"}'
+        in metadata["invocation_parameters"]
+    )
+    assert metadata["output_messages"][0]["content"] == "Need to call the tool."
+    assert metadata["output_messages"][1]["tool_calls"][0]["function_name"] == (
+        "get_horoscope"
+    )
+
+
+def test_request_audit_infers_responses_session_from_replayed_function_call_history():
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    annotate_request_audit_request_payload(
+        request,
+        {
+            "model": "gpt-5",
+            "input": [
+                {
+                    "type": "function_call",
+                    "id": "fc_call_abc123",
+                    "call_id": "call_abc123",
+                    "name": "get_horoscope",
+                    "arguments": '{"sign":"Aquarius"}',
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_abc123",
+                    "output": '{"horoscope":"Aquarius: ..."}',
+                },
+            ],
+        },
+    )
+
+    metadata = get_request_audit_metadata(request)
+
+    assert metadata["session_id"] == "resp_abc123"

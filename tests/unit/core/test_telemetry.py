@@ -5,8 +5,13 @@ import pytest
 from gpt2giga.app.telemetry import (
     PrometheusMetricsSink,
     _build_langfuse_attributes,
+    _build_phoenix_attributes,
     _build_otlp_traces_payload,
+    _build_otlp_traces_protobuf_payload,
     create_observability_hub,
+)
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+    ExportTraceServiceRequest,
 )
 
 
@@ -120,6 +125,101 @@ def test_langfuse_sink_requires_base_url_and_keys():
         create_observability_hub(["langfuse"], config=config)
 
 
+def test_phoenix_attributes_mark_llm_span_and_input_output_columns():
+    attributes = _build_phoenix_attributes(
+        {
+            "endpoint": "/chat/completions",
+            "model": "GigaChat-2-Max",
+            "session_id": "resp_123",
+            "input_value": "Tell me a joke",
+            "input_mime_type": "text/plain",
+            "output_value": "Knock knock",
+            "output_mime_type": "text/plain",
+            "input_messages": [
+                {"role": "system", "content": "Be concise."},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "call_123",
+                            "function_name": "get_weather",
+                            "function_arguments": '{"city":"Paris"}',
+                        }
+                    ],
+                },
+                {"role": "user", "content": "Tell me a joke"},
+            ],
+            "output_messages": [
+                {"role": "assistant", "content": "Thinking..."},
+                {"role": "assistant", "content": "Knock knock"},
+            ],
+            "available_tools": [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "parameters": {"type": "object"},
+                }
+            ],
+            "invocation_parameters": '{"reasoning":{"effort":"high"}}',
+            "token_usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+            },
+        }
+    )
+
+    assert attributes["openinference.span.kind"] == "LLM"
+    assert attributes["session.id"] == "resp_123"
+    assert attributes["input.value"] == "Tell me a joke"
+    assert attributes["output.value"] == "Knock knock"
+    assert attributes["llm.model_name"] == "GigaChat-2-Max"
+    assert attributes["llm.input_messages.0.message.role"] == "system"
+    assert (
+        attributes["llm.input_messages.1.message.tool_calls.0.tool_call.function.name"]
+        == "get_weather"
+    )
+    assert attributes["llm.output_messages.1.message.content"] == "Knock knock"
+    assert attributes["llm.tools.0.tool.name"] == "get_weather"
+    assert attributes["llm.invocation_parameters"] == '{"reasoning":{"effort":"high"}}'
+    assert attributes["llm.token_count.total"] == 30
+
+
+def test_otlp_protobuf_payload_contains_http_and_genai_attributes():
+    payload = _build_otlp_traces_protobuf_payload(
+        {
+            "created_at": "2026-04-14T10:20:30+00:00",
+            "provider": "openai",
+            "endpoint": "/chat/completions",
+            "path": "/v1/chat/completions",
+            "method": "post",
+            "status_code": 200,
+            "duration_ms": 125.0,
+            "model": "GigaChat-2-Max",
+            "request_id": "req_123",
+            "token_usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+            },
+        },
+        resource_attributes={"service.name": "gpt2giga"},
+        scope_name="gpt2giga.observability",
+        scope_version="1.0.0",
+    )
+
+    parsed = ExportTraceServiceRequest()
+    parsed.ParseFromString(payload)
+    span = parsed.resource_spans[0].scope_spans[0].spans[0]
+    attributes = {item.key: item.value for item in span.attributes}
+
+    assert span.name == "POST /chat/completions"
+    assert attributes["http.request.method"].string_value == "POST"
+    assert attributes["http.response.status_code"].int_value == 200
+    assert attributes["gen_ai.request.model"].string_value == "GigaChat-2-Max"
+    assert attributes["gen_ai.usage.total_tokens"].int_value == 30
+
+
 def test_phoenix_sink_builds_otlp_endpoint_headers_and_project_name():
     config = SimpleNamespace(
         proxy_settings=SimpleNamespace(
@@ -142,6 +242,7 @@ def test_phoenix_sink_builds_otlp_endpoint_headers_and_project_name():
     assert sink is not None
     assert sink.name == "phoenix"
     assert sink._endpoint == "http://phoenix:6006/v1/traces"
+    assert sink._content_type == "application/x-protobuf"
     assert sink._headers == {
         "x-tenant": "team-a",
         "authorization": "Bearer phx-secret",

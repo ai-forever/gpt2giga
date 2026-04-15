@@ -19,6 +19,7 @@ from gpt2giga.app.dependencies import (
     get_logger_from_state,
 )
 from gpt2giga.app.observability import (
+    annotate_request_audit_request_payload,
     annotate_request_audit_from_payload,
     set_request_audit_model,
 )
@@ -63,6 +64,7 @@ async def count_tokens(request: Request):
 async def messages(request: Request):
     """Anthropic Messages API compatible endpoint."""
     data = await read_request_json(request)
+    annotate_request_audit_request_payload(request, data)
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
     giga_client = get_gigachat_client(request)

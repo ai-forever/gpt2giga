@@ -7,6 +7,7 @@ from gpt2giga.api.openai.openapi import chat_completions_openapi_extra
 from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_CHAT, provider_tag
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.app.observability import (
+    annotate_request_audit_request_payload,
     annotate_request_audit_from_payload,
     set_request_audit_model,
 )
@@ -25,6 +26,7 @@ router = APIRouter(tags=[provider_tag(TAG_CHAT, PROVIDER_OPENAI)])
 async def chat_completions(request: Request):
     """Create a chat completion."""
     payload = await read_request_json(request)
+    annotate_request_audit_request_payload(request, payload)
     current_rquid = rquid_context.get()
     giga_client = get_gigachat_client(request)
     app_state = request.app.state

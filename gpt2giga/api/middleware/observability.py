@@ -104,6 +104,15 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
             "error_type": resolved_error_type,
             "api_key_name": getattr(api_key_context, "name", None),
             "api_key_source": getattr(api_key_context, "source", None),
+            "input_value": audit.get("input_value"),
+            "input_mime_type": audit.get("input_mime_type"),
+            "output_value": audit.get("output_value"),
+            "output_mime_type": audit.get("output_mime_type"),
+            "input_messages": audit.get("input_messages"),
+            "output_messages": audit.get("output_messages"),
+            "session_id": audit.get("session_id"),
+            "available_tools": audit.get("available_tools"),
+            "invocation_parameters": audit.get("invocation_parameters"),
         }
 
     def _record_event(

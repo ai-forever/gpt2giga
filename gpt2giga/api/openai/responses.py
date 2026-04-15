@@ -7,6 +7,7 @@ from gpt2giga.api.openai.openapi import responses_openapi_extra
 from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_RESPONSES, provider_tag
 from gpt2giga.app.dependencies import get_logger_from_state
 from gpt2giga.app.observability import (
+    annotate_request_audit_request_payload,
     annotate_request_audit_from_payload,
     set_request_audit_model,
 )
@@ -26,6 +27,7 @@ router = APIRouter(tags=[provider_tag(TAG_RESPONSES, PROVIDER_OPENAI)])
 async def responses(request: Request):
     """Create a Responses API response."""
     payload = await read_request_json(request)
+    annotate_request_audit_request_payload(request, payload)
     current_rquid = rquid_context.get()
     giga_client = get_gigachat_client(request)
     app_state = request.app.state
