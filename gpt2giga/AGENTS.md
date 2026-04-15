@@ -28,6 +28,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 |---|---|
 | `app/factory.py` | FastAPI app factory, middleware registration, router mounting |
 | `app/admin_ui.py` | Optional admin UI detection and `/admin` setup-path helpers |
+| `app/admin_runtime.py` | Domain services that build admin runtime/config/capability/usage payloads |
 | `app/lifespan.py` | Startup/shutdown orchestration and runtime service lifecycle |
 | `app/wiring.py` | App-scoped runtime wiring for typed `app.state.services/stores/providers` |
 | `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
@@ -78,7 +79,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/` | HTTP transport adapters: provider endpoints, middleware, dependencies, system routes, and admin routes |
 | `api/*/openapi.py` | Provider-specific OpenAPI schema fragments colocated with routers |
 | `api/_openapi.py` | Shared OpenAPI request-body helper |
-| `api/admin/runtime.py` | `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities` |
+| `api/admin/runtime.py` | Thin HTTP layer for `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities`, recent events, and usage endpoints |
 | `api/admin/logs.py` | `/admin/api/logs`, `/admin/api/logs/stream`, legacy `/logs*` compatibility shims |
 | `api/admin/ui.py` | `/admin` operator UI |
 | `frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `../packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` |

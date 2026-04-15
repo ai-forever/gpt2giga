@@ -100,3 +100,41 @@
   - required settings;
   - live-apply vs restart semantics;
   - test/export actions.
+
+## Phase 2
+
+### Сделано
+
+- Начат разрез `gpt2giga/api/admin/runtime.py` на domain-oriented app services.
+- Добавлен новый app-level модуль `gpt2giga/app/admin_runtime.py` с двумя явными service-entrypoints:
+  - `AdminRuntimeSnapshotService` для version/config/runtime/routes/capabilities/recent-events payload-ов;
+  - `AdminUsageReporter` для aggregated usage payload-ов и filter-summary logic.
+- Перенёс из route-модуля в service layer:
+  - runtime snapshot builders;
+  - config summary builders;
+  - capability matrix / admin route-capability metadata;
+  - recent requests/errors payload assembly;
+  - usage filtering, sorting, available-filters и summary aggregation.
+- Упростил `gpt2giga/api/admin/runtime.py` до тонкого HTTP слоя:
+  - IP allowlist check;
+  - query params;
+  - вызов соответствующего service builder-а;
+  - metrics endpoint оставлен transport-level wrapper-ом над `build_metrics_response(...)`.
+- Добавил unit coverage на новый service slice:
+  - runtime snapshot payload;
+  - grouped config summary payload;
+  - usage filtering + summary aggregation.
+- Обновил `gpt2giga/AGENTS.md`, чтобы repo map отражал новый app-level service module.
+
+### Проверка
+
+- `uv sync --all-extras --dev`
+- `uv run ruff check gpt2giga/app/admin_runtime.py gpt2giga/api/admin/runtime.py tests/unit/app/test_admin_runtime.py`
+- `uv run ruff format --check gpt2giga/app/admin_runtime.py gpt2giga/api/admin/runtime.py tests/unit/app/test_admin_runtime.py`
+- `uv run pytest tests/unit/app/test_admin_runtime.py tests/integration/app/test_system_router_extra.py -q`
+- `uv run pytest tests/integration/app/test_api_server.py -q`
+
+### Дальше
+
+- Продолжить Phase 2 на `gpt2giga/api/admin/settings.py`: вытащить snapshot/update/persist/test-key flows в отдельные control-plane services.
+- После `settings.py` перейти к extraction runtime snapshot/update reporting из более тяжёлых helper-блоков в `api/admin/runtime.py`, если останутся смешанные transport/domain обязанности.
