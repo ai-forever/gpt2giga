@@ -217,6 +217,7 @@ export function collectGigachatPayload(form) {
         scope: fields.scope.value.trim() || null,
         base_url: fields.base_url.value.trim() || null,
         auth_url: fields.auth_url.value.trim() || null,
+        ca_bundle_file: fields.ca_bundle_file.value.trim() || null,
         verify_ssl_certs: fields.verify_ssl_certs.value === "true",
         timeout: fields.timeout && fields.timeout.value ? Number(fields.timeout.value) : null,
     };

@@ -16,29 +16,28 @@
 
 Исходники UI:
 
-- [gpt2giga/frontend/admin/api.ts](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/frontend/admin/api.ts)
-- [gpt2giga/frontend/admin/app.ts](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/frontend/admin/app.ts)
-- [gpt2giga/frontend/admin/forms.ts](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/frontend/admin/forms.ts)
-- [gpt2giga/frontend/admin/routes.ts](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/frontend/admin/routes.ts)
-- [gpt2giga/frontend/admin/templates.ts](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/frontend/admin/templates.ts)
-- [gpt2giga/frontend/admin/pages/](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/frontend/admin/pages)
+- [gpt2giga/frontend/admin/api.ts](./gpt2giga/frontend/admin/api.ts)
+- [gpt2giga/frontend/admin/app.ts](./gpt2giga/frontend/admin/app.ts)
+- [gpt2giga/frontend/admin/forms.ts](./gpt2giga/frontend/admin/forms.ts)
+- [gpt2giga/frontend/admin/routes.ts](./gpt2giga/frontend/admin/routes.ts)
+- [gpt2giga/frontend/admin/templates.ts](./gpt2giga/frontend/admin/templates.ts)
+- [gpt2giga/frontend/admin/pages/](./gpt2giga/frontend/admin/pages)
 
-Скомпилированные ассеты:
+Runtime-ассеты:
 
-- [gpt2giga/static/admin/](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/static/admin)
+- [packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/](./packages/gpt2giga-ui/src/gpt2giga_ui/static/admin)
 
 Shell:
 
-- [gpt2giga/templates/console.html](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/templates/console.html)
-- [gpt2giga/templates/admin.html](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/templates/admin.html)
+- [packages/gpt2giga-ui/src/gpt2giga_ui/templates/console.html](./packages/gpt2giga-ui/src/gpt2giga_ui/templates/console.html)
 
 Раздача статики:
 
-- [gpt2giga/app/factory.py](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/app/factory.py)
+- [gpt2giga/app/factory.py](./gpt2giga/app/factory.py)
 
 Роутинг shell:
 
-- [gpt2giga/api/admin/ui.py](/Users/riyakupov/code_projects/gpt2giga/gpt2giga/api/admin/ui.py)
+- [gpt2giga/api/admin/ui.py](./gpt2giga/api/admin/ui.py)
 
 ## Продуктовая цель
 
@@ -94,7 +93,7 @@ Frontend уже переведён на TypeScript. Это нужно сохра
 Правило:
 
 - редактируем `.ts` в `gpt2giga/frontend/admin`
-- собираем в `gpt2giga/static/admin`
+- собираем в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin`
 - shell только подключает готовые файлы
 
 ### 4. Bootstrap без `.env`
@@ -184,7 +183,7 @@ open http://localhost:8090
 
 ## Что доведено после параллельной волны
 
-Backlog из [UI_PARALLEL_TASKS.md](/Users/riyakupov/code_projects/gpt2giga/UI_PARALLEL_TASKS.md) закрыт целиком, включая интеграционные `T6-T7`.
+Backlog из [UI_PARALLEL_TASKS.md](./UI_PARALLEL_TASKS.md) закрыт целиком, включая интеграционные `T6-T7`.
 Это значит, что console теперь прошла не только этап modular TypeScript migration, но и отдельный проход по зрелости operator workflows.
 
 ### 1. Shared primitives и page structure
@@ -247,7 +246,7 @@ Backlog из [UI_PARALLEL_TASKS.md](/Users/riyakupov/code_projects/gpt2giga/UI_P
 npm run build:admin
 ```
 
-Скомпилированные ассеты в `gpt2giga/static/admin/` обновляются как часть финальной интеграции, а не как побочный эффект случайной локальной сборки.
+Скомпилированные ассеты в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` обновляются как часть финальной интеграции, а не как побочный эффект случайной локальной сборки.
 
 ## Чего делать не надо
 
@@ -262,7 +261,7 @@ npm run build:admin
 Если меняется admin UI:
 
 1. правим `gpt2giga/frontend/admin/*.ts`
-2. при необходимости правим shell/styling/static mount
+2. при необходимости правим shell/styling в `packages/gpt2giga-ui/src/gpt2giga_ui/`
 3. запускаем `npm run build:admin`
 4. прогоняем admin integration tests
 

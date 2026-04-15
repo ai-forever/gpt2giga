@@ -62,6 +62,8 @@ sequenceDiagram
 После старта proxy по умолчанию доступен на `http://localhost:8090`.
 Swagger UI доступен на `http://localhost:8090/docs`, а HTML admin console ставится отдельно через `uv add "gpt2giga[ui]"` и тогда открывается по `http://localhost:8090/admin`.
 
+Исходники admin UI лежат в `gpt2giga/frontend/admin/`, а runtime-ассеты и HTML shell, которые реально подхватывает приложение, живут в `packages/gpt2giga-ui/src/gpt2giga_ui/`.
+
 ### Docker / Compose
 
 ```bash
@@ -160,6 +162,15 @@ uv run ruff check .
 uv run ruff format --check .
 uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
+
+Для изменений в admin UI:
+
+```bash
+npm install
+npm run build:admin
+```
+
+Эта сборка пишет JavaScript-модули сразу в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, то есть в тот optional package, который runtime монтирует на `/admin/assets/admin/*`.
 
 PR-шаблоны находятся в [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) и [`.github/PULL_REQUEST_TEMPLATE/ru.md`](./.github/PULL_REQUEST_TEMPLATE/ru.md).
 

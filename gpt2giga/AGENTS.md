@@ -81,10 +81,8 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/admin/runtime.py` | `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities` |
 | `api/admin/logs.py` | `/admin/api/logs`, `/admin/api/logs/stream`, legacy `/logs*` compatibility shims |
 | `api/admin/ui.py` | `/admin` operator UI |
-| `frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `static/admin/` |
-| `static/admin/` | Compiled admin console assets | Served at `/admin/assets/admin/*` |
-| `templates/console.html` | Thin admin UI shell | Loads compiled CSS/JS for the console |
-| `../packages/gpt2giga-ui/` | Optional UI distribution | Ships the compiled admin shell/assets used by `gpt2giga[ui]` |
+| `frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `../packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` |
+| `../packages/gpt2giga-ui/` | Optional UI distribution | Runtime source of truth for the compiled admin shell/assets used by `gpt2giga[ui]` |
 
 ## API Layout
 

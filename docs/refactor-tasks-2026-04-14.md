@@ -14,7 +14,7 @@ Date: 2026-04-14
 - [x] Add one current architecture note for contributors.
   - Cover request flow, provider mapping flow, runtime/control-plane flow, and admin UI structure.
 - [x] Document admin frontend build workflow.
-  - Explain that `gpt2giga/frontend/admin/` is source and `gpt2giga/static/admin/` is generated output.
+  - Explain that `gpt2giga/frontend/admin/` is source and `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` is generated output.
 - [x] Decide whether compiled admin assets must stay committed.
   - If yes, document when and how to rebuild them.
   - If no, update packaging/release flow before removing them from git.

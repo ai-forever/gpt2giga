@@ -8,7 +8,7 @@
     "noEmitOnError": true,
     "skipLibCheck": true,
     "rootDir": "gpt2giga/frontend",
-    "outDir": "gpt2giga/static",
+    "outDir": "packages/gpt2giga-ui/src/gpt2giga_ui/static",
     "verbatimModuleSyntax": true
   },
   "include": ["gpt2giga/frontend/**/*.ts"]

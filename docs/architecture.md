@@ -81,9 +81,9 @@
 ### Текущая структура
 
 - Исходники operator UI находятся в `gpt2giga/frontend/admin/`.
-- Скомпилированные browser asset-ы находятся в `gpt2giga/static/admin/`.
-- HTML shell в `gpt2giga/templates/console.html` подключает `/admin/assets/admin/index.js` и `/admin/assets/admin/console.css`.
-- Статика монтируется в `gpt2giga/app/factory.py` через `StaticFiles(directory=gpt2giga/static)`.
+- Runtime-ассеты и HTML shell лежат в optional package `packages/gpt2giga-ui/src/gpt2giga_ui/`.
+- `gpt2giga/app/admin_ui.py` читает shell из `packages/gpt2giga-ui/src/gpt2giga_ui/templates/console.html`.
+- `gpt2giga/app/factory.py` монтирует `packages/gpt2giga-ui/src/gpt2giga_ui/static/` на `/admin/assets/*`.
 
 ### Как собирать
 
@@ -94,26 +94,26 @@ npm run build:admin
 
 - TypeScript-конфиг в `tsconfig.json` использует:
   - `rootDir = gpt2giga/frontend`
-  - `outDir = gpt2giga/static`
-- Это означает, что `gpt2giga/frontend/admin/**/*.ts` компилируется в `gpt2giga/static/admin/**/*.js`.
+  - `outDir = packages/gpt2giga-ui/src/gpt2giga_ui/static`
+- Это означает, что `gpt2giga/frontend/admin/**/*.ts` компилируется в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/**/*.js`.
 
 ### Нужно ли коммитить compiled admin assets
 
-Да, в текущем release flow `gpt2giga/static/admin/*` должны оставаться в git.
+Да, в текущем release flow compiled admin assets внутри `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/*` должны оставаться в git.
 
 Причина простая:
 
 - `Dockerfile` копирует `gpt2giga/` и сразу вызывает `uv build`, без Node.js шага.
-- `.github/workflows/publish-pypi.yml` публикует результат `uv build`, тоже без `npm run build:admin`.
+- `.github/workflows/publish-pypi.yml` отдельно собирает `packages/gpt2giga-ui`, тоже без `npm run build:admin`.
 - `.github/workflows/docker_image.yaml` собирает образ напрямую из репозитория, без отдельной frontend-сборки.
 
-Пока packaging/release pipeline не научится собирать admin frontend самостоятельно, каждое изменение в `gpt2giga/frontend/admin/` должно сопровождаться обновлением соответствующих файлов в `gpt2giga/static/admin/`.
+Пока packaging/release pipeline не научится собирать admin frontend самостоятельно, каждое изменение в `gpt2giga/frontend/admin/` должно сопровождаться обновлением соответствующих файлов в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
 
 Практическое правило для contributors:
 
 1. Меняете `gpt2giga/frontend/admin/*`.
 2. Запускаете `npm run build:admin`.
-3. Коммитите и исходники, и обновленный output в `gpt2giga/static/admin/`.
+3. Коммитите и исходники, и обновленный output в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
 
 ## Куда смотреть дальше
 
