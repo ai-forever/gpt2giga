@@ -30,7 +30,6 @@ services:
   gpt2giga-prod:
     <<: *gpt2giga-common
     profiles: ["PROD"]
-    pull_policy: always
     container_name: gpt2giga
     environment:
       HTTP_PROXY: http://mitmproxy:8080

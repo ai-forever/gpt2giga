@@ -65,8 +65,10 @@ sequenceDiagram
 
 ```bash
 cp .env.example .env
-docker compose -f deploy/compose/base.yaml --profile DEV up -d
+make compose-base-dev-d
 ```
+
+Полная карта compose-сценариев, включая observability, multi-instance, Traefik и runtime backend examples: [deploy/README.md](./deploy/README.md).
 
 Для production, reverse proxy и multi-instance сценариев используйте [docs/operator-guide.md](./docs/operator-guide.md) и [docs/integrations/nginx/README.md](./docs/integrations/nginx/README.md).
 

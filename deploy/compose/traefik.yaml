@@ -10,7 +10,6 @@ x-gpt2giga-common: &gpt2giga-common
 services:
   gpt2giga:
     <<: *gpt2giga-common
-    pull_policy: always
     container_name: gpt2giga
     environment:
       GIGACHAT_MODEL: GigaChat
@@ -21,7 +20,6 @@ services:
 
   gpt2giga-pro:
     <<: *gpt2giga-common
-    pull_policy: always
     container_name: gpt2giga_pro
     environment:
       GIGACHAT_MODEL: GigaChat-Pro
@@ -32,7 +30,6 @@ services:
 
   gpt2giga-max:
     <<: *gpt2giga-common
-    pull_policy: always
     container_name: gpt2giga_max
     environment:
       GIGACHAT_MODEL: GigaChat-Max

@@ -197,6 +197,7 @@ GPT2GIGA_MODE=DEV
 ## Docker / Compose
 
 Готовые compose-стеки лежат в `deploy/compose/`.
+Краткая карта файлов и соответствующих `make`-команд: [deploy/README.md](../deploy/README.md).
 
 Основные файлы:
 

@@ -1,7 +1,6 @@
 x-gpt2giga-common: &gpt2giga-common
   image: ghcr.io/ai-forever/gpt2giga:latest
   restart: unless-stopped
-  pull_policy: always
   build:
     context: ../..
     dockerfile: Dockerfile
