@@ -254,23 +254,36 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
 def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 
+    overview_asset = client.get("/admin/assets/admin/pages/render-overview.js")
     system_asset = client.get("/admin/assets/admin/pages/render-system.js")
     providers_asset = client.get("/admin/assets/admin/pages/render-providers.js")
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
+    assert overview_asset.status_code == 200
+    assert "Workflow handoff" in overview_asset.text
+    assert "Recent error handoff" in overview_asset.text
+    assert "Overview workflow guide" in overview_asset.text
+    assert "Overview stays summary-first" in overview_asset.text
+
     assert system_asset.status_code == 200
     assert "Confirm live request behavior before deep forensics" in system_asset.text
     assert (
-        "Detailed diagnostics stay staged until the executive summary"
+        "Detailed diagnostics stay staged until the executive summary, readiness"
         in system_asset.text
     )
     assert "Use staged diagnostics when the summary is not enough" in system_asset.text
+    assert "Copy system snapshot" in system_asset.text
+    assert "Current system snapshot" in system_asset.text
+    assert "System stays staged." in system_asset.text
 
     assert providers_asset.status_code == 200
     assert "Keep this page summary-first" in providers_asset.text
     assert "Smoke the mounted provider surface" in providers_asset.text
     assert "Route-family detail stays secondary" in providers_asset.text
     assert "Provider surface diagnostics" in providers_asset.text
+    assert "Provider workflow handoff" in providers_asset.text
+    assert "Current route-family snapshot" in providers_asset.text
+    assert "Full provider surface matrix" in providers_asset.text
     assert docs_links_asset.status_code == 200
     assert "provider-surface-diagnostics" in docs_links_asset.text
 

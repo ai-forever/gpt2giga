@@ -66,32 +66,8 @@ export async function renderProviders(app, token) {
         },
     ], "Provider summary is unavailable.")}
         </div>
-      `, "panel panel--span-4")}
-    ${card("Backend posture", renderStatLines([
-        { label: "GigaChat API mode", value: String(backend.gigachat_api_mode ?? "n/a") },
-        { label: "Chat backend mode", value: String(backend.chat_backend_mode ?? "n/a") },
-        {
-            label: "Responses backend mode",
-            value: String(backend.responses_backend_mode ?? "n/a"),
-        },
-        {
-            label: "Runtime store backend",
-            value: String(backend.runtime_store_backend ?? "n/a"),
-        },
-        {
-            label: "Telemetry",
-            value: backend.telemetry_enabled ? "enabled" : "disabled",
-            tone: backend.telemetry_enabled ? "good" : "default",
-        },
-        {
-            label: "Governance",
-            value: backend.governance_enabled
-                ? `${formatNumber(backend.governance_limits_configured ?? 0)} limits`
-                : "disabled",
-            tone: backend.governance_enabled ? "good" : "default",
-        },
-    ], "Backend capability metadata is unavailable."), "panel panel--span-3")}
-    ${card("Provider workflows", `
+      `, "panel panel--span-8 panel--measure")}
+    ${card("Provider workflow handoff", `
         <div class="stack">
           <p class="muted">
             Keep this page summary-first: confirm which provider surface should exist, smoke one route family, then widen into route diagnostics only if the mismatch still remains.
@@ -147,24 +123,7 @@ export async function renderProviders(app, token) {
     })}
           </div>
         </div>
-      `, "panel panel--span-5")}
-    ${card("Guide and troubleshooting", renderGuideLinks([
-        {
-            label: "Provider surface diagnostics",
-            href: OPERATOR_GUIDE_LINKS.providers,
-            note: "Use the operator playbook for capability coverage, mounted route checks, and the expected page-to-page handoff from Settings to Playground to Traffic.",
-        },
-        {
-            label: "Rollout backend v2",
-            href: OPERATOR_GUIDE_LINKS.rolloutV2,
-            note: "Open the rollout notes when the mismatch is really about backend mode selection rather than a missing route or disabled provider family.",
-        },
-        {
-            label: "Troubleshooting handoff map",
-            href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Use the escalation map when provider posture looks wrong but the next operator surface is still ambiguous.",
-        },
-    ], "This page stays summary-first. Use the docs only after provider coverage, playground smoke, or live traffic still leave the mismatch unresolved."), "panel panel--span-12")}
+      `, "panel panel--span-4 panel--aside")}
     ${card("Capability coverage", `
         <div class="stack">
           <p class="muted">
@@ -182,7 +141,24 @@ export async function renderProviders(app, token) {
         `<span class="muted">${escapeHtml(row.routeSample)}</span>`,
     ]), "No capability coverage rows were reported by the admin API.")}
         </div>
-      `, "panel panel--span-12")}
+      `, "panel panel--span-8 panel--measure")}
+    ${card("Guide and troubleshooting", renderGuideLinks([
+        {
+            label: "Provider surface diagnostics",
+            href: OPERATOR_GUIDE_LINKS.providers,
+            note: "Use the operator playbook for capability coverage, mounted route checks, and the expected page-to-page handoff from Settings to Playground to Traffic.",
+        },
+        {
+            label: "Rollout backend v2",
+            href: OPERATOR_GUIDE_LINKS.rolloutV2,
+            note: "Open the rollout notes when the mismatch is really about backend mode selection rather than a missing route or disabled provider family.",
+        },
+        {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Use the escalation map when provider posture looks wrong but the next operator surface is still ambiguous.",
+        },
+    ], "This page stays summary-first. Use the docs only after provider coverage, playground smoke, or live traffic still leave the mismatch unresolved."), "panel panel--span-4 panel--aside")}
     ${card("Provider briefs", `
         <div class="step-grid">
           ${surfaceRows
@@ -223,14 +199,38 @@ export async function renderProviders(app, token) {
     })
         .join("")}
         </div>
-      `, "panel panel--span-12")}
-    ${card("Detailed route diagnostics", `
+      `, "panel panel--span-8 panel--measure")}
+    ${card("Backend posture", renderStatLines([
+        { label: "GigaChat API mode", value: String(backend.gigachat_api_mode ?? "n/a") },
+        { label: "Chat backend mode", value: String(backend.chat_backend_mode ?? "n/a") },
+        {
+            label: "Responses backend mode",
+            value: String(backend.responses_backend_mode ?? "n/a"),
+        },
+        {
+            label: "Runtime store backend",
+            value: String(backend.runtime_store_backend ?? "n/a"),
+        },
+        {
+            label: "Telemetry",
+            value: backend.telemetry_enabled ? "enabled" : "disabled",
+            tone: backend.telemetry_enabled ? "good" : "default",
+        },
+        {
+            label: "Governance",
+            value: backend.governance_enabled
+                ? `${formatNumber(backend.governance_limits_configured ?? 0)} limits`
+                : "disabled",
+            tone: backend.governance_enabled ? "good" : "default",
+        },
+    ], "Backend capability metadata is unavailable."), "panel panel--span-4 panel--aside")}
+    ${card("Staged route diagnostics", `
         <div class="stack">
           <p class="muted">
-            Open these disclosures only when provider briefs and capability coverage still leave a route-family mismatch unresolved.
+            Open these disclosures only when provider briefs, capability coverage, and workflow handoff still leave a route-family mismatch unresolved.
           </p>
           <details class="surface details-disclosure" id="providers-route-detail">
-            <summary>Mounted route families</summary>
+            <summary>Current route-family snapshot</summary>
             ${renderTable([
         { label: "Family" },
         { label: "Mounted routes" },
@@ -244,7 +244,7 @@ export async function renderProviders(app, token) {
     ]), "No mounted routes were reported by the admin API.")}
           </details>
           <details class="surface details-disclosure">
-            <summary>Full surface matrix</summary>
+            <summary>Full provider surface matrix</summary>
             ${renderTable([
         { label: "Surface" },
         { label: "Mode" },

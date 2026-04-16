@@ -1,5 +1,6 @@
+import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
-import { banner, card, kpi, pill, renderDefinitionList, renderSetupSteps, renderStatLines, renderWorkflowCard, } from "../templates.js";
+import { banner, card, kpi, pill, renderDefinitionList, renderGuideLinks, renderSetupSteps, renderStatLines, renderWorkflowCard, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber, humanizeField } from "../utils.js";
 export async function renderSystem(app, token) {
     const [runtime, config, routes, setup] = await Promise.all([
@@ -33,7 +34,7 @@ export async function renderSystem(app, token) {
     const setupActionPath = setup.setup_complete ? pathForPage("settings") : pathForPage("setup");
     const setupActionLabel = setup.setup_complete ? "Review settings" : "Finish setup";
     app.setHeroActions(`
-    <button class="button button--secondary" id="copy-diagnostics" type="button">Copy diagnostics JSON</button>
+    <button class="button button--secondary" id="copy-diagnostics" type="button">Copy system snapshot</button>
     <a class="button button--secondary" href="/admin/providers">Provider diagnostics</a>
     <a class="button button--secondary" href="/admin/traffic">Traffic summary</a>
     <a class="button button--secondary" href="/admin/settings">Open settings</a>
@@ -75,7 +76,7 @@ export async function renderSystem(app, token) {
         },
     ], "System summary is unavailable.")}
         </div>
-      `, "panel panel--span-5")}
+      `, "panel panel--span-8 panel--measure")}
     ${card("Diagnostic workflows", `
         <div class="stack">
           <p class="muted">
@@ -128,12 +129,7 @@ export async function renderSystem(app, token) {
     })}
           </div>
         </div>
-      `, "panel panel--span-7")}
-    ${card("Route coverage", renderDefinitionList(routeSummaries.map((group) => ({
-        label: group.label,
-        value: formatNumber(group.count),
-        note: group.samples.length ? group.samples.join(", ") : "No routes in this group.",
-    })), "No mounted routes were reported by the admin API."), "panel panel--span-4")}
+      `, "panel panel--span-4 panel--aside")}
     ${card("Readiness", `
         <div class="stack">
           ${renderStatLines([
@@ -172,7 +168,29 @@ export async function renderSystem(app, token) {
                 `
         : ""}
         </div>
-      `, "panel panel--span-4")}
+      `, "panel panel--span-8 panel--measure")}
+    ${card("Guide and troubleshooting", renderGuideLinks([
+        {
+            label: "Overview workflow guide",
+            href: OPERATOR_GUIDE_LINKS.overview,
+            note: "Step back to the broader operator map when the current warning or runtime signal still lacks a clear owner.",
+        },
+        {
+            label: "Provider surface diagnostics",
+            href: OPERATOR_GUIDE_LINKS.providers,
+            note: "Open the provider guide when the mismatch is really about mounted compatibility surfaces rather than raw runtime health.",
+        },
+        {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Use the escalation map when System narrows the posture but the next surface is still ambiguous.",
+        },
+    ], "System stays staged. Open the longer guides only when the executive summary, readiness, and workflow cards still do not explain the mismatch."), "panel panel--span-4 panel--aside")}
+    ${card("Route coverage", renderDefinitionList(routeSummaries.map((group) => ({
+        label: group.label,
+        value: formatNumber(group.count),
+        note: group.samples.length ? group.samples.join(", ") : "No routes in this group.",
+    })), "No mounted routes were reported by the admin API."), "panel panel--span-4")}
     ${card("Runtime posture", renderDefinitionList([
         {
             label: "Auth required",
@@ -208,10 +226,10 @@ export async function renderSystem(app, token) {
         },
     ], "Runtime posture metadata is unavailable."), "panel panel--span-4")}
     ${card("Config highlights", renderDefinitionList(buildConfigHighlightItems(configSummary, runtime, setup, storeState), "No config highlights were reported."), "panel panel--span-4")}
-    ${card("Detailed diagnostics", `
+    ${card("Staged diagnostics and export", `
         <div class="stack">
           <p class="muted">
-            Detailed diagnostics stay staged until the executive summary, workflow handoff, and route coverage still leave ambiguity.
+            Detailed diagnostics stay staged until the executive summary, readiness, and workflow handoff still leave ambiguity.
           </p>
           <details class="surface details-disclosure" id="system-detailed-diagnostics">
             <summary>Runtime state detail</summary>
@@ -262,7 +280,7 @@ export async function renderSystem(app, token) {
             </div>
           </details>
           <details class="surface details-disclosure">
-            <summary>Raw diagnostics JSON</summary>
+            <summary>Current system snapshot</summary>
             <p class="field-note">
               Copy the full runtime, config, setup, and route payload when you need a precise snapshot for debugging or for a support handoff.
             </p>
@@ -274,7 +292,7 @@ export async function renderSystem(app, token) {
     document.getElementById("copy-diagnostics")?.addEventListener("click", async () => {
         try {
             await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2));
-            app.pushAlert("Diagnostics copied to clipboard.", "info");
+            app.pushAlert("System snapshot copied to clipboard.", "info");
         }
         catch (error) {
             app.pushAlert(error instanceof Error ? error.message : String(error), "danger");

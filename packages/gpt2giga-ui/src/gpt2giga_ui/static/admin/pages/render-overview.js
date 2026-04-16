@@ -1,5 +1,6 @@
+import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
-import { card, pill, renderDefinitionList, renderTable, renderWorkflowCard, } from "../templates.js";
+import { card, pill, renderDefinitionList, renderGuideLinks, renderTable, renderWorkflowCard, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber, formatTimestamp, } from "../utils.js";
 const MAX_SUMMARY_ROWS = 5;
 export async function renderOverview(app, token) {
@@ -84,8 +85,8 @@ export async function renderOverview(app, token) {
         },
     ], "Overview summary is unavailable.")}
         </div>
-      `, "panel panel--span-8")}
-    ${card("Operator workflows", `
+      `, "panel panel--span-8 panel--measure")}
+    ${card("Workflow handoff", `
         <div class="stack overview-aside">
           <p class="muted">The console is grouped by operator workflow. Start from the smallest surface that answers the question, then branch deeper only if the current summary still leaves ambiguity.</p>
           <div class="workflow-grid">
@@ -161,25 +162,47 @@ export async function renderOverview(app, token) {
     })}
           </div>
         </div>
-      `, "panel panel--span-4")}
-    ${recentErrors.length
-        ? card("Recent errors", renderTable([
-            { label: "When" },
-            { label: "Route" },
-            { label: "Failure" },
-            { label: "Context" },
-            { label: "Handoff" },
-        ], recentErrors.map((event) => {
-            const requestId = String(event.request_id ?? "").trim();
-            return [
-                `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(requestId || "no request id")}</span>`,
-                `${escapeHtml(String(event.provider ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(event.method ?? "GET"))} ${escapeHtml(String(event.endpoint ?? event.path ?? "n/a"))}</span>`,
-                `<strong>${escapeHtml(String(event.error_type ?? "HTTP error"))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
-                `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
-                renderRecentErrorActions(requestId),
-            ];
-        }), "No recent errors recorded."), "panel panel--span-12")
-        : ""}
+      `, "panel panel--span-4 panel--aside")}
+    ${card("Recent error handoff", `
+        <div class="stack">
+          <p class="muted">
+            Keep Overview summary-first. Use this short failure sample only to decide whether Traffic or Logs is the next surface worth opening.
+          </p>
+          ${renderTable([
+        { label: "When" },
+        { label: "Route" },
+        { label: "Failure" },
+        { label: "Context" },
+        { label: "Handoff" },
+    ], recentErrors.map((event) => {
+        const requestId = String(event.request_id ?? "").trim();
+        return [
+            `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(requestId || "no request id")}</span>`,
+            `${escapeHtml(String(event.provider ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(event.method ?? "GET"))} ${escapeHtml(String(event.endpoint ?? event.path ?? "n/a"))}</span>`,
+            `<strong>${escapeHtml(String(event.error_type ?? "HTTP error"))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
+            `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
+            renderRecentErrorActions(requestId),
+        ];
+    }), "No recent errors recorded.")}
+        </div>
+      `, "panel panel--span-8 panel--measure")}
+    ${card("Guide and troubleshooting", renderGuideLinks([
+        {
+            label: "Overview workflow guide",
+            href: OPERATOR_GUIDE_LINKS.overview,
+            note: "Use the operator guide when the workflow cards still leave the next page-to-page handoff unclear.",
+        },
+        {
+            label: "Traffic workflow guide",
+            href: OPERATOR_GUIDE_LINKS.traffic,
+            note: "Open the Traffic playbook when the next step is broad request review rather than a request-pinned log dive.",
+        },
+        {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Use the escalation map when the summary cards still do not clearly point at the next operator surface.",
+        },
+    ], "Overview stays summary-first. The guides matter only after the posture summary and workflow cards stop being enough."), "panel panel--span-4 panel--aside")}
   `);
 }
 function formatPercent(part, total) {
