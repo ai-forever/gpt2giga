@@ -9,6 +9,15 @@
 
 ## Entries
 
+- 2026-04-16 — `Milestone 2`
+  - `gpt2giga/features/responses/stream.py` превращён в thin compatibility facade с сохранением public import path.
+  - Внутренняя реализация Responses streaming разложена по `gpt2giga/features/responses/_streaming/{events,state,v1,v2,failures}.py`.
+  - `ResponsesStreamEventSequencer` вынесен отдельно; legacy v1 flow и v2 orchestration разнесены по разным internal modules.
+  - V2 mutable stream state оформлен через typed state objects для text/function/tool веток, включая tool progress и image-generation hydration.
+  - Добавлен targeted test на re-export `gpt2giga.features.responses.stream` поверх internal implementation.
+  - Проверка: `uv run ruff check gpt2giga/features/responses tests/unit/api/openai/test_stream_generators.py`; `uv run ruff format --check gpt2giga/features/responses tests/unit/api/openai/test_stream_generators.py`; `uv run pytest tests/unit/api/openai/test_stream_generators.py -q`; `uv run pytest tests/integration/openai/test_router_endpoints.py -q`; `uv run pytest tests/unit/providers/gigachat/test_responses_v2.py -q`.
+  - Commit: `refactor: split responses streaming implementation`.
+
 - 2026-04-16 — `Milestone 1`
   - Вынесены общие SSE formatter helpers в `gpt2giga/core/http/sse.py`.
   - `gpt2giga/api/openai/streaming.py` оставлен как compatibility facade.

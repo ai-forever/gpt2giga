@@ -22,7 +22,18 @@ from gpt2giga.core.http.sse import (
     format_responses_stream_event,
 )
 from gpt2giga.features.chat.stream import stream_chat_completion_generator
-from gpt2giga.features.responses.stream import stream_responses_generator
+from gpt2giga.features.responses._streaming import (
+    ResponsesStreamEventSequencer as internal_responses_stream_event_sequencer,
+)
+from gpt2giga.features.responses._streaming import (
+    stream_responses_generator as internal_stream_responses_generator,
+)
+from gpt2giga.features.responses.stream import (
+    ResponsesStreamEventSequencer as public_responses_stream_event_sequencer,
+)
+from gpt2giga.features.responses.stream import (
+    stream_responses_generator,
+)
 from gpt2giga.providers.gigachat import GigaChatChatMapper, ResponseProcessor
 
 
@@ -212,6 +223,13 @@ def test_openai_streaming_facade_reexports_core_sse_helpers():
     assert transport_format_chat_stream_chunk is format_chat_stream_chunk
     assert transport_format_chat_stream_done is format_chat_stream_done
     assert transport_format_responses_stream_event is format_responses_stream_event
+
+
+def test_responses_streaming_facade_reexports_internal_impl():
+    assert public_responses_stream_event_sequencer is (
+        internal_responses_stream_event_sequencer
+    )
+    assert stream_responses_generator is internal_stream_responses_generator
 
 
 @pytest.mark.asyncio

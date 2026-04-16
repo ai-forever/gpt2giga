@@ -218,12 +218,12 @@ uv run pytest tests/unit/api/openai/test_stream_generators.py tests/integration/
 
 ### Что сделать
 
-- [ ] Оставить `gpt2giga/features/responses/stream.py` как стабильный public entrypoint.
-- [ ] Вынести `ResponsesStreamEventSequencer` и близкие helper-ы в отдельный internal module.
-- [ ] Вынести legacy v1 flow в отдельный internal module.
-- [ ] Вынести v2-specific state handling, tool state, function-call state и image hydration из giant function.
-- [ ] Максимально заменить deep nested dict mutation на небольшие локальные helpers или typed state objects, но без переписывания semantics.
-- [ ] Сохранить event order, status transitions, sequence numbers и error behavior **бит-в-бит по возможности**, потому что tests уже на это опираются.
+- [x] Оставить `gpt2giga/features/responses/stream.py` как стабильный public entrypoint.
+- [x] Вынести `ResponsesStreamEventSequencer` и близкие helper-ы в отдельный internal module.
+- [x] Вынести legacy v1 flow в отдельный internal module.
+- [x] Вынести v2-specific state handling, tool state, function-call state и image hydration из giant function.
+- [x] Максимально заменить deep nested dict mutation на небольшие локальные helpers или typed state objects, но без переписывания semantics.
+- [x] Сохранить event order, status transitions, sequence numbers и error behavior **бит-в-бит по возможности**, потому что tests уже на это опираются.
 
 ### Важные правила
 
