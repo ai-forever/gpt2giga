@@ -44,7 +44,7 @@ export function buildUsageProvidersQuery(filters) {
     setQueryParamIfPresent(params, "api_key_name", filters.apiKeyName);
     return params.toString();
 }
-export function buildTrafficUrl(filters) {
+export function buildTrafficUrl(filters, page = "traffic") {
     const params = new URLSearchParams();
     setQueryParamIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
     setQueryParamIfPresent(params, "request_id", filters.requestId);
@@ -57,7 +57,8 @@ export function buildTrafficUrl(filters) {
     setQueryParamIfPresent(params, "source", filters.source);
     setQueryParamIfPresent(params, "api_key_name", filters.apiKeyName);
     const query = params.toString();
-    return query ? `/admin/traffic?${query}` : "/admin/traffic";
+    const basePath = page === "traffic" ? "/admin/traffic" : `/admin/${page}`;
+    return query ? `${basePath}?${query}` : basePath;
 }
 export function buildLogsUrlForRequest(requestId, filters) {
     const params = new URLSearchParams();

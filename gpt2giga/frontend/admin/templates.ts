@@ -300,6 +300,7 @@ export function renderWorkflowCard(options: {
 
 export function renderSubpageNav(options: {
   currentPage: PageId;
+  hrefForPage?: (page: PageId) => string;
   intro?: string;
   items: SubpageNavLink[];
   title: string;
@@ -314,10 +315,11 @@ export function renderSubpageNav(options: {
         ${options.items
           .map((item) => {
             const active = item.page === options.currentPage;
+            const href = options.hrefForPage?.(item.page) ?? pathForPage(item.page);
             return `
               <a
                 class="button${active ? "" : " button--secondary"}"
-                href="${escapeHtml(pathForPage(item.page))}"
+                href="${escapeHtml(href)}"
                 ${active ? 'aria-current="page"' : ""}
                 title="${escapeHtml(item.description ?? item.label)}"
               >

@@ -14,6 +14,7 @@ import type {
   TrafficDetailKind,
   TrafficEvent,
   TrafficFilters,
+  TrafficPage,
   TrafficSelection,
   UsageEntry,
 } from "./state.js";
@@ -25,10 +26,11 @@ interface BindTrafficPageOptions {
   data: TrafficPageData;
   elements: TrafficPageElements;
   filters: TrafficFilters;
+  page: TrafficPage;
 }
 
 export function bindTrafficPage(options: BindTrafficPageOptions): void {
-  const { app, data, elements, filters } = options;
+  const { app, data, elements, filters, page } = options;
   const requestLookup = indexEventsByRequestId(data.requestEvents);
   const errorLookup = indexEventsByRequestId(data.errorEvents);
   const inspectPayloads: Record<TrafficDetailKind, Record<string, unknown>[]> = {
@@ -132,13 +134,13 @@ export function bindTrafficPage(options: BindTrafficPageOptions): void {
       source: fields.source.value,
       apiKeyName: fields.api_key_name.value,
     };
-    window.history.replaceState({}, "", buildTrafficUrl(nextFilters));
-    void app.render("traffic");
+    window.history.replaceState({}, "", buildTrafficUrl(nextFilters, page));
+    void app.render(page);
   });
 
   elements.resetButton.addEventListener("click", () => {
-    window.history.replaceState({}, "", "/admin/traffic");
-    void app.render("traffic");
+    window.history.replaceState({}, "", buildTrafficUrl({ ...filters, requestId: "", provider: "", endpoint: "", method: "", statusCode: "", model: "", errorType: "", source: "", apiKeyName: "", limit: DEFAULT_LIMIT }, page));
+    void app.render(page);
   });
 
   elements.actionNode.addEventListener("click", (event) => {
@@ -156,13 +158,13 @@ export function bindTrafficPage(options: BindTrafficPageOptions): void {
       if (!requestId) {
         return;
       }
-      window.history.replaceState({}, "", buildTrafficUrl({ ...filters, requestId }));
-      void app.render("traffic");
+      window.history.replaceState({}, "", buildTrafficUrl({ ...filters, requestId }, page));
+      void app.render(page);
       return;
     }
     if (action === "clear-request-scope") {
-      window.history.replaceState({}, "", buildTrafficUrl({ ...filters, requestId: "" }));
-      void app.render("traffic");
+      window.history.replaceState({}, "", buildTrafficUrl({ ...filters, requestId: "" }, page));
+      void app.render(page);
       return;
     }
     if (action === "inspect-counterpart") {

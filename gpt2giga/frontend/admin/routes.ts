@@ -163,11 +163,39 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
   },
   traffic: {
     eyebrow: "Traffic",
-    title: "Recent request and error traffic",
+    title: "Traffic summary",
     subtitle:
-      "Recent request feeds, usage summaries, and recent errors from runtime observability.",
+      "Start from recent request, error, and usage summaries before opening a focused traffic page.",
     workflow: "observe",
-    navDescription: "Summary-first request feed with direct handoff into matching log context.",
+    navDescription:
+      "Summary-first observe hub with direct handoff into focused request, error, and usage pages.",
+  },
+  "traffic-requests": {
+    eyebrow: "Traffic",
+    title: "Request traffic",
+    subtitle:
+      "Focus on recent request rows, request pinning, and request-scoped handoff into Logs.",
+    workflow: "observe",
+    navDescription:
+      "Focused request traffic page for recent request review and request-scoped log handoff.",
+  },
+  "traffic-errors": {
+    eyebrow: "Traffic",
+    title: "Error traffic",
+    subtitle:
+      "Focus on recent failures, error patterns, and the next diagnostic handoff without usage noise.",
+    workflow: "observe",
+    navDescription:
+      "Focused error traffic page for failure review and escalation into raw logs only when needed.",
+  },
+  "traffic-usage": {
+    eyebrow: "Traffic",
+    title: "Usage traffic",
+    subtitle:
+      "Focus on provider and API-key rollups without the request and error tables competing for attention.",
+    workflow: "observe",
+    navDescription:
+      "Focused usage traffic page for provider and key rollups with lighter handoff back to requests.",
   },
   providers: {
     eyebrow: "Providers",
@@ -228,6 +256,9 @@ const NAV_ENTRY_BY_PAGE: Partial<Record<PageId, PageId>> = {
   "settings-gigachat": "settings",
   "settings-security": "settings",
   "settings-history": "settings",
+  "traffic-requests": "traffic",
+  "traffic-errors": "traffic",
+  "traffic-usage": "traffic",
   files: "files-batches",
   batches: "files-batches",
 };
@@ -315,6 +346,28 @@ const SUBPAGE_NAV: Record<string, SubpageNavItem[]> = {
       page: "batches",
       label: "Batches",
       description: "Batch creation, lifecycle review, and output handoff.",
+    },
+  ],
+  traffic: [
+    {
+      page: "traffic",
+      label: "Overview",
+      description: "Summary-first request, error, and usage posture before drilling deeper.",
+    },
+    {
+      page: "traffic-requests",
+      label: "Requests",
+      description: "Recent request feed, request pinning, and request-scoped log handoff.",
+    },
+    {
+      page: "traffic-errors",
+      label: "Errors",
+      description: "Recent failure feed, error pattern review, and raw log escalation.",
+    },
+    {
+      page: "traffic-usage",
+      label: "Usage",
+      description: "Provider and API-key rollups without request-table overload.",
     },
   ],
 };

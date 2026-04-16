@@ -212,11 +212,14 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert traffic_asset.status_code == 200
-    assert "Open logs with current filters" in traffic_asset.text
-    assert (
-        "same request id and compatible filters already applied" in traffic_asset.text
-    )
-    assert "Usage drill-down" in traffic_asset.text
+    assert "Traffic navigation" in traffic_asset.text
+    assert "Traffic pages" in traffic_asset.text
+    assert "Open requests" in traffic_asset.text
+    assert "Open errors" in traffic_asset.text
+    assert "Open usage" in traffic_asset.text
+    assert "Request inspector and handoff" in traffic_asset.text
+    assert "Error inspector and handoff" in traffic_asset.text
+    assert "Usage inspector and handoff" in traffic_asset.text
     assert "Raw payload snapshot" in traffic_asset.text
     assert "Traffic workflow guide" in traffic_asset.text
     assert "Troubleshooting handoff map" in traffic_asset.text

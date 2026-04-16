@@ -41,6 +41,10 @@ def test_console_routes_are_available():
     assert client.get("/admin/keys").status_code == 200
     assert client.get("/admin/logs").status_code == 200
     assert client.get("/admin/playground").status_code == 200
+    assert client.get("/admin/traffic").status_code == 200
+    assert client.get("/admin/traffic-requests").status_code == 200
+    assert client.get("/admin/traffic-errors").status_code == 200
+    assert client.get("/admin/traffic-usage").status_code == 200
     assert client.get("/admin/files-batches").status_code == 200
     assert client.get("/admin/files").status_code == 200
     assert client.get("/admin/batches").status_code == 200

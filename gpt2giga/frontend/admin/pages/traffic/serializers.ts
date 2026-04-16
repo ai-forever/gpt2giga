@@ -12,6 +12,7 @@ import type {
   TrafficDetailKind,
   TrafficEvent,
   TrafficFilters,
+  TrafficPage,
   TrafficSelection,
   UsageEntry,
 } from "./state.js";
@@ -64,7 +65,10 @@ export function buildUsageProvidersQuery(filters: TrafficFilters): string {
   return params.toString();
 }
 
-export function buildTrafficUrl(filters: TrafficFilters): string {
+export function buildTrafficUrl(
+  filters: TrafficFilters,
+  page: TrafficPage = "traffic",
+): string {
   const params = new URLSearchParams();
   setQueryParamIfPresent(params, "limit", filters.limit, DEFAULT_LIMIT);
   setQueryParamIfPresent(params, "request_id", filters.requestId);
@@ -77,7 +81,8 @@ export function buildTrafficUrl(filters: TrafficFilters): string {
   setQueryParamIfPresent(params, "source", filters.source);
   setQueryParamIfPresent(params, "api_key_name", filters.apiKeyName);
   const query = params.toString();
-  return query ? `/admin/traffic?${query}` : "/admin/traffic";
+  const basePath = page === "traffic" ? "/admin/traffic" : `/admin/${page}`;
+  return query ? `${basePath}?${query}` : basePath;
 }
 
 export function buildLogsUrlForRequest(

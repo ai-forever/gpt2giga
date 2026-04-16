@@ -1,3 +1,9 @@
+export type TrafficPage =
+  | "traffic"
+  | "traffic-requests"
+  | "traffic-errors"
+  | "traffic-usage";
+
 export interface TrafficFilters {
   limit: string;
   requestId: string;

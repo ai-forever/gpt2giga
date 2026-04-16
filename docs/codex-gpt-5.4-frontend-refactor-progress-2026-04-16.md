@@ -151,8 +151,59 @@ Commit:
 
 Commit:
 
-- `pending (record actual hash from git history after commit; no amend)` — `refactor: polish admin form surfaces`
+- `377ff16` — `refactor: polish admin form surfaces`
 
 Следующий шаг:
 
 - при необходимости сделать отдельный stretch-slice для `Traffic`: либо ещё сильнее уменьшить плотность summary page, либо разрезать её на `requests/errors/usage` child pages без перегрузки rail.
+
+### Slice 4
+
+Статус: `done`
+
+Цель:
+
+- закрыть optional `Traffic` split отдельным чистым slice;
+- превратить `/admin/traffic` в summary-first hub;
+- вынести request/error/usage drill-down на отдельные страницы без удлинения left rail.
+
+Планируемый объём:
+
+- добавить child pages `traffic-requests`, `traffic-errors`, `traffic-usage`;
+- подключить reusable secondary nav для `Traffic`;
+- разрезать `Traffic` на hub + focused request/error/usage surfaces;
+- обновить server-side console routes и asset tests под новый split;
+- пересобрать runtime admin assets.
+
+Фактически сделано:
+
+- добавлены page ids, route metadata и secondary nav для `traffic`, `traffic-requests`, `traffic-errors`, `traffic-usage`;
+- `/admin/traffic` переведён в summary-first hub с lane cards для requests/errors/usage и отдельным scope/handoff surface вместо одной перегруженной страницы;
+- `/admin/traffic-requests` вынесен в request-first surface с собственными filters, request table, inspector/handoff и error-lane handoff;
+- `/admin/traffic-errors` вынесен в error-first surface с собственными filters, error table, inspector/handoff и request-lane handoff;
+- `/admin/traffic-usage` вынесен в usage-first surface с provider/key rollups, отдельным inspector/handoff и возвратом в request evidence только по необходимости;
+- navigation между traffic child pages сохраняет текущие filters/query scope;
+- обновлены server-side console route inventory и integration tests;
+- runtime admin assets пересобраны через `npm run build:admin`.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q` — 40 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `pending (record actual hash from git history after commit; no amend)` — `refactor: split admin traffic surfaces`
+
+Следующий шаг:
+
+- при необходимости сделать короткий follow-up только на copy/spacing polish внутри новых traffic child pages; базовый refactor по плану уже закрыт без дальнейшего route split.
