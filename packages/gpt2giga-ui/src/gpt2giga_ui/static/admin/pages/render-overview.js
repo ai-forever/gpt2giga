@@ -1,11 +1,11 @@
-import { card, renderDefinitionList, renderStatLines, renderTable, } from "../templates.js";
+import { WORKFLOW_META, pathForPage } from "../routes.js";
+import { card, pill, renderDefinitionList, renderTable, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber, formatTimestamp, } from "../utils.js";
 const MAX_SUMMARY_ROWS = 5;
 export async function renderOverview(app, token) {
-    const [runtime, setup, usageKeys, usageProviders, errors] = await Promise.all([
+    const [runtime, setup, usageProviders, errors] = await Promise.all([
         app.api.json("/admin/api/runtime"),
         app.api.json("/admin/api/setup"),
-        app.api.json("/admin/api/usage/keys"),
         app.api.json("/admin/api/usage/providers"),
         app.api.json("/admin/api/errors/recent?limit=5"),
     ]);
@@ -13,9 +13,7 @@ export async function renderOverview(app, token) {
         return;
     }
     const runtimeRecord = asRecord(runtime);
-    const setupRecord = asRecord(setup);
     const summary = asRecord(usageProviders.summary);
-    const keyEntries = asArray(usageKeys.entries).slice(0, MAX_SUMMARY_ROWS);
     const providerEntries = asArray(usageProviders.entries).slice(0, MAX_SUMMARY_ROWS);
     const recentErrors = asArray(errors.events)
         .slice(-MAX_SUMMARY_ROWS)
@@ -87,58 +85,81 @@ export async function renderOverview(app, token) {
     ], "Overview summary is unavailable.")}
         </div>
       `, "panel panel--span-8")}
-    ${card("Next steps", `
+    ${card("Operator workflows", `
         <div class="stack overview-aside">
-          <div class="toolbar">
-            <a class="button" href="${escapeHtml(setup.setup_complete ? "/admin/playground" : "/admin/setup")}">
-              ${escapeHtml(setup.setup_complete ? "Run smoke request" : "Finish setup")}
-            </a>
-            <a class="button button--secondary" href="/admin/traffic">Inspect traffic</a>
-            <a class="button button--secondary" href="/admin/logs">Inspect logs</a>
+          <p class="muted">The console is grouped by operator workflow. Start from the smallest surface that answers the question, then branch deeper only if the current summary still leaves ambiguity.</p>
+          <div class="workflow-grid">
+            ${renderWorkflowCard({
+        workflow: "start",
+        title: setup.setup_complete
+            ? "Bootstrap is complete"
+            : "Finish the first-run path",
+        note: setup.setup_complete
+            ? "Stay on the guided path: overview first, then one playground smoke request before opening deeper diagnostics."
+            : "Persist the control-plane target, configure GigaChat auth, and close the bootstrap gap before treating the gateway as ready.",
+        pills: [
+            pill(`Persisted: ${setup.persisted ? "ready" : "missing"}`, setup.persisted ? "good" : "warn"),
+            pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
+            pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn"),
+        ],
+        actions: setup.setup_complete
+            ? [
+                { label: "Overview", href: pathForPage("overview") },
+                { label: "Playground", href: pathForPage("playground"), primary: true },
+            ]
+            : [
+                { label: "Overview", href: pathForPage("overview") },
+                { label: "Setup", href: pathForPage("setup"), primary: true },
+            ],
+    })}
+            ${renderWorkflowCard({
+        workflow: "configure",
+        title: "Persist operator posture",
+        note: "Use the configuration surfaces for observability, provider posture, and auth rotation instead of editing environment files by hand.",
+        pills: [
+            pill(`Gateway auth: ${runtimeRecord.auth_required ? "required" : "open"}`, runtimeRecord.auth_required ? "good" : "warn"),
+            pill(`Telemetry: ${runtime.telemetry_enabled ? "enabled" : "disabled"}`, runtime.telemetry_enabled ? "good" : "default"),
+            pill(`Providers: ${enabledProviders.length || 0}`),
+        ],
+        actions: [
+            { label: "Settings", href: pathForPage("settings"), primary: true },
+            { label: "API Keys", href: pathForPage("keys") },
+        ],
+    })}
+            ${renderWorkflowCard({
+        workflow: "observe",
+        title: errorCount > 0 ? "Recent traffic needs inspection" : "Keep observation summary-first",
+        note: errorCount > 0
+            ? "Traffic narrows the request window first. Once one request id matters, open Logs with the same context instead of tailing the whole file."
+            : "Traffic stays the broad request view, while Logs is the deep dive only after a single request or failure is worth following.",
+        pills: [
+            pill(`Requests: ${formatNumber(requestCount)}`),
+            pill(`Errors: ${formatNumber(errorCount)}`, errorCount > 0 ? "warn" : "good"),
+            pill(`Tokens: ${formatNumber(totalTokens)}`),
+        ],
+        actions: [
+            { label: "Traffic", href: pathForPage("traffic"), primary: true },
+            { label: "Logs", href: pathForPage("logs") },
+        ],
+    })}
+            ${renderWorkflowCard({
+        workflow: "diagnose",
+        title: enabledProviders.length
+            ? "Advanced diagnostic surfaces are available"
+            : "Provider posture still needs validation",
+        note: "Use System and Providers when config, routes, or runtime posture feel inconsistent. Files & Batches stays here as the advanced workbench for stored inputs and batch jobs.",
+        pills: [
+            pill(`Providers: ${enabledProviders.join(", ") || "none"}`),
+            pill(`Docs: ${runtimeRecord.docs_enabled ? "exposed" : "disabled"}`),
+            pill(`Top provider: ${String(topProvider?.provider ?? "n/a")}`),
+        ],
+        actions: [
+            { label: "System", href: pathForPage("system"), primary: true },
+            { label: "Providers", href: pathForPage("providers") },
+            { label: "Files & Batches", href: pathForPage("files-batches") },
+        ],
+    })}
           </div>
-          ${renderStatLines([
-        {
-            label: "Persisted config",
-            value: setup.persisted ? "ready" : "missing",
-            tone: setup.persisted ? "good" : "warn",
-        },
-        {
-            label: "GigaChat credentials",
-            value: setup.gigachat_ready ? "ready" : "missing",
-            tone: setup.gigachat_ready ? "good" : "warn",
-        },
-        {
-            label: "Security bootstrap",
-            value: setup.security_ready ? "ready" : "pending",
-            tone: setup.security_ready ? "good" : "warn",
-        },
-        {
-            label: "Gateway auth",
-            value: runtimeRecord.auth_required ? "required" : "open",
-            tone: runtimeRecord.auth_required ? "good" : "warn",
-        },
-        {
-            label: "Telemetry",
-            value: runtime.telemetry_enabled ? "enabled" : "disabled",
-            tone: runtime.telemetry_enabled ? "good" : "default",
-        },
-    ], "No readiness metadata is available.")}
-          ${renderDefinitionList([
-        {
-            label: "Focused page",
-            value: setup.setup_complete ? "Playground or logs" : "Setup",
-            note: setup.setup_complete
-                ? "Start with one smoke request, then open logs only if something fails."
-                : "Complete bootstrap and credentials before digging into the rest of the console.",
-        },
-        {
-            label: "Providers",
-            value: enabledProviders.join(", ") || "none",
-            note: topProvider
-                ? `${String(topProvider.provider ?? "unknown")} is currently the most visible provider.`
-                : "No provider traffic has been recorded yet.",
-        },
-    ], "No action summary is available.")}
         </div>
       `, "panel panel--span-4")}
     ${recentErrors.length
@@ -160,10 +181,6 @@ export async function renderOverview(app, token) {
         }), "No recent errors recorded."), "panel panel--span-12")
         : ""}
   `);
-}
-function joinObjectKeys(value) {
-    const entries = Object.keys(asRecord(value));
-    return entries.length ? entries.join(", ") : "none";
 }
 function formatPercent(part, total) {
     if (!Number.isFinite(part) || !Number.isFinite(total) || total <= 0) {
@@ -209,6 +226,24 @@ function renderOverviewMetric(label, value, note, tone = "default") {
       <span class="overview-metric__label">${escapeHtml(label)}</span>
       <strong class="overview-metric__value">${escapeHtml(value)}</strong>
       <span class="overview-metric__note">${escapeHtml(note)}</span>
+    </article>
+  `;
+}
+function renderWorkflowCard(options) {
+    const workflow = WORKFLOW_META[options.workflow];
+    return `
+    <article class="workflow-card">
+      <div class="workflow-card__header">
+        <span class="eyebrow">${escapeHtml(workflow.label)}</span>
+        <h4>${escapeHtml(options.title)}</h4>
+        <p>${escapeHtml(options.note)}</p>
+      </div>
+      <div class="pill-row">${options.pills.join("")}</div>
+      <div class="workflow-card__actions">
+        ${options.actions
+        .map((action) => `<a class="button${action.primary ? "" : " button--secondary"}" href="${escapeHtml(action.href)}">${escapeHtml(action.label)}</a>`)
+        .join("")}
+      </div>
     </article>
   `;
 }

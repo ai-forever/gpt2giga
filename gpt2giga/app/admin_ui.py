@@ -19,9 +19,31 @@ class AdminUIResources:
     console_html_path: Path
 
 
+def _build_resources(package_root: Path) -> AdminUIResources | None:
+    static_dir = package_root / "static"
+    console_html_path = package_root / "templates" / "console.html"
+    if not static_dir.is_dir() or not console_html_path.is_file():
+        return None
+    return AdminUIResources(
+        package_root=package_root,
+        static_dir=static_dir,
+        console_html_path=console_html_path,
+    )
+
+
+def _get_repo_local_admin_ui_resources() -> AdminUIResources | None:
+    repo_root = Path(__file__).resolve().parents[2]
+    package_root = repo_root / "packages" / "gpt2giga-ui" / "src" / _UI_PACKAGE_NAME
+    return _build_resources(package_root)
+
+
 @lru_cache(maxsize=1)
 def get_admin_ui_resources() -> AdminUIResources | None:
-    """Return UI resources when the optional UI package is installed."""
+    """Return UI resources from the repo checkout or installed optional package."""
+    repo_local_resources = _get_repo_local_admin_ui_resources()
+    if repo_local_resources is not None:
+        return repo_local_resources
+
     try:
         package = import_module(_UI_PACKAGE_NAME)
     except ModuleNotFoundError:
@@ -32,15 +54,7 @@ def get_admin_ui_resources() -> AdminUIResources | None:
         return None
 
     package_root = Path(package_file).resolve().parent
-    static_dir = package_root / "static"
-    console_html_path = package_root / "templates" / "console.html"
-    if not static_dir.is_dir() or not console_html_path.is_file():
-        return None
-    return AdminUIResources(
-        package_root=package_root,
-        static_dir=static_dir,
-        console_html_path=console_html_path,
-    )
+    return _build_resources(package_root)
 
 
 def is_admin_ui_enabled(config: object) -> bool:

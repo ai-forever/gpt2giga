@@ -294,3 +294,44 @@
   - сгруппировать навигацию по сценариям;
   - усилить summary-first/handoff flow между observe/diagnose surfaces;
   - продолжить упрощение top-level information architecture без big-bang миграции.
+
+## Phase 5
+
+### Сделано
+
+- Начат UX-focused slice без смены стека: верхняя information architecture admin console переведена на сценарные workflow-группы:
+  - `Start`
+  - `Configure`
+  - `Observe`
+  - `Diagnose`
+- Обновлён operator shell `packages/gpt2giga-ui/src/gpt2giga_ui/templates/console.html`:
+  - навигация теперь группирует страницы по workflow, а не по старым широким секциям;
+  - каждая ссылка получила короткое объяснение, зачем именно идти на эту страницу.
+- Расширены frontend route metadata в `gpt2giga/frontend/admin/routes.ts` и `types.ts`:
+  - у страниц появились `workflow` и `navDescription`;
+  - hero eyebrow теперь явно показывает текущий workflow (`Start · Overview`, `Observe · Traffic` и т.д.).
+- Перестроен `overview` как summary-first entrypoint:
+  - вместо общего блока `Next steps` добавлен блок `Operator workflows`;
+  - overview теперь явно показывает 4 сценария работы и рекомендуемые handoff-страницы для каждого;
+  - `Traffic` позиционирован как summary-first observe surface, а `Logs` — как deep-dive после narrowing по request context.
+- Обновлены shell-стили в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/console.css` под новый nav/workflow layout.
+- Пересобраны shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
+- Дополнительно выровнен local dev/runtime lookup для optional UI package:
+  - `gpt2giga/app/admin_ui.py` теперь в source checkout предпочитает repo-local `packages/gpt2giga-ui/src/gpt2giga_ui/`, а не уже установленную копию из `.venv/site-packages`;
+  - это убирает drift между локальными template/CSS-правками и тем HTML shell, который реально видят integration-тесты.
+- Добавлен unit-тест `tests/unit/app/test_admin_ui.py` на prefer-local lookup для admin UI resources.
+
+### Проверка
+
+- `npm run build:admin`
+- `uv run pytest tests/unit/app/test_admin_ui.py tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
+- `uv run ruff check gpt2giga/app/admin_ui.py tests/unit/app/test_admin_ui.py tests/integration/app/test_system_router_extra.py`
+- `uv run ruff format --check gpt2giga/app/admin_ui.py tests/unit/app/test_admin_ui.py tests/integration/app/test_system_router_extra.py`
+
+### Дальше
+
+- Первый практический slice `Phase 5` закрыт: верхний operator UX теперь лучше отражает реальные workflow, а overview стал summary-first точкой входа вместо просто списка страниц.
+- Следующие логичные шаги внутри `Phase 5`:
+  - продолжить упрощение observe/diagnose handoff на самих страницах;
+  - вынести для observability понятные пресеты (`Local Prometheus`, `Local OTLP collector`, `Local Langfuse`, `Local Phoenix`);
+  - при желании ещё сильнее staged-упростить крупные day-2 экраны, чтобы на них было меньше конкурирующих панелей одновременно.

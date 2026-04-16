@@ -54,6 +54,10 @@ def test_admin_ui_ok():
     assert "<html" in resp.text.lower()
     assert "gpt2giga Console" in resp.text
     assert "Gateway Console" in resp.text
+    assert "Start" in resp.text
+    assert "Configure" in resp.text
+    assert "Observe" in resp.text
+    assert "Diagnose" in resp.text
     assert "Playground" in resp.text
     assert "Files &amp; Batches" in resp.text
 

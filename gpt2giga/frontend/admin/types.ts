@@ -10,6 +10,8 @@ export type PageId =
   | "files-batches"
   | "system";
 
+export type WorkflowId = "start" | "configure" | "observe" | "diagnose";
+
 export type AlertTone = "info" | "warn" | "danger";
 
 export type JsonPrimitive = string | number | boolean | null;
@@ -22,6 +24,13 @@ export interface RouteMeta {
   eyebrow: string;
   title: string;
   subtitle: string;
+  workflow: WorkflowId;
+  navDescription: string;
+}
+
+export interface WorkflowMeta {
+  label: string;
+  description: string;
 }
 
 export interface DiffEntry {

@@ -1,5 +1,11 @@
 import { AdminApiClient } from "./api.js";
-import { PAGE_META, isConsolePathname, pageFromLocation, pathForPage } from "./routes.js";
+import {
+  PAGE_META,
+  WORKFLOW_META,
+  isConsolePathname,
+  pageFromLocation,
+  pathForPage,
+} from "./routes.js";
 import { renderLoadingGrid } from "./templates.js";
 import type {
   AlertMessage,
@@ -78,7 +84,7 @@ export class AdminApp {
 
   setHero(page: PageId): void {
     const meta = PAGE_META[page];
-    this.pageEyebrow.textContent = meta.eyebrow;
+    this.pageEyebrow.textContent = `${WORKFLOW_META[meta.workflow].label} · ${meta.eyebrow}`;
     this.pageTitle.textContent = meta.title;
     this.pageSubtitle.textContent = meta.subtitle;
   }

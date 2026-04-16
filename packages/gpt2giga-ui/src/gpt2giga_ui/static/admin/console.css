@@ -151,6 +151,13 @@ textarea {
   text-transform: uppercase;
 }
 
+.nav-group__copy {
+  margin: -4px 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .rail-status-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -171,6 +178,17 @@ textarea {
   transition: transform 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
+.console-nav a strong {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.nav-link__meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .console-nav a:hover {
   transform: translateY(-1px);
   background: rgba(255, 255, 255, 0.92);
@@ -182,6 +200,10 @@ textarea {
   color: #f6f3eb;
   border-color: transparent;
   box-shadow: 0 12px 28px rgba(27, 48, 40, 0.18);
+}
+
+.console-nav a.active .nav-link__meta {
+  color: rgba(246, 243, 235, 0.72);
 }
 
 .status-chip strong {
@@ -696,6 +718,43 @@ code {
 
 .overview-aside {
   gap: 18px;
+}
+
+.workflow-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.workflow-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.workflow-card__header {
+  display: grid;
+  gap: 6px;
+}
+
+.workflow-card__header h4 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.workflow-card__header p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.workflow-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .settings-switcher {

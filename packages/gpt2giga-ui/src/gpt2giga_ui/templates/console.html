@@ -35,20 +35,60 @@
 
         <nav class="console-nav" id="nav">
           <div class="nav-group">
-            <span class="nav-group__label">Control</span>
-            <a href="/admin">Overview</a>
-            <a href="/admin/setup">Setup</a>
-            <a href="/admin/settings">Settings</a>
-            <a href="/admin/keys">API Keys</a>
-            <a href="/admin/playground">Playground</a>
+            <span class="nav-group__label">Start</span>
+            <p class="nav-group__copy">Summary-first bootstrap and smoke workflow for the first operator pass.</p>
+            <a href="/admin">
+              <strong>Overview</strong>
+              <span class="nav-link__meta">Gateway posture, readiness, and the next recommended step.</span>
+            </a>
+            <a href="/admin/setup">
+              <strong>Setup</strong>
+              <span class="nav-link__meta">Close bootstrap gaps before the gateway is treated as production-ready.</span>
+            </a>
+            <a href="/admin/playground">
+              <strong>Playground</strong>
+              <span class="nav-link__meta">Run the first smoke request against the mounted compatibility surfaces.</span>
+            </a>
+          </div>
+          <div class="nav-group">
+            <span class="nav-group__label">Configure</span>
+            <p class="nav-group__copy">Persist control-plane posture, observability, and gateway auth without editing env files.</p>
+            <a href="/admin/settings">
+              <strong>Settings</strong>
+              <span class="nav-link__meta">Edit application, observability, GigaChat, and security sections.</span>
+            </a>
+            <a href="/admin/keys">
+              <strong>API Keys</strong>
+              <span class="nav-link__meta">Create, rotate, or revoke global and scoped gateway keys.</span>
+            </a>
           </div>
           <div class="nav-group">
             <span class="nav-group__label">Observe</span>
-            <a href="/admin/logs">Logs</a>
-            <a href="/admin/traffic">Traffic</a>
-            <a href="/admin/providers">Providers</a>
-            <a href="/admin/files-batches">Files &amp; Batches</a>
-            <a href="/admin/system">System</a>
+            <p class="nav-group__copy">Start from traffic summaries, then jump into one request's log context only when needed.</p>
+            <a href="/admin/traffic">
+              <strong>Traffic</strong>
+              <span class="nav-link__meta">Request summaries, usage rollups, and recent errors with request handoff.</span>
+            </a>
+            <a href="/admin/logs">
+              <strong>Logs</strong>
+              <span class="nav-link__meta">Tail and stream logs for the narrowed request or failure context.</span>
+            </a>
+          </div>
+          <div class="nav-group">
+            <span class="nav-group__label">Diagnose</span>
+            <p class="nav-group__copy">Advanced diagnostic surfaces for runtime posture, provider coverage, and stored workbench state.</p>
+            <a href="/admin/providers">
+              <strong>Providers</strong>
+              <span class="nav-link__meta">Compare enabled provider families against mounted routes and backend posture.</span>
+            </a>
+            <a href="/admin/files-batches">
+              <strong>Files &amp; Batches</strong>
+              <span class="nav-link__meta">Inspect uploaded files, batch jobs, and batch-input handoff state.</span>
+            </a>
+            <a href="/admin/system">
+              <strong>System</strong>
+              <span class="nav-link__meta">Runtime, config, and route diagnostics when operator posture looks off.</span>
+            </a>
           </div>
         </nav>
 
