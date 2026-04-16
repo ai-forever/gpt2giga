@@ -221,6 +221,26 @@
   - SSE consumption helpers.
 - После разреза `render-playground.ts` уменьшился примерно с `1268` строк до `34`, при этом shipped behavior страницы сохранён.
 - Пересобрал shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, включая новый compiled subtree `pages/playground/`.
+- Продолжил тот же slice-шаблон для `logs`.
+- `gpt2giga/frontend/admin/pages/render-logs.ts` сведён к тонкому page entrypoint:
+  - чтение query-driven filters;
+  - загрузка initial logs payload;
+  - рендер hero/content;
+  - bind нового logs slice.
+- Вынес logs page logic в отдельную модульную структуру `gpt2giga/frontend/admin/pages/logs/`:
+  - `state.ts` для filters, stream-state и tail-context типов;
+  - `serializers.ts` для URL/query helpers, tail-context extraction, selection summaries и stream diagnostics;
+  - `api.ts` для initial fetch/tail refresh и SSE reader;
+  - `view.ts` для page layout и DOM lookup;
+  - `bindings.ts` для filter submit, selection inspector, local tail buffer и live stream lifecycle.
+- Убрал из giant renderer-а page-local mutable state и transport helper-ы:
+  - tail refresh/load flow;
+  - SSE connect/stop/error handling;
+  - tail-derived request context rendering;
+  - selection inspector handoff между recent events и tail rows;
+  - query-driven filter persistence.
+- После разреза `render-logs.ts` уменьшился примерно с `1210` строк до `29`, при этом shipped behavior страницы сохранён.
+- Пересобрал shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, включая новый compiled subtree `pages/logs/`.
 
 ### Проверка
 
@@ -229,8 +249,7 @@
 
 ### Дальше
 
-- Первый Phase 4 slice теперь закрыт: playground больше не giant renderer и читается как page slice с явными слоями `state/api/view/bindings/serializers`.
-- Следующий практический шаг по плану — продолжить тот же шаблон для request-observability страниц:
-  - `render-logs.ts`;
+- Уже два Phase 4 slice переведены на page-slice архитектуру: `playground` и `logs`.
+- Следующий практический шаг по плану — продолжить тот же шаблон для оставшихся тяжёлых страниц:
   - `render-traffic.ts`;
   - затем `render-files-batches.ts`.
