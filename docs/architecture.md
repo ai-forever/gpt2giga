@@ -26,11 +26,13 @@
   - `gpt2giga/providers/gigachat/request_mapper.py`
   - `gpt2giga/providers/gigachat/request_mapping_base.py`
   - `gpt2giga/providers/gigachat/chat_request_mapper.py`
-  - `gpt2giga/providers/gigachat/responses_request_mapper.py`
+  - `gpt2giga/providers/gigachat/responses/`
+  - `gpt2giga/providers/gigachat/responses_request_mapper.py` как compatibility entrypoint
 - Общая response-нормализация сосредоточена в:
   - `gpt2giga/providers/gigachat/response_mapper.py`
   - `gpt2giga/providers/gigachat/response_mapping_common.py`
-  - `gpt2giga/providers/gigachat/responses_response_mapper.py`
+  - `gpt2giga/providers/gigachat/responses/`
+  - `gpt2giga/providers/gigachat/responses_response_mapper.py` как compatibility entrypoint
 - Streaming для GigaChat и OpenAI-compatible SSE разделен между:
   - `gpt2giga/providers/gigachat/streaming.py`
   - `gpt2giga/features/chat/stream.py`

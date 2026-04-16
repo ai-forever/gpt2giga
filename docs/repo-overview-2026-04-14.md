@@ -74,15 +74,11 @@ The provider directory is split into many focused modules, which is good, but th
 - `request_mapper.py`
 - `request_mapping_base.py`
 - `chat_request_mapper.py`
+- `responses/`
 - `responses_request_mapper.py`
 - `response_mapper.py`
 - `response_mapping_common.py`
 - `responses_response_mapper.py`
-- `responses_input_normalizer.py`
-- `responses_output_items.py`
-- `responses_result_builder.py`
-- `responses_tool_mapping.py`
-- `responses_threading.py`
 
 This suggests local modularity but global complexity. A new contributor likely understands each file only after first understanding the whole pipeline. That is a sign the abstraction graph needs pruning or stronger grouping.
 

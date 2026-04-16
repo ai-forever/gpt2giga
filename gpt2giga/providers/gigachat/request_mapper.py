@@ -18,7 +18,7 @@ from gpt2giga.providers.gigachat.message_utils import collapse_user_messages
 from gpt2giga.providers.gigachat.request_mapping_base import (
     RequestTransformerBaseMixin,
 )
-from gpt2giga.providers.gigachat.responses_request_mapper import (
+from gpt2giga.providers.gigachat.responses import (
     RequestTransformerResponsesV2Mixin,
 )
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_to_gigachat

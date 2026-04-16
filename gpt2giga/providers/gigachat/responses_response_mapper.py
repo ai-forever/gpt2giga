@@ -1,15 +1,7 @@
-"""GigaChat Responses API output mapping helpers."""
+"""Compatibility wrapper for the structured Responses response mapper."""
 
-from gpt2giga.providers.gigachat.responses_output_items import (
-    ResponsesOutputItemsMixin,
-)
-from gpt2giga.providers.gigachat.responses_result_builder import (
-    ResponsesResultBuilderMixin,
+from gpt2giga.providers.gigachat.responses.response_mapper import (
+    ResponseProcessorResponsesMixin,
 )
 
-
-class ResponseProcessorResponsesMixin(
-    ResponsesResultBuilderMixin,
-    ResponsesOutputItemsMixin,
-):
-    """Helpers specific to the Responses API output shape."""
+__all__ = ["ResponseProcessorResponsesMixin"]

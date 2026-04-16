@@ -430,3 +430,44 @@
   - при желании добавить test/export actions для sink-ов;
   - при желании связать preset cards с docs/operator guide deep links или sample commands;
   - при желании ещё сильнее staged-упростить крупные day-2 экраны, чтобы на них было меньше конкурирующих панелей одновременно.
+
+## Phase 6
+
+### Сделано
+
+- Начат первый provider-layer slice после UI/control-plane этапов: `responses_*` helper-граф больше не живёт плоским набором однотипно названных модулей в корне `providers/gigachat/`.
+- Введён явный внутренний пакет `gpt2giga/providers/gigachat/responses/` для structured Responses pipeline:
+  - `backend_request.py`
+  - `input_normalizer.py`
+  - `model_options.py`
+  - `threading.py`
+  - `tool_mapping.py`
+  - `request_mapper.py`
+  - `output_items.py`
+  - `result_builder.py`
+  - `response_mapper.py`
+- `gpt2giga/providers/gigachat/request_mapper.py` и `response_mapper.py` теперь импортируют Responses mixin-ы из нового пакета, а не из плоских top-level helper-файлов.
+- Старые import paths сохранены как thin compatibility wrappers:
+  - `responses_backend_request.py`
+  - `responses_input_normalizer.py`
+  - `responses_options.py`
+  - `responses_request_mapper.py`
+  - `responses_output_items.py`
+  - `responses_result_builder.py`
+  - `responses_threading.py`
+  - `responses_tool_mapping.py`
+  - `responses_response_mapper.py`
+- Обновлены repo docs, чтобы provider mapping flow ссылался на `providers/gigachat/responses/` как на реальный внутренний source of truth, а старые top-level модули были обозначены как compatibility entrypoints.
+
+### Проверка
+
+- `uv run ruff check gpt2giga/providers/gigachat/request_mapper.py gpt2giga/providers/gigachat/response_mapper.py gpt2giga/providers/gigachat/responses gpt2giga/providers/gigachat/responses_backend_request.py gpt2giga/providers/gigachat/responses_input_normalizer.py gpt2giga/providers/gigachat/responses_options.py gpt2giga/providers/gigachat/responses_output_items.py gpt2giga/providers/gigachat/responses_request_mapper.py gpt2giga/providers/gigachat/responses_response_mapper.py gpt2giga/providers/gigachat/responses_result_builder.py gpt2giga/providers/gigachat/responses_threading.py gpt2giga/providers/gigachat/responses_tool_mapping.py tests/unit/providers/gigachat/test_responses_pipeline_structure.py`
+- `uv run ruff format --check gpt2giga/providers/gigachat/request_mapper.py gpt2giga/providers/gigachat/response_mapper.py gpt2giga/providers/gigachat/responses gpt2giga/providers/gigachat/responses_backend_request.py gpt2giga/providers/gigachat/responses_input_normalizer.py gpt2giga/providers/gigachat/responses_options.py gpt2giga/providers/gigachat/responses_output_items.py gpt2giga/providers/gigachat/responses_request_mapper.py gpt2giga/providers/gigachat/responses_response_mapper.py gpt2giga/providers/gigachat/responses_result_builder.py gpt2giga/providers/gigachat/responses_threading.py gpt2giga/providers/gigachat/responses_tool_mapping.py tests/unit/providers/gigachat/test_responses_pipeline_structure.py`
+- `uv run pytest tests/unit/providers/gigachat/test_responses_v2.py tests/unit/providers/gigachat/test_responses_pipeline_structure.py tests/unit/providers/gigachat/test_request_transform_params.py tests/unit/providers/gigachat/test_protocol_compat.py tests/integration/openai/test_router_endpoints.py -q`
+
+### Дальше
+
+- Первый `Phase 6` slice теперь закрывает именно структуру pipeline naming/layout без functional rewrite.
+- Следующий логичный шаг внутри `Phase 6`:
+  - либо продолжить provider-layer docs и явно расписать chat/responses/v1/v2 flow;
+  - либо убрать уже реально мёртвые transitional shims, если targeted tests подтвердят, что внешняя совместимость больше не нужна.

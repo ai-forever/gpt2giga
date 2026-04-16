@@ -139,10 +139,11 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `providers/gigachat/request_mapper.py` | Public `RequestTransformer` implementation for chat/responses request mapping |
 | `providers/gigachat/request_mapping_base.py` | Shared request parameter, schema, and validation helpers |
 | `providers/gigachat/chat_request_mapper.py` | Message role/content normalization and attachment handling |
-| `providers/gigachat/responses_request_mapper.py` | Native Responses API v2 request/tool/thread mapping |
+| `providers/gigachat/responses/` | Structured internal Responses pipeline helpers for request normalization, tools, threading, and output shaping |
+| `providers/gigachat/responses_request_mapper.py` | Compatibility wrapper exposing the public Responses request-mapper mixin |
 | `providers/gigachat/response_mapper.py` | Public `ResponseProcessor` implementation for chat completions |
 | `providers/gigachat/response_mapping_common.py` | Shared response status, usage, reasoning, and serialization helpers |
-| `providers/gigachat/responses_response_mapper.py` | Responses API and Responses v2 output shaping helpers |
+| `providers/gigachat/responses_response_mapper.py` | Compatibility wrapper exposing the public Responses response-mapper mixin |
 | `providers/gigachat/streaming.py` | Provider-owned stream iteration, GigaChat error wrapping, and chunk parsing |
 | `providers/gigachat/attachments.py` | Image/audio/text attachment handling, upload, and cleanup |
 | `providers/gigachat/tool_mapping.py` | Tool/function conversion and reserved-name remapping |
