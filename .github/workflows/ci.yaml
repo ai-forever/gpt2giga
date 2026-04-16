@@ -7,7 +7,10 @@ on:
       - 'gpt2giga/**'
       - 'packages/gpt2giga-ui/**'
       - 'tests/**'
+      - 'package.json'
+      - 'package-lock.json'
       - 'pyproject.toml'
+      - 'tsconfig.json'
       - 'uv.lock'
       - '.github/workflows/ci.yaml'
   pull_request:
@@ -17,11 +20,35 @@ on:
       - 'gpt2giga/**'
       - 'packages/gpt2giga-ui/**'
       - 'tests/**'
+      - 'package.json'
+      - 'package-lock.json'
       - 'pyproject.toml'
+      - 'tsconfig.json'
       - 'uv.lock'
       - '.github/workflows/ci.yaml'
 
 jobs:
+  admin-build:
+    name: Build admin frontend
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build admin frontend
+        run: npm run build:admin
+
   test:
     name: Test on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest

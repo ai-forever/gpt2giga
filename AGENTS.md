@@ -33,6 +33,7 @@ uv run pre-commit install
 
 - **Formatter/Linter:** Ruff is the project standard. Keep `ruff check` and `ruff format` green.
 - **Commit style:** Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`.
+- **Commit discipline:** After every completed change slice with green targeted checks, create a separate commit before moving to the next slice. Do not leave finished work only in the working tree.
 - **Python compat:** Code must remain compatible with Python `3.10` through `3.14`.
 - **Starlette baseline:** Runtime targets `Starlette 1.x`. Use `lifespan`, `APIRouter`, and `add_middleware`; do not add removed decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - **Async-first:** Endpoint handlers and upstream GigaChat interactions are async.
