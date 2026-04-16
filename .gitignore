@@ -181,3 +181,4 @@ cython_debug/
 .kilocode
 .opencode
 node_modules/
+scripts/internal
