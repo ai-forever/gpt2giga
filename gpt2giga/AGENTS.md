@@ -193,6 +193,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Decorate router handlers with `@exceptions_handler`.
 - Use `app/dependencies.py` accessors plus typed `app.state.services`, `app.state.stores`, and `app.state.providers` instead of scattering new runtime fields across flat `app.state.*`.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
+- For internal reads, prefer grouped views such as `proxy_settings.security`, `proxy_settings.runtime_store`, and `proxy_settings.observability`; flat proxy fields remain the env/control-plane compatibility layer.
 - Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
 

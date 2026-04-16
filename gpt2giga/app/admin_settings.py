@@ -154,6 +154,8 @@ def _get_client_ip(request: Request) -> str:
 
 def _build_application_settings(proxy: ProxySettings) -> dict[str, Any]:
     """Build a safe application settings payload for the admin UI."""
+    runtime_store = proxy.runtime_store
+    observability = proxy.observability
     return {
         "mode": proxy.mode,
         "host": proxy.host,
@@ -164,11 +166,11 @@ def _build_application_settings(proxy: ProxySettings) -> dict[str, Any]:
         "enabled_providers": list(proxy.enabled_providers),
         "gigachat_api_mode": proxy.gigachat_api_mode,
         "gigachat_responses_api_mode": proxy.gigachat_responses_api_mode,
-        "runtime_store_backend": proxy.runtime_store_backend,
-        "runtime_store_dsn_configured": proxy.runtime_store_dsn is not None,
-        "runtime_store_namespace": proxy.runtime_store_namespace,
-        "enable_telemetry": proxy.enable_telemetry,
-        "observability_sinks": list(proxy.observability_sinks),
+        "runtime_store_backend": runtime_store.backend,
+        "runtime_store_dsn_configured": runtime_store.dsn_configured,
+        "runtime_store_namespace": runtime_store.namespace,
+        "enable_telemetry": observability.enable_telemetry,
+        "observability_sinks": list(observability.active_sinks),
         "recent_requests_max_items": proxy.recent_requests_max_items,
         "recent_errors_max_items": proxy.recent_errors_max_items,
         "embeddings": proxy.embeddings,

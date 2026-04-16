@@ -621,6 +621,7 @@ def persist_control_plane_config(
 def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
     """Return a safe summary of the persisted-control-plane state."""
     proxy = config.proxy_settings
+    runtime_store = proxy.runtime_store
     payload = load_control_plane_payload()
     bootstrap_state = load_bootstrap_state()
     persisted = has_persisted_control_plane()
@@ -652,7 +653,7 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
         )
     if "*" in proxy.cors_allow_origins:
         warnings.append("CORS allows all origins.")
-    if proxy.runtime_store_backend == "memory":
+    if not runtime_store.durable:
         warnings.append(
             "Runtime store backend is memory. Stateful metadata and recent events are not durable."
         )

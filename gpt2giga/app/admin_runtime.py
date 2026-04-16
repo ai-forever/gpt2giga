@@ -230,6 +230,8 @@ class AdminRuntimeSnapshotService:
     def build_config_payload(self) -> dict[str, object]:
         """Return a sanitized config summary for admin tooling."""
         proxy = self.proxy
+        runtime_store = proxy.runtime_store
+        observability = proxy.observability
         return {
             "mode": proxy.mode,
             "host": proxy.host,
@@ -239,11 +241,11 @@ class AdminRuntimeSnapshotService:
             "gigachat_responses_api_mode": proxy.gigachat_responses_api_mode,
             "chat_backend_mode": proxy.chat_backend_mode,
             "responses_backend_mode": proxy.responses_backend_mode,
-            "runtime_store_backend": proxy.runtime_store_backend,
-            "runtime_store_namespace": proxy.runtime_store_namespace,
-            "enable_telemetry": proxy.enable_telemetry,
-            "observability_sinks": list(proxy.observability_sinks),
-            "runtime_store_dsn_configured": proxy.runtime_store_dsn is not None,
+            "runtime_store_backend": runtime_store.backend,
+            "runtime_store_namespace": runtime_store.namespace,
+            "enable_telemetry": observability.enable_telemetry,
+            "observability_sinks": list(observability.active_sinks),
+            "runtime_store_dsn_configured": runtime_store.dsn_configured,
             "recent_requests_max_items": proxy.recent_requests_max_items,
             "recent_errors_max_items": proxy.recent_errors_max_items,
             "max_request_body_bytes": proxy.max_request_body_bytes,
@@ -273,9 +275,11 @@ class AdminRuntimeSnapshotService:
     def build_runtime_payload(self) -> dict[str, object]:
         """Return effective runtime status for the admin layer."""
         proxy = self.proxy
+        runtime_store = proxy.runtime_store
+        observability = proxy.observability
         is_prod_mode = proxy.mode == "PROD"
         auth_required = proxy.enable_api_key_auth or is_prod_mode
-        metrics_enabled = proxy.metrics_enabled
+        metrics_enabled = observability.metrics_enabled
         ui_enabled = is_admin_ui_enabled(self.config)
         return {
             "app_version": self.request.app.version or get_app_version(),
@@ -290,10 +294,10 @@ class AdminRuntimeSnapshotService:
             "gigachat_responses_api_mode": proxy.gigachat_responses_api_mode,
             "chat_backend_mode": proxy.chat_backend_mode,
             "responses_backend_mode": proxy.responses_backend_mode,
-            "runtime_store_backend": proxy.runtime_store_backend,
-            "runtime_store_namespace": proxy.runtime_store_namespace,
-            "telemetry_enabled": proxy.enable_telemetry,
-            "observability_sinks": list(proxy.observability_sinks),
+            "runtime_store_backend": runtime_store.backend,
+            "runtime_store_namespace": runtime_store.namespace,
+            "telemetry_enabled": observability.enable_telemetry,
+            "observability_sinks": list(observability.active_sinks),
             "metrics_enabled": metrics_enabled,
             "governance_limits_configured": len(proxy.governance_limits),
             "governance_enabled": bool(proxy.governance_limits),
@@ -316,7 +320,9 @@ class AdminRuntimeSnapshotService:
     def build_capabilities_payload(self) -> dict[str, object]:
         """Return enabled provider groups and operator capabilities."""
         enabled_providers = set(self.proxy.enabled_providers)
-        metrics_enabled = self.proxy.metrics_enabled
+        runtime_store = self.proxy.runtime_store
+        observability = self.proxy.observability
+        metrics_enabled = observability.metrics_enabled
         capability_matrix = self._build_capability_matrix(
             metrics_enabled=metrics_enabled
         )
@@ -326,9 +332,9 @@ class AdminRuntimeSnapshotService:
                 "gigachat_api_mode": self.proxy.gigachat_api_mode,
                 "chat_backend_mode": self.proxy.chat_backend_mode,
                 "responses_backend_mode": self.proxy.responses_backend_mode,
-                "runtime_store_backend": self.proxy.runtime_store_backend,
-                "telemetry_enabled": self.proxy.enable_telemetry,
-                "observability_sinks": list(self.proxy.observability_sinks),
+                "runtime_store_backend": runtime_store.backend,
+                "telemetry_enabled": observability.enable_telemetry,
+                "observability_sinks": list(observability.active_sinks),
                 "governance_enabled": bool(self.proxy.governance_limits),
                 "governance_limits_configured": len(self.proxy.governance_limits),
             },

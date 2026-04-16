@@ -9,6 +9,8 @@ from gigachat.settings import Settings as GigachatSettings
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from gpt2giga.core.config.observability import ObservabilitySettings
+from gpt2giga.core.config.runtime_store import RuntimeStoreSettings
 from gpt2giga.core.config.security import SecuritySettings
 from gpt2giga.core.constants import (
     DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
@@ -742,6 +744,16 @@ class ProxySettings(BaseSettings):
         )
 
     @property
+    def runtime_store(self) -> RuntimeStoreSettings:
+        """Build a grouped runtime-store view for internal consumers."""
+        return RuntimeStoreSettings.from_proxy_settings(self)
+
+    @property
+    def observability(self) -> ObservabilitySettings:
+        """Build a grouped observability view for internal consumers."""
+        return ObservabilitySettings.from_proxy_settings(self)
+
+    @property
     def chat_backend_mode(self) -> Literal["v1", "v2"]:
         """Resolve the effective backend mode for chat-like capabilities."""
         return self.gigachat_api_mode
@@ -754,7 +766,7 @@ class ProxySettings(BaseSettings):
     @property
     def metrics_enabled(self) -> bool:
         """Return whether Prometheus metrics are effectively enabled."""
-        return self.enable_telemetry and "prometheus" in set(self.observability_sinks)
+        return self.observability.metrics_enabled
 
     model_config = SettingsConfigDict(env_prefix="gpt2giga_", case_sensitive=False)
 

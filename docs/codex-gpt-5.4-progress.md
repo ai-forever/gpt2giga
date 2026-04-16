@@ -505,3 +505,43 @@
 - Следующий логичный шаг после docs sync снова возвращается к выбору внутри provider-layer:
   - либо проверить, можно ли безопасно удалить часть `responses_*` compatibility shim-ов без внешнего API-риска;
   - либо продолжить следующий provider simplification slice уже внутри `gpt2giga/providers/gigachat/`, если появится более конкретный pain point.
+
+## Phase 9
+
+### Сделано
+
+- Закрыт отдельный config-oriented slice, который план давно требовал для снижения когнитивной нагрузки без ломки env/control-plane совместимости.
+- Добавлен новый typed grouped model `gpt2giga/core/config/runtime_store.py` с `RuntimeStoreSettings`.
+- `ProxySettings` теперь предоставляет внутренние grouped views:
+  - `proxy_settings.runtime_store`
+  - `proxy_settings.observability`
+  - существующий `proxy_settings.security` остаётся рядом с ними как тот же pattern.
+- `metrics_enabled` теперь вычисляется через grouped observability model, а не через локальную дублированную логику в `ProxySettings`.
+- Переведены на grouped config views несколько внутренних runtime/control-plane call sites:
+  - `gpt2giga/app/dependencies.py`
+  - `gpt2giga/app/runtime_backends.py`
+  - `gpt2giga/app/telemetry.py`
+  - `gpt2giga/app/admin_runtime.py`
+  - `gpt2giga/app/admin_settings.py`
+  - `gpt2giga/core/config/control_plane.py`
+- Telemetry/runtime code теперь читает observability/runtime-store параметры через typed grouped models, но сохраняет fallback на старые flat attrs для совместимости в тестовых `SimpleNamespace` и других duck-typed конфигурациях.
+- Обновлён `gpt2giga/AGENTS.md`, чтобы contributor-facing guidance явно рекомендовал внутреннее использование grouped config views вместо новых прямых чтений flat-полей.
+- Добавлены regression tests на:
+  - grouped runtime-store view;
+  - grouped observability view;
+  - работу Phoenix telemetry sink через реальный `ProxyConfig`, а не только через ad hoc stub-конфиг.
+
+### Проверка
+
+- `uv run ruff check .`
+- `uv run ruff format --check .`
+- `npm run build:admin`
+- `uv run pytest tests/unit/core/test_config.py tests/unit/core/test_telemetry.py tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py -q`
+- `uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80`
+
+### Дальше
+
+- `Phase 9` теперь можно считать закрытой в его практической части: internal config grouping для runtime-store/observability появился и уже используется в нескольких core call sites без смены внешнего config surface.
+- Следующий логичный шаг снова возвращается в provider-layer:
+  - либо проверить, можно ли безопасно удалить часть `responses_*` compatibility shim-ов;
+  - либо сделать следующий provider simplification slice в `gpt2giga/providers/gigachat/`, если появится более конкретный hotspot вокруг `request_mapper.py` / `response_mapper.py`.

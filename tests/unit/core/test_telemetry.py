@@ -10,6 +10,7 @@ from gpt2giga.app.telemetry import (
     _build_otlp_traces_protobuf_payload,
     create_observability_hub,
 )
+from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
 )
@@ -268,3 +269,32 @@ def test_phoenix_sink_requires_base_url():
 
     with pytest.raises(RuntimeError, match="PHOENIX_BASE_URL"):
         create_observability_hub(["phoenix"], config=config)
+
+
+def test_phoenix_sink_supports_grouped_proxy_settings():
+    config = ProxyConfig(
+        proxy=ProxySettings(
+            observability_sinks=["phoenix"],
+            otlp_headers={"x-tenant": "team-a"},
+            otlp_timeout_seconds=5.0,
+            otlp_max_pending_requests=16,
+            otlp_service_name="gpt2giga",
+            runtime_store_namespace="test",
+            mode="DEV",
+            phoenix_base_url="http://phoenix:6006",
+            phoenix_api_key="phx-secret",
+            phoenix_project_name="gpt2giga-dev",
+        )
+    )
+
+    hub = create_observability_hub(["phoenix"], config=config)
+    sink = hub.get_sink("phoenix")
+
+    assert sink is not None
+    assert sink._endpoint == "http://phoenix:6006/v1/traces"
+    assert sink._headers == {
+        "x-tenant": "team-a",
+        "authorization": "Bearer phx-secret",
+    }
+    assert sink._resource_attributes["service.namespace"] == "test"
+    assert sink._resource_attributes["openinference.project.name"] == "gpt2giga-dev"

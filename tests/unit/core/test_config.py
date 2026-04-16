@@ -131,6 +131,19 @@ def test_proxy_settings_runtime_store_dsn_normalized(monkeypatch):
     assert s.runtime_store_dsn == "sqlite:///tmp/runtime.db"
 
 
+def test_proxy_settings_runtime_store_grouped_view():
+    s = ProxySettings(
+        runtime_store_backend="sqlite",
+        runtime_store_dsn="sqlite:///tmp/runtime.db",
+        runtime_store_namespace="tests",
+    )
+    assert s.runtime_store.backend == "sqlite"
+    assert s.runtime_store.dsn == "sqlite:///tmp/runtime.db"
+    assert s.runtime_store.namespace == "tests"
+    assert s.runtime_store.dsn_configured is True
+    assert s.runtime_store.durable is True
+
+
 def test_proxy_settings_enable_telemetry_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_ENABLE_TELEMETRY", "false")
     s = ProxySettings()
@@ -148,6 +161,20 @@ def test_proxy_settings_observability_sinks_supports_phoenix(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SINKS", "prometheus, phoenix")
     s = ProxySettings()
     assert s.observability_sinks == ["prometheus", "phoenix"]
+
+
+def test_proxy_settings_observability_grouped_view():
+    s = ProxySettings(
+        enable_telemetry=True,
+        observability_sinks=["prometheus", "phoenix"],
+        phoenix_base_url="http://phoenix:6006",
+        phoenix_project_name="local",
+    )
+    assert s.observability.enable_telemetry is True
+    assert s.observability.active_sinks == ["prometheus", "phoenix"]
+    assert s.observability.metrics_enabled is True
+    assert s.observability.phoenix.base_url == "http://phoenix:6006"
+    assert s.observability.phoenix.project_name == "local"
 
 
 def test_proxy_settings_observability_sinks_can_be_disabled(monkeypatch):

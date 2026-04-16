@@ -157,7 +157,12 @@ def configure_runtime_stores(
         state.stores = stores
 
     proxy_settings = getattr(config, "proxy_settings", None)
-    backend_name = getattr(proxy_settings, "runtime_store_backend", "memory")
+    runtime_store = getattr(proxy_settings, "runtime_store", None)
+    backend_name = getattr(
+        runtime_store,
+        "backend",
+        getattr(proxy_settings, "runtime_store_backend", "memory"),
+    )
     current_backend = stores.backend
     if current_backend is not None and current_backend.name == backend_name:
         _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)
@@ -216,8 +221,21 @@ def configure_runtime_observability(
         state.observability = observability
 
     proxy_settings = getattr(config, "proxy_settings", None)
-    telemetry_enabled = bool(getattr(proxy_settings, "enable_telemetry", True))
-    sink_names = list(getattr(proxy_settings, "observability_sinks", ["prometheus"]))
+    grouped_settings = getattr(proxy_settings, "observability", None)
+    telemetry_enabled = bool(
+        getattr(
+            grouped_settings,
+            "enable_telemetry",
+            getattr(proxy_settings, "enable_telemetry", True),
+        )
+    )
+    sink_names = list(
+        getattr(
+            grouped_settings,
+            "active_sinks",
+            getattr(proxy_settings, "observability_sinks", ["prometheus"]),
+        )
+    )
     current_hub = observability.hub
     if not telemetry_enabled:
         observability.hub = None

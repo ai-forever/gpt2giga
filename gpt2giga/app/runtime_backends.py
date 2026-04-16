@@ -105,9 +105,18 @@ class ConfigurableRuntimeStateBackend(RuntimeStateBackend):
     ) -> ConfigurableRuntimeStateBackend:
         """Build a backend instance from the shared proxy config."""
         proxy_settings = getattr(config, "proxy_settings", None)
+        runtime_store = getattr(proxy_settings, "runtime_store", None)
         return cls(
-            dsn=getattr(proxy_settings, "runtime_store_dsn", None),
-            namespace=getattr(proxy_settings, "runtime_store_namespace", "gpt2giga"),
+            dsn=getattr(
+                runtime_store,
+                "dsn",
+                getattr(proxy_settings, "runtime_store_dsn", None),
+            ),
+            namespace=getattr(
+                runtime_store,
+                "namespace",
+                getattr(proxy_settings, "runtime_store_namespace", "gpt2giga"),
+            ),
             logger=logger,
         )
 

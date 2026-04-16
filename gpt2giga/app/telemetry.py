@@ -772,8 +772,13 @@ def _build_langfuse_attributes(event: Mapping[str, Any]) -> dict[str, Any]:
 
 def _build_default_resource_attributes(config: Any | None) -> dict[str, Any]:
     proxy_settings = getattr(config, "proxy_settings", None)
+    observability = getattr(proxy_settings, "observability", None)
+    otlp = getattr(observability, "otlp", None)
+    runtime_store = getattr(proxy_settings, "runtime_store", None)
     service_name = _label_value(
-        getattr(proxy_settings, "otlp_service_name", None),
+        getattr(
+            otlp, "service_name", getattr(proxy_settings, "otlp_service_name", None)
+        ),
         default="gpt2giga",
     )
     mode = _label_value(getattr(proxy_settings, "mode", None), default="DEV").lower()
@@ -783,7 +788,11 @@ def _build_default_resource_attributes(config: Any | None) -> dict[str, Any]:
         "deployment.environment": mode,
     }
     runtime_namespace = _label_value(
-        getattr(proxy_settings, "runtime_store_namespace", None),
+        getattr(
+            runtime_store,
+            "namespace",
+            getattr(proxy_settings, "runtime_store_namespace", None),
+        ),
         default="gpt2giga",
     )
     if runtime_namespace:
@@ -794,7 +803,13 @@ def _build_default_resource_attributes(config: Any | None) -> dict[str, Any]:
 def _build_phoenix_resource_attributes(config: Any | None) -> dict[str, Any]:
     resource_attributes = _build_default_resource_attributes(config)
     proxy_settings = getattr(config, "proxy_settings", None)
-    project_name = getattr(proxy_settings, "phoenix_project_name", None)
+    observability = getattr(proxy_settings, "observability", None)
+    phoenix = getattr(observability, "phoenix", None)
+    project_name = getattr(
+        phoenix,
+        "project_name",
+        getattr(proxy_settings, "phoenix_project_name", None),
+    )
     normalized_project_name = (
         str(project_name).strip() if project_name is not None else ""
     )
@@ -942,7 +957,9 @@ def _resolve_openinference_span_kind(event: Mapping[str, Any]) -> str:
 
 def _build_otlp_headers(config: Any | None) -> dict[str, str]:
     proxy_settings = getattr(config, "proxy_settings", None)
-    configured = getattr(proxy_settings, "otlp_headers", None)
+    observability = getattr(proxy_settings, "observability", None)
+    otlp = getattr(observability, "otlp", None)
+    configured = getattr(otlp, "headers", getattr(proxy_settings, "otlp_headers", None))
     if isinstance(configured, Mapping):
         return {
             str(key): str(value)
@@ -954,7 +971,13 @@ def _build_otlp_headers(config: Any | None) -> dict[str, str]:
 
 def _resolve_otlp_endpoint(config: Any | None) -> str:
     proxy_settings = getattr(config, "proxy_settings", None)
-    endpoint = getattr(proxy_settings, "otlp_traces_endpoint", None)
+    observability = getattr(proxy_settings, "observability", None)
+    otlp = getattr(observability, "otlp", None)
+    endpoint = getattr(
+        otlp,
+        "traces_endpoint",
+        getattr(proxy_settings, "otlp_traces_endpoint", None),
+    )
     normalized = str(endpoint).strip() if endpoint is not None else ""
     if normalized:
         return normalized
@@ -965,7 +988,13 @@ def _resolve_otlp_endpoint(config: Any | None) -> str:
 
 def _build_langfuse_endpoint(config: Any | None) -> str:
     proxy_settings = getattr(config, "proxy_settings", None)
-    base_url = getattr(proxy_settings, "langfuse_base_url", None)
+    observability = getattr(proxy_settings, "observability", None)
+    langfuse = getattr(observability, "langfuse", None)
+    base_url = getattr(
+        langfuse,
+        "base_url",
+        getattr(proxy_settings, "langfuse_base_url", None),
+    )
     normalized = str(base_url).strip().rstrip("/") if base_url is not None else ""
     if not normalized:
         raise RuntimeError(
@@ -976,8 +1005,24 @@ def _build_langfuse_endpoint(config: Any | None) -> str:
 
 def _build_langfuse_headers(config: Any | None) -> dict[str, str]:
     proxy_settings = getattr(config, "proxy_settings", None)
-    public_key = str(getattr(proxy_settings, "langfuse_public_key", "") or "").strip()
-    secret_key = str(getattr(proxy_settings, "langfuse_secret_key", "") or "").strip()
+    observability = getattr(proxy_settings, "observability", None)
+    langfuse = getattr(observability, "langfuse", None)
+    public_key = str(
+        getattr(
+            langfuse,
+            "public_key",
+            getattr(proxy_settings, "langfuse_public_key", ""),
+        )
+        or ""
+    ).strip()
+    secret_key = str(
+        getattr(
+            langfuse,
+            "secret_key",
+            getattr(proxy_settings, "langfuse_secret_key", ""),
+        )
+        or ""
+    ).strip()
     if not public_key or not secret_key:
         raise RuntimeError(
             "Langfuse sink requires GPT2GIGA_LANGFUSE_PUBLIC_KEY and "
@@ -997,7 +1042,13 @@ def _build_langfuse_headers(config: Any | None) -> dict[str, str]:
 
 def _build_phoenix_endpoint(config: Any | None) -> str:
     proxy_settings = getattr(config, "proxy_settings", None)
-    base_url = getattr(proxy_settings, "phoenix_base_url", None)
+    observability = getattr(proxy_settings, "observability", None)
+    phoenix = getattr(observability, "phoenix", None)
+    base_url = getattr(
+        phoenix,
+        "base_url",
+        getattr(proxy_settings, "phoenix_base_url", None),
+    )
     normalized = str(base_url).strip().rstrip("/") if base_url is not None else ""
     if not normalized:
         raise RuntimeError(
@@ -1008,7 +1059,12 @@ def _build_phoenix_endpoint(config: Any | None) -> str:
 
 def _build_phoenix_headers(config: Any | None) -> dict[str, str]:
     proxy_settings = getattr(config, "proxy_settings", None)
-    api_key = str(getattr(proxy_settings, "phoenix_api_key", "") or "").strip()
+    observability = getattr(proxy_settings, "observability", None)
+    phoenix = getattr(observability, "phoenix", None)
+    api_key = str(
+        getattr(phoenix, "api_key", getattr(proxy_settings, "phoenix_api_key", ""))
+        or ""
+    ).strip()
     headers = _build_otlp_headers(config)
     if api_key:
         headers["authorization"] = f"Bearer {api_key}"
@@ -1156,14 +1212,38 @@ register_observability_sink(
             ),
             logger=kwargs.get("logger"),
             max_pending_requests=getattr(
-                getattr(kwargs.get("config"), "proxy_settings", None),
-                "otlp_max_pending_requests",
-                256,
+                getattr(
+                    getattr(
+                        getattr(kwargs.get("config"), "proxy_settings", None),
+                        "observability",
+                        None,
+                    ),
+                    "otlp",
+                    None,
+                ),
+                "max_pending_requests",
+                getattr(
+                    getattr(kwargs.get("config"), "proxy_settings", None),
+                    "otlp_max_pending_requests",
+                    256,
+                ),
             ),
             timeout_seconds=getattr(
-                getattr(kwargs.get("config"), "proxy_settings", None),
-                "otlp_timeout_seconds",
-                5.0,
+                getattr(
+                    getattr(
+                        getattr(kwargs.get("config"), "proxy_settings", None),
+                        "observability",
+                        None,
+                    ),
+                    "otlp",
+                    None,
+                ),
+                "timeout_seconds",
+                getattr(
+                    getattr(kwargs.get("config"), "proxy_settings", None),
+                    "otlp_timeout_seconds",
+                    5.0,
+                ),
             ),
         ),
     )
@@ -1180,14 +1260,38 @@ register_observability_sink(
             ),
             logger=kwargs.get("logger"),
             max_pending_requests=getattr(
-                getattr(kwargs.get("config"), "proxy_settings", None),
-                "otlp_max_pending_requests",
-                256,
+                getattr(
+                    getattr(
+                        getattr(kwargs.get("config"), "proxy_settings", None),
+                        "observability",
+                        None,
+                    ),
+                    "otlp",
+                    None,
+                ),
+                "max_pending_requests",
+                getattr(
+                    getattr(kwargs.get("config"), "proxy_settings", None),
+                    "otlp_max_pending_requests",
+                    256,
+                ),
             ),
             timeout_seconds=getattr(
-                getattr(kwargs.get("config"), "proxy_settings", None),
-                "otlp_timeout_seconds",
-                5.0,
+                getattr(
+                    getattr(
+                        getattr(kwargs.get("config"), "proxy_settings", None),
+                        "observability",
+                        None,
+                    ),
+                    "otlp",
+                    None,
+                ),
+                "timeout_seconds",
+                getattr(
+                    getattr(kwargs.get("config"), "proxy_settings", None),
+                    "otlp_timeout_seconds",
+                    5.0,
+                ),
             ),
             attribute_enricher=_build_langfuse_attributes,
         ),
@@ -1205,14 +1309,38 @@ register_observability_sink(
             ),
             logger=kwargs.get("logger"),
             max_pending_requests=getattr(
-                getattr(kwargs.get("config"), "proxy_settings", None),
-                "otlp_max_pending_requests",
-                256,
+                getattr(
+                    getattr(
+                        getattr(kwargs.get("config"), "proxy_settings", None),
+                        "observability",
+                        None,
+                    ),
+                    "otlp",
+                    None,
+                ),
+                "max_pending_requests",
+                getattr(
+                    getattr(kwargs.get("config"), "proxy_settings", None),
+                    "otlp_max_pending_requests",
+                    256,
+                ),
             ),
             timeout_seconds=getattr(
-                getattr(kwargs.get("config"), "proxy_settings", None),
-                "otlp_timeout_seconds",
-                5.0,
+                getattr(
+                    getattr(
+                        getattr(kwargs.get("config"), "proxy_settings", None),
+                        "observability",
+                        None,
+                    ),
+                    "otlp",
+                    None,
+                ),
+                "timeout_seconds",
+                getattr(
+                    getattr(kwargs.get("config"), "proxy_settings", None),
+                    "otlp_timeout_seconds",
+                    5.0,
+                ),
             ),
             attribute_enricher=_build_phoenix_attributes,
             content_type=_OTLP_PROTOBUF_TRACES_CONTENT_TYPE,
