@@ -70,10 +70,11 @@ uv run pre-commit install
 - Anthropic-compatible endpoints live in `gpt2giga/api/anthropic/`.
 - LiteLLM-compatible model-info endpoints live in `gpt2giga/api/litellm/`.
 - Capability-level orchestration for chat, responses, embeddings, model discovery, files, and batches lives in `gpt2giga/features/`.
+- Admin control-plane HTTP endpoints live in `gpt2giga/api/admin/`, while payload/mutation services live in `gpt2giga/app/admin_runtime.py` and `gpt2giga/app/admin_settings.py`.
 - GigaChat client/auth helpers and provider-specific request/response mappers live in `gpt2giga/providers/gigachat/`.
 - Simple provider mappings for embeddings and model discovery live in `gpt2giga/providers/gigachat/embeddings_mapper.py` and `gpt2giga/providers/gigachat/models_mapper.py`.
-- Request transformation is split across `gpt2giga/providers/gigachat/request_mapper.py`, `request_mapping_base.py`, `chat_request_mapper.py`, and `responses_request_mapper.py`.
-- Response transformation is split across `gpt2giga/providers/gigachat/response_mapper.py`, `response_mapping_common.py`, and `responses_response_mapper.py`.
+- Request transformation is split across `gpt2giga/providers/gigachat/request_mapper.py`, `request_mapping_base.py`, `chat_request_mapper.py`, and the structured Responses helpers in `gpt2giga/providers/gigachat/responses/`; top-level `responses_*` modules remain compatibility wrappers.
+- Response transformation is split across `gpt2giga/providers/gigachat/response_mapper.py`, `response_mapping_common.py`, and the structured Responses helpers in `gpt2giga/providers/gigachat/responses/`; top-level `responses_*` modules remain compatibility entrypoints.
 - GigaChat stream iteration and chunk normalization live in `gpt2giga/providers/gigachat/streaming.py`.
 - Anthropic- and Gemini-specific request/response/stream translation helpers live next to those routers under `gpt2giga/api/anthropic/` and `gpt2giga/api/gemini/`.
 - OpenAI SSE formatting helpers live in `gpt2giga/api/openai/streaming.py`, while feature-owned stream orchestration lives in `gpt2giga/features/chat/stream.py` and `gpt2giga/features/responses/stream.py`.
@@ -81,6 +82,7 @@ uv run pre-commit install
 - Typed runtime dependencies live in `gpt2giga/app/dependencies.py`, with `app.state` organized around `config`, `logger`, `services`, `stores`, and `providers`; flat `app.state.*` aliases remain compatibility shims.
 - Request/app-scoped metadata stores for files, batches, and responses live in feature-owned store modules under `gpt2giga/features/*/store.py`.
 - OpenAPI schema builders live next to provider routers in `gpt2giga/api/*/openapi.py`, with shared helpers in `gpt2giga/api/_openapi.py`.
+- Runtime admin shell/assets are loaded from `packages/gpt2giga-ui/src/gpt2giga_ui/`; in a source checkout `gpt2giga/app/admin_ui.py` prefers that repo-local package copy over an installed wheel.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2`; do not add legacy `send_to_gigachat*` aliases back.
 
 ## Quick Find Commands

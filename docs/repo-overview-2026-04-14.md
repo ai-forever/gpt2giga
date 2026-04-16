@@ -2,6 +2,16 @@
 
 Date: 2026-04-14
 
+Status note as of 2026-04-16:
+
+- This document is the baseline overview that informed the Codex refactor plan.
+- Several high-risk items mentioned below are already addressed:
+  - shipped admin assets now have a single source of truth in `packages/gpt2giga-ui/src/gpt2giga_ui/static/`;
+  - `api/admin/runtime.py` and `api/admin/settings.py` are thin HTTP layers over `app/admin_runtime.py` and `app/admin_settings.py`;
+  - the four heaviest admin pages were split into page-slice modules;
+  - native Responses v2 helpers now live under `gpt2giga/providers/gigachat/responses/`, with top-level `responses_*` modules kept only as compatibility wrappers.
+- Use this overview together with `docs/architecture.md` and `docs/codex-gpt-5.4-progress.md`, not as the single source of current structure.
+
 ## Executive summary
 
 `gpt2giga` is already more than a thin protocol adapter. In practice it is an integration gateway with four distinct responsibilities:
@@ -22,7 +32,7 @@ The project is useful and already reasonably structured, but it has crossed the 
   - `19` admin TypeScript source files
   - about `23.8k` Python LOC in `gpt2giga/`
   - about `9.3k` admin TS LOC in `gpt2giga/frontend/admin/`
-  - about `7.1k` compiled admin JS LOC in `gpt2giga/static/admin/`
+  - compiled admin JS is shipped from `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`
 - The repo contains strong supporting assets: examples, docs, integration guides, Docker/Traefik, CI, PR template, tests by layer.
 
 ## What is good already
@@ -56,12 +66,12 @@ The repo has unit/integration/smoke structure, runnable examples, and integratio
 
 This is the strongest architectural signal.
 
-Files like:
+Files and modules like:
 
-- `gpt2giga/api/admin/runtime.py` (`768` lines)
-- `gpt2giga/api/admin/settings.py` (`909` lines)
-- `gpt2giga/app/telemetry.py` (`880` lines)
-- `gpt2giga/app/runtime_backends.py` (`862` lines)
+- `gpt2giga/app/admin_runtime.py`
+- `gpt2giga/app/admin_settings.py`
+- `gpt2giga/app/telemetry.py`
+- `gpt2giga/app/runtime_backends.py`
 
 show that the repository is not only a proxy anymore. It is also building an operator platform. That is valid, but it means simplification should treat admin/control-plane as a first-class subsystem, not as "just some endpoints".
 
@@ -75,10 +85,9 @@ The provider directory is split into many focused modules, which is good, but th
 - `request_mapping_base.py`
 - `chat_request_mapper.py`
 - `responses/`
-- `responses_request_mapper.py`
 - `response_mapper.py`
 - `response_mapping_common.py`
-- `responses_response_mapper.py`
+- compatibility `responses_*` wrappers
 
 This suggests local modularity but global complexity. A new contributor likely understands each file only after first understanding the whole pipeline. That is a sign the abstraction graph needs pruning or stronger grouping.
 
@@ -98,18 +107,18 @@ This suggests local modularity but global complexity. A new contributor likely u
 
 ## 4. Frontend is modular by file, but not simple in interaction model
 
-The admin frontend is the clearest simplification candidate.
+The admin frontend was the clearest simplification candidate.
 
-Large files:
+At the time of this baseline review, the biggest hotspots were giant page renderers such as:
 
-- `render-files-batches.ts`: `1597` lines
-- `render-playground.ts`: `1269` lines
-- `render-logs.ts`: `1211` lines
-- `render-traffic.ts`: `867` lines
-- `render-setup.ts`: `720` lines
-- `render-settings.ts`: `674` lines
-- `templates.ts`: `468` lines
-- `forms.ts`: `468` lines
+- `render-files-batches.ts`
+- `render-playground.ts`
+- `render-logs.ts`
+- `render-traffic.ts`
+- `render-setup.ts`
+- `render-settings.ts`
+
+Those pages have since been split into slice-local modules, but the core observation still matters: the UI complexity was caused by mixed responsibilities, not by the lack of a framework.
 
 Operationally it is a vanilla TypeScript SPA built around:
 
@@ -125,7 +134,7 @@ The main frontend issue is not "plain TS instead of framework". Plain TS is fine
 
 ## 5. Setup and settings look partially duplicated
 
-The diff between `render-setup.ts` and `render-settings.ts` shows strong overlap in:
+The historical diff between `render-setup.ts` and `render-settings.ts` showed strong overlap in:
 
 - application form rendering
 - GigaChat form rendering
@@ -133,16 +142,16 @@ The diff between `render-setup.ts` and `render-settings.ts` shows strong overlap
 - persistence/runtime status messaging
 - save/test flow mechanics
 
-This is probably the biggest frontend refactor win: shared section components or shared page controllers would shrink code quickly.
+That overlap is now reduced via shared control-plane form bindings, but the underlying design lesson remains valid.
 
 ## 6. Source and compiled admin assets live side by side
 
-The repository keeps:
+Historically the repository kept:
 
 - source in `gpt2giga/frontend/admin/`
-- compiled output in `gpt2giga/static/admin/`
+- compiled output in a shipped tree alongside it
 
-This is not wrong, but it increases diff noise and makes the frontend feel larger than it is. It also raises the bar for refactors because every frontend change conceptually touches two trees.
+That issue is now resolved by shipping compiled assets from `packages/gpt2giga-ui/src/gpt2giga_ui/static/`, but it is still a useful reminder of why the packaging flow had to be clarified first.
 
 ## 7. Documentation is mostly good, but navigation is drifting
 
@@ -265,8 +274,8 @@ Routes and page entrypoints should mostly:
 
 This is especially relevant for:
 
-- `gpt2giga/api/admin/runtime.py`
-- `gpt2giga/api/admin/settings.py`
+- `gpt2giga/api/admin/runtime.py` and `gpt2giga/app/admin_runtime.py`
+- `gpt2giga/api/admin/settings.py` and `gpt2giga/app/admin_settings.py`
 - large admin page renderers
 
 ## 3. Prefer vertical slices inside admin

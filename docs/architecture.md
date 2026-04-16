@@ -140,10 +140,12 @@ api/openai/responses.py
 ### Control plane
 
 - Операторские HTML route-ы живут в `gpt2giga/api/admin/ui.py`.
-- Операторские API и runtime snapshot endpoint-ы живут в `gpt2giga/api/admin/`.
-- Настройки и live mutation flow сейчас проходят через `gpt2giga/api/admin/settings.py` и `gpt2giga/core/config/control_plane.py`.
+- Операторские API и runtime snapshot endpoint-ы живут в `gpt2giga/api/admin/`, но сами route-модули теперь остаются thin HTTP layer.
+- `gpt2giga/api/admin/settings.py` делегирует setup/settings/revisions/key-management flow в `gpt2giga/app/admin_settings.py`.
+- `gpt2giga/api/admin/runtime.py` делегирует runtime/config/capabilities/usage payload building в `gpt2giga/app/admin_runtime.py`.
+- Настройки и live mutation flow проходят через `gpt2giga/app/admin_settings.py` и `gpt2giga/core/config/control_plane.py`.
 - Когда изменение безопасно для live-reload, `reload_runtime_services()` пересобирает runtime без полного рестарта процесса.
-- Runtime snapshot endpoint-ы в `gpt2giga/api/admin/runtime.py` читают текущее состояние из `app.state.config`, runtime stores и observability state.
+- Runtime snapshot service читает текущее состояние из `app.state.config`, runtime stores и observability state.
 
 ## Admin frontend
 
@@ -151,7 +153,7 @@ api/openai/responses.py
 
 - Исходники operator UI находятся в `gpt2giga/frontend/admin/`.
 - Runtime-ассеты и HTML shell лежат в optional package `packages/gpt2giga-ui/src/gpt2giga_ui/`.
-- `gpt2giga/app/admin_ui.py` читает shell из `packages/gpt2giga-ui/src/gpt2giga_ui/templates/console.html`.
+- `gpt2giga/app/admin_ui.py` в source checkout предпочитает repo-local `packages/gpt2giga-ui/src/gpt2giga_ui/`, чтобы локальные template/CSS/admin asset правки не расходились с тем, что реально монтирует runtime.
 - `gpt2giga/app/factory.py` монтирует `packages/gpt2giga-ui/src/gpt2giga_ui/static/` на `/admin/assets/*`.
 
 ### Как собирать

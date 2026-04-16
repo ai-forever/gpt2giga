@@ -478,3 +478,30 @@
 - Следующий логичный шаг внутри `Phase 6`:
   - либо точечно удалить уже реально мёртвые transitional shims, если targeted tests и поиск по импортам подтвердят, что внешняя совместимость больше не нужна;
   - либо перейти к `Phase 10` и продолжить синхронизацию обзорных docs вокруг новой provider/control-plane картины.
+
+## Phase 10
+
+### Сделано
+
+- Закрыт docs-oriented follow-up после `Phase 6`, чтобы обзорные contributor docs не отставали от уже выполненных backend/UI slices.
+- Обновлён корневой `AGENTS.md`:
+  - control-plane теперь явно описан как `api/admin/*` thin HTTP layer поверх `app/admin_runtime.py` и `app/admin_settings.py`;
+  - provider mapping notes теперь фиксируют `gpt2giga/providers/gigachat/responses/` как internal source of truth, а top-level `responses_*` модули как compatibility layer;
+  - admin UI runtime path уточнён как `packages/gpt2giga-ui/src/gpt2giga_ui/` с prefer-local lookup в source checkout.
+- Обновлён `docs/architecture.md`:
+  - control-plane section теперь отражает service-layer split, а не старую картину с route-heavy admin modules;
+  - admin UI section теперь явно описывает repo-local package lookup для shell/static assets.
+- Обновлён `docs/repo-overview-2026-04-14.md`:
+  - добавлен status note, что это baseline-документ, а не единственный source of truth;
+  - отмечены уже закрытые high-risk темы: UI asset source-of-truth, thin admin routes, page-slice refactor, structured Responses package;
+  - убраны самые заметные устаревшие привязки к `gpt2giga/static/admin` и giant `api/admin/*` route modules как текущему состоянию.
+
+### Проверка
+
+- `git diff --check`
+
+### Дальше
+
+- Следующий логичный шаг после docs sync снова возвращается к выбору внутри provider-layer:
+  - либо проверить, можно ли безопасно удалить часть `responses_*` compatibility shim-ов без внешнего API-риска;
+  - либо продолжить следующий provider simplification slice уже внутри `gpt2giga/providers/gigachat/`, если появится более конкретный pain point.
