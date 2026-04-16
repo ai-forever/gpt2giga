@@ -403,11 +403,11 @@ uv run pytest tests/integration/app/test_admin_console_settings.py tests/integra
 - [x] Milestone 2 закрыт и закоммичен
 - [x] Milestone 3 закрыт и закоммичен
 - [x] Milestone 4 закрыт **или осознанно остановлен** после зелёного Milestone 3 с записью причины
-- [ ] `uv run ruff check .` зелёный
-- [ ] `uv run ruff format --check .` зелёный
-- [ ] `uv run pytest tests/ --cov=. --cov-fail-under=80` зелёный
+- [x] `uv run ruff check .` зелёный
+- [x] `uv run ruff format --check .` зелёный
+- [x] `uv run pytest tests/ --cov=. --cov-fail-under=80` зелёный
 - [ ] если трогался frontend: `npm run build:admin` выполнен и generated assets обновлены
-- [ ] `AGENTS.md` и `docs/architecture.md` обновлены, если изменилась реальная структура модулей
+- [x] `AGENTS.md` и `docs/architecture.md` обновлены, если изменилась реальная структура модулей
 
 ---
 

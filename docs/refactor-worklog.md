@@ -25,6 +25,12 @@
   - Проверка: `uv run ruff check gpt2giga/core/config/control_plane.py gpt2giga/core/config/_control_plane tests/unit/core/test_control_plane.py`; `uv run ruff format --check gpt2giga/core/config/control_plane.py gpt2giga/core/config/_control_plane tests/unit/core/test_control_plane.py`; `uv run pytest tests/unit/core/test_control_plane.py tests/unit/app/test_admin_settings.py tests/integration/app/test_admin_console_settings.py tests/integration/app/test_api_server.py -q`; `uv run ruff check gpt2giga/app gpt2giga/core/config tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`; `uv run ruff format --check gpt2giga/app gpt2giga/core/config tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`; `uv run pytest tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py -q`; `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py tests/integration/app/test_api_server.py -q`.
   - Commit: `refactor: split control plane internals`
 
+- 2026-04-16 — refactor wave gate
+  - Полный gate после закрытия `Milestone 4` прошёл зелёно без дополнительных кодовых правок.
+  - Проверка: `uv run ruff check .`; `uv run ruff format --check .`; `uv run pytest tests/ --cov=. --cov-fail-under=80`.
+  - Result: `548 passed, 2 skipped`, total coverage `83.79%`.
+  - Commit: `docs: record refactor wave verification`
+
 - 2026-04-16 — `Milestone 3`
   - `gpt2giga/app/observability.py` сведён к thin compatibility facade, а реализация разнесена по `gpt2giga/app/_observability/{models,feeds,usage,messages,context,recording}.py`.
   - `gpt2giga/app/telemetry.py` сведён к thin compatibility facade, а реализация sink-ов и OTLP/Prometheus helper-ов разнесена по `gpt2giga/app/_telemetry/{contracts,hub,registry,prometheus,otlp,langfuse,phoenix,encoding,builtin}.py`.
