@@ -13,6 +13,7 @@ from gpt2giga.app.observability import (
     set_request_audit_model,
     set_request_audit_usage,
 )
+from gpt2giga.core.http.sse import format_chat_stream_chunk, format_chat_stream_done
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.contracts import ChatProviderMapper
 from gpt2giga.providers.gigachat.client import get_gigachat_client
@@ -36,11 +37,6 @@ async def stream_chat_completion_generator(
     api_mode: str = "v1",
 ) -> AsyncGenerator[str, None]:
     """Stream chat-completions chunks as SSE lines."""
-    from gpt2giga.api.openai.streaming import (
-        format_chat_stream_chunk,
-        format_chat_stream_done,
-    )
-
     logger = None
     rquid = rquid_context.get()
     set_request_audit_model(request, model)

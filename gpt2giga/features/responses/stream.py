@@ -18,6 +18,7 @@ from gpt2giga.app.observability import (
     set_request_audit_model,
     set_request_audit_usage,
 )
+from gpt2giga.core.http.sse import format_responses_stream_event
 from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.responses.store import get_response_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
@@ -58,8 +59,6 @@ async def _stream_responses_generator_v1(
     response_processor: Any,
 ) -> AsyncGenerator[str, None]:
     """Stream legacy Responses API events over the v1 backend path."""
-    from gpt2giga.api.openai.streaming import format_responses_stream_event
-
     logger = None
     rquid = rquid_context.get()
     processor = response_processor
@@ -305,8 +304,6 @@ async def stream_responses_generator(
     api_mode: str = "v2",
 ) -> AsyncGenerator[str, None]:
     """Stream Responses API events as SSE lines."""
-    from gpt2giga.api.openai.streaming import format_responses_stream_event
-
     logger = None
     rquid = rquid_context.get()
     processor = response_processor or get_response_processor_from_state(
