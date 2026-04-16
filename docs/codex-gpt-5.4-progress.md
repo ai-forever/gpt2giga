@@ -320,6 +320,22 @@
   - `gpt2giga/app/admin_ui.py` теперь в source checkout предпочитает repo-local `packages/gpt2giga-ui/src/gpt2giga_ui/`, а не уже установленную копию из `.venv/site-packages`;
   - это убирает drift между локальными template/CSS-правками и тем HTML shell, который реально видят integration-тесты.
 - Добавлен unit-тест `tests/unit/app/test_admin_ui.py` на prefer-local lookup для admin UI resources.
+- Добавлен следующий UX slice внутри `Settings → Observability`: локальные пресеты для самых частых compose-сценариев:
+  - `Local Prometheus`
+  - `Local OTLP collector`
+  - `Local Langfuse`
+  - `Local Phoenix`
+- Preset cards встроены прямо в observability section и используют repo-local значения из `deploy/compose/observability-*.yaml`, а не абстрактные примеры:
+  - OTLP preset заполняет `http://otel-collector:4318/v1/traces`;
+  - Langfuse preset заполняет `http://langfuse-web:3000`;
+  - Phoenix preset заполняет `http://phoenix:6006` и `gpt2giga-local`;
+  - Prometheus preset включает встроенные `/metrics` и `/admin/api/metrics`.
+- Presets работают как additive handoff, а не как destructive reset:
+  - включают telemetry;
+  - включают выбранный sink;
+  - не выключают остальные sink-и;
+  - не очищают уже сохранённые secret-поля.
+- Добавлен runtime-facing regression test на shipped admin asset bundle, чтобы preset labels и compose overlay hints реально попадали в отгружаемый `/admin/assets/admin/pages/control-plane-sections.js`.
 
 ### Проверка
 
@@ -327,11 +343,16 @@
 - `uv run pytest tests/unit/app/test_admin_ui.py tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
 - `uv run ruff check gpt2giga/app/admin_ui.py tests/unit/app/test_admin_ui.py tests/integration/app/test_system_router_extra.py`
 - `uv run ruff format --check gpt2giga/app/admin_ui.py tests/unit/app/test_admin_ui.py tests/integration/app/test_system_router_extra.py`
+- `npm run build:admin`
+- `uv run ruff check tests/integration/app/test_system_router_extra.py`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
 
 ### Дальше
 
 - Первый практический slice `Phase 5` закрыт: верхний operator UX теперь лучше отражает реальные workflow, а overview стал summary-first точкой входа вместо просто списка страниц.
-- Следующие логичные шаги внутри `Phase 5`:
-  - продолжить упрощение observe/diagnose handoff на самих страницах;
-  - вынести для observability понятные пресеты (`Local Prometheus`, `Local OTLP collector`, `Local Langfuse`, `Local Phoenix`);
+- Следующий логичный шаг внутри `Phase 5`:
+  - продолжить упрощение observe/diagnose handoff уже на самих страницах `Traffic` и `Logs`, чтобы summary-first routing читался не только из overview/navigation, но и из page-local actions/empty states.
+- Дополнительный follow-up для observability UX теперь стал уже вторичным:
+  - при желании добавить test/export actions для sink-ов;
+  - при желании связать preset cards с docs/operator guide deep links или sample commands;
   - при желании ещё сильнее staged-упростить крупные day-2 экраны, чтобы на них было меньше конкурирующих панелей одновременно.

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
 from gpt2giga.api.system import system_router
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.app.factory import create_app
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
@@ -188,6 +189,19 @@ def test_admin_ui_warning_banner():
     assert 'id="alerts"' in resp.text
     assert "/admin/assets/admin/console.css" in resp.text
     assert "/admin/assets/admin/index.js" in resp.text
+
+
+def test_admin_ui_assets_include_observability_presets():
+    client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
+
+    response = client.get("/admin/assets/admin/pages/control-plane-sections.js")
+
+    assert response.status_code == 200
+    assert "Local Prometheus" in response.text
+    assert "Local OTLP collector" in response.text
+    assert "Local Langfuse" in response.text
+    assert "Local Phoenix" in response.text
+    assert "deploy/compose/observability-otlp.yaml" in response.text
 
 
 def test_admin_runtime_endpoint():

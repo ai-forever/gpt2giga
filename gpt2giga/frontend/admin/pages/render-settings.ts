@@ -23,6 +23,7 @@ import {
 } from "./control-plane-form-bindings.js";
 import {
   bindGigachatSecretFields,
+  bindObservabilityPresetButtons,
   bindObservabilitySecretFields,
   renderApplicationSection,
   renderGigachatSection,
@@ -334,7 +335,7 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     rerenderPage: "settings",
   });
 
-  bindControlPlaneSectionForm({
+  const observabilityBinding = bindControlPlaneSectionForm({
     app,
     form: observabilityForm,
     statusNode: observabilityStatusNode,
@@ -360,6 +361,11 @@ export async function renderSettings(app: AdminApp, token: number): Promise<void
     outcomeLabel: "Observability settings",
     failurePrefix: "Observability settings failed to save",
     rerenderPage: "settings",
+  });
+
+  bindObservabilityPresetButtons(observabilityForm, {
+    refreshStatus: observabilityBinding.refreshStatus,
+    setActionState: observabilityBinding.setActionState,
   });
 
   const gigachatBinding = bindControlPlaneSectionForm({

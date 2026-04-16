@@ -1,7 +1,7 @@
 import { bindValidityReset, buildApplicationPayload, buildObservabilityDiffEntries, buildObservabilityPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, describePersistOutcome, validateJsonArrayField, validateJsonObjectField, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
 import {} from "./control-plane-actions.js";
 import { bindControlPlaneSectionForm, bindGigachatConnectionTestAction, } from "./control-plane-form-bindings.js";
-import { bindGigachatSecretFields, bindObservabilitySecretFields, renderApplicationSection, renderGigachatSection, renderObservabilitySection, renderSecuritySection, } from "./control-plane-sections.js";
+import { bindGigachatSecretFields, bindObservabilityPresetButtons, bindObservabilitySecretFields, renderApplicationSection, renderGigachatSection, renderObservabilitySection, renderSecuritySection, } from "./control-plane-sections.js";
 import { collectSecretFieldMessages, renderInlineBannerStatus, } from "./control-plane-status.js";
 import { banner, card, renderDiffSections, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatTimestamp, toErrorMessage, } from "../utils.js";
@@ -180,7 +180,7 @@ export async function renderSettings(app, token) {
         failurePrefix: "Application settings failed to save",
         rerenderPage: "settings",
     });
-    bindControlPlaneSectionForm({
+    const observabilityBinding = bindControlPlaneSectionForm({
         app,
         form: observabilityForm,
         statusNode: observabilityStatusNode,
@@ -205,6 +205,10 @@ export async function renderSettings(app, token) {
         outcomeLabel: "Observability settings",
         failurePrefix: "Observability settings failed to save",
         rerenderPage: "settings",
+    });
+    bindObservabilityPresetButtons(observabilityForm, {
+        refreshStatus: observabilityBinding.refreshStatus,
+        setActionState: observabilityBinding.setActionState,
     });
     const gigachatBinding = bindControlPlaneSectionForm({
         app,
