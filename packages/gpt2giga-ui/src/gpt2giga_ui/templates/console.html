@@ -12,7 +12,7 @@
         <div class="brand-block">
           <span class="eyebrow">Gateway Console</span>
           <h1>gpt2giga</h1>
-          <p>Operator surface for bootstrap, runtime, keys, logs, traffic, and test calls.</p>
+          <p>Operator surface for bootstrap, settings, traffic, and runtime diagnostics.</p>
         </div>
 
         <section class="rail-section">
@@ -34,9 +34,9 @@
         </section>
 
         <nav class="console-nav" id="nav">
-          <div class="nav-group">
+          <div class="nav-group" data-workflow="start">
             <span class="nav-group__label">Start</span>
-            <p class="nav-group__copy">Summary-first bootstrap and smoke workflow for the first operator pass.</p>
+            <p class="nav-group__copy">Bootstrap, confirm readiness, and run one smoke request before going deeper.</p>
             <a href="/admin">
               <strong>Overview</strong>
               <span class="nav-link__meta">Gateway posture, readiness, and the next recommended step.</span>
@@ -50,9 +50,9 @@
               <span class="nav-link__meta">Run the first smoke request against the mounted compatibility surfaces.</span>
             </a>
           </div>
-          <div class="nav-group">
+          <div class="nav-group" data-workflow="configure">
             <span class="nav-group__label">Configure</span>
-            <p class="nav-group__copy">Persist control-plane posture, observability, and gateway auth without editing env files.</p>
+            <p class="nav-group__copy">Persist runtime posture, observability, and gateway auth without touching env files.</p>
             <a href="/admin/settings">
               <strong>Settings</strong>
               <span class="nav-link__meta">Edit application, observability, GigaChat, and security sections.</span>
@@ -62,9 +62,9 @@
               <span class="nav-link__meta">Create, rotate, or revoke global and scoped gateway keys.</span>
             </a>
           </div>
-          <div class="nav-group">
+          <div class="nav-group" data-workflow="observe">
             <span class="nav-group__label">Observe</span>
-            <p class="nav-group__copy">Start from traffic summaries, then jump into one request's log context only when needed.</p>
+            <p class="nav-group__copy">Start from request summaries, then narrow into one request or failure only when needed.</p>
             <a href="/admin/traffic">
               <strong>Traffic</strong>
               <span class="nav-link__meta">Request summaries, usage rollups, and recent errors with request handoff.</span>
@@ -74,9 +74,9 @@
               <span class="nav-link__meta">Tail and stream logs for the narrowed request or failure context.</span>
             </a>
           </div>
-          <div class="nav-group">
+          <div class="nav-group" data-workflow="diagnose">
             <span class="nav-group__label">Diagnose</span>
-            <p class="nav-group__copy">Advanced diagnostic surfaces for runtime posture, provider coverage, and stored workbench state.</p>
+            <p class="nav-group__copy">Open deeper runtime, provider, and workbench diagnostics only after the smaller surfaces narrow the question.</p>
             <a href="/admin/providers">
               <strong>Providers</strong>
               <span class="nav-link__meta">Compare enabled provider families against mounted routes and backend posture.</span>
@@ -117,6 +117,15 @@
             <span class="eyebrow" id="page-eyebrow">Console</span>
             <h2 id="page-title">Loading…</h2>
             <p id="page-subtitle">Collecting runtime state and control-plane data.</p>
+            <div class="hero-context">
+              <div class="hero-context__chips">
+                <span class="pill" id="workflow-chip">Workflow</span>
+                <span class="pill" id="surface-chip">Surface</span>
+              </div>
+              <p class="hero-context__copy" id="page-context">
+                Loading the current workflow surface and operator handoff.
+              </p>
+            </div>
           </div>
           <div class="hero-actions" id="hero-actions"></div>
         </header>

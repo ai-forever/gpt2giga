@@ -38,6 +38,9 @@ export class AdminApp {
   private readonly pageEyebrow = this.requireElement<HTMLElement>("page-eyebrow");
   private readonly pageTitle = this.requireElement<HTMLElement>("page-title");
   private readonly pageSubtitle = this.requireElement<HTMLElement>("page-subtitle");
+  private readonly workflowChip = this.requireElement<HTMLElement>("workflow-chip");
+  private readonly surfaceChip = this.requireElement<HTMLElement>("surface-chip");
+  private readonly pageContext = this.requireElement<HTMLElement>("page-context");
   private readonly nav = this.requireElement<HTMLElement>("nav");
   private readonly saveAuthButton = this.requireElement<HTMLButtonElement>("save-auth");
 
@@ -85,9 +88,17 @@ export class AdminApp {
 
   setHero(page: PageId): void {
     const meta = PAGE_META[page];
-    this.pageEyebrow.textContent = `${WORKFLOW_META[meta.workflow].label} · ${meta.eyebrow}`;
+    const workflow = WORKFLOW_META[meta.workflow];
+    const navPage = navEntryForPage(page);
+    const navSurface =
+      navPage === page ? meta.eyebrow : `${PAGE_META[navPage].eyebrow} detail`;
+
+    this.pageEyebrow.textContent = `${workflow.label} · ${meta.eyebrow}`;
     this.pageTitle.textContent = meta.title;
     this.pageSubtitle.textContent = meta.subtitle;
+    this.workflowChip.textContent = `${workflow.label} workflow`;
+    this.surfaceChip.textContent = navSurface;
+    this.pageContext.textContent = meta.navDescription;
   }
 
   setHeroActions(html: string): void {
@@ -283,11 +294,23 @@ export class AdminApp {
 
   private setNav(page: PageId): void {
     const navPage = navEntryForPage(page);
+    const workflow = PAGE_META[page].workflow;
+
+    this.nav.querySelectorAll<HTMLElement>(".nav-group").forEach((group) => {
+      group.classList.toggle("nav-group--active", group.dataset.workflow === workflow);
+    });
+
     this.nav.querySelectorAll("a[href]").forEach((link) => {
       const href = link.getAttribute("href");
       const matchesOverview =
         navPage === "overview" && (href === "/admin" || href === "/admin/overview");
-      link.classList.toggle("active", matchesOverview || href === pathForPage(navPage));
+      const active = matchesOverview || href === pathForPage(navPage);
+      link.classList.toggle("active", active);
+      if (active) {
+        link.setAttribute("aria-current", "page");
+      } else {
+        link.removeAttribute("aria-current");
+      }
     });
   }
 

@@ -20,6 +20,9 @@ export class AdminApp {
     pageEyebrow = this.requireElement("page-eyebrow");
     pageTitle = this.requireElement("page-title");
     pageSubtitle = this.requireElement("page-subtitle");
+    workflowChip = this.requireElement("workflow-chip");
+    surfaceChip = this.requireElement("surface-chip");
+    pageContext = this.requireElement("page-context");
     nav = this.requireElement("nav");
     saveAuthButton = this.requireElement("save-auth");
     apiClient;
@@ -56,9 +59,15 @@ export class AdminApp {
     }
     setHero(page) {
         const meta = PAGE_META[page];
-        this.pageEyebrow.textContent = `${WORKFLOW_META[meta.workflow].label} · ${meta.eyebrow}`;
+        const workflow = WORKFLOW_META[meta.workflow];
+        const navPage = navEntryForPage(page);
+        const navSurface = navPage === page ? meta.eyebrow : `${PAGE_META[navPage].eyebrow} detail`;
+        this.pageEyebrow.textContent = `${workflow.label} · ${meta.eyebrow}`;
         this.pageTitle.textContent = meta.title;
         this.pageSubtitle.textContent = meta.subtitle;
+        this.workflowChip.textContent = `${workflow.label} workflow`;
+        this.surfaceChip.textContent = navSurface;
+        this.pageContext.textContent = meta.navDescription;
     }
     setHeroActions(html) {
         this.heroActions.innerHTML = html;
@@ -217,10 +226,21 @@ export class AdminApp {
     }
     setNav(page) {
         const navPage = navEntryForPage(page);
+        const workflow = PAGE_META[page].workflow;
+        this.nav.querySelectorAll(".nav-group").forEach((group) => {
+            group.classList.toggle("nav-group--active", group.dataset.workflow === workflow);
+        });
         this.nav.querySelectorAll("a[href]").forEach((link) => {
             const href = link.getAttribute("href");
             const matchesOverview = navPage === "overview" && (href === "/admin" || href === "/admin/overview");
-            link.classList.toggle("active", matchesOverview || href === pathForPage(navPage));
+            const active = matchesOverview || href === pathForPage(navPage);
+            link.classList.toggle("active", active);
+            if (active) {
+                link.setAttribute("aria-current", "page");
+            }
+            else {
+                link.removeAttribute("aria-current");
+            }
         });
     }
     requireElement(id) {

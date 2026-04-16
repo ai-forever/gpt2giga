@@ -61,6 +61,13 @@ def test_admin_ui_ok():
     assert "Diagnose" in resp.text
     assert "Playground" in resp.text
     assert "Files &amp; Batches" in resp.text
+    assert 'data-workflow="start"' in resp.text
+    assert 'data-workflow="configure"' in resp.text
+    assert 'data-workflow="observe"' in resp.text
+    assert 'data-workflow="diagnose"' in resp.text
+    assert 'id="workflow-chip"' in resp.text
+    assert 'id="surface-chip"' in resp.text
+    assert 'id="page-context"' in resp.text
 
 
 def test_legacy_logs_html_redirects_to_admin():
@@ -189,6 +196,16 @@ def test_admin_ui_warning_banner():
     assert 'id="alerts"' in resp.text
     assert "/admin/assets/admin/console.css" in resp.text
     assert "/admin/assets/admin/index.js" in resp.text
+
+    asset_client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
+    index_asset = asset_client.get("/admin/assets/admin/index.js")
+    stylesheet = asset_client.get("/admin/assets/admin/console.css")
+
+    assert index_asset.status_code == 200
+    assert stylesheet.status_code == 200
+    assert "AdminApp" in index_asset.text
+    assert ".hero-context" in stylesheet.text
+    assert ".nav-group--active" in stylesheet.text
 
 
 def test_admin_ui_assets_include_observability_presets():
