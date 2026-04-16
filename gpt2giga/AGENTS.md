@@ -157,6 +157,15 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/gemini/response.py` | OpenAI/GigaChat result → Gemini response/error |
 | `api/gemini/streaming.py` | Gemini SSE/data-only translation |
 
+### Provider Execution Cheat Sheet
+
+- Chat flow:
+  `api/openai/chat.py` -> `features/chat/service.py` -> `providers/gigachat/chat_mapper.py` -> `RequestTransformer.prepare_chat_completion(...)` or `prepare_chat_completion_v2(...)` -> GigaChat `achat/astream` or `achat_v2/astream_v2` -> `ResponseProcessor`
+- Responses flow:
+  `api/openai/responses.py` -> `features/responses/service.py` -> `RequestTransformer.prepare_response(...)` or `prepare_response_v2(...)` -> GigaChat `achat` or `achat_v2` -> `ResponseProcessor.process_response_api(...)` or `process_response_api_v2(...)`
+- `app/wiring.py` is the place that injects `chat_backend_mode` and `responses_backend_mode` into the mapper/service layer; routers should not branch on backend mode.
+- `providers/gigachat/responses/` is the internal source of truth for native Responses v2 helper modules. Top-level `responses_*` modules remain compatibility wrappers for old imports.
+
 ## Shared Utilities
 
 - `core/errors.py`: `@exceptions_handler` and exception normalization

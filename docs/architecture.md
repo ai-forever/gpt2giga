@@ -39,6 +39,69 @@
   - `gpt2giga/features/responses/stream.py`
   - `gpt2giga/api/openai/streaming.py`
 
+### Chat flow
+
+```text
+api/openai/chat.py
+-> features/chat/service.py
+-> providers/gigachat/chat_mapper.py
+-> providers/gigachat/request_mapper.py
+-> GigaChat achat/astream или achat_v2/astream_v2
+-> providers/gigachat/response_mapper.py
+-> OpenAI-compatible chat response / SSE
+```
+
+- `gpt2giga/app/wiring.py` передает `chat_backend_mode` в `GigaChatChatMapper`.
+- `gpt2giga/providers/gigachat/chat_mapper.py` выбирает backend path один раз:
+  - `prepare_chat_completion(...)` для `v1`;
+  - `prepare_chat_completion_v2(...)` для `v2`.
+- `prepare_chat_completion(...)` остается legacy chat path:
+  - применяет `transform_chat_parameters(...)`;
+  - нормализует сообщения через `chat_request_mapper.py`;
+  - завершает payload через `_finalize_transformation(...)`;
+  - дальше `ChatService`/provider client вызывают `achat` или `astream`.
+- `prepare_chat_completion_v2(...)` не строит отдельный параллельный chat-pipeline:
+  - сначала приводит chat-like payload к Responses-style `input/tools/text` shape;
+  - затем делегирует в `prepare_response_v2(...)`;
+  - итоговый `ChatV2` payload собирается helper-ами из `gpt2giga/providers/gigachat/responses/`.
+- На ответе `GigaChatChatMapper` так же скрывает backend split:
+  - `process_response(...)` / `process_stream_chunk(...)` для `v1`;
+  - `process_response_v2(...)` / `process_stream_chunk_v2(...)` через `normalize_chat_v2_*` для `v2`.
+
+### Responses flow
+
+```text
+api/openai/responses.py
+-> features/responses/service.py
+-> providers/gigachat/request_mapper.py
+-> providers/gigachat/responses/
+-> GigaChat achat или achat_v2
+-> providers/gigachat/response_mapper.py
+-> OpenAI-compatible Responses payload / SSE
+```
+
+- `gpt2giga/app/wiring.py` передает `responses_backend_mode` в `ResponsesService`.
+- `gpt2giga/features/responses/service.py` держит backend choice внутри feature-layer:
+  - валидирует request context;
+  - при необходимости восстанавливает `model` из `previous_response_id`;
+  - выбирает `prepare_response(...)` или `prepare_response_v2(...)`.
+- `prepare_response(...)` — legacy Responses path:
+  - `transform_responses_parameters(...)` переносит canonical поля в chat-like payload;
+  - `transform_response_format(...)` разворачивает `input` в legacy `messages`;
+  - `_finalize_transformation(...)` применяет общую message normalization.
+- `prepare_response_v2(...)` живет в `gpt2giga/providers/gigachat/responses/backend_request.py` и собирает native `ChatV2` payload через узкие mixin-модули:
+  - `input_normalizer.py`
+  - `model_options.py`
+  - `threading.py`
+  - `tool_mapping.py`
+  - `backend_request.py`
+- На execution path `ResponsesService` сам выбирает upstream method:
+  - `giga_client.achat(...)` + `process_response_api(...)` для `v1`;
+  - `giga_client.achat_v2(...)` + `process_response_api_v2(...)` для `v2`.
+- Streaming path остается feature-owned:
+  - orchestration и metadata-store handoff находятся в `gpt2giga/features/responses/stream.py`;
+  - OpenAI-compatible SSE formatting остается в `gpt2giga/api/openai/streaming.py`.
+
 ### v1 и v2 backend path
 
 - Режимы backend-а задаются конфигом:
@@ -47,6 +110,10 @@
   - `responses_backend_mode`
 - `gpt2giga/app/wiring.py` связывает runtime с `RequestTransformer`, `ResponseProcessor`, `GigaChatChatMapper` и `ResponsesService`.
 - Chat path и Responses path используют общие provider helper-ы, но развилки по v1/v2 скрыты внутри mapper/service слоя, а не в публичных router-ах.
+- Практическое правило для contributors:
+  - router и provider transport adapter не должны выбирать `achat` против `achat_v2`;
+  - единственный internal source of truth для native Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`;
+  - top-level модули `responses_*` сохранены как compatibility re-export layer для старых import path-ов.
 
 ### Models, embeddings, files, batches
 

@@ -458,6 +458,13 @@
   - `responses_tool_mapping.py`
   - `responses_response_mapper.py`
 - Обновлены repo docs, чтобы provider mapping flow ссылался на `providers/gigachat/responses/` как на реальный внутренний source of truth, а старые top-level модули были обозначены как compatibility entrypoints.
+- Продолжен docs-oriented slice внутри `Phase 6`, чтобы новый provider layout читался без археологии по коду:
+  - `docs/architecture.md` теперь явно расписывает `chat` flow, `responses` flow и место выбора `v1/v2` backend path;
+  - `docs/how-to-add-provider.md` теперь отдельно фиксирует, что backend split происходит в `app/wiring.py` + feature/provider layer, а не в transport routes;
+  - `gpt2giga/AGENTS.md` получил короткий provider execution cheat sheet для `chat` и `responses`.
+- Зафиксировано текущее правило совместимости:
+  - internal source of truth для native Responses v2 helper-ов — `gpt2giga/providers/gigachat/responses/`;
+  - top-level `responses_*` модули пока остаются тонким compatibility re-export слоем.
 
 ### Проверка
 
@@ -467,7 +474,7 @@
 
 ### Дальше
 
-- Первый `Phase 6` slice теперь закрывает именно структуру pipeline naming/layout без functional rewrite.
+- Первый `Phase 6` slice теперь закрывает и структуру pipeline naming/layout, и contributor-facing explanation для `chat/responses/v1/v2` flow без functional rewrite.
 - Следующий логичный шаг внутри `Phase 6`:
-  - либо продолжить provider-layer docs и явно расписать chat/responses/v1/v2 flow;
-  - либо убрать уже реально мёртвые transitional shims, если targeted tests подтвердят, что внешняя совместимость больше не нужна.
+  - либо точечно удалить уже реально мёртвые transitional shims, если targeted tests и поиск по импортам подтвердят, что внешняя совместимость больше не нужна;
+  - либо перейти к `Phase 10` и продолжить синхронизацию обзорных docs вокруг новой provider/control-plane картины.

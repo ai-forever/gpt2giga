@@ -55,6 +55,47 @@ HTTP request
 
 значит интеграция идет мимо архитектуры проекта.
 
+## Где реально выбирается backend `v1`/`v2`
+
+Для новых provider-ов важно держать в голове не только общую цепочку, но и конкретное место, где происходит backend split.
+
+### Chat-like flow
+
+```text
+api/<provider>/*
+-> build_normalized_request(...)
+-> features/chat/service.py
+-> providers/gigachat/chat_mapper.py
+-> RequestTransformer.prepare_chat_completion(...) или prepare_chat_completion_v2(...)
+-> GigaChat achat/astream или achat_v2/astream_v2
+-> ResponseProcessor
+-> provider response/stream presenter
+```
+
+- `features/chat/service.py` работает через `GigaChatChatMapper`, уже сконфигурированный в `gpt2giga/app/wiring.py`.
+- `chat_mapper.py` получает `backend_mode` из runtime wiring и сам решает, какой prepare/process path использовать.
+- `prepare_chat_completion_v2(...)` не должен вызываться из router напрямую. Он уже знает, как превратить chat-like payload в native `ChatV2` через structured helper-ы.
+
+### Responses flow
+
+```text
+api/<provider>/*
+-> build_normalized_request(...)
+-> features/responses/service.py
+-> RequestTransformer.prepare_response(...) или prepare_response_v2(...)
+-> GigaChat achat или achat_v2
+-> ResponseProcessor.process_response_api(...) или process_response_api_v2(...)
+-> provider response/stream presenter
+```
+
+- `features/responses/service.py` получает `responses_backend_mode` тоже из `gpt2giga/app/wiring.py`.
+- Именно service-layer, а не router, решает:
+  - когда вызывать legacy Responses path;
+  - когда собирать native `ChatV2`;
+  - как использовать `previous_response_id` и response store для continuation flow.
+- Internal source of truth для Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`.
+- Плоские top-level модули вида `responses_request_mapper.py` и `responses_response_mapper.py` оставлены только как compatibility wrappers для старых import path-ов.
+
 ## Где проходит граница ответственности
 
 ### `gpt2giga/api/<provider>/`
@@ -265,6 +306,7 @@ provider_adapters = ProviderAdapterBundle(
 В transport layer не нужно:
 
 - вручную выбирать `achat` против `achat_v2`;
+- вручную вызывать `prepare_chat_completion_v2(...)` или `prepare_response_v2(...)`;
 - собирать GigaChat request body напрямую;
 - создавать ad-hoc metadata storage;
 - реализовывать auth policy вручную;
