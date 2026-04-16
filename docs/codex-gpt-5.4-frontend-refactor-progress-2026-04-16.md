@@ -304,3 +304,52 @@ Commit:
 Следующий шаг:
 
 - если продолжать дальше, делать уже только небольшой consistency pass по `Providers` / `System` / `Overview`; основные route-level и workflow-level цели плана закрыты.
+
+### Slice 7
+
+Статус: `done`
+
+Цель:
+
+- сделать завершающий consistency pass по summary-first surfaces;
+- выровнять `Overview`, `Providers` и `System` под уже введённый handoff/guide pattern;
+- ещё сильнее увести staged diagnostics на вторичный план без нового route split.
+
+Планируемый объём:
+
+- сделать `Overview` более summary-first и добавить явный guide/handoff surface;
+- перестроить `Providers` в более спокойный `measure/aside` layout без потери capability coverage;
+- сделать `System` более staged: summary/readiness раньше, guides и export отдельно;
+- пересобрать runtime admin assets и обновить targeted asset assertions.
+
+Фактически сделано:
+
+- `Overview` переведён на более явный handoff pattern: основная posture-панель и workflow aside получили `measure/aside` layout, а recent errors вынесены в отдельный summary-first handoff surface вместо условного full-width tail;
+- в `Overview` добавлен отдельный `Guide and troubleshooting` surface с handoff в operator guide, traffic workflow и troubleshooting map;
+- `Providers` перегруппирован в более спокойный summary-first flow: `Executive summary`, `Capability coverage` и `Provider briefs` стали primary `measure` surfaces, а `Provider workflow handoff`, `Guide and troubleshooting` и `Backend posture` ушли в `aside`;
+- staged route diagnostics в `Providers` смягчены через copy `Current route-family snapshot` и `Full provider surface matrix`, чтобы raw route detail читался как вторичный слой;
+- `System` переведён на более staged layout: `Executive summary` и `Readiness` стали primary surfaces, добавлен отдельный `Guide and troubleshooting`, copy/export смягчены до `Copy system snapshot` и `Current system snapshot`;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration asset-test обновлён под новый summary-surface copy для `Overview`, `Providers` и `System`.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q` — 25 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `110844c` — `refactor: align admin summary surfaces`
+
+Следующий шаг:
+
+- базовый frontend-refactor по этому плану закрыт; если продолжать дальше, то только мелкий shell/copy cleanup без новых workflow slices.
