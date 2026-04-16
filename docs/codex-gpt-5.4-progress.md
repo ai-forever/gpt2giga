@@ -261,6 +261,26 @@
   - shared Logs handoff actions.
 - После разреза `render-traffic.ts` уменьшился примерно с `866` строк до `32`, при этом shipped behavior страницы сохранён.
 - Пересобрал shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, включая новый compiled subtree `pages/traffic/`.
+- Завершил тот же slice-шаблон для `files-batches`.
+- `gpt2giga/frontend/admin/pages/render-files-batches.ts` сведён к тонкому page entrypoint:
+  - чтение route filters/state;
+  - загрузка initial files/batches inventory;
+  - рендер hero/content;
+  - bind нового files-batches slice.
+- Вынес files/batches page logic в отдельную модульную структуру `gpt2giga/frontend/admin/pages/files-batches/`:
+  - `state.ts` для filters, route-state, preview/selection типов и inventory shape;
+  - `api.ts` для inventory load, file metadata/content fetch, upload/create/delete actions;
+  - `serializers.ts` для route/query helpers, inventory filtering, preview analysis, batch/file summaries и inspector action rendering;
+  - `view.ts` для page layout, KPI/cards/tables и DOM lookup;
+  - `bindings.ts` для inspector state, workflow summaries, preview lifecycle и form/action wiring.
+- Убрал из giant renderer-а page-local mutable state и смешение UI/API responsibilities:
+  - file/batch inspector selection flow;
+  - content preview/media lifecycle;
+  - upload/create/delete workflow actions;
+  - route-state handoff между inventory, inspector и batch composer;
+  - filter/apply/reset wiring.
+- После разреза `render-files-batches.ts` уменьшился примерно с `1596` строк до `33`, при этом shipped behavior страницы сохранён.
+- Пересобрал shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, включая новый compiled subtree `pages/files-batches/`.
 
 ### Проверка
 
@@ -269,6 +289,8 @@
 
 ### Дальше
 
-- Уже три Phase 4 slice переведены на page-slice архитектуру: `playground`, `logs`, `traffic`.
-- Следующий практический шаг по плану — завершить этот фронтенд-кусок тем же шаблоном для:
-  - `render-files-batches.ts`.
+- Все четыре приоритетные Phase 4 страницы переведены на page-slice архитектуру: `playground`, `logs`, `traffic`, `files-batches`.
+- Следующий практический шаг по плану — перейти к `Phase 5` и начать облегчать сам operator UX:
+  - сгруппировать навигацию по сценариям;
+  - усилить summary-first/handoff flow между observe/diagnose surfaces;
+  - продолжить упрощение top-level information architecture без big-bang миграции.
