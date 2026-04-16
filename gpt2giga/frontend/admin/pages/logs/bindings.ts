@@ -77,7 +77,7 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
     );
     elements.actionsNode.innerHTML = renderLogSelectionActions(requestId || null, filters);
     elements.detailSummaryNode.textContent =
-      kind === "error" ? "Raw error event context" : "Raw request event context";
+      kind === "error" ? "Selected error snapshot" : "Selected request snapshot";
     elements.detailNode.textContent = JSON.stringify(
       {
         selected_event: item,
@@ -95,7 +95,7 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
       "No tail-derived request context selected yet.",
     );
     elements.actionsNode.innerHTML = renderLogSelectionActions(row.requestId || null, filters);
-    elements.detailSummaryNode.textContent = "Raw tail-derived context";
+    elements.detailSummaryNode.textContent = "Selected tail context snapshot";
     elements.detailNode.textContent = JSON.stringify(
       {
         selected_tail_line: {

@@ -210,6 +210,7 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     traffic_asset = client.get("/admin/assets/admin/pages/traffic/view.js")
     traffic_bindings_asset = client.get("/admin/assets/admin/pages/traffic/bindings.js")
     logs_asset = client.get("/admin/assets/admin/pages/logs/view.js")
+    logs_bindings_asset = client.get("/admin/assets/admin/pages/logs/bindings.js")
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert traffic_asset.status_code == 200
@@ -230,11 +231,19 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     assert "Troubleshooting handoff map" in traffic_asset.text
 
     assert logs_asset.status_code == 200
+    assert logs_bindings_asset.status_code == 200
     assert "Open traffic summary" in logs_asset.text
-    assert "Return to the broad traffic summary" in logs_asset.text
-    assert "Session diagnostics" in logs_asset.text
-    assert "Raw context snapshot" in logs_asset.text
+    assert "Current posture and handoff" in logs_asset.text
+    assert "Rendered log tail" in logs_asset.text
+    assert "Live stream diagnostics" in logs_asset.text
+    assert "Current scope snapshot" in logs_asset.text
     assert "Logs deep-dive guide" in logs_asset.text
+    assert "Keep Logs narrower than the broad traffic workflow." in logs_asset.text
+    assert "Tail-derived request context" in logs_asset.text
+    assert "Return to the broad traffic summary" in logs_asset.text
+    assert "Selected request snapshot" in logs_bindings_asset.text
+    assert "Selected error snapshot" in logs_bindings_asset.text
+    assert "Selected tail context snapshot" in logs_bindings_asset.text
 
     assert docs_links_asset.status_code == 200
     assert "operator-guide.md" in docs_links_asset.text
