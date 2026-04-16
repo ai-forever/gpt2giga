@@ -1,0 +1,285 @@
+import { asRecord } from "../../utils.js";
+import { DEFAULT_OUTPUT, getPlaygroundFields } from "./state.js";
+export function applyPreset(form, preset) {
+    const fields = getPlaygroundFields(form);
+    fields.surface.value = preset.surface;
+    fields.model.value = preset.model;
+    fields.system_prompt.value = preset.systemPrompt;
+    fields.user_prompt.value = preset.userPrompt;
+    fields.stream.value = String(preset.stream);
+}
+export function buildRequest(form) {
+    const fields = getPlaygroundFields(form);
+    return buildRequestFromState({
+        surface: fields.surface.value,
+        model: fields.model.value.trim() || "GigaChat",
+        systemPrompt: fields.system_prompt.value.trim(),
+        userPrompt: fields.user_prompt.value.trim(),
+        stream: fields.stream.value === "true",
+    });
+}
+export function buildRequestFromPreset(preset) {
+    return buildRequestFromState({
+        surface: preset.surface,
+        model: preset.model,
+        systemPrompt: preset.systemPrompt,
+        userPrompt: preset.userPrompt,
+        stream: preset.stream,
+    });
+}
+export function applyPlainResponse(rawText, request, runState) {
+    const contentType = runState.contentType.toLowerCase();
+    const parsedJson = tryParseJson(rawText);
+    const displayText = parsedJson !== null
+        ? JSON.stringify(parsedJson, null, 2)
+        : contentType.startsWith("text/")
+            ? rawText
+            : rawText || "(empty response body)";
+    runState.rawOutput = displayText || "(empty response body)";
+    runState.assistantOutput =
+        (parsedJson !== null ? extractAssistantText(parsedJson, request.surface) : rawText).trim() ||
+            "";
+}
+export function buildGatewayHeaders(surface, gatewayKey) {
+    const headers = new Headers({
+        "Content-Type": "application/json",
+    });
+    if (!gatewayKey) {
+        return headers;
+    }
+    headers.set("Authorization", `Bearer ${gatewayKey}`);
+    if (surface === "gemini-generate") {
+        headers.set("x-goog-api-key", gatewayKey);
+    }
+    return headers;
+}
+export function tryParseJson(value) {
+    if (!value.trim()) {
+        return null;
+    }
+    try {
+        return JSON.parse(value);
+    }
+    catch {
+        return null;
+    }
+}
+export function extractAssistantText(payload, surface) {
+    const record = asRecord(payload);
+    if (typeof record.output_text === "string") {
+        return String(record.output_text);
+    }
+    if (Array.isArray(record.output_text)) {
+        return record.output_text.map(String).join("");
+    }
+    if (Array.isArray(record.choices)) {
+        const parts = record.choices.flatMap((choice) => {
+            const choiceRecord = asRecord(choice);
+            return [
+                extractMessageContent(choiceRecord.message),
+                extractMessageContent(choiceRecord.delta),
+                extractTextValue(choiceRecord.text),
+            ].filter(Boolean);
+        });
+        if (parts.length) {
+            return parts.join("");
+        }
+    }
+    if (Array.isArray(record.content)) {
+        const text = record.content
+            .flatMap((item) => {
+            const itemRecord = asRecord(item);
+            if (typeof itemRecord.text === "string") {
+                return [itemRecord.text];
+            }
+            if (Array.isArray(itemRecord.content)) {
+                return itemRecord.content.map((part) => extractTextValue(part)).filter(Boolean);
+            }
+            return [];
+        })
+            .join("");
+        if (text) {
+            return text;
+        }
+    }
+    if (record.delta) {
+        const deltaText = extractMessageContent(record.delta) || extractTextValue(record.delta);
+        if (deltaText) {
+            return deltaText;
+        }
+    }
+    if (Array.isArray(record.candidates)) {
+        const candidateText = record.candidates
+            .flatMap((candidate) => {
+            const content = asRecord(asRecord(candidate).content);
+            return Array.isArray(content.parts)
+                ? content.parts.map((part) => extractTextValue(part)).filter(Boolean)
+                : [];
+        })
+            .join("");
+        if (candidateText) {
+            return candidateText;
+        }
+    }
+    if (surface === "openai-responses" && Array.isArray(record.output)) {
+        const outputText = record.output
+            .flatMap((item) => {
+            const itemRecord = asRecord(item);
+            if (Array.isArray(itemRecord.content)) {
+                return itemRecord.content.map((part) => extractTextValue(part)).filter(Boolean);
+            }
+            return [];
+        })
+            .join("");
+        if (outputText) {
+            return outputText;
+        }
+    }
+    return "";
+}
+export function mergeAssistantOutput(current, next, eventType, payload, surface) {
+    const candidate = next.trim();
+    if (!candidate) {
+        return current;
+    }
+    const lowerType = eventType.toLowerCase();
+    const payloadRecord = asRecord(payload);
+    const choiceList = Array.isArray(payloadRecord.choices) ? payloadRecord.choices : [];
+    const isDeltaEvent = lowerType.includes("delta") ||
+        lowerType.includes("chunk") ||
+        Boolean(payloadRecord.delta) ||
+        Boolean(asRecord(choiceList[0]).delta);
+    if (!current) {
+        return candidate;
+    }
+    if (candidate.startsWith(current) || candidate.length > current.length * 1.5) {
+        return candidate;
+    }
+    if (!isDeltaEvent || surface === "gemini-generate") {
+        return candidate.length >= current.length ? candidate : current;
+    }
+    if (current.endsWith(candidate)) {
+        return current;
+    }
+    return current + candidate;
+}
+export function formatSseTranscript(events) {
+    if (!events.length) {
+        return DEFAULT_OUTPUT;
+    }
+    return events
+        .map((event, index) => {
+        if (event.data === "[DONE]") {
+            return `#${index + 1} ${event.type}\n[DONE]`;
+        }
+        const parsed = tryParseJson(event.data);
+        const body = parsed === null ? event.data : JSON.stringify(parsed, null, 2);
+        return `#${index + 1} ${event.type}\n${body}`;
+    })
+        .join("\n\n");
+}
+export function isAbortError(error) {
+    return error instanceof DOMException
+        ? error.name === "AbortError"
+        : error instanceof Error && error.name === "AbortError";
+}
+function buildRequestFromState({ surface, model, systemPrompt, userPrompt, stream, }) {
+    if (surface === "openai-chat") {
+        return {
+            surface,
+            label: "OpenAI chat/completions",
+            url: "/v1/chat/completions",
+            stream,
+            authLabel: "Authorization: Bearer",
+            body: {
+                model,
+                stream,
+                messages: [
+                    ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+                    { role: "user", content: userPrompt },
+                ],
+            },
+        };
+    }
+    if (surface === "openai-responses") {
+        return {
+            surface,
+            label: "OpenAI responses",
+            url: "/v1/responses",
+            stream,
+            authLabel: "Authorization: Bearer",
+            body: {
+                model,
+                stream,
+                instructions: systemPrompt || undefined,
+                input: userPrompt,
+            },
+        };
+    }
+    if (surface === "anthropic-messages") {
+        return {
+            surface,
+            label: "Anthropic messages",
+            url: "/v1/messages",
+            stream,
+            authLabel: "Authorization: Bearer",
+            body: {
+                model,
+                stream,
+                max_tokens: 256,
+                system: systemPrompt || undefined,
+                messages: [{ role: "user", content: userPrompt }],
+            },
+        };
+    }
+    return {
+        surface,
+        label: "Gemini generateContent",
+        url: stream
+            ? `/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`
+            : `/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+        stream,
+        authLabel: "Authorization: Bearer + x-goog-api-key",
+        body: {
+            ...(systemPrompt
+                ? {
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }],
+                    },
+                }
+                : {}),
+            contents: [
+                {
+                    role: "user",
+                    parts: [{ text: userPrompt }],
+                },
+            ],
+        },
+    };
+}
+function extractMessageContent(value) {
+    const record = asRecord(value);
+    if (typeof record.content === "string") {
+        return record.content;
+    }
+    if (Array.isArray(record.content)) {
+        return record.content.map((part) => extractTextValue(part)).filter(Boolean).join("");
+    }
+    return "";
+}
+function extractTextValue(value) {
+    if (typeof value === "string") {
+        return value;
+    }
+    const record = asRecord(value);
+    if (typeof record.text === "string") {
+        return record.text;
+    }
+    if (typeof record.value === "string") {
+        return record.value;
+    }
+    if (typeof record.partial_json === "string") {
+        return record.partial_json;
+    }
+    return "";
+}

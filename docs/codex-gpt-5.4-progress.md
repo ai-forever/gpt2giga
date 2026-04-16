@@ -197,3 +197,40 @@
 - Следующий практический шаг по плану — продолжить `Phase 3/4` на тяжёлых admin pages:
   - начать slice-архитектуру с `render-playground.ts`;
   - затем аналогично разрезать `logs`, `traffic`, `files-batches`.
+
+## Phase 4
+
+### Сделано
+
+- Начат priority slice для тяжёлых admin pages с `playground`.
+- `gpt2giga/frontend/admin/pages/render-playground.ts` сведён к тонкому page entrypoint:
+  - загрузка `setup` payload;
+  - рендер hero/content;
+  - bind нового playground slice.
+- Вынес playground page logic в отдельную модульную структуру `gpt2giga/frontend/admin/pages/playground/`:
+  - `state.ts` для preset-ов, run-state и form field типов;
+  - `serializers.ts` для request building, response parsing и SSE transcript helpers;
+  - `api.ts` для fetch/SSE execution flow, abort/dispose lifecycle и transport orchestration;
+  - `view.ts` для page layout, DOM lookup и panel/status rendering;
+  - `bindings.ts` для form wiring, preset sync, validation и run/reset actions.
+- Убрал из giant renderer-а page-local mutable state и scattered helper-ы:
+  - active controller/run lifecycle;
+  - request preview refresh;
+  - run status panel updates;
+  - preset activation logic;
+  - SSE consumption helpers.
+- После разреза `render-playground.ts` уменьшился примерно с `1268` строк до `34`, при этом shipped behavior страницы сохранён.
+- Пересобрал shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, включая новый compiled subtree `pages/playground/`.
+
+### Проверка
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q`
+
+### Дальше
+
+- Первый Phase 4 slice теперь закрыт: playground больше не giant renderer и читается как page slice с явными слоями `state/api/view/bindings/serializers`.
+- Следующий практический шаг по плану — продолжить тот же шаблон для request-observability страниц:
+  - `render-logs.ts`;
+  - `render-traffic.ts`;
+  - затем `render-files-batches.ts`.
