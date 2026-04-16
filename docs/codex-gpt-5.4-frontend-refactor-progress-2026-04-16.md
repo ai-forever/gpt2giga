@@ -254,3 +254,53 @@ Commit:
 Следующий шаг:
 
 - при необходимости делать только общий cleanup pass по copy/consistency между `Traffic`, `Logs`, `Providers`, `System`; route-level refactor для admin console закрыт.
+
+### Slice 6
+
+Статус: `done`
+
+Цель:
+
+- сделать follow-up cleanup для `Logs` после split `Traffic`;
+- снизить плотность deep-dive surface и выровнять handoff copy с `Traffic`;
+- увести raw snapshots и stream internals на вторичный план без изменения admin API.
+
+Планируемый объём:
+
+- перестроить `/admin/logs` в более спокойный `8/4` layout;
+- перевести filters в более узкий form-shell вместо full-width stack;
+- собрать selection/handoff summary в отдельный aside inspector;
+- смягчить copy для raw context и SSE diagnostics;
+- пересобрать runtime assets и обновить integration asset assertions.
+
+Фактически сделано:
+
+- `Logs` переведён на более спокойный layout: workflow guide остаётся summary-first, filters живут в `panel--measure`, а posture/handoff и live-tail controls вынесены в отдельные `aside` surfaces;
+- filters собраны в `form-shell` с секциями `Tail window`, `Request pinning`, `Event scope`, чтобы deep-dive page перестала выглядеть как одна длинная техническая форма;
+- selection inspector перестроен в `Current posture` и `Selection and handoff`, а raw disclosure переименован в `Current scope snapshot`;
+- stream panel смягчён: diagnostics теперь явно secondary (`Live stream diagnostics`), а основной акцент остаётся на rendered tail и predictable handoff обратно в `Traffic`;
+- binding copy обновлён под новые snapshot labels: `Selected request snapshot`, `Selected error snapshot`, `Selected tail context snapshot`;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration asset-test обновлён под новый `Logs` copy и layout affordances.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q` — 40 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `4d49a46` — `refactor: polish admin logs surface`
+
+Следующий шаг:
+
+- если продолжать дальше, делать уже только небольшой consistency pass по `Providers` / `System` / `Overview`; основные route-level и workflow-level цели плана закрыты.
