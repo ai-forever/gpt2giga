@@ -245,6 +245,19 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert "Route-family detail stays secondary" in providers_asset.text
 
 
+def test_admin_ui_assets_include_staged_files_batches_copy():
+    client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
+
+    files_batches_asset = client.get("/admin/assets/admin/pages/files-batches/view.js")
+
+    assert files_batches_asset.status_code == 200
+    assert "Staged files and batch workflow" in files_batches_asset.text
+    assert "Stage 1 · Upload input" in files_batches_asset.text
+    assert "Selection metadata snapshot" in files_batches_asset.text
+    assert "Content preview stays secondary" in files_batches_asset.text
+    assert "Escalate only when execution context is needed" in files_batches_asset.text
+
+
 def test_admin_runtime_endpoint():
     app = make_app()
     client = TestClient(app)

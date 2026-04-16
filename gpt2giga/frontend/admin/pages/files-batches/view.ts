@@ -1,9 +1,11 @@
 import {
   card,
   kpi,
+  pill,
   renderDefinitionList,
   renderFilterSelectOptions,
   renderStaticSelectOptions,
+  renderWorkflowCard,
 } from "../../templates.js";
 import { escapeHtml, formatBytes, formatTimestamp } from "../../utils.js";
 import type { FilesBatchesPageData } from "./api.js";
@@ -19,9 +21,13 @@ export interface FilesBatchesPageElements {
   batchForm: HTMLFormElement;
   batchInput: HTMLInputElement;
   contentNode: HTMLPreElement;
+  contentDisclosure: HTMLDetailsElement;
   contentSummaryNode: HTMLElement;
+  contentSummaryTitleNode: HTMLElement;
   detailNode: HTMLPreElement;
+  detailDisclosure: HTMLDetailsElement;
   detailSummaryNode: HTMLElement;
+  detailSummaryTitleNode: HTMLElement;
   filtersForm: HTMLFormElement;
   mediaNode: HTMLElement;
   refreshButton: HTMLButtonElement;
@@ -49,6 +55,44 @@ export function renderFilesBatchesPage(
     ${kpi("Batches shown", `${inventory.filteredBatches.length}/${data.batches.length}`)}
     ${kpi("Output ready", inventory.outputReadyBatches)}
     ${kpi("Needs attention", inventory.attentionBatches)}
+    ${card(
+      "Staged files and batch workflow",
+      `
+        <div class="step-grid">
+          ${renderWorkflowCard({
+            workflow: "start",
+            title: "Stage or reuse one input file",
+            note: "Start with one JSONL input or stored artifact before touching the batch composer.",
+            pills: [pill("Upload"), pill("Inspect")],
+            actions: [
+              { label: "Stage input", href: "#files-batches-upload", primary: true },
+              { label: "Open playground", href: "/admin/playground" },
+            ],
+          })}
+          ${renderWorkflowCard({
+            workflow: "diagnose",
+            title: "Inspect lifecycle before retrying",
+            note: "Use the inspector to confirm file metadata, batch posture, and output availability before queuing another job.",
+            pills: [pill("Metadata"), pill("Lifecycle"), pill("Output", "good")],
+            actions: [
+              { label: "Open inspector", href: "#files-batches-inspector", primary: true },
+              { label: "Jump to batches", href: "#files-batches-batches" },
+            ],
+          })}
+          ${renderWorkflowCard({
+            workflow: "observe",
+            title: "Escalate only when execution context is needed",
+            note: "Once one batch or output needs request-level evidence, hand off into Traffic or Logs with the broader gateway context.",
+            pills: [pill("Traffic"), pill("Logs"), pill("Downstream handoff")],
+            actions: [
+              { label: "Open traffic", href: "/admin/traffic", primary: true },
+              { label: "Open logs", href: "/admin/logs" },
+            ],
+          })}
+        </div>
+      `,
+      "panel panel--span-12",
+    )}
     ${card(
       "Inventory filters",
       `
@@ -95,48 +139,67 @@ export function renderFilesBatchesPage(
       "panel panel--span-12",
     )}
     ${card(
-      "Upload file",
+      "Stage 1 · Upload input",
       `
-        <form id="files-upload-form" class="stack">
-          <label class="field">
-            <span>Purpose</span>
-            <select name="purpose">
-              ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
-            </select>
-          </label>
-          <label class="field">
-            <span>File</span>
-            <input name="file" type="file" required />
-          </label>
-          <div class="banner">Uploads go through the OpenAI-compatible gateway surface and use the gateway API key from the rail.</div>
-          <button class="button" type="submit">Upload file</button>
-        </form>
+        <div class="stack" id="files-batches-upload">
+          <p class="muted">
+            Start here when a fresh JSONL input or reference artifact needs to enter the gateway inventory.
+          </p>
+          <form id="files-upload-form" class="stack">
+            <label class="field">
+              <span>Purpose</span>
+              <select name="purpose">
+                ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
+              </select>
+            </label>
+            <label class="field">
+              <span>File</span>
+              <input name="file" type="file" required />
+            </label>
+            <div class="banner">Uploads go through the OpenAI-compatible gateway surface and use the gateway API key from the rail.</div>
+            <button class="button" type="submit">Upload file</button>
+          </form>
+        </div>
       `,
       "panel panel--span-4",
     )}
     ${card(
-      "Create batch",
+      "Stage 2 · Queue batch job",
       `
-        <form id="batch-create-form" class="stack">
-          <label class="field">
-            <span>Endpoint</span>
-            <select name="endpoint">
-              ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
-            </select>
-          </label>
-          <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required /></label>
-          <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
-          <div class="banner banner--warn">Batch creation expects an uploaded JSONL file in OpenAI batch input format.</div>
-          <button class="button" type="submit">Create batch job</button>
-        </form>
+        <div class="stack">
+          <p class="muted">
+            Use this after selecting or uploading an input file. The composer stays separate from the inspector so retries remain deliberate.
+          </p>
+          <form id="batch-create-form" class="stack">
+            <label class="field">
+              <span>Endpoint</span>
+              <select name="endpoint">
+                ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
+              </select>
+            </label>
+            <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required /></label>
+            <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
+            <div class="banner banner--warn">Batch creation expects an uploaded JSONL file in OpenAI batch input format.</div>
+            <button class="button" type="submit">Create batch job</button>
+          </form>
+        </div>
       `,
       "panel panel--span-4",
     )}
     ${card(
-      "Inspector",
+      "Inspector and staged handoff",
       `
-        <div class="surface">
+        <div class="surface" id="files-batches-inspector">
           <div class="stack">
+            <div class="workflow-card">
+              <div class="workflow-card__header">
+                <span class="eyebrow">Diagnose</span>
+                <h4>Keep inventory summary-first</h4>
+                <p>
+                  Select one file or batch first. Raw metadata and content previews stay secondary until one object actually needs deeper inspection.
+                </p>
+              </div>
+            </div>
             <div id="files-batches-summary">
               ${renderDefinitionList(
                 buildIdleSelectionSummary(
@@ -157,27 +220,39 @@ export function renderFilesBatchesPage(
                 <span class="muted">Select a file or batch to unlock context-aware actions.</span>
               </div>
             </div>
-            <div id="files-batches-detail-summary">
-              ${renderDefinitionList(
-                [
-                  { label: "Detail surface", value: "Idle" },
-                  { label: "Loaded object", value: "No file or batch metadata loaded" },
-                ],
-                "No detail payload loaded.",
-              )}
-            </div>
-            <pre class="code-block code-block--tall" id="files-batches-detail">No selection yet.</pre>
-            <div id="files-batches-content-summary">
-              ${renderDefinitionList(
-                [
-                  { label: "Preview surface", value: "Idle" },
-                  { label: "Loaded content", value: "No file content loaded" },
-                ],
-                "No file content loaded.",
-              )}
-            </div>
-            <div id="files-batches-media"></div>
-            <pre class="code-block code-block--tall" id="files-batches-content">No file content loaded.</pre>
+            <details class="details-disclosure" id="files-batches-detail-disclosure">
+              <summary id="files-batches-detail-summary-label">Selection metadata snapshot</summary>
+              <p class="field-note">
+                Open this only when the selection summary is not enough and raw file or batch metadata still matters.
+              </p>
+              <div id="files-batches-detail-summary">
+                ${renderDefinitionList(
+                  [
+                    { label: "Detail surface", value: "Idle" },
+                    { label: "Loaded object", value: "No file or batch metadata loaded" },
+                  ],
+                  "No detail payload loaded.",
+                )}
+              </div>
+              <pre class="code-block code-block--tall" id="files-batches-detail">No selection yet.</pre>
+            </details>
+            <details class="details-disclosure" id="files-batches-content-disclosure">
+              <summary id="files-batches-content-summary-label">Content preview</summary>
+              <p class="field-note">
+                Content preview stays secondary until one file or batch output actually needs inspection.
+              </p>
+              <div id="files-batches-content-summary">
+                ${renderDefinitionList(
+                  [
+                    { label: "Preview surface", value: "Idle" },
+                    { label: "Loaded content", value: "No file content loaded" },
+                  ],
+                  "No file content loaded.",
+                )}
+              </div>
+              <div id="files-batches-media"></div>
+              <pre class="code-block code-block--tall" id="files-batches-content">No file content loaded.</pre>
+            </details>
           </div>
         </div>
       `,
@@ -225,7 +300,7 @@ export function renderFilesBatchesPage(
       "Batch jobs",
       inventory.filteredBatches.length
         ? `
-            <div class="table-wrap">
+            <div class="table-wrap" id="files-batches-batches">
               <table>
                 <thead>
                   <tr><th>Batch</th><th>Status</th><th>Endpoint</th><th>Output</th><th>Actions</th></tr>
@@ -268,6 +343,18 @@ export function resolveFilesBatchesElements(
 ): FilesBatchesPageElements | null {
   const detailNode = pageContent.querySelector<HTMLPreElement>("#files-batches-detail");
   const contentNode = pageContent.querySelector<HTMLPreElement>("#files-batches-content");
+  const detailDisclosure = pageContent.querySelector<HTMLDetailsElement>(
+    "#files-batches-detail-disclosure",
+  );
+  const contentDisclosure = pageContent.querySelector<HTMLDetailsElement>(
+    "#files-batches-content-disclosure",
+  );
+  const detailSummaryTitleNode = pageContent.querySelector<HTMLElement>(
+    "#files-batches-detail-summary-label",
+  );
+  const contentSummaryTitleNode = pageContent.querySelector<HTMLElement>(
+    "#files-batches-content-summary-label",
+  );
   const mediaNode = pageContent.querySelector<HTMLElement>("#files-batches-media");
   const summaryNode = pageContent.querySelector<HTMLElement>("#files-batches-summary");
   const workflowNode = pageContent.querySelector<HTMLElement>("#files-batches-workflow");
@@ -294,6 +381,10 @@ export function resolveFilesBatchesElements(
   if (
     !detailNode ||
     !contentNode ||
+    !detailDisclosure ||
+    !contentDisclosure ||
+    !detailSummaryTitleNode ||
+    !contentSummaryTitleNode ||
     !mediaNode ||
     !summaryNode ||
     !workflowNode ||
@@ -315,9 +406,13 @@ export function resolveFilesBatchesElements(
     batchForm,
     batchInput,
     contentNode,
+    contentDisclosure,
     contentSummaryNode,
+    contentSummaryTitleNode,
     detailNode,
+    detailDisclosure,
     detailSummaryNode,
+    detailSummaryTitleNode,
     filtersForm,
     mediaNode,
     refreshButton,

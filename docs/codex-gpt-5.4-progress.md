@@ -363,6 +363,15 @@
   - `Providers` оставляет `Capability coverage` primary, а route families и full surface matrix переводит в secondary disclosure diagnostics;
   - `Overview`, `System` и `Providers` теперь используют общий `renderWorkflowCard(...)` helper вместо page-local дублирования workflow-card markup.
 - Добавлен runtime regression test на shipped assets `render-system.js` и `render-providers.js`, чтобы summary-first/staged diagnostics copy для этих экранов не дрейфовал между TS source и отгружаемым bundle.
+- Продолжен следующий `Phase 5` UX slice на экране `Files & Batches`, где оставался самый тяжёлый workbench-мэшап из inventory, inspector и composer flow:
+  - верх страницы теперь начинается с `Staged files and batch workflow` с явными handoff-картами для input staging, lifecycle inspection и downstream observe-перехода в `Traffic`/`Logs`;
+  - формы переименованы в staged flow (`Stage 1 · Upload input`, `Stage 2 · Queue batch job`), чтобы composer перестал конкурировать с inspector без объяснения порядка;
+  - inspector переведён на summary-first disclosure-модель:
+    - raw metadata теперь живёт под `Selection metadata snapshot`;
+    - content/media preview теперь живёт под `Content preview` и раскрывается только когда реально нужен;
+    - при смене file/batch selection старый preview больше не остаётся висеть как ложный контекст для нового объекта;
+  - navigation copy для `Files & Batches` обновлён под staged workbench semantics вместо общего “advanced workbench state”.
+- Добавлен runtime regression test на shipped asset `pages/files-batches/view.js`, чтобы workflow/disclosure copy для `Files & Batches` не дрейфовал между TS source и отгружаемым bundle.
 
 ### Проверка
 
@@ -380,14 +389,18 @@
 - `npm run build:admin`
 - `uv run pytest tests/integration/app/test_system_router_extra.py -q`
 - `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
+- `uv run ruff check tests/integration/app/test_system_router_extra.py`
+- `uv run ruff format --check tests/integration/app/test_system_router_extra.py`
+- `npm run build:admin`
 - `uv run pytest tests/integration/app/test_system_router_extra.py -q`
 
 ### Дальше
 
 - Первый практический slice `Phase 5` закрыт: верхний operator UX теперь лучше отражает реальные workflow, а overview стал summary-first точкой входа вместо просто списка страниц.
 - Следующий логичный шаг внутри `Phase 5` теперь сместился дальше:
-  - после `System`/`Providers` продолжить staged-упрощение соседних surfaces, где ещё остаются конкурирующие diagnostics/workbench панели, в первую очередь `Files & Batches`;
-  - при желании добавить docs/deep-link handoff из `Traffic`/`Logs`/`Providers` в operator guide и troubleshooting flow.
+  - после `Files & Batches` логично добавить docs/deep-link handoff из `Traffic`/`Logs`/`Providers`/`Files & Batches` в operator guide и troubleshooting flow;
+  - затем можно решать, нужен ли ещё один UX slice для более явной связки batch output -> traffic/log diagnostics или Phase 5 уже достаточно закрыта для перехода к Phase 6/10.
 - Дополнительный follow-up для observability UX теперь стал уже вторичным:
   - при желании добавить test/export actions для sink-ов;
   - при желании связать preset cards с docs/operator guide deep links или sample commands;

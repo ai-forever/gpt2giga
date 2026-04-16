@@ -17,11 +17,24 @@ export function bindFilesBatchesPage(options) {
     const setWorkflowSummary = (items) => {
         setDefinitionBlock(elements.workflowNode, items, "No workflow state reported.");
     };
-    const setDetailSummary = (items) => {
+    const setDetailSurface = (title, items, payload, open = false) => {
+        elements.detailSummaryTitleNode.textContent = title;
         setDefinitionBlock(elements.detailSummaryNode, items, "No detail payload loaded.");
+        elements.detailNode.textContent = payload;
+        elements.detailDisclosure.open = open;
     };
-    const setContentSummary = (items) => {
+    const setContentSurface = (title, items, payload, open = false) => {
+        elements.contentSummaryTitleNode.textContent = title;
         setDefinitionBlock(elements.contentSummaryNode, items, "No file content loaded.");
+        elements.contentNode.textContent = payload;
+        elements.contentDisclosure.open = open;
+    };
+    const resetContentSurface = () => {
+        clearMediaPreview();
+        setContentSurface("Content preview", [
+            { label: "Preview surface", value: "Idle" },
+            { label: "Loaded content", value: "No file content loaded" },
+        ], "No file content loaded.", false);
     };
     const clearMediaPreview = () => {
         elements.mediaNode.innerHTML = "";
@@ -59,6 +72,7 @@ export function bindFilesBatchesPage(options) {
         const source = inventory.fileLookup.get(fileId);
         elements.batchInput.value = fileId;
         selection = { kind: "file", fileId };
+        resetContentSurface();
         setSummary([
             { label: "Selection", value: "Batch input ready" },
             { label: "File id", value: fileId },
@@ -70,12 +84,11 @@ export function bindFilesBatchesPage(options) {
                 note: "The input field has been populated for the batch form.",
             },
         ]);
-        setDetailSummary([
+        setDetailSurface("Composer handoff", [
             { label: "Detail surface", value: "Composer handoff" },
             { label: "Selected input", value: fileId },
             { label: "Endpoint target", value: "Choose an endpoint in the batch form" },
-        ]);
-        elements.detailNode.textContent = `Selected ${fileId} as batch input.`;
+        ], `Selected ${fileId} as batch input.`, false);
         setWorkflowSummary([
             { label: "Workflow state", value: "Batch input primed" },
             { label: "Input file", value: fileId },
@@ -91,7 +104,7 @@ export function bindFilesBatchesPage(options) {
     const previewFileContent = async (fileId, button, options) => {
         const source = inventory.fileLookup.get(fileId);
         const label = options?.label ?? "File content preview";
-        setContentSummary([
+        setContentSurface(label, [
             { label: "Preview surface", value: label },
             { label: "File id", value: fileId },
             {
@@ -99,9 +112,8 @@ export function bindFilesBatchesPage(options) {
                 value: "Loading…",
                 note: options?.support ?? String(source?.filename ?? fileId),
             },
-        ]);
+        ], "Loading file content…", true);
         clearMediaPreview();
-        elements.contentNode.textContent = "Loading file content…";
         await runWorkflowAction({
             root: elements.actionNode,
             button,
@@ -127,11 +139,11 @@ export function bindFilesBatchesPage(options) {
             action: async () => {
                 const bytes = await fetchFileContent(app, fileId);
                 const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
-                setContentSummary(buildContentPreviewSummary(preview, fileId, label, {
+                setContentSurface(label, buildContentPreviewSummary(preview, fileId, label, {
                     support: options?.support ?? String(source?.filename ?? fileId),
                     file: source,
                     relatedBatch: options?.relatedBatch ?? null,
-                }));
+                }), preview.textFallback, true);
                 if (preview.kind === "image") {
                     const blobBytes = new Uint8Array(bytes.byteLength);
                     blobBytes.set(bytes);
@@ -146,11 +158,9 @@ export function bindFilesBatchesPage(options) {
               />
             </figure>
           `;
-                    elements.contentNode.textContent = preview.textFallback;
                 }
                 else {
                     clearMediaPreview();
-                    elements.contentNode.textContent = preview.textFallback;
                 }
                 return preview;
             },
@@ -195,6 +205,7 @@ export function bindFilesBatchesPage(options) {
                 const linkedBatches = getLinkedBatchesForFile(fileId, data.batches);
                 const readyOutputs = linkedBatches.filter((batch) => Boolean(String(batch.output_file_id ?? ""))).length;
                 selection = { kind: "file", fileId };
+                resetContentSurface();
                 setSummary([
                     { label: "Selection", value: "File" },
                     { label: "File id", value: fileId },
@@ -213,13 +224,12 @@ export function bindFilesBatchesPage(options) {
                             : "No completed output linked yet.",
                     },
                 ]);
-                setDetailSummary([
+                setDetailSurface("Selection metadata snapshot", [
                     { label: "Detail surface", value: "File metadata" },
                     { label: "Linked batches", value: String(linkedBatches.length) },
                     { label: "Stored bytes", value: formatBytes(source.bytes) },
                     { label: "Status", value: String(source.status ?? "processed") },
-                ]);
-                elements.detailNode.textContent = JSON.stringify(payload, null, 2);
+                ], JSON.stringify(payload, null, 2), true);
                 updateInspectorActions();
                 return payload;
             },
@@ -265,6 +275,7 @@ export function bindFilesBatchesPage(options) {
                     inputFileId: inputFileId || undefined,
                     outputFileId: outputFileId || undefined,
                 };
+                resetContentSurface();
                 setSummary([
                     { label: "Selection", value: "Batch" },
                     { label: "Batch id", value: batchId },
@@ -276,20 +287,24 @@ export function bindFilesBatchesPage(options) {
                         note: inputFileId || "no input file",
                     },
                 ]);
-                setDetailSummary([
+                setDetailSurface("Selection metadata snapshot", [
                     { label: "Detail surface", value: "Batch metadata" },
                     { label: "Lifecycle posture", value: humanizeBatchLifecycle(source.status) },
                     { label: "Input file", value: inputFileId || "missing" },
                     { label: "Output file", value: outputFileId || "not ready" },
                     { label: "Requests", value: summarizeBatchRequestCounts(source.request_counts) },
-                ]);
-                elements.detailNode.textContent = JSON.stringify(payload, null, 2);
+                ], JSON.stringify(payload, null, 2), true);
                 updateInspectorActions();
                 return payload;
             },
         });
     };
     updateInspectorActions();
+    resetContentSurface();
+    setDetailSurface("Selection metadata snapshot", [
+        { label: "Detail surface", value: "Idle" },
+        { label: "Loaded object", value: "No file or batch metadata loaded" },
+    ], "No selection yet.", false);
     elements.refreshButton.addEventListener("click", () => {
         void app.render("files-batches");
     });
@@ -492,7 +507,7 @@ export function bindFilesBatchesPage(options) {
                 { label: "Batch id", value: String(latestOutputBatch?.id ?? "unknown") },
                 { label: "Endpoint", value: String(latestOutputBatch?.endpoint ?? "n/a") },
             ]);
-            setDetailSummary([
+            setDetailSurface("Selection metadata snapshot", [
                 { label: "Detail surface", value: "Latest linked output" },
                 { label: "Batch id", value: String(latestOutputBatch?.id ?? "unknown") },
                 { label: "Output file", value: outputFileId },
@@ -500,7 +515,10 @@ export function bindFilesBatchesPage(options) {
                     label: "Requests",
                     value: summarizeBatchRequestCounts(latestOutputBatch?.request_counts),
                 },
-            ]);
+            ], JSON.stringify({
+                latest_linked_batch: latestOutputBatch,
+                output_file_id: outputFileId,
+            }, null, 2), true);
             updateInspectorActions();
             await previewFileContent(outputFileId, button, {
                 label: "Latest linked output",
@@ -584,11 +602,14 @@ export function bindFilesBatchesPage(options) {
                 { label: "Batch id", value: String(batch?.id ?? "unknown") },
                 { label: "Endpoint", value: String(batch?.endpoint ?? "n/a") },
             ]);
-            setDetailSummary([
+            setDetailSurface("Selection metadata snapshot", [
                 { label: "Detail surface", value: "Batch output handoff" },
                 { label: "Batch id", value: String(batch?.id ?? "unknown") },
                 { label: "Output file", value: fileId },
-            ]);
+            ], JSON.stringify({
+                batch_output_handoff: batch ?? null,
+                output_file_id: fileId,
+            }, null, 2), true);
             updateInspectorActions();
             await previewFileContent(fileId, item instanceof HTMLButtonElement ? item : null, {
                 label: "Batch output preview",

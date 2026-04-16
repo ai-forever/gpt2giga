@@ -90,9 +90,9 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
     eyebrow: "Files & Batches",
     title: "Files and batch jobs",
     subtitle:
-      "Upload JSONL inputs, inspect stored files, and launch OpenAI-compatible batch jobs.",
+      "Stage JSONL inputs, inspect stored files, and launch OpenAI-compatible batch jobs without losing lifecycle context.",
     workflow: "diagnose",
-    navDescription: "Inspect stored inputs, batch jobs, and advanced workbench state from one place.",
+    navDescription: "Staged workbench for stored inputs, batch lifecycles, and downstream output handoff.",
   },
   system: {
     eyebrow: "System",
