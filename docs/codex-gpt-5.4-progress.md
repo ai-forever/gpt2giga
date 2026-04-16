@@ -241,6 +241,26 @@
   - query-driven filter persistence.
 - После разреза `render-logs.ts` уменьшился примерно с `1210` строк до `29`, при этом shipped behavior страницы сохранён.
 - Пересобрал shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, включая новый compiled subtree `pages/logs/`.
+- Продолжил тот же slice-шаблон для `traffic`.
+- `gpt2giga/frontend/admin/pages/render-traffic.ts` сведён к тонкому page entrypoint:
+  - чтение query-driven filters;
+  - загрузка initial traffic/usage payload-ов;
+  - рендер hero/content;
+  - bind нового traffic slice.
+- Вынес traffic page logic в отдельную модульную структуру `gpt2giga/frontend/admin/pages/traffic/`:
+  - `state.ts` для filters, selection и usage/event типов;
+  - `serializers.ts` для query builders, selection summaries, request/log handoff и table render helpers;
+  - `api.ts` для initial data loading;
+  - `view.ts` для page layout и DOM lookup;
+  - `bindings.ts` для selection inspector, filter submit и cross-table request pin workflow.
+- Убрал из giant renderer-а page-local selection orchestration и scattered table/payload helper-ы:
+  - recent request/error selection;
+  - usage-row inspection;
+  - counterpart handoff between request/error rows;
+  - query-driven traffic filter persistence;
+  - shared Logs handoff actions.
+- После разреза `render-traffic.ts` уменьшился примерно с `866` строк до `32`, при этом shipped behavior страницы сохранён.
+- Пересобрал shipped admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, включая новый compiled subtree `pages/traffic/`.
 
 ### Проверка
 
@@ -249,7 +269,6 @@
 
 ### Дальше
 
-- Уже два Phase 4 slice переведены на page-slice архитектуру: `playground` и `logs`.
-- Следующий практический шаг по плану — продолжить тот же шаблон для оставшихся тяжёлых страниц:
-  - `render-traffic.ts`;
-  - затем `render-files-batches.ts`.
+- Уже три Phase 4 slice переведены на page-slice архитектуру: `playground`, `logs`, `traffic`.
+- Следующий практический шаг по плану — завершить этот фронтенд-кусок тем же шаблоном для:
+  - `render-files-batches.ts`.
