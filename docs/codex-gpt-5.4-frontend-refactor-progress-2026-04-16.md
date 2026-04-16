@@ -451,3 +451,50 @@ Commit:
 Следующий шаг:
 
 - если продолжать дальше, то уже только точечный CTA/copy polish на отдельных страницах; shell routing, accessibility-basics и handoff URL contract для этого refactor уже закрыты.
+
+### Slice 10
+
+Статус: `done`
+
+Цель:
+
+- сделать точечный consistency pass для оставшихся operator entrypoints без нового route split;
+- выровнять `API Keys` и `Playground` под уже введённый summary-first / handoff pattern;
+- увести raw payload и usage snapshot на вторичный план без изменения admin API.
+
+Планируемый объём:
+
+- перестроить `/admin/keys` в более спокойную key-first surface;
+- сузить `Playground` до более явного smoke-flow layout с calmer request/output hierarchy;
+- обновить runtime assets и integration asset assertions под новый copy/layout.
+
+Фактически сделано:
+
+- `API Keys` переведён в summary-first surface: добавлены `Executive summary`, `Key workflows`, calmer `Create scoped key`, `Scoped key inventory`, `Guide and troubleshooting` и secondary `Current key snapshot` вместо постоянного raw блока;
+- `Playground` переведён на `measure/aside` layout: request builder собран в `form-shell`, bootstrap/request/transport raw payloads унесены в secondary disclosures, а smoke handoff и guide surfaces вынесены в `aside`;
+- hero/actions и page copy для `Keys` и `Playground` выровнены с уже используемым workflow/handoff language;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration asset-test расширен под новый copy для `render-keys.js` и `playground/view.js`.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q` — 41 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `refactor: polish admin playground and keys`
+- commit hash будет доступен в git history и в итоговом отчёте текущего запуска; сам файл не может атомарно содержать hash того же самого commit без отдельного follow-up commit.
+
+Следующий шаг:
+
+- route/layout refactor по этому плану закрыт; если продолжать дальше, то уже только очень мелкий copy/accessibility polish или новый отдельный UX-plan вне текущего scope.

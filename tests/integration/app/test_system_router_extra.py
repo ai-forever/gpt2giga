@@ -316,6 +316,34 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert "provider-surface-diagnostics" in docs_links_asset.text
 
 
+def test_admin_ui_assets_include_polished_keys_and_playground_copy():
+    client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
+
+    keys_asset = client.get("/admin/assets/admin/pages/render-keys.js")
+    playground_asset = client.get("/admin/assets/admin/pages/playground/view.js")
+    docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
+
+    assert keys_asset.status_code == 200
+    assert "Key workflows" in keys_asset.text
+    assert "Create scoped key" in keys_asset.text
+    assert "Scoped key inventory" in keys_asset.text
+    assert "Current key snapshot" in keys_asset.text
+    assert "Open usage traffic" in keys_asset.text
+    assert "Keys stay narrow on purpose." in keys_asset.text
+
+    assert playground_asset.status_code == 200
+    assert "Smoke workflow handoff" in playground_asset.text
+    assert "Current request posture" in playground_asset.text
+    assert "Current request payload" in playground_asset.text
+    assert "Current transport snapshot" in playground_asset.text
+    assert "Playground stays narrow." in playground_asset.text
+    assert "Current bootstrap posture" in playground_asset.text
+
+    assert docs_links_asset.status_code == 200
+    assert "troubleshooting-handoff-map" in docs_links_asset.text
+    assert "rollout-backend-v2" in docs_links_asset.text
+
+
 def test_admin_ui_assets_include_staged_files_batches_copy():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 

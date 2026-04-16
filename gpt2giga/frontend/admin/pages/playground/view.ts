@@ -1,4 +1,14 @@
-import { card, kpi, pill, renderDefinitionList } from "../../templates.js";
+import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
+import { pathForPage } from "../../routes.js";
+import {
+  card,
+  kpi,
+  pill,
+  renderDefinitionList,
+  renderFormSection,
+  renderGuideLinks,
+  renderWorkflowCard,
+} from "../../templates.js";
 import type { SetupPayload } from "../../types.js";
 import {
   asRecord,
@@ -47,22 +57,27 @@ export function renderPlaygroundPage(
   setup: SetupPayload,
   initialRequest: PlaygroundRequest,
 ): string {
+  const bootstrapRequired = asRecord(setup.bootstrap).required;
   return `
     ${kpi("GigaChat", setup.gigachat_ready ? "ready" : "missing")}
     ${kpi("Security", setup.security_ready ? "ready" : "pending")}
     ${kpi("Persisted", setup.persisted ? "yes" : "defaults")}
-    ${kpi("Bootstrap", asRecord(setup.bootstrap).required ? "active" : "off")}
+    ${kpi("Bootstrap", bootstrapRequired ? "active" : "off")}
     ${card(
-      "Request Builder",
+      "Request builder",
       `
-        <form id="playground-form" class="stack">
-          <div class="surface">
-            <div class="surface__header">
-              <div class="stack">
-                <h4>Smoke presets</h4>
-                <p class="muted">Load a ready-made request, then tweak model/prompt fields before sending.</p>
-              </div>
-              <div class="surface__meta">
+        <form id="playground-form" class="form-shell">
+          <div class="form-shell__intro">
+            <span class="eyebrow">Smoke flow</span>
+            <p class="muted">
+              Keep Playground narrow: load a preset, tweak only the request fields that matter, then send one proof request before widening into Traffic or Logs.
+            </p>
+          </div>
+          ${renderFormSection({
+            title: "Smoke presets",
+            intro: "Start from a known-good request shape, then adjust only the surface, model, or prompt fields you really need.",
+            body: `
+              <div class="toolbar">
                 ${PLAYGROUND_PRESETS.map(
                   (preset) => `
                     <button class="button button--secondary playground-preset" data-preset="${escapeHtml(
@@ -73,81 +88,115 @@ export function renderPlaygroundPage(
                   `,
                 ).join("")}
               </div>
-            </div>
-          </div>
-          <label class="field">
-            <span>Surface</span>
-            <select name="surface">
-              <option value="openai-chat">OpenAI chat/completions</option>
-              <option value="openai-responses">OpenAI responses</option>
-              <option value="anthropic-messages">Anthropic messages</option>
-              <option value="gemini-generate">Gemini generateContent</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Model</span>
-            <input name="model" value="${escapeHtml(String(initialRequest.body.model ?? "GigaChat"))}" />
-          </label>
-          <label class="field">
-            <span>System prompt</span>
-            <textarea name="system_prompt" placeholder="Optional system prompt">${escapeHtml(
-              DEFAULT_PLAYGROUND_PRESET.systemPrompt,
-            )}</textarea>
-          </label>
-          <label class="field">
-            <span>User prompt</span>
-            <textarea name="user_prompt">${escapeHtml(DEFAULT_PLAYGROUND_PRESET.userPrompt)}</textarea>
-          </label>
-          <div class="dual-grid">
-            <label class="field">
-              <span>Stream</span>
-              <select name="stream">
-                <option value="false">off</option>
-                <option value="true">on</option>
-              </select>
-            </label>
-            <div class="surface">
-              <div class="stack">
-                <h4>Gateway auth</h4>
-                <p class="muted" id="playground-auth-note">
-                  Requests reuse the gateway key from the left rail. Keep it aligned with bootstrap or scoped keys.
-                </p>
+            `,
+          })}
+          ${renderFormSection({
+            title: "Request targeting",
+            intro: "Choose the compatibility surface and model first, then edit prompts inside one quieter shell.",
+            body: `
+              <div class="dual-grid">
+                <label class="field">
+                  <span>Surface</span>
+                  <select name="surface">
+                    <option value="openai-chat">OpenAI chat/completions</option>
+                    <option value="openai-responses">OpenAI responses</option>
+                    <option value="anthropic-messages">Anthropic messages</option>
+                    <option value="gemini-generate">Gemini generateContent</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Model</span>
+                  <input name="model" value="${escapeHtml(String(initialRequest.body.model ?? "GigaChat"))}" />
+                </label>
               </div>
-            </div>
-          </div>
-          <div class="toolbar">
+              <label class="field">
+                <span>System prompt</span>
+                <textarea name="system_prompt" placeholder="Optional system prompt">${escapeHtml(
+                  DEFAULT_PLAYGROUND_PRESET.systemPrompt,
+                )}</textarea>
+              </label>
+              <label class="field">
+                <span>User prompt</span>
+                <textarea name="user_prompt">${escapeHtml(DEFAULT_PLAYGROUND_PRESET.userPrompt)}</textarea>
+              </label>
+            `,
+          })}
+          ${renderFormSection({
+            title: "Transport posture",
+            intro: "Streaming and gateway auth stay explicit so the operator always knows what the proxy will attach and how the response should arrive.",
+            body: `
+              <div class="dual-grid">
+                <label class="field">
+                  <span>Stream</span>
+                  <select name="stream">
+                    <option value="false">off</option>
+                    <option value="true">on</option>
+                  </select>
+                </label>
+                <div class="surface">
+                  <div class="stack">
+                    <h4>Gateway auth</h4>
+                    <p class="muted" id="playground-auth-note">
+                      Requests reuse the gateway key from the left rail. Keep it aligned with bootstrap or scoped keys.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            `,
+          })}
+          <div class="form-actions">
             <button class="button" id="playground-submit" type="submit">Send request</button>
             <span class="muted" id="playground-form-note">Preview updates live as you type.</span>
           </div>
         </form>
       `,
-      "panel panel--span-4",
+      "panel panel--span-8 panel--measure",
     )}
     ${card(
-      "Request Preview",
-      `
-        <div class="surface">
-          <div class="stack">
-            <div id="playground-request-summary"></div>
-            <pre class="code-block code-block--tall" id="playground-request-body">${escapeHtml(
-              JSON.stringify(initialRequest.body, null, 2),
-            )}</pre>
-          </div>
-        </div>
-      `,
-      "panel panel--span-4",
-    )}
-    ${card(
-      "Bootstrap Hints",
+      "Smoke workflow handoff",
       `
         <div class="stack">
           <div id="playground-bootstrap-banner"></div>
+          <div class="workflow-grid">
+            ${renderWorkflowCard({
+              workflow: "start",
+              title: setup.gigachat_ready ? "Smoke the mounted compatibility surface" : "Finish bootstrap before smoke",
+              note: setup.gigachat_ready
+                ? "Use one preset request as proof that the mounted route really works from inside the console, then widen into request-level diagnostics only if the result still feels wrong."
+                : "Missing upstream credentials or bootstrap posture should be closed before Playground output is treated as a real signal.",
+              pills: [
+                pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
+                pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn"),
+                pill(`Bootstrap: ${bootstrapRequired ? "active" : "off"}`, bootstrapRequired ? "warn" : "default"),
+              ],
+              actions: [
+                { label: setup.gigachat_ready ? "Run smoke request" : "Open setup", href: setup.gigachat_ready ? "#playground-submit" : pathForPage("setup"), primary: true },
+                { label: "API Keys", href: pathForPage("keys") },
+              ],
+            })}
+            ${renderWorkflowCard({
+              workflow: "observe",
+              title: "Hand off only after one request narrows the story",
+              note: "Traffic and Logs stay secondary until one request, failure, or usage signal becomes the real debugging target.",
+              pills: [
+                pill(`Persisted: ${setup.persisted ? "yes" : "defaults"}`, setup.persisted ? "good" : "default"),
+                pill(`Gateway auth: ${setup.security_ready ? "protected" : "open"}`),
+                pill(`Zero-env path: ready`),
+              ],
+              actions: [
+                { label: "Traffic", href: pathForPage("traffic"), primary: true },
+                { label: "Logs", href: pathForPage("logs") },
+              ],
+            })}
+          </div>
           <div class="surface">
             <div class="stack">
               <div class="surface__header">
                 <div class="stack">
-                  <h4>Zero-env path</h4>
-                  <p class="muted">Use the console as a built-in smoke client even before external SDKs are wired up.</p>
+                  <h4>Current bootstrap posture</h4>
+                  <p class="muted">
+                    Keep bootstrap facts close to the smoke flow, but out of the main request builder.
+                  </p>
                 </div>
                 <div class="surface__meta">
                   ${pill("setup")}
@@ -156,44 +205,93 @@ export function renderPlaygroundPage(
                 </div>
               </div>
               <div id="playground-bootstrap-summary"></div>
-              <div class="toolbar">
-                <a class="button button--secondary" href="/admin/setup">Open setup</a>
-                <a class="button button--secondary" href="/admin/keys">Open keys</a>
-              </div>
             </div>
           </div>
         </div>
       `,
-      "panel panel--span-4",
+      "panel panel--span-4 panel--aside",
     )}
     ${card(
-      "Run Status",
+      "Request preview",
       `
-        <div class="surface">
-          <div class="stack">
-            <div class="surface__header">
-              <div class="stack">
-                <h4>Request lifecycle</h4>
-                <p class="muted">Pending, first-byte, stream, success, and abort states stay explicit so the UI never looks hung.</p>
+        <div class="stack">
+          <div class="surface">
+            <div class="stack">
+              <div class="surface__header">
+                <div class="stack">
+                  <h4>Current request posture</h4>
+                  <p class="muted">
+                    Summary stays primary. Open the raw request payload only when a specific field still needs inspection.
+                  </p>
+                </div>
               </div>
-              <div class="surface__meta" id="playground-status-pill">${pill("idle")}</div>
+              <div id="playground-request-summary"></div>
             </div>
-            <div id="playground-run-note" class="field-note">${escapeHtml(DEFAULT_OUTPUT)}</div>
-            <div id="playground-run-summary"></div>
           </div>
+          <details class="details-disclosure">
+            <summary>Current request payload</summary>
+            <pre class="code-block code-block--tall" id="playground-request-body">${escapeHtml(
+              JSON.stringify(initialRequest.body, null, 2),
+            )}</pre>
+          </details>
         </div>
       `,
-      "panel panel--span-4",
+      "panel panel--span-8 panel--measure",
     )}
     ${card(
-      "Assistant Output",
+      "Current posture and handoff",
+      `
+        <div class="stack">
+          <div class="surface">
+            <div class="stack">
+              <div class="surface__header">
+                <div class="stack">
+                  <h4>Request lifecycle</h4>
+                  <p class="muted">
+                    Pending, first-byte, stream, success, and abort states stay explicit so the UI never looks hung.
+                  </p>
+                </div>
+                <div class="surface__meta" id="playground-status-pill">${pill("idle")}</div>
+              </div>
+              <div id="playground-run-note" class="field-note">${escapeHtml(DEFAULT_OUTPUT)}</div>
+              <div id="playground-run-summary"></div>
+            </div>
+          </div>
+          ${renderGuideLinks(
+            [
+              {
+                label: "Overview workflow guide",
+                href: OPERATOR_GUIDE_LINKS.overview,
+                note: "Use the broader operator map when Playground is no longer the right surface and you need to step back into setup, settings, or request diagnostics.",
+              },
+              {
+                label: "Troubleshooting handoff map",
+                href: OPERATOR_GUIDE_LINKS.troubleshooting,
+                note: "Open the escalation map when the smoke request succeeded but the next page is still unclear.",
+              },
+              {
+                label: "Rollout backend v2",
+                href: OPERATOR_GUIDE_LINKS.rolloutV2,
+                note: "Use the rollout notes when the result difference looks tied to backend mode rather than request construction.",
+              },
+            ],
+            "Playground stays narrow. Use the longer guides only after one smoke request and its summary still do not explain what the operator should do next.",
+          )}
+        </div>
+      `,
+      "panel panel--span-4 panel--aside",
+    )}
+    ${card(
+      "Assistant output",
       `
         <div class="surface surface--dark">
           <div class="stack">
             <div class="surface__header">
               <div class="stack">
                 <h4>Parsed response</h4>
-                <p class="muted">Best-effort extraction keeps the operator focused on model output instead of protocol noise.</p>
+                <p class="muted">
+                  Best-effort extraction keeps the operator focused on model output instead of protocol noise.
+                </p>
               </div>
               <div class="surface__meta" id="playground-output-meta">${pill("waiting")}</div>
             </div>
@@ -203,27 +301,32 @@ export function renderPlaygroundPage(
           </div>
         </div>
       `,
-      "panel panel--span-4",
+      "panel panel--span-8 panel--measure",
     )}
     ${card(
-      "Raw Response",
+      "Transport transcript",
       `
-        <div class="surface">
-          <div class="stack">
+        <div class="stack">
+          <div class="surface">
             <div class="surface__header">
               <div class="stack">
-                <h4>Transport transcript</h4>
-                <p class="muted">Shows the final body for plain requests or a normalized event transcript for SSE.</p>
+                <h4>Transport posture</h4>
+                <p class="muted">
+                  Rendered output stays primary. Open the transcript only when transport-level detail is the actual debugging target.
+                </p>
               </div>
               <div class="surface__meta" id="playground-transport-meta">${pill("idle")}</div>
             </div>
+          </div>
+          <details class="details-disclosure">
+            <summary>Current transport snapshot</summary>
             <pre class="code-block code-block--tall playground-output" id="playground-output">${escapeHtml(
               DEFAULT_OUTPUT,
             )}</pre>
-          </div>
+          </details>
         </div>
       `,
-      "panel panel--span-8",
+      "panel panel--span-4 panel--aside",
     )}
   `;
 }
