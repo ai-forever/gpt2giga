@@ -56,3 +56,54 @@
 Следующий шаг:
 
 - выделить реальный focused split для `Files` / `Batches`, чтобы child pages перестали быть общим workbench с разными URL и получили отдельные surface-level layouts.
+
+### Slice 2
+
+Статус: `done`
+
+Цель:
+
+- довести `Files & Batches` от route-level split до реального UX split;
+- развести `files` и `batches` по отдельным рабочим поверхностям;
+- закрепить page-specific URL/state contract для новых страниц.
+
+Планируемый объём:
+
+- превратить `/admin/files-batches` в summary-first hub;
+- сделать `/admin/files` file-first страницей;
+- сделать `/admin/batches` batch-first страницей;
+- убрать общую перегруженную поверхность с новых child pages;
+- обновить asset/tests под новый copy и split.
+
+Фактически сделано:
+
+- `/admin/files-batches` переведён в hub с кратким summary, recent activity и handoff links;
+- `/admin/files` переведён в file-first surface с upload, file inventory, preview и переходом в batch composer;
+- `/admin/batches` переведён в batch-first surface с batch create, lifecycle review и output handoff;
+- `files-batches` view/bindings/serializers/state разрезаны под page-specific behavior;
+- закреплён page-aware query/state contract:
+  `files` хранит file-centric filters/selection, `batches` хранит batch-centric filters и `compose_input`;
+- обновлены runtime admin assets через `npm run build:admin`;
+- обновлён integration asset-test под новый split и новый copy.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q` — 40 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `b489f12` — `refactor: split admin files and batches surfaces`
+
+Следующий шаг:
+
+- сделать visual density / responsive pass для form-centric child pages, прежде всего `Setup`, `Settings`, `/admin/files` и `/admin/batches`.

@@ -59,6 +59,16 @@ packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/
   - gateway API key.
 - Не оставлять законченные изменения только в working tree: каждый завершённый slice после релевантных проверок нужно фиксировать отдельным commit.
 - После каждого законченного slice делать отдельный commit.
+- Обязательно вести прогресс в `docs/codex-gpt-5.4-frontend-refactor-progress-2026-04-16.md`.
+- После каждого законченного slice обязательно обновлять `docs/codex-gpt-5.4-frontend-refactor-progress-2026-04-16.md` и записывать туда:
+  - статус slice;
+  - цель;
+  - планируемый объём;
+  - что фактически сделано;
+  - какие проверки запускались;
+  - результат проверок;
+  - commit hash и commit message;
+  - следующий запланированный шаг.
 
 ---
 
@@ -640,6 +650,7 @@ uv run ruff format --check .
 - сначала внести реальные изменения в код;
 - после каждого законченного slice прогнать релевантные проверки;
 - потом делать отдельный commit;
+- после этого обязательно обновить `docs/codex-gpt-5.4-frontend-refactor-progress-2026-04-16.md` фактической записью по завершённому slice;
 - в конце обновить документы, если page map или UX-подход заметно изменились.
 
 Если по ходу увидишь возможность сделать чище и проще без расширения риска — делай. Но не уходи в бесконечный rewrite.
@@ -712,3 +723,345 @@ uv run ruff format --check .
 ```
 
 Работай по этапам, не делай бесконечный rewrite. Главный результат — меньше перегрузки и больше отдельных понятных страниц.
+
+---
+
+## Продолжение плана от текущего состояния ветки
+
+Ниже продолжение плана не с нуля, а **от уже существующего состояния кода** в текущей ветке.
+
+### Что уже фактически есть в коде
+
+На момент продолжения плана инфраструктурный слой уже частично внедрён:
+
+- `PageId` уже расширен под:
+  - `setup-claim`
+  - `setup-application`
+  - `setup-gigachat`
+  - `setup-security`
+  - `settings-application`
+  - `settings-observability`
+  - `settings-gigachat`
+  - `settings-security`
+  - `settings-history`
+  - `files`
+  - `batches`
+- `gpt2giga/frontend/admin/routes.ts` уже содержит page meta и secondary nav map;
+- в `templates.ts` уже есть reusable primitive `renderSubpageNav(...)`;
+- server-side shell routes в `gpt2giga/api/admin/ui.py` уже зарегистрированы;
+- `pages/index.ts` уже умеет открывать новые page ids;
+- integration tests уже проверяют доступность новых HTML routes.
+
+Это значит, что дальше нужен не ещё один routing-first slice, а **доведение page split до реального UX-эффекта**.
+
+---
+
+## Обновлённая оценка состояния по слайсам
+
+### Slice A — routing foundation
+
+Статус: **в основном сделано**.
+
+Что считать уже закрытым:
+
+- новые console routes заведены;
+- child pages доступны сервером;
+- shared subpage navigation внедрена;
+- setup/settings/files-batches уже переведены на multi-page route map;
+- тесты на доступность основных HTML entrypoints уже есть.
+
+Что ещё может остаться точечно:
+
+- проверить, нет ли пропущенных compatibility redirects/normalization rules;
+- проверить shell behavior для прямого захода на child routes;
+- проверить, что left rail и hero не теряют активное состояние на новых страницах.
+
+### Slice B — Setup split
+
+Статус: **в основном сделано**.
+
+По коду уже видно:
+
+- `setup` стал hub page;
+- `setup-claim`, `setup-application`, `setup-gigachat`, `setup-security` уже рендерятся отдельно;
+- есть secondary nav и переход к next recommended step.
+
+Остаточные задачи:
+
+- сократить второстепенный текст на child pages, если они всё ещё визуально тяжёлые;
+- проверить, не дублируются ли одни и те же summary-блоки между hub и focused pages;
+- убедиться, что observability handoff остаётся вторичным и не возвращает перегрузку.
+
+### Slice C — Settings split
+
+Статус: **в основном сделано**.
+
+По коду уже видно:
+
+- `settings` стал summary-first hub;
+- `settings-application`, `settings-observability`, `settings-gigachat`, `settings-security`, `settings-history` уже выделены;
+- история и rollback уже разведены от form-heavy экранов.
+
+Остаточные задачи:
+
+- добить compatibility behavior для старых `?section=` сценариев, если где-то ещё есть UX-рассинхрон;
+- проверить, что section pages не тянут лишние блоки из hub;
+- проверить ширину form-centric layouts и плотность diagnostic cards.
+
+### Slice D — Files & Batches split
+
+Статус: **заведён route-level split, но UX split ещё не завершён**.
+
+Это сейчас главный незавершённый кусок.
+
+По текущему коду видно:
+
+- `/admin/files-batches`, `/admin/files`, `/admin/batches` уже существуют;
+- secondary nav уже есть;
+- но `render-files-batches.ts` всё ещё рендерит общий workbench и прямо говорит, что split продолжается.
+
+Именно здесь нужен следующий полноценный инженерный слайс.
+
+---
+
+## Следующий приоритетный план выполнения
+
+### Phase 4A — завершить реальный split Files / Batches
+
+Цель: сделать так, чтобы новые URL отличались не только заголовком и nav, но и **содержанием страницы**.
+
+#### Что сделать
+
+- оставить `/admin/files-batches` как hub/workbench summary;
+- сделать `/admin/files` file-first страницей:
+  - upload;
+  - file inventory;
+  - preview/content;
+  - минимально нужные actions по выбранному file;
+- сделать `/admin/batches` batch-first страницей:
+  - batch creation;
+  - batch inventory;
+  - output/result workflow;
+  - минимально нужные actions по выбранному batch.
+
+#### Как разрезать код
+
+- в `gpt2giga/frontend/admin/pages/files-batches/view.ts` выделить:
+  - hub renderer;
+  - files renderer;
+  - batches renderer;
+- оставить общие data loaders, serializers и bindings только там, где реально есть shared behavior;
+- если bindings стали слишком условными, разделить на:
+  - shared bindings;
+  - files-only bindings;
+  - batches-only bindings.
+
+#### На что смотреть в UX
+
+- на `/admin/files` upload должен быть ближе к верхней части страницы;
+- на `/admin/files` preview не должен конкурировать с batch lifecycle;
+- на `/admin/batches` создание batch и status/result workflow должны быть видимы без file-upload шума;
+- raw metadata/content оставить за `details` или secondary disclosure.
+
+#### Проверка slice
+
+```bash
+npm run build:admin
+uv run pytest tests/integration/app/test_admin_console_settings.py -q
+uv run ruff check .
+uv run ruff format --check .
+```
+
+Отдельный commit.
+
+### Phase 4B — добить URL/state contract для Files / Batches
+
+После визуального split закрепить предсказуемый state contract.
+
+#### Что сделать
+
+- определить, какие query params остаются общими, а какие должны быть page-specific;
+- для `/admin/files` оставить только file-centric filters/selection;
+- для `/admin/batches` оставить только batch-centric filters/selection;
+- если есть shared selection model, сделать явное правило приоритета:
+  - URL;
+  - затем UI selection;
+  - затем fallback inventory state.
+
+#### Зачем это нужно
+
+Без этого новые страницы будут казаться отдельными только визуально, но не семантически.
+
+#### Проверка slice
+
+- открыть `/admin/files` напрямую с query params;
+- открыть `/admin/batches` напрямую с query params;
+- проверить browser back/forward;
+- проверить refresh без потери ожидаемого selection state.
+
+При необходимости добавить targeted tests на serializer/query behavior.
+
+Отдельный commit.
+
+### Phase 5 — visual density and responsive pass
+
+После завершения реального page split сделать отдельный, уже более безопасный visual slice.
+
+#### Главные задачи
+
+- сузить form-centric content column;
+- уменьшить количество full-width forms там, где это не нужно;
+- выровнять spacing между hero, subpage nav, summary cards и forms;
+- уменьшить давление длинных diagnostics block;
+- раньше переводить сложные grids в одну колонку.
+
+#### Где смотреть в первую очередь
+
+- `console.css` после rebuild из source;
+- shared templates/layout helpers;
+- Setup child pages;
+- Settings child pages;
+- новые `/admin/files` и `/admin/batches`.
+
+#### Что считать успехом
+
+- на laptop-width формы читаются без ощущения «слишком широко»;
+- secondary nav не ломает layout;
+- summary cards не спорят по важности с главной формой;
+- большие code/json blocks визуально вторичны.
+
+#### Проверка slice
+
+```bash
+npm run build:admin
+uv run ruff check .
+uv run ruff format --check .
+```
+
+Если будут UI snapshot/integration tests для shell assets, прогнать и их.
+
+Отдельный commit.
+
+### Phase 6 — optional Traffic split
+
+Эта фаза нужна только после того, как `Files / Batches` и visual pass уже доведены.
+
+#### Что делать только при наличии чистого окна
+
+- оставить `/admin/traffic` summary-first;
+- при необходимости добавить:
+  - `/admin/traffic-requests`
+  - `/admin/traffic-errors`
+  - `/admin/traffic-usage`
+- использовать тот же reusable subpage nav pattern.
+
+#### Критерий запуска этой фазы
+
+Не начинать её, если:
+
+- `files` / `batches` ещё фактически не разделены;
+- form-centric layouts всё ещё перегружены;
+- базовые admin route tests не закрывают уже внесённые изменения.
+
+Отдельный commit.
+
+---
+
+## Технические риски и как их сдерживать
+
+### 1. Псевдо-split вместо настоящего split
+
+Риск:
+
+- новые URL есть, но разные страницы по факту показывают одну и ту же тяжёлую поверхность.
+
+Что делать:
+
+- резать view и bindings по смыслу;
+- не оставлять весь старый workbench на `files` и `batches`;
+- hub page держать summary-first.
+
+### 2. Слишком много shared helpers с ветвлением по page id
+
+Риск:
+
+- вместо упрощения получится общий модуль с большим числом `if (page === ...)`.
+
+Что делать:
+
+- shared оставлять только для реальной общей логики;
+- page-local renderers и bindings держать тонкими, но отдельными;
+- если условные ветки перевешивают, разносить по модулям.
+
+### 3. Случайная регрессия deep-link behavior
+
+Риск:
+
+- прямые URL, refresh или browser back начнут вести себя непредсказуемо.
+
+Что делать:
+
+- отдельно тестировать прямой заход на каждую child page;
+- отдельно тестировать query-param restoration;
+- не смешивать page routing и transient UI state без явного serializer contract.
+
+### 4. Визуальная чистка превратится в redesign
+
+Риск:
+
+- много косметических правок при слабом архитектурном выигрыше.
+
+Что делать:
+
+- сначала завершить page split;
+- только потом отдельным слайсом править плотность и layout;
+- не трогать shell и rail шире, чем это нужно для читаемости.
+
+---
+
+## Что имеет смысл добавить в тестовый план
+
+Помимо уже существующих route tests, полезно добавить или проверить следующее.
+
+### HTML and shell routing
+
+- прямой GET на `/admin/files` возвращает shell;
+- прямой GET на `/admin/batches` возвращает shell;
+- прямой GET на child pages setup/settings продолжает возвращать shell;
+- актив не ломается при новых page-local модулях.
+
+### Compatibility behavior
+
+- `/admin/settings?section=application` переводит в ожидаемую child page semantics;
+- `/admin/settings?section=history` не оставляет пользователя на перегруженном hub;
+- при наличии legacy links старые entrypoints продолжают работать.
+
+### Asset surface
+
+- если после split появятся новые page-local bundles или дополнительные imports, они реально раздаются из `/admin/assets/admin/...`;
+- build не забывает положить их в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
+
+### Query/state behavior
+
+- file-centric query params не мешают batch-centric page;
+- batch-centric query params не загромождают file page;
+- refresh и back/forward сохраняют ожидаемую страницу и состояние фильтров.
+
+---
+
+## Практический stop condition
+
+Работу можно считать законченной без optional Traffic split, если выполнено всё ниже:
+
+- `Setup` и `Settings` действительно работают как hub + focused child pages;
+- `Files & Batches` реально разделён на:
+  - summary hub;
+  - file-first page;
+  - batch-first page;
+- новые URL отличаются не только nav, но и содержанием;
+- form-centric страницы стали уже и спокойнее;
+- прямой заход, refresh и back/forward работают предсказуемо;
+- ассеты пересобраны;
+- admin route tests и релевантные integration tests зелёные.
+
+Если всё это сделано чисто, optional `Traffic` split можно либо взять отдельным следующим циклом, либо оставить как stretch без блокировки merge.
