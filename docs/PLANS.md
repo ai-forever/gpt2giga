@@ -293,12 +293,12 @@ uv run pytest tests/unit/providers/gigachat/test_responses_v2.py -q
 
 ### Что сделать
 
-- [ ] Свести `gpt2giga/app/observability.py` к thin facade/re-export layer.
-- [ ] Свести `gpt2giga/app/telemetry.py` к thin facade/re-export layer.
-- [ ] Сохранить все текущие public class/function names и import paths.
-- [ ] Не менять current sink registry contract.
-- [ ] Не менять metrics exposition format и не ломать existing tests.
-- [ ] По возможности сделать так, чтобы новый implementation file редко превышал ~400–500 строк; если одна тема всё равно остаётся больше, это должно быть осознанно и локально оправдано.
+- [x] Свести `gpt2giga/app/observability.py` к thin facade/re-export layer.
+- [x] Свести `gpt2giga/app/telemetry.py` к thin facade/re-export layer.
+- [x] Сохранить все текущие public class/function names и import paths.
+- [x] Не менять current sink registry contract.
+- [x] Не менять metrics exposition format и не ломать existing tests.
+- [x] По возможности сделать так, чтобы новый implementation file редко превышал ~400–500 строк; если одна тема всё равно остаётся больше, это должно быть осознанно и локально оправдано.
 
 ### Важные правила
 
@@ -400,7 +400,7 @@ uv run pytest tests/integration/app/test_admin_console_settings.py tests/integra
 
 - [x] Milestone 0 закрыт и закоммичен
 - [x] Milestone 1 закрыт и закоммичен
-- [ ] Milestone 2 закрыт и закоммичен
+- [x] Milestone 2 закрыт и закоммичен
 - [ ] Milestone 3 закрыт и закоммичен
 - [ ] Milestone 4 закрыт **или осознанно остановлен** после зелёного Milestone 3 с записью причины
 - [ ] `uv run ruff check .` зелёный
@@ -472,37 +472,48 @@ uv run pytest tests/integration/app/test_admin_console_settings.py tests/integra
 
 ### TODO
 
-- [ ] not started
+- [x] completed
 
 ### Done
 
-- _empty_
+- `gpt2giga/features/responses/stream.py` сведён к thin facade/re-export слою с сохранением public import path.
+- Внутренняя реализация разрезана по `gpt2giga/features/responses/_streaming/{events,state,v1,v2,failures}.py`.
+- Добавлен targeted test на сохранение старого import path поверх internal implementation.
 
 ### Verification
 
-- _empty_
+- `uv run ruff check gpt2giga/features/responses tests/unit/api/openai/test_stream_generators.py`
+- `uv run ruff format --check gpt2giga/features/responses tests/unit/api/openai/test_stream_generators.py`
+- `uv run pytest tests/unit/api/openai/test_stream_generators.py -q`
+- `uv run pytest tests/integration/openai/test_router_endpoints.py -q`
+- `uv run pytest tests/unit/providers/gigachat/test_responses_v2.py -q`
 
 ### Next
 
-- _empty_
+- Перейти к `Milestone 3`: разрезать `app/observability.py` и `app/telemetry.py` через internal packages с сохранением public import path-ов.
 
 ## Milestone 3
 
 ### TODO
 
-- [ ] not started
+- [x] completed
 
 ### Done
 
-- _empty_
+- `gpt2giga/app/observability.py` переведён в thin facade, а реализация вынесена в `gpt2giga/app/_observability/`.
+- `gpt2giga/app/telemetry.py` переведён в thin facade, а sink/hub/registry/OTLP implementation вынесены в `gpt2giga/app/_telemetry/`.
+- Добавлены targeted import-stability tests, которые pin-ят совместимость старых import path-ов поверх internal implementation split.
 
 ### Verification
 
-- _empty_
+- `uv run ruff check gpt2giga/app tests/unit/core/test_telemetry.py tests/unit/api/test_middleware.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`
+- `uv run ruff format --check gpt2giga/app tests/unit/core/test_telemetry.py tests/unit/api/test_middleware.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`
+- `uv run pytest tests/unit/core/test_telemetry.py tests/unit/api/test_middleware.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py -q`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py tests/integration/app/test_api_server.py -q`
 
 ### Next
 
-- _empty_
+- Начать `Milestone 4` с `gpt2giga/app/runtime_backends.py` и `gpt2giga/core/config/control_plane.py`; админские сервисы трогать только если после этого останется безопасный бюджет.
 
 ## Milestone 4
 

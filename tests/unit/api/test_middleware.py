@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import gpt2giga.app.observability as observability_facade
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
@@ -11,6 +12,27 @@ from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_CHAT, provider_tag
+from gpt2giga.app._observability.context import (
+    get_request_audit_metadata as internal_get_request_audit_metadata,
+)
+from gpt2giga.app._observability.context import (
+    set_request_audit_error as internal_set_request_audit_error,
+)
+from gpt2giga.app._observability.context import (
+    set_request_audit_model as internal_set_request_audit_model,
+)
+from gpt2giga.app._observability.context import (
+    set_request_audit_usage as internal_set_request_audit_usage,
+)
+from gpt2giga.app._observability.feeds import (
+    filter_request_events as internal_filter_request_events,
+)
+from gpt2giga.app._observability.recording import (
+    annotate_request_audit_from_payload as internal_annotate_request_audit_from_payload,
+)
+from gpt2giga.app._observability.recording import (
+    annotate_request_audit_request_payload as internal_annotate_request_audit_request_payload,
+)
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.observability import (
     annotate_request_audit_from_payload,
@@ -38,6 +60,31 @@ def test_path_norm_redirect():
     # чтобы не терять body у POST запросов.
     assert resp.status_code == 200
     assert resp.history == []
+
+
+def test_observability_facade_reexports_internal_implementation():
+    assert (
+        observability_facade.annotate_request_audit_from_payload
+        is internal_annotate_request_audit_from_payload
+    )
+    assert (
+        observability_facade.annotate_request_audit_request_payload
+        is internal_annotate_request_audit_request_payload
+    )
+    assert observability_facade.filter_request_events is internal_filter_request_events
+    assert (
+        observability_facade.get_request_audit_metadata
+        is internal_get_request_audit_metadata
+    )
+    assert (
+        observability_facade.set_request_audit_error is internal_set_request_audit_error
+    )
+    assert (
+        observability_facade.set_request_audit_model is internal_set_request_audit_model
+    )
+    assert (
+        observability_facade.set_request_audit_usage is internal_set_request_audit_usage
+    )
 
 
 def test_path_norm_preserves_query_params():

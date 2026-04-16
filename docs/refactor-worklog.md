@@ -9,6 +9,14 @@
 
 ## Entries
 
+- 2026-04-16 — `Milestone 3`
+  - `gpt2giga/app/observability.py` сведён к thin compatibility facade, а реализация разнесена по `gpt2giga/app/_observability/{models,feeds,usage,messages,context,recording}.py`.
+  - `gpt2giga/app/telemetry.py` сведён к thin compatibility facade, а реализация sink-ов и OTLP/Prometheus helper-ов разнесена по `gpt2giga/app/_telemetry/{contracts,hub,registry,prometheus,otlp,langfuse,phoenix,encoding,builtin}.py`.
+  - Сохранены прежние public import path-ы для middleware, admin runtime и telemetry factory helpers; builtin sink registration теперь закреплена через internal `register_builtin_sinks()`.
+  - Добавлены targeted import-stability tests для фасадов `gpt2giga.app.observability` и `gpt2giga.app.telemetry`.
+  - Проверка: `uv run ruff check gpt2giga/app tests/unit/core/test_telemetry.py tests/unit/api/test_middleware.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`; `uv run ruff format --check gpt2giga/app tests/unit/core/test_telemetry.py tests/unit/api/test_middleware.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`; `uv run pytest tests/unit/core/test_telemetry.py tests/unit/api/test_middleware.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py -q`; `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py tests/integration/app/test_api_server.py -q`.
+  - Commit: `refactor: split observability and telemetry internals`.
+
 - 2026-04-16 — `Milestone 2`
   - `gpt2giga/features/responses/stream.py` превращён в thin compatibility facade с сохранением public import path.
   - Внутренняя реализация Responses streaming разложена по `gpt2giga/features/responses/_streaming/{events,state,v1,v2,failures}.py`.
