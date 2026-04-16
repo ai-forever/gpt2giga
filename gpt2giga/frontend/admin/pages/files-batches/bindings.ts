@@ -42,10 +42,11 @@ interface BindFilesBatchesPageOptions {
   elements: FilesBatchesPageElements;
   filters: FilesBatchesFilters;
   inventory: FilesBatchesInventory;
+  page: "files-batches" | "files" | "batches";
 }
 
 export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void {
-  const { app, data, elements, filters, inventory } = options;
+  const { app, data, elements, filters, inventory, page } = options;
 
   let selection: InspectorSelection = { kind: "idle" };
   let previewObjectUrl: string | null = null;
@@ -488,12 +489,12 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   );
 
   elements.refreshButton.addEventListener("click", () => {
-    void app.render("files-batches");
+    void app.render(page);
   });
 
   elements.resetButton.addEventListener("click", () => {
-    window.history.replaceState({}, "", "/admin/files-batches");
-    void app.render("files-batches");
+    window.history.replaceState({}, "", `/admin/${page}`);
+    void app.render(page);
   });
 
   elements.filtersForm.addEventListener("submit", (event) => {
@@ -512,8 +513,8 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       batchStatus: fields.batch_status.value,
       endpoint: fields.endpoint.value,
     };
-    window.history.replaceState({}, "", buildFilesBatchesUrl(nextFilters));
-    void app.render("files-batches");
+    window.history.replaceState({}, "", buildFilesBatchesUrl(nextFilters, undefined, page));
+    void app.render(page);
   });
 
   elements.uploadForm.addEventListener("submit", async (event) => {
@@ -564,9 +565,9 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
             selectedFileId: String(response.id ?? ""),
             composeInputFileId: String(response.id ?? ""),
             selectedBatchId: "",
-          }),
+          }, page),
         );
-        await app.render("files-batches");
+        await app.render(page);
         return response;
       },
     });
@@ -637,9 +638,9 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
             ...routeState,
             selectedBatchId: String(response.id ?? ""),
             selectedFileId: "",
-          }),
+          }, page),
         );
-        await app.render("files-batches");
+        await app.render(page);
         return response;
       },
     });
@@ -814,7 +815,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           ]);
           await deleteFile(app, fileId);
           app.queueAlert(`Deleted file ${fileId}.`, "info");
-          await app.render("files-batches");
+          await app.render(page);
         },
       });
     });

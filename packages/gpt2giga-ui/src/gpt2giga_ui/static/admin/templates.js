@@ -1,5 +1,5 @@
 import { describePendingRuntimeImpact, planPendingApply, } from "./forms.js";
-import { WORKFLOW_META } from "./routes.js";
+import { WORKFLOW_META, pathForPage } from "./routes.js";
 import { escapeHtml, formatTimestamp, humanizeField, uniqueSortedStrings, } from "./utils.js";
 export function banner(message, tone = "info") {
     const toneClass = tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
@@ -167,6 +167,33 @@ export function renderWorkflowCard(options) {
         .join("")}
       </div>
     </article>
+  `;
+}
+export function renderSubpageNav(options) {
+    return `
+    <div class="stack">
+      <div class="stack">
+        <span class="eyebrow">${escapeHtml(options.title)}</span>
+        ${options.intro ? `<p class="muted">${escapeHtml(options.intro)}</p>` : ""}
+      </div>
+      <div class="toolbar">
+        ${options.items
+        .map((item) => {
+        const active = item.page === options.currentPage;
+        return `
+              <a
+                class="button${active ? "" : " button--secondary"}"
+                href="${escapeHtml(pathForPage(item.page))}"
+                ${active ? 'aria-current="page"' : ""}
+                title="${escapeHtml(item.description ?? item.label)}"
+              >
+                ${escapeHtml(item.label)}
+              </a>
+            `;
+    })
+        .join("")}
+      </div>
+    </div>
   `;
 }
 export function renderGuideLinks(links, intro = "Use these links when the current screen already narrowed the problem but you still need the longer operator playbook.") {

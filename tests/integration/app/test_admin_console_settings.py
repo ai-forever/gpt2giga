@@ -29,10 +29,21 @@ def test_console_routes_are_available():
     assert "/admin/assets/admin/index.js" in response.text
 
     assert client.get("/admin/settings").status_code == 200
+    assert client.get("/admin/setup-claim").status_code == 200
+    assert client.get("/admin/setup-application").status_code == 200
+    assert client.get("/admin/setup-gigachat").status_code == 200
+    assert client.get("/admin/setup-security").status_code == 200
+    assert client.get("/admin/settings-application").status_code == 200
+    assert client.get("/admin/settings-observability").status_code == 200
+    assert client.get("/admin/settings-gigachat").status_code == 200
+    assert client.get("/admin/settings-security").status_code == 200
+    assert client.get("/admin/settings-history").status_code == 200
     assert client.get("/admin/keys").status_code == 200
     assert client.get("/admin/logs").status_code == 200
     assert client.get("/admin/playground").status_code == 200
     assert client.get("/admin/files-batches").status_code == 200
+    assert client.get("/admin/files").status_code == 200
+    assert client.get("/admin/batches").status_code == 200
 
 
 def test_setup_endpoint_reports_persisted_status(tmp_path, monkeypatch):

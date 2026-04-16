@@ -2,8 +2,8 @@ import {
   describePendingRuntimeImpact,
   planPendingApply,
 } from "./forms.js";
-import { WORKFLOW_META } from "./routes.js";
-import type { DiffEntry, PendingChangeSummary, SetupStep } from "./types.js";
+import { WORKFLOW_META, pathForPage } from "./routes.js";
+import type { DiffEntry, PageId, PendingChangeSummary, SetupStep } from "./types.js";
 import {
   escapeHtml,
   formatTimestamp,
@@ -52,6 +52,12 @@ interface GuideLinkItem {
   href: string;
   label: string;
   note: string;
+}
+
+interface SubpageNavLink {
+  description?: string;
+  label: string;
+  page: PageId;
 }
 
 export function banner(message: string, tone: "info" | "warn" | "danger" = "info"): string {
@@ -269,6 +275,39 @@ export function renderWorkflowCard(options: {
           .join("")}
       </div>
     </article>
+  `;
+}
+
+export function renderSubpageNav(options: {
+  currentPage: PageId;
+  intro?: string;
+  items: SubpageNavLink[];
+  title: string;
+}): string {
+  return `
+    <div class="stack">
+      <div class="stack">
+        <span class="eyebrow">${escapeHtml(options.title)}</span>
+        ${options.intro ? `<p class="muted">${escapeHtml(options.intro)}</p>` : ""}
+      </div>
+      <div class="toolbar">
+        ${options.items
+          .map((item) => {
+            const active = item.page === options.currentPage;
+            return `
+              <a
+                class="button${active ? "" : " button--secondary"}"
+                href="${escapeHtml(pathForPage(item.page))}"
+                ${active ? 'aria-current="page"' : ""}
+                title="${escapeHtml(item.description ?? item.label)}"
+              >
+                ${escapeHtml(item.label)}
+              </a>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
   `;
 }
 

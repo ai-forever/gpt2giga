@@ -1,4 +1,5 @@
 import { pill } from "../../templates.js";
+import type { PageId } from "../../types.js";
 import {
   escapeHtml,
   formatBytes,
@@ -222,6 +223,7 @@ export function readFilesBatchesRouteState(): FilesBatchesRouteState {
 export function buildFilesBatchesUrl(
   filters: FilesBatchesFilters,
   routeState?: Partial<FilesBatchesRouteState>,
+  page: PageId = "files-batches",
 ): string {
   const params = new URLSearchParams();
   setQueryParamIfPresent(params, "query", filters.query);
@@ -232,7 +234,8 @@ export function buildFilesBatchesUrl(
   setQueryParamIfPresent(params, "selected_batch", routeState?.selectedBatchId ?? "");
   setQueryParamIfPresent(params, "compose_input", routeState?.composeInputFileId ?? "");
   const query = params.toString();
-  return query ? `/admin/files-batches?${query}` : "/admin/files-batches";
+  const pathname = page === "overview" ? "/admin" : `/admin/${page}`;
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 export function firstErrorLine(message: string): string {

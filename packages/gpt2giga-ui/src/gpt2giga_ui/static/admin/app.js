@@ -1,5 +1,5 @@
 import { AdminApiClient } from "./api.js";
-import { PAGE_META, WORKFLOW_META, isConsolePathname, pageFromLocation, pathForPage, } from "./routes.js";
+import { PAGE_META, WORKFLOW_META, isConsolePathname, navEntryForPage, pageFromLocation, pathForPage, } from "./routes.js";
 import { renderLoadingGrid } from "./templates.js";
 import { toErrorMessage } from "./utils.js";
 import { PAGE_RENDERERS } from "./pages/index.js";
@@ -216,10 +216,11 @@ export class AdminApp {
         });
     }
     setNav(page) {
+        const navPage = navEntryForPage(page);
         this.nav.querySelectorAll("a[href]").forEach((link) => {
             const href = link.getAttribute("href");
-            const matchesOverview = page === "overview" && (href === "/admin" || href === "/admin/overview");
-            link.classList.toggle("active", matchesOverview || href === pathForPage(page));
+            const matchesOverview = navPage === "overview" && (href === "/admin" || href === "/admin/overview");
+            link.classList.toggle("active", matchesOverview || href === pathForPage(navPage));
         });
     }
     requireElement(id) {

@@ -5,7 +5,7 @@ import { createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFil
 import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, firstErrorLine, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, readFilesBatchesRouteState, renderInspectorActions, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
 import { INVALID_JSON } from "./state.js";
 export function bindFilesBatchesPage(options) {
-    const { app, data, elements, filters, inventory } = options;
+    const { app, data, elements, filters, inventory, page } = options;
     let selection = { kind: "idle" };
     let previewObjectUrl = null;
     const setDefinitionBlock = (node, items, emptyMessage) => {
@@ -346,11 +346,11 @@ export function bindFilesBatchesPage(options) {
         { label: "Loaded object", value: "No file or batch metadata loaded" },
     ], "No selection yet.", false);
     elements.refreshButton.addEventListener("click", () => {
-        void app.render("files-batches");
+        void app.render(page);
     });
     elements.resetButton.addEventListener("click", () => {
-        window.history.replaceState({}, "", "/admin/files-batches");
-        void app.render("files-batches");
+        window.history.replaceState({}, "", `/admin/${page}`);
+        void app.render(page);
     });
     elements.filtersForm.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -362,8 +362,8 @@ export function bindFilesBatchesPage(options) {
             batchStatus: fields.batch_status.value,
             endpoint: fields.endpoint.value,
         };
-        window.history.replaceState({}, "", buildFilesBatchesUrl(nextFilters));
-        void app.render("files-batches");
+        window.history.replaceState({}, "", buildFilesBatchesUrl(nextFilters, undefined, page));
+        void app.render(page);
     });
     elements.uploadForm.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -405,8 +405,8 @@ export function bindFilesBatchesPage(options) {
                     selectedFileId: String(response.id ?? ""),
                     composeInputFileId: String(response.id ?? ""),
                     selectedBatchId: "",
-                }));
-                await app.render("files-batches");
+                }, page));
+                await app.render(page);
                 return response;
             },
         });
@@ -459,8 +459,8 @@ export function bindFilesBatchesPage(options) {
                     ...routeState,
                     selectedBatchId: String(response.id ?? ""),
                     selectedFileId: "",
-                }));
-                await app.render("files-batches");
+                }, page));
+                await app.render(page);
                 return response;
             },
         });
@@ -615,7 +615,7 @@ export function bindFilesBatchesPage(options) {
                     ]);
                     await deleteFile(app, fileId);
                     app.queueAlert(`Deleted file ${fileId}.`, "info");
-                    await app.render("files-batches");
+                    await app.render(page);
                 },
             });
         });

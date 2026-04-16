@@ -3,6 +3,7 @@ import {
   PAGE_META,
   WORKFLOW_META,
   isConsolePathname,
+  navEntryForPage,
   pageFromLocation,
   pathForPage,
 } from "./routes.js";
@@ -281,10 +282,12 @@ export class AdminApp {
   }
 
   private setNav(page: PageId): void {
+    const navPage = navEntryForPage(page);
     this.nav.querySelectorAll("a[href]").forEach((link) => {
       const href = link.getAttribute("href");
-      const matchesOverview = page === "overview" && (href === "/admin" || href === "/admin/overview");
-      link.classList.toggle("active", matchesOverview || href === pathForPage(page));
+      const matchesOverview =
+        navPage === "overview" && (href === "/admin" || href === "/admin/overview");
+      link.classList.toggle("active", matchesOverview || href === pathForPage(navPage));
     });
   }
 

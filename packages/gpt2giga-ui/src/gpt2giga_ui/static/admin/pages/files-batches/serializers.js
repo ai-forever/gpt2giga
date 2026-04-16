@@ -150,7 +150,7 @@ export function readFilesBatchesRouteState() {
         composeInputFileId: params.get("compose_input") || "",
     };
 }
-export function buildFilesBatchesUrl(filters, routeState) {
+export function buildFilesBatchesUrl(filters, routeState, page = "files-batches") {
     const params = new URLSearchParams();
     setQueryParamIfPresent(params, "query", filters.query);
     setQueryParamIfPresent(params, "purpose", filters.purpose);
@@ -160,7 +160,8 @@ export function buildFilesBatchesUrl(filters, routeState) {
     setQueryParamIfPresent(params, "selected_batch", routeState?.selectedBatchId ?? "");
     setQueryParamIfPresent(params, "compose_input", routeState?.composeInputFileId ?? "");
     const query = params.toString();
-    return query ? `/admin/files-batches?${query}` : "/admin/files-batches";
+    const pathname = page === "overview" ? "/admin" : `/admin/${page}`;
+    return query ? `${pathname}?${query}` : pathname;
 }
 export function firstErrorLine(message) {
     return message.split("\n").map((line) => line.trim()).find(Boolean) ?? "Unknown error";

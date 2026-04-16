@@ -27,17 +27,80 @@ export const PAGE_META = {
     },
     setup: {
         eyebrow: "Setup",
-        title: "Bootstrap and first-run flow",
-        subtitle: "Persist control-plane config, configure GigaChat, and close out PROD bootstrap access from one guided page.",
+        title: "Setup hub",
+        subtitle: "Track bootstrap progress, resolve warnings, and open the next setup step directly.",
         workflow: "start",
-        navDescription: "Guided bootstrap flow for persisted config, GigaChat auth, and security closure.",
+        navDescription: "Summary-first bootstrap hub with direct handoff into claim, application, GigaChat, and security steps.",
+    },
+    "setup-claim": {
+        eyebrow: "Setup",
+        title: "Claim bootstrap session",
+        subtitle: "Record the first operator for PROD bootstrap before continuing with setup.",
+        workflow: "start",
+        navDescription: "Focused claim workflow for the first bootstrap operator session.",
+    },
+    "setup-application": {
+        eyebrow: "Setup",
+        title: "Application bootstrap posture",
+        subtitle: "Persist runtime mode and provider posture without the rest of the setup noise.",
+        workflow: "start",
+        navDescription: "Focused application bootstrap step for runtime mode and provider posture.",
+    },
+    "setup-gigachat": {
+        eyebrow: "Setup",
+        title: "GigaChat bootstrap",
+        subtitle: "Configure credentials, test connectivity, and stage GigaChat runtime settings.",
+        workflow: "start",
+        navDescription: "Focused GigaChat setup step with credential staging and connection testing.",
+    },
+    "setup-security": {
+        eyebrow: "Setup",
+        title: "Security bootstrap",
+        subtitle: "Close bootstrap access and stage gateway auth without leaving the setup flow.",
+        workflow: "start",
+        navDescription: "Focused security bootstrap step for gateway auth, CORS, and global key rotation.",
     },
     settings: {
         eyebrow: "Settings",
-        title: "Configuration editor",
-        subtitle: "Application, GigaChat, and security settings with persisted storage, diffs, and rollback.",
+        title: "Settings hub",
+        subtitle: "Open focused configuration pages for application, observability, GigaChat, security, and history.",
         workflow: "configure",
-        navDescription: "Edit persisted control-plane sections, including observability and restart semantics.",
+        navDescription: "Summary-first settings hub with direct handoff into one configuration area at a time.",
+    },
+    "settings-application": {
+        eyebrow: "Settings",
+        title: "Application settings",
+        subtitle: "Edit runtime mode, provider posture, and restart-sensitive application controls.",
+        workflow: "configure",
+        navDescription: "Focused application settings surface for runtime posture and provider routing.",
+    },
+    "settings-observability": {
+        eyebrow: "Settings",
+        title: "Observability settings",
+        subtitle: "Manage telemetry sinks, endpoints, and observability presets on a dedicated page.",
+        workflow: "configure",
+        navDescription: "Focused observability settings surface for telemetry sink posture and presets.",
+    },
+    "settings-gigachat": {
+        eyebrow: "Settings",
+        title: "GigaChat settings",
+        subtitle: "Persist credentials, transport settings, and connection-test candidate values.",
+        workflow: "configure",
+        navDescription: "Focused GigaChat settings surface for provider auth and connectivity checks.",
+    },
+    "settings-security": {
+        eyebrow: "Settings",
+        title: "Security settings",
+        subtitle: "Edit gateway auth, logs access, CORS, and governance limits in one focused surface.",
+        workflow: "configure",
+        navDescription: "Focused security settings surface for gateway auth and operator guardrails.",
+    },
+    "settings-history": {
+        eyebrow: "Settings",
+        title: "Settings history",
+        subtitle: "Review persisted revisions and rollback snapshots without sharing space with forms.",
+        workflow: "configure",
+        navDescription: "Focused revision history surface for rollback and persisted change review.",
     },
     keys: {
         eyebrow: "Keys",
@@ -76,10 +139,24 @@ export const PAGE_META = {
     },
     "files-batches": {
         eyebrow: "Files & Batches",
-        title: "Files and batch jobs",
-        subtitle: "Stage JSONL inputs, inspect stored files, and launch OpenAI-compatible batch jobs without losing lifecycle context.",
+        title: "Files and batch workbench",
+        subtitle: "Start from the shared workbench, then narrow into focused files or batches views as needed.",
         workflow: "diagnose",
-        navDescription: "Staged workbench for stored inputs, batch lifecycles, and downstream output handoff.",
+        navDescription: "Shared workbench hub for stored inputs, batch lifecycles, and downstream output handoff.",
+    },
+    files: {
+        eyebrow: "Files & Batches",
+        title: "Files workbench",
+        subtitle: "Focus on upload, stored file inventory, and file preview without the batch workflow noise.",
+        workflow: "diagnose",
+        navDescription: "Focused file inventory and preview view inside the files and batches workflow.",
+    },
+    batches: {
+        eyebrow: "Files & Batches",
+        title: "Batch jobs workbench",
+        subtitle: "Focus on batch creation, lifecycle inspection, and output handoff without upload-first clutter.",
+        workflow: "diagnose",
+        navDescription: "Focused batch lifecycle view inside the files and batches workflow.",
     },
     system: {
         eyebrow: "System",
@@ -90,26 +167,137 @@ export const PAGE_META = {
     },
 };
 export const PAGE_ORDER = Object.keys(PAGE_META);
+const NAV_ENTRY_BY_PAGE = {
+    "setup-claim": "setup",
+    "setup-application": "setup",
+    "setup-gigachat": "setup",
+    "setup-security": "setup",
+    "settings-application": "settings",
+    "settings-observability": "settings",
+    "settings-gigachat": "settings",
+    "settings-security": "settings",
+    "settings-history": "settings",
+    files: "files-batches",
+    batches: "files-batches",
+};
+const SETTINGS_SECTION_PAGE = {
+    application: "settings-application",
+    observability: "settings-observability",
+    gigachat: "settings-gigachat",
+    security: "settings-security",
+    history: "settings-history",
+};
+const SUBPAGE_NAV = {
+    setup: [
+        {
+            page: "setup",
+            label: "Overview",
+            description: "Progress, readiness, warnings, and the next recommended step.",
+        },
+        {
+            page: "setup-claim",
+            label: "Claim",
+            description: "Record the first bootstrap operator when claim is required.",
+        },
+        {
+            page: "setup-application",
+            label: "Application",
+            description: "Persist runtime mode and provider posture for bootstrap.",
+        },
+        {
+            page: "setup-gigachat",
+            label: "GigaChat",
+            description: "Configure credentials and test the provider connection.",
+        },
+        {
+            page: "setup-security",
+            label: "Security",
+            description: "Close bootstrap access and stage gateway auth posture.",
+        },
+    ],
+    settings: [
+        {
+            page: "settings",
+            label: "Overview",
+            description: "Summary and entrypoint cards for the main settings areas.",
+        },
+        {
+            page: "settings-application",
+            label: "Application",
+            description: "Runtime mode, provider posture, and restart-sensitive controls.",
+        },
+        {
+            page: "settings-observability",
+            label: "Observability",
+            description: "Telemetry sinks, endpoints, and preset staging.",
+        },
+        {
+            page: "settings-gigachat",
+            label: "GigaChat",
+            description: "Credentials, transport settings, and connection testing.",
+        },
+        {
+            page: "settings-security",
+            label: "Security",
+            description: "Gateway auth, logs access, CORS, and governance limits.",
+        },
+        {
+            page: "settings-history",
+            label: "History",
+            description: "Recent persisted revisions and rollback actions.",
+        },
+    ],
+    "files-batches": [
+        {
+            page: "files-batches",
+            label: "Overview",
+            description: "Shared workbench summary for uploads, jobs, and handoff state.",
+        },
+        {
+            page: "files",
+            label: "Files",
+            description: "Stored file inventory, upload, and content preview.",
+        },
+        {
+            page: "batches",
+            label: "Batches",
+            description: "Batch creation, lifecycle review, and output handoff.",
+        },
+    ],
+};
 export function pathForPage(page) {
     return page === "overview" ? "/admin" : `/admin/${page}`;
 }
 export function isPageId(value) {
     return PAGE_ORDER.includes(value);
 }
+export function navEntryForPage(page) {
+    return NAV_ENTRY_BY_PAGE[page] ?? page;
+}
+export function subpagesFor(page) {
+    return SUBPAGE_NAV[navEntryForPage(page)] ?? [];
+}
 export function pageFromLocation(location) {
-    const queryPage = new URLSearchParams(location.search).get("tab")?.trim();
-    if (queryPage && isPageId(queryPage)) {
-        return queryPage;
+    const params = new URLSearchParams(location.search);
+    const queryPage = params.get("tab")?.trim();
+    const candidate = queryPage && isPageId(queryPage)
+        ? queryPage
+        : normalizePathnameToPage(location.pathname);
+    if (candidate === "settings") {
+        return SETTINGS_SECTION_PAGE[params.get("section")?.trim() ?? ""] ?? candidate;
     }
-    const path = location.pathname.replace(/^\/admin\/?/, "");
-    if (path === "" || path === "overview") {
-        return "overview";
-    }
-    return isPageId(path) ? path : "overview";
+    return candidate;
 }
 export function isConsolePathname(pathname) {
     return pathname === "/admin" || PAGE_ORDER.some((page) => pathForPage(page) === pathname);
 }
 export function pagesForWorkflow(workflow) {
     return PAGE_ORDER.filter((page) => PAGE_META[page].workflow === workflow);
+}
+function normalizePathnameToPage(pathname) {
+    const path = pathname.replace(/^\/admin\/?/, "");
+    if (path === "" || path === "overview") {
+        return "overview";
+    }
+    return isPageId(path) ? path : "overview";
 }

@@ -1,13 +1,24 @@
 export type PageId =
   | "overview"
   | "setup"
+  | "setup-claim"
+  | "setup-application"
+  | "setup-gigachat"
+  | "setup-security"
   | "settings"
+  | "settings-application"
+  | "settings-observability"
+  | "settings-gigachat"
+  | "settings-security"
+  | "settings-history"
   | "keys"
   | "logs"
   | "playground"
   | "traffic"
   | "providers"
   | "files-batches"
+  | "files"
+  | "batches"
   | "system";
 
 export type WorkflowId = "start" | "configure" | "observe" | "diagnose";
