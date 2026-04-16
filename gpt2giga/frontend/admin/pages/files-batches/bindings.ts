@@ -120,6 +120,11 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     );
   };
 
+  const clearSelectionHandoff = (): void => {
+    delete selection.handoffRequestId;
+    delete selection.handoffRequestCount;
+  };
+
   const runWorkflowAction = async <T>({
     button,
     root,
@@ -160,6 +165,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     const source = inventory.fileLookup.get(fileId);
     elements.batchInput.value = fileId;
     selection = { kind: "file", fileId };
+    clearSelectionHandoff();
     resetContentSurface();
     setSummary([
       { label: "Selection", value: "Batch input ready" },
@@ -243,10 +249,41 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           value: label,
           note: summarizePreviewOutcome(preview),
         },
+        ...(preview.handoffRequestId
+          ? [
+              {
+                label: "Downstream handoff",
+                value:
+                  (preview.handoffRequestCount ?? 0) > 1
+                    ? "Sample request scoped"
+                    : "Request scoped",
+                note:
+                  (preview.handoffRequestCount ?? 0) > 1
+                    ? `Traffic and Logs can open with sample request ${preview.handoffRequestId} from ${preview.handoffRequestCount} decoded result rows.`
+                    : `Traffic and Logs can open directly with request ${preview.handoffRequestId}.`,
+              },
+            ]
+          : []),
       ],
       action: async () => {
         const bytes = await fetchFileContent(app, fileId);
         const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
+        if (preview.handoffRequestId && options?.relatedBatch) {
+          selection = {
+            kind: "batch",
+            batchId: String(options.relatedBatch.id ?? selection.batchId ?? ""),
+            inputFileId:
+              String(options.relatedBatch.input_file_id ?? selection.inputFileId ?? "") ||
+              undefined,
+            outputFileId: fileId,
+            handoffRequestId: preview.handoffRequestId,
+            handoffRequestCount: preview.handoffRequestCount,
+          };
+          updateInspectorActions();
+        } else if (selection.kind === "batch") {
+          clearSelectionHandoff();
+          updateInspectorActions();
+        }
         setContentSurface(
           label,
           buildContentPreviewSummary(preview, fileId, label, {
@@ -311,7 +348,9 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
             value: linkedBatches.length
               ? "Inspect linked batch or preview content"
               : "Preview content or use for batch",
-            note: String(source.filename ?? fileId),
+            note: linkedBatches.some((batch) => Boolean(String(batch.output_file_id ?? "")))
+              ? "Preview the latest linked output to unlock request-scoped Traffic and Logs handoff."
+              : String(source.filename ?? fileId),
           },
         ];
       },
@@ -323,6 +362,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           Boolean(String(batch.output_file_id ?? "")),
         ).length;
         selection = { kind: "file", fileId };
+        clearSelectionHandoff();
         resetContentSurface();
         setSummary([
           { label: "Selection", value: "File" },
@@ -387,7 +427,9 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
             value: selection.outputFileId
               ? "Preview output or inspect input"
               : "Preview input and refresh status",
-            note: buildBatchActionHint(source),
+            note: selection.outputFileId
+              ? "Preview one output to unlock request-scoped Traffic and Logs handoff."
+              : buildBatchActionHint(source),
           },
         ];
       },
@@ -402,6 +444,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           inputFileId: inputFileId || undefined,
           outputFileId: outputFileId || undefined,
         };
+        clearSelectionHandoff();
         resetContentSurface();
         setSummary([
           { label: "Selection", value: "Batch" },
@@ -678,6 +721,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         inputFileId: String(latestOutputBatch?.input_file_id ?? "") || undefined,
         outputFileId,
       };
+      clearSelectionHandoff();
       setSummary([
         { label: "Selection", value: "Linked batch output" },
         { label: "Output file", value: outputFileId },
@@ -740,6 +784,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         return;
       }
       selection = { kind: "file", fileId };
+      clearSelectionHandoff();
       updateInspectorActions();
       await previewFileContent(
         fileId,
@@ -799,6 +844,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         inputFileId: String(batch?.input_file_id ?? "") || undefined,
         outputFileId: fileId,
       };
+      clearSelectionHandoff();
       setSummary([
         { label: "Selection", value: "Batch output" },
         { label: "Output file", value: fileId },
@@ -866,6 +912,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           inputFileId: inputFileId || undefined,
           outputFileId: String(batch?.output_file_id ?? "") || undefined,
         };
+        clearSelectionHandoff();
         updateInspectorActions();
         await previewFileContent(
           inputFileId,

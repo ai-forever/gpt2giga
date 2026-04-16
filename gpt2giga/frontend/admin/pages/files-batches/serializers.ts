@@ -91,12 +91,18 @@ export function renderInspectorActions(
             ? `${String(source.filename ?? selection.fileId)} can feed a new batch immediately. Linked batch actions unlock as downstream jobs appear.`
             : "This file can be previewed, queued as batch input, or handed off into the latest linked batch context.",
         )}
+        ${escapeHtml(
+          latestOutputBatch
+            ? " Preview the latest output to unlock request-scoped Traffic and Logs handoff."
+            : "",
+        )}
       </p>
     `;
   }
 
   if (selection.kind === "batch" && selection.batchId) {
     const source = batchLookup.get(selection.batchId);
+    const handoffActions = renderBatchHandoffActions(selection);
     return `
       <div class="toolbar">
         <button class="button button--secondary" data-inspector-action="inspect-batch" type="button">Refresh batch</button>
@@ -106,7 +112,8 @@ export function renderInspectorActions(
         <button class="button button--secondary" ${selection.outputFileId ? 'data-inspector-action="inspect-output-file"' : 'disabled title="Output metadata appears after the provider creates output_file_id"'} type="button">Inspect output file</button>
         <button class="button" ${selection.outputFileId ? 'data-inspector-action="batch-output"' : 'disabled title="Output preview unlocks after completion"'} type="button">Preview output</button>
       </div>
-      <p class="muted">${escapeHtml(buildBatchActionHint(source))}</p>
+      ${handoffActions}
+      <p class="muted">${escapeHtml(buildBatchActionHint(source, selection))}</p>
     `;
   }
 
@@ -176,6 +183,20 @@ export function buildContentPreviewSummary(
     });
   }
 
+  if (preview.handoffRequestId) {
+    summary.push({
+      label: "Downstream handoff",
+      value:
+        (preview.handoffRequestCount ?? 0) > 1
+          ? "Sample request scoped"
+          : "Request scoped",
+      note:
+        (preview.handoffRequestCount ?? 0) > 1
+          ? `Traffic and Logs can open with sample request ${preview.handoffRequestId} from ${preview.handoffRequestCount} decoded result rows.`
+          : `Traffic and Logs can open directly with request ${preview.handoffRequestId}.`,
+    });
+  }
+
   return summary;
 }
 
@@ -222,6 +243,11 @@ export function summarizePreviewOutcome(preview: FilePreview): string {
   return [
     preview.formatLabel,
     preview.contentKind,
+    preview.handoffRequestId
+      ? (preview.handoffRequestCount ?? 0) > 1
+        ? `sample request ${preview.handoffRequestId}`
+        : `request ${preview.handoffRequestId}`
+      : "",
     preview.kind === "image"
       ? formatBytes(preview.byteLength)
       : `${preview.lineCount} line${preview.lineCount === 1 ? "" : "s"}`,
@@ -325,14 +351,24 @@ export function summarizeBatchRequestCounts(value: unknown): string {
   return `${completed}/${total} completed${failed > 0 ? ` · ${failed} failed` : ""}`;
 }
 
-export function buildBatchActionHint(batch: BatchRecord | undefined): string {
+export function buildBatchActionHint(
+  batch: BatchRecord | undefined,
+  selection?: InspectorSelection,
+): string {
   if (!batch) {
     return "Refresh this batch to load lifecycle posture and linked input/output files.";
   }
   const status = String(batch.status ?? "unknown");
   const outputFileId = String(batch.output_file_id ?? "");
+  const handoffRequestId = selection?.handoffRequestId?.trim() ?? "";
+  const handoffRequestCount = selection?.handoffRequestCount ?? 0;
   if (outputFileId) {
-    return `Batch ${String(batch.id ?? "unknown")} is ${status}; output preview is available from ${outputFileId}.`;
+    if (handoffRequestId) {
+      return handoffRequestCount > 1
+        ? `Batch ${String(batch.id ?? "unknown")} is ${status}; output preview decoded ${handoffRequestCount} request ids, and scoped Traffic/Logs handoff is ready from sample request ${handoffRequestId}.`
+        : `Batch ${String(batch.id ?? "unknown")} is ${status}; output preview decoded request ${handoffRequestId}, so scoped Traffic/Logs handoff is ready.`;
+    }
+    return `Batch ${String(batch.id ?? "unknown")} is ${status}; output preview is available from ${outputFileId}. Preview one output first to unlock request-scoped Traffic and Logs handoff.`;
   }
   if (isAttentionBatchStatus(status)) {
     return `Batch ${String(batch.id ?? "unknown")} needs operator follow-up. Inspect the input payload and refresh metadata for the latest error posture.`;
@@ -430,6 +466,8 @@ function analyzeContentText(
   let sampleLabel: string | undefined;
   let sampleValue: string | undefined;
   let sampleNote: string | undefined;
+  let handoffRequestId: string | undefined;
+  let handoffRequestCount: number | undefined;
 
   if (json !== INVALID_JSON) {
     if (Array.isArray(json)) {
@@ -476,13 +514,26 @@ function analyzeContentText(
       const errorCount = outputRows.filter((row) => Boolean(row.error)).length;
       const successCount = outputRows.length - errorCount;
       const sampleRow = outputRows[0] ?? {};
+      const requestIds = Array.from(
+        new Set(
+          outputRows
+            .map((row) => extractBatchOutputRequestId(row))
+            .filter((value) => value.length > 0),
+        ),
+      );
       contentKind = "Batch output";
       contentKindNote = `${successCount} success · ${errorCount} error`;
       sampleLabel = "Sample result";
       sampleValue = String(sampleRow.custom_id ?? sampleRow.id ?? "batch-result");
-      sampleNote = errorCount
-        ? "Contains at least one failed row."
-        : "Rows decode cleanly into transformed results.";
+      sampleNote = requestIds.length
+        ? errorCount
+          ? `Contains at least one failed row. Sample request id: ${requestIds[0]}.`
+          : `Rows decode cleanly into transformed results. Sample request id: ${requestIds[0]}.`
+        : errorCount
+          ? "Contains at least one failed row."
+          : "Rows decode cleanly into transformed results.";
+      handoffRequestId = requestIds[0];
+      handoffRequestCount = requestIds.length;
     }
   }
 
@@ -496,7 +547,53 @@ function analyzeContentText(
     sampleLabel,
     sampleValue,
     sampleNote,
+    handoffRequestId,
+    handoffRequestCount,
   };
+}
+
+function renderBatchHandoffActions(selection: InspectorSelection): string {
+  const requestId = selection.handoffRequestId?.trim() ?? "";
+  if (!requestId) {
+    return "";
+  }
+
+  const scopedLabel =
+    (selection.handoffRequestCount ?? 0) > 1 ? "sample result" : "request";
+  return `
+    <div class="toolbar">
+      <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForBatchResult(requestId))}">Open traffic for ${escapeHtml(scopedLabel)}</a>
+      <a class="button button--secondary" href="${escapeHtml(buildLogsUrlForBatchResult(requestId))}">Open logs for ${escapeHtml(scopedLabel)}</a>
+    </div>
+  `;
+}
+
+function buildTrafficUrlForBatchResult(requestId: string): string {
+  const params = new URLSearchParams();
+  setQueryParamIfPresent(params, "request_id", requestId.trim());
+  const query = params.toString();
+  return query ? `/admin/traffic?${query}` : "/admin/traffic";
+}
+
+function buildLogsUrlForBatchResult(requestId: string): string {
+  const params = new URLSearchParams();
+  setQueryParamIfPresent(params, "request_id", requestId.trim());
+  const query = params.toString();
+  return query ? `/admin/logs?${query}` : "/admin/logs";
+}
+
+function extractBatchOutputRequestId(row: Record<string, unknown>): string {
+  const response = row.response;
+  if (response && typeof response === "object" && !Array.isArray(response)) {
+    const nestedRequestId = String(
+      (response as Record<string, unknown>).request_id ?? "",
+    ).trim();
+    if (nestedRequestId) {
+      return nestedRequestId;
+    }
+  }
+
+  return String(row.request_id ?? row.id ?? row.custom_id ?? "").trim();
 }
 
 function detectImageMimeType(bytes: Uint8Array, filename: string): string | null {

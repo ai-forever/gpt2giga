@@ -26,6 +26,8 @@ export interface FilePreview {
   sampleValue?: string;
   sampleNote?: string;
   dimensionsNote?: string;
+  handoffRequestId?: string;
+  handoffRequestCount?: number;
 }
 
 export interface DefinitionItem {
@@ -40,6 +42,8 @@ export interface InspectorSelection {
   batchId?: string;
   inputFileId?: string;
   outputFileId?: string;
+  handoffRequestId?: string;
+  handoffRequestCount?: number;
 }
 
 export type FileRecord = Record<string, unknown>;

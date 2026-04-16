@@ -382,6 +382,14 @@
 - Добавлен regression coverage на shipped admin bundle для нового doc handoff слоя:
   - page assets проверяют наличие guide/troubleshooting CTA;
   - `docs-links.js` проверяется на присутствие page-specific anchor fragments для operator guide.
+- Закрыт ещё один `Phase 5` follow-up slice для `Files & Batches -> Traffic/Logs`:
+  - preview batch output теперь извлекает request-scoped context из transformed JSONL results;
+  - inspector получает явный downstream handoff в `Traffic` и `Logs`, когда output preview уже декодировал request id;
+  - если output уже есть, но preview ещё не открывали, UI теперь явно подсказывает, что scoped handoff появится после preview, а не оставляет только broad observe CTA.
+- Safe preview summary для batch outputs теперь отражает downstream posture:
+  - `Request scoped` для single-result output;
+  - `Sample request scoped` для multi-row output с пояснением, что handoff строится от sample request id из decoded rows.
+- Добавлен regression test на shipped asset `pages/files-batches/serializers.js`, чтобы scoped handoff copy и CTA не дрейфовали между TS source и отгружаемым bundle.
 
 ### Проверка
 
@@ -407,13 +415,17 @@
 - `npm run build:admin`
 - `uv run ruff check gpt2giga/frontend/admin gpt2giga/app/admin_ui.py tests/integration/app/test_system_router_extra.py`
 - `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check tests/integration/app/test_system_router_extra.py`
+- `uv run ruff format --check tests/integration/app/test_system_router_extra.py`
 
 ### Дальше
 
 - Первый практический slice `Phase 5` закрыт: верхний operator UX теперь лучше отражает реальные workflow, а overview стал summary-first точкой входа вместо просто списка страниц.
 - Следующий логичный шаг внутри `Phase 5` теперь сместился дальше:
-  - docs/deep-link handoff уже добавлен, поэтому следующий выбор теперь между ещё одним UX slice для явной связки batch output -> traffic/log diagnostics и переходом к `Phase 6/10`;
-  - если оставаться в `Phase 5`, то самый полезный follow-up теперь — сделать более явный downstream path от batch/output selection к scoped `Traffic`/`Logs`, а не просто на broad observe surfaces.
+  - docs/deep-link handoff и scoped batch-output handoff уже добавлены;
+  - следующий выбор теперь между ещё одним UX slice для более сильной correlation story вокруг multi-row batch outputs и переходом к `Phase 6/10`.
 - Дополнительный follow-up для observability UX теперь стал уже вторичным:
   - при желании добавить test/export actions для sink-ов;
   - при желании связать preset cards с docs/operator guide deep links или sample commands;

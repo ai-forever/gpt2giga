@@ -262,6 +262,9 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 
     files_batches_asset = client.get("/admin/assets/admin/pages/files-batches/view.js")
+    files_batches_serializers_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/serializers.js"
+    )
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert files_batches_asset.status_code == 200
@@ -271,6 +274,24 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert "Content preview stays secondary" in files_batches_asset.text
     assert "Escalate only when execution context is needed" in files_batches_asset.text
     assert "Files and batches lifecycle" in files_batches_asset.text
+    assert files_batches_serializers_asset.status_code == 200
+    assert (
+        "Preview one output first to unlock request-scoped Traffic and Logs handoff."
+        in (files_batches_serializers_asset.text)
+    )
+    assert (
+        'scopedLabel = (selection.handoffRequestCount ?? 0) > 1 ? "sample result" : "request"'
+        in files_batches_serializers_asset.text
+    )
+    assert (
+        "Open traffic for ${escapeHtml(scopedLabel)}"
+        in files_batches_serializers_asset.text
+    )
+    assert (
+        "Open logs for ${escapeHtml(scopedLabel)}"
+        in files_batches_serializers_asset.text
+    )
+    assert "Sample request scoped" in files_batches_serializers_asset.text
     assert docs_links_asset.status_code == 200
     assert "files-and-batches-lifecycle" in docs_links_asset.text
 
