@@ -319,7 +319,7 @@ function renderTrafficRequestsPage(
           </div>
         </div>
       `,
-      "panel panel--span-12",
+      "panel panel--span-8",
     )}
     ${card(
       "Guide and troubleshooting",
@@ -338,7 +338,7 @@ function renderTrafficRequestsPage(
         ],
         "This focused page is for request review and handoff. The longer guides stay secondary until one request already stands out.",
       ),
-      "panel panel--span-12",
+      "panel panel--span-4 panel--aside",
     )}
   `;
 }
@@ -406,7 +406,7 @@ function renderTrafficErrorsPage(
           </div>
         </div>
       `,
-      "panel panel--span-12",
+      "panel panel--span-8",
     )}
     ${card(
       "Guide and troubleshooting",
@@ -425,7 +425,7 @@ function renderTrafficErrorsPage(
         ],
         "This focused page is for failure triage. The longer playbooks stay secondary until one error pattern is clearly isolated.",
       ),
-      "panel panel--span-12",
+      "panel panel--span-4 panel--aside",
     )}
   `;
 }
@@ -527,7 +527,7 @@ function renderTrafficUsagePage(
           })}
         </div>
       `,
-      "panel panel--span-12",
+      "panel panel--span-8",
     )}
     ${card(
       "Guide and troubleshooting",
@@ -546,7 +546,7 @@ function renderTrafficUsagePage(
         ],
         "This focused page is for grouped usage review. The guides matter only after one provider or key grouping already became the real issue.",
       ),
-      "panel panel--span-12",
+      "panel panel--span-4 panel--aside",
     )}
   `;
 }
@@ -776,21 +776,34 @@ function renderTrafficInspector(options: {
   return `
     <div class="stack">
       <p class="muted">${escapeHtml(options.summaryIntro)}</p>
-      ${renderStatLines(options.statItems, "No traffic rows are loaded yet.")}
-      <div id="traffic-selection-summary">
-        ${renderDefinitionList(
-          buildTrafficSelectionSummary(options.filters),
-          options.emptySelectionMessage ?? "Select a request, error, or usage row.",
-        )}
-      </div>
-      <div class="toolbar" id="traffic-selection-actions">
-        ${renderTrafficSelectionActions(
-          { requestId: null, counterpartKind: null, counterpartIndex: null },
-          options.filters,
-        )}
-      </div>
+      ${renderFormSection({
+        title: "Current posture",
+        intro: "Keep the scope summary readable first. Deep payload inspection stays collapsed until the posture and next handoff still leave ambiguity.",
+        body: renderStatLines(options.statItems, "No traffic rows are loaded yet."),
+      })}
+      ${renderFormSection({
+        title: "Selection and handoff",
+        intro: "Use the selected row summary and the request pin actions before opening raw snapshots or dropping into Logs.",
+        body: `
+          <div id="traffic-selection-summary">
+            ${renderDefinitionList(
+              buildTrafficSelectionSummary(options.filters),
+              options.emptySelectionMessage ?? "Select a request, error, or usage row.",
+            )}
+          </div>
+          <div class="toolbar" id="traffic-selection-actions">
+            ${renderTrafficSelectionActions(
+              { requestId: null, counterpartKind: null, counterpartIndex: null },
+              options.filters,
+            )}
+          </div>
+        `,
+      })}
       <details class="details-disclosure" id="traffic-detail-disclosure">
-        <summary id="traffic-detail-summary">Raw payload snapshot</summary>
+        <summary id="traffic-detail-summary">Current scope snapshot</summary>
+        <p class="field-note">
+          Expand this only when the selection summary and handoff actions still are not enough.
+        </p>
         <pre class="code-block code-block--tall" id="traffic-detail">${escapeHtml(
           JSON.stringify(options.rawPayload, null, 2),
         )}</pre>

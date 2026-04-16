@@ -208,19 +208,24 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 
     traffic_asset = client.get("/admin/assets/admin/pages/traffic/view.js")
+    traffic_bindings_asset = client.get("/admin/assets/admin/pages/traffic/bindings.js")
     logs_asset = client.get("/admin/assets/admin/pages/logs/view.js")
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert traffic_asset.status_code == 200
+    assert traffic_bindings_asset.status_code == 200
     assert "Traffic navigation" in traffic_asset.text
     assert "Traffic pages" in traffic_asset.text
     assert "Open requests" in traffic_asset.text
     assert "Open errors" in traffic_asset.text
     assert "Open usage" in traffic_asset.text
+    assert "Current posture" in traffic_asset.text
+    assert "Selection and handoff" in traffic_asset.text
     assert "Request inspector and handoff" in traffic_asset.text
     assert "Error inspector and handoff" in traffic_asset.text
     assert "Usage inspector and handoff" in traffic_asset.text
-    assert "Raw payload snapshot" in traffic_asset.text
+    assert "Current scope snapshot" in traffic_asset.text
+    assert "Selected request snapshot" in traffic_bindings_asset.text
     assert "Traffic workflow guide" in traffic_asset.text
     assert "Troubleshooting handoff map" in traffic_asset.text
 

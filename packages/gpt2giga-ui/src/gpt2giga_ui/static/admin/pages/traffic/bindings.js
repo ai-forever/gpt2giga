@@ -40,7 +40,7 @@ export function bindTrafficPage(options) {
             counterpartKind: counterpartIndex >= 0 ? counterpartKind : null,
             counterpartIndex: counterpartIndex >= 0 ? counterpartIndex : null,
         });
-        setDetailState(kind === "error" ? "Raw error event payload" : "Raw request event payload", {
+        setDetailState(kind === "error" ? "Selected error snapshot" : "Selected request snapshot", {
             selected_event: item,
             counterpart_event: counterpart,
             active_filters: filters,
@@ -49,13 +49,13 @@ export function bindTrafficPage(options) {
     const selectUsageRow = (kind, item) => {
         setSelectionSummary(buildUsageSelectionSummary(kind, item, filters));
         setSelectionActions({ requestId: null, counterpartKind: null, counterpartIndex: null });
-        setDetailState(kind === "key" ? "Raw usage-by-key payload" : "Raw usage-by-provider payload", {
+        setDetailState(kind === "key" ? "Selected usage-by-key snapshot" : "Selected usage-by-provider snapshot", {
             selected_usage_entry: item,
             usage_summary: data.providerSummary,
             active_filters: filters,
         });
     };
-    setDetailState("Raw payload snapshot", {
+    setDetailState("Current scope snapshot", {
         active_filters: filters,
         usage_summary: data.providerSummary,
     }, false);
