@@ -202,8 +202,55 @@ Commit:
 
 Commit:
 
-- `pending (record actual hash from git history after commit; no amend)` — `refactor: split admin traffic surfaces`
+- `c930ea4` — `refactor: split admin traffic surfaces`
 
 Следующий шаг:
 
 - при необходимости сделать короткий follow-up только на copy/spacing polish внутри новых traffic child pages; базовый refactor по плану уже закрыт без дальнейшего route split.
+
+### Slice 5
+
+Статус: `done`
+
+Цель:
+
+- сделать короткий follow-up на новые `Traffic` child pages;
+- уменьшить ощущение длинного support-tail на focused traffic surfaces;
+- ещё сильнее увести raw diagnostics на вторичный план без потери handoff UX.
+
+Планируемый объём:
+
+- облегчить нижний support-row на `traffic-requests`, `traffic-errors`, `traffic-usage`;
+- перегруппировать inspector в более явные posture/handoff blocks;
+- переименовать raw payload disclosure в менее агрессивный snapshot copy;
+- пересобрать runtime assets и проверить asset-level integration smoke.
+
+Фактически сделано:
+
+- на focused `Traffic` pages support content разложен в более спокойный `8/4` row вместо full-width tail: companion workflow остаётся главным, а guide card уходит в `aside`;
+- `Request/Error/Usage inspector` перегруппированы в `Current posture` и `Selection and handoff`, чтобы selection summary и next-step actions читались раньше raw JSON;
+- raw diagnostics disclosure переименован в `Current scope snapshot`, а selection-driven snapshots получили более мягкий copy (`Selected request snapshot`, `Selected error snapshot`, `Selected usage-* snapshot`);
+- runtime admin assets пересобраны через `npm run build:admin`;
+- progress-log дополнен фактическим hash предыдущего traffic-slice.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q` — 25 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `e04c35f` — `refactor: polish admin traffic follow-up`
+
+Следующий шаг:
+
+- при необходимости делать только общий cleanup pass по copy/consistency между `Traffic`, `Logs`, `Providers`, `System`; route-level refactor для admin console закрыт.
