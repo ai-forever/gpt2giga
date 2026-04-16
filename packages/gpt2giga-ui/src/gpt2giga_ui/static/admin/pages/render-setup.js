@@ -231,7 +231,7 @@ function renderSetupMainCard(options) {
                   `
                 : `<p class="muted">This environment does not require an explicit bootstrap claim.</p>`}
         </div>
-      `, "panel panel--span-8");
+      `, "panel panel--span-8 panel--measure");
     }
     if (options.activeSection === "application") {
         return card("Application posture", renderApplicationSection({
@@ -241,7 +241,7 @@ function renderSetupMainCard(options) {
             submitLabel: "Save application step",
             values: options.applicationValues,
             variant: "setup",
-        }), "panel panel--span-8");
+        }), "panel panel--span-8 panel--measure");
     }
     if (options.activeSection === "gigachat") {
         return card("GigaChat auth", renderGigachatSection({
@@ -253,7 +253,7 @@ function renderSetupMainCard(options) {
             testButtonLabel: "Test connection",
             values: options.gigachatValues,
             variant: "setup",
-        }), "panel panel--span-8");
+        }), "panel panel--span-8 panel--measure");
     }
     return card("Security bootstrap", renderSecuritySection({
         bannerMessage: "Security bootstrap saves to the control plane first. If this step includes restart-sensitive changes, the running process keeps the previous posture until restart.",
@@ -262,7 +262,7 @@ function renderSetupMainCard(options) {
         submitLabel: "Save security step",
         values: options.securityValues,
         variant: "setup",
-    }), "panel panel--span-8");
+    }), "panel panel--span-8 panel--measure");
 }
 function renderSetupSidebar(options) {
     const nextStep = getNextRecommendedSetupPage(options.setup);
@@ -287,8 +287,8 @@ function renderSetupSidebar(options) {
             </div>
             ${banner("Use the dedicated keys page for scoped key inventory. This page only keeps the bootstrap-critical global-key action nearby.")}
           </div>
-        `, "panel panel--span-4")}
-      ${card("Observability handoff", renderSetupObservabilityHandoff(options.observabilityValues), "panel panel--span-4")}
+        `, "panel panel--span-4 panel--aside")}
+      ${card("Observability handoff", renderSetupObservabilityHandoff(options.observabilityValues), "panel panel--span-4 panel--aside")}
       ${renderSetupStatusCard({
             setup: options.setup,
             runtime: options.runtime,
@@ -327,7 +327,7 @@ function renderSetupStatusCard(options) {
         </div>
         <p class="muted">${escapeHtml(options.nextStep.note)}</p>
       </div>
-    `, "panel panel--span-4");
+    `, "panel panel--span-4 panel--aside");
 }
 function renderSetupStepCard(options) {
     return card(options.title, `

@@ -42,6 +42,13 @@ interface InlineStatus {
   message: string;
 }
 
+interface FormSectionOptions {
+  body: string;
+  className?: string;
+  intro?: string;
+  title: string;
+}
+
 interface WorkflowCardAction {
   label: string;
   href: string;
@@ -160,6 +167,19 @@ export function renderSecretField(options: SecretFieldOptions): string {
         <span>${escapeHtml(options.clearLabel)}</span>
       </label>
     </div>
+  `;
+}
+
+export function renderFormSection(options: FormSectionOptions): string {
+  const className = ["form-section", options.className].filter(Boolean).join(" ");
+  return `
+    <section class="${escapeHtml(className)}">
+      <div class="form-section__header">
+        <h4>${escapeHtml(options.title)}</h4>
+        ${options.intro ? `<p class="muted">${escapeHtml(options.intro)}</p>` : ""}
+      </div>
+      ${options.body}
+    </section>
   `;
 }
 

@@ -107,3 +107,52 @@ Commit:
 Следующий шаг:
 
 - сделать visual density / responsive pass для form-centric child pages, прежде всего `Setup`, `Settings`, `/admin/files` и `/admin/batches`.
+
+### Slice 3
+
+Статус: `done`
+
+Цель:
+
+- снизить визуальную плотность на form-centric child pages;
+- сузить и структурировать `Setup` / `Settings` focused forms;
+- улучшить responsive collapse для `/admin/files` и `/admin/batches`.
+
+Планируемый объём:
+
+- добавить shared form/layout primitives для спокойных form surfaces;
+- перегруппировать control-plane формы в более явные секции;
+- сузить main form panels и облегчить side posture panels;
+- обновить form surfaces в `files` / `batches`;
+- пересобрать runtime assets и проверить shell/integration smoke.
+
+Фактически сделано:
+
+- добавлен shared helper `renderFormSection(...)` для повторяющихся form sections;
+- `Setup` и `Settings` focused pages переведены на более узкий main-column pattern через `panel--measure`, а side posture cards сделаны легче и предсказуемее через `panel--aside`;
+- control-plane формы `application`, `gigachat`, `security`, `observability` перегруппированы в явные секции с intro/surface hierarchy вместо длинного плоского stack layout;
+- `files` и `batches` получили calmer form shells для filters/upload/queue workflows;
+- в `console.css` добавлены shared form-shell styles и более ранний responsive collapse для form grids;
+- runtime admin assets пересобраны через `npm run build:admin`.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py -q` — 40 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `pending (record actual hash from git history after commit; no amend)` — `refactor: polish admin form surfaces`
+
+Следующий шаг:
+
+- при необходимости сделать отдельный stretch-slice для `Traffic`: либо ещё сильнее уменьшить плотность summary page, либо разрезать её на `requests/errors/usage` child pages без перегрузки rail.

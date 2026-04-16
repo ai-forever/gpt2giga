@@ -86,6 +86,18 @@ export function renderSecretField(options) {
     </div>
   `;
 }
+export function renderFormSection(options) {
+    const className = ["form-section", options.className].filter(Boolean).join(" ");
+    return `
+    <section class="${escapeHtml(className)}">
+      <div class="form-section__header">
+        <h4>${escapeHtml(options.title)}</h4>
+        ${options.intro ? `<p class="muted">${escapeHtml(options.intro)}</p>` : ""}
+      </div>
+      ${options.body}
+    </section>
+  `;
+}
 export function renderTable(columns, rows, emptyMessage = "No rows available.") {
     if (!rows.length) {
         return renderEmptyState(emptyMessage);

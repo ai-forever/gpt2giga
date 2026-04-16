@@ -215,7 +215,7 @@ function renderSettingsMainCard(options) {
             submitLabel: "Save application settings",
             values: options.applicationValues,
             variant: "settings",
-        }), "panel panel--span-8");
+        }), "panel panel--span-8 panel--measure");
     }
     if (options.activeSection === "observability") {
         return card("Observability", renderObservabilitySection({
@@ -224,7 +224,7 @@ function renderSettingsMainCard(options) {
             statusId: "settings-observability-status",
             submitLabel: "Save observability settings",
             values: options.observabilityValues,
-        }), "panel panel--span-8");
+        }), "panel panel--span-8 panel--measure");
     }
     if (options.activeSection === "gigachat") {
         return card("GigaChat", renderGigachatSection({
@@ -236,7 +236,7 @@ function renderSettingsMainCard(options) {
             testButtonLabel: "Test connection",
             values: options.gigachatValues,
             variant: "settings",
-        }), "panel panel--span-8");
+        }), "panel panel--span-8 panel--measure");
     }
     if (options.activeSection === "security") {
         return card("Security", renderSecuritySection({
@@ -246,7 +246,7 @@ function renderSettingsMainCard(options) {
             submitLabel: "Save security settings",
             values: options.securityValues,
             variant: "settings",
-        }), "panel panel--span-8");
+        }), "panel panel--span-8 panel--measure");
     }
     return card("Recent revisions", options.revisions.length
         ? `
@@ -273,7 +273,7 @@ function renderSettingsMainCard(options) {
             .join("")}
           </div>
         `
-        : `<p>No persisted revisions yet. Save a settings change to start revision history.</p>`, "panel panel--span-8");
+        : `<p>No persisted revisions yet. Save a settings change to start revision history.</p>`, "panel panel--span-8 panel--measure");
 }
 function renderSettingsSidebar(options) {
     const intro = (() => {
@@ -349,7 +349,7 @@ function renderSettingsSidebar(options) {
         : `<a class="button" href="/admin/settings-history">Open history</a>`}
         </div>
       </div>
-    `, "panel panel--span-4");
+    `, "panel panel--span-4 panel--aside");
 }
 function renderSettingsEntryCard(options) {
     return card(options.title, `

@@ -383,7 +383,7 @@ function renderSetupMainCard(options: {
           }
         </div>
       `,
-      "panel panel--span-8",
+      "panel panel--span-8 panel--measure",
     );
   }
 
@@ -399,7 +399,7 @@ function renderSetupMainCard(options: {
         values: options.applicationValues,
         variant: "setup",
       }),
-      "panel panel--span-8",
+      "panel panel--span-8 panel--measure",
     );
   }
 
@@ -417,7 +417,7 @@ function renderSetupMainCard(options: {
         values: options.gigachatValues,
         variant: "setup",
       }),
-      "panel panel--span-8",
+      "panel panel--span-8 panel--measure",
     );
   }
 
@@ -432,7 +432,7 @@ function renderSetupMainCard(options: {
       values: options.securityValues,
       variant: "setup",
     }),
-    "panel panel--span-8",
+    "panel panel--span-8 panel--measure",
   );
 }
 
@@ -475,12 +475,12 @@ function renderSetupSidebar(options: {
             )}
           </div>
         `,
-        "panel panel--span-4",
+        "panel panel--span-4 panel--aside",
       )}
       ${card(
         "Observability handoff",
         renderSetupObservabilityHandoff(options.observabilityValues),
-        "panel panel--span-4",
+        "panel panel--span-4 panel--aside",
       )}
       ${renderSetupStatusCard({
         setup: options.setup,
@@ -537,7 +537,7 @@ function renderSetupStatusCard(options: {
         <p class="muted">${escapeHtml(options.nextStep.note)}</p>
       </div>
     `,
-    "panel panel--span-4",
+    "panel panel--span-4 panel--aside",
   );
 }
 

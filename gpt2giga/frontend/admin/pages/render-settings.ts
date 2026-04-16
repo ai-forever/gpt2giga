@@ -401,7 +401,7 @@ function renderSettingsMainCard(options: {
         values: options.applicationValues,
         variant: "settings",
       }),
-      "panel panel--span-8",
+      "panel panel--span-8 panel--measure",
     );
   }
 
@@ -416,7 +416,7 @@ function renderSettingsMainCard(options: {
         submitLabel: "Save observability settings",
         values: options.observabilityValues,
       }),
-      "panel panel--span-8",
+      "panel panel--span-8 panel--measure",
     );
   }
 
@@ -434,7 +434,7 @@ function renderSettingsMainCard(options: {
         values: options.gigachatValues,
         variant: "settings",
       }),
-      "panel panel--span-8",
+      "panel panel--span-8 panel--measure",
     );
   }
 
@@ -450,7 +450,7 @@ function renderSettingsMainCard(options: {
         values: options.securityValues,
         variant: "settings",
       }),
-      "panel panel--span-8",
+      "panel panel--span-8 panel--measure",
     );
   }
 
@@ -489,7 +489,7 @@ function renderSettingsMainCard(options: {
           </div>
         `
       : `<p>No persisted revisions yet. Save a settings change to start revision history.</p>`,
-    "panel panel--span-8",
+    "panel panel--span-8 panel--measure",
   );
 }
 
@@ -606,7 +606,7 @@ function renderSettingsSidebar(options: {
         </div>
       </div>
     `,
-    "panel panel--span-4",
+    "panel panel--span-4 panel--aside",
   );
 }
 

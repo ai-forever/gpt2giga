@@ -1,6 +1,6 @@
 import { pathForPage } from "../../routes.js";
 import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
-import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderGuideLinks, renderStaticSelectOptions, renderWorkflowCard, } from "../../templates.js";
+import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderFormSection, renderGuideLinks, renderStaticSelectOptions, renderWorkflowCard, } from "../../templates.js";
 import { escapeHtml, formatBytes, formatTimestamp } from "../../utils.js";
 import { buildFilesBatchesUrl, buildIdleSelectionSummary, buildIdleWorkflowSummary, getLatestLinkedBatch, renderBatchStatus, } from "./serializers.js";
 export function renderFilesBatchesHeroActions(page) {
@@ -172,22 +172,27 @@ function renderFilesPage(data, inventory, filters) {
     ${renderFiltersCard("files", data, filters)}
     ${card("Upload input", `
         <div class="stack" id="files-batches-upload">
-          <p class="muted">
-            Start here when a fresh JSONL input or reference artifact needs to enter the gateway inventory.
-          </p>
-          <form id="files-upload-form" class="stack">
-            <label class="field">
-              <span>Purpose</span>
-              <select name="purpose">
-                ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
-              </select>
-            </label>
-            <label class="field">
-              <span>File</span>
-              <input name="file" type="file" required />
-            </label>
-            <div class="banner">Uploads go through the OpenAI-compatible gateway surface and use the gateway API key from the rail.</div>
-            <button class="button" type="submit">Upload file</button>
+          <form id="files-upload-form" class="form-shell form-shell--compact">
+            ${renderFormSection({
+        title: "Upload source",
+        intro: "Start here when a fresh JSONL input or reference artifact needs to enter the gateway inventory.",
+        body: `
+                <label class="field">
+                  <span>Purpose</span>
+                  <select name="purpose">
+                    ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
+                  </select>
+                </label>
+                <label class="field">
+                  <span>File</span>
+                  <input name="file" type="file" required />
+                </label>
+                <div class="banner">Uploads go through the OpenAI-compatible gateway surface and use the gateway API key from the rail.</div>
+              `,
+    })}
+            <div class="form-actions">
+              <button class="button" type="submit">Upload file</button>
+            </div>
           </form>
         </div>
       `, "panel panel--span-4")}
@@ -261,20 +266,25 @@ function renderBatchesPage(data, inventory, filters) {
     ${renderFiltersCard("batches", data, filters)}
     ${card("Queue batch job", `
         <div class="stack">
-          <p class="muted">
-            Use this after staging an input file. If a new file still needs upload, switch to the files page first.
-          </p>
-          <form id="batch-create-form" class="stack">
-            <label class="field">
-              <span>Endpoint</span>
-              <select name="endpoint">
-                ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
-              </select>
-            </label>
-            <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required /></label>
-            <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
-            <div class="banner banner--warn">Batch creation expects an uploaded JSONL file in OpenAI batch input format.</div>
-            <button class="button" type="submit">Create batch job</button>
+          <form id="batch-create-form" class="form-shell form-shell--compact">
+            ${renderFormSection({
+        title: "Queue one job",
+        intro: "Use this after staging an input file. If a new file still needs upload, switch to the files page first.",
+        body: `
+                <label class="field">
+                  <span>Endpoint</span>
+                  <select name="endpoint">
+                    ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
+                  </select>
+                </label>
+                <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required /></label>
+                <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
+                <div class="banner banner--warn">Batch creation expects an uploaded JSONL file in OpenAI batch input format.</div>
+              `,
+    })}
+            <div class="form-actions">
+              <button class="button" type="submit">Create batch job</button>
+            </div>
           </form>
         </div>
       `, "panel panel--span-4")}
@@ -360,11 +370,19 @@ function renderFiltersCard(page, data, filters) {
     </label>
   `;
     return card(page === "files" ? "File filters" : "Batch filters", `
-      <form id="files-batches-filters-form" class="stack">
-        <div class="${page === "files" ? "dual-grid" : "quad-grid"}">
-          ${page === "files" ? fileFields : batchFields}
-        </div>
-        <div class="toolbar">
+      <form id="files-batches-filters-form" class="form-shell form-shell--compact">
+        ${renderFormSection({
+        title: page === "files" ? "Inventory scope" : "Lifecycle scope",
+        intro: page === "files"
+            ? "Keep the inventory narrow enough that preview and file-level actions still feel local to one artifact."
+            : "Narrow lifecycle review before opening one batch, previewing one output, or handing off into request-level tools.",
+        body: `
+            <div class="${page === "files" ? "dual-grid" : "quad-grid"}">
+              ${page === "files" ? fileFields : batchFields}
+            </div>
+          `,
+    })}
+        <div class="form-actions">
           <button class="button" type="submit">Apply filters</button>
           <span class="muted">${page === "files" ? "Keep the inventory small while preview and upload work stays local to one file." : "Narrow lifecycle review before opening one batch or output."}</span>
         </div>

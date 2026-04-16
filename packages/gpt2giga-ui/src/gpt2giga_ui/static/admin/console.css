@@ -238,6 +238,16 @@ textarea {
   min-width: 0;
 }
 
+.panel--measure {
+  width: 100%;
+  max-width: 880px;
+  justify-self: start;
+}
+
+.panel--aside {
+  align-self: start;
+}
+
 .panel--span-3 {
   grid-column: span 3;
 }
@@ -584,6 +594,55 @@ code {
   background: rgba(255, 255, 255, 0.68);
 }
 
+.form-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.form-shell--compact {
+  gap: 14px;
+}
+
+.form-shell__intro {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  border: 1px solid rgba(15, 95, 90, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(246, 251, 249, 0.9)),
+    radial-gradient(circle at top right, rgba(15, 95, 90, 0.08), transparent 44%);
+}
+
+.form-section {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.form-section__header {
+  display: grid;
+  gap: 6px;
+}
+
+.form-section__header h4 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.24;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
 .surface--dark {
   background: rgba(20, 33, 29, 0.92);
   color: #eff7f1;
@@ -818,6 +877,18 @@ code {
     position: static;
     height: auto;
     overflow: visible;
+  }
+
+  .panel--measure,
+  .panel--aside {
+    max-width: none;
+    grid-column: span 12;
+  }
+
+  .form-shell .dual-grid,
+  .form-shell .triple-grid,
+  .form-shell .quad-grid {
+    grid-template-columns: 1fr;
   }
 }
 
