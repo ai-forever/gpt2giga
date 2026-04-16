@@ -38,6 +38,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
 | `app/cli.py` | Config loading and env-path handling |
 | `app/dependencies.py` | Typed runtime containers and accessors for config, services, stores, and providers |
+| `core/config/_control_plane/` | Internal control-plane persistence/bootstrap implementation | `core/config/control_plane.py` remains the stable facade/re-export path |
 | `core/config/settings.py` | Primary `ProxySettings`, `GigaChatCLI`, and `ProxyConfig` implementation |
 | `core/config/security.py` | Consolidated security posture model and limits |
 | `core/logging/setup.py` | Logger setup, redaction, UTF-8 sanitization, and RQUID context |
@@ -196,6 +197,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Decorate router handlers with `@exceptions_handler`.
 - Use `app/dependencies.py` accessors plus typed `app.state.services`, `app.state.stores`, and `app.state.providers` instead of scattering new runtime fields across flat `app.state.*`.
 - Keep `gpt2giga.app.runtime_backends` as the stable import facade when splitting runtime storage internals; move implementation into `app/_runtime_backends/`.
+- Keep `gpt2giga.core.config.control_plane` as the stable import facade when splitting control-plane persistence internals; move implementation into `core/config/_control_plane/`.
 - When splitting oversized runtime modules, prefer underscore-prefixed internal packages such as `app/_observability/` and `app/_telemetry/`, while keeping the old top-level module as the stable import facade.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
 - For internal reads, prefer grouped views such as `proxy_settings.security`, `proxy_settings.runtime_store`, and `proxy_settings.observability`; flat proxy fields remain the env/control-plane compatibility layer.

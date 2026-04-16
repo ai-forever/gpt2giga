@@ -401,8 +401,8 @@ uv run pytest tests/integration/app/test_admin_console_settings.py tests/integra
 - [x] Milestone 0 закрыт и закоммичен
 - [x] Milestone 1 закрыт и закоммичен
 - [x] Milestone 2 закрыт и закоммичен
-- [ ] Milestone 3 закрыт и закоммичен
-- [ ] Milestone 4 закрыт **или осознанно остановлен** после зелёного Milestone 3 с записью причины
+- [x] Milestone 3 закрыт и закоммичен
+- [x] Milestone 4 закрыт **или осознанно остановлен** после зелёного Milestone 3 с записью причины
 - [ ] `uv run ruff check .` зелёный
 - [ ] `uv run ruff format --check .` зелёный
 - [ ] `uv run pytest tests/ --cov=. --cov-fail-under=80` зелёный
@@ -520,24 +520,34 @@ uv run pytest tests/integration/app/test_admin_console_settings.py tests/integra
 ### TODO
 
 - [x] Разрезать `gpt2giga/app/runtime_backends.py` через `gpt2giga/app/_runtime_backends/` и сохранить старый import path как facade.
-- [ ] Разрезать `gpt2giga/core/config/control_plane.py` через `gpt2giga/core/config/_control_plane/` и сохранить старый import path как facade.
-- [ ] Решить, нужен ли отдельный follow-up split для `app/admin_settings.py` и `app/admin_runtime.py` после control-plane slice.
+- [x] Разрезать `gpt2giga/core/config/control_plane.py` через `gpt2giga/core/config/_control_plane/` и сохранить старый import path как facade.
+- [x] Не трогать `app/admin_settings.py` и `app/admin_runtime.py`: после runtime/control-plane split дополнительный admin follow-up в рамках этого milestone не потребовался.
 
 ### Done
 
 - `gpt2giga/app/runtime_backends.py` сведён к thin facade/re-export слою.
 - Внутренняя реализация runtime store/feed backends вынесена в `gpt2giga/app/_runtime_backends/{contracts,memory,sqlite,registry,provisioning}.py`.
 - Добавлен targeted import-stability test для `gpt2giga.app.runtime_backends`, который pin-ит facade поверх internal implementation.
+- `gpt2giga/core/config/control_plane.py` сведён к thin facade/re-export слою.
+- Внутренняя реализация control-plane persistence разнесена по `gpt2giga/core/config/_control_plane/{paths,bootstrap,crypto,payloads,revisions,status}.py`.
+- Добавлен targeted import-stability test для `gpt2giga.core.config.control_plane`, который pin-ит facade поверх internal implementation.
 
 ### Verification
 
 - `uv run ruff check gpt2giga/app/runtime_backends.py gpt2giga/app/_runtime_backends tests/unit/core/test_runtime_backends.py`
 - `uv run ruff format --check gpt2giga/app/runtime_backends.py gpt2giga/app/_runtime_backends tests/unit/core/test_runtime_backends.py`
 - `uv run pytest tests/unit/core/test_runtime_backends.py tests/unit/app/test_admin_runtime.py tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga/core/config/control_plane.py gpt2giga/core/config/_control_plane tests/unit/core/test_control_plane.py`
+- `uv run ruff format --check gpt2giga/core/config/control_plane.py gpt2giga/core/config/_control_plane tests/unit/core/test_control_plane.py`
+- `uv run pytest tests/unit/core/test_control_plane.py tests/unit/app/test_admin_settings.py tests/integration/app/test_admin_console_settings.py tests/integration/app/test_api_server.py -q`
+- `uv run ruff check gpt2giga/app gpt2giga/core/config tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`
+- `uv run ruff format --check gpt2giga/app gpt2giga/core/config tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`
+- `uv run pytest tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py -q`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py tests/integration/app/test_api_server.py -q`
 
 ### Next
 
-- Продолжить `Milestone 4` с `gpt2giga/core/config/control_plane.py`; админские сервисы пока не трогать.
+- `Milestone 4` закрыт; дальше остаётся только полный repo-wide gate из definition of done для всей волны.
 
 ---
 

@@ -147,6 +147,7 @@ api/openai/responses.py
 - `gpt2giga/api/admin/settings.py` делегирует setup/settings/revisions/key-management flow в `gpt2giga/app/admin_settings.py`.
 - `gpt2giga/api/admin/runtime.py` делегирует runtime/config/capabilities/usage payload building в `gpt2giga/app/admin_runtime.py`.
 - Настройки и live mutation flow проходят через `gpt2giga/app/admin_settings.py` и `gpt2giga/core/config/control_plane.py`.
+- Внутренняя реализация control-plane persistence, bootstrap, revisions и payload/status helpers теперь лежит в `gpt2giga/core/config/_control_plane/`, а `gpt2giga/core/config/control_plane.py` остаётся совместимым facade/re-export слоем.
 - Когда изменение безопасно для live-reload, `reload_runtime_services()` пересобирает runtime без полного рестарта процесса.
 - Runtime snapshot service читает текущее состояние из `app.state.config`, runtime stores и observability state.
 

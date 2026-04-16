@@ -1,13 +1,15 @@
-"""Compatibility facade for control-plane configuration helpers."""
+"""Internal control-plane configuration implementation package."""
 
-from gpt2giga.core.config._control_plane import (
-    CONTROL_PLANE_DIR_ENV,
-    CONTROL_PLANE_VERSION,
-    apply_control_plane_overrides,
-    build_control_plane_status,
-    build_proxy_config_from_control_plane_payload,
+from .bootstrap import (
     claim_admin_instance,
     clear_bootstrap_token,
+    is_admin_instance_claimed,
+    load_bootstrap_state,
+    load_bootstrap_token,
+)
+from .paths import (
+    CONTROL_PLANE_DIR_ENV,
+    CONTROL_PLANE_VERSION,
     get_control_plane_bootstrap_state_file,
     get_control_plane_bootstrap_token_file,
     get_control_plane_dir,
@@ -15,30 +17,33 @@ from gpt2giga.core.config._control_plane import (
     get_control_plane_key_file,
     get_control_plane_revisions_dir,
     has_persisted_control_plane,
-    is_admin_instance_claimed,
     is_control_plane_persistence_enabled,
-    is_control_plane_setup_complete,
-    is_gigachat_ready,
-    is_security_ready,
-    list_control_plane_revisions,
-    load_bootstrap_state,
-    load_bootstrap_token,
+)
+from .payloads import (
+    apply_control_plane_overrides,
+    build_proxy_config_from_control_plane_payload,
     load_control_plane_overrides,
     load_control_plane_overrides_from_payload,
     load_control_plane_payload,
-    load_control_plane_revision_payload,
     persist_control_plane_config,
+)
+from .revisions import list_control_plane_revisions, load_control_plane_revision_payload
+from .status import (
+    build_control_plane_status,
+    is_control_plane_setup_complete,
+    is_gigachat_ready,
+    is_security_ready,
     requires_admin_bootstrap,
 )
 
 __all__ = [
     "CONTROL_PLANE_DIR_ENV",
     "CONTROL_PLANE_VERSION",
-    "apply_control_plane_overrides",
-    "build_control_plane_status",
-    "build_proxy_config_from_control_plane_payload",
     "claim_admin_instance",
     "clear_bootstrap_token",
+    "is_admin_instance_claimed",
+    "load_bootstrap_state",
+    "load_bootstrap_token",
     "get_control_plane_bootstrap_state_file",
     "get_control_plane_bootstrap_token_file",
     "get_control_plane_dir",
@@ -46,18 +51,18 @@ __all__ = [
     "get_control_plane_key_file",
     "get_control_plane_revisions_dir",
     "has_persisted_control_plane",
-    "is_admin_instance_claimed",
     "is_control_plane_persistence_enabled",
-    "is_control_plane_setup_complete",
-    "is_gigachat_ready",
-    "is_security_ready",
-    "list_control_plane_revisions",
-    "load_bootstrap_state",
-    "load_bootstrap_token",
+    "apply_control_plane_overrides",
+    "build_proxy_config_from_control_plane_payload",
     "load_control_plane_overrides",
     "load_control_plane_overrides_from_payload",
     "load_control_plane_payload",
-    "load_control_plane_revision_payload",
     "persist_control_plane_config",
+    "list_control_plane_revisions",
+    "load_control_plane_revision_payload",
+    "build_control_plane_status",
+    "is_control_plane_setup_complete",
+    "is_gigachat_ready",
+    "is_security_ready",
     "requires_admin_bootstrap",
 ]

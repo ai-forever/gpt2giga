@@ -17,6 +17,14 @@
   - Проверка: `uv run ruff check gpt2giga/app/runtime_backends.py gpt2giga/app/_runtime_backends tests/unit/core/test_runtime_backends.py`; `uv run ruff format --check gpt2giga/app/runtime_backends.py gpt2giga/app/_runtime_backends tests/unit/core/test_runtime_backends.py`; `uv run pytest tests/unit/core/test_runtime_backends.py tests/unit/app/test_admin_runtime.py tests/integration/app/test_system_router_extra.py -q`.
   - Commit: `refactor: split runtime backends internals`
 
+- 2026-04-16 — `Milestone 4` slice: control plane
+  - `gpt2giga/core/config/control_plane.py` сведён к thin compatibility facade с сохранением прежнего import path.
+  - Внутренняя реализация control-plane persistence разложена по `gpt2giga/core/config/_control_plane/{paths,bootstrap,crypto,payloads,revisions,status}.py`.
+  - Сохранены прежние public helper names для bootstrap access, persisted payload loading, revision flow и admin settings service.
+  - Добавлен targeted import-stability test для фасада `gpt2giga.core.config.control_plane`.
+  - Проверка: `uv run ruff check gpt2giga/core/config/control_plane.py gpt2giga/core/config/_control_plane tests/unit/core/test_control_plane.py`; `uv run ruff format --check gpt2giga/core/config/control_plane.py gpt2giga/core/config/_control_plane tests/unit/core/test_control_plane.py`; `uv run pytest tests/unit/core/test_control_plane.py tests/unit/app/test_admin_settings.py tests/integration/app/test_admin_console_settings.py tests/integration/app/test_api_server.py -q`; `uv run ruff check gpt2giga/app gpt2giga/core/config tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`; `uv run ruff format --check gpt2giga/app gpt2giga/core/config tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py`; `uv run pytest tests/unit/core/test_runtime_backends.py tests/unit/core/test_control_plane.py tests/unit/app/test_admin_runtime.py tests/unit/app/test_admin_settings.py -q`; `uv run pytest tests/integration/app/test_admin_console_settings.py tests/integration/app/test_system_router_extra.py tests/integration/app/test_api_server.py -q`.
+  - Commit: `refactor: split control plane internals`
+
 - 2026-04-16 — `Milestone 3`
   - `gpt2giga/app/observability.py` сведён к thin compatibility facade, а реализация разнесена по `gpt2giga/app/_observability/{models,feeds,usage,messages,context,recording}.py`.
   - `gpt2giga/app/telemetry.py` сведён к thin compatibility facade, а реализация sink-ов и OTLP/Prometheus helper-ов разнесена по `gpt2giga/app/_telemetry/{contracts,hub,registry,prometheus,otlp,langfuse,phoenix,encoding,builtin}.py`.

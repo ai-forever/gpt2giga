@@ -1,5 +1,14 @@
 import json
 
+from gpt2giga.core.config._control_plane.bootstrap import (
+    claim_admin_instance as internal_claim_admin_instance,
+)
+from gpt2giga.core.config._control_plane.paths import (
+    get_control_plane_file as internal_get_control_plane_file,
+)
+from gpt2giga.core.config._control_plane.payloads import (
+    persist_control_plane_config as internal_persist_control_plane_config,
+)
 from gpt2giga.core.config.control_plane import (
     apply_control_plane_overrides,
     build_proxy_config_from_control_plane_payload,
@@ -17,6 +26,12 @@ from gpt2giga.core.config.control_plane import (
     persist_control_plane_config,
 )
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
+
+
+def test_control_plane_facade_reexports_internal_helpers():
+    assert claim_admin_instance is internal_claim_admin_instance
+    assert get_control_plane_file is internal_get_control_plane_file
+    assert persist_control_plane_config is internal_persist_control_plane_config
 
 
 def test_control_plane_roundtrip_encrypts_secrets(tmp_path, monkeypatch):
