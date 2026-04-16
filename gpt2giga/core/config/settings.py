@@ -294,6 +294,18 @@ class ProxySettings(BaseSettings):
             "Отключить HTML admin UI даже если установлен optional пакет gpt2giga-ui."
         ),
     )
+    disable_persist: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "disable_persist",
+            "GPT2GIGA_DISABLE_PERSIST",
+            "DISABLE_PERSIST",
+        ),
+        description=(
+            "Отключить control-plane persistence. При True runtime-config читается "
+            "только из .env/ENV, а admin save/rollback/key-rotation mutations недоступны."
+        ),
+    )
     enabled_providers: Annotated[list[ProviderName], NoDecode] = Field(
         default_factory=lambda: list(_ALL_ENABLED_PROVIDERS),
         description=(

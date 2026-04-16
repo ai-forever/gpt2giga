@@ -1,5 +1,6 @@
 import pytest
 from fastapi import FastAPI
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from gpt2giga.api.admin import admin_api_router
@@ -144,3 +145,21 @@ async def test_admin_key_management_service_manages_scoped_keys(tmp_path, monkey
     assert rotated["keys"]["scoped"][0]["key_preview"] != "rotated-key"
     assert deleted["deleted"] == "sdk-openai"
     assert deleted["keys"]["scoped"] == []
+
+
+@pytest.mark.asyncio
+async def test_admin_control_plane_settings_service_rejects_mutations_when_persist_disabled():
+    request = _build_request(
+        ProxyConfig(
+            proxy=ProxySettings(mode="DEV", disable_persist=True),
+            gigachat={"credentials": "env-creds"},
+        )
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await AdminControlPlaneSettingsService(request).update_gigachat_settings(
+            {"model": "GigaChat-Max"}
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "Control-plane persistence is disabled" in str(exc_info.value.detail)

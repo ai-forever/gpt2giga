@@ -278,6 +278,54 @@ def test_gigachat_settings_test_endpoint_reports_success(tmp_path, monkeypatch):
     assert "GigaChat-Max" in payload["sample_models"]
 
 
+def test_setup_endpoint_reports_env_only_mode_without_bootstrap():
+    client = TestClient(
+        make_app(
+            config=ProxyConfig(
+                proxy=ProxySettings(
+                    mode="PROD",
+                    disable_persist=True,
+                    enable_api_key_auth=True,
+                    api_key="env-admin-key",
+                ),
+                gigachat={"credentials": "env-creds", "scope": "GIGACHAT_API_PERS"},
+            )
+        )
+    )
+
+    response = client.get("/admin/api/setup", headers={"x-api-key": "env-admin-key"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["disable_persist"] is True
+    assert payload["persistence_enabled"] is False
+    assert payload["persisted"] is False
+    assert payload["setup_complete"] is True
+    assert payload["bootstrap"]["required"] is False
+    assert payload["claim"]["required"] is False
+
+
+def test_settings_mutation_is_rejected_when_persist_is_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(
+        make_app(
+            config=ProxyConfig(
+                proxy=ProxySettings(mode="DEV", disable_persist=True),
+                gigachat={"credentials": "env-creds"},
+            )
+        )
+    )
+
+    response = client.put(
+        "/admin/api/settings/gigachat",
+        json={"model": "GigaChat-Max"},
+    )
+
+    assert response.status_code == 409
+    assert "Control-plane persistence is disabled" in response.json()["detail"]
+    assert (tmp_path / "control-plane.json").exists() is False
+
+
 def test_gigachat_settings_test_endpoint_passes_ca_bundle_to_factory(
     tmp_path, monkeypatch
 ):

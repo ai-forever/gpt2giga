@@ -3,8 +3,9 @@ import os
 from loguru import logger as loguru_logger
 
 from gpt2giga.app.cli import load_config
+from gpt2giga.core.config.control_plane import persist_control_plane_config
 from gpt2giga.core.app_meta import warn_sensitive_cli_args
-from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
 def test_load_config_basic(monkeypatch):
@@ -62,6 +63,33 @@ def test_load_config_env_path_does_not_leak_dotenv_into_process_env(
     assert config.proxy_settings.observability_sinks == ["phoenix"]
     assert os.environ.get("GIGACHAT_CREDENTIALS") is None
     assert os.environ.get("GPT2GIGA_OBSERVABILITY_SINKS") is None
+
+
+def test_load_config_ignores_control_plane_when_disable_persist_is_enabled(
+    monkeypatch, tmp_path
+):
+    control_plane_dir = tmp_path / "control-plane"
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(control_plane_dir))
+    persist_control_plane_config(
+        ProxyConfig(
+            proxy=ProxySettings(api_key="persisted-secret"),
+            gigachat={"credentials": "persisted-creds"},
+        )
+    )
+
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "GPT2GIGA_DISABLE_PERSIST=true\n"
+        "GPT2GIGA_API_KEY=env-secret\n"
+        "GIGACHAT_CREDENTIALS=env-creds\n"
+    )
+    monkeypatch.setattr("sys.argv", ["prog", "--env-path", str(env_file)])
+
+    config = load_config()
+
+    assert config.proxy_settings.disable_persist is True
+    assert config.proxy_settings.api_key == "env-secret"
+    assert config.gigachat_settings.credentials.get_secret_value() == "env-creds"
 
 
 def test_warn_sensitive_cli_args_credentials(monkeypatch):

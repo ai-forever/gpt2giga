@@ -270,3 +270,26 @@ def test_persist_control_plane_config_keeps_managed_gigachat_fields_across_saves
     assert merged.proxy_settings.enable_reasoning is True
     assert merged.gigachat_settings.credentials.get_secret_value() == "persisted-creds"
     assert merged.gigachat_settings.model == "GigaChat-Max"
+
+
+def test_apply_control_plane_overrides_skips_persisted_state_when_disabled(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+
+    persist_control_plane_config(
+        ProxyConfig(
+            proxy=ProxySettings(mode="DEV", api_key="persisted-secret"),
+            gigachat={"credentials": "persisted-creds", "model": "GigaChat-Max"},
+        )
+    )
+
+    runtime = ProxyConfig(
+        proxy=ProxySettings(mode="DEV", disable_persist=True, api_key="env-secret"),
+        gigachat={"credentials": "env-creds", "model": "GigaChat-2-Max"},
+    )
+    merged = apply_control_plane_overrides(runtime)
+
+    assert merged.proxy_settings.api_key == "env-secret"
+    assert merged.gigachat_settings.credentials.get_secret_value() == "env-creds"
+    assert merged.gigachat_settings.model == "GigaChat-2-Max"

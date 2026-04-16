@@ -15,6 +15,7 @@ from gpt2giga.core.config.settings import GigaChatCLI, ProxyConfig, ProxySetting
 
 CONTROL_PLANE_VERSION = 1
 CONTROL_PLANE_DIR_ENV = "GPT2GIGA_CONTROL_PLANE_DIR"
+_DISABLE_PERSIST_ENV_NAMES = ("GPT2GIGA_DISABLE_PERSIST", "DISABLE_PERSIST")
 _CONTROL_FILE_NAME = "control-plane.json"
 _CONTROL_KEY_FILE_NAME = "control-plane.key"
 _BOOTSTRAP_TOKEN_FILE_NAME = "bootstrap-token"
@@ -35,6 +36,28 @@ _GIGACHAT_FIELDS = set(GigaChatCLI.model_fields)
 def _utc_now() -> str:
     """Return an RFC3339-like timestamp."""
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _env_flag_enabled(name: str) -> bool | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_control_plane_persistence_enabled(
+    config: ProxyConfig | ProxySettings | None = None,
+) -> bool:
+    """Return whether disk-backed control-plane persistence is enabled."""
+    proxy_settings = getattr(config, "proxy_settings", config)
+    if proxy_settings is not None:
+        return not bool(getattr(proxy_settings, "disable_persist", False))
+
+    for env_name in _DISABLE_PERSIST_ENV_NAMES:
+        raw_flag = _env_flag_enabled(env_name)
+        if raw_flag is not None:
+            return not raw_flag
+    return True
 
 
 def get_control_plane_dir() -> Path:
@@ -75,8 +98,12 @@ def get_control_plane_revisions_dir() -> Path:
     return get_control_plane_dir() / _REVISIONS_DIR_NAME
 
 
-def has_persisted_control_plane() -> bool:
+def has_persisted_control_plane(
+    config: ProxyConfig | ProxySettings | None = None,
+) -> bool:
     """Return whether a persisted control-plane payload exists."""
+    if not is_control_plane_persistence_enabled(config):
+        return False
     return get_control_plane_file().exists()
 
 
@@ -157,8 +184,14 @@ def _load_fernet(*, create: bool) -> Fernet | None:
     return Fernet(key)
 
 
-def load_bootstrap_token(*, create: bool) -> str | None:
+def load_bootstrap_token(
+    *,
+    create: bool,
+    config: ProxyConfig | ProxySettings | None = None,
+) -> str | None:
     """Load or lazily create the bootstrap token used for first-run admin access."""
+    if not is_control_plane_persistence_enabled(config):
+        return None
     token_file = get_control_plane_bootstrap_token_file()
     if token_file.exists():
         token = token_file.read_text(encoding="utf-8").strip()
@@ -184,8 +217,17 @@ def clear_bootstrap_token() -> None:
         pass
 
 
-def load_bootstrap_state() -> dict[str, Any]:
+def load_bootstrap_state(
+    config: ProxyConfig | ProxySettings | None = None,
+) -> dict[str, Any]:
     """Load persisted first-run claim metadata."""
+    if not is_control_plane_persistence_enabled(config):
+        return {
+            "claimed_at": None,
+            "operator_label": None,
+            "claimed_via": None,
+            "claimed_from": None,
+        }
     path = get_control_plane_bootstrap_state_file()
     if not path.exists():
         return {
@@ -204,9 +246,11 @@ def load_bootstrap_state() -> dict[str, Any]:
     }
 
 
-def is_admin_instance_claimed() -> bool:
+def is_admin_instance_claimed(
+    config: ProxyConfig | ProxySettings | None = None,
+) -> bool:
     """Return whether the first-run admin bootstrap has been claimed."""
-    return bool(load_bootstrap_state().get("claimed_at"))
+    return bool(load_bootstrap_state(config=config).get("claimed_at"))
 
 
 def claim_admin_instance(
@@ -214,9 +258,13 @@ def claim_admin_instance(
     operator_label: str | None = None,
     claimed_via: str | None = None,
     claimed_from: str | None = None,
+    config: ProxyConfig | ProxySettings | None = None,
 ) -> dict[str, Any]:
     """Persist the first operator claim for the current instance."""
-    existing = load_bootstrap_state()
+    if not is_control_plane_persistence_enabled(config):
+        raise RuntimeError("Control-plane persistence is disabled")
+
+    existing = load_bootstrap_state(config=config)
     if existing.get("claimed_at"):
         return existing
 
@@ -278,8 +326,22 @@ def _decrypt_secret_map(
     return values
 
 
-def load_control_plane_payload() -> dict[str, Any]:
+def load_control_plane_payload(
+    config: ProxyConfig | ProxySettings | None = None,
+) -> dict[str, Any]:
     """Load the raw control-plane payload from disk."""
+    if not is_control_plane_persistence_enabled(config):
+        return {
+            "version": CONTROL_PLANE_VERSION,
+            "proxy": {},
+            "gigachat": {},
+            "secrets": {"proxy": {}, "gigachat": {}},
+            "managed": {"proxy": [], "gigachat": []},
+            "change": {},
+            "revision_id": None,
+            "updated_at": None,
+        }
+
     path = get_control_plane_file()
     if not path.exists():
         return {
@@ -419,10 +481,12 @@ def build_proxy_config_from_control_plane_payload(
 
 def apply_control_plane_overrides(config: ProxyConfig) -> ProxyConfig:
     """Overlay persisted UI-managed settings onto the runtime config."""
-    if not has_persisted_control_plane():
+    if not is_control_plane_persistence_enabled(config):
+        return config
+    if not has_persisted_control_plane(config):
         return config
 
-    payload = load_control_plane_payload()
+    payload = load_control_plane_payload(config=config)
     proxy_managed_fields, gigachat_managed_fields = _load_managed_fields_from_payload(
         payload,
         infer_legacy=True,
@@ -469,15 +533,15 @@ def is_security_ready(config: ProxyConfig) -> bool:
 
 def is_control_plane_setup_complete(config: ProxyConfig) -> bool:
     """Return whether persisted config, upstream auth and gateway auth are all ready."""
-    return (
-        has_persisted_control_plane()
-        and is_gigachat_ready(config)
-        and is_security_ready(config)
-    )
+    persistence_enabled = is_control_plane_persistence_enabled(config)
+    storage_ready = not persistence_enabled or has_persisted_control_plane(config)
+    return storage_ready and is_gigachat_ready(config) and is_security_ready(config)
 
 
 def requires_admin_bootstrap(config: ProxyConfig) -> bool:
     """Return whether PROD admin access must stay in bootstrap mode."""
+    if not is_control_plane_persistence_enabled(config):
+        return False
     return config.proxy_settings.mode == "PROD" and not is_control_plane_setup_complete(
         config
     )
@@ -508,7 +572,9 @@ def _build_control_plane_payload(
     }
 
     previous_payload = (
-        load_control_plane_payload() if has_persisted_control_plane() else {}
+        load_control_plane_payload(config=config)
+        if has_persisted_control_plane(config)
+        else {}
     )
     managed_proxy_fields, managed_gigachat_fields = _load_managed_fields_from_payload(
         previous_payload,
@@ -565,8 +631,14 @@ def _write_control_plane_revision(payload: dict[str, Any]) -> None:
             continue
 
 
-def list_control_plane_revisions(limit: int = 10) -> list[dict[str, Any]]:
+def list_control_plane_revisions(
+    limit: int = 10,
+    *,
+    config: ProxyConfig | ProxySettings | None = None,
+) -> list[dict[str, Any]]:
     """Return recent persisted control-plane revisions."""
+    if not is_control_plane_persistence_enabled(config):
+        return []
     revisions_dir = get_control_plane_revisions_dir()
     if not revisions_dir.exists():
         return []
@@ -584,8 +656,14 @@ def list_control_plane_revisions(limit: int = 10) -> list[dict[str, Any]]:
     return payloads
 
 
-def load_control_plane_revision_payload(revision_id: str) -> dict[str, Any]:
+def load_control_plane_revision_payload(
+    revision_id: str,
+    *,
+    config: ProxyConfig | ProxySettings | None = None,
+) -> dict[str, Any]:
     """Load a specific persisted control-plane revision."""
+    if not is_control_plane_persistence_enabled(config):
+        raise FileNotFoundError(revision_id)
     path = get_control_plane_revisions_dir() / f"{revision_id}.json"
     if not path.exists():
         raise FileNotFoundError(revision_id)
@@ -604,6 +682,9 @@ def persist_control_plane_config(
     restored_from_revision_id: str | None = None,
 ) -> Path:
     """Persist the current runtime config for future UI-managed startups."""
+    if not is_control_plane_persistence_enabled(config):
+        raise RuntimeError("Control-plane persistence is disabled")
+
     _ensure_control_plane_dir()
     payload = _build_control_plane_payload(
         config,
@@ -622,20 +703,27 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
     """Return a safe summary of the persisted-control-plane state."""
     proxy = config.proxy_settings
     runtime_store = proxy.runtime_store
-    payload = load_control_plane_payload()
-    bootstrap_state = load_bootstrap_state()
-    persisted = has_persisted_control_plane()
+    persistence_enabled = is_control_plane_persistence_enabled(config)
+    payload = load_control_plane_payload(config=config)
+    bootstrap_state = load_bootstrap_state(config=config)
+    persisted = has_persisted_control_plane(config)
     gigachat_ready = is_gigachat_ready(config)
     security_ready = is_security_ready(config)
-    setup_complete = persisted and gigachat_ready and security_ready
+    storage_ready = not persistence_enabled or persisted
+    setup_complete = storage_ready and gigachat_ready and security_ready
     bootstrap_required = requires_admin_bootstrap(config)
-    bootstrap_token = load_bootstrap_token(create=bootstrap_required)
+    bootstrap_token = load_bootstrap_token(create=bootstrap_required, config=config)
     claimed = bool(bootstrap_state.get("claimed_at"))
     claim_required = bootstrap_required
     claim_ready = claimed or not claim_required
 
     warnings: list[str] = []
-    if not persisted:
+    if not persistence_enabled:
+        warnings.append(
+            "Control-plane persistence is disabled. Runtime config loads only from .env "
+            "and process environment variables; admin save and rollback actions are unavailable."
+        )
+    elif not persisted:
         warnings.append(
             "Control-plane config is not persisted yet. Save setup values to survive restarts."
         )
@@ -667,9 +755,11 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
         )
 
     return {
+        "persistence_enabled": persistence_enabled,
+        "disable_persist": not persistence_enabled,
         "persisted": persisted,
-        "path": str(get_control_plane_file()),
-        "key_path": str(get_control_plane_key_file()),
+        "path": str(get_control_plane_file()) if persistence_enabled else None,
+        "key_path": str(get_control_plane_key_file()) if persistence_enabled else None,
         "updated_at": payload.get("updated_at"),
         "gigachat_ready": gigachat_ready,
         "security_ready": security_ready,
@@ -709,8 +799,12 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
             {
                 "id": "storage",
                 "label": "Persist settings",
-                "ready": persisted,
-                "description": "Write control-plane config to disk for restart-safe bootstrap.",
+                "ready": storage_ready,
+                "description": (
+                    "Write control-plane config to disk for restart-safe bootstrap."
+                    if persistence_enabled
+                    else "Persistence is disabled; runtime config is sourced only from .env and environment variables."
+                ),
             },
             {
                 "id": "gigachat",

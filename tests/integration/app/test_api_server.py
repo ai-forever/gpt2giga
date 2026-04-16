@@ -370,6 +370,29 @@ def test_prod_mode_without_api_key_enters_bootstrap_mode(tmp_path, monkeypatch):
     )
 
 
+def test_prod_mode_with_disable_persist_uses_env_auth_without_bootstrap():
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                mode="PROD",
+                disable_persist=True,
+                enable_api_key_auth=True,
+                api_key="env-admin-key",
+            ),
+            gigachat={"credentials": "env-creds", "scope": "GIGACHAT_API_PERS"},
+        )
+    )
+    client = TestClient(app)
+
+    redirect = client.get("/admin", follow_redirects=False)
+    assert redirect.status_code == 401
+
+    setup = client.get("/admin/api/setup", headers={"x-api-key": "env-admin-key"})
+    assert setup.status_code == 200
+    assert setup.json()["bootstrap"]["required"] is False
+    assert setup.json()["setup_complete"] is True
+
+
 def test_prod_mode_forces_auth_dependency():
     app = create_app(
         config=ProxyConfig(

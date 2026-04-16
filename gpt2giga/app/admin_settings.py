@@ -371,6 +371,7 @@ class AdminControlPlaneSettingsService:
 
     def claim_setup_instance(self, operator_label: str | None) -> dict[str, Any]:
         """Record operator metadata for the first-run claim step."""
+        self._ensure_persistence_enabled()
         control_plane = self._control_summary()
         if not control_plane["bootstrap"]["required"]:
             raise HTTPException(
@@ -549,6 +550,7 @@ class AdminControlPlaneSettingsService:
 
     async def rollback_revision(self, revision_id: str) -> dict[str, Any]:
         """Rollback runtime settings to a previous persisted revision."""
+        self._ensure_persistence_enabled()
         try:
             payload = load_control_plane_revision_payload(revision_id)
         except FileNotFoundError as exc:
@@ -589,6 +591,18 @@ class AdminControlPlaneSettingsService:
     def _control_summary(self) -> dict[str, Any]:
         """Return the current control-plane status summary."""
         return build_control_plane_status(self.config)
+
+    def _ensure_persistence_enabled(self) -> None:
+        """Reject admin mutations when env-only config mode is enabled."""
+        if not self.config.proxy_settings.disable_persist:
+            return
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Control-plane persistence is disabled. Update .env or container "
+                "environment variables and restart the process."
+            ),
+        )
 
     def _build_settings_snapshot(self, config: ProxyConfig) -> dict[str, Any]:
         """Build the safe, UI-facing snapshot of all settings sections."""
@@ -632,6 +646,7 @@ class AdminControlPlaneSettingsService:
         restored_from_revision_id: str | None = None,
     ) -> dict[str, Any]:
         """Persist the candidate config and apply live-safe changes."""
+        self._ensure_persistence_enabled()
         logger = get_logger_from_state(self.state)
         persist_path = persist_control_plane_config(
             updated_config,
