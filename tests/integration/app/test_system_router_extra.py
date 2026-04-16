@@ -61,6 +61,10 @@ def test_admin_ui_ok():
     assert "Diagnose" in resp.text
     assert "Playground" in resp.text
     assert "Files &amp; Batches" in resp.text
+    assert 'class="skip-link"' in resp.text
+    assert 'href="#page-title"' in resp.text
+    assert 'aria-label="Primary console navigation"' in resp.text
+    assert 'id="page-title" tabindex="-1"' in resp.text
     assert 'data-workflow="start"' in resp.text
     assert 'data-workflow="configure"' in resp.text
     assert 'data-workflow="observe"' in resp.text
@@ -199,13 +203,20 @@ def test_admin_ui_warning_banner():
 
     asset_client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
     index_asset = asset_client.get("/admin/assets/admin/index.js")
+    app_asset = asset_client.get("/admin/assets/admin/app.js")
     stylesheet = asset_client.get("/admin/assets/admin/console.css")
 
     assert index_asset.status_code == 200
+    assert app_asset.status_code == 200
     assert stylesheet.status_code == 200
     assert "AdminApp" in index_asset.text
+    assert "navigateToLocation" in app_asset.text
+    assert "url.search" in app_asset.text
+    assert "pageTitle.focus()" in app_asset.text
     assert ".hero-context" in stylesheet.text
     assert ".nav-group--active" in stylesheet.text
+    assert ".skip-link" in stylesheet.text
+    assert ".subpage-nav" in stylesheet.text
 
 
 def test_admin_ui_assets_include_observability_presets():

@@ -41,6 +41,24 @@ body {
     linear-gradient(180deg, #fbf7ef 0%, var(--bg) 56%, #ecdcc6 100%);
 }
 
+.skip-link {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 20;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--panel-dark);
+  color: #f8f5ef;
+  box-shadow: 0 12px 28px rgba(27, 48, 40, 0.18);
+  transform: translateY(-160%);
+  transition: transform 120ms ease;
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -51,6 +69,16 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 3px solid rgba(15, 95, 90, 0.24);
+  outline-offset: 3px;
 }
 
 .console-shell {
@@ -285,6 +313,10 @@ textarea {
   color: var(--muted);
   font-size: 14px;
   line-height: 1.5;
+}
+
+.subpage-nav {
+  min-width: 0;
 }
 
 .page-grid {

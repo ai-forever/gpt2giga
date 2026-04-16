@@ -29,6 +29,7 @@ export class AdminApp {
     cleanups = [];
     flashAlerts = [];
     renderToken = 0;
+    shouldFocusPageHeading = false;
     constructor() {
         this.adminKeyInput.value = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
         this.gatewayKeyInput.value =
@@ -90,12 +91,24 @@ export class AdminApp {
         this.flashAlerts.push({ message, tone });
     }
     navigate(page) {
-        const nextPath = pathForPage(page);
+        this.navigateToLocation({
+            hash: "",
+            pathname: pathForPage(page),
+            search: "",
+        });
+    }
+    navigateToLocation(locationLike) {
+        const nextUrl = `${locationLike.pathname}${locationLike.search}${locationLike.hash}`;
         const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-        if (currentUrl !== nextPath) {
-            window.history.pushState({}, "", nextPath);
+        if (currentUrl !== nextUrl) {
+            window.history.pushState({}, "", nextUrl);
         }
-        void this.render(page);
+        this.shouldFocusPageHeading = true;
+        void this.render(pageFromLocation({
+            hash: locationLike.hash,
+            pathname: locationLike.pathname,
+            search: locationLike.search,
+        }));
     }
     saveGatewayKey(value) {
         this.gatewayKeyInput.value = value;
@@ -135,6 +148,10 @@ export class AdminApp {
         </article>
       `);
             this.pushAlert("The current page failed to load. Check your admin API key or recent logs.", "danger");
+        }
+        if (this.isCurrentRender(token) && this.shouldFocusPageHeading) {
+            this.shouldFocusPageHeading = false;
+            this.pageTitle.focus();
         }
     }
     async runCleanup() {
@@ -213,14 +230,14 @@ export class AdminApp {
                 return;
             }
             event.preventDefault();
-            const nextPage = pageFromLocation({
+            this.navigateToLocation({
                 hash: url.hash,
                 pathname: url.pathname,
                 search: url.search,
             });
-            this.navigate(nextPage);
         });
         window.addEventListener("popstate", () => {
+            this.shouldFocusPageHeading = true;
             void this.render();
         });
     }

@@ -182,8 +182,9 @@ export function renderWorkflowCard(options) {
   `;
 }
 export function renderSubpageNav(options) {
+    const navLabel = `${options.title} pages`;
     return `
-    <div class="stack">
+    <nav class="subpage-nav stack" aria-label="${escapeHtml(navLabel)}">
       <div class="stack">
         <span class="eyebrow">${escapeHtml(options.title)}</span>
         ${options.intro ? `<p class="muted">${escapeHtml(options.intro)}</p>` : ""}
@@ -206,7 +207,7 @@ export function renderSubpageNav(options) {
     })
         .join("")}
       </div>
-    </div>
+    </nav>
   `;
 }
 export function renderGuideLinks(links, intro = "Use these links when the current screen already narrowed the problem but you still need the longer operator playbook.") {

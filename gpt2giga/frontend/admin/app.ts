@@ -48,6 +48,7 @@ export class AdminApp {
   private cleanups: CleanupFn[] = [];
   private flashAlerts: AlertMessage[] = [];
   private renderToken = 0;
+  private shouldFocusPageHeading = false;
 
   constructor() {
     this.adminKeyInput.value = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
@@ -126,12 +127,27 @@ export class AdminApp {
   }
 
   navigate(page: PageId): void {
-    const nextPath = pathForPage(page);
+    this.navigateToLocation({
+      hash: "",
+      pathname: pathForPage(page),
+      search: "",
+    });
+  }
+
+  navigateToLocation(locationLike: Pick<Location, "hash" | "pathname" | "search">): void {
+    const nextUrl = `${locationLike.pathname}${locationLike.search}${locationLike.hash}`;
     const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-    if (currentUrl !== nextPath) {
-      window.history.pushState({}, "", nextPath);
+    if (currentUrl !== nextUrl) {
+      window.history.pushState({}, "", nextUrl);
     }
-    void this.render(page);
+    this.shouldFocusPageHeading = true;
+    void this.render(
+      pageFromLocation({
+        hash: locationLike.hash,
+        pathname: locationLike.pathname,
+        search: locationLike.search,
+      } as Location),
+    );
   }
 
   saveGatewayKey(value: string): void {
@@ -179,6 +195,11 @@ export class AdminApp {
         "The current page failed to load. Check your admin API key or recent logs.",
         "danger",
       );
+    }
+
+    if (this.isCurrentRender(token) && this.shouldFocusPageHeading) {
+      this.shouldFocusPageHeading = false;
+      this.pageTitle.focus();
     }
   }
 
@@ -279,15 +300,15 @@ export class AdminApp {
       }
 
       event.preventDefault();
-      const nextPage = pageFromLocation({
+      this.navigateToLocation({
         hash: url.hash,
         pathname: url.pathname,
         search: url.search,
-      } as Location);
-      this.navigate(nextPage);
+      });
     });
 
     window.addEventListener("popstate", () => {
+      this.shouldFocusPageHeading = true;
       void this.render();
     });
   }

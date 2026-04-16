@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/admin/assets/admin/console.css" />
   </head>
   <body class="console-body">
+    <a class="skip-link" href="#page-title">Skip to page heading</a>
     <div class="console-shell">
       <aside class="console-rail">
         <div class="brand-block">
@@ -33,7 +34,7 @@
           </div>
         </section>
 
-        <nav class="console-nav" id="nav">
+        <nav class="console-nav" id="nav" aria-label="Primary console navigation">
           <div class="nav-group" data-workflow="start">
             <span class="nav-group__label">Start</span>
             <p class="nav-group__copy">Bootstrap, confirm readiness, and run one smoke request before going deeper.</p>
@@ -111,11 +112,11 @@
         </section>
       </aside>
 
-      <main class="console-main">
+      <main class="console-main" id="console-main">
         <header class="console-hero">
           <div class="stack">
             <span class="eyebrow" id="page-eyebrow">Console</span>
-            <h2 id="page-title">Loading…</h2>
+            <h2 id="page-title" tabindex="-1">Loading…</h2>
             <p id="page-subtitle">Collecting runtime state and control-plane data.</p>
             <div class="hero-context">
               <div class="hero-context__chips">
