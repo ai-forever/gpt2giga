@@ -492,9 +492,53 @@ Commit:
 
 Commit:
 
-- `refactor: polish admin playground and keys`
-- commit hash будет доступен в git history и в итоговом отчёте текущего запуска; сам файл не может атомарно содержать hash того же самого commit без отдельного follow-up commit.
+- `a79c724` — `refactor: polish admin playground and keys`
 
 Следующий шаг:
 
 - route/layout refactor по этому плану закрыт; если продолжать дальше, то уже только очень мелкий copy/accessibility polish или новый отдельный UX-plan вне текущего scope.
+
+### Slice 11
+
+Статус: `done`
+
+Цель:
+
+- сделать точечный shell/navigation follow-up без нового route split;
+- сохранить page-local hash CTA внутри `/admin` без ложного SPA rerender;
+- убрать оставшийся legacy handoff на `settings?section=...` в пользу прямой child page.
+
+Планируемый объём:
+
+- перестать перехватывать same-page hash links в shell navigation;
+- перевести observability handoff в setup на `/admin/settings-observability`;
+- пересобрать runtime assets и обновить integration asset assertions под новый contract.
+
+Фактически сделано:
+
+- в `AdminApp` shell-navigation больше не перехватывает same-page hash links, поэтому page-local CTA вроде перехода к форме `Rotate global key` и skip-link работают как обычная document navigation без лишнего rerender/focus jump;
+- handoff из setup observability card переведён с compatibility URL `/admin/settings?section=observability` на прямой child page `/admin/settings-observability`;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration asset-test обновлён: проверяет новый hash-navigation guard в собранном `app.js` и отсутствие legacy `settings?section=observability` в compiled `control-plane-sections.js`.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q` — 26 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `94bcbd7` — `fix: preserve admin page-local hash navigation`
+
+Следующий шаг:
+
+- если продолжать дальше в рамках этого плана, то уже только очень мелкий CTA/accessibility polish или новый отдельный UX-plan; заметных route/workflow gaps здесь больше нет.
