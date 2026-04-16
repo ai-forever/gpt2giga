@@ -5,7 +5,8 @@ import { bindFilesBatchesPage } from "./files-batches/bindings.js";
 import { loadFilesBatchesPageData } from "./files-batches/api.js";
 import {
   buildFilesBatchesInventory,
-  readFilesBatchesFilters,
+  buildFilesBatchesUrl,
+  readFilesBatchesFiltersForPage,
 } from "./files-batches/serializers.js";
 import {
   renderFilesBatchesHeroActions,
@@ -20,14 +21,14 @@ export async function renderFilesBatches(
   const currentPage = app.currentPage();
   const page =
     currentPage === "files" || currentPage === "batches" ? currentPage : "files-batches";
-  const filters = readFilesBatchesFilters();
+  const filters = readFilesBatchesFiltersForPage(page);
   const data = await loadFilesBatchesPageData(app);
   if (!app.isCurrentRender(token)) {
     return;
   }
 
   const inventory = buildFilesBatchesInventory(data, filters);
-  app.setHeroActions(renderFilesBatchesHeroActions());
+  app.setHeroActions(renderFilesBatchesHeroActions(page));
   app.setContent(`
     ${card(
       "Workbench navigation",
@@ -36,14 +37,34 @@ export async function renderFilesBatches(
         title: "Files & batches pages",
         intro:
           page === "files-batches"
-            ? "The focused files and batches pages are wired up as dedicated URLs. This slice keeps the shared workbench available while the split continues."
-            : "This URL is ready for the files and batches split. The deeper layout refactor will narrow the page further in the next slice.",
+            ? "Use the hub for counts and handoff only. Open the dedicated files or batches page when the work stops being summary-first."
+            : page === "files"
+              ? "This page stays file-first: upload, inspect, preview, then hand off into the dedicated batch composer only when queueing is next."
+              : "This page stays batch-first: create jobs, inspect lifecycle state, and preview outputs without file-upload noise.",
         items: subpagesFor(page),
       }),
       "panel panel--span-12",
     )}
-    ${renderFilesBatchesPage(data, inventory, filters)}
+    ${renderFilesBatchesPage(page, data, inventory, filters)}
   `);
+
+  document.getElementById("refresh-files-batches")?.addEventListener("click", () => {
+    void app.render(page);
+  });
+  document
+    .getElementById("reset-files-batches-filters")
+    ?.addEventListener("click", () => {
+      window.history.replaceState(
+        {},
+        "",
+        buildFilesBatchesUrl(
+          { query: "", purpose: "", batchStatus: "", endpoint: "" },
+          undefined,
+          page,
+        ),
+      );
+      void app.render(page);
+    });
 
   const elements = resolveFilesBatchesElements(app.pageContent);
   if (!elements) {

@@ -1,3 +1,5 @@
+export type FilesBatchesPage = "files-batches" | "files" | "batches";
+
 export interface FilesBatchesFilters {
   query: string;
   purpose: string;

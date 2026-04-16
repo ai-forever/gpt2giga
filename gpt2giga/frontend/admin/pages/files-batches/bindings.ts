@@ -23,6 +23,7 @@ import {
   humanizeBatchLifecycle,
   readFilesBatchesRouteState,
   renderInspectorActions,
+  scopeFilesBatchesFilters,
   summarizeBatchRequestCounts,
   summarizePreviewOutcome,
 } from "./serializers.js";
@@ -31,6 +32,7 @@ import type {
   DefinitionItem,
   FilesBatchesFilters,
   FilesBatchesInventory,
+  FilesBatchesPage,
   InspectorSelection,
 } from "./state.js";
 import { INVALID_JSON } from "./state.js";
@@ -42,7 +44,7 @@ interface BindFilesBatchesPageOptions {
   elements: FilesBatchesPageElements;
   filters: FilesBatchesFilters;
   inventory: FilesBatchesInventory;
-  page: "files-batches" | "files" | "batches";
+  page: FilesBatchesPage;
 }
 
 export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void {
@@ -114,6 +116,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
 
   const updateInspectorActions = (): void => {
     elements.actionNode.innerHTML = renderInspectorActions(
+      page,
       selection,
       inventory.fileLookup,
       inventory.batchLookup,
@@ -124,6 +127,58 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   const clearSelectionHandoff = (): void => {
     delete selection.handoffRequestId;
     delete selection.handoffRequestCount;
+  };
+
+  const replaceStateForPage = (
+    targetPage: FilesBatchesPage,
+    routeState?: Parameters<typeof buildFilesBatchesUrl>[1],
+  ): void => {
+    window.history.replaceState(
+      {},
+      "",
+      buildFilesBatchesUrl(
+        scopeFilesBatchesFilters(targetPage, filters),
+        routeState,
+        targetPage,
+      ),
+    );
+  };
+
+  const navigateToPage = (
+    targetPage: FilesBatchesPage,
+    routeState?: Parameters<typeof buildFilesBatchesUrl>[1],
+  ): void => {
+    window.history.pushState(
+      {},
+      "",
+      buildFilesBatchesUrl(
+        scopeFilesBatchesFilters(targetPage, filters),
+        routeState,
+        targetPage,
+      ),
+    );
+    void app.render(targetPage);
+  };
+
+  const syncSelectionRouteState = (nextSelection: InspectorSelection): void => {
+    if (page === "files") {
+      replaceStateForPage(page, {
+        selectedFileId: nextSelection.kind === "file" ? nextSelection.fileId : "",
+      });
+      return;
+    }
+    if (page === "batches") {
+      replaceStateForPage(page, {
+        composeInputFileId: elements.batchInput?.value.trim() ?? "",
+        selectedBatchId: nextSelection.kind === "batch" ? nextSelection.batchId : "",
+      });
+      return;
+    }
+    replaceStateForPage(page, {
+      selectedFileId: nextSelection.kind === "file" ? nextSelection.fileId : "",
+      selectedBatchId: nextSelection.kind === "batch" ? nextSelection.batchId : "",
+      composeInputFileId: elements.batchInput?.value.trim() ?? "",
+    });
   };
 
   const runWorkflowAction = async <T>({
@@ -163,11 +218,16 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   };
 
   const focusBatchComposer = (fileId: string): void => {
+    if (!elements.batchInput) {
+      navigateToPage("batches", { composeInputFileId: fileId });
+      return;
+    }
     const source = inventory.fileLookup.get(fileId);
     elements.batchInput.value = fileId;
     selection = { kind: "file", fileId };
     clearSelectionHandoff();
     resetContentSurface();
+    syncSelectionRouteState(selection);
     setSummary([
       { label: "Selection", value: "Batch input ready" },
       { label: "File id", value: fileId },
@@ -365,6 +425,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         selection = { kind: "file", fileId };
         clearSelectionHandoff();
         resetContentSurface();
+        syncSelectionRouteState(selection);
         setSummary([
           { label: "Selection", value: "File" },
           { label: "File id", value: fileId },
@@ -447,6 +508,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         };
         clearSelectionHandoff();
         resetContentSurface();
+        syncSelectionRouteState(selection);
         setSummary([
           { label: "Selection", value: "Batch" },
           { label: "Batch id", value: batchId },
@@ -488,36 +550,31 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     false,
   );
 
-  elements.refreshButton.addEventListener("click", () => {
-    void app.render(page);
-  });
-
-  elements.resetButton.addEventListener("click", () => {
-    window.history.replaceState({}, "", `/admin/${page}`);
-    void app.render(page);
-  });
-
-  elements.filtersForm.addEventListener("submit", (event) => {
+  elements.filtersForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const fields = form.elements as typeof form.elements & {
-      query: HTMLInputElement;
-      purpose: HTMLSelectElement;
-      batch_status: HTMLSelectElement;
-      endpoint: HTMLSelectElement;
+      query?: HTMLInputElement;
+      purpose?: HTMLSelectElement;
+      batch_status?: HTMLSelectElement;
+      endpoint?: HTMLSelectElement;
     };
 
     const nextFilters: FilesBatchesFilters = {
-      query: fields.query.value.trim(),
-      purpose: fields.purpose.value,
-      batchStatus: fields.batch_status.value,
-      endpoint: fields.endpoint.value,
+      query: fields.query?.value.trim() ?? "",
+      purpose: fields.purpose?.value ?? "",
+      batchStatus: fields.batch_status?.value ?? "",
+      endpoint: fields.endpoint?.value ?? "",
     };
-    window.history.replaceState({}, "", buildFilesBatchesUrl(nextFilters, undefined, page));
+    window.history.replaceState(
+      {},
+      "",
+      buildFilesBatchesUrl(nextFilters, undefined, page),
+    );
     void app.render(page);
   });
 
-  elements.uploadForm.addEventListener("submit", async (event) => {
+  elements.uploadForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const fields = form.elements as typeof form.elements & {
@@ -549,31 +606,23 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         { label: "File id", value: String(response.id ?? "unknown") },
         {
           label: "Next step",
-          value: "Inspect or use for batch",
-          note: "The page refreshes into the new file selection so the inspector stays on the fresh upload.",
+          value: "Inspect or open batches",
+          note: "The page refreshes into the new file selection so the files inspector stays on the fresh upload.",
         },
       ],
       action: async () => {
         const response = await uploadFile(app, fields.purpose.value, upload);
         app.queueAlert(`Uploaded file ${String(response.id ?? "")}.`, "info");
-        const routeState = readFilesBatchesRouteState();
-        window.history.replaceState(
-          {},
-          "",
-          buildFilesBatchesUrl(filters, {
-            ...routeState,
-            selectedFileId: String(response.id ?? ""),
-            composeInputFileId: String(response.id ?? ""),
-            selectedBatchId: "",
-          }, page),
-        );
+        replaceStateForPage(page, {
+          selectedFileId: String(response.id ?? ""),
+        });
         await app.render(page);
         return response;
       },
     });
   });
 
-  elements.batchForm.addEventListener("submit", async (event) => {
+  elements.batchForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const fields = form.elements as typeof form.elements & {
@@ -617,7 +666,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         {
           label: "Next step",
           value: "Inspect lifecycle",
-          note: "The page refreshes into the new batch selection so output polling starts from the inspector.",
+          note: "The page refreshes into the new batch selection so output polling starts from the focused batches inspector.",
         },
       ],
       action: async () => {
@@ -630,16 +679,10 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           `Created batch ${String(response.id ?? "")} for ${String(response.endpoint ?? "")}.`,
           "info",
         );
-        const routeState = readFilesBatchesRouteState();
-        window.history.replaceState(
-          {},
-          "",
-          buildFilesBatchesUrl(filters, {
-            ...routeState,
-            selectedBatchId: String(response.id ?? ""),
-            selectedFileId: "",
-          }, page),
-        );
+        replaceStateForPage(page, {
+          composeInputFileId: fields.input_file_id.value.trim(),
+          selectedBatchId: String(response.id ?? ""),
+        });
         await app.render(page);
         return response;
       },
@@ -723,6 +766,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         outputFileId,
       };
       clearSelectionHandoff();
+      syncSelectionRouteState(selection);
       setSummary([
         { label: "Selection", value: "Linked batch output" },
         { label: "Output file", value: outputFileId },
@@ -786,6 +830,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       }
       selection = { kind: "file", fileId };
       clearSelectionHandoff();
+      syncSelectionRouteState(selection);
       updateInspectorActions();
       await previewFileContent(
         fileId,
@@ -815,6 +860,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           ]);
           await deleteFile(app, fileId);
           app.queueAlert(`Deleted file ${fileId}.`, "info");
+          replaceStateForPage(page, undefined);
           await app.render(page);
         },
       });
@@ -846,6 +892,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         outputFileId: fileId,
       };
       clearSelectionHandoff();
+      syncSelectionRouteState(selection);
       setSummary([
         { label: "Selection", value: "Batch output" },
         { label: "Output file", value: fileId },
@@ -914,6 +961,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           outputFileId: String(batch?.output_file_id ?? "") || undefined,
         };
         clearSelectionHandoff();
+        syncSelectionRouteState(selection);
         updateInspectorActions();
         await previewFileContent(
           inputFileId,
@@ -927,8 +975,8 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       });
     });
 
-  const routeState = readFilesBatchesRouteState();
-  if (routeState.composeInputFileId) {
+  const routeState = readFilesBatchesRouteState(page);
+  if (routeState.composeInputFileId && elements.batchInput) {
     elements.batchInput.value = routeState.composeInputFileId;
     setWorkflowSummary([
       { label: "Workflow state", value: "Batch composer primed" },

@@ -268,13 +268,17 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert files_batches_asset.status_code == 200
-    assert "Staged files and batch workflow" in files_batches_asset.text
-    assert "Stage 1 · Upload input" in files_batches_asset.text
+    assert "Shared workbench hub" in files_batches_asset.text
+    assert "Files workbench" in files_batches_asset.text
+    assert "Batch jobs workbench" in files_batches_asset.text
+    assert "Upload input" in files_batches_asset.text
+    assert "Queue batch job" in files_batches_asset.text
     assert "Selection metadata snapshot" in files_batches_asset.text
     assert "Content preview stays secondary" in files_batches_asset.text
-    assert "Escalate only when execution context is needed" in files_batches_asset.text
+    assert "Open batches" in files_batches_asset.text
     assert "Files and batches lifecycle" in files_batches_asset.text
     assert files_batches_serializers_asset.status_code == 200
+    assert "Open batch composer" in files_batches_serializers_asset.text
     assert (
         "Preview one output first to unlock request-scoped Traffic and Logs handoff."
         in (files_batches_serializers_asset.text)

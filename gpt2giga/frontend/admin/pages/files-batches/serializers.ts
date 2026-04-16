@@ -15,6 +15,7 @@ import type {
   FileRecord,
   FilesBatchesFilters,
   FilesBatchesInventory,
+  FilesBatchesPage,
   FilesBatchesRouteState,
   InspectorSelection,
 } from "./state.js";
@@ -42,12 +43,34 @@ export function buildFilesBatchesInventory(
 }
 
 export function buildIdleSelectionSummary(
+  page: FilesBatchesPage,
   filteredFiles: number,
   totalFiles: number,
   filteredBatches: number,
   totalBatches: number,
   filters: FilesBatchesFilters,
 ): DefinitionItem[] {
+  if (page === "files") {
+    return [
+      { label: "Selection", value: "No file selected" },
+      { label: "Files shown", value: `${filteredFiles}/${totalFiles}` },
+      { label: "Current focus", value: "Upload, inspect, or preview one stored file" },
+      { label: "Filters", value: summarizeFilters(filters) || "No active filters" },
+    ];
+  }
+
+  if (page === "batches") {
+    return [
+      { label: "Selection", value: "No batch selected" },
+      { label: "Batches shown", value: `${filteredBatches}/${totalBatches}` },
+      {
+        label: "Current focus",
+        value: "Inspect lifecycle, preview output, or queue the next job",
+      },
+      { label: "Filters", value: summarizeFilters(filters) || "No active filters" },
+    ];
+  }
+
   return [
     { label: "Selection", value: "No file or batch selected" },
     { label: "Files shown", value: `${filteredFiles}/${totalFiles}` },
@@ -56,7 +79,31 @@ export function buildIdleSelectionSummary(
   ];
 }
 
-export function buildIdleWorkflowSummary(): DefinitionItem[] {
+export function buildIdleWorkflowSummary(page: FilesBatchesPage): DefinitionItem[] {
+  if (page === "files") {
+    return [
+      { label: "Workflow state", value: "Idle" },
+      { label: "Current posture", value: "No file action in progress" },
+      {
+        label: "Next step",
+        value: "Stage or inspect one file",
+        note: "Upload a new artifact or select one stored file to unlock preview and batch handoff.",
+      },
+    ];
+  }
+
+  if (page === "batches") {
+    return [
+      { label: "Workflow state", value: "Idle" },
+      { label: "Current posture", value: "No batch action in progress" },
+      {
+        label: "Next step",
+        value: "Inspect one batch",
+        note: "Select a batch to unlock input preview, output preview, and request-scoped handoff.",
+      },
+    ];
+  }
+
   return [
     { label: "Workflow state", value: "Idle" },
     { label: "Current posture", value: "No pending file or batch action" },
@@ -69,6 +116,7 @@ export function buildIdleWorkflowSummary(): DefinitionItem[] {
 }
 
 export function renderInspectorActions(
+  page: FilesBatchesPage,
   selection: InspectorSelection,
   fileLookup: Map<string, FileRecord>,
   batchLookup: Map<string, BatchRecord>,
@@ -82,15 +130,19 @@ export function renderInspectorActions(
       <div class="toolbar">
         <button class="button button--secondary" data-inspector-action="inspect-file" type="button">Refresh metadata</button>
         <button class="button button--secondary" data-inspector-action="preview-file" type="button">Preview content</button>
-        <button class="button" data-inspector-action="use-file" type="button">Use for batch</button>
+        <button class="button" data-inspector-action="use-file" type="button">${page === "files" ? "Open batch composer" : "Use for batch"}</button>
         <button class="button button--secondary" ${latestBatch ? 'data-inspector-action="inspect-linked-batch"' : 'disabled title="No linked batch record yet"'} type="button">Inspect latest batch</button>
         <button class="button button--secondary" ${latestOutputBatch ? 'data-inspector-action="preview-linked-output"' : 'disabled title="No linked output file yet"'} type="button">Preview latest output</button>
       </div>
       <p class="muted">
         ${escapeHtml(
           source
-            ? `${String(source.filename ?? selection.fileId)} can feed a new batch immediately. Linked batch actions unlock as downstream jobs appear.`
-            : "This file can be previewed, queued as batch input, or handed off into the latest linked batch context.",
+            ? page === "files"
+              ? `${String(source.filename ?? selection.fileId)} stays file-first on this page. Open the dedicated batches surface when the next move is queueing a job.`
+              : `${String(source.filename ?? selection.fileId)} can feed a new batch immediately. Linked batch actions unlock as downstream jobs appear.`
+            : page === "files"
+              ? "This file can be previewed here, then handed off into the dedicated batches page when queueing is next."
+              : "This file can be previewed, queued as batch input, or handed off into the latest linked batch context.",
         )}
         ${escapeHtml(
           latestOutputBatch
@@ -203,39 +255,89 @@ export function buildContentPreviewSummary(
 
 export function readFilesBatchesFilters(): FilesBatchesFilters {
   const params = new URLSearchParams(window.location.search);
-  return {
+  return scopeFilesBatchesFilters("files-batches", {
     query: params.get("query") || "",
     purpose: params.get("purpose") || "",
     batchStatus: params.get("batch_status") || "",
     endpoint: params.get("endpoint") || "",
-  };
+  });
 }
 
-export function readFilesBatchesRouteState(): FilesBatchesRouteState {
+export function readFilesBatchesFiltersForPage(
+  page: FilesBatchesPage,
+): FilesBatchesFilters {
   const params = new URLSearchParams(window.location.search);
-  return {
+  return scopeFilesBatchesFilters(page, {
+    query: params.get("query") || "",
+    purpose: params.get("purpose") || "",
+    batchStatus: params.get("batch_status") || "",
+    endpoint: params.get("endpoint") || "",
+  });
+}
+
+export function readFilesBatchesRouteState(
+  page: FilesBatchesPage = "files-batches",
+): FilesBatchesRouteState {
+  const params = new URLSearchParams(window.location.search);
+  return scopeFilesBatchesRouteState(page, {
     selectedFileId: params.get("selected_file") || "",
     selectedBatchId: params.get("selected_batch") || "",
     composeInputFileId: params.get("compose_input") || "",
-  };
+  });
 }
 
 export function buildFilesBatchesUrl(
   filters: FilesBatchesFilters,
   routeState?: Partial<FilesBatchesRouteState>,
-  page: PageId = "files-batches",
+  page: FilesBatchesPage | PageId = "files-batches",
 ): string {
+  const scopedFilters = scopeFilesBatchesFilters(
+    isFilesBatchesPage(page) ? page : "files-batches",
+    filters,
+  );
+  const scopedRouteState = scopeFilesBatchesRouteState(
+    isFilesBatchesPage(page) ? page : "files-batches",
+    routeState,
+  );
   const params = new URLSearchParams();
-  setQueryParamIfPresent(params, "query", filters.query);
-  setQueryParamIfPresent(params, "purpose", filters.purpose);
-  setQueryParamIfPresent(params, "batch_status", filters.batchStatus);
-  setQueryParamIfPresent(params, "endpoint", filters.endpoint);
-  setQueryParamIfPresent(params, "selected_file", routeState?.selectedFileId ?? "");
-  setQueryParamIfPresent(params, "selected_batch", routeState?.selectedBatchId ?? "");
-  setQueryParamIfPresent(params, "compose_input", routeState?.composeInputFileId ?? "");
+  setQueryParamIfPresent(params, "query", scopedFilters.query);
+  setQueryParamIfPresent(params, "purpose", scopedFilters.purpose);
+  setQueryParamIfPresent(params, "batch_status", scopedFilters.batchStatus);
+  setQueryParamIfPresent(params, "endpoint", scopedFilters.endpoint);
+  setQueryParamIfPresent(params, "selected_file", scopedRouteState.selectedFileId);
+  setQueryParamIfPresent(params, "selected_batch", scopedRouteState.selectedBatchId);
+  setQueryParamIfPresent(params, "compose_input", scopedRouteState.composeInputFileId);
   const query = params.toString();
   const pathname = page === "overview" ? "/admin" : `/admin/${page}`;
   return query ? `${pathname}?${query}` : pathname;
+}
+
+export function scopeFilesBatchesFilters(
+  page: FilesBatchesPage,
+  filters: FilesBatchesFilters,
+): FilesBatchesFilters {
+  return {
+    query: filters.query,
+    purpose: page === "batches" ? "" : filters.purpose,
+    batchStatus: page === "files" ? "" : filters.batchStatus,
+    endpoint: page === "files" ? "" : filters.endpoint,
+  };
+}
+
+export function scopeFilesBatchesRouteState(
+  page: FilesBatchesPage,
+  routeState?: Partial<FilesBatchesRouteState>,
+): FilesBatchesRouteState {
+  return {
+    selectedFileId:
+      page === "batches" ? "" : routeState?.selectedFileId?.trim() ?? "",
+    selectedBatchId:
+      page === "files" ? "" : routeState?.selectedBatchId?.trim() ?? "",
+    composeInputFileId:
+      page === "files-batches" || page === "batches"
+        ? routeState?.composeInputFileId?.trim() ?? ""
+        : "",
+  };
 }
 
 export function firstErrorLine(message: string): string {
@@ -420,6 +522,10 @@ function matchesFile(item: FileRecord, filters: FilesBatchesFilters): boolean {
   return [item.id, item.filename, item.purpose]
     .map((value) => String(value ?? "").toLowerCase())
     .some((value) => value.includes(query));
+}
+
+function isFilesBatchesPage(value: PageId | FilesBatchesPage): value is FilesBatchesPage {
+  return value === "files-batches" || value === "files" || value === "batches";
 }
 
 function matchesBatch(item: BatchRecord, filters: FilesBatchesFilters): boolean {

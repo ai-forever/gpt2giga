@@ -1,3 +1,4 @@
+import { pathForPage } from "../../routes.js";
 import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
 import {
   card,
@@ -12,16 +13,22 @@ import {
 import { escapeHtml, formatBytes, formatTimestamp } from "../../utils.js";
 import type { FilesBatchesPageData } from "./api.js";
 import {
+  buildFilesBatchesUrl,
   buildIdleSelectionSummary,
   buildIdleWorkflowSummary,
+  getLatestLinkedBatch,
   renderBatchStatus,
 } from "./serializers.js";
-import type { FilesBatchesFilters, FilesBatchesInventory } from "./state.js";
+import type {
+  FilesBatchesFilters,
+  FilesBatchesInventory,
+  FilesBatchesPage,
+} from "./state.js";
 
 export interface FilesBatchesPageElements {
   actionNode: HTMLElement;
-  batchForm: HTMLFormElement;
-  batchInput: HTMLInputElement;
+  batchForm: HTMLFormElement | null;
+  batchInput: HTMLInputElement | null;
   contentNode: HTMLPreElement;
   contentDisclosure: HTMLDetailsElement;
   contentSummaryNode: HTMLElement;
@@ -30,65 +37,88 @@ export interface FilesBatchesPageElements {
   detailDisclosure: HTMLDetailsElement;
   detailSummaryNode: HTMLElement;
   detailSummaryTitleNode: HTMLElement;
-  filtersForm: HTMLFormElement;
+  filtersForm: HTMLFormElement | null;
   mediaNode: HTMLElement;
-  refreshButton: HTMLButtonElement;
-  resetButton: HTMLButtonElement;
   summaryNode: HTMLElement;
-  uploadForm: HTMLFormElement;
+  uploadForm: HTMLFormElement | null;
   workflowNode: HTMLElement;
 }
 
-export function renderFilesBatchesHeroActions(): string {
+export function renderFilesBatchesHeroActions(page: FilesBatchesPage): string {
+  if (page === "files-batches") {
+    return `
+      <button class="button button--secondary" id="refresh-files-batches" type="button">Refresh inventory</button>
+      <a class="button button--secondary" href="${pathForPage("files")}">Open files</a>
+      <a class="button" href="${pathForPage("batches")}">Open batches</a>
+    `;
+  }
+
   return `
     <button class="button button--secondary" id="reset-files-batches-filters" type="button">Reset filters</button>
     <button class="button button--secondary" id="refresh-files-batches" type="button">Refresh inventory</button>
-    <a class="button" href="/admin/playground">Open playground</a>
+    <a class="button" href="${pathForPage(page === "files" ? "batches" : "files")}">${page === "files" ? "Open batches" : "Open files"}</a>
   `;
 }
 
 export function renderFilesBatchesPage(
+  page: FilesBatchesPage,
   data: FilesBatchesPageData,
   inventory: FilesBatchesInventory,
   filters: FilesBatchesFilters,
 ): string {
+  if (page === "files") {
+    return renderFilesPage(data, inventory, filters);
+  }
+  if (page === "batches") {
+    return renderBatchesPage(data, inventory, filters);
+  }
+  return renderFilesBatchesHub(data, inventory);
+}
+
+function renderFilesBatchesHub(
+  data: FilesBatchesPageData,
+  inventory: FilesBatchesInventory,
+): string {
+  const recentFiles = inventory.filteredFiles.slice(0, 5);
+  const recentBatches = inventory.filteredBatches.slice(0, 5);
+
   return `
-    ${kpi("Files shown", `${inventory.filteredFiles.length}/${data.files.length}`)}
-    ${kpi("Batches shown", `${inventory.filteredBatches.length}/${data.batches.length}`)}
+    ${kpi("Stored files", data.files.length)}
+    ${kpi("Batch jobs", data.batches.length)}
     ${kpi("Output ready", inventory.outputReadyBatches)}
     ${kpi("Needs attention", inventory.attentionBatches)}
     ${card(
-      "Staged files and batch workflow",
+      "Shared workbench hub",
       `
         <div class="step-grid">
           ${renderWorkflowCard({
             workflow: "start",
-            title: "Stage or reuse one input file",
-            note: "Start with one JSONL input or stored artifact before touching the batch composer.",
-            pills: [pill("Upload"), pill("Inspect")],
+            title: "Stage one input on the files page",
+            note: "Use the dedicated files surface when the next operator move is upload, inventory review, or content preview.",
+            pills: [pill("Upload"), pill("Inventory"), pill("Preview")],
             actions: [
-              { label: "Stage input", href: "#files-batches-upload", primary: true },
-              { label: "Open playground", href: "/admin/playground" },
+              { label: "Open files", href: pathForPage("files"), primary: true },
+              { label: "Open playground", href: pathForPage("playground") },
             ],
           })}
           ${renderWorkflowCard({
             workflow: "diagnose",
-            title: "Inspect lifecycle before retrying",
-            note: "Use the inspector to confirm file metadata, batch posture, and output availability before queuing another job.",
-            pills: [pill("Metadata"), pill("Lifecycle"), pill("Output", "good")],
+            title: "Queue and inspect jobs on the batches page",
+            note: "Use the dedicated batches surface when the next move is creation, lifecycle review, or output handoff.",
+            pills: [pill("Composer"), pill("Lifecycle"), pill("Output", "good")],
             actions: [
-              { label: "Open inspector", href: "#files-batches-inspector", primary: true },
-              { label: "Jump to batches", href: "#files-batches-batches" },
+              { label: "Open batches", href: pathForPage("batches"), primary: true },
+              { label: "Open traffic", href: pathForPage("traffic") },
             ],
           })}
           ${renderWorkflowCard({
             workflow: "observe",
-            title: "Escalate only when execution context is needed",
-            note: "Once one batch or output needs request-level evidence, hand off into Traffic or Logs with the broader gateway context.",
-            pills: [pill("Traffic"), pill("Logs"), pill("Downstream handoff")],
+            title: "Escalate only after one request is scoped",
+            note: "Traffic and Logs stay downstream from the workbench. Preview one output first, then hand off with request context.",
+            pills: [pill("Traffic"), pill("Logs"), pill("Request scoped")],
             actions: [
-              { label: "Open traffic", href: "/admin/traffic", primary: true },
-              { label: "Open logs", href: "/admin/logs" },
+              { label: "Open traffic", href: pathForPage("traffic"), primary: true },
+              { label: "Open logs", href: pathForPage("logs") },
             ],
           })}
         </div>
@@ -96,52 +126,166 @@ export function renderFilesBatchesPage(
       "panel panel--span-12",
     )}
     ${card(
-      "Inventory filters",
+      "Recent files",
+      recentFiles.length
+        ? `
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>File</th><th>Purpose</th><th>Size</th><th>Latest batch</th><th>Open</th></tr>
+                </thead>
+                <tbody>
+                  ${recentFiles
+                    .map((item) => {
+                      const id = String(item.id ?? "");
+                      const latestBatch = getLatestLinkedBatch(id, data.batches);
+                      return `
+                        <tr>
+                          <td><strong>${escapeHtml(item.filename ?? id)}</strong><br /><span class="muted">${escapeHtml(id)}</span></td>
+                          <td>${escapeHtml(item.purpose ?? "user_data")}</td>
+                          <td>${escapeHtml(formatBytes(item.bytes))}</td>
+                          <td>${latestBatch ? `${escapeHtml(String(latestBatch.id ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(latestBatch.status ?? "unknown"))}</span>` : '<span class="muted">No linked batch</span>'}</td>
+                          <td>
+                            <div class="toolbar">
+                              <a class="button button--secondary" href="${escapeHtml(
+                                buildFilesBatchesUrl(
+                                  emptyFilters(),
+                                  { selectedFileId: id },
+                                  "files",
+                                ),
+                              )}">Files</a>
+                              <a class="button" href="${escapeHtml(
+                                buildFilesBatchesUrl(
+                                  emptyFilters(),
+                                  { composeInputFileId: id },
+                                  "batches",
+                                ),
+                              )}">Batch composer</a>
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          `
+        : "<p>No files are stored yet. Start on the files page to upload the first input.</p>",
+      "panel panel--span-6",
+    )}
+    ${card(
+      "Recent batches",
+      recentBatches.length
+        ? `
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Batch</th><th>Status</th><th>Endpoint</th><th>Output</th><th>Open</th></tr>
+                </thead>
+                <tbody>
+                  ${recentBatches
+                    .map((item) => {
+                      const id = String(item.id ?? "");
+                      return `
+                        <tr>
+                          <td><strong>${escapeHtml(id)}</strong><br /><span class="muted">${escapeHtml(String(item.input_file_id ?? "no input file"))}</span></td>
+                          <td>${renderBatchStatus(String(item.status ?? "unknown"))}</td>
+                          <td>${escapeHtml(item.endpoint ?? "n/a")}</td>
+                          <td>${escapeHtml(String(item.output_file_id ?? "n/a"))}</td>
+                          <td>
+                            <div class="toolbar">
+                              <a class="button button--secondary" href="${escapeHtml(
+                                buildFilesBatchesUrl(
+                                  emptyFilters(),
+                                  { selectedBatchId: id },
+                                  "batches",
+                                ),
+                              )}">Batches</a>
+                              <a class="button button--secondary" href="${pathForPage("traffic")}">Traffic</a>
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          `
+        : "<p>No batches are stored yet. Open the batches page when the first queued job is ready.</p>",
+      "panel panel--span-6",
+    )}
+    ${card(
+      "Guide and troubleshooting",
+      renderGuideLinks(
+        [
+          {
+            label: "Files and batches lifecycle",
+            href: OPERATOR_GUIDE_LINKS.filesBatches,
+            note: "Follow the staged operator path for uploads, queued jobs, output inspection, and downstream request handoff.",
+          },
+          {
+            label: "Traffic workflow guide",
+            href: OPERATOR_GUIDE_LINKS.traffic,
+            note: "Open this when a decoded batch output now needs request-level evidence.",
+          },
+          {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Use the escalation map once the issue moved from stored artifacts into runtime posture or log evidence.",
+          },
+        ],
+        "Use the hub for counts and recent activity only. Open the focused pages when one stored object now needs real operator work.",
+      ),
+      "panel panel--span-12",
+    )}
+  `;
+}
+
+function renderFilesPage(
+  data: FilesBatchesPageData,
+  inventory: FilesBatchesInventory,
+  filters: FilesBatchesFilters,
+): string {
+  return `
+    ${kpi("Files shown", `${inventory.filteredFiles.length}/${data.files.length}`)}
+    ${kpi(
+      "Filtered bytes",
+      formatBytes(
+        inventory.filteredFiles.reduce(
+          (total, item) => total + Number(item.bytes ?? 0),
+          0,
+        ),
+      ),
+    )}
+    ${kpi(
+      "Linked batches",
+      inventory.filteredFiles.reduce(
+        (count, item) =>
+          count + (getLatestLinkedBatch(String(item.id ?? ""), data.batches) ? 1 : 0),
+        0,
+      ),
+    )}
+    ${kpi("Ready outputs", inventory.outputReadyBatches)}
+    ${card(
+      "Files workbench",
       `
-        <form id="files-batches-filters-form" class="stack">
-          <div class="quad-grid">
-            <label class="field">
-              <span>Search</span>
-              <input name="query" value="${escapeHtml(filters.query)}" placeholder="Filter by id, filename, or metadata label" />
-            </label>
-            <label class="field">
-              <span>File purpose</span>
-              <select name="purpose">
-                ${renderFilterSelectOptions(
-                  filters.purpose,
-                  data.files.map((item) => item.purpose),
-                )}
-              </select>
-            </label>
-            <label class="field">
-              <span>Batch status</span>
-              <select name="batch_status">
-                ${renderFilterSelectOptions(
-                  filters.batchStatus,
-                  data.batches.map((item) => item.status),
-                )}
-              </select>
-            </label>
-            <label class="field">
-              <span>Endpoint</span>
-              <select name="endpoint">
-                ${renderFilterSelectOptions(
-                  filters.endpoint,
-                  data.batches.map((item) => item.endpoint),
-                )}
-              </select>
-            </label>
-          </div>
+        <div class="stack">
+          <p class="muted">
+            Keep this page file-first: upload one artifact, inspect stored metadata, and preview content before deciding whether the next move belongs on the batches page.
+          </p>
           <div class="toolbar">
-            <button class="button" type="submit">Apply filters</button>
-            <span class="muted">Filters work on the loaded gateway inventory so inspection stays local and immediate.</span>
+            <a class="button" href="${pathForPage("batches")}">Open batches</a>
+            <a class="button button--secondary" href="${pathForPage("traffic")}">Open traffic</a>
           </div>
-        </form>
+        </div>
       `,
       "panel panel--span-12",
     )}
+    ${renderFiltersCard("files", data, filters)}
     ${card(
-      "Stage 1 · Upload input",
+      "Upload input",
       `
         <div class="stack" id="files-batches-upload">
           <p class="muted">
@@ -165,12 +309,111 @@ export function renderFilesBatchesPage(
       `,
       "panel panel--span-4",
     )}
+    ${renderInspectorCard(
+      "files",
+      inventory,
+      data,
+      filters,
+      "File selection and preview",
+      "Select one stored file to unlock metadata, content preview, and a clean handoff into the dedicated batch composer.",
+      "panel panel--span-8",
+    )}
     ${card(
-      "Stage 2 · Queue batch job",
+      "Stored files",
+      inventory.filteredFiles.length
+        ? `
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>File</th><th>Purpose</th><th>Size</th><th>Latest batch</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  ${inventory.filteredFiles
+                    .map((item) => {
+                      const id = String(item.id ?? "");
+                      const latestBatch = getLatestLinkedBatch(id, data.batches);
+                      return `
+                        <tr>
+                          <td><strong>${escapeHtml(item.filename ?? id)}</strong><br /><span class="muted">${escapeHtml(id)}</span></td>
+                          <td>${escapeHtml(item.purpose ?? "user_data")}</td>
+                          <td>${escapeHtml(formatBytes(item.bytes))}</td>
+                          <td>${latestBatch ? `${escapeHtml(String(latestBatch.id ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(latestBatch.status ?? "unknown"))}</span>` : '<span class="muted">No linked batch</span>'}</td>
+                          <td>
+                            <div class="toolbar">
+                              <button class="button button--secondary" data-file-view="${escapeHtml(id)}" type="button">Inspect</button>
+                              <button class="button button--secondary" data-file-content="${escapeHtml(id)}" type="button">Content</button>
+                              <button class="button" data-file-use="${escapeHtml(id)}" type="button">Open batches</button>
+                              <button class="button button--danger" data-file-delete="${escapeHtml(id)}" type="button">Delete</button>
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join("")}
+                </tbody>
+              </table>
+            </div>
+          `
+        : "<p>No files matched the current filters.</p>",
+      "panel panel--span-8",
+    )}
+    ${card(
+      "Next operator move",
+      renderGuideLinks(
+        [
+          {
+            label: "Files and batches lifecycle",
+            href: OPERATOR_GUIDE_LINKS.filesBatches,
+            note: "Stay on this page while the task is still file-centric. Move to batches only once queueing or lifecycle review is next.",
+          },
+          {
+            label: "Traffic workflow guide",
+            href: OPERATOR_GUIDE_LINKS.traffic,
+            note: "Open Traffic only after one file output or batch result has been decoded into a request-level clue.",
+          },
+        ],
+        "File preview and metadata stay primary here. Batch creation, job history, and output triage live on the dedicated batches surface.",
+      ),
+      "panel panel--span-4",
+    )}
+  `;
+}
+
+function renderBatchesPage(
+  data: FilesBatchesPageData,
+  inventory: FilesBatchesInventory,
+  filters: FilesBatchesFilters,
+): string {
+  return `
+    ${kpi("Batches shown", `${inventory.filteredBatches.length}/${data.batches.length}`)}
+    ${kpi("Output ready", inventory.outputReadyBatches)}
+    ${kpi("Needs attention", inventory.attentionBatches)}
+    ${kpi(
+      "Endpoints",
+      new Set(inventory.filteredBatches.map((item) => String(item.endpoint ?? ""))).size,
+    )}
+    ${card(
+      "Batch jobs workbench",
       `
         <div class="stack">
           <p class="muted">
-            Use this after selecting or uploading an input file. The composer stays separate from the inspector so retries remain deliberate.
+            Keep this page batch-first: queue one job, inspect lifecycle state, preview input or output, and only then branch into request-level Traffic or Logs.
+          </p>
+          <div class="toolbar">
+            <a class="button" href="${pathForPage("files")}">Open files</a>
+            <a class="button button--secondary" href="${pathForPage("logs")}">Open logs</a>
+          </div>
+        </div>
+      `,
+      "panel panel--span-12",
+    )}
+    ${renderFiltersCard("batches", data, filters)}
+    ${card(
+      "Queue batch job",
+      `
+        <div class="stack">
+          <p class="muted">
+            Use this after staging an input file. If a new file still needs upload, switch to the files page first.
           </p>
           <form id="batch-create-form" class="stack">
             <label class="field">
@@ -188,139 +431,14 @@ export function renderFilesBatchesPage(
       `,
       "panel panel--span-4",
     )}
-    ${card(
-      "Inspector and staged handoff",
-      `
-        <div class="surface" id="files-batches-inspector">
-          <div class="stack">
-            <div class="workflow-card">
-              <div class="workflow-card__header">
-                <span class="eyebrow">Diagnose</span>
-                <h4>Keep inventory summary-first</h4>
-                <p>
-                  Select one file or batch first. Raw metadata and content previews stay secondary until one object actually needs deeper inspection.
-                </p>
-              </div>
-            </div>
-            <div id="files-batches-summary">
-              ${renderDefinitionList(
-                buildIdleSelectionSummary(
-                  inventory.filteredFiles.length,
-                  data.files.length,
-                  inventory.filteredBatches.length,
-                  data.batches.length,
-                  filters,
-                ),
-                "No selection yet.",
-              )}
-            </div>
-            <div id="files-batches-workflow">
-              ${renderDefinitionList(buildIdleWorkflowSummary(), "No workflow state reported.")}
-            </div>
-            <div id="files-batches-actions">
-              <div class="toolbar">
-                <span class="muted">Select a file or batch to unlock context-aware actions.</span>
-              </div>
-            </div>
-            <details class="details-disclosure" id="files-batches-detail-disclosure">
-              <summary id="files-batches-detail-summary-label">Selection metadata snapshot</summary>
-              <p class="field-note">
-                Open this only when the selection summary is not enough and raw file or batch metadata still matters.
-              </p>
-              <div id="files-batches-detail-summary">
-                ${renderDefinitionList(
-                  [
-                    { label: "Detail surface", value: "Idle" },
-                    { label: "Loaded object", value: "No file or batch metadata loaded" },
-                  ],
-                  "No detail payload loaded.",
-                )}
-              </div>
-              <pre class="code-block code-block--tall" id="files-batches-detail">No selection yet.</pre>
-            </details>
-            <details class="details-disclosure" id="files-batches-content-disclosure">
-              <summary id="files-batches-content-summary-label">Content preview</summary>
-              <p class="field-note">
-                Content preview stays secondary until one file or batch output actually needs inspection.
-              </p>
-              <div id="files-batches-content-summary">
-                ${renderDefinitionList(
-                  [
-                    { label: "Preview surface", value: "Idle" },
-                    { label: "Loaded content", value: "No file content loaded" },
-                  ],
-                  "No file content loaded.",
-                )}
-              </div>
-              <div id="files-batches-media"></div>
-              <pre class="code-block code-block--tall" id="files-batches-content">No file content loaded.</pre>
-            </details>
-          </div>
-        </div>
-      `,
-      "panel panel--span-4",
-    )}
-    ${card(
-      "Guide and troubleshooting",
-      renderGuideLinks(
-        [
-          {
-            label: "Files and batches lifecycle",
-            href: OPERATOR_GUIDE_LINKS.filesBatches,
-            note: "Follow the staged operator path for uploads, queued jobs, output inspection, and the downstream request-evidence handoff.",
-          },
-          {
-            label: "Traffic workflow guide",
-            href: OPERATOR_GUIDE_LINKS.traffic,
-            note: "Open this when a batch output now needs request-level evidence and the next move is the broader recent-traffic summary.",
-          },
-          {
-            label: "Troubleshooting handoff map",
-            href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Use the escalation map when the problem moved from stored artifacts into runtime failures, provider posture, or log evidence.",
-          },
-        ],
-        "Files and batch work stays local until one stored artifact needs runtime evidence. These guide links show when to stay on the workbench and when to branch into the broader operator flow.",
-      ),
-      "panel panel--span-4",
-    )}
-    ${card(
-      "Stored files",
-      inventory.filteredFiles.length
-        ? `
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr><th>File</th><th>Purpose</th><th>Size</th><th>Created</th><th>Actions</th></tr>
-                </thead>
-                <tbody>
-                  ${inventory.filteredFiles
-                    .map((item) => {
-                      const id = String(item.id ?? "");
-                      return `
-                        <tr>
-                          <td><strong>${escapeHtml(item.filename ?? item.id ?? "")}</strong><br /><span class="muted">${escapeHtml(id)}</span></td>
-                          <td>${escapeHtml(item.purpose ?? "user_data")}</td>
-                          <td>${escapeHtml(formatBytes(item.bytes))}</td>
-                          <td>${escapeHtml(formatTimestamp(item.created_at))}</td>
-                          <td>
-                            <div class="toolbar">
-                              <button class="button button--secondary" data-file-view="${escapeHtml(id)}" type="button">Inspect</button>
-                              <button class="button button--secondary" data-file-use="${escapeHtml(id)}" type="button">Use for batch</button>
-                              <button class="button button--secondary" data-file-content="${escapeHtml(id)}" type="button">Content</button>
-                              <button class="button button--danger" data-file-delete="${escapeHtml(id)}" type="button">Delete</button>
-                            </div>
-                          </td>
-                        </tr>
-                      `;
-                    })
-                    .join("")}
-                </tbody>
-              </table>
-            </div>
-          `
-        : "<p>No files matched the current filters.</p>",
-      "panel panel--span-6",
+    ${renderInspectorCard(
+      "batches",
+      inventory,
+      data,
+      filters,
+      "Batch lifecycle and output",
+      "Select one batch to inspect lifecycle metadata, preview input or output, and unlock request-scoped handoff only when one output is decoded.",
+      "panel panel--span-8",
     )}
     ${card(
       "Batch jobs",
@@ -338,7 +456,7 @@ export function renderFilesBatchesPage(
                       const outputFile = String(item.output_file_id ?? "");
                       return `
                         <tr>
-                          <td><strong>${escapeHtml(id)}</strong><br /><span class="muted">${escapeHtml(item.input_file_id ?? "no input file")}</span></td>
+                          <td><strong>${escapeHtml(id)}</strong><br /><span class="muted">${escapeHtml(String(item.input_file_id ?? "no input file"))}</span></td>
                           <td>${renderBatchStatus(String(item.status ?? "unknown"))}</td>
                           <td>${escapeHtml(item.endpoint ?? "n/a")}</td>
                           <td>${escapeHtml(outputFile || "n/a")}</td>
@@ -359,9 +477,176 @@ export function renderFilesBatchesPage(
             </div>
           `
         : "<p>No batches matched the current filters.</p>",
-      "panel panel--span-6",
+      "panel panel--span-8",
+    )}
+    ${card(
+      "Input staging handoff",
+      renderGuideLinks(
+        [
+          {
+            label: "Files and batches lifecycle",
+            href: OPERATOR_GUIDE_LINKS.filesBatches,
+            note: "Open the files page when the missing piece is still upload, file metadata, or a clean content preview before retrying a job.",
+          },
+          {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Use the broader map once batch lifecycle signals are no longer enough and the issue moved into provider posture or request logs.",
+          },
+        ],
+        "Batch creation and lifecycle stay primary here. File staging is now a deliberate handoff back to the dedicated files page instead of another section on the same screen.",
+      ),
+      "panel panel--span-4",
     )}
   `;
+}
+
+function renderFiltersCard(
+  page: FilesBatchesPage,
+  data: FilesBatchesPageData,
+  filters: FilesBatchesFilters,
+): string {
+  const fileFields = `
+    <label class="field">
+      <span>Search</span>
+      <input name="query" value="${escapeHtml(filters.query)}" placeholder="Filter by id, filename, or metadata label" />
+    </label>
+    <label class="field">
+      <span>File purpose</span>
+      <select name="purpose">
+        ${renderFilterSelectOptions(
+          filters.purpose,
+          data.files.map((item) => item.purpose),
+        )}
+      </select>
+    </label>
+  `;
+
+  const batchFields = `
+    <label class="field">
+      <span>Search</span>
+      <input name="query" value="${escapeHtml(filters.query)}" placeholder="Filter by batch id, file id, or endpoint" />
+    </label>
+    <label class="field">
+      <span>Batch status</span>
+      <select name="batch_status">
+        ${renderFilterSelectOptions(
+          filters.batchStatus,
+          data.batches.map((item) => item.status),
+        )}
+      </select>
+    </label>
+    <label class="field">
+      <span>Endpoint</span>
+      <select name="endpoint">
+        ${renderFilterSelectOptions(
+          filters.endpoint,
+          data.batches.map((item) => item.endpoint),
+        )}
+      </select>
+    </label>
+  `;
+
+  return card(
+    page === "files" ? "File filters" : "Batch filters",
+    `
+      <form id="files-batches-filters-form" class="stack">
+        <div class="${page === "files" ? "dual-grid" : "quad-grid"}">
+          ${page === "files" ? fileFields : batchFields}
+        </div>
+        <div class="toolbar">
+          <button class="button" type="submit">Apply filters</button>
+          <span class="muted">${page === "files" ? "Keep the inventory small while preview and upload work stays local to one file." : "Narrow lifecycle review before opening one batch or output."}</span>
+        </div>
+      </form>
+    `,
+    "panel panel--span-12",
+  );
+}
+
+function renderInspectorCard(
+  page: FilesBatchesPage,
+  inventory: FilesBatchesInventory,
+  data: FilesBatchesPageData,
+  filters: FilesBatchesFilters,
+  title: string,
+  intro: string,
+  panelClass: string,
+): string {
+  return card(
+    title,
+    `
+      <div class="surface" id="files-batches-inspector">
+        <div class="stack">
+          <div class="workflow-card">
+            <div class="workflow-card__header">
+              <span class="eyebrow">${page === "files" ? "Files" : "Batches"}</span>
+              <h4>${escapeHtml(title)}</h4>
+              <p>${escapeHtml(intro)}</p>
+            </div>
+          </div>
+          <div id="files-batches-summary">
+            ${renderDefinitionList(
+              buildIdleSelectionSummary(
+                page,
+                inventory.filteredFiles.length,
+                data.files.length,
+                inventory.filteredBatches.length,
+                data.batches.length,
+                filters,
+              ),
+              "No selection yet.",
+            )}
+          </div>
+          <div id="files-batches-workflow">
+            ${renderDefinitionList(
+              buildIdleWorkflowSummary(page),
+              "No workflow state reported.",
+            )}
+          </div>
+          <div id="files-batches-actions">
+            <div class="toolbar">
+              <span class="muted">${page === "files" ? "Select a file to unlock preview and batch handoff." : "Select a batch to unlock input, output, and lifecycle actions."}</span>
+            </div>
+          </div>
+          <details class="details-disclosure" id="files-batches-detail-disclosure">
+            <summary id="files-batches-detail-summary-label">Selection metadata snapshot</summary>
+            <p class="field-note">
+              Open this only when the selection summary is not enough and raw file or batch metadata still matters.
+            </p>
+            <div id="files-batches-detail-summary">
+              ${renderDefinitionList(
+                [
+                  { label: "Detail surface", value: "Idle" },
+                  { label: "Loaded object", value: "No file or batch metadata loaded" },
+                ],
+                "No detail payload loaded.",
+              )}
+            </div>
+            <pre class="code-block code-block--tall" id="files-batches-detail">No selection yet.</pre>
+          </details>
+          <details class="details-disclosure" id="files-batches-content-disclosure">
+            <summary id="files-batches-content-summary-label">Content preview</summary>
+            <p class="field-note">
+              Content preview stays secondary until one file or batch output actually needs inspection.
+            </p>
+            <div id="files-batches-content-summary">
+              ${renderDefinitionList(
+                [
+                  { label: "Preview surface", value: "Idle" },
+                  { label: "Loaded content", value: "No file content loaded" },
+                ],
+                "No file content loaded.",
+              )}
+            </div>
+            <div id="files-batches-media"></div>
+            <pre class="code-block code-block--tall" id="files-batches-content">No file content loaded.</pre>
+          </details>
+        </div>
+      </div>
+    `,
+    panelClass,
+  );
 }
 
 export function resolveFilesBatchesElements(
@@ -391,18 +676,6 @@ export function resolveFilesBatchesElements(
     "#files-batches-content-summary",
   );
   const actionNode = pageContent.querySelector<HTMLElement>("#files-batches-actions");
-  const batchInput = pageContent.querySelector<HTMLInputElement>("#batch-input-file-id");
-  const filtersForm = pageContent.querySelector<HTMLFormElement>(
-    "#files-batches-filters-form",
-  );
-  const uploadForm = pageContent.querySelector<HTMLFormElement>("#files-upload-form");
-  const batchForm = pageContent.querySelector<HTMLFormElement>("#batch-create-form");
-  const refreshButton = document.getElementById(
-    "refresh-files-batches",
-  ) as HTMLButtonElement | null;
-  const resetButton = document.getElementById(
-    "reset-files-batches-filters",
-  ) as HTMLButtonElement | null;
 
   if (
     !detailNode ||
@@ -416,21 +689,15 @@ export function resolveFilesBatchesElements(
     !workflowNode ||
     !detailSummaryNode ||
     !contentSummaryNode ||
-    !actionNode ||
-    !batchInput ||
-    !filtersForm ||
-    !uploadForm ||
-    !batchForm ||
-    !refreshButton ||
-    !resetButton
+    !actionNode
   ) {
     return null;
   }
 
   return {
     actionNode,
-    batchForm,
-    batchInput,
+    batchForm: pageContent.querySelector<HTMLFormElement>("#batch-create-form"),
+    batchInput: pageContent.querySelector<HTMLInputElement>("#batch-input-file-id"),
     contentNode,
     contentDisclosure,
     contentSummaryNode,
@@ -439,12 +706,19 @@ export function resolveFilesBatchesElements(
     detailDisclosure,
     detailSummaryNode,
     detailSummaryTitleNode,
-    filtersForm,
+    filtersForm: pageContent.querySelector<HTMLFormElement>("#files-batches-filters-form"),
     mediaNode,
-    refreshButton,
-    resetButton,
     summaryNode,
-    uploadForm,
+    uploadForm: pageContent.querySelector<HTMLFormElement>("#files-upload-form"),
     workflowNode,
+  };
+}
+
+function emptyFilters(): FilesBatchesFilters {
+  return {
+    query: "",
+    purpose: "",
+    batchStatus: "",
+    endpoint: "",
   };
 }
