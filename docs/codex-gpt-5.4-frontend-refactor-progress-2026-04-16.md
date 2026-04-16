@@ -400,3 +400,54 @@ Commit:
 Следующий шаг:
 
 - если продолжать дальше, то только очень мелкий accessibility/copy pass по shell и page-level CTA; route/layout refactor по этому плану закрыт.
+
+### Slice 9
+
+Статус: `done`
+
+Цель:
+
+- сделать завершающий shell-level accessibility/navigation follow-up без нового route split;
+- сохранить deep-link/handoff query contract при SPA-переходах внутри `/admin`;
+- выровнять shell semantics для left rail и secondary nav.
+
+Планируемый объём:
+
+- исправить internal navigation так, чтобы `/admin/...?...` не терял `search/hash`;
+- добавить shell landmarks и skip-link для keyboard/screen-reader navigation;
+- закрепить focus-management на page heading после route change;
+- обновить integration assertions под новый shell/accessibility contract.
+
+Фактически сделано:
+
+- в `AdminApp` добавлен `navigateToLocation(...)`: internal `/admin` links теперь сохраняют `pathname + search + hash`, поэтому handoff из `Traffic`/`Logs`/`Providers` больше не теряет deep-link scope при SPA-navigation;
+- после route change и browser `popstate` shell теперь переводит focus на `page-title`, чтобы child pages и direct handoff читались предсказуемо для keyboard/screen-reader flows, но обычные same-page rerender-ы не перехватывают focus;
+- HTML shell получил `skip-link`, `aria-label` для primary console nav и фокусируемый `page-title`;
+- shared `renderSubpageNav(...)` переведён на семантический `nav` с явным `aria-label`;
+- в `console.css` добавлены skip-link/focus-visible affordances и лёгкий hook для `subpage-nav`;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration asset tests расширены под новый shell contract и проверяют как shell HTML, так и собранный `app.js`.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `uv run pytest tests/integration/app/test_admin_console_settings.py -q`
+- `uv run ruff check .`
+- `uv run ruff format --check .`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q` — 25 passed
+- `uv run pytest tests/integration/app/test_admin_console_settings.py -q` — 15 passed
+- `uv run ruff check .` — green
+- `uv run ruff format --check .` — green
+
+Commit:
+
+- `b92feb3` — `fix: preserve admin handoff urls and shell focus`
+
+Следующий шаг:
+
+- если продолжать дальше, то уже только точечный CTA/copy polish на отдельных страницах; shell routing, accessibility-basics и handoff URL contract для этого refactor уже закрыты.
