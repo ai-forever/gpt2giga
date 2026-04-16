@@ -1,5 +1,6 @@
 import { bindReplaceableFieldBehavior, bindSecretFieldBehavior, } from "../forms.js";
 import { banner, pill, renderBooleanSelectOptions, renderFormSection, renderSelectOption, renderSecretField, renderStaticSelectOptions, } from "../templates.js";
+import { pathForPage } from "../routes.js";
 import { asArray, asRecord, csv, escapeHtml, } from "../utils.js";
 const LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"];
 const OBSERVABILITY_PRESETS = [
@@ -554,7 +555,7 @@ export function renderSetupObservabilityHandoff(values) {
       ${sinkSummaries}
       <p class="muted">Setup keeps observability outside the bootstrap-critical path. Use the dedicated settings section for OTLP headers, Langfuse keys, Phoenix routing, and later sink tuning.</p>
       <div class="toolbar">
-        <a class="button button--secondary" href="/admin/settings?section=observability">Open observability settings</a>
+        <a class="button button--secondary" href="${escapeHtml(pathForPage("settings-observability"))}">Open observability settings</a>
       </div>
     </div>
   `;

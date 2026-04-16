@@ -298,6 +298,13 @@ export class AdminApp {
       if (url.origin !== window.location.origin || !isConsolePathname(url.pathname)) {
         return;
       }
+      if (
+        url.pathname === window.location.pathname &&
+        url.search === window.location.search &&
+        url.hash
+      ) {
+        return;
+      }
 
       event.preventDefault();
       this.navigateToLocation({

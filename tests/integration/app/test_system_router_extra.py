@@ -212,6 +212,8 @@ def test_admin_ui_warning_banner():
     assert "AdminApp" in index_asset.text
     assert "navigateToLocation" in app_asset.text
     assert "url.search" in app_asset.text
+    assert "url.pathname === window.location.pathname" in app_asset.text
+    assert "url.hash" in app_asset.text
     assert "pageTitle.focus()" in app_asset.text
     assert ".hero-context" in stylesheet.text
     assert ".nav-group--active" in stylesheet.text
@@ -230,6 +232,8 @@ def test_admin_ui_assets_include_observability_presets():
     assert "Local Langfuse" in response.text
     assert "Local Phoenix" in response.text
     assert "deploy/compose/observability-otlp.yaml" in response.text
+    assert 'pathForPage("settings-observability")' in response.text
+    assert "settings?section=observability" not in response.text
 
 
 def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
