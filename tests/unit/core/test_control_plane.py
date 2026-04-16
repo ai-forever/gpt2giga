@@ -61,6 +61,7 @@ def test_apply_control_plane_overrides_replaces_runtime_defaults(tmp_path, monke
         proxy=ProxySettings(
             mode="DEV",
             gigachat_api_mode="v2",
+            gigachat_responses_api_mode="v1",
             api_key="persisted-secret",
             enable_reasoning=True,
         ),
@@ -72,6 +73,8 @@ def test_apply_control_plane_overrides_replaces_runtime_defaults(tmp_path, monke
     merged = apply_control_plane_overrides(runtime)
 
     assert merged.proxy_settings.gigachat_api_mode == "v2"
+    assert merged.proxy_settings.gigachat_responses_api_mode == "v1"
+    assert merged.proxy_settings.responses_backend_mode == "v1"
     assert merged.proxy_settings.api_key == "persisted-secret"
     assert merged.proxy_settings.enable_reasoning is True
     assert merged.gigachat_settings.credentials.get_secret_value() == "persisted-creds"

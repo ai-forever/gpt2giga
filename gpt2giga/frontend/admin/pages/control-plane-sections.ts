@@ -8,6 +8,7 @@ import {
   banner,
   pill,
   renderBooleanSelectOptions,
+  renderSelectOption,
   renderSecretField,
   renderStaticSelectOptions,
 } from "../templates.js";
@@ -207,6 +208,13 @@ export function renderApplicationSection(
           <span>GigaChat API mode</span>
           <select name="gigachat_api_mode">
             ${renderStaticSelectOptions(String(options.values.gigachat_api_mode ?? ""), ["v1", "v2"])}
+          </select>
+        </label>
+        <label class="field">
+          <span>Responses API mode</span>
+          <select name="gigachat_responses_api_mode">
+            ${renderSelectOption("", String(options.values.gigachat_responses_api_mode ?? ""), "inherit base mode")}
+            ${renderStaticSelectOptions(String(options.values.gigachat_responses_api_mode ?? ""), ["v1", "v2"])}
           </select>
         </label>
       </div>

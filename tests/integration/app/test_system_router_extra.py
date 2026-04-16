@@ -299,6 +299,7 @@ def test_admin_config_exposes_grouped_safe_summary():
                 host="localhost",
                 port=8090,
                 gigachat_api_mode="v1",
+                gigachat_responses_api_mode="v2",
                 runtime_store_backend="memory",
                 enable_telemetry=True,
             )
@@ -313,6 +314,8 @@ def test_admin_config_exposes_grouped_safe_summary():
     assert payload["summary"]["network"]["bind"] == "localhost:8090"
     assert payload["summary"]["network"]["governance_limits_configured"] == 0
     assert payload["summary"]["providers"]["gigachat_api_mode"] == "v1"
+    assert payload["summary"]["providers"]["gigachat_responses_api_mode"] == "v2"
+    assert payload["summary"]["providers"]["responses_backend_mode"] == "v2"
     assert payload["summary"]["providers"]["telemetry_enabled"] is True
     assert payload["summary"]["providers"]["governance_enabled"] is False
     assert payload["summary"]["limits"]["max_request_body_bytes"] > 0

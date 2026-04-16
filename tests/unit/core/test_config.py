@@ -8,6 +8,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_ENABLED_PROVIDERS", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_GIGACHAT_RESPONSES_API_MODE", raising=False)
     s = ProxySettings()
     assert s.mode == "DEV"
     assert s.host == "localhost"
@@ -16,6 +17,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.enable_reasoning is False
     assert s.enabled_providers == ["openai", "anthropic", "gemini"]
     assert s.gigachat_api_mode == "v1"
+    assert s.gigachat_responses_api_mode is None
     assert s.runtime_store_backend == "memory"
     assert s.runtime_store_namespace == "gpt2giga"
     assert s.enable_telemetry is True
@@ -90,6 +92,7 @@ def test_proxy_settings_gigachat_api_mode_normalized(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_GIGACHAT_API_MODE", " V1 ")
     s = ProxySettings()
     assert s.gigachat_api_mode == "v1"
+    assert s.chat_backend_mode == "v1"
     assert s.responses_backend_mode == "v1"
 
 
@@ -98,6 +101,21 @@ def test_proxy_settings_gigachat_api_mode_v2(monkeypatch):
     s = ProxySettings()
     assert s.gigachat_api_mode == "v2"
     assert s.chat_backend_mode == "v2"
+    assert s.responses_backend_mode == "v2"
+
+
+def test_proxy_settings_gigachat_responses_api_mode_normalized(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_GIGACHAT_RESPONSES_API_MODE", " V2 ")
+    s = ProxySettings()
+    assert s.gigachat_responses_api_mode == "v2"
+    assert s.responses_backend_mode == "v2"
+
+
+def test_proxy_settings_gigachat_responses_api_mode_overrides_base_mode(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_GIGACHAT_API_MODE", "v1")
+    monkeypatch.setenv("GPT2GIGA_GIGACHAT_RESPONSES_API_MODE", "v2")
+    s = ProxySettings()
+    assert s.chat_backend_mode == "v1"
     assert s.responses_backend_mode == "v2"
 
 

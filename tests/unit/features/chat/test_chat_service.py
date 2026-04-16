@@ -274,3 +274,27 @@ async def test_get_chat_service_from_state_respects_v2_mode_from_config():
     assert giga_client.last_request_v2["messages"][0]["content"][0]["text"] == "hi"
     assert transformer.calls_v2 == [(data, giga_client)]
     assert result["id"] == "resp-v2-config"
+
+
+def test_get_chat_service_from_state_ignores_responses_override():
+    transformer = LegacyRequestTransformer()
+    response_processor = LegacyResponseProcessor()
+    state = SimpleNamespace(
+        services=RuntimeServices(),
+        providers=RuntimeProviders(
+            request_transformer=transformer,
+            response_processor=response_processor,
+        ),
+        config=ProxyConfig.model_validate(
+            {
+                "proxy": {
+                    "gigachat_api_mode": "v1",
+                    "gigachat_responses_api_mode": "v2",
+                }
+            }
+        ),
+    )
+
+    service = get_chat_service_from_state(state)
+
+    assert service.backend_mode == "v1"

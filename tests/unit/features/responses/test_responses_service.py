@@ -317,6 +317,27 @@ def test_get_responses_service_from_state_respects_v1_mode_from_config():
     assert service.backend_mode == "v1"
 
 
+def test_get_responses_service_from_state_prefers_responses_override_from_config():
+    request_preparer = FakeRequestPreparer()
+    response_processor = FakeResponseProcessor()
+    state = SimpleNamespace(
+        request_transformer=request_preparer,
+        response_processor=response_processor,
+        config=ProxyConfig.model_validate(
+            {
+                "proxy": {
+                    "gigachat_api_mode": "v1",
+                    "gigachat_responses_api_mode": "v2",
+                }
+            }
+        ),
+    )
+
+    service = get_responses_service_from_state(state)
+
+    assert service.backend_mode == "v2"
+
+
 def test_get_response_store_from_state_creates_and_reuses_store():
     state = SimpleNamespace()
 

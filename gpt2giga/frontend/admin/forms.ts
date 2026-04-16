@@ -83,6 +83,7 @@ export function buildApplicationPayload(form: HTMLFormElement): Record<string, u
   const fields = form.elements as typeof form.elements & {
     mode: HTMLSelectElement;
     gigachat_api_mode: HTMLSelectElement;
+    gigachat_responses_api_mode?: HTMLSelectElement;
     enabled_providers: HTMLInputElement;
     embeddings?: HTMLInputElement;
     enable_telemetry?: HTMLSelectElement;
@@ -105,6 +106,10 @@ export function buildApplicationPayload(form: HTMLFormElement): Record<string, u
 
   if (fields.enable_telemetry) {
     payload.enable_telemetry = fields.enable_telemetry.value === "true";
+  }
+  if (fields.gigachat_responses_api_mode) {
+    payload.gigachat_responses_api_mode =
+      fields.gigachat_responses_api_mode.value || null;
   }
   if (fields.observability_sinks) {
     payload.observability_sinks = parseCsv(fields.observability_sinks.value);

@@ -303,12 +303,22 @@ class ProxySettings(BaseSettings):
     gigachat_api_mode: GigaChatAPIMode = Field(
         default="v1",
         description=(
-            "Режим backend API GigaChat. "
-            "'v1' направляет все chat-like endpoints через legacy API "
+            "Базовый режим backend API GigaChat для chat-like endpoints. "
+            "'v1' направляет OpenAI chat/completions, Anthropic messages, "
+            "Gemini generateContent и batch chat requests через legacy API "
             "(achat/astream). "
-            "'v2' направляет OpenAI chat/responses, Anthropic messages и "
-            "Gemini generateContent через native v2 API "
-            "(achat_v2/astream_v2)."
+            "'v2' направляет эти capability через native v2 API "
+            "(achat_v2/astream_v2). Responses API может быть переопределен "
+            "отдельно через `gigachat_responses_api_mode`."
+        ),
+    )
+    gigachat_responses_api_mode: GigaChatAPIMode | None = Field(
+        default=None,
+        description=(
+            "Опциональное переопределение backend API GigaChat только для "
+            "OpenAI Responses API. Пусто = использовать `gigachat_api_mode`. "
+            "'v1' направляет /responses через legacy API (achat/astream), "
+            "'v2' через native v2 API (achat_v2/astream_v2)."
         ),
     )
     runtime_store_backend: str = Field(
@@ -548,12 +558,17 @@ class ProxySettings(BaseSettings):
 
         return value
 
-    @field_validator("gigachat_api_mode", mode="before")
+    @field_validator(
+        "gigachat_api_mode",
+        "gigachat_responses_api_mode",
+        mode="before",
+    )
     @classmethod
     def normalize_gigachat_api_mode(cls, value):
         """Normalize backend mode from ENV/CLI friendly forms."""
         if isinstance(value, str):
-            return value.strip().lower()
+            normalized = value.strip().lower()
+            return normalized or None
         return value
 
     @field_validator("runtime_store_backend", mode="before")
@@ -734,7 +749,7 @@ class ProxySettings(BaseSettings):
     @property
     def responses_backend_mode(self) -> Literal["v1", "v2"]:
         """Resolve the effective backend mode for the Responses capability."""
-        return self.gigachat_api_mode
+        return self.gigachat_responses_api_mode or self.gigachat_api_mode
 
     @property
     def metrics_enabled(self) -> bool:

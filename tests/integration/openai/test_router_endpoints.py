@@ -389,6 +389,29 @@ def test_responses_non_stream_v1_mode_uses_legacy_backend_path():
     assert app.state.request_transformer.last_mode == "v1"
 
 
+def test_responses_non_stream_can_override_base_mode():
+    app = make_app(
+        config=ProxyConfig.model_validate(
+            {
+                "proxy": {
+                    "gigachat_api_mode": "v1",
+                    "gigachat_responses_api_mode": "v2",
+                }
+            }
+        )
+    )
+    client = TestClient(app)
+
+    resp = client.post("/responses", json={"input": "hi", "model": "gpt-x"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "completed"
+    assert body["conversation"] == {"id": "thread-1"}
+    assert app.state.gigachat_client.last_responses_method == "v2"
+    assert app.state.request_transformer.last_mode == "v2"
+
+
 def test_responses_non_stream_preserves_reasoning_config():
     app = make_app(
         config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})

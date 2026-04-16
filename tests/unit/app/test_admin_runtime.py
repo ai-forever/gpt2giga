@@ -54,6 +54,7 @@ def test_admin_runtime_snapshot_service_reports_config_summary():
                 host="localhost",
                 port=8090,
                 gigachat_api_mode="v1",
+                gigachat_responses_api_mode="v2",
                 enable_telemetry=True,
             )
         )
@@ -64,6 +65,9 @@ def test_admin_runtime_snapshot_service_reports_config_summary():
     assert payload["mode"] == "DEV"
     assert payload["summary"]["network"]["bind"] == "localhost:8090"
     assert payload["summary"]["providers"]["gigachat_api_mode"] == "v1"
+    assert payload["summary"]["providers"]["gigachat_responses_api_mode"] == "v2"
+    assert payload["summary"]["providers"]["chat_backend_mode"] == "v1"
+    assert payload["summary"]["providers"]["responses_backend_mode"] == "v2"
     assert payload["summary"]["providers"]["telemetry_enabled"] is True
 
 

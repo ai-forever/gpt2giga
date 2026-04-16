@@ -56,6 +56,9 @@ export interface SetupStep {
 export interface RuntimePayload {
   mode?: string;
   gigachat_api_mode?: string;
+  gigachat_responses_api_mode?: string | null;
+  chat_backend_mode?: string;
+  responses_backend_mode?: string;
   enabled_providers?: string[];
   telemetry_enabled?: boolean;
   runtime_store_backend?: string;
