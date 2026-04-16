@@ -353,3 +353,50 @@ Commit:
 Следующий шаг:
 
 - базовый frontend-refactor по этому плану закрыт; если продолжать дальше, то только мелкий shell/copy cleanup без новых workflow slices.
+
+### Slice 8
+
+Статус: `done`
+
+Цель:
+
+- сделать завершающий shell-level consistency pass без нового route split;
+- уменьшить постоянную многословность left rail;
+- вынести текущий workflow/surface context в hero, чтобы summary-first pages ощущались единым console shell.
+
+Планируемый объём:
+
+- сделать rail компактнее и оставить expanded copy только вокруг активного workflow;
+- добавить hero-level workflow/surface context поверх page-specific actions;
+- закрепить новый shell contract integration assertions без изменения admin API.
+
+Фактически сделано:
+
+- left rail сделан спокойнее: workflow group copy и nav meta больше не доминируют постоянно, а раскрываются вокруг активной или наведённой группы/ссылки;
+- активный workflow в rail теперь явно подсвечивается через `nav-group--active`, а активный entry получает `aria-current="page"`;
+- в shell hero добавлен отдельный `hero-context` слой с `workflow-chip`, `surface-chip` и page-specific context copy, который наполняется из `PAGE_META`/`WORKFLOW_META`;
+- обновлён shell HTML (`data-workflow` на nav groups) и runtime app logic, чтобы rail и hero читались как одна система;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration assertions расширены под новый shell contract и stylesheet hooks.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `uv run ruff check gpt2giga tests`
+- `uv run ruff format --check gpt2giga tests`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q` — 25 passed
+- `uv run ruff check gpt2giga tests` — green
+- `uv run ruff format --check gpt2giga tests` — green
+
+Commit:
+
+- `8266954` — `refactor: compact admin shell navigation`
+
+Следующий шаг:
+
+- если продолжать дальше, то только очень мелкий accessibility/copy pass по shell и page-level CTA; route/layout refactor по этому плану закрыт.
