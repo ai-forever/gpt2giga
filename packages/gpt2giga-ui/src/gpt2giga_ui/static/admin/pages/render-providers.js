@@ -1,4 +1,5 @@
-import { banner, card, kpi, pill, renderDefinitionList, renderStatLines, renderTable, } from "../templates.js";
+import { pathForPage } from "../routes.js";
+import { banner, card, kpi, pill, renderDefinitionList, renderStatLines, renderTable, renderWorkflowCard, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber } from "../utils.js";
 export async function renderProviders(app, token) {
     const [capabilities, routes, runtime] = await Promise.all([
@@ -20,11 +21,15 @@ export async function renderProviders(app, token) {
     const routeFamilyRows = buildRouteFamilySummaries(routeRows);
     const capabilityRows = buildCapabilityCoverageRows(surfaceRows);
     const leadProvider = [...enabledProviderRows].sort((left, right) => Number(right.route_count ?? 0) - Number(left.route_count ?? 0))[0];
+    const leadProviderName = String(leadProvider?.name ?? "");
     const warnings = buildProviderWarnings(enabledProviderRows.length, backend);
+    const smokeHref = pathForPage("playground");
+    const trafficHref = buildTrafficUrlForProvider(leadProviderName);
+    const logsHref = buildLogsUrlForProvider(leadProviderName);
     app.setHeroActions(`
-    <a class="button" href="/admin/playground">Smoke in playground</a>
+    <a class="button" href="${escapeHtml(smokeHref)}">Smoke in playground</a>
+    <a class="button button--secondary" href="${escapeHtml(trafficHref)}">Provider traffic</a>
     <a class="button button--secondary" href="/admin/settings">Open settings</a>
-    <a class="button button--secondary" href="/admin/setup">Open setup</a>
     <a class="button button--secondary" href="/admin/system">Open system</a>
   `);
     app.setContent(`
@@ -84,34 +89,70 @@ export async function renderProviders(app, token) {
                 : "disabled",
             tone: backend.governance_enabled ? "good" : "default",
         },
-    ], "Backend capability metadata is unavailable."), "panel panel--span-4")}
-    ${card("Operator handoff", `
+    ], "Backend capability metadata is unavailable."), "panel panel--span-3")}
+    ${card("Provider workflows", `
         <div class="stack">
-          <div class="toolbar">
-            <a class="button" href="/admin/playground">Smoke request</a>
-            <a class="button button--secondary" href="/admin/traffic">Traffic</a>
-            <a class="button button--secondary" href="/admin/logs">Logs</a>
+          <p class="muted">
+            Keep this page summary-first: confirm which provider surface should exist, smoke one route family, then widen into route diagnostics only if the mismatch still remains.
+          </p>
+          <div class="workflow-grid">
+            ${renderWorkflowCard({
+        workflow: "configure",
+        title: enabledProviderRows.length ? "Adjust provider posture deliberately" : "Enable a provider family first",
+        note: enabledProviderRows.length
+            ? "Settings owns provider toggles, observability sinks, and auth posture. Return to Setup only when bootstrap prerequisites are still incomplete."
+            : "No compatibility surface is enabled yet, so Setup and Settings remain the correct place to restore a usable provider path.",
+        pills: [
+            pill(`Enabled: ${formatNumber(enabledProviderRows.length)}`, enabledProviderRows.length ? "good" : "warn"),
+            pill(`Telemetry: ${backend.telemetry_enabled ? "on" : "off"}`, backend.telemetry_enabled ? "good" : "warn"),
+            pill(`Governance: ${backend.governance_enabled ? "on" : "off"}`),
+        ],
+        actions: [
+            { label: "Settings", href: pathForPage("settings"), primary: true },
+            { label: "Setup", href: pathForPage("setup") },
+        ],
+    })}
+            ${renderWorkflowCard({
+        workflow: "start",
+        title: "Smoke the mounted provider surface",
+        note: leadProvider
+            ? `${displayName(leadProvider)} currently exposes the widest mounted surface. Use Playground to confirm the compatibility route before inspecting lower-level diagnostics.`
+            : "Once a provider is enabled, Playground is the fastest way to prove the mounted compatibility route actually works.",
+        pills: [
+            pill(`Lead provider: ${leadProvider ? displayName(leadProvider) : "n/a"}`),
+            pill(`Routes: ${formatNumber(routeRows.length)}`),
+            pill(`Capabilities: ${formatNumber(capabilityRows.length)}`),
+        ],
+        actions: [
+            { label: "Playground", href: smokeHref, primary: true },
+            { label: "System", href: pathForPage("system") },
+        ],
+    })}
+            ${renderWorkflowCard({
+        workflow: "observe",
+        title: "Confirm the live request path before route forensics",
+        note: leadProvider
+            ? "Traffic opens already scoped to the current lead provider. Hand off into Logs only after one provider-specific request or failure becomes the real debugging target."
+            : "Traffic and Logs stay secondary until a provider family is enabled and you have a live request path worth following.",
+        pills: [
+            pill(`Lead route owner: ${leadProvider ? displayName(leadProvider) : "none"}`),
+            pill(`Admin routes: ${formatNumber(adminRouteCount)}`),
+            pill(`Store: ${String(backend.runtime_store_backend ?? "n/a")}`),
+        ],
+        actions: [
+            { label: "Traffic", href: trafficHref, primary: true },
+            { label: "Logs", href: logsHref },
+        ],
+    })}
           </div>
-          ${renderDefinitionList([
-        {
-            label: "Setup",
-            value: "Provider bootstrap",
-            note: "Use Setup when provider access is blocked by missing credentials or bootstrap posture.",
-        },
-        {
-            label: "Settings",
-            value: "Runtime toggles",
-            note: "Use Settings to change enabled providers, observability sinks, and auth posture.",
-        },
-        {
-            label: "System",
-            value: "Full diagnostics",
-            note: "System keeps the route/runtime/config bundle when this page suggests a backend mismatch.",
-        },
-    ], "No handoff guidance is available.")}
         </div>
-      `, "panel panel--span-4")}
-    ${card("Capability coverage", renderTable([
+      `, "panel panel--span-5")}
+    ${card("Capability coverage", `
+        <div class="stack">
+          <p class="muted">
+            Capability coverage stays primary. Route-family detail stays secondary until capability coverage and provider briefs still do not explain the mismatch.
+          </p>
+          ${renderTable([
         { label: "Capability" },
         { label: "Enabled surfaces" },
         { label: "Standby surfaces" },
@@ -121,18 +162,9 @@ export async function renderProviders(app, token) {
         `<span class="muted">${escapeHtml(row.enabledSurfaces)}</span>`,
         `<span class="muted">${escapeHtml(row.standbySurfaces)}</span>`,
         `<span class="muted">${escapeHtml(row.routeSample)}</span>`,
-    ]), "No capability coverage rows were reported by the admin API."), "panel panel--span-6")}
-    ${card("Mounted route families", renderTable([
-        { label: "Family" },
-        { label: "Mounted routes" },
-        { label: "Examples" },
-        { label: "Owner" },
-    ], routeFamilyRows.map((group) => [
-        `<strong>${escapeHtml(group.label)}</strong>`,
-        `${escapeHtml(formatNumber(group.count))}<br /><span class="muted">${escapeHtml(group.count ? "mounted" : "idle")}</span>`,
-        `<span class="muted">${escapeHtml(group.samples.join(", ") || "No routes in this family.")}</span>`,
-        `<span class="muted">${escapeHtml(group.owner)}</span>`,
-    ]), "No mounted routes were reported by the admin API."), "panel panel--span-6")}
+    ]), "No capability coverage rows were reported by the admin API.")}
+        </div>
+      `, "panel panel--span-12")}
     ${card("Provider briefs", `
         <div class="step-grid">
           ${surfaceRows
@@ -174,7 +206,28 @@ export async function renderProviders(app, token) {
         .join("")}
         </div>
       `, "panel panel--span-12")}
-    ${card("Surface matrix", renderTable([
+    ${card("Detailed route diagnostics", `
+        <div class="stack">
+          <p class="muted">
+            Open these disclosures only when provider briefs and capability coverage still leave a route-family mismatch unresolved.
+          </p>
+          <details class="surface details-disclosure" id="providers-route-detail">
+            <summary>Mounted route families</summary>
+            ${renderTable([
+        { label: "Family" },
+        { label: "Mounted routes" },
+        { label: "Examples" },
+        { label: "Owner" },
+    ], routeFamilyRows.map((group) => [
+        `<strong>${escapeHtml(group.label)}</strong>`,
+        `${escapeHtml(formatNumber(group.count))}<br /><span class="muted">${escapeHtml(group.count ? "mounted" : "idle")}</span>`,
+        `<span class="muted">${escapeHtml(group.samples.join(", ") || "No routes in this family.")}</span>`,
+        `<span class="muted">${escapeHtml(group.owner)}</span>`,
+    ]), "No mounted routes were reported by the admin API.")}
+          </details>
+          <details class="surface details-disclosure">
+            <summary>Full surface matrix</summary>
+            ${renderTable([
         { label: "Surface" },
         { label: "Mode" },
         { label: "Capabilities" },
@@ -190,7 +243,10 @@ export async function renderProviders(app, token) {
             `${escapeHtml(formatNumber(capabilitiesList.length))}<br /><span class="muted">${escapeHtml(capabilitiesList.slice(0, 3).join(", ") || "none")}</span>`,
             `${escapeHtml(formatNumber(row.route_count ?? routesList.length))}<br /><span class="muted">${escapeHtml(routesList.slice(0, 2).join(", ") || "none")}</span>`,
         ];
-    }), "No capability rows were reported by the admin API."), "panel panel--span-12")}
+    }), "No capability rows were reported by the admin API.")}
+          </details>
+        </div>
+      `, "panel panel--span-12")}
   `);
 }
 function buildProviderWarnings(enabledProviderCount, backend) {
@@ -305,4 +361,12 @@ function buildTrafficUrlForProvider(providerName) {
     }
     const query = params.toString();
     return query ? `/admin/traffic?${query}` : "/admin/traffic";
+}
+function buildLogsUrlForProvider(providerName) {
+    const params = new URLSearchParams();
+    if (providerName.trim()) {
+        params.set("provider", providerName.trim());
+    }
+    const query = params.toString();
+    return query ? `/admin/logs?${query}` : "/admin/logs";
 }

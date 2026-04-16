@@ -1,4 +1,5 @@
 import { describePendingRuntimeImpact, planPendingApply, } from "./forms.js";
+import { WORKFLOW_META } from "./routes.js";
 import { escapeHtml, formatTimestamp, humanizeField, uniqueSortedStrings, } from "./utils.js";
 export function banner(message, tone = "info") {
     const toneClass = tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
@@ -148,6 +149,24 @@ export function renderSetupSteps(steps) {
           `)
         .join("")}
     </div>
+  `;
+}
+export function renderWorkflowCard(options) {
+    const workflow = WORKFLOW_META[options.workflow];
+    return `
+    <article class="workflow-card">
+      <div class="workflow-card__header">
+        <span class="eyebrow">${escapeHtml(workflow.label)}</span>
+        <h4>${escapeHtml(options.title)}</h4>
+        <p>${escapeHtml(options.note)}</p>
+      </div>
+      <div class="pill-row">${options.pills.join("")}</div>
+      <div class="workflow-card__actions">
+        ${options.actions
+        .map((action) => `<a class="button${action.primary ? "" : " button--secondary"}" href="${escapeHtml(action.href)}">${escapeHtml(action.label)}</a>`)
+        .join("")}
+      </div>
+    </article>
   `;
 }
 export function renderDiffTable(entries, emptyMessage = "No changes.") {

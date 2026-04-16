@@ -1,5 +1,5 @@
-import { WORKFLOW_META, pathForPage } from "../routes.js";
-import { card, pill, renderDefinitionList, renderTable, } from "../templates.js";
+import { pathForPage } from "../routes.js";
+import { card, pill, renderDefinitionList, renderTable, renderWorkflowCard, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber, formatTimestamp, } from "../utils.js";
 const MAX_SUMMARY_ROWS = 5;
 export async function renderOverview(app, token) {
@@ -226,24 +226,6 @@ function renderOverviewMetric(label, value, note, tone = "default") {
       <span class="overview-metric__label">${escapeHtml(label)}</span>
       <strong class="overview-metric__value">${escapeHtml(value)}</strong>
       <span class="overview-metric__note">${escapeHtml(note)}</span>
-    </article>
-  `;
-}
-function renderWorkflowCard(options) {
-    const workflow = WORKFLOW_META[options.workflow];
-    return `
-    <article class="workflow-card">
-      <div class="workflow-card__header">
-        <span class="eyebrow">${escapeHtml(workflow.label)}</span>
-        <h4>${escapeHtml(options.title)}</h4>
-        <p>${escapeHtml(options.note)}</p>
-      </div>
-      <div class="pill-row">${options.pills.join("")}</div>
-      <div class="workflow-card__actions">
-        ${options.actions
-        .map((action) => `<a class="button${action.primary ? "" : " button--secondary"}" href="${escapeHtml(action.href)}">${escapeHtml(action.label)}</a>`)
-        .join("")}
-      </div>
     </article>
   `;
 }

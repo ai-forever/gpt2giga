@@ -225,6 +225,26 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     assert "Raw context snapshot" in logs_asset.text
 
 
+def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
+    client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
+
+    system_asset = client.get("/admin/assets/admin/pages/render-system.js")
+    providers_asset = client.get("/admin/assets/admin/pages/render-providers.js")
+
+    assert system_asset.status_code == 200
+    assert "Confirm live request behavior before deep forensics" in system_asset.text
+    assert (
+        "Detailed diagnostics stay staged until the executive summary"
+        in system_asset.text
+    )
+    assert "Use staged diagnostics when the summary is not enough" in system_asset.text
+
+    assert providers_asset.status_code == 200
+    assert "Keep this page summary-first" in providers_asset.text
+    assert "Smoke the mounted provider surface" in providers_asset.text
+    assert "Route-family detail stays secondary" in providers_asset.text
+
+
 def test_admin_runtime_endpoint():
     app = make_app()
     client = TestClient(app)

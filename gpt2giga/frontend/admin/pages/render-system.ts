@@ -1,4 +1,5 @@
 import type { AdminApp } from "../app.js";
+import { pathForPage } from "../routes.js";
 import {
   banner,
   card,
@@ -7,6 +8,7 @@ import {
   renderDefinitionList,
   renderSetupSteps,
   renderStatLines,
+  renderWorkflowCard,
 } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber, humanizeField } from "../utils.js";
 
@@ -51,12 +53,14 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
   const readyServiceCount = countTruthyEntries(serviceState);
   const readyProviderCount = countTruthyEntries(providerState);
   const systemWarnings = buildSystemWarnings(setup, runtime, warnings, readyServiceCount);
+  const setupActionPath = setup.setup_complete ? pathForPage("settings") : pathForPage("setup");
+  const setupActionLabel = setup.setup_complete ? "Review settings" : "Finish setup";
 
   app.setHeroActions(`
     <button class="button button--secondary" id="copy-diagnostics" type="button">Copy diagnostics JSON</button>
+    <a class="button button--secondary" href="/admin/providers">Provider diagnostics</a>
+    <a class="button button--secondary" href="/admin/traffic">Traffic summary</a>
     <a class="button button--secondary" href="/admin/settings">Open settings</a>
-    <a class="button button--secondary" href="/admin/providers">Open providers</a>
-    <a class="button button--secondary" href="/admin/logs">Open logs</a>
   `);
   app.setContent(`
     ${kpi("Setup", setup.setup_complete ? "complete" : "in progress")}
@@ -101,42 +105,64 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
           )}
         </div>
       `,
-      "panel panel--span-4",
+      "panel panel--span-5",
     )}
     ${card(
-      "Immediate actions",
+      "Diagnostic workflows",
       `
         <div class="stack">
-          <div class="toolbar">
-            <a class="button" href="${escapeHtml(setup.setup_complete ? "/admin/settings" : "/admin/setup")}">
-              ${escapeHtml(setup.setup_complete ? "Review settings" : "Finish setup")}
-            </a>
-            <a class="button button--secondary" href="/admin/providers">Providers</a>
-            <a class="button button--secondary" href="/admin/traffic">Traffic</a>
+          <p class="muted">
+            Start from the smallest workflow that resolves the question. Open detailed diagnostics only after the executive summary still feels inconsistent.
+          </p>
+          <div class="workflow-grid">
+            ${renderWorkflowCard({
+              workflow: "start",
+              title: setup.setup_complete ? "Bootstrap is stable" : "Close bootstrap gaps first",
+              note: setup.setup_complete
+                ? "System already sees persisted bootstrap posture. Use Settings only for deliberate day-2 changes, not as the first reaction to every warning banner."
+                : "Missing persisted config, credentials, or security posture should be resolved before you spend time on deeper runtime forensics.",
+              pills: [
+                pill(`Persisted: ${setup.persisted ? "ready" : "missing"}`, setup.persisted ? "good" : "warn"),
+                pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
+                pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn"),
+              ],
+              actions: [
+                { label: setupActionLabel, href: setupActionPath, primary: true },
+                { label: "API Keys", href: pathForPage("keys") },
+              ],
+            })}
+            ${renderWorkflowCard({
+              workflow: "observe",
+              title: "Confirm live request behavior before deep forensics",
+              note: "If the runtime posture looks healthy here but clients still fail, move to Traffic first and only then hand off one narrowed request into Logs.",
+              pills: [
+                pill(`Routes: ${formatNumber(routeRows.length)}`),
+                pill(`Services: ${formatNumber(readyServiceCount)} ready`, readyServiceCount ? "good" : "warn"),
+                pill(`Providers: ${formatNumber(readyProviderCount)} ready`, readyProviderCount ? "good" : "warn"),
+              ],
+              actions: [
+                { label: "Traffic", href: pathForPage("traffic"), primary: true },
+                { label: "Logs", href: pathForPage("logs") },
+              ],
+            })}
+            ${renderWorkflowCard({
+              workflow: "diagnose",
+              title: "Use staged diagnostics when the summary is not enough",
+              note: "Route coverage, effective config, and raw payload export stay secondary until the summary and workflow cards no longer explain the mismatch.",
+              pills: [
+                pill(`Warnings: ${formatNumber(systemWarnings.length)}`, systemWarnings.length ? "warn" : "good"),
+                pill(`Docs: ${runtime.docs_enabled ? "exposed" : "disabled"}`),
+                pill(`Mode: ${String(runtime.mode ?? "n/a")}`),
+              ],
+              actions: [
+                { label: "Providers", href: pathForPage("providers"), primary: true },
+                { label: "Detailed diagnostics", href: "#system-detailed-diagnostics" },
+              ],
+            })}
           </div>
-          ${renderDefinitionList(
-            [
-              {
-                label: "Setup",
-                value: setup.setup_complete ? "Stable" : "Needs completion",
-                note: "Setup is still the best place to close bootstrap or missing-credential gaps.",
-              },
-              {
-                label: "Settings",
-                value: "Runtime edits",
-                note: "Use Settings for persisted changes to auth, providers, and logging posture.",
-              },
-              {
-                label: "Logs and Traffic",
-                value: "Live diagnostics",
-                note: "Use these when the runtime summary looks healthy but requests still fail in practice.",
-              },
-            ],
-            "No action guidance is available.",
-          )}
         </div>
       `,
-      "panel panel--span-4",
+      "panel panel--span-7",
     )}
     ${card(
       "Route coverage",
@@ -248,72 +274,68 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
       "panel panel--span-4",
     )}
     ${card(
-      "Runtime state detail",
-      `
-        <div class="dual-grid">
-          <section class="surface stack">
-            <div class="surface__header">
-              <h4>Services</h4>
-              ${pill(`${formatNumber(readyServiceCount)} ready`, readyServiceCount ? "good" : "warn")}
-            </div>
-            ${renderBooleanSection(serviceState)}
-          </section>
-          <section class="surface stack">
-            <div class="surface__header">
-              <h4>Providers</h4>
-              ${pill(`${formatNumber(readyProviderCount)} ready`, readyProviderCount ? "good" : "warn")}
-            </div>
-            ${renderBooleanSection(providerState)}
-          </section>
-          <section class="surface stack">
-            <div class="surface__header">
-              <h4>Stores</h4>
-              ${pill(String(storeState.backend ?? "n/a"))}
-            </div>
-            ${renderSummarySection(storeState)}
-          </section>
-        </div>
-      `,
-      "panel panel--span-12",
-    )}
-    ${card(
-      "Effective config",
-      `
-        <div class="dual-grid">
-          ${Object.entries(configSummary)
-            .map(([sectionName, sectionValue]) => {
-              const sectionRecord = asRecord(sectionValue);
-              return `
-                <section class="surface stack">
-                  <div class="surface__header">
-                    <h4>${escapeHtml(humanizeField(sectionName))}</h4>
-                    ${pill(`${formatNumber(Object.keys(sectionRecord).length)} fields`)}
-                  </div>
-                  ${renderDefinitionList(
-                    Object.entries(sectionRecord).map(([key, value]) => ({
-                      label: humanizeField(key),
-                      value: summarizeValue(value),
-                    })),
-                    "No summary entries were reported.",
-                  )}
-                </section>
-              `;
-            })
-            .join("")}
-        </div>
-      `,
-      "panel panel--span-12",
-    )}
-    ${card(
-      "Diagnostics bundle",
+      "Detailed diagnostics",
       `
         <div class="stack">
           <p class="muted">
-            Copy the full runtime, config, setup, and route payload when you need a precise
-            snapshot for debugging.
+            Detailed diagnostics stay staged until the executive summary, workflow handoff, and route coverage still leave ambiguity.
           </p>
+          <details class="surface details-disclosure" id="system-detailed-diagnostics">
+            <summary>Runtime state detail</summary>
+            <div class="dual-grid">
+              <section class="surface stack">
+                <div class="surface__header">
+                  <h4>Services</h4>
+                  ${pill(`${formatNumber(readyServiceCount)} ready`, readyServiceCount ? "good" : "warn")}
+                </div>
+                ${renderBooleanSection(serviceState)}
+              </section>
+              <section class="surface stack">
+                <div class="surface__header">
+                  <h4>Providers</h4>
+                  ${pill(`${formatNumber(readyProviderCount)} ready`, readyProviderCount ? "good" : "warn")}
+                </div>
+                ${renderBooleanSection(providerState)}
+              </section>
+              <section class="surface stack">
+                <div class="surface__header">
+                  <h4>Stores</h4>
+                  ${pill(String(storeState.backend ?? "n/a"))}
+                </div>
+                ${renderSummarySection(storeState)}
+              </section>
+            </div>
+          </details>
           <details class="surface details-disclosure">
-            <summary>Preview raw diagnostics JSON</summary>
+            <summary>Effective config summary</summary>
+            <div class="dual-grid">
+              ${Object.entries(configSummary)
+                .map(([sectionName, sectionValue]) => {
+                  const sectionRecord = asRecord(sectionValue);
+                  return `
+                    <section class="surface stack">
+                      <div class="surface__header">
+                        <h4>${escapeHtml(humanizeField(sectionName))}</h4>
+                        ${pill(`${formatNumber(Object.keys(sectionRecord).length)} fields`)}
+                      </div>
+                      ${renderDefinitionList(
+                        Object.entries(sectionRecord).map(([key, value]) => ({
+                          label: humanizeField(key),
+                          value: summarizeValue(value),
+                        })),
+                        "No summary entries were reported.",
+                      )}
+                    </section>
+                  `;
+                })
+                .join("")}
+            </div>
+          </details>
+          <details class="surface details-disclosure">
+            <summary>Raw diagnostics JSON</summary>
+            <p class="field-note">
+              Copy the full runtime, config, setup, and route payload when you need a precise snapshot for debugging or for a support handoff.
+            </p>
             <pre class="code-block code-block--tall" id="system-diagnostics">${escapeHtml(JSON.stringify(diagnostics, null, 2))}</pre>
           </details>
         </div>

@@ -1,12 +1,13 @@
 import type { AdminApp } from "../app.js";
-import { WORKFLOW_META, pathForPage } from "../routes.js";
+import { pathForPage } from "../routes.js";
 import {
   card,
   pill,
   renderDefinitionList,
   renderTable,
+  renderWorkflowCard,
 } from "../templates.js";
-import type { RuntimePayload, SetupPayload, WorkflowId } from "../types.js";
+import type { RuntimePayload, SetupPayload } from "../types.js";
 import {
   asArray,
   asRecord,
@@ -319,34 +320,6 @@ function renderOverviewMetric(
       <span class="overview-metric__label">${escapeHtml(label)}</span>
       <strong class="overview-metric__value">${escapeHtml(value)}</strong>
       <span class="overview-metric__note">${escapeHtml(note)}</span>
-    </article>
-  `;
-}
-
-function renderWorkflowCard(options: {
-  workflow: WorkflowId;
-  title: string;
-  note: string;
-  pills: string[];
-  actions: Array<{ label: string; href: string; primary?: boolean }>;
-}): string {
-  const workflow = WORKFLOW_META[options.workflow];
-  return `
-    <article class="workflow-card">
-      <div class="workflow-card__header">
-        <span class="eyebrow">${escapeHtml(workflow.label)}</span>
-        <h4>${escapeHtml(options.title)}</h4>
-        <p>${escapeHtml(options.note)}</p>
-      </div>
-      <div class="pill-row">${options.pills.join("")}</div>
-      <div class="workflow-card__actions">
-        ${options.actions
-          .map(
-            (action) =>
-              `<a class="button${action.primary ? "" : " button--secondary"}" href="${escapeHtml(action.href)}">${escapeHtml(action.label)}</a>`,
-          )
-          .join("")}
-      </div>
     </article>
   `;
 }

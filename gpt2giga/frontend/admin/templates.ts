@@ -2,6 +2,7 @@ import {
   describePendingRuntimeImpact,
   planPendingApply,
 } from "./forms.js";
+import { WORKFLOW_META } from "./routes.js";
 import type { DiffEntry, PendingChangeSummary, SetupStep } from "./types.js";
 import {
   escapeHtml,
@@ -39,6 +40,12 @@ interface DefinitionItem {
 interface InlineStatus {
   tone: "info" | "warn" | "danger";
   message: string;
+}
+
+interface WorkflowCardAction {
+  label: string;
+  href: string;
+  primary?: boolean;
 }
 
 export function banner(message: string, tone: "info" | "warn" | "danger" = "info"): string {
@@ -228,6 +235,34 @@ export function renderSetupSteps(steps: SetupStep[]): string {
         )
         .join("")}
     </div>
+  `;
+}
+
+export function renderWorkflowCard(options: {
+  workflow: "start" | "configure" | "observe" | "diagnose";
+  title: string;
+  note: string;
+  pills: string[];
+  actions: WorkflowCardAction[];
+}): string {
+  const workflow = WORKFLOW_META[options.workflow];
+  return `
+    <article class="workflow-card">
+      <div class="workflow-card__header">
+        <span class="eyebrow">${escapeHtml(workflow.label)}</span>
+        <h4>${escapeHtml(options.title)}</h4>
+        <p>${escapeHtml(options.note)}</p>
+      </div>
+      <div class="pill-row">${options.pills.join("")}</div>
+      <div class="workflow-card__actions">
+        ${options.actions
+          .map(
+            (action) =>
+              `<a class="button${action.primary ? "" : " button--secondary"}" href="${escapeHtml(action.href)}">${escapeHtml(action.label)}</a>`,
+          )
+          .join("")}
+      </div>
+    </article>
   `;
 }
 

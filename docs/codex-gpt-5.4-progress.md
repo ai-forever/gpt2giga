@@ -356,6 +356,13 @@
   - `Logs` inspector получил такой же staged empty state и secondary raw-context disclosure вместо постоянно открытого JSON;
   - `Logs` stream diagnostics свернуты в secondary disclosure и автоматически раскрываются только во время live session / stream error.
 - Добавлен runtime regression test на shipped assets для новых staged inspector/disclosure copy, чтобы summary-first UX не дрейфовал между TS source и shipped bundle.
+- Продолжен следующий `Phase 5` UX slice на экранах `System` и `Providers`, где ещё оставались конкурирующие diagnostics/workbench панели:
+  - `System` теперь явно ведёт по staged workflow-картам (`Start`, `Observe`, `Diagnose`) вместо общего блока `Immediate actions`;
+  - `System` прячет тяжёлую диагностику за единый `Detailed diagnostics` bundle с disclosure-секциями для runtime state, effective config и raw JSON;
+  - `Providers` теперь ведёт через summary-first workflow-карты для enable/smoke/observe сценариев вместо плоского handoff блока;
+  - `Providers` оставляет `Capability coverage` primary, а route families и full surface matrix переводит в secondary disclosure diagnostics;
+  - `Overview`, `System` и `Providers` теперь используют общий `renderWorkflowCard(...)` helper вместо page-local дублирования workflow-card markup.
+- Добавлен runtime regression test на shipped assets `render-system.js` и `render-providers.js`, чтобы summary-first/staged diagnostics copy для этих экранов не дрейфовал между TS source и отгружаемым bundle.
 
 ### Проверка
 
@@ -372,13 +379,15 @@
 - `uv run pytest tests/integration/app/test_system_router_extra.py -q`
 - `npm run build:admin`
 - `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
 
 ### Дальше
 
 - Первый практический slice `Phase 5` закрыт: верхний operator UX теперь лучше отражает реальные workflow, а overview стал summary-first точкой входа вместо просто списка страниц.
 - Следующий логичный шаг внутри `Phase 5` теперь сместился дальше:
-  - продолжить staged-упрощение крупных day-2 экранов уже на соседних surfaces (`System`, `Providers`, возможно `Files & Batches`), где ещё остаются конкурирующие diagnostics/workbench панели;
-  - при желании добавить docs/deep-link handoff из `Traffic`/`Logs` в операторские guide-ы и troubleshooting flow.
+  - после `System`/`Providers` продолжить staged-упрощение соседних surfaces, где ещё остаются конкурирующие diagnostics/workbench панели, в первую очередь `Files & Batches`;
+  - при желании добавить docs/deep-link handoff из `Traffic`/`Logs`/`Providers` в operator guide и troubleshooting flow.
 - Дополнительный follow-up для observability UX теперь стал уже вторичным:
   - при желании добавить test/export actions для sink-ов;
   - при желании связать preset cards с docs/operator guide deep links или sample commands;
