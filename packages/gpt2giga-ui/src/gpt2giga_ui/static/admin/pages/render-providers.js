@@ -1,5 +1,6 @@
+import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
-import { banner, card, kpi, pill, renderDefinitionList, renderStatLines, renderTable, renderWorkflowCard, } from "../templates.js";
+import { banner, card, kpi, pill, renderDefinitionList, renderGuideLinks, renderStatLines, renderTable, renderWorkflowCard, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber } from "../utils.js";
 export async function renderProviders(app, token) {
     const [capabilities, routes, runtime] = await Promise.all([
@@ -147,6 +148,23 @@ export async function renderProviders(app, token) {
           </div>
         </div>
       `, "panel panel--span-5")}
+    ${card("Guide and troubleshooting", renderGuideLinks([
+        {
+            label: "Provider surface diagnostics",
+            href: OPERATOR_GUIDE_LINKS.providers,
+            note: "Use the operator playbook for capability coverage, mounted route checks, and the expected page-to-page handoff from Settings to Playground to Traffic.",
+        },
+        {
+            label: "Rollout backend v2",
+            href: OPERATOR_GUIDE_LINKS.rolloutV2,
+            note: "Open the rollout notes when the mismatch is really about backend mode selection rather than a missing route or disabled provider family.",
+        },
+        {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Use the escalation map when provider posture looks wrong but the next operator surface is still ambiguous.",
+        },
+    ], "This page stays summary-first. Use the docs only after provider coverage, playground smoke, or live traffic still leave the mismatch unresolved."), "panel panel--span-12")}
     ${card("Capability coverage", `
         <div class="stack">
           <p class="muted">

@@ -1,4 +1,5 @@
-import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderStaticSelectOptions, renderWorkflowCard, } from "../../templates.js";
+import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
+import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderGuideLinks, renderStaticSelectOptions, renderWorkflowCard, } from "../../templates.js";
 import { escapeHtml, formatBytes, formatTimestamp } from "../../utils.js";
 import { buildIdleSelectionSummary, buildIdleWorkflowSummary, renderBatchStatus, } from "./serializers.js";
 export function renderFilesBatchesHeroActions() {
@@ -173,6 +174,23 @@ export function renderFilesBatchesPage(data, inventory, filters) {
           </div>
         </div>
       `, "panel panel--span-4")}
+    ${card("Guide and troubleshooting", renderGuideLinks([
+        {
+            label: "Files and batches lifecycle",
+            href: OPERATOR_GUIDE_LINKS.filesBatches,
+            note: "Follow the staged operator path for uploads, queued jobs, output inspection, and the downstream request-evidence handoff.",
+        },
+        {
+            label: "Traffic workflow guide",
+            href: OPERATOR_GUIDE_LINKS.traffic,
+            note: "Open this when a batch output now needs request-level evidence and the next move is the broader recent-traffic summary.",
+        },
+        {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Use the escalation map when the problem moved from stored artifacts into runtime failures, provider posture, or log evidence.",
+        },
+    ], "Files and batch work stays local until one stored artifact needs runtime evidence. These guide links show when to stay on the workbench and when to branch into the broader operator flow."), "panel panel--span-4")}
     ${card("Stored files", inventory.filteredFiles.length
         ? `
             <div class="table-wrap">

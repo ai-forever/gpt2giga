@@ -336,8 +336,8 @@ function buildConfigHighlightItems(configSummary, runtime, setup, storeState) {
             note: `Mode ${String(network.mode ?? runtime.mode ?? "n/a")} with ${runtime.docs_enabled ? "docs exposed" : "docs disabled"}.`,
         },
         {
-            label: "Provider backend",
-            value: String(providers.gigachat_api_mode ?? "n/a"),
+            label: "Provider backends",
+            value: `${String(providers.chat_backend_mode ?? providers.gigachat_api_mode ?? "n/a")} / ${String(providers.responses_backend_mode ?? "n/a")}`,
             note: `${asArray(providers.enabled_providers).map(String).join(", ") || "No enabled providers"} using ${String(providers.runtime_store_backend ?? "n/a")} storage.`,
         },
         {

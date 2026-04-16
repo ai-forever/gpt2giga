@@ -257,6 +257,86 @@ GPT2GIGA_GIGACHAT_API_MODE=v1
 docker compose -f deploy/compose/base.yaml --profile PROD up -d
 ```
 
+## Operator console workflows
+
+### Traffic summary to request scope
+
+`/admin/traffic` — это summary-first поверхность для day-2 наблюдения.
+
+Когда идти сюда:
+
+- нужно быстро понять общий поток recent requests и recent errors;
+- нужно сравнить provider/key usage, не начиная с raw logs;
+- нужно сузиться до одного `request_id`, но ещё не ясно, нужны ли line-by-line логи.
+
+Практический порядок:
+
+1. Отфильтруйте `provider`, `endpoint`, `status_code` или `request_id`.
+2. Проверьте `Recent requests` и `Recent errors`, чтобы выбрать один request/failure.
+3. Держите `Usage summary` и `Usage drill-down` вторичными, пока вопрос не стал явно про provider spike или key-level spike.
+4. Открывайте `/admin/logs` только после того, как уже выделили один request context.
+
+### Logs deep-dive and live tail
+
+`/admin/logs` — diagnose-first поверхность для raw tail, tail-derived request context и live SSE stream.
+
+Когда идти сюда:
+
+- есть конкретный `request_id` или текстовый паттерн, который нужно проследить в tail;
+- нужен live stream, чтобы поймать hanging reader, stream error или sequence around one request;
+- structured recent request/error rows уже не дают достаточной глубины.
+
+Практический порядок:
+
+1. По возможности приходите сюда уже с `request_id` из `/admin/traffic`.
+2. Сначала читайте `Context inspector` и `Tail-derived request context`, а не сырой tail.
+3. Раскрывайте `Session diagnostics` только если есть реальная проблема live stream lifecycle.
+4. Возвращайтесь в `/admin/traffic`, когда root cause уже понятен и нужно проверить более широкий request/error фон.
+
+### Provider surface diagnostics
+
+`/admin/providers` — summary-first страница для mounted provider surface, capability coverage и route ownership.
+
+Когда идти сюда:
+
+- кажется, что нужный provider family не смонтирован или смонтирован не так;
+- нужно сравнить enabled providers, backend modes и capability coverage;
+- playground smoke или traffic summary показали mismatch между ожидаемой и реальной provider surface.
+
+Практический порядок:
+
+1. Подтвердите `Enabled provider mix` и backend modes.
+2. Используйте `Capability coverage` как primary explanation.
+3. Переходите в `Playground`, если нужно быстро доказать, что конкретный mounted route действительно отвечает.
+4. Переходите в `Traffic` или `Logs` только если mismatch уже про live request path, а не про config/mount posture.
+
+### Files and batches lifecycle
+
+`/admin/files-batches` — workbench для staged input files, batch lifecycle и downstream output handoff.
+
+Когда идти сюда:
+
+- нужно загрузить JSONL input или переиспользовать уже сохранённый файл;
+- нужно проверить статус batch job, input/output linkage и metadata;
+- нужно решить, оставаться ли на inventory/workbench уровне или уходить в runtime diagnostics.
+
+Практический порядок:
+
+1. Начинайте с `Stage 1 · Upload input` или выбора уже существующего файла.
+2. Создавайте batch только после проверки input metadata и intended endpoint.
+3. Держите `Selection metadata snapshot` и `Content preview` вторичными, пока summary не перестанет хватать.
+4. Переходите в `Traffic` или `Logs` только когда batch/output уже требует request-level evidence, а не просто inventory inspection.
+
+## Troubleshooting handoff map
+
+| Симптом | Стартовая страница | Следующий шаг |
+|---|---|---|
+| Нужно понять общий request/error фон по recent activity | `/admin/traffic` | Закрепите один `request_id`, потом переходите в `/admin/logs` |
+| Нужен raw tail или live stream по одному запросу | `/admin/logs` | После локализации причины вернитесь в `/admin/traffic` |
+| Кажется, что route или provider surface смонтированы не так | `/admin/providers` | Сначала `Playground`, потом `Traffic`, если уже есть live request mismatch |
+| Batch job или output file ведут себя странно | `/admin/files-batches` | Сначала inspector/workflow summary, потом `Traffic` или `Logs` |
+| Непонятно, это config/runtime проблема или live request проблема | `/admin/system` | Оттуда переходите в `/admin/providers` или `/admin/traffic` |
+
 ## Admin и legacy logs
 
 В `DEV` доступны:

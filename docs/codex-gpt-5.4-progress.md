@@ -372,6 +372,16 @@
     - при смене file/batch selection старый preview больше не остаётся висеть как ложный контекст для нового объекта;
   - navigation copy для `Files & Batches` обновлён под staged workbench semantics вместо общего “advanced workbench state”.
 - Добавлен runtime regression test на shipped asset `pages/files-batches/view.js`, чтобы workflow/disclosure copy для `Files & Batches` не дрейфовал между TS source и отгружаемым bundle.
+- Закрыт следующий запланированный UX slice с docs/deep-link handoff из day-2 экранов в operator guide:
+  - добавлен общий frontend helper `gpt2giga/frontend/admin/docs-links.ts` для стабильных operator-guide deep links;
+  - в `Traffic`, `Logs`, `Providers` и `Files & Batches` появились отдельные `Guide and troubleshooting` cards с переходами в page-specific operator playbook и общий troubleshooting map;
+  - `gpt2giga/frontend/admin/templates.ts` получил общий `renderGuideLinks(...)`, чтобы doc handoff не дублировался page-local HTML-разметкой.
+- Обновлён `docs/operator-guide.md` под эти deep links:
+  - добавлены ASCII-стабильные секции `Operator console workflows` и `Troubleshooting handoff map`;
+  - добавлены явные workflow-подразделы для `Traffic`, `Logs`, `Providers` и `Files & Batches`, чтобы UI вёл не в абстрактный длинный guide, а в конкретный операторский сценарий.
+- Добавлен regression coverage на shipped admin bundle для нового doc handoff слоя:
+  - page assets проверяют наличие guide/troubleshooting CTA;
+  - `docs-links.js` проверяется на присутствие page-specific anchor fragments для operator guide.
 
 ### Проверка
 
@@ -394,13 +404,16 @@
 - `uv run ruff format --check tests/integration/app/test_system_router_extra.py`
 - `npm run build:admin`
 - `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `npm run build:admin`
+- `uv run ruff check gpt2giga/frontend/admin gpt2giga/app/admin_ui.py tests/integration/app/test_system_router_extra.py`
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
 
 ### Дальше
 
 - Первый практический slice `Phase 5` закрыт: верхний operator UX теперь лучше отражает реальные workflow, а overview стал summary-first точкой входа вместо просто списка страниц.
 - Следующий логичный шаг внутри `Phase 5` теперь сместился дальше:
-  - после `Files & Batches` логично добавить docs/deep-link handoff из `Traffic`/`Logs`/`Providers`/`Files & Batches` в operator guide и troubleshooting flow;
-  - затем можно решать, нужен ли ещё один UX slice для более явной связки batch output -> traffic/log diagnostics или Phase 5 уже достаточно закрыта для перехода к Phase 6/10.
+  - docs/deep-link handoff уже добавлен, поэтому следующий выбор теперь между ещё одним UX slice для явной связки batch output -> traffic/log diagnostics и переходом к `Phase 6/10`;
+  - если оставаться в `Phase 5`, то самый полезный follow-up теперь — сделать более явный downstream path от batch/output selection к scoped `Traffic`/`Logs`, а не просто на broad observe surfaces.
 - Дополнительный follow-up для observability UX теперь стал уже вторичным:
   - при желании добавить test/export actions для sink-ов;
   - при желании связать preset cards с docs/operator guide deep links или sample commands;

@@ -209,6 +209,7 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
 
     traffic_asset = client.get("/admin/assets/admin/pages/traffic/view.js")
     logs_asset = client.get("/admin/assets/admin/pages/logs/view.js")
+    docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert traffic_asset.status_code == 200
     assert "Open logs with current filters" in traffic_asset.text
@@ -217,12 +218,20 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     )
     assert "Usage drill-down" in traffic_asset.text
     assert "Raw payload snapshot" in traffic_asset.text
+    assert "Traffic workflow guide" in traffic_asset.text
+    assert "Troubleshooting handoff map" in traffic_asset.text
 
     assert logs_asset.status_code == 200
     assert "Open traffic summary" in logs_asset.text
     assert "Return to the broad traffic summary" in logs_asset.text
     assert "Session diagnostics" in logs_asset.text
     assert "Raw context snapshot" in logs_asset.text
+    assert "Logs deep-dive guide" in logs_asset.text
+
+    assert docs_links_asset.status_code == 200
+    assert "operator-guide.md" in docs_links_asset.text
+    assert "traffic-summary-to-request-scope" in docs_links_asset.text
+    assert "logs-deep-dive-and-live-tail" in docs_links_asset.text
 
 
 def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
@@ -230,6 +239,7 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
 
     system_asset = client.get("/admin/assets/admin/pages/render-system.js")
     providers_asset = client.get("/admin/assets/admin/pages/render-providers.js")
+    docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert system_asset.status_code == 200
     assert "Confirm live request behavior before deep forensics" in system_asset.text
@@ -243,12 +253,16 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert "Keep this page summary-first" in providers_asset.text
     assert "Smoke the mounted provider surface" in providers_asset.text
     assert "Route-family detail stays secondary" in providers_asset.text
+    assert "Provider surface diagnostics" in providers_asset.text
+    assert docs_links_asset.status_code == 200
+    assert "provider-surface-diagnostics" in docs_links_asset.text
 
 
 def test_admin_ui_assets_include_staged_files_batches_copy():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 
     files_batches_asset = client.get("/admin/assets/admin/pages/files-batches/view.js")
+    docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert files_batches_asset.status_code == 200
     assert "Staged files and batch workflow" in files_batches_asset.text
@@ -256,6 +270,9 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert "Selection metadata snapshot" in files_batches_asset.text
     assert "Content preview stays secondary" in files_batches_asset.text
     assert "Escalate only when execution context is needed" in files_batches_asset.text
+    assert "Files and batches lifecycle" in files_batches_asset.text
+    assert docs_links_asset.status_code == 200
+    assert "files-and-batches-lifecycle" in docs_links_asset.text
 
 
 def test_admin_runtime_endpoint():

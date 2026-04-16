@@ -1,4 +1,5 @@
-import { card, kpi, renderDefinitionList, renderFilterSelectOptions, renderStaticSelectOptions, } from "../../templates.js";
+import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
+import { card, kpi, renderDefinitionList, renderFilterSelectOptions, renderGuideLinks, renderStaticSelectOptions, } from "../../templates.js";
 import { asArray, asRecord, escapeHtml } from "../../utils.js";
 import { buildStreamDiagnostics, buildTailContextRows, buildTrafficUrlForRequest, countMatchingLines, formatRenderedLogOutput, indexEventsByRequestId, renderErrorRows, renderLogSelectionActions, renderRequestRows, renderStreamPill, renderTailContextTable, summarizeActiveFilters, } from "./serializers.js";
 import { createLogsStreamState, DEFAULT_LIMIT, DEFAULT_LINES } from "./state.js";
@@ -182,6 +183,25 @@ export function renderLogsPage(data, filters) {
           ${renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup), filters)}
         </div>
       `, "panel panel--span-4")}
+    ${card("Guide and troubleshooting", renderGuideLinks([
+        {
+            label: "Logs deep-dive guide",
+            href: OPERATOR_GUIDE_LINKS.logs,
+            note: "Use the longer playbook for request-pinned tail inspection, live streaming, and the moment when raw logs become necessary.",
+        },
+        {
+            label: "Traffic workflow guide",
+            href: OPERATOR_GUIDE_LINKS.traffic,
+            note: "Step back to the summary-first request flow when you need to re-check recent request volume, error mix, or a broader provider window.",
+        },
+        {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Use the page-to-page escalation map when the problem no longer belongs only to Logs and needs a clearer next handoff.",
+        },
+    ], filters.requestId
+        ? "Logs is already pinned to one request. These links explain how to keep the deep dive scoped and when to return to broader operator surfaces."
+        : "Logs is the deep-dive surface. Use the guide links when you need a fuller troubleshooting flow instead of continuing ad hoc from the raw tail alone."), "panel panel--span-4")}
     ${card("Rendered log tail", `
         <div class="surface surface--dark">
           <div class="stack">

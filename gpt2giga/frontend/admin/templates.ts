@@ -48,6 +48,12 @@ interface WorkflowCardAction {
   primary?: boolean;
 }
 
+interface GuideLinkItem {
+  href: string;
+  label: string;
+  note: string;
+}
+
 export function banner(message: string, tone: "info" | "warn" | "danger" = "info"): string {
   const toneClass =
     tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
@@ -263,6 +269,37 @@ export function renderWorkflowCard(options: {
           .join("")}
       </div>
     </article>
+  `;
+}
+
+export function renderGuideLinks(
+  links: GuideLinkItem[],
+  intro = "Use these links when the current screen already narrowed the problem but you still need the longer operator playbook.",
+): string {
+  if (!links.length) {
+    return renderEmptyState("No guide links are configured.");
+  }
+
+  return `
+    <div class="stack">
+      <p class="muted">${escapeHtml(intro)}</p>
+      <div class="step-grid">
+        ${links
+          .map(
+            (link) => `
+              <article class="step-card">
+                <h4>
+                  <a href="${escapeHtml(link.href)}" target="_blank" rel="noreferrer noopener">
+                    ${escapeHtml(link.label)}
+                  </a>
+                </h4>
+                <p>${escapeHtml(link.note)}</p>
+              </article>
+            `,
+          )
+          .join("")}
+      </div>
+    </div>
   `;
 }
 

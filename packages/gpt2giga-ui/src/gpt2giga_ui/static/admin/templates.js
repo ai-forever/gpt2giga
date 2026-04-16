@@ -169,6 +169,30 @@ export function renderWorkflowCard(options) {
     </article>
   `;
 }
+export function renderGuideLinks(links, intro = "Use these links when the current screen already narrowed the problem but you still need the longer operator playbook.") {
+    if (!links.length) {
+        return renderEmptyState("No guide links are configured.");
+    }
+    return `
+    <div class="stack">
+      <p class="muted">${escapeHtml(intro)}</p>
+      <div class="step-grid">
+        ${links
+        .map((link) => `
+              <article class="step-card">
+                <h4>
+                  <a href="${escapeHtml(link.href)}" target="_blank" rel="noreferrer noopener">
+                    ${escapeHtml(link.label)}
+                  </a>
+                </h4>
+                <p>${escapeHtml(link.note)}</p>
+              </article>
+            `)
+        .join("")}
+      </div>
+    </div>
+  `;
+}
 export function renderDiffTable(entries, emptyMessage = "No changes.") {
     if (!entries.length) {
         return `<p class="muted">${escapeHtml(emptyMessage)}</p>`;

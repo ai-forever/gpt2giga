@@ -1,8 +1,10 @@
+import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
 import {
   card,
   kpi,
   renderDefinitionList,
   renderFilterSelectOptions,
+  renderGuideLinks,
   renderStaticSelectOptions,
   renderStatLines,
 } from "../../templates.js";
@@ -295,6 +297,32 @@ export function renderTrafficPage(data: TrafficPageData, filters: TrafficFilters
           </details>
         </div>
       `,
+      "panel panel--span-12",
+    )}
+    ${card(
+      "Guide and troubleshooting",
+      renderGuideLinks(
+        [
+          {
+            label: "Traffic workflow guide",
+            href: OPERATOR_GUIDE_LINKS.traffic,
+            note: "Follow the summary-first request workflow and know when to pin one request before opening raw logs.",
+          },
+          {
+            label: "Logs deep-dive guide",
+            href: OPERATOR_GUIDE_LINKS.logs,
+            note: "Use this when the traffic summary already isolated one request and the next step is raw tail evidence or live SSE inspection.",
+          },
+          {
+            label: "Troubleshooting handoff map",
+            href: OPERATOR_GUIDE_LINKS.troubleshooting,
+            note: "Open the escalation map when the current symptom still does not clearly point at the next operator surface.",
+          },
+        ],
+        requestPinned
+          ? "The request is already pinned. These guide links explain when to stay on Traffic, when to escalate into Logs, and how to hand the same context across screens."
+          : "Keep the broad observe surface in Traffic by default. Use the guide links only after the summary exposed one request, provider, or failure pattern worth a deeper pass.",
+      ),
       "panel panel--span-12",
     )}
   `;

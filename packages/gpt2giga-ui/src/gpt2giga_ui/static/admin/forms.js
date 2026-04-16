@@ -40,6 +40,10 @@ export function buildApplicationPayload(form) {
     if (fields.enable_telemetry) {
         payload.enable_telemetry = fields.enable_telemetry.value === "true";
     }
+    if (fields.gigachat_responses_api_mode) {
+        payload.gigachat_responses_api_mode =
+            fields.gigachat_responses_api_mode.value || null;
+    }
     if (fields.observability_sinks) {
         payload.observability_sinks = parseCsv(fields.observability_sinks.value);
     }
