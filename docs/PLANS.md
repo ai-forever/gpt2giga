@@ -440,6 +440,7 @@ uv run pytest tests/integration/app/test_admin_console_settings.py tests/integra
 
 ### Next
 
+- Canonical `latest`/plain version image tags для Docker Hub и GHCR должны оставаться привязанными к Python `3.13`.
 - Начать `Milestone 2`: разрезать `gpt2giga/features/responses/stream.py` через internal split + stable facade без изменения wire-format SSE.
 
 ## Milestone 1

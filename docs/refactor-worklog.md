@@ -20,6 +20,7 @@
 - 2026-04-16 — `Milestone 0`
   - Добавлен отдельный CI job для сборки admin frontend через `npm ci` и `npm run build:admin`.
   - Исправлена публикация Docker tags: plain version и `latest` теперь публикуются только canonical matrix job.
+  - Canonical Python для plain version и `latest` tags зафиксирован как `3.13` для Docker Hub и GHCR.
   - Расширены workflow `paths:` для UI package и frontend build-конфигов.
   - Добавлен AST-based architecture guardrail test против зависимости `features/**` и `providers/**` от `gpt2giga.api.openai.streaming`.
   - Удалены локальные директории `.ipynb_checkpoints/`.
@@ -27,3 +28,8 @@
   - Создан этот отдельный журнал и добавлены записи о выполненной работе.
   - Проверка: `npm ci`; `npm run build:admin`; `uv run ruff check .github/workflows tests gpt2giga/core/http gpt2giga/api/openai/streaming.py gpt2giga/features/chat/stream.py gpt2giga/features/responses/stream.py`; `uv run ruff format --check tests gpt2giga/core/http gpt2giga/api/openai/streaming.py gpt2giga/features/chat/stream.py gpt2giga/features/responses/stream.py`; `uv run pytest tests/unit -q`; `git diff --check`.
   - Commit: `ci: add frontend build and docker publish guardrails`.
+
+- 2026-04-16 — follow-up slice
+  - В `.github/workflows/docker_image.yaml` canonical Docker Hub job для plain version и `latest` tags перенесён с Python `3.12` на Python `3.13`.
+  - Проверка: `git diff --check`.
+  - Commit: `ci: align docker latest tags with python 3.13`.
