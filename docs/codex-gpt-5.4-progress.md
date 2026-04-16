@@ -336,6 +336,20 @@
   - не выключают остальные sink-и;
   - не очищают уже сохранённые secret-поля.
 - Добавлен runtime-facing regression test на shipped admin asset bundle, чтобы preset labels и compose overlay hints реально попадали в отгружаемый `/admin/assets/admin/pages/control-plane-sections.js`.
+- Продолжен следующий Phase 5 UX slice уже внутри observe/diagnose surfaces:
+  - `Traffic` получил summary-first workflow card с явным handoff в `Logs`;
+  - `Logs` получил diagnose-first workflow card с явным возвратом в `Traffic`.
+- Cross-page handoff между `Traffic` и `Logs` теперь переносит не только `request_id`, но и совместимые фильтры:
+  - `provider`;
+  - `method`;
+  - `status_code`;
+  - `error_type`;
+  - `limit`.
+- Обновлены page-local CTA и row-level actions:
+  - `Traffic` открывает `Logs` уже с текущим scoped context;
+  - `Logs` возвращает в `Traffic` с тем же request/filter context;
+  - shipped assets теперь явно маркируют `Traffic` как summary-first observe surface, а `Logs` как deep-dive diagnose surface.
+- Добавлен runtime regression test на shipped assets `pages/traffic/view.js` и `pages/logs/view.js`, чтобы observe/diagnose handoff copy и compiled bundle не дрейфовали.
 
 ### Проверка
 
@@ -346,12 +360,17 @@
 - `npm run build:admin`
 - `uv run ruff check tests/integration/app/test_system_router_extra.py`
 - `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `npm run build:admin`
+- `uv run ruff check tests/integration/app/test_system_router_extra.py`
+- `uv run ruff format --check tests/integration/app/test_system_router_extra.py`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
 
 ### Дальше
 
 - Первый практический slice `Phase 5` закрыт: верхний operator UX теперь лучше отражает реальные workflow, а overview стал summary-first точкой входа вместо просто списка страниц.
-- Следующий логичный шаг внутри `Phase 5`:
-  - продолжить упрощение observe/diagnose handoff уже на самих страницах `Traffic` и `Logs`, чтобы summary-first routing читался не только из overview/navigation, но и из page-local actions/empty states.
+- Следующий логичный шаг внутри `Phase 5` теперь сместился дальше:
+  - упростить сами page-local empty states и competing panels на крупных day-2 экранах, чтобы staged workflow читался ещё быстрее без лишнего визуального шума;
+  - при желании добавить docs/deep-link handoff из `Traffic`/`Logs` в операторские guide-ы и troubleshooting flow.
 - Дополнительный follow-up для observability UX теперь стал уже вторичным:
   - при желании добавить test/export actions для sink-ов;
   - при желании связать preset cards с docs/operator guide deep links или sample commands;

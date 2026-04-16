@@ -47,7 +47,7 @@ export function bindLogsPage(options) {
         }, null, 2);
     };
     const renderTailContext = () => {
-        elements.tailContextNode.innerHTML = renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup));
+        elements.tailContextNode.innerHTML = renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup), filters);
     };
     const renderStreamDiagnosticsPanel = () => {
         elements.streamDiagnostics.innerHTML = renderDefinitionList(buildStreamDiagnostics(streamState, rawLogLines.length));

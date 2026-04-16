@@ -59,11 +59,15 @@ export function buildTrafficUrl(filters) {
     const query = params.toString();
     return query ? `/admin/traffic?${query}` : "/admin/traffic";
 }
-export function buildLogsUrlForRequest(requestId) {
+export function buildLogsUrlForRequest(requestId, filters) {
     const params = new URLSearchParams();
-    if (requestId.trim()) {
-        params.set("request_id", requestId.trim());
-    }
+    const scopedRequestId = requestId.trim() || filters?.requestId?.trim() || "";
+    setQueryParamIfPresent(params, "request_id", scopedRequestId);
+    setQueryParamIfPresent(params, "provider", filters?.provider || "");
+    setQueryParamIfPresent(params, "method", filters?.method || "");
+    setQueryParamIfPresent(params, "status_code", filters?.statusCode || "");
+    setQueryParamIfPresent(params, "error_type", filters?.errorType || "");
+    setQueryParamIfPresent(params, "limit", filters?.limit || "", DEFAULT_LIMIT);
     const query = params.toString();
     return query ? `/admin/logs?${query}` : "/admin/logs";
 }
@@ -117,7 +121,7 @@ export function buildTrafficEventSelectionSummary(kind, item, counterpart) {
             label: "Request id",
             value: requestId || "n/a",
             note: requestId
-                ? "This id can reopen Logs with the same request context already applied."
+                ? "This id can reopen Logs with the same request context and compatible filters already applied."
                 : "No request id was recorded, so the Logs handoff is unavailable for this row.",
         },
         {
@@ -172,14 +176,14 @@ export function buildUsageSelectionSummary(kind, item, filters) {
             value: filters.requestId ? "Aggregate tables stay unpinned" : "Following the current filters",
             note: filters.requestId
                 ? "The recent request/error feeds are pinned, but usage rows stay grouped by provider/model/key."
-                : "Pin a request from the request/error tables to hand off one request into Logs.",
+                : "Pin a request from the request/error tables to hand off one request into Logs with the same filters.",
         },
     ];
 }
 export function renderTrafficSelectionActions(selection, filters) {
     const actions = [];
     if (selection.requestId) {
-        actions.push(`<a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(selection.requestId))}">Open logs for request</a>`);
+        actions.push(`<a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(selection.requestId, filters))}">Open logs for request</a>`);
         if (filters.requestId !== selection.requestId) {
             actions.push(`<button class="button" data-traffic-action="scope-request" data-request-id="${escapeHtml(selection.requestId)}" type="button">Pin this request</button>`);
         }
@@ -250,7 +254,7 @@ export function indexEventsByRequestId(events) {
     });
     return index;
 }
-export function renderRequestRows(events) {
+export function renderRequestRows(events, filters) {
     return renderTable([
         { label: "When" },
         { label: "Route" },
@@ -264,10 +268,10 @@ export function renderRequestRows(events) {
         renderStatusSummary(event),
         `<strong>${escapeHtml(formatDurationMs(event.stream_duration_ms ?? event.duration_ms))}</strong><br /><span class="muted">${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
         `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
-        renderEventRowActions(index, "request", String(event.request_id ?? ""), buildLogsUrlForRequest),
+        renderEventRowActions(index, "request", String(event.request_id ?? ""), filters),
     ]), "No recent requests matched the selected filters.");
 }
-export function renderErrorRows(events) {
+export function renderErrorRows(events, filters) {
     return renderTable([
         { label: "When" },
         { label: "Route" },
@@ -281,7 +285,7 @@ export function renderErrorRows(events) {
         `<strong>${escapeHtml(String(event.error_type ?? "HTTP error"))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
         `<strong>${escapeHtml(formatDurationMs(event.stream_duration_ms ?? event.duration_ms))}</strong><br /><span class="muted">${escapeHtml(String(event.client_ip ?? "client hidden"))}</span>`,
         `${escapeHtml(String(event.model ?? "n/a"))}<br /><span class="muted">${escapeHtml(String(event.api_key_name ?? event.api_key_source ?? "anonymous"))}</span>`,
-        renderEventRowActions(index, "error", String(event.request_id ?? ""), buildLogsUrlForRequest),
+        renderEventRowActions(index, "error", String(event.request_id ?? ""), filters),
     ]), "No recent errors matched the selected filters.");
 }
 export function renderUsageKeyRows(entries) {
@@ -328,12 +332,12 @@ export function seedTrafficSelection(filters, requestLookup, errorLookup, select
         selectTrafficEvent("error", errorEvent);
     }
 }
-function renderEventRowActions(index, kind, requestId, buildContextUrl) {
+function renderEventRowActions(index, kind, requestId, filters) {
     const actions = [
         `<button class="button button--secondary" data-traffic-detail="${index}" data-traffic-kind="${kind}" type="button">View</button>`,
     ];
     if (requestId.trim()) {
-        actions.push(`<a class="button" href="${escapeHtml(buildContextUrl(requestId))}">Open logs</a>`);
+        actions.push(`<a class="button" href="${escapeHtml(buildLogsUrlForRequest(requestId, filters))}">Open logs</a>`);
     }
     return `<div class="toolbar">${actions.join("")}</div>`;
 }

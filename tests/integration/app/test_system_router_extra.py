@@ -204,6 +204,23 @@ def test_admin_ui_assets_include_observability_presets():
     assert "deploy/compose/observability-otlp.yaml" in response.text
 
 
+def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
+    client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
+
+    traffic_asset = client.get("/admin/assets/admin/pages/traffic/view.js")
+    logs_asset = client.get("/admin/assets/admin/pages/logs/view.js")
+
+    assert traffic_asset.status_code == 200
+    assert "Open logs with current filters" in traffic_asset.text
+    assert (
+        "same request id and compatible filters already applied" in traffic_asset.text
+    )
+
+    assert logs_asset.status_code == 200
+    assert "Open traffic summary" in logs_asset.text
+    assert "Return to the broad traffic summary" in logs_asset.text
+
+
 def test_admin_runtime_endpoint():
     app = make_app()
     client = TestClient(app)

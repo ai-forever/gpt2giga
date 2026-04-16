@@ -11,7 +11,7 @@ export async function renderLogs(app: AdminApp, token: number): Promise<void> {
     return;
   }
 
-  app.setHeroActions(renderLogsHeroActions());
+  app.setHeroActions(renderLogsHeroActions(filters));
   app.setContent(renderLogsPage(data, filters));
 
   const elements = resolveLogsElements(app.pageContent);

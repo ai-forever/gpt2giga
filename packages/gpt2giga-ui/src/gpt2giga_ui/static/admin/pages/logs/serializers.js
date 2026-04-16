@@ -40,11 +40,15 @@ export function buildLogsUrl(filters) {
     const query = params.toString();
     return query ? `/admin/logs?${query}` : "/admin/logs";
 }
-export function buildTrafficUrlForRequest(requestId) {
+export function buildTrafficUrlForRequest(requestId, filters) {
     const params = new URLSearchParams();
-    if (requestId.trim()) {
-        params.set("request_id", requestId.trim());
-    }
+    const scopedRequestId = requestId.trim() || filters?.requestId?.trim() || "";
+    setQueryParamIfPresent(params, "request_id", scopedRequestId);
+    setQueryParamIfPresent(params, "provider", filters?.provider || "");
+    setQueryParamIfPresent(params, "method", filters?.method || "");
+    setQueryParamIfPresent(params, "status_code", filters?.statusCode || "");
+    setQueryParamIfPresent(params, "error_type", filters?.errorType || "");
+    setQueryParamIfPresent(params, "limit", filters?.limit || "", DEFAULT_LIMIT);
     const query = params.toString();
     return query ? `/admin/traffic?${query}` : "/admin/traffic";
 }
@@ -88,7 +92,7 @@ export function summarizeActiveFilters(filters) {
 export function renderLogSelectionActions(requestId, filters) {
     const actions = [];
     if (requestId) {
-        actions.push(`<a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForRequest(requestId))}">Open traffic for request</a>`);
+        actions.push(`<a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForRequest(requestId, filters))}">Open traffic for request</a>`);
         if (filters.requestId !== requestId) {
             actions.push(`<button class="button" data-log-action="scope-request" data-request-id="${escapeHtml(requestId)}" type="button">Pin this request</button>`);
         }
@@ -121,7 +125,7 @@ export function buildTailContextRows(lines, filters, requestLookup, errorLookup)
     });
     return rows.slice(-MAX_TAIL_CONTEXT_ROWS).reverse();
 }
-export function renderTailContextTable(rows) {
+export function renderTailContextTable(rows, filters) {
     return renderTable([
         { label: "Tail line" },
         { label: "Request id" },
@@ -134,7 +138,7 @@ export function renderTailContextTable(rows) {
         `
         <div class="toolbar">
           <button class="button button--secondary" data-log-tail-detail="${escapeHtml(row.rowId)}" type="button">Inspect</button>
-          <a class="button" href="${escapeHtml(buildTrafficUrlForRequest(row.requestId))}">Open traffic</a>
+          <a class="button" href="${escapeHtml(buildTrafficUrlForRequest(row.requestId, filters))}">Open traffic</a>
         </div>
       `,
     ]), "No request ids were extracted from the current rendered tail. Expand the tail window, adjust the text filter, or inspect a recent request/error row instead.");
@@ -177,7 +181,7 @@ export function buildLogEventSelectionSummary(kind, item, counterpart) {
             label: "Request id",
             value: requestId || "n/a",
             note: requestId
-                ? "Use this id to pin Logs or jump into the matching Traffic context."
+                ? "Use this id to pin Logs or jump into the matching Traffic context with compatible filters still applied."
                 : "This row cannot drive the cross-page request handoff because no request id was recorded.",
         },
         {
@@ -316,12 +320,12 @@ function extractRequestIdFromLogLine(line) {
 function matchesLineToFilters(line, filters) {
     return filterLogLines([line], filters).length > 0;
 }
-function renderEventRowActions(index, kind, requestId, buildContextUrl) {
+function renderEventRowActions(index, kind, requestId, filters) {
     const actions = [
         `<button class="button button--secondary" data-log-detail="${index}" data-log-kind="${kind}" type="button">Inspect</button>`,
     ];
     if (requestId.trim()) {
-        actions.push(`<a class="button" href="${escapeHtml(buildContextUrl(requestId))}">Open traffic</a>`);
+        actions.push(`<a class="button" href="${escapeHtml(buildTrafficUrlForRequest(requestId, filters))}">Open traffic</a>`);
     }
     return `<div class="toolbar">${actions.join("")}</div>`;
 }
@@ -347,7 +351,7 @@ export function renderStreamPill(phase) {
     const { label, tone } = describeStreamPhase(phase);
     return pill(label, tone);
 }
-export function renderErrorRows(events) {
+export function renderErrorRows(events, filters) {
     return renderTable([
         { label: "When" },
         { label: "Failure" },
@@ -357,10 +361,10 @@ export function renderErrorRows(events) {
         `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(String(event.request_id ?? "no request id"))}</span>`,
         `<strong>${escapeHtml(String(event.error_type ?? "HTTP error"))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
         `${escapeHtml(String(event.provider ?? "unknown"))}<br /><span class="muted">${escapeHtml(`${String(event.method ?? "GET")} ${String(event.endpoint ?? event.path ?? "n/a")}`)}</span>`,
-        renderEventRowActions(index, "error", String(event.request_id ?? ""), buildTrafficUrlForRequest),
+        renderEventRowActions(index, "error", String(event.request_id ?? ""), filters),
     ]), "No recent errors matched the current filters.");
 }
-export function renderRequestRows(events) {
+export function renderRequestRows(events, filters) {
     return renderTable([
         { label: "When" },
         { label: "Latency" },
@@ -370,6 +374,6 @@ export function renderRequestRows(events) {
         `<strong>${escapeHtml(formatTimestamp(event.created_at))}</strong><br /><span class="muted">${escapeHtml(String(event.request_id ?? "no request id"))}</span>`,
         `<strong>${escapeHtml(formatDurationMs(event.stream_duration_ms ?? event.duration_ms))}</strong><br /><span class="muted">status ${escapeHtml(formatNumber(event.status_code ?? 0))}</span>`,
         `${escapeHtml(String(event.provider ?? "unknown"))}<br /><span class="muted">${escapeHtml(`${String(event.method ?? "GET")} ${String(event.endpoint ?? event.path ?? "n/a")}`)}</span>`,
-        renderEventRowActions(index, "request", String(event.request_id ?? ""), buildTrafficUrlForRequest),
+        renderEventRowActions(index, "request", String(event.request_id ?? ""), filters),
     ]), "No recent requests matched the current filters.");
 }

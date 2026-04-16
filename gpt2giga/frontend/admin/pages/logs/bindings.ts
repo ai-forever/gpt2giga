@@ -110,6 +110,7 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
   const renderTailContext = (): void => {
     elements.tailContextNode.innerHTML = renderTailContextTable(
       buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup),
+      filters,
     );
   };
 

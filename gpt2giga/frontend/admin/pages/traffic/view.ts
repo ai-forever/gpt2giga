@@ -29,10 +29,12 @@ export interface TrafficPageElements {
 }
 
 export function renderTrafficHeroActions(filters: TrafficFilters): string {
+  const logsHref = buildLogsUrlForRequest(filters.requestId, filters);
+  const logsLabel = filters.requestId ? "Open pinned logs" : "Open logs with current filters";
   return `
     <button class="button button--secondary" id="reset-traffic-filters" type="button">Reset filters</button>
-    <a class="button" href="${escapeHtml(filters.requestId ? buildLogsUrlForRequest(filters.requestId) : "/admin/logs")}">
-      ${escapeHtml(filters.requestId ? "Open pinned logs" : "Open logs")}
+    <a class="button" href="${escapeHtml(logsHref)}">
+      ${escapeHtml(logsLabel)}
     </a>
   `;
 }
@@ -52,6 +54,11 @@ export function renderTrafficPage(data: TrafficPageData, filters: TrafficFilters
     ${kpi(requestPinned ? "Pinned errors" : "Errors", formatNumber(scopeSummary.errorCount))}
     ${kpi(requestPinned ? "Pinned tokens" : "Tokens", formatNumber(scopeSummary.totalTokens))}
     ${kpi(requestPinned ? "Providers in scope" : "Providers", formatNumber(scopeSummary.providerCount))}
+    ${card(
+      requestPinned ? "Observe workflow" : "Summary-first observe workflow",
+      renderTrafficWorkflowGuide(filters, requestPinned),
+      "panel panel--span-12",
+    )}
     ${card(
       "Traffic filters",
       `
@@ -181,7 +188,7 @@ export function renderTrafficPage(data: TrafficPageData, filters: TrafficFilters
       `,
       "panel panel--span-12",
     )}
-    ${card("Recent requests", renderRequestRows(data.requestEvents), "panel panel--span-8")}
+    ${card("Recent requests", renderRequestRows(data.requestEvents, filters), "panel panel--span-8")}
     ${card(
       "Selected payload",
       `
@@ -215,7 +222,7 @@ export function renderTrafficPage(data: TrafficPageData, filters: TrafficFilters
       `,
       "panel panel--span-4",
     )}
-    ${card("Recent errors", renderErrorRows(data.errorEvents), "panel panel--span-8")}
+    ${card("Recent errors", renderErrorRows(data.errorEvents, filters), "panel panel--span-8")}
     ${card(
       "Usage summary",
       `
@@ -245,6 +252,46 @@ export function renderTrafficPage(data: TrafficPageData, filters: TrafficFilters
     )}
     ${card("Usage by key", renderUsageKeyRows(data.keyEntries), "panel panel--span-6")}
     ${card("Usage by provider", renderUsageProviderRows(data.providerEntries), "panel panel--span-6")}
+  `;
+}
+
+function renderTrafficWorkflowGuide(filters: TrafficFilters, requestPinned: boolean): string {
+  const logsHref = buildLogsUrlForRequest(filters.requestId, filters);
+  return `
+    <div class="workflow-grid">
+      <article class="workflow-card">
+        <div class="workflow-card__header">
+          <span class="eyebrow">Observe</span>
+          <h4>${escapeHtml(requestPinned ? "Stay scoped to one request" : "Stay here for the broad request picture")}</h4>
+          <p>${escapeHtml(
+            requestPinned
+              ? "Traffic is already narrowed to one request id. Use this page to compare the pinned request, matching error rows, and aggregate usage before deciding whether raw logs are necessary."
+              : "Traffic is the summary-first surface: recent requests, recent errors, and usage rollups stay visible together so you can narrow down one request or failure without starting in raw logs.",
+          )}</p>
+        </div>
+        <div class="workflow-card__actions">
+          <a class="button button--secondary" href="/admin/traffic">${escapeHtml(
+            requestPinned ? "Return to broad traffic" : "Reset traffic scope",
+          )}</a>
+        </div>
+      </article>
+      <article class="workflow-card">
+        <div class="workflow-card__header">
+          <span class="eyebrow">Diagnose</span>
+          <h4>${escapeHtml(requestPinned ? "Escalate only when raw context is needed" : "Escalate to Logs only after one request stands out")}</h4>
+          <p>${escapeHtml(
+            requestPinned
+              ? "Open Logs when the pinned request now needs raw line-by-line context, tail-derived request correlation, or a live stream follow-up."
+              : "Pick one request or error row first, then move into Logs with the same request id and compatible filters already applied.",
+          )}</p>
+        </div>
+        <div class="workflow-card__actions">
+          <a class="button" href="${escapeHtml(logsHref)}">${escapeHtml(
+            requestPinned ? "Open pinned logs" : "Open logs with current filters",
+          )}</a>
+        </div>
+      </article>
+    </div>
   `;
 }
 

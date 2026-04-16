@@ -8,7 +8,7 @@ export async function renderLogs(app, token) {
     if (!app.isCurrentRender(token)) {
         return;
     }
-    app.setHeroActions(renderLogsHeroActions());
+    app.setHeroActions(renderLogsHeroActions(filters));
     app.setContent(renderLogsPage(data, filters));
     const elements = resolveLogsElements(app.pageContent);
     if (!elements) {

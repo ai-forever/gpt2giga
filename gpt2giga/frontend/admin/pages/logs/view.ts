@@ -43,11 +43,15 @@ export interface LogsPageElements {
   tailContextNode: HTMLElement;
 }
 
-export function renderLogsHeroActions(): string {
+export function renderLogsHeroActions(filters: LogsFilters): string {
+  const trafficHref = buildTrafficUrlForRequest(filters.requestId, filters);
   return `
     <button class="button button--secondary" id="reset-log-filters" type="button">Reset filters</button>
     <button class="button button--secondary" id="refresh-logs" type="button">Refresh tail</button>
     <button class="button" id="toggle-stream" type="button">Start live stream</button>
+    <a class="button button--secondary" href="${escapeHtml(trafficHref)}">${escapeHtml(
+      filters.requestId ? "Open pinned traffic" : "Open traffic summary",
+    )}</a>
   `;
 }
 
@@ -62,6 +66,11 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
     ${kpi("Matching lines", countMatchingLines(rawLogLines, filters))}
     ${kpi("Recent errors", data.errorEvents.length)}
     ${kpi("Recent requests", data.requestEvents.length)}
+    ${card(
+      filters.requestId ? "Diagnose workflow" : "Deep-dive diagnose workflow",
+      renderLogsWorkflowGuide(filters),
+      "panel panel--span-12",
+    )}
     ${card(
       "Log filters",
       `
@@ -155,8 +164,8 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
           </div>
           <div class="toolbar">
             <button class="button" type="submit">Apply filters</button>
-            <a class="button button--secondary" href="${escapeHtml(filters.requestId ? buildTrafficUrlForRequest(filters.requestId) : "/admin/traffic")}">
-              ${escapeHtml(filters.requestId ? "Open pinned traffic" : "Open traffic")}
+            <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForRequest(filters.requestId, filters))}">
+              ${escapeHtml(filters.requestId ? "Open pinned traffic" : "Open traffic summary")}
             </a>
           </div>
         </form>
@@ -235,7 +244,7 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
       "Tail-derived request context",
       `
         <div id="logs-tail-context">
-          ${renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup))}
+          ${renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup), filters)}
         </div>
       `,
       "panel panel--span-4",
@@ -248,7 +257,7 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
             <div class="surface__header">
               <div class="stack">
                 <h4>Rendered output</h4>
-                <p class="muted">Client-side filtering is applied after fetching the selected tail window. Use the tail-derived context panel to jump from matching lines into structured request data.</p>
+                <p class="muted">Client-side filtering is applied after fetching the selected tail window. Use the tail-derived context panel to jump from matching lines into structured request data, then return to Traffic with the same request scope when you need the aggregate view again.</p>
               </div>
               <div class="surface__meta">
                 <span class="pill" id="logs-match-count">${escapeHtml(
@@ -264,8 +273,49 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
       `,
       "panel panel--span-12",
     )}
-    ${card("Recent errors", renderErrorRows(data.errorEvents), "panel panel--span-6")}
-    ${card("Recent requests", renderRequestRows(data.requestEvents), "panel panel--span-6")}
+    ${card("Recent errors", renderErrorRows(data.errorEvents, filters), "panel panel--span-6")}
+    ${card("Recent requests", renderRequestRows(data.requestEvents, filters), "panel panel--span-6")}
+  `;
+}
+
+function renderLogsWorkflowGuide(filters: LogsFilters): string {
+  const trafficHref = buildTrafficUrlForRequest(filters.requestId, filters);
+  const scoped = Boolean(filters.requestId);
+  return `
+    <div class="workflow-grid">
+      <article class="workflow-card">
+        <div class="workflow-card__header">
+          <span class="eyebrow">Diagnose</span>
+          <h4>${escapeHtml(scoped ? "Keep the deep dive scoped" : "Use Logs only after Traffic narrowed the question")}</h4>
+          <p>${escapeHtml(
+            scoped
+              ? "Logs is already scoped to one request id. Follow the rendered tail, structured request and error context, and live stream from here when you need raw evidence for one request."
+              : "Logs is the diagnose surface. Start from Traffic summaries when possible, then land here only after one request, failure, or text pattern is worth tracing line by line.",
+          )}</p>
+        </div>
+        <div class="workflow-card__actions">
+          <a class="button button--secondary" href="/admin/logs">${escapeHtml(
+            scoped ? "Reset log scope" : "Reset to default tail",
+          )}</a>
+        </div>
+      </article>
+      <article class="workflow-card">
+        <div class="workflow-card__header">
+          <span class="eyebrow">Observe</span>
+          <h4>${escapeHtml(scoped ? "Return to the matching traffic summary" : "Return to the broad traffic summary")}</h4>
+          <p>${escapeHtml(
+            scoped
+              ? "When the root cause is clear, jump back to Traffic to compare the same request context against recent request and error summaries."
+              : "Return to Traffic whenever you need to re-check recent request volume, error mix, or usage rollups around the same provider and status filters.",
+          )}</p>
+        </div>
+        <div class="workflow-card__actions">
+          <a class="button" href="${escapeHtml(trafficHref)}">${escapeHtml(
+            scoped ? "Open pinned traffic" : "Open traffic summary",
+          )}</a>
+        </div>
+      </article>
+    </div>
   `;
 }
 
