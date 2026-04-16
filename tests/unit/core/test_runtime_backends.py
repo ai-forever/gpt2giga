@@ -1,13 +1,24 @@
 from types import SimpleNamespace
 
+from gpt2giga.app._runtime_backends.contracts import (
+    ConfigurableRuntimeStateBackend as InternalConfigurableRuntimeStateBackend,
+)
+from gpt2giga.app._runtime_backends.memory import (
+    InMemoryRuntimeStateBackend as InternalInMemoryRuntimeStateBackend,
+)
+from gpt2giga.app._runtime_backends.sqlite import (
+    SqliteRuntimeStateBackend as InternalSqliteRuntimeStateBackend,
+)
 from gpt2giga.app.dependencies import (
     configure_runtime_stores,
     ensure_runtime_dependencies,
 )
 from gpt2giga.app.runtime_backends import (
     ConfigurableRuntimeStateBackend,
+    InMemoryRuntimeStateBackend,
     RuntimeBackendDescriptor,
     RuntimeStateBackend,
+    SqliteRuntimeStateBackend,
     register_runtime_backend,
 )
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
@@ -64,6 +75,13 @@ class _ScaffoldBackend(ConfigurableRuntimeStateBackend):
 
     def feed(self, name, *, max_items):
         return _FakeFeed()
+
+
+def test_runtime_backends_facade_reexports_internal_implementations():
+    assert ConfigurableRuntimeStateBackend is InternalConfigurableRuntimeStateBackend
+    assert RuntimeStateBackend.__module__ == "gpt2giga.app._runtime_backends.contracts"
+    assert InMemoryRuntimeStateBackend is InternalInMemoryRuntimeStateBackend
+    assert SqliteRuntimeStateBackend is InternalSqliteRuntimeStateBackend
 
 
 def test_ensure_runtime_dependencies_configures_memory_backend_resources():

@@ -9,6 +9,14 @@
 
 ## Entries
 
+- 2026-04-16 — `Milestone 4` slice: runtime backends
+  - `gpt2giga/app/runtime_backends.py` сведён к thin compatibility facade с сохранением прежнего import path.
+  - Внутренняя реализация runtime store/feed backends разложена по `gpt2giga/app/_runtime_backends/{contracts,memory,sqlite,registry,provisioning}.py`.
+  - Сохранены прежние public class/function names для `app/dependencies.py`, observability feed helpers и тестов, включая registry/provisioning entrypoints.
+  - Добавлен targeted import-stability test для фасада `gpt2giga.app.runtime_backends`.
+  - Проверка: `uv run ruff check gpt2giga/app/runtime_backends.py gpt2giga/app/_runtime_backends tests/unit/core/test_runtime_backends.py`; `uv run ruff format --check gpt2giga/app/runtime_backends.py gpt2giga/app/_runtime_backends tests/unit/core/test_runtime_backends.py`; `uv run pytest tests/unit/core/test_runtime_backends.py tests/unit/app/test_admin_runtime.py tests/integration/app/test_system_router_extra.py -q`.
+  - Commit: `refactor: split runtime backends internals`
+
 - 2026-04-16 — `Milestone 3`
   - `gpt2giga/app/observability.py` сведён к thin compatibility facade, а реализация разнесена по `gpt2giga/app/_observability/{models,feeds,usage,messages,context,recording}.py`.
   - `gpt2giga/app/telemetry.py` сведён к thin compatibility facade, а реализация sink-ов и OTLP/Prometheus helper-ов разнесена по `gpt2giga/app/_telemetry/{contracts,hub,registry,prometheus,otlp,langfuse,phoenix,encoding,builtin}.py`.

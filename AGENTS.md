@@ -81,6 +81,7 @@ uv run pre-commit install
 - OpenAI SSE formatting helpers live in `gpt2giga/api/openai/streaming.py`, while feature-owned stream orchestration lives in `gpt2giga/features/chat/stream.py` and `gpt2giga/features/responses/stream.py`.
 - Shared request parsing, schema normalization, app metadata, and exception handling live under `gpt2giga/core/`.
 - Typed runtime dependencies live in `gpt2giga/app/dependencies.py`, with `app.state` organized around `config`, `logger`, `services`, `stores`, and `providers`; flat `app.state.*` aliases remain compatibility shims.
+- Runtime store/feed backend internals live in `gpt2giga/app/_runtime_backends/`, while `gpt2giga/app/runtime_backends.py` remains the stable facade/import path.
 - Request/app-scoped metadata stores for files, batches, and responses live in feature-owned store modules under `gpt2giga/features/*/store.py`.
 - OpenAPI schema builders live next to provider routers in `gpt2giga/api/*/openapi.py`, with shared helpers in `gpt2giga/api/_openapi.py`.
 - Runtime admin shell/assets are loaded from `packages/gpt2giga-ui/src/gpt2giga_ui/`; in a source checkout `gpt2giga/app/admin_ui.py` prefers that repo-local package copy over an installed wheel.

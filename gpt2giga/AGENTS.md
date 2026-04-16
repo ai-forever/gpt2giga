@@ -32,6 +32,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `app/admin_runtime.py` | Domain services that build admin runtime/config/capability/usage payloads |
 | `app/_observability/` | Internal request-audit implementation | `app/observability.py` remains the stable facade/re-export path |
 | `app/_telemetry/` | Internal telemetry sink, registry, and OTLP/Prometheus implementation | `app/telemetry.py` remains the stable facade/re-export path |
+| `app/_runtime_backends/` | Internal runtime store/feed backend implementation | `app/runtime_backends.py` remains the stable facade/re-export path |
 | `app/lifespan.py` | Startup/shutdown orchestration and runtime service lifecycle |
 | `app/wiring.py` | App-scoped runtime wiring for typed `app.state.services/stores/providers` |
 | `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
@@ -194,6 +195,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - Decorate router handlers with `@exceptions_handler`.
 - Use `app/dependencies.py` accessors plus typed `app.state.services`, `app.state.stores`, and `app.state.providers` instead of scattering new runtime fields across flat `app.state.*`.
+- Keep `gpt2giga.app.runtime_backends` as the stable import facade when splitting runtime storage internals; move implementation into `app/_runtime_backends/`.
 - When splitting oversized runtime modules, prefer underscore-prefixed internal packages such as `app/_observability/` and `app/_telemetry/`, while keeping the old top-level module as the stable import facade.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
 - For internal reads, prefer grouped views such as `proxy_settings.security`, `proxy_settings.runtime_store`, and `proxy_settings.observability`; flat proxy fields remain the env/control-plane compatibility layer.

@@ -519,19 +519,25 @@ uv run pytest tests/integration/app/test_admin_console_settings.py tests/integra
 
 ### TODO
 
-- [ ] not started
+- [x] Разрезать `gpt2giga/app/runtime_backends.py` через `gpt2giga/app/_runtime_backends/` и сохранить старый import path как facade.
+- [ ] Разрезать `gpt2giga/core/config/control_plane.py` через `gpt2giga/core/config/_control_plane/` и сохранить старый import path как facade.
+- [ ] Решить, нужен ли отдельный follow-up split для `app/admin_settings.py` и `app/admin_runtime.py` после control-plane slice.
 
 ### Done
 
-- _empty_
+- `gpt2giga/app/runtime_backends.py` сведён к thin facade/re-export слою.
+- Внутренняя реализация runtime store/feed backends вынесена в `gpt2giga/app/_runtime_backends/{contracts,memory,sqlite,registry,provisioning}.py`.
+- Добавлен targeted import-stability test для `gpt2giga.app.runtime_backends`, который pin-ит facade поверх internal implementation.
 
 ### Verification
 
-- _empty_
+- `uv run ruff check gpt2giga/app/runtime_backends.py gpt2giga/app/_runtime_backends tests/unit/core/test_runtime_backends.py`
+- `uv run ruff format --check gpt2giga/app/runtime_backends.py gpt2giga/app/_runtime_backends tests/unit/core/test_runtime_backends.py`
+- `uv run pytest tests/unit/core/test_runtime_backends.py tests/unit/app/test_admin_runtime.py tests/integration/app/test_system_router_extra.py -q`
 
 ### Next
 
-- _empty_
+- Продолжить `Milestone 4` с `gpt2giga/core/config/control_plane.py`; админские сервисы пока не трогать.
 
 ---
 

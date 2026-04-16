@@ -137,6 +137,7 @@ api/openai/responses.py
 - `gpt2giga/app/wiring.py` инициализирует GigaChat client, request/response mapper-ы и feature-сервисы.
 - Внутренняя реализация request-audit observability теперь лежит в `gpt2giga/app/_observability/`, а `gpt2giga/app/observability.py` остаётся совместимым facade/re-export слоем.
 - Внутренняя реализация telemetry sink-ов и registry теперь лежит в `gpt2giga/app/_telemetry/`, а `gpt2giga/app/telemetry.py` остаётся совместимым facade/re-export слоем.
+- Внутренняя реализация runtime store/feed backends теперь лежит в `gpt2giga/app/_runtime_backends/`, а `gpt2giga/app/runtime_backends.py` остаётся совместимым facade/re-export слоем.
 - Runtime store backend и observability backend также провиженятся через typed container-ы, чтобы route-модули не собирали инфраструктуру вручную.
 
 ### Control plane
