@@ -645,6 +645,11 @@ code {
   margin-bottom: 14px;
 }
 
+.details-disclosure summary + .field-note,
+.details-disclosure summary + .code-block {
+  margin-top: 0;
+}
+
 .rail-disclosure summary {
   display: flex;
   align-items: center;

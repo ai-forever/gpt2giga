@@ -215,10 +215,14 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     assert (
         "same request id and compatible filters already applied" in traffic_asset.text
     )
+    assert "Usage drill-down" in traffic_asset.text
+    assert "Raw payload snapshot" in traffic_asset.text
 
     assert logs_asset.status_code == 200
     assert "Open traffic summary" in logs_asset.text
     assert "Return to the broad traffic summary" in logs_asset.text
+    assert "Session diagnostics" in logs_asset.text
+    assert "Raw context snapshot" in logs_asset.text
 
 
 def test_admin_runtime_endpoint():

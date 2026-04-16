@@ -76,6 +76,8 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
       "No event selected yet.",
     );
     elements.actionsNode.innerHTML = renderLogSelectionActions(requestId || null, filters);
+    elements.detailSummaryNode.textContent =
+      kind === "error" ? "Raw error event context" : "Raw request event context";
     elements.detailNode.textContent = JSON.stringify(
       {
         selected_event: item,
@@ -84,6 +86,7 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
       null,
       2,
     );
+    elements.detailDisclosure.open = true;
   };
 
   const setSelectionFromTailRow = (row: TailContextRow): void => {
@@ -92,6 +95,7 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
       "No tail-derived request context selected yet.",
     );
     elements.actionsNode.innerHTML = renderLogSelectionActions(row.requestId || null, filters);
+    elements.detailSummaryNode.textContent = "Raw tail-derived context";
     elements.detailNode.textContent = JSON.stringify(
       {
         selected_tail_line: {
@@ -105,6 +109,7 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
       null,
       2,
     );
+    elements.detailDisclosure.open = true;
   };
 
   const renderTailContext = (): void => {
@@ -126,6 +131,10 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
     elements.streamNote.textContent = streamState.note;
     elements.streamButton.textContent = buttonLabel;
     elements.streamButton.toggleAttribute("disabled", streamState.phase === "stopping");
+    elements.streamDiagnosticsDisclosure.open =
+      streamState.phase === "connecting" ||
+      streamState.phase === "streaming" ||
+      streamState.phase === "error";
     renderStreamDiagnosticsPanel();
   };
 
@@ -368,6 +377,8 @@ export function bindLogsPage(options: BindLogsPageOptions): void {
     stopStream("Stopping live stream during page cleanup.");
   });
 
+  elements.detailSummaryNode.textContent = "Raw context snapshot";
+  elements.detailDisclosure.open = false;
   setRenderedLogs();
   setStreamVisuals();
   seedLogsSelection(

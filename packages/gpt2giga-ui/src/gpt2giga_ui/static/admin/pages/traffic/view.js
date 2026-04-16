@@ -122,7 +122,7 @@ export function renderTrafficPage(data, filters) {
         </form>
       `, "panel panel--span-12")}
     ${card("Recent requests", renderRequestRows(data.requestEvents, filters), "panel panel--span-8")}
-    ${card("Selected payload", `
+    ${card("Inspector and handoff", `
         <div class="stack">
           ${renderStatLines([
         { label: "Request events", value: formatNumber(data.requestEvents.length) },
@@ -130,16 +130,28 @@ export function renderTrafficPage(data, filters) {
         { label: "Usage key rows", value: formatNumber(data.keyEntries.length) },
         { label: "Usage provider rows", value: formatNumber(data.providerEntries.length) },
     ], "No traffic rows are loaded yet.")}
+          <div class="workflow-card">
+            <div class="workflow-card__header">
+              <span class="eyebrow">${escapeHtml(requestPinned ? "Pinned context" : "Start here")}</span>
+              <h4>${escapeHtml(requestPinned ? "Pinned request context is ready" : "Narrow one request before escalating")}</h4>
+              <p>${escapeHtml(requestPinned
+        ? "This page is already scoped to one request id. Inspect the pinned request or matching error first, then open Logs only if raw line-by-line evidence is still needed."
+        : "Use recent requests or recent errors to identify one request worth pinning. Keep usage rollups secondary until a provider or key grouping needs a separate drill-down.")}</p>
+            </div>
+          </div>
           <div id="traffic-selection-summary">
             ${renderDefinitionList(buildTrafficSelectionSummary(filters), "Select a request, error, or usage row.")}
           </div>
           <div class="toolbar" id="traffic-selection-actions">
             ${renderTrafficSelectionActions({ requestId: null, counterpartKind: null, counterpartIndex: null }, filters)}
           </div>
-          <pre class="code-block code-block--tall" id="traffic-detail">${escapeHtml(JSON.stringify({
+          <details class="details-disclosure" id="traffic-detail-disclosure">
+            <summary id="traffic-detail-summary">Raw payload snapshot</summary>
+            <pre class="code-block code-block--tall" id="traffic-detail">${escapeHtml(JSON.stringify({
         active_filters: filters,
         usage_summary: data.providerSummary,
     }, null, 2))}</pre>
+          </details>
         </div>
       `, "panel panel--span-4")}
     ${card("Recent errors", renderErrorRows(data.errorEvents, filters), "panel panel--span-8")}
@@ -163,8 +175,29 @@ export function renderTrafficPage(data, filters) {
         },
     ], "Usage totals are empty.")}
       `, "panel panel--span-4")}
-    ${card("Usage by key", renderUsageKeyRows(data.keyEntries), "panel panel--span-6")}
-    ${card("Usage by provider", renderUsageProviderRows(data.providerEntries), "panel panel--span-6")}
+    ${card("Usage drill-down", `
+        <div class="stack">
+          <p class="muted">
+            ${escapeHtml(requestPinned
+        ? "Request pinning only narrows recent request and error feeds. Keep usage drill-down secondary, because provider and key rollups stay aggregate."
+        : "Stay on the summary-first traffic surface by default. Expand one grouped usage view only when a provider or key breakdown needs inspection.")}
+          </p>
+          <details class="details-disclosure" open>
+            <summary>Usage by provider (${escapeHtml(formatNumber(data.providerEntries.length))} rows)</summary>
+            <p class="field-note">
+              Compare provider totals first when the question is “where did the traffic go?” rather than “which key drove it?”
+            </p>
+            ${renderUsageProviderRows(data.providerEntries)}
+          </details>
+          <details class="details-disclosure">
+            <summary>Usage by key (${escapeHtml(formatNumber(data.keyEntries.length))} rows)</summary>
+            <p class="field-note">
+              Expand this only when provider totals already look suspicious and the next question is which gateway key drove the spike.
+            </p>
+            ${renderUsageKeyRows(data.keyEntries)}
+          </details>
+        </div>
+      `, "panel panel--span-12")}
   `;
 }
 function renderTrafficWorkflowGuide(filters, requestPinned) {
@@ -199,16 +232,26 @@ function renderTrafficWorkflowGuide(filters, requestPinned) {
   `;
 }
 export function resolveTrafficElements(pageContent) {
+    const detailDisclosure = pageContent.querySelector("#traffic-detail-disclosure");
+    const detailSummaryNode = pageContent.querySelector("#traffic-detail-summary");
     const detailNode = pageContent.querySelector("#traffic-detail");
     const filtersForm = pageContent.querySelector("#traffic-filters-form");
     const summaryNode = pageContent.querySelector("#traffic-selection-summary");
     const actionNode = pageContent.querySelector("#traffic-selection-actions");
     const resetButton = document.getElementById("reset-traffic-filters");
-    if (!detailNode || !filtersForm || !summaryNode || !actionNode || !resetButton) {
+    if (!detailDisclosure ||
+        !detailSummaryNode ||
+        !detailNode ||
+        !filtersForm ||
+        !summaryNode ||
+        !actionNode ||
+        !resetButton) {
         return null;
     }
     return {
         actionNode,
+        detailDisclosure,
+        detailSummaryNode,
         detailNode,
         filtersForm,
         resetButton,

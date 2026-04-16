@@ -17,6 +17,11 @@ export function bindTrafficPage(options) {
     const setSelectionActions = (selection) => {
         elements.actionNode.innerHTML = renderTrafficSelectionActions(selection, filters);
     };
+    const setDetailState = (summary, payload, open = true) => {
+        elements.detailSummaryNode.textContent = summary;
+        elements.detailNode.textContent = JSON.stringify(payload, null, 2);
+        elements.detailDisclosure.open = open;
+    };
     const selectTrafficEvent = (kind, item) => {
         const requestId = normalizeOptionalText(item.request_id);
         const counterpartKind = kind === "request" ? "error" : "request";
@@ -35,21 +40,25 @@ export function bindTrafficPage(options) {
             counterpartKind: counterpartIndex >= 0 ? counterpartKind : null,
             counterpartIndex: counterpartIndex >= 0 ? counterpartIndex : null,
         });
-        elements.detailNode.textContent = JSON.stringify({
+        setDetailState(kind === "error" ? "Raw error event payload" : "Raw request event payload", {
             selected_event: item,
             counterpart_event: counterpart,
             active_filters: filters,
-        }, null, 2);
+        });
     };
     const selectUsageRow = (kind, item) => {
         setSelectionSummary(buildUsageSelectionSummary(kind, item, filters));
         setSelectionActions({ requestId: null, counterpartKind: null, counterpartIndex: null });
-        elements.detailNode.textContent = JSON.stringify({
+        setDetailState(kind === "key" ? "Raw usage-by-key payload" : "Raw usage-by-provider payload", {
             selected_usage_entry: item,
             usage_summary: data.providerSummary,
             active_filters: filters,
-        }, null, 2);
+        });
     };
+    setDetailState("Raw payload snapshot", {
+        active_filters: filters,
+        usage_summary: data.providerSummary,
+    }, false);
     elements.filtersForm.addEventListener("submit", (event) => {
         event.preventDefault();
         const form = event.currentTarget;

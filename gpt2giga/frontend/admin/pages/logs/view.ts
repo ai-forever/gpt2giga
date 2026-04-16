@@ -29,6 +29,8 @@ export interface LogsPageElements {
   actionsNode: HTMLElement;
   autoScrollToggle: HTMLInputElement;
   clearButton: HTMLButtonElement;
+  detailDisclosure: HTMLDetailsElement;
+  detailSummaryNode: HTMLElement;
   detailNode: HTMLPreElement;
   filtersForm: HTMLFormElement;
   logOutput: HTMLPreElement;
@@ -37,6 +39,7 @@ export interface LogsPageElements {
   resetFiltersButton: HTMLButtonElement;
   streamButton: HTMLButtonElement;
   streamDiagnostics: HTMLElement;
+  streamDiagnosticsDisclosure: HTMLDetailsElement;
   streamNote: HTMLElement;
   streamStatus: HTMLElement;
   summaryNode: HTMLElement;
@@ -192,9 +195,15 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
               <button class="button button--secondary" id="clear-log-output" type="button">Clear buffer</button>
               <span class="muted" id="logs-stream-note">Tail buffer loaded from the file on disk.</span>
             </div>
-            <div id="logs-stream-diagnostics">
-              ${renderDefinitionList(buildStreamDiagnostics(streamState, rawLogLines.length))}
-            </div>
+            <details class="details-disclosure" id="logs-stream-diagnostics-disclosure">
+              <summary>Session diagnostics</summary>
+              <p class="field-note">
+                Expand this only when the live SSE lifecycle needs troubleshooting or when a hanging reader is suspected.
+              </p>
+              <div id="logs-stream-diagnostics">
+                ${renderDefinitionList(buildStreamDiagnostics(streamState, rawLogLines.length))}
+              </div>
+            </details>
           </div>
         </div>
       `,
@@ -205,6 +214,19 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
       `
         <div class="surface">
           <div class="stack">
+            <div class="workflow-card">
+              <div class="workflow-card__header">
+                <span class="eyebrow">${escapeHtml(filters.requestId ? "Pinned context" : "Start here")}</span>
+                <h4>${escapeHtml(
+                  filters.requestId ? "Pinned request evidence is ready" : "Narrow the deep dive before reading raw logs",
+                )}</h4>
+                <p>${escapeHtml(
+                  filters.requestId
+                    ? "This page is already scoped to one request id. Inspect the structured request or error context first, then keep the rendered tail and live stream secondary."
+                    : "Use Traffic or a tail-derived request id to narrow one request first. Keep the raw tail and live stream secondary until one failure or text pattern actually needs line-by-line evidence.",
+                )}</p>
+              </div>
+            </div>
             <div id="logs-selection-summary">
               ${renderDefinitionList(
                 [
@@ -224,17 +246,20 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
             <div class="toolbar" id="logs-selection-actions">
               ${renderLogSelectionActions(null, filters)}
             </div>
-            <pre class="code-block" id="logs-detail">${escapeHtml(
-              JSON.stringify(
-                {
-                  filters,
-                  requests_loaded: data.requestEvents.length,
-                  errors_loaded: data.errorEvents.length,
-                },
-                null,
-                2,
-              ),
-            )}</pre>
+            <details class="details-disclosure" id="logs-detail-disclosure">
+              <summary id="logs-detail-summary">Raw context snapshot</summary>
+              <pre class="code-block" id="logs-detail">${escapeHtml(
+                JSON.stringify(
+                  {
+                    filters,
+                    requests_loaded: data.requestEvents.length,
+                    errors_loaded: data.errorEvents.length,
+                  },
+                  null,
+                  2,
+                ),
+              )}</pre>
+            </details>
           </div>
         </div>
       `,
@@ -330,7 +355,12 @@ export function resolveLogsElements(pageContent: HTMLElement): LogsPageElements 
   const streamStatus = pageContent.querySelector<HTMLElement>("#logs-stream-status");
   const streamNote = pageContent.querySelector<HTMLElement>("#logs-stream-note");
   const streamDiagnostics = pageContent.querySelector<HTMLElement>("#logs-stream-diagnostics");
+  const streamDiagnosticsDisclosure = pageContent.querySelector<HTMLDetailsElement>(
+    "#logs-stream-diagnostics-disclosure",
+  );
   const autoScrollToggle = pageContent.querySelector<HTMLInputElement>("#logs-auto-scroll");
+  const detailDisclosure = pageContent.querySelector<HTMLDetailsElement>("#logs-detail-disclosure");
+  const detailSummaryNode = pageContent.querySelector<HTMLElement>("#logs-detail-summary");
   const detailNode = pageContent.querySelector<HTMLPreElement>("#logs-detail");
   const summaryNode = pageContent.querySelector<HTMLElement>("#logs-selection-summary");
   const actionsNode = pageContent.querySelector<HTMLElement>("#logs-selection-actions");
@@ -347,7 +377,10 @@ export function resolveLogsElements(pageContent: HTMLElement): LogsPageElements 
     !streamStatus ||
     !streamNote ||
     !streamDiagnostics ||
+    !streamDiagnosticsDisclosure ||
     !autoScrollToggle ||
+    !detailDisclosure ||
+    !detailSummaryNode ||
     !detailNode ||
     !summaryNode ||
     !actionsNode ||
@@ -360,6 +393,8 @@ export function resolveLogsElements(pageContent: HTMLElement): LogsPageElements 
     actionsNode,
     autoScrollToggle,
     clearButton,
+    detailDisclosure,
+    detailSummaryNode,
     detailNode,
     filtersForm,
     logOutput,
@@ -368,6 +403,7 @@ export function resolveLogsElements(pageContent: HTMLElement): LogsPageElements 
     resetFiltersButton,
     streamButton,
     streamDiagnostics,
+    streamDiagnosticsDisclosure,
     streamNote,
     streamStatus,
     summaryNode,

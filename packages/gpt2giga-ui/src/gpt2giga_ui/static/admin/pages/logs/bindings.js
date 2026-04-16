@@ -28,14 +28,18 @@ export function bindLogsPage(options) {
                 : null;
         elements.summaryNode.innerHTML = renderDefinitionList(buildLogEventSelectionSummary(kind, item, counterpart), "No event selected yet.");
         elements.actionsNode.innerHTML = renderLogSelectionActions(requestId || null, filters);
+        elements.detailSummaryNode.textContent =
+            kind === "error" ? "Raw error event context" : "Raw request event context";
         elements.detailNode.textContent = JSON.stringify({
             selected_event: item,
             counterpart_event: counterpart,
         }, null, 2);
+        elements.detailDisclosure.open = true;
     };
     const setSelectionFromTailRow = (row) => {
         elements.summaryNode.innerHTML = renderDefinitionList(buildTailSelectionSummary(row), "No tail-derived request context selected yet.");
         elements.actionsNode.innerHTML = renderLogSelectionActions(row.requestId || null, filters);
+        elements.detailSummaryNode.textContent = "Raw tail-derived context";
         elements.detailNode.textContent = JSON.stringify({
             selected_tail_line: {
                 line_number: row.lineNumber,
@@ -45,6 +49,7 @@ export function bindLogsPage(options) {
             matched_request_event: row.requestEvent,
             matched_error_event: row.errorEvent,
         }, null, 2);
+        elements.detailDisclosure.open = true;
     };
     const renderTailContext = () => {
         elements.tailContextNode.innerHTML = renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup), filters);
@@ -58,6 +63,10 @@ export function bindLogsPage(options) {
         elements.streamNote.textContent = streamState.note;
         elements.streamButton.textContent = buttonLabel;
         elements.streamButton.toggleAttribute("disabled", streamState.phase === "stopping");
+        elements.streamDiagnosticsDisclosure.open =
+            streamState.phase === "connecting" ||
+                streamState.phase === "streaming" ||
+                streamState.phase === "error";
         renderStreamDiagnosticsPanel();
     };
     const setRenderedLogs = () => {
@@ -271,6 +280,8 @@ export function bindLogsPage(options) {
     app.registerCleanup(() => {
         stopStream("Stopping live stream during page cleanup.");
     });
+    elements.detailSummaryNode.textContent = "Raw context snapshot";
+    elements.detailDisclosure.open = false;
     setRenderedLogs();
     setStreamVisuals();
     seedLogsSelection(filters, requestLookup, errorLookup, rawLogLines, setSelectionFromEvent, setSelectionFromTailRow);

@@ -350,6 +350,12 @@
   - `Logs` возвращает в `Traffic` с тем же request/filter context;
   - shipped assets теперь явно маркируют `Traffic` как summary-first observe surface, а `Logs` как deep-dive diagnose surface.
 - Добавлен runtime regression test на shipped assets `pages/traffic/view.js` и `pages/logs/view.js`, чтобы observe/diagnose handoff copy и compiled bundle не дрейфовали.
+- Продолжен следующий `Phase 5` UX slice уже внутри самих day-2 экранов:
+  - `Traffic` теперь делает usage breakdown явно вторичным через отдельный `Usage drill-down` card с disclosure-панелями для provider/key rollups;
+  - `Traffic` inspector получил staged handoff copy вместо сразу открытого raw JSON, а payload snapshot теперь раскрывается только по запросу или после выбора строки;
+  - `Logs` inspector получил такой же staged empty state и secondary raw-context disclosure вместо постоянно открытого JSON;
+  - `Logs` stream diagnostics свернуты в secondary disclosure и автоматически раскрываются только во время live session / stream error.
+- Добавлен runtime regression test на shipped assets для новых staged inspector/disclosure copy, чтобы summary-first UX не дрейфовал между TS source и shipped bundle.
 
 ### Проверка
 
@@ -364,12 +370,14 @@
 - `uv run ruff check tests/integration/app/test_system_router_extra.py`
 - `uv run ruff format --check tests/integration/app/test_system_router_extra.py`
 - `uv run pytest tests/integration/app/test_system_router_extra.py -q`
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -q`
 
 ### Дальше
 
 - Первый практический slice `Phase 5` закрыт: верхний operator UX теперь лучше отражает реальные workflow, а overview стал summary-first точкой входа вместо просто списка страниц.
 - Следующий логичный шаг внутри `Phase 5` теперь сместился дальше:
-  - упростить сами page-local empty states и competing panels на крупных day-2 экранах, чтобы staged workflow читался ещё быстрее без лишнего визуального шума;
+  - продолжить staged-упрощение крупных day-2 экранов уже на соседних surfaces (`System`, `Providers`, возможно `Files & Batches`), где ещё остаются конкурирующие diagnostics/workbench панели;
   - при желании добавить docs/deep-link handoff из `Traffic`/`Logs` в операторские guide-ы и troubleshooting flow.
 - Дополнительный follow-up для observability UX теперь стал уже вторичным:
   - при желании добавить test/export actions для sink-ов;
