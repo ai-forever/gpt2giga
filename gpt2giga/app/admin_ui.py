@@ -17,6 +17,7 @@ class AdminUIResources:
     package_root: Path
     static_dir: Path
     console_html_path: Path
+    favicon_ico_path: Path | None
 
 
 def _build_resources(package_root: Path) -> AdminUIResources | None:
@@ -24,10 +25,12 @@ def _build_resources(package_root: Path) -> AdminUIResources | None:
     console_html_path = package_root / "templates" / "console.html"
     if not static_dir.is_dir() or not console_html_path.is_file():
         return None
+    favicon_ico_path = static_dir / "favicon.ico"
     return AdminUIResources(
         package_root=package_root,
         static_dir=static_dir,
         console_html_path=console_html_path,
+        favicon_ico_path=favicon_ico_path if favicon_ico_path.is_file() else None,
     )
 
 

@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import RedirectResponse
+from starlette.responses import FileResponse, RedirectResponse
 from starlette.staticfiles import StaticFiles
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
@@ -77,6 +77,16 @@ def _mount_admin_assets(app: FastAPI, *, assets_dir: Path | None) -> None:
         StaticFiles(directory=assets_dir),
         name="admin-assets",
     )
+
+
+def _register_favicon_route(app: FastAPI, *, favicon_path: Path | None) -> None:
+    """Expose the packaged favicon when UI assets are available."""
+    if favicon_path is None:
+        return
+
+    @app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
+    async def favicon() -> FileResponse:
+        return FileResponse(favicon_path, media_type="image/x-icon")
 
 
 def _register_middlewares(app: FastAPI, config) -> None:
@@ -251,6 +261,12 @@ def create_app(
     _mount_admin_assets(
         app,
         assets_dir=admin_ui_resources.static_dir if admin_ui_enabled else None,
+    )
+    _register_favicon_route(
+        app,
+        favicon_path=admin_ui_resources.favicon_ico_path
+        if admin_ui_resources
+        else None,
     )
     _register_exception_handlers(app)
     _register_middlewares(app, config)
