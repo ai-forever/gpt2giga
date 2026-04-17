@@ -114,3 +114,50 @@ Commit hash и commit message:
 Следующий шаг:
 
 - пройтись по remaining copy-density в shared control-plane form sections и при необходимости дочистить остаточные verbose banners на focused admin pages без нового layout refactor.
+
+### Slice 3
+
+Статус: `done`
+
+Цель:
+
+- уменьшить copy-density в shared control-plane form sections;
+- сократить статусный/helper copy вокруг secret fields, pending summaries и observability presets;
+- дочистить самый шумный focused surface (`Logs`) без нового layout refactor.
+
+Планируемый объём:
+
+- укоротить shared helper copy в `templates.ts` и `forms.ts`;
+- сократить intros/banner copy в `control-plane-sections.ts`;
+- укоротить focused setup/settings banner/status copy;
+- сделать `Logs` суше: компактнее workflow/scope/inspector/guide text;
+- пересобрать runtime admin assets и обновить integration asserts под новый copy.
+
+Фактически сделано:
+
+- `renderSecretField(...)`, pending status copy и live/restart summaries укорочены; dynamic secret helper text в `forms.ts` стал короче;
+- shared control-plane sections упрощены: короче section intros, observability preset copy, sink descriptions, OTLP header helper text и setup observability handoff;
+- focused `Setup` и `Settings` pages получили более короткие banner messages, status notes и pending messages без смены структуры;
+- `Logs` упрощён: короче titles, workflow copy, filter/inspector/helper text, tail context copy и live-stream diagnostics copy; guide block переведён в compact disclosure;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration asserts обновлены под новый `Logs` copy.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
+- `uv run ruff check tests/integration/app/test_system_router_extra.py`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q` — 41 passed
+- `uv run ruff check tests/integration/app/test_system_router_extra.py` — green
+
+Commit hash и commit message:
+
+- `a938554` — `refactor: trim admin control plane copy`
+
+Следующий шаг:
+
+- пройтись по remaining focused observe/diagnose surfaces (`Traffic`, `Playground`, `Keys`) и добить остаточный explanatory prose в inspector/guide blocks без новой layout wave.
