@@ -253,10 +253,10 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     assert "Open errors" in traffic_asset.text
     assert "Open usage" in traffic_asset.text
     assert "Current posture" in traffic_asset.text
-    assert "Selection and handoff" in traffic_asset.text
-    assert "Request inspector and handoff" in traffic_asset.text
-    assert "Error inspector and handoff" in traffic_asset.text
-    assert "Usage inspector and handoff" in traffic_asset.text
+    assert "Selection" in traffic_asset.text
+    assert "Request inspector" in traffic_asset.text
+    assert "Error inspector" in traffic_asset.text
+    assert "Usage inspector" in traffic_asset.text
     assert "Current scope snapshot" in traffic_asset.text
     assert "Selected request snapshot" in traffic_bindings_asset.text
     assert "Traffic workflow guide" in traffic_asset.text
@@ -342,16 +342,16 @@ def test_admin_ui_assets_include_polished_keys_and_playground_copy():
     assert "Scoped key inventory" in keys_asset.text
     assert "Current key snapshot" in keys_asset.text
     assert "Open usage traffic" in keys_asset.text
-    assert "Keys stay narrow on purpose." in keys_asset.text
+    assert "Operator guides" in keys_asset.text
 
     assert playground_asset.status_code == 200
-    assert "Smoke workflow handoff" in playground_asset.text
-    assert "Current request posture" in playground_asset.text
-    assert "Current request payload" in playground_asset.text
-    assert "Current transport snapshot" in playground_asset.text
+    assert "Smoke workflow" in playground_asset.text
+    assert "Request preview" in playground_asset.text
+    assert "Request payload" in playground_asset.text
+    assert "Transport snapshot" in playground_asset.text
     assert "Run one smoke request" in playground_asset.text
-    assert "Operator guides" in playground_asset.text
-    assert "Current bootstrap posture" in playground_asset.text
+    assert "Run state" in playground_asset.text
+    assert "Bootstrap posture" in playground_asset.text
 
     assert docs_links_asset.status_code == 200
     assert "troubleshooting-handoff-map" in docs_links_asset.text

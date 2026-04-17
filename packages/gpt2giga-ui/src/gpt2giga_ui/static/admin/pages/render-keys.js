@@ -23,7 +23,7 @@ export async function renderKeys(app, token) {
     ${kpi("Scoped keys", formatNumber(scoped.length))}
     ${kpi("Restricted scopes", formatNumber(scopedRestrictionCount))}
     ${kpi("Observed requests", formatNumber(totalRequestCount))}
-    ${card("Executive summary", `
+    ${card("Summary", `
         <div class="stack">
           ${renderKeysBanner(global, scoped)}
           ${renderDefinitionList([
@@ -31,29 +31,29 @@ export async function renderKeys(app, token) {
             label: "Global gateway posture",
             value: global.configured ? "ready" : "missing",
             note: global.configured
-                ? `Preview ${String(global.key_preview ?? "hidden")} is staged as the broad fallback credential.`
-                : "Rotate a global key if you need one broad credential before handing out narrower scoped keys.",
+                ? `Preview ${String(global.key_preview ?? "hidden")} is the broad fallback key.`
+                : "Create a global key if you need one broad fallback.",
         },
         {
             label: "Scoped inventory",
             value: formatNumber(scoped.length),
             note: scoped.length
-                ? `${formatNumber(scopedRestrictionCount)} keys currently enforce provider, endpoint, or model restrictions.`
-                : "No scoped keys exist yet, so every client currently depends on the global key path.",
+                ? `${formatNumber(scopedRestrictionCount)} keys enforce provider, endpoint, or model limits.`
+                : "No scoped keys exist yet.",
         },
         {
             label: "Recent usage signal",
             value: `${formatNumber(totalRequestCount)} observed requests`,
             note: totalRequestCount
-                ? "Usage is aggregated from the runtime counters already visible in Traffic > Usage."
-                : "No requests have been attributed to stored keys yet.",
+                ? "Aggregated from Traffic > Usage counters."
+                : "No requests have been attributed yet.",
         },
         {
             label: "Fastest next handoff",
             value: global.configured || scoped.length ? "Playground or Traffic" : "Create a key first",
             note: global.configured || scoped.length
-                ? "Smoke one known request in Playground, then confirm attribution in Traffic > Usage."
-                : "This page stays key-first until at least one reusable credential exists.",
+                ? "Smoke one request, then confirm attribution in Traffic > Usage."
+                : "Create one reusable key first.",
         },
     ], "Key posture is unavailable.")}
         </div>
@@ -65,7 +65,6 @@ export async function renderKeys(app, token) {
         workflow: "configure",
         compact: true,
         title: global.configured ? "Rotate the global fallback" : "Create the first global fallback",
-        note: global.configured ? "Keep it broad only when needed." : "Use it as the first recovery path.",
         pills: [
             pill(`Global: ${global.configured ? "ready" : "missing"}`, global.configured ? "good" : "warn"),
             pill(`Scoped: ${formatNumber(scoped.length)}`),
@@ -80,7 +79,6 @@ export async function renderKeys(app, token) {
         workflow: "start",
         compact: true,
         title: scoped.length ? "Issue a client-specific key" : "Create the first scoped key",
-        note: scoped.length ? "Tighten provider, endpoint, or model reach." : "Keep client access narrow from the start.",
         pills: [
             pill(`Restricted scopes: ${formatNumber(scopedRestrictionCount)}`),
             pill(`Preview: ${String(global.key_preview ?? "none")}`),
@@ -95,7 +93,6 @@ export async function renderKeys(app, token) {
         workflow: "observe",
         compact: true,
         title: "Confirm attribution after one request",
-        note: "Use Traffic as the proof surface.",
         pills: [
             pill(`Global requests: ${formatNumber(readUsageCount(globalUsage.request_count))}`),
             pill(`Scoped requests: ${formatNumber(scopedRequestCount)}`),
@@ -145,31 +142,31 @@ export async function renderKeys(app, token) {
     })}
           <div class="form-actions">
             <button class="button" type="submit">Create scoped key</button>
-            <span class="muted">The full key value is shown once after creation or rotation.</span>
+            <span class="muted">Full value is shown once.</span>
           </div>
         </form>
       `, "panel panel--span-8 panel--measure")}
-    ${card("Current posture and handoff", `
+    ${card("Current posture", `
         <div class="stack">
           ${renderDefinitionList([
         {
             label: "Global preview",
             value: String(global.key_preview ?? "not configured"),
             note: global.configured
-                ? "Keep this for controlled broad access or emergency recovery only."
-                : "No broad fallback is configured right now.",
+                ? "Keep this for controlled broad access only."
+                : "No broad fallback is configured.",
         },
         {
             label: "Best smoke path",
             value: global.configured || scoped.length ? "Playground" : "Setup / Security",
             note: global.configured || scoped.length
-                ? "Copy the desired key into the left-rail gateway field before the next smoke run."
-                : "Security bootstrap or key creation still needs to happen before smoke traffic makes sense.",
+                ? "Copy the target key into the rail before the next smoke run."
+                : "Finish bootstrap or key creation first.",
         },
         {
             label: "Usage confirmation",
             value: totalRequestCount ? "Traffic usage is warm" : "Traffic usage is idle",
-            note: "Usage traffic remains the confirmation surface after one request lands.",
+            note: "Traffic > Usage stays the confirmation surface.",
         },
     ], "Current key posture is unavailable.")}
           <div class="toolbar">
@@ -199,33 +196,30 @@ export async function renderKeys(app, token) {
             `,
         ];
     }), "No scoped keys yet. Create one above to establish a narrower handoff than the global key."), "panel panel--span-8 panel--measure")}
-    ${card("Guide and troubleshooting", renderGuideLinks([
+    ${card("Guides", renderGuideLinks([
         {
             label: "Overview workflow guide",
             href: OPERATOR_GUIDE_LINKS.overview,
-            note: "Use the broader operator map when the question is really about where key management sits relative to Setup, Playground, or runtime diagnostics.",
+            note: "Use the broader operator map when the question is where key management sits relative to Setup or diagnostics.",
         },
         {
             label: "Troubleshooting handoff map",
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Open the escalation map when key posture looks correct but request failures still need a different surface.",
+            note: "Open the escalation map when key posture looks correct but failures still need a different surface.",
         },
         {
             label: "Provider surface diagnostics",
             href: OPERATOR_GUIDE_LINKS.providers,
-            note: "Use provider diagnostics only after a key works but the mounted compatibility surface still behaves differently than expected.",
+            note: "Use provider diagnostics only after a key works but the mounted surface still behaves differently than expected.",
         },
     ], {
         compact: true,
         collapsibleSummary: "Operator guides",
-        intro: "Keys stay narrow on purpose.",
     }), "panel panel--span-4 panel--aside")}
     ${card("Current key snapshot", `
         <details class="details-disclosure">
           <summary>Current key snapshot</summary>
-          <p class="field-note">
-            Raw usage and preview metadata stay secondary. Open this only when the executive summary and inventory rows still leave ambiguity.
-          </p>
+          <p class="field-note">Open only if the summary or inventory rows are not enough.</p>
           ${renderJson(keys)}
         </details>
       `, "panel panel--span-12")}
@@ -291,15 +285,15 @@ export async function renderKeys(app, token) {
 }
 function renderKeysBanner(global, scoped) {
     if (!global.configured && scoped.length === 0) {
-        return banner("No reusable gateway credentials are configured yet. Create a global or scoped key before handing the proxy to external SDKs or operators.", "warn");
+        return banner("No reusable gateway keys yet. Create a global or scoped key before external access.", "warn");
     }
     if (!global.configured) {
-        return banner("Only scoped keys are configured right now. That is acceptable for narrow clients, but emergency operator recovery may still want a deliberate global fallback.", "info");
+        return banner("Only scoped keys exist. Fine for narrow clients, but recovery may still want a deliberate global fallback.", "info");
     }
     if (scoped.length === 0) {
-        return banner("A broad global key exists, but there are no client-specific scoped keys yet. Create one before distributing access beyond a single operator path.", "warn");
+        return banner("A global key exists, but no scoped keys do. Create one before wider distribution.", "warn");
     }
-    return banner("Global fallback and scoped client keys are both present. Keep distribution narrow, then confirm attribution from Traffic > Usage after one smoke request.", "info");
+    return banner("Global fallback and scoped keys are present. Keep distribution narrow and confirm attribution in Traffic > Usage.", "info");
 }
 function describeScopePosture(item) {
     const parts = [

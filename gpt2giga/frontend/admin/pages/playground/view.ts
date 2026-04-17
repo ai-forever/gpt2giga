@@ -1,4 +1,3 @@
-import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
 import { pathForPage } from "../../routes.js";
 import {
   card,
@@ -6,7 +5,6 @@ import {
   pill,
   renderDefinitionList,
   renderFormSection,
-  renderGuideLinks,
   renderWorkflowCard,
 } from "../../templates.js";
 import type { SetupPayload } from "../../types.js";
@@ -69,12 +67,10 @@ export function renderPlaygroundPage(
         <form id="playground-form" class="form-shell">
           <div class="form-shell__intro">
             <span class="eyebrow">Smoke flow</span>
-            <p class="muted">
-              Load a preset, adjust the key fields, and send one proof request.
-            </p>
+            <p class="muted">Load a preset and send one request.</p>
           </div>
           ${renderFormSection({
-            title: "Smoke presets",
+            title: "Presets",
             body: `
               <div class="toolbar">
                 ${PLAYGROUND_PRESETS.map(
@@ -90,7 +86,7 @@ export function renderPlaygroundPage(
             `,
           })}
           ${renderFormSection({
-            title: "Request targeting",
+            title: "Request",
             body: `
               <div class="dual-grid">
                 <label class="field">
@@ -120,7 +116,7 @@ export function renderPlaygroundPage(
             `,
           })}
           ${renderFormSection({
-            title: "Transport posture",
+            title: "Transport",
             body: `
               <div class="dual-grid">
                 <label class="field">
@@ -133,9 +129,7 @@ export function renderPlaygroundPage(
                 <div class="surface">
                   <div class="stack">
                     <h4>Gateway auth</h4>
-                    <p class="muted" id="playground-auth-note">
-                      Requests reuse the gateway key from the rail.
-                    </p>
+                    <p class="muted" id="playground-auth-note">Reuses the rail gateway key.</p>
                   </div>
                 </div>
               </div>
@@ -143,14 +137,14 @@ export function renderPlaygroundPage(
           })}
           <div class="form-actions">
             <button class="button" id="playground-submit" type="submit">Send request</button>
-            <span class="muted" id="playground-form-note">Preview updates live as you type.</span>
+            <span class="muted" id="playground-form-note">Preview updates live.</span>
           </div>
         </form>
       `,
       "panel panel--span-8 panel--measure",
     )}
     ${card(
-      "Smoke workflow handoff",
+      "Smoke workflow",
       `
         <div class="stack">
           <div id="playground-bootstrap-banner"></div>
@@ -171,7 +165,7 @@ export function renderPlaygroundPage(
             })}
             ${renderWorkflowCard({
               workflow: "observe",
-              title: "Hand off to traffic or logs",
+              title: "Next surface",
               compact: true,
               pills: [
                 pill(`Persisted: ${setup.persisted ? "yes" : "defaults"}`, setup.persisted ? "good" : "default"),
@@ -184,21 +178,10 @@ export function renderPlaygroundPage(
               ],
             })}
           </div>
-          <div class="surface">
-            <div class="stack">
-              <div class="surface__header">
-                <div class="stack">
-                  <h4>Current bootstrap posture</h4>
-                </div>
-                <div class="surface__meta">
-                  ${pill("setup")}
-                  ${pill("keys")}
-                  ${pill("smoke")}
-                </div>
-              </div>
-              <div id="playground-bootstrap-summary"></div>
-            </div>
-          </div>
+          <details class="details-disclosure">
+            <summary>Bootstrap posture</summary>
+            <div id="playground-bootstrap-summary"></div>
+          </details>
         </div>
       `,
       "panel panel--span-4 panel--aside",
@@ -209,14 +192,11 @@ export function renderPlaygroundPage(
         <div class="stack">
           <div class="surface">
             <div class="stack">
-              <div class="surface__header">
-                <h4>Current request posture</h4>
-              </div>
               <div id="playground-request-summary"></div>
             </div>
           </div>
           <details class="details-disclosure">
-            <summary>Current request payload</summary>
+            <summary>Request payload</summary>
             <pre class="code-block code-block--tall" id="playground-request-body">${escapeHtml(
               JSON.stringify(initialRequest.body, null, 2),
             )}</pre>
@@ -226,43 +206,19 @@ export function renderPlaygroundPage(
       "panel panel--span-8 panel--measure",
     )}
     ${card(
-      "Current posture and handoff",
+      "Run state",
       `
         <div class="stack">
           <div class="surface">
             <div class="stack">
               <div class="surface__header">
-                <h4>Request lifecycle</h4>
+                <h4>Lifecycle</h4>
                 <div class="surface__meta" id="playground-status-pill">${pill("idle")}</div>
               </div>
               <div id="playground-run-note" class="field-note">${escapeHtml(DEFAULT_OUTPUT)}</div>
               <div id="playground-run-summary"></div>
             </div>
           </div>
-          ${renderGuideLinks(
-            [
-              {
-                label: "Overview workflow guide",
-                href: OPERATOR_GUIDE_LINKS.overview,
-                note: "Use the broader operator map when Playground is no longer the right surface and you need to step back into setup, settings, or request diagnostics.",
-              },
-              {
-                label: "Troubleshooting handoff map",
-                href: OPERATOR_GUIDE_LINKS.troubleshooting,
-                note: "Open the escalation map when the smoke request succeeded but the next page is still unclear.",
-              },
-              {
-                label: "Rollout backend v2",
-                href: OPERATOR_GUIDE_LINKS.rolloutV2,
-                note: "Use the rollout notes when the result difference looks tied to backend mode rather than request construction.",
-              },
-            ],
-            {
-              collapsibleSummary: "Operator guides",
-              compact: true,
-              intro: "Open these only when one smoke request still does not explain the next step.",
-            },
-          )}
         </div>
       `,
       "panel panel--span-4 panel--aside",
@@ -290,12 +246,12 @@ export function renderPlaygroundPage(
         <div class="stack">
           <div class="surface">
             <div class="surface__header">
-              <h4>Transport posture</h4>
+              <h4>Transport</h4>
               <div class="surface__meta" id="playground-transport-meta">${pill("idle")}</div>
             </div>
           </div>
           <details class="details-disclosure">
-            <summary>Current transport snapshot</summary>
+            <summary>Transport snapshot</summary>
             <pre class="code-block code-block--tall playground-output" id="playground-output">${escapeHtml(
               DEFAULT_OUTPUT,
             )}</pre>
@@ -394,14 +350,14 @@ export function updatePlaygroundRequestPreview(options: {
       label: "Bootstrap",
       value: bootstrap.required ? "active" : "not required",
       note: bootstrap.required
-        ? "If the gateway key is still empty, save the bootstrap/admin token into the left-rail gateway field first."
+        ? "If the rail key is empty, save the bootstrap/admin token first."
         : "Normal gateway auth flow.",
     },
   ]);
   elements.requestBody.textContent = JSON.stringify(request.body, null, 2);
   elements.authNote.textContent = gatewayKey
-    ? `Gateway key is present and will be attached as ${request.authLabel}.`
-    : "Gateway key is empty. The request will be sent without proxy auth headers.";
+    ? `Gateway key present. Will attach ${request.authLabel}.`
+    : "Gateway key empty. Request will be sent without proxy auth headers.";
   elements.formNote.textContent = describePreviewState(request, gatewayKey, setup);
   elements.bootstrapBanner.innerHTML = renderBootstrapBanner(setup, gatewayKey);
   elements.bootstrapSummary.innerHTML = renderDefinitionList(
@@ -473,8 +429,8 @@ function renderBootstrapBanner(setup: SetupPayload, gatewayKey: string): string 
   if (!setup.gigachat_ready) {
     return `
       <div class="banner banner--warn">
-        GigaChat credentials are still missing. Use <a href="/admin/setup"><strong>/admin/setup</strong></a>
-        before relying on playground smoke results.
+        GigaChat credentials are missing. Use <a href="/admin/setup"><strong>/admin/setup</strong></a>
+        before trusting smoke results.
       </div>
     `;
   }
@@ -483,7 +439,7 @@ function renderBootstrapBanner(setup: SetupPayload, gatewayKey: string): string 
     return `
       <div class="banner banner--warn">
         Bootstrap mode is active and the gateway key field is empty. Save the bootstrap/admin token in the
-        left rail, then re-run a preset from this page.
+        rail, then rerun.
       </div>
     `;
   }
@@ -491,16 +447,15 @@ function renderBootstrapBanner(setup: SetupPayload, gatewayKey: string): string 
   if (!setup.security_ready && !gatewayKey) {
     return `
       <div class="banner banner--warn">
-        Gateway auth is not configured yet. Playground can still help validate GigaChat wiring, but protected
-        routes will need a global or scoped key from <a href="/admin/keys"><strong>/admin/keys</strong></a>.
+        Gateway auth is not configured yet. Playground can still validate upstream wiring, but protected
+        routes still need a key from <a href="/admin/keys"><strong>/admin/keys</strong></a>.
       </div>
     `;
   }
 
   return `
     <div class="banner">
-      Playground is ready for smoke traffic. The safest first run is the <strong>OpenAI hello</strong> preset,
-      followed by a streaming preset to verify cleanup.
+      Playground is ready for smoke traffic. Start with <strong>OpenAI hello</strong>, then try streaming.
     </div>
   `;
 }
@@ -514,30 +469,22 @@ function buildBootstrapSteps(
     {
       label: "Persisted config",
       value: setup.persisted ? "yes" : "not yet",
-      note: setup.persisted
-        ? "Runtime changes survive restart."
-        : "Current values still look like defaults until settings are saved.",
+      note: setup.persisted ? "Changes survive restart." : "Values still look like defaults.",
     },
     {
       label: "GigaChat",
       value: setup.gigachat_ready ? "ready" : "missing",
-      note: setup.gigachat_ready
-        ? "Upstream credentials are present."
-        : "Configure credentials in setup before expecting successful completions.",
+      note: setup.gigachat_ready ? "Upstream credentials are present." : "Finish Setup before expecting success.",
     },
     {
       label: "Gateway key",
       value: gatewayKey ? "present" : "empty",
-      note: gatewayKey
-        ? "Playground will attach it to outgoing requests."
-        : "Use the left-rail gateway input if proxy auth is enabled.",
+      note: gatewayKey ? "Playground will attach it." : "Use the rail input if proxy auth is enabled.",
     },
     {
       label: "Bootstrap gate",
       value: bootstrap.required ? "active" : "off",
-      note: bootstrap.required
-        ? "Use the bootstrap token or localhost allowance until setup is complete."
-        : "No special first-run gate is active.",
+      note: bootstrap.required ? "Use the bootstrap token or localhost allowance." : "No special gate is active.",
     },
   ];
 }
@@ -548,13 +495,13 @@ function describePreviewState(
   setup: SetupPayload,
 ): string {
   if (!setup.gigachat_ready) {
-    return "The payload is ready, but upstream GigaChat credentials are still missing.";
+    return "Payload is ready, but upstream GigaChat credentials are still missing.";
   }
   if (!gatewayKey && (setup.security_ready || asRecord(setup.bootstrap).required)) {
-    return `Preview is valid, but ${request.authLabel} will be absent until the gateway key field is filled.`;
+    return `Preview is valid, but ${request.authLabel} stays absent until the gateway key field is filled.`;
   }
   if (request.stream) {
-    return `Streaming is enabled. ${request.url} will stay cancellable from the hero action bar.`;
+    return `Streaming is enabled. ${request.url} stays cancellable from the hero bar.`;
   }
   return `Plain POST preview is ready for ${request.url}.`;
 }
