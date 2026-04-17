@@ -40,7 +40,6 @@ export class AdminApp {
   private readonly pageSubtitle = this.requireElement<HTMLElement>("page-subtitle");
   private readonly workflowChip = this.requireElement<HTMLElement>("workflow-chip");
   private readonly surfaceChip = this.requireElement<HTMLElement>("surface-chip");
-  private readonly pageContext = this.requireElement<HTMLElement>("page-context");
   private readonly nav = this.requireElement<HTMLElement>("nav");
   private readonly saveAuthButton = this.requireElement<HTMLButtonElement>("save-auth");
 
@@ -99,7 +98,6 @@ export class AdminApp {
     this.pageSubtitle.textContent = meta.subtitle;
     this.workflowChip.textContent = `${workflow.label} workflow`;
     this.surfaceChip.textContent = navSurface;
-    this.pageContext.textContent = meta.navDescription;
   }
 
   setHeroActions(html: string): void {

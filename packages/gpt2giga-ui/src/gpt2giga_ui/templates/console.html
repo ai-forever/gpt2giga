@@ -13,7 +13,7 @@
         <div class="brand-block">
           <span class="eyebrow">Gateway Console</span>
           <h1>gpt2giga</h1>
-          <p>Operator surface for bootstrap, settings, traffic, and runtime diagnostics.</p>
+          <p>Bootstrap, configure, observe, and diagnose the gateway.</p>
         </div>
 
         <section class="rail-section">
@@ -37,58 +37,58 @@
         <nav class="console-nav" id="nav" aria-label="Primary console navigation">
           <div class="nav-group" data-workflow="start">
             <span class="nav-group__label">Start</span>
-            <p class="nav-group__copy">Bootstrap, confirm readiness, and run one smoke request before going deeper.</p>
+            <p class="nav-group__copy">Bootstrap and run one smoke request.</p>
             <a href="/admin">
               <strong>Overview</strong>
-              <span class="nav-link__meta">Gateway posture, readiness, and the next recommended step.</span>
+              <span class="nav-link__meta">Status and next step.</span>
             </a>
             <a href="/admin/setup">
               <strong>Setup</strong>
-              <span class="nav-link__meta">Close bootstrap gaps before the gateway is treated as production-ready.</span>
+              <span class="nav-link__meta">Bootstrap tasks.</span>
             </a>
             <a href="/admin/playground">
               <strong>Playground</strong>
-              <span class="nav-link__meta">Run the first smoke request against the mounted compatibility surfaces.</span>
+              <span class="nav-link__meta">Smoke request.</span>
             </a>
           </div>
           <div class="nav-group" data-workflow="configure">
             <span class="nav-group__label">Configure</span>
-            <p class="nav-group__copy">Persist runtime posture, observability, and gateway auth without touching env files.</p>
+            <p class="nav-group__copy">Persist settings and key posture.</p>
             <a href="/admin/settings">
               <strong>Settings</strong>
-              <span class="nav-link__meta">Edit application, observability, GigaChat, and security sections.</span>
+              <span class="nav-link__meta">Config sections.</span>
             </a>
             <a href="/admin/keys">
               <strong>API Keys</strong>
-              <span class="nav-link__meta">Create, rotate, or revoke global and scoped gateway keys.</span>
+              <span class="nav-link__meta">Global and scoped keys.</span>
             </a>
           </div>
           <div class="nav-group" data-workflow="observe">
             <span class="nav-group__label">Observe</span>
-            <p class="nav-group__copy">Start from request summaries, then narrow into one request or failure only when needed.</p>
+            <p class="nav-group__copy">Review requests before raw logs.</p>
             <a href="/admin/traffic">
               <strong>Traffic</strong>
-              <span class="nav-link__meta">Request summaries, usage rollups, and recent errors with request handoff.</span>
+              <span class="nav-link__meta">Requests, errors, usage.</span>
             </a>
             <a href="/admin/logs">
               <strong>Logs</strong>
-              <span class="nav-link__meta">Tail and stream logs for the narrowed request or failure context.</span>
+              <span class="nav-link__meta">Pinned request logs.</span>
             </a>
           </div>
           <div class="nav-group" data-workflow="diagnose">
             <span class="nav-group__label">Diagnose</span>
-            <p class="nav-group__copy">Open deeper runtime, provider, and workbench diagnostics only after the smaller surfaces narrow the question.</p>
+            <p class="nav-group__copy">Deeper runtime and provider checks.</p>
             <a href="/admin/providers">
               <strong>Providers</strong>
-              <span class="nav-link__meta">Compare enabled provider families against mounted routes and backend posture.</span>
+              <span class="nav-link__meta">Providers and routes.</span>
             </a>
             <a href="/admin/files-batches">
               <strong>Files &amp; Batches</strong>
-              <span class="nav-link__meta">Inspect uploaded files, batch jobs, and batch-input handoff state.</span>
+              <span class="nav-link__meta">Files and batch jobs.</span>
             </a>
             <a href="/admin/system">
               <strong>System</strong>
-              <span class="nav-link__meta">Runtime, config, and route diagnostics when operator posture looks off.</span>
+              <span class="nav-link__meta">Runtime diagnostics.</span>
             </a>
           </div>
         </nav>
@@ -96,7 +96,7 @@
         <section class="rail-section auth-panel">
           <details class="details-disclosure rail-disclosure" id="auth-disclosure">
             <summary>Browser keys</summary>
-            <p class="field-note">Stored only in this browser for admin access and playground requests.</p>
+            <p class="field-note">Stored in this browser for admin and playground requests.</p>
             <div class="stack">
               <label class="field">
                 <span>Admin API key / bootstrap token</span>
@@ -123,9 +123,6 @@
                 <span class="pill" id="workflow-chip">Workflow</span>
                 <span class="pill" id="surface-chip">Surface</span>
               </div>
-              <p class="hero-context__copy" id="page-context">
-                Loading the current workflow surface and operator handoff.
-              </p>
             </div>
           </div>
           <div class="hero-actions" id="hero-actions"></div>

@@ -21,12 +21,11 @@ export function renderPlaygroundPage(setup, initialRequest) {
           <div class="form-shell__intro">
             <span class="eyebrow">Smoke flow</span>
             <p class="muted">
-              Keep Playground narrow: load a preset, tweak only the request fields that matter, then send one proof request before widening into Traffic or Logs.
+              Load a preset, adjust the key fields, and send one proof request.
             </p>
           </div>
           ${renderFormSection({
         title: "Smoke presets",
-        intro: "Start from a known-good request shape, then adjust only the surface, model, or prompt fields you really need.",
         body: `
               <div class="toolbar">
                 ${PLAYGROUND_PRESETS.map((preset) => `
@@ -39,7 +38,6 @@ export function renderPlaygroundPage(setup, initialRequest) {
     })}
           ${renderFormSection({
         title: "Request targeting",
-        intro: "Choose the compatibility surface and model first, then edit prompts inside one quieter shell.",
         body: `
               <div class="dual-grid">
                 <label class="field">
@@ -68,7 +66,6 @@ export function renderPlaygroundPage(setup, initialRequest) {
     })}
           ${renderFormSection({
         title: "Transport posture",
-        intro: "Streaming and gateway auth stay explicit so the operator always knows what the proxy will attach and how the response should arrive.",
         body: `
               <div class="dual-grid">
                 <label class="field">
@@ -82,7 +79,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
                   <div class="stack">
                     <h4>Gateway auth</h4>
                     <p class="muted" id="playground-auth-note">
-                      Requests reuse the gateway key from the left rail. Keep it aligned with bootstrap or scoped keys.
+                      Requests reuse the gateway key from the rail.
                     </p>
                   </div>
                 </div>
@@ -101,10 +98,8 @@ export function renderPlaygroundPage(setup, initialRequest) {
           <div class="workflow-grid">
             ${renderWorkflowCard({
         workflow: "start",
-        title: setup.gigachat_ready ? "Smoke the mounted compatibility surface" : "Finish bootstrap before smoke",
-        note: setup.gigachat_ready
-            ? "Use one preset request as proof that the mounted route really works from inside the console, then widen into request-level diagnostics only if the result still feels wrong."
-            : "Missing upstream credentials or bootstrap posture should be closed before Playground output is treated as a real signal.",
+        title: setup.gigachat_ready ? "Run one smoke request" : "Finish bootstrap first",
+        compact: true,
         pills: [
             pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
             pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn"),
@@ -117,8 +112,8 @@ export function renderPlaygroundPage(setup, initialRequest) {
     })}
             ${renderWorkflowCard({
         workflow: "observe",
-        title: "Hand off only after one request narrows the story",
-        note: "Traffic and Logs stay secondary until one request, failure, or usage signal becomes the real debugging target.",
+        title: "Hand off to traffic or logs",
+        compact: true,
         pills: [
             pill(`Persisted: ${setup.persisted ? "yes" : "defaults"}`, setup.persisted ? "good" : "default"),
             pill(`Gateway auth: ${setup.security_ready ? "protected" : "open"}`),
@@ -135,9 +130,6 @@ export function renderPlaygroundPage(setup, initialRequest) {
               <div class="surface__header">
                 <div class="stack">
                   <h4>Current bootstrap posture</h4>
-                  <p class="muted">
-                    Keep bootstrap facts close to the smoke flow, but out of the main request builder.
-                  </p>
                 </div>
                 <div class="surface__meta">
                   ${pill("setup")}
@@ -155,12 +147,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
           <div class="surface">
             <div class="stack">
               <div class="surface__header">
-                <div class="stack">
-                  <h4>Current request posture</h4>
-                  <p class="muted">
-                    Summary stays primary. Open the raw request payload only when a specific field still needs inspection.
-                  </p>
-                </div>
+                <h4>Current request posture</h4>
               </div>
               <div id="playground-request-summary"></div>
             </div>
@@ -176,12 +163,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
           <div class="surface">
             <div class="stack">
               <div class="surface__header">
-                <div class="stack">
-                  <h4>Request lifecycle</h4>
-                  <p class="muted">
-                    Pending, first-byte, stream, success, and abort states stay explicit so the UI never looks hung.
-                  </p>
-                </div>
+                <h4>Request lifecycle</h4>
                 <div class="surface__meta" id="playground-status-pill">${pill("idle")}</div>
               </div>
               <div id="playground-run-note" class="field-note">${escapeHtml(DEFAULT_OUTPUT)}</div>
@@ -204,19 +186,18 @@ export function renderPlaygroundPage(setup, initialRequest) {
             href: OPERATOR_GUIDE_LINKS.rolloutV2,
             note: "Use the rollout notes when the result difference looks tied to backend mode rather than request construction.",
         },
-    ], "Playground stays narrow. Use the longer guides only after one smoke request and its summary still do not explain what the operator should do next.")}
+    ], {
+        collapsibleSummary: "Operator guides",
+        compact: true,
+        intro: "Open these only when one smoke request still does not explain the next step.",
+    })}
         </div>
       `, "panel panel--span-4 panel--aside")}
     ${card("Assistant output", `
         <div class="surface surface--dark">
           <div class="stack">
             <div class="surface__header">
-              <div class="stack">
-                <h4>Parsed response</h4>
-                <p class="muted">
-                  Best-effort extraction keeps the operator focused on model output instead of protocol noise.
-                </p>
-              </div>
+              <h4>Parsed response</h4>
               <div class="surface__meta" id="playground-output-meta">${pill("waiting")}</div>
             </div>
             <pre class="code-block code-block--tall playground-output" id="playground-assistant-output">${escapeHtml(DEFAULT_ASSISTANT_OUTPUT)}</pre>
@@ -227,12 +208,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
         <div class="stack">
           <div class="surface">
             <div class="surface__header">
-              <div class="stack">
-                <h4>Transport posture</h4>
-                <p class="muted">
-                  Rendered output stays primary. Open the transcript only when transport-level detail is the actual debugging target.
-                </p>
-              </div>
+              <h4>Transport posture</h4>
               <div class="surface__meta" id="playground-transport-meta">${pill("idle")}</div>
             </div>
           </div>

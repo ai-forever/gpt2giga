@@ -116,12 +116,12 @@ function renderTrafficNavigation(page: TrafficPage, filters: TrafficFilters): st
     title: "Traffic pages",
     intro:
       page === "traffic"
-        ? "Keep the hub summary-first. Open requests, errors, or usage only when one lane becomes the real task."
+        ? "Keep the hub broad, then open a focused lane."
         : page === "traffic-requests"
-          ? "This page stays request-first. Keep request review here, then escalate into Logs only when raw line context is actually needed."
+          ? "Request-first review and handoff."
           : page === "traffic-errors"
-            ? "This page stays failure-first. Review error patterns here before jumping into raw logs."
-            : "This page stays usage-first. Keep provider and key rollups together without the request and error tables competing for space.",
+            ? "Failure-first review and handoff."
+            : "Usage-first review before request evidence.",
     items: subpagesFor(page),
     hrefForPage: (target) => buildTrafficUrl(filters, target as TrafficPage),
   });
@@ -147,8 +147,7 @@ function renderTrafficOverviewPage(
       "Requests lane",
       renderTrafficPreviewLane({
         title: "Recent request sample",
-        intro:
-          "Keep the overview broad. Open the requests page when request review becomes the primary operator task.",
+        intro: "Open the requests page when request review becomes primary.",
         rows: renderRequestPreviewRows(data.requestEvents, filters),
         stats: [
           { label: "Rows in scope", value: formatNumber(data.requestEvents.length) },
@@ -165,8 +164,7 @@ function renderTrafficOverviewPage(
       "Errors lane",
       renderTrafficPreviewLane({
         title: "Recent error sample",
-        intro:
-          "Use the focused errors page when failure triage needs more than a short summary sample.",
+        intro: "Open the errors page when failure triage needs more than this sample.",
         rows: renderErrorPreviewRows(data.errorEvents, filters),
         stats: [
           { label: "Rows in scope", value: formatNumber(data.errorEvents.length) },
@@ -192,8 +190,7 @@ function renderTrafficOverviewPage(
       "Usage lane",
       renderTrafficPreviewLane({
         title: "Aggregate usage sample",
-        intro:
-          "Stay on the hub until one provider or key grouping stands out. Use the focused usage page only when grouped rollups become the main question.",
+        intro: "Open the usage page when one provider or key grouping stands out.",
         rows: renderUsagePreviewRows(data.providerEntries),
         stats: [
           {
@@ -252,7 +249,11 @@ function renderTrafficOverviewPage(
             note: "Use the escalation map when the current traffic lane still does not clearly point at the next surface.",
           },
         ],
-        "Keep the hub lightweight. The longer guides only matter after one traffic lane already exposed the next diagnostic question.",
+        {
+          collapsibleSummary: "Operator guides",
+          compact: true,
+          intro: "Open these only after one traffic lane already exposed the next question.",
+        },
       ),
       "panel panel--span-12",
     )}
@@ -336,7 +337,10 @@ function renderTrafficRequestsPage(
             note: "Escalate here only after one request row already proved that raw logs are the next step.",
           },
         ],
-        "This focused page is for request review and handoff. The longer guides stay secondary until one request already stands out.",
+        {
+          collapsibleSummary: "Operator guides",
+          compact: true,
+        },
       ),
       "panel panel--span-4 panel--aside",
     )}
@@ -423,7 +427,10 @@ function renderTrafficErrorsPage(
             note: "Open this when the error row is already isolated and only raw log evidence is missing.",
           },
         ],
-        "This focused page is for failure triage. The longer playbooks stay secondary until one error pattern is clearly isolated.",
+        {
+          collapsibleSummary: "Operator guides",
+          compact: true,
+        },
       ),
       "panel panel--span-4 panel--aside",
     )}
@@ -499,8 +506,8 @@ function renderTrafficUsagePage(
         <div class="step-grid">
           ${renderWorkflowCard({
             workflow: "observe",
-            title: "Move into request review after one provider stands out",
-            note: "Use the requests page when grouped usage already exposed the provider, key, or model that now needs request-level evidence.",
+            title: "Move into request review",
+            compact: true,
             pills: [pill("Requests"), pill("Pinned request"), pill("Logs")],
             actions: [
               {
@@ -513,8 +520,8 @@ function renderTrafficUsagePage(
           })}
           ${renderWorkflowCard({
             workflow: "diagnose",
-            title: "Escalate into logs only after request scope exists",
-            note: "Logs are still downstream from usage. Keep the grouped rollups primary until one request or failure lane is actually identified.",
+            title: "Escalate into logs later",
+            compact: true,
             pills: [pill("Usage first"), pill("Logs later"), pill("Request scoped")],
             actions: [
               {
@@ -544,7 +551,10 @@ function renderTrafficUsagePage(
             note: "Open the escalation map once grouped usage already pointed at the next request or provider surface.",
           },
         ],
-        "This focused page is for grouped usage review. The guides matter only after one provider or key grouping already became the real issue.",
+        {
+          collapsibleSummary: "Operator guides",
+          compact: true,
+        },
       ),
       "panel panel--span-4 panel--aside",
     )}
@@ -576,12 +586,12 @@ function renderTrafficFilters(
 
   const intro =
     variant === "overview"
-      ? "Keep the hub filters broad. The focused child pages exist so request, error, and usage drill-down do not have to share the same screen."
+      ? "Keep the hub filters broad."
       : variant === "requests"
-        ? "Keep this form request-centric: route, model, and request id narrowing belong here; grouped usage drill-down does not."
+        ? "Keep this form request-centric."
         : variant === "errors"
-          ? "Keep this form failure-centric: error type, route, and request id narrowing belong here before any raw-log escalation."
-          : "Keep this form usage-centric: provider, model, key source, and key name narrowing belong here before dropping back into request evidence.";
+          ? "Keep this form failure-centric."
+          : "Keep this form usage-centric.";
 
   const primarySection =
     variant === "usage"
@@ -724,18 +734,18 @@ function renderTrafficFilters(
                 : "Usage traffic scope",
         intro:
           variant === "overview"
-            ? "These filters stay shared across the traffic family so child pages can open with the same current scope."
+            ? "Shared across the traffic family."
             : variant === "usage"
-              ? "Usage filters stay aggregate even when recent request and error feeds are pinned to one request id elsewhere."
-              : "Request pinning follows the current filters so Logs can reopen with the same compatible scope.",
+              ? "Usage stays aggregate even when request feeds are pinned elsewhere."
+              : "Request pinning follows the current filters.",
         body: primarySection,
       })}
       ${renderFormSection({
         title: "Request pinning",
         intro:
           variant === "usage"
-            ? "Request id remains secondary here. It affects request and error lanes more than grouped usage, but keeping it visible preserves handoff consistency."
-            : "Use request pinning when the next step is correlating recent rows with the same request id across traffic and Logs.",
+            ? "Secondary here, but keeps handoff consistent."
+            : "Use this when the next step is request-scoped review.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -760,7 +770,7 @@ function renderTrafficFilters(
       })}
       <div class="toolbar">
         <button class="button" type="submit">Apply filters</button>
-        <span class="muted">The same scope carries across the traffic family and into Logs handoff links.</span>
+        <span class="muted">The same scope carries across traffic pages.</span>
       </div>
     </form>
   `;
@@ -778,12 +788,12 @@ function renderTrafficInspector(options: {
       <p class="muted">${escapeHtml(options.summaryIntro)}</p>
       ${renderFormSection({
         title: "Current posture",
-        intro: "Keep the scope summary readable first. Deep payload inspection stays collapsed until the posture and next handoff still leave ambiguity.",
+        intro: "Keep the scope summary readable first.",
         body: renderStatLines(options.statItems, "No traffic rows are loaded yet."),
       })}
       ${renderFormSection({
         title: "Selection and handoff",
-        intro: "Use the selected row summary and the request pin actions before opening raw snapshots or dropping into Logs.",
+        intro: "Use the selected row summary before raw snapshots or Logs.",
         body: `
           <div id="traffic-selection-summary">
             ${renderDefinitionList(
@@ -821,9 +831,7 @@ function renderTrafficWorkflowGuide(filters: TrafficFilters, requestPinned: bool
         title: requestPinned
           ? "Stay scoped to one request"
           : "Stay broad until one lane stands out",
-        note: requestPinned
-          ? "Traffic is already pinned to one request id. Use the focused request or error page only when one lane becomes the main task."
-          : "Keep the overview broad first: requests, errors, and usage stay visible together so you can choose the right focused page before escalating.",
+        compact: true,
         pills: [
           pill("Overview"),
           pill(requestPinned ? "Pinned request" : "Summary first"),
@@ -842,10 +850,8 @@ function renderTrafficWorkflowGuide(filters: TrafficFilters, requestPinned: bool
         workflow: "diagnose",
         title: requestPinned
           ? "Escalate only when raw context is needed"
-          : "Open Logs only after one request exists",
-        note: requestPinned
-          ? "Use Logs when the pinned request now needs raw line evidence, live tail correlation, or downstream trace context."
-          : "Logs stay downstream from traffic. Pick the lane first, then pin one request before escalating to raw output.",
+          : "Open logs only after one request exists",
+        compact: true,
         pills: [pill("Logs"), pill("Request scoped"), pill("Raw evidence")],
         actions: [
           {
@@ -861,7 +867,7 @@ function renderTrafficWorkflowGuide(filters: TrafficFilters, requestPinned: bool
 }
 
 function renderTrafficPreviewLane(options: {
-  intro: string;
+  intro?: string;
   primaryHref: string;
   primaryLabel: string;
   rows: string;
@@ -872,7 +878,7 @@ function renderTrafficPreviewLane(options: {
 }): string {
   return `
     <div class="stack">
-      <p class="muted">${escapeHtml(options.intro)}</p>
+      ${options.intro ? `<p class="muted">${escapeHtml(options.intro)}</p>` : ""}
       ${renderStatLines(options.stats)}
       ${renderFormSection({
         title: options.title,

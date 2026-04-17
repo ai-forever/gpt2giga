@@ -61,6 +61,12 @@ interface GuideLinkItem {
   note: string;
 }
 
+interface GuideLinksOptions {
+  collapsibleSummary?: string;
+  compact?: boolean;
+  intro?: string;
+}
+
 interface SubpageNavLink {
   description?: string;
   label: string;
@@ -272,18 +278,22 @@ export function renderSetupSteps(steps: SetupStep[]): string {
 
 export function renderWorkflowCard(options: {
   workflow: "start" | "configure" | "observe" | "diagnose";
+  compact?: boolean;
   title: string;
-  note: string;
+  note?: string;
   pills: string[];
   actions: WorkflowCardAction[];
 }): string {
   const workflow = WORKFLOW_META[options.workflow];
+  const className = ["workflow-card", options.compact ? "workflow-card--compact" : ""]
+    .filter(Boolean)
+    .join(" ");
   return `
-    <article class="workflow-card">
+    <article class="${className}">
       <div class="workflow-card__header">
-        <span class="eyebrow">${escapeHtml(workflow.label)}</span>
+        ${options.compact ? "" : `<span class="eyebrow">${escapeHtml(workflow.label)}</span>`}
         <h4>${escapeHtml(options.title)}</h4>
-        <p>${escapeHtml(options.note)}</p>
+        ${options.note ? `<p>${escapeHtml(options.note)}</p>` : ""}
       </div>
       <div class="pill-row">${options.pills.join("")}</div>
       <div class="workflow-card__actions">
@@ -336,20 +346,27 @@ export function renderSubpageNav(options: {
 
 export function renderGuideLinks(
   links: GuideLinkItem[],
-  intro = "Use these links when the current screen already narrowed the problem but you still need the longer operator playbook.",
+  options:
+    | string
+    | GuideLinksOptions = "Use these links when the current screen already narrowed the problem but you still need the longer operator playbook.",
 ): string {
   if (!links.length) {
     return renderEmptyState("No guide links are configured.");
   }
 
-  return `
-    <div class="stack">
-      <p class="muted">${escapeHtml(intro)}</p>
+  const normalizedOptions: GuideLinksOptions =
+    typeof options === "string" ? { intro: options } : options;
+  const className = ["stack", "guide-links", normalizedOptions.compact ? "guide-links--compact" : ""]
+    .filter(Boolean)
+    .join(" ");
+  const body = `
+    <div class="${className}">
+      ${normalizedOptions.intro ? `<p class="muted">${escapeHtml(normalizedOptions.intro)}</p>` : ""}
       <div class="step-grid">
         ${links
           .map(
             (link) => `
-              <article class="step-card">
+              <article class="step-card${normalizedOptions.compact ? " step-card--compact" : ""}">
                 <h4>
                   <a href="${escapeHtml(link.href)}" target="_blank" rel="noreferrer noopener">
                     ${escapeHtml(link.label)}
@@ -362,6 +379,19 @@ export function renderGuideLinks(
           .join("")}
       </div>
     </div>
+  `;
+
+  if (normalizedOptions.collapsibleSummary) {
+    return `
+      <details class="details-disclosure">
+        <summary>${escapeHtml(normalizedOptions.collapsibleSummary)}</summary>
+        ${body}
+      </details>
+    `;
+  }
+
+  return `
+    ${body}
   `;
 }
 

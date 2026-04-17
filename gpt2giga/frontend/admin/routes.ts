@@ -31,8 +31,7 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
   overview: {
     eyebrow: "Overview",
     title: "Gateway overview",
-    subtitle:
-      "Health, setup readiness, usage volume, and operator warnings in one place.",
+    subtitle: "Health, setup state, usage, and operator warnings.",
     workflow: "start",
     navDescription:
       "Summary-first posture view with the next operator action already narrowed down.",
@@ -40,8 +39,7 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
   setup: {
     eyebrow: "Setup",
     title: "Setup hub",
-    subtitle:
-      "Track bootstrap progress, resolve warnings, and open the next setup step directly.",
+    subtitle: "Bootstrap progress, warnings, and the next step.",
     workflow: "start",
     navDescription:
       "Summary-first bootstrap hub with direct handoff into claim, application, GigaChat, and security steps.",
@@ -85,8 +83,7 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
   settings: {
     eyebrow: "Settings",
     title: "Settings hub",
-    subtitle:
-      "Open focused configuration pages for application, observability, GigaChat, security, and history.",
+    subtitle: "Focused pages for config and revision history.",
     workflow: "configure",
     navDescription:
       "Summary-first settings hub with direct handoff into one configuration area at a time.",
@@ -155,8 +152,7 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
   playground: {
     eyebrow: "Playground",
     title: "Manual request playground",
-    subtitle:
-      "Test OpenAI, Anthropic, and Gemini-compatible calls directly against this proxy.",
+    subtitle: "Run compatibility requests directly against this proxy.",
     workflow: "start",
     navDescription:
       "Smoke the mounted compatibility routes before exposing them to real clients.",
@@ -164,8 +160,7 @@ export const PAGE_META: Record<PageId, RouteMeta> = {
   traffic: {
     eyebrow: "Traffic",
     title: "Traffic summary",
-    subtitle:
-      "Start from recent request, error, and usage summaries before opening a focused traffic page.",
+    subtitle: "Recent requests, errors, and usage before drill-down.",
     workflow: "observe",
     navDescription:
       "Summary-first observe hub with direct handoff into focused request, error, and usage pages.",

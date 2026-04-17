@@ -22,7 +22,6 @@ export class AdminApp {
     pageSubtitle = this.requireElement("page-subtitle");
     workflowChip = this.requireElement("workflow-chip");
     surfaceChip = this.requireElement("surface-chip");
-    pageContext = this.requireElement("page-context");
     nav = this.requireElement("nav");
     saveAuthButton = this.requireElement("save-auth");
     apiClient;
@@ -68,7 +67,6 @@ export class AdminApp {
         this.pageSubtitle.textContent = meta.subtitle;
         this.workflowChip.textContent = `${workflow.label} workflow`;
         this.surfaceChip.textContent = navSurface;
-        this.pageContext.textContent = meta.navDescription;
     }
     setHeroActions(html) {
         this.heroActions.innerHTML = html;

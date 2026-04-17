@@ -42,22 +42,22 @@ export async function renderOverview(app, token) {
             <span class="eyebrow">Current posture</span>
             <h4 class="overview-callout__title">
               ${escapeHtml(setup.setup_complete
-        ? "Gateway is ready for guided operator work."
-        : "Gateway still needs a first-run pass.")}
+        ? "Gateway is ready for operator work."
+        : "Gateway still needs setup.")}
             </h4>
             <p class="muted">
               ${escapeHtml(setup.setup_complete
-        ? "Core bootstrap steps are in place. Focus on smoke traffic, logs, and provider coverage."
-        : "Finish persisted settings, configure GigaChat credentials, and close the auth bootstrap before treating the gateway as production-ready.")}
+        ? "Use playground, traffic, or settings as the next step."
+        : "Finish setup, GigaChat credentials, and gateway auth first.")}
             </p>
           </section>
           <div class="overview-stat-grid">
-            ${renderOverviewMetric("Setup", setup.setup_complete ? "Complete" : "Needs action", setup.setup_complete ? "Bootstrap and security are in place." : "Open Setup to finish the first-run flow.", setup.setup_complete ? "good" : "warn")}
-            ${renderOverviewMetric("Requests", formatNumber(requestCount), `${formatNumber(totalTokens)} total tokens observed.`)}
-            ${renderOverviewMetric("Error rate", formatPercent(errorCount, requestCount), errorCount > 0 ? `${formatNumber(errorCount)} recent errors need inspection.` : "No recent errors in the usage rollup.", errorCount > 0 ? "warn" : "good")}
+            ${renderOverviewMetric("Setup", setup.setup_complete ? "Complete" : "Needs action", setup.setup_complete ? "Bootstrap closed." : "Open Setup.", setup.setup_complete ? "good" : "warn")}
+            ${renderOverviewMetric("Requests", formatNumber(requestCount), `${formatNumber(totalTokens)} tokens`)}
+            ${renderOverviewMetric("Error rate", formatPercent(errorCount, requestCount), errorCount > 0 ? `${formatNumber(errorCount)} recent errors` : "No recent errors", errorCount > 0 ? "warn" : "good")}
             ${renderOverviewMetric("Providers", formatNumber(enabledProviders.length), topProvider
-        ? `${String(topProvider.provider ?? "Unknown")} is currently the busiest provider.`
-        : "No provider traffic has been recorded yet.")}
+        ? `Top: ${String(topProvider.provider ?? "Unknown")}`
+        : "No traffic yet")}
           </div>
           ${renderDefinitionList([
         {
@@ -88,16 +88,13 @@ export async function renderOverview(app, token) {
       `, "panel panel--span-8 panel--measure")}
     ${card("Workflow handoff", `
         <div class="stack overview-aside">
-          <p class="muted">The console is grouped by operator workflow. Start from the smallest surface that answers the question, then branch deeper only if the current summary still leaves ambiguity.</p>
           <div class="workflow-grid">
             ${renderWorkflowCard({
         workflow: "start",
         title: setup.setup_complete
-            ? "Bootstrap is complete"
-            : "Finish the first-run path",
-        note: setup.setup_complete
-            ? "Stay on the guided path: overview first, then one playground smoke request before opening deeper diagnostics."
-            : "Persist the control-plane target, configure GigaChat auth, and close the bootstrap gap before treating the gateway as ready.",
+            ? "Run setup or playground"
+            : "Finish setup",
+        compact: true,
         pills: [
             pill(`Persisted: ${setup.persisted ? "ready" : "missing"}`, setup.persisted ? "good" : "warn"),
             pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
@@ -115,8 +112,8 @@ export async function renderOverview(app, token) {
     })}
             ${renderWorkflowCard({
         workflow: "configure",
-        title: "Persist operator posture",
-        note: "Use the configuration surfaces for observability, provider posture, and auth rotation instead of editing environment files by hand.",
+        title: "Open settings or keys",
+        compact: true,
         pills: [
             pill(`Gateway auth: ${runtimeRecord.auth_required ? "required" : "open"}`, runtimeRecord.auth_required ? "good" : "warn"),
             pill(`Telemetry: ${runtime.telemetry_enabled ? "enabled" : "disabled"}`, runtime.telemetry_enabled ? "good" : "default"),
@@ -129,10 +126,8 @@ export async function renderOverview(app, token) {
     })}
             ${renderWorkflowCard({
         workflow: "observe",
-        title: errorCount > 0 ? "Recent traffic needs inspection" : "Keep observation summary-first",
-        note: errorCount > 0
-            ? "Traffic narrows the request window first. Once one request id matters, open Logs with the same context instead of tailing the whole file."
-            : "Traffic stays the broad request view, while Logs is the deep dive only after a single request or failure is worth following.",
+        title: errorCount > 0 ? "Inspect traffic or logs" : "Open traffic or logs",
+        compact: true,
         pills: [
             pill(`Requests: ${formatNumber(requestCount)}`),
             pill(`Errors: ${formatNumber(errorCount)}`, errorCount > 0 ? "warn" : "good"),
@@ -146,9 +141,9 @@ export async function renderOverview(app, token) {
             ${renderWorkflowCard({
         workflow: "diagnose",
         title: enabledProviders.length
-            ? "Advanced diagnostic surfaces are available"
-            : "Provider posture still needs validation",
-        note: "Use System and Providers when config, routes, or runtime posture feel inconsistent. Files & Batches stays here as the advanced workbench for stored inputs and batch jobs.",
+            ? "Open advanced diagnostics"
+            : "Validate provider posture",
+        compact: true,
         pills: [
             pill(`Providers: ${enabledProviders.join(", ") || "none"}`),
             pill(`Docs: ${runtimeRecord.docs_enabled ? "exposed" : "disabled"}`),
@@ -165,9 +160,6 @@ export async function renderOverview(app, token) {
       `, "panel panel--span-4 panel--aside")}
     ${card("Recent error handoff", `
         <div class="stack">
-          <p class="muted">
-            Keep Overview summary-first. Use this short failure sample only to decide whether Traffic or Logs is the next surface worth opening.
-          </p>
           ${renderTable([
         { label: "When" },
         { label: "Route" },
@@ -202,7 +194,11 @@ export async function renderOverview(app, token) {
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
             note: "Use the escalation map when the summary cards still do not clearly point at the next operator surface.",
         },
-    ], "Overview stays summary-first. The guides matter only after the posture summary and workflow cards stop being enough."), "panel panel--span-4 panel--aside")}
+    ], {
+        collapsibleSummary: "Operator guides",
+        compact: true,
+        intro: "Open these only when the summary still does not point to the next page.",
+    }), "panel panel--span-4 panel--aside")}
   `);
 }
 function formatPercent(part, total) {
@@ -248,7 +244,7 @@ function renderOverviewMetric(label, value, note, tone = "default") {
     <article class="${toneClass}">
       <span class="overview-metric__label">${escapeHtml(label)}</span>
       <strong class="overview-metric__value">${escapeHtml(value)}</strong>
-      <span class="overview-metric__note">${escapeHtml(note)}</span>
+      ${note ? `<span class="overview-metric__note">${escapeHtml(note)}</span>` : ""}
     </article>
   `;
 }

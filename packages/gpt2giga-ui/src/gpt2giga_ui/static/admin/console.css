@@ -224,7 +224,6 @@ summary:focus-visible {
 }
 
 .nav-group--active .nav-group__copy,
-.nav-group:hover .nav-group__copy,
 .nav-group:focus-within .nav-group__copy {
   max-height: 72px;
   margin: -4px 0 2px;
@@ -250,9 +249,7 @@ summary:focus-visible {
   transition: max-height 140ms ease, opacity 120ms ease;
 }
 
-.console-nav a.active .nav-link__meta,
-.console-nav a:hover .nav-link__meta,
-.console-nav a:focus-visible .nav-link__meta {
+.console-nav a.active .nav-link__meta {
   max-height: 72px;
   opacity: 1;
 }
@@ -296,9 +293,10 @@ summary:focus-visible {
 }
 
 .hero-context {
-  display: grid;
-  gap: 10px;
-  max-width: 720px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .hero-context__chips {
@@ -306,13 +304,6 @@ summary:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-}
-
-.hero-context__copy {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.5;
 }
 
 .subpage-nav {
@@ -631,6 +622,14 @@ code {
   margin-bottom: 8px;
 }
 
+.step-card--compact {
+  padding: 16px;
+}
+
+.step-card--compact h4 {
+  margin-top: 0;
+}
+
 .stat-line {
   display: flex;
   justify-content: space-between;
@@ -911,6 +910,26 @@ code {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.workflow-card--compact {
+  gap: 10px;
+}
+
+.workflow-card--compact .workflow-card__header {
+  gap: 4px;
+}
+
+.workflow-card--compact .workflow-card__header h4 {
+  font-size: 16px;
+}
+
+.guide-links {
+  gap: 12px;
+}
+
+.guide-links--compact {
+  gap: 10px;
 }
 
 .settings-switcher {

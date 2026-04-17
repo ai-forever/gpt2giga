@@ -71,7 +71,7 @@ def test_admin_ui_ok():
     assert 'data-workflow="diagnose"' in resp.text
     assert 'id="workflow-chip"' in resp.text
     assert 'id="surface-chip"' in resp.text
-    assert 'id="page-context"' in resp.text
+    assert 'id="page-context"' not in resp.text
 
 
 def test_legacy_logs_html_redirects_to_admin():
@@ -295,7 +295,8 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert "Workflow handoff" in overview_asset.text
     assert "Recent error handoff" in overview_asset.text
     assert "Overview workflow guide" in overview_asset.text
-    assert "Overview stays summary-first" in overview_asset.text
+    assert "Operator guides" in overview_asset.text
+    assert "Run setup or playground" in overview_asset.text
 
     assert system_asset.status_code == 200
     assert "Confirm live request behavior before deep forensics" in system_asset.text
@@ -340,7 +341,8 @@ def test_admin_ui_assets_include_polished_keys_and_playground_copy():
     assert "Current request posture" in playground_asset.text
     assert "Current request payload" in playground_asset.text
     assert "Current transport snapshot" in playground_asset.text
-    assert "Playground stays narrow." in playground_asset.text
+    assert "Run one smoke request" in playground_asset.text
+    assert "Operator guides" in playground_asset.text
     assert "Current bootstrap posture" in playground_asset.text
 
     assert docs_links_asset.status_code == 200
