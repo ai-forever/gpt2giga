@@ -96,7 +96,7 @@ function renderSetupHub(options) {
     ${card("Setup map", renderSubpageNav({
         currentPage: options.currentPage,
         title: "Setup pages",
-        intro: "Use the hub for progress. Open one step at a time.",
+        intro: "Use the hub for progress.",
         items: subpagesFor(options.currentPage),
     }), "panel panel--span-12")}
     ${card("Setup progress", `
@@ -188,7 +188,7 @@ function renderFocusedSetupPage(options) {
     ${card("Setup navigation", renderSubpageNav({
         currentPage: options.currentPage,
         title: "Setup pages",
-        intro: "Each page owns one setup task.",
+        intro: "One task per page.",
         items: subpagesFor(options.currentPage),
     }), "panel panel--span-12")}
     ${renderSetupMainCard(options)}
@@ -235,7 +235,7 @@ function renderSetupMainCard(options) {
     }
     if (options.activeSection === "application") {
         return card("Application posture", renderApplicationSection({
-            bannerMessage: "Saving always updates the persisted control-plane target. Runtime only reloads immediately when this bootstrap step stays restart-safe.",
+            bannerMessage: "Saves the target config. Restart-sensitive fields wait for restart.",
             formId: "setup-application-form",
             statusId: "setup-application-status",
             submitLabel: "Save application step",
@@ -245,7 +245,7 @@ function renderSetupMainCard(options) {
     }
     if (options.activeSection === "gigachat") {
         return card("GigaChat auth", renderGigachatSection({
-            bannerMessage: "Connection tests use candidate values without persisting them. Saving updates the persisted target first, then reloads runtime only when the batch is restart-safe.",
+            bannerMessage: "Connection test is dry-run. Restart-sensitive fields wait for restart.",
             formId: "setup-gigachat-form",
             statusId: "setup-gigachat-status",
             submitLabel: "Save GigaChat step",
@@ -256,7 +256,7 @@ function renderSetupMainCard(options) {
         }), "panel panel--span-8 panel--measure");
     }
     return card("Security bootstrap", renderSecuritySection({
-        bannerMessage: "Security bootstrap saves to the control plane first. If this step includes restart-sensitive changes, the running process keeps the previous posture until restart.",
+        bannerMessage: "Saves the target config first. Restart-sensitive fields wait for restart.",
         formId: "setup-security-form",
         statusId: "setup-security-status",
         submitLabel: "Save security step",
@@ -386,10 +386,10 @@ function bindSetupInteractions(options) {
             updatedAt: options.persistedUpdatedAt,
             buildPayload: () => buildApplicationPayload(applicationForm),
             buildEntries: (payload) => buildPendingDiffEntries("application", options.applicationValues, payload),
-            buildNote: () => "Use this step for runtime posture and provider routing. Restart-sensitive controls are called out before you save.",
+            buildNote: () => "Restart-sensitive controls are flagged before save.",
             getValidationMessage: (_payload, report = false) => validateRequiredCsvField(applicationFields?.enabled_providers, "Provide at least one enabled provider.", { report }),
             endpoint: "/admin/api/settings/application",
-            pendingMessage: "Saving the application bootstrap step. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
+            pendingMessage: "Saving the application bootstrap step. Restart-sensitive fields wait for restart.",
             outcomeLabel: "Application bootstrap step",
             failurePrefix: "Application bootstrap step failed to save",
             rerenderPage: options.currentPage,
@@ -411,12 +411,12 @@ function bindSetupInteractions(options) {
                     syncAccessTokenSecret(),
                 ]);
                 return stagedSecretMessages.length
-                    ? `Testing the connection here does not persist the form. ${stagedSecretMessages.join(" ")}`
-                    : "Testing the connection here does not persist the form; save only after the pending state looks correct.";
+                    ? `Connection test never saves. ${stagedSecretMessages.join(" ")}`
+                    : "Connection test never saves. Review the pending state, then save.";
             },
             getValidationMessage: getGigachatValidationMessage,
             endpoint: "/admin/api/settings/gigachat",
-            pendingMessage: "Saving the GigaChat bootstrap step. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
+            pendingMessage: "Saving the GigaChat bootstrap step. Secrets stay masked; restart-sensitive fields wait for restart.",
             outcomeLabel: "GigaChat bootstrap step",
             failurePrefix: "GigaChat bootstrap step failed to save",
             rerenderPage: options.currentPage,
@@ -431,7 +431,7 @@ function bindSetupInteractions(options) {
             setActionState: (state) => {
                 gigachatBinding.setActionState(state);
             },
-            pendingMessage: "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save this step.",
+            pendingMessage: "Testing candidate GigaChat settings only. Saved values stay unchanged.",
         });
     }
     if (securityForm && securityStatusNode) {
@@ -443,9 +443,9 @@ function bindSetupInteractions(options) {
             updatedAt: options.persistedUpdatedAt,
             buildPayload: () => buildSecurityPayload(securityForm),
             buildEntries: (payload) => buildPendingDiffEntries("security", options.securityValues, payload),
-            buildNote: () => "Gateway auth posture and CORS are the main restart-sensitive controls in this step.",
+            buildNote: () => "Gateway auth and CORS are the main restart-sensitive controls here.",
             endpoint: "/admin/api/settings/security",
-            pendingMessage: "Saving the security bootstrap step. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
+            pendingMessage: "Saving the security bootstrap step. Restart-sensitive fields wait for restart.",
             outcomeLabel: "Security bootstrap step",
             failurePrefix: "Security bootstrap step failed to save",
             rerenderPage: options.currentPage,
@@ -491,33 +491,33 @@ function getNextRecommendedSetupPage(setup) {
         return {
             href: "/admin/setup-claim",
             label: "Open claim step",
-            note: "Claim the bootstrap session before relying on the rest of the setup flow.",
+            note: "Claim the bootstrap session first.",
         };
     }
     if (!setup.persisted) {
         return {
             href: "/admin/setup-application",
             label: "Open application step",
-            note: "Persist baseline runtime posture before moving deeper into provider and security steps.",
+            note: "Persist the baseline runtime posture first.",
         };
     }
     if (!setup.gigachat_ready) {
         return {
             href: "/admin/setup-gigachat",
             label: "Open GigaChat step",
-            note: "Provider credentials are still incomplete, so playground calls will fail until this step is ready.",
+            note: "Provider credentials are still incomplete.",
         };
     }
     if (!setup.security_ready) {
         return {
             href: "/admin/setup-security",
             label: "Open security step",
-            note: "Close bootstrap exposure and stage gateway auth before treating the gateway as production-ready.",
+            note: "Close bootstrap exposure and stage gateway auth.",
         };
     }
     return {
         href: "/admin/playground",
         label: "Open playground",
-        note: "Bootstrap-critical setup is complete. The next move is a smoke request against the mounted surfaces.",
+        note: "Bootstrap-critical setup is complete. Run a smoke request next.",
     };
 }

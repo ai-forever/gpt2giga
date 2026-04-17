@@ -23,16 +23,16 @@ export function renderLogsPage(data, filters) {
     ${kpi("Matching lines", countMatchingLines(rawLogLines, filters))}
     ${kpi("Recent errors", data.errorEvents.length)}
     ${kpi("Recent requests", data.requestEvents.length)}
-    ${card(filters.requestId ? "Diagnose workflow" : "Deep-dive diagnose workflow", renderLogsWorkflowGuide(filters), "panel panel--span-12 panel--measure")}
-    ${card("Log scope", renderLogsFiltersForm(data, filters), "panel panel--span-8 panel--measure")}
-    ${card("Current posture and handoff", renderLogsInspector(data, filters, rawLogLines), "panel panel--span-4 panel--aside")}
+    ${card("Workflow", renderLogsWorkflowGuide(filters), "panel panel--span-12 panel--measure")}
+    ${card("Scope", renderLogsFiltersForm(data, filters), "panel panel--span-8 panel--measure")}
+    ${card("Posture", renderLogsInspector(data, filters, rawLogLines), "panel panel--span-4 panel--aside")}
     ${card("Rendered log tail", `
         <div class="surface surface--dark">
           <div class="stack">
             <div class="surface__header">
               <div class="stack">
                 <h4>Rendered output</h4>
-                <p class="muted">Keep the tail readable first. Use the request scope and tail-derived context table to correlate one request before expanding live stream troubleshooting or raw snapshots.</p>
+                <p class="muted">Read the rendered tail first. Use one request scope before opening stream diagnostics or raw snapshots.</p>
               </div>
               <div class="surface__meta">
                 <span class="pill" id="logs-match-count">${escapeHtml(`${countMatchingLines(rawLogLines, filters)} matches`)}</span>
@@ -42,36 +42,38 @@ export function renderLogsPage(data, filters) {
           </div>
         </div>
       `, "panel panel--span-8")}
-    ${card("Live tail controls", renderLogsStreamPanel(streamState, rawLogLines.length), "panel panel--span-4 panel--aside")}
-    ${card("Tail-derived request context", `
+    ${card("Live stream", renderLogsStreamPanel(streamState, rawLogLines.length), "panel panel--span-4 panel--aside")}
+    ${card("Tail context", `
         <div class="stack">
           <p class="muted">
-            Extract request ids from the rendered tail only after the current scope is narrow enough to be useful. This keeps the handoff back to Traffic predictable instead of starting from raw lines alone.
+            Extract request ids only after the current scope is narrow enough to be useful.
           </p>
           <div id="logs-tail-context">
             ${renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup), filters)}
           </div>
         </div>
       `, "panel panel--span-8")}
-    ${card("Guide and troubleshooting", renderGuideLinks([
+    ${card("Guides", renderGuideLinks([
         {
             label: "Logs deep-dive guide",
             href: OPERATOR_GUIDE_LINKS.logs,
-            note: "Use the longer playbook for request-pinned tail inspection, live streaming, and the moment when raw logs become necessary.",
+            note: "Request-pinned tail inspection and live streaming.",
         },
         {
             label: "Traffic workflow guide",
             href: OPERATOR_GUIDE_LINKS.traffic,
-            note: "Step back to the summary-first request flow when you need to re-check recent request volume, error mix, or a broader provider window.",
+            note: "Step back when you need the broader request summary.",
         },
         {
             label: "Troubleshooting handoff map",
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Use the page-to-page escalation map when the problem no longer belongs only to Logs and needs a clearer next handoff.",
+            note: "Cross-page escalation map.",
         },
-    ], filters.requestId
-        ? "Logs is already pinned to one request. Use these guides only when the current posture and handoff actions still leave the next step unclear."
-        : "Logs stays request-scoped. Use the guides when the current posture and tail context are still not enough to choose the next handoff."), "panel panel--span-4 panel--aside")}
+    ], {
+        compact: true,
+        collapsibleSummary: "Operator guides",
+        intro: filters.requestId ? "Open only if the pinned request still needs a handoff." : "Open only if the current scope still needs a handoff.",
+    }), "panel panel--span-4 panel--aside")}
     ${card("Recent errors", renderErrorRows(data.errorEvents, filters), "panel panel--span-6")}
     ${card("Recent requests", renderRequestRows(data.requestEvents, filters), "panel panel--span-6")}
   `;
@@ -81,12 +83,12 @@ function renderLogsFiltersForm(data, filters) {
     <form id="logs-filters-form" class="form-shell form-shell--compact">
       <div class="form-shell__intro">
         <p class="muted">
-          Keep Logs narrower than the broad traffic workflow. Start by shaping one tail window, then pin one request only when the next step really needs raw evidence.
+          Keep Logs narrower than Traffic. Shape the tail window first, then pin one request only when needed.
         </p>
       </div>
       ${renderFormSection({
         title: "Tail window",
-        intro: "These controls shape the rendered tail first. Text matching stays client-side so you can re-scope quickly without another page transition.",
+        intro: "Shape the rendered tail first.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -104,7 +106,7 @@ function renderLogsFiltersForm(data, filters) {
     })}
       ${renderFormSection({
         title: "Request pinning",
-        intro: "Pin one request id only when structured request and error context should stay aligned with the same log window and Traffic handoff.",
+        intro: "Pin one request only when the same scope should stay aligned across logs and traffic.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -117,7 +119,7 @@ function renderLogsFiltersForm(data, filters) {
             </label>
             <div class="surface">
               <p class="muted">
-                Request pinning narrows the recent request and error context, tail-derived request links, and the rendered tail without forcing you into raw output too early.
+                Pinning narrows the rendered tail, recent events, and handoff links together.
               </p>
             </div>
           </div>
@@ -125,7 +127,7 @@ function renderLogsFiltersForm(data, filters) {
     })}
       ${renderFormSection({
         title: "Event scope",
-        intro: "These filters stay aligned with the recent request and error feeds so the current scope can move between Traffic and Logs without rework.",
+        intro: "Keep the current scope aligned with recent request and error feeds.",
         body: `
           <div class="quad-grid">
             <label class="field">
@@ -169,7 +171,7 @@ function renderLogsFiltersForm(data, filters) {
                 ${renderStaticSelectOptions(filters.limit || DEFAULT_LIMIT, ["5", "8", "12", "20"])}
               </select>
             </label>
-            <span class="muted">The same scope drives recent request and error panels, tail-derived links, and the Traffic handoff.</span>
+            <span class="muted">The same scope drives recent panels, tail links, and Traffic handoff.</span>
           </div>
         `,
     })}
@@ -185,12 +187,9 @@ function renderLogsFiltersForm(data, filters) {
 function renderLogsInspector(data, filters, rawLogLines) {
     return `
     <div class="stack">
-      <p class="muted">
-        Keep the selected scope readable before expanding any raw snapshot. The page should answer what is pinned, what evidence is loaded, and where the next handoff goes.
-      </p>
       ${renderFormSection({
         title: "Current posture",
-        intro: "Read the current log scope first. Tail evidence and live stream internals stay secondary until this summary still leaves ambiguity.",
+        intro: "Read the current log scope first.",
         body: renderStatLines([
             { label: "Tail lines loaded", value: String(rawLogLines.length) },
             { label: "Matching lines", value: countMatchingLines(rawLogLines, filters) },
@@ -201,7 +200,7 @@ function renderLogsInspector(data, filters, rawLogLines) {
     })}
       ${renderFormSection({
         title: "Selection and handoff",
-        intro: "Inspect the selected event or tail-derived request here first, then hand off to Traffic only when the aggregated view needs to come back into focus.",
+        intro: "Inspect the selected event or tail-derived request here first.",
         body: `
           <div id="logs-selection-summary">
             ${renderDefinitionList([
@@ -211,8 +210,8 @@ function renderLogsInspector(data, filters, rawLogLines) {
                 label: "Request scope",
                 value: filters.requestId || "Recent log window",
                 note: filters.requestId
-                    ? "The rendered tail, tail-derived request links, and event panels are pinned to one request id."
-                    : "Select a tail-derived request line or a recent request or error row to inspect context.",
+                    ? "Tail, tail links, and recent panels are pinned to one request."
+                    : "Select a tail-derived request line or recent event row.",
             },
         ], "No event selected yet.")}
           </div>
@@ -224,7 +223,7 @@ function renderLogsInspector(data, filters, rawLogLines) {
       <details class="details-disclosure" id="logs-detail-disclosure">
         <summary id="logs-detail-summary">Current scope snapshot</summary>
         <p class="field-note">
-          Expand this only when the posture summary and handoff actions still are not enough.
+          Expand only if the posture summary still is not enough.
         </p>
         <pre class="code-block" id="logs-detail">${escapeHtml(JSON.stringify({
         filters,
@@ -242,7 +241,7 @@ function renderLogsStreamPanel(streamState, rawLineCount) {
         <div class="surface__header">
           <div class="stack">
             <h4>Live tail status</h4>
-            <p class="muted">Use streaming only after the current scope is already clear. Restart and diagnostics stay secondary to the rendered tail and request handoff.</p>
+            <p class="muted">Use streaming only after the current scope is clear.</p>
           </div>
           <div class="surface__meta" id="logs-stream-status">${renderStreamPill("idle")}</div>
         </div>
@@ -257,7 +256,7 @@ function renderLogsStreamPanel(streamState, rawLineCount) {
         <details class="details-disclosure" id="logs-stream-diagnostics-disclosure">
           <summary>Live stream diagnostics</summary>
           <p class="field-note">
-            Expand this only when the SSE lifecycle itself needs troubleshooting or when a hanging reader is suspected.
+            Expand only when the SSE lifecycle itself needs troubleshooting.
           </p>
           <div id="logs-stream-diagnostics">
             ${renderDefinitionList(buildStreamDiagnostics(streamState, rawLineCount))}
@@ -275,10 +274,10 @@ function renderLogsWorkflowGuide(filters) {
       <article class="workflow-card">
         <div class="workflow-card__header">
           <span class="eyebrow">Diagnose</span>
-          <h4>${escapeHtml(scoped ? "Keep the deep dive scoped" : "Use Logs only after Traffic narrowed the question")}</h4>
+          <h4>${escapeHtml(scoped ? "Keep the deep dive scoped" : "Open Logs after Traffic narrows the question")}</h4>
           <p>${escapeHtml(scoped
-        ? "Logs is already scoped to one request id. Read the posture summary, use the selected request and error context, and open the rendered tail only as the evidence surface for that same request."
-        : "Logs is the deep-dive surface. Start from Traffic summaries when possible, then land here only after one request, failure, or text pattern is worth tracing line by line.")}</p>
+        ? "Logs is already pinned to one request. Keep the same request across posture, tail, and recent-event context."
+        : "Start from Traffic summaries when possible, then land here only after one request, failure, or text pattern is worth tracing line by line.")}</p>
         </div>
         <div class="workflow-card__actions">
           <a class="button button--secondary" href="/admin/logs">${escapeHtml(scoped ? "Reset log scope" : "Reset to default tail")}</a>
@@ -287,10 +286,10 @@ function renderLogsWorkflowGuide(filters) {
       <article class="workflow-card">
         <div class="workflow-card__header">
           <span class="eyebrow">Observe</span>
-          <h4>${escapeHtml(scoped ? "Return to the matching traffic summary" : "Return to the broad traffic summary")}</h4>
+          <h4>${escapeHtml(scoped ? "Return to matching traffic" : "Return to traffic summary")}</h4>
           <p>${escapeHtml(scoped
-        ? "When the root cause is clear, jump back to Traffic to compare the same request context against recent request and error summaries without rebuilding the scope."
-        : "Return to Traffic whenever you need to re-check recent request volume, error mix, or usage rollups around the same provider and status filters.")}</p>
+        ? "Jump back to Traffic to compare the same request against recent request and error summaries."
+        : "Return to Traffic when you need the broader request, error, or usage summary.")}</p>
         </div>
         <div class="workflow-card__actions">
           <a class="button" href="${escapeHtml(trafficHref)}">${escapeHtml(scoped ? "Open pinned traffic" : "Open traffic summary")}</a>

@@ -222,7 +222,7 @@ export function bindReplaceableFieldBehavior(options) {
             textarea.disabled = false;
             textarea.placeholder = originalPlaceholder;
             if (note) {
-                note.textContent = `Stored preview: ${preview}. Pending action: ${options.noteReplace}`;
+                note.textContent = `Stored: ${preview}. Save: ${options.noteReplace}`;
             }
             return {
                 intent: "replace",
@@ -234,7 +234,7 @@ export function bindReplaceableFieldBehavior(options) {
             textarea.disabled = true;
             textarea.placeholder = options.clearPlaceholder;
             if (note) {
-                note.textContent = `Stored preview: ${preview}. Pending action: ${options.noteClear}`;
+                note.textContent = `Stored: ${preview}. Save: ${options.noteClear}`;
             }
             return {
                 intent: "clear",
@@ -244,7 +244,7 @@ export function bindReplaceableFieldBehavior(options) {
         textarea.disabled = false;
         textarea.placeholder = originalPlaceholder;
         if (note) {
-            note.textContent = `Stored preview: ${preview}. Pending action: ${options.noteKeep}`;
+            note.textContent = `Stored: ${preview}. Save: ${options.noteKeep}`;
         }
         return {
             intent: "keep",
@@ -259,9 +259,9 @@ export function bindSecretFieldBehavior(options) {
     return bindReplaceableFieldBehavior({
         ...options,
         clearPlaceholder: "Uncheck clear to paste a replacement secret",
-        noteReplace: "replace the stored secret on save.",
-        noteClear: "clear the stored secret on save.",
-        noteKeep: "keep the stored secret unless you paste a replacement.",
+        noteReplace: "replace it.",
+        noteClear: "clear it.",
+        noteKeep: "keep it.",
         messageReplace: "A new secret is staged and will replace the stored value on save.",
         messageClear: "The stored secret will be removed when this section is saved.",
         messageKeep: "The stored secret remains unchanged unless you paste a replacement.",

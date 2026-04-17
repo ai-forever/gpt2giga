@@ -8,8 +8,8 @@ const OBSERVABILITY_PRESETS = [
         id: "local-prometheus",
         label: "Local Prometheus",
         composeOverlay: "deploy/compose/observability-prometheus.yaml",
-        description: "Enable the in-process metrics sink and keep scraping on the built-in gateway endpoints.",
-        note: "Stages telemetry on plus the Prometheus sink. No credentials or extra endpoints are required.",
+        description: "Stage the built-in metrics sink.",
+        note: "Turns telemetry on and keeps the built-in metrics endpoints.",
         pillLabels: ["Sink: Prometheus", "Gateway: /metrics", "Admin: /admin/api/metrics"],
         statusMessage: "Local Prometheus preset staged. Telemetry is on and Prometheus metrics stay on the built-in endpoints until you save.",
         apply: (fields) => {
@@ -21,8 +21,8 @@ const OBSERVABILITY_PRESETS = [
         id: "local-otlp",
         label: "Local OTLP collector",
         composeOverlay: "deploy/compose/observability-otlp.yaml",
-        description: "Fill the repo-local OpenTelemetry Collector endpoint and keep the default gateway service identity.",
-        note: "Stages telemetry on, enables OTLP, fills the collector URL, and leaves any headers override untouched unless you change it yourself.",
+        description: "Stage the repo-local OTLP collector endpoint.",
+        note: "Turns telemetry on, enables OTLP, and fills the local collector URL.",
         pillLabels: [
             "Sink: OTLP/HTTP",
             "Endpoint: http://otel-collector:4318/v1/traces",
@@ -45,8 +45,8 @@ const OBSERVABILITY_PRESETS = [
         id: "local-langfuse",
         label: "Local Langfuse",
         composeOverlay: "deploy/compose/observability-langfuse.yaml",
-        description: "Stage the self-hosted Langfuse base URL used by the local compose stack, then paste the generated keys.",
-        note: "Stages telemetry on, enables Langfuse, fills the local base URL, and keeps public/secret key fields ready for a manual paste from the Langfuse UI.",
+        description: "Stage the local Langfuse base URL.",
+        note: "Turns telemetry on, enables Langfuse, and leaves key fields ready for paste.",
         pillLabels: [
             "Sink: Langfuse",
             "Base URL: http://langfuse-web:3000",
@@ -69,8 +69,8 @@ const OBSERVABILITY_PRESETS = [
         id: "local-phoenix",
         label: "Local Phoenix",
         composeOverlay: "deploy/compose/observability-phoenix.yaml",
-        description: "Fill the local Phoenix collector URL and a project label that groups traces cleanly during local debugging.",
-        note: "Stages telemetry on, enables Phoenix, fills the local base URL, and leaves the API key blank because the bundled local compose runs without auth by default.",
+        description: "Stage the local Phoenix endpoint and project.",
+        note: "Turns telemetry on, enables Phoenix, and leaves the API key blank by default.",
         pillLabels: [
             "Sink: Phoenix",
             "Base URL: http://phoenix:6006",
@@ -97,7 +97,7 @@ export function renderApplicationSection(options) {
       </div>
       ${renderFormSection({
         title: "Gateway mode and compatibility",
-        intro: "Keep the top-level runtime posture narrow here, then use the rest of the page only for the settings that belong to the same change slice.",
+        intro: "Set the top-level runtime posture here.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -125,8 +125,8 @@ export function renderApplicationSection(options) {
       ${renderFormSection({
         title: options.variant === "setup" ? "Bootstrap posture" : "Runtime posture details",
         intro: options.variant === "setup"
-            ? "Only the bootstrap-critical application fields stay on this page. Observability and later operational tuning live elsewhere."
-            : "Provider routing, runtime storage, and adjacent behavior stay together here so the page still reads as one coherent task.",
+            ? "Only bootstrap-critical application fields stay here."
+            : "Keep provider routing and runtime storage together here.",
         body: options.variant === "setup"
             ? renderSetupApplicationFields(options.values)
             : renderSettingsApplicationFields(options.values),
@@ -156,7 +156,7 @@ export function renderGigachatSection(options) {
       </div>
       ${renderFormSection({
         title: "Provider routing and transport",
-        intro: "Keep the live request target, auth endpoint, and transport trust settings together so connection tests reflect the same candidate posture you are about to save.",
+        intro: "Keep request target and transport settings together.",
         body: `
           <div class="dual-grid">
             <label class="field"><span>Model</span><input name="model" value="${escapeHtml(options.values.model ?? "")}" /></label>
@@ -182,7 +182,7 @@ export function renderGigachatSection(options) {
     })}
       ${renderFormSection({
         title: "Credentials and token staging",
-        intro: "Secret fields stay secondary until you actively replace or clear them. Leave fields blank when the stored secret should remain unchanged.",
+        intro: "Blank keeps the stored secret.",
         body: `
           <div class="dual-grid">
             ${renderSecretField({
@@ -206,7 +206,7 @@ export function renderGigachatSection(options) {
     })}
       ${renderFormSection({
         title: "Candidate connectivity check",
-        intro: "Timeout and connection testing stay adjacent so you can stage a candidate change, test it, and then decide whether it is worth persisting.",
+        intro: "Test candidate values before saving them.",
         body: `
           <div class="${options.variant === "setup" ? "stack" : "dual-grid"}">
             ${timeoutField}
@@ -236,8 +236,8 @@ export function renderSecuritySection(options) {
             ? "Gateway access during bootstrap"
             : "Gateway access and operator guardrails",
         intro: options.variant === "setup"
-            ? "Keep this step limited to the minimum auth posture that closes bootstrap exposure and makes the next operator path obvious."
-            : "API key auth, logs exposure, CORS, and governance all shape who can reach the gateway and how much they can do once inside.",
+            ? "Use the minimum auth posture needed to close bootstrap exposure."
+            : "API key auth, logs exposure, CORS, and governance stay together here.",
         body: `
           <label class="field">
             <span>${escapeHtml(authLabel)}</span>
@@ -273,7 +273,7 @@ export function renderObservabilitySection(options) {
       </div>
       ${renderFormSection({
         title: "Telemetry gate and active sinks",
-        intro: "Start with the high-level pipeline switch and current sink posture before touching any individual integration settings.",
+        intro: "Start with the pipeline switch and sink posture.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -285,18 +285,16 @@ export function renderObservabilitySection(options) {
             <div class="stack">
               ${pill(`Active sinks: ${activeSinks.length || 0}`, activeSinks.length ? "good" : "warn")}
               ${pill(Boolean(options.values.metrics_enabled) ? "Metrics endpoint: live" : "Metrics endpoint: disabled", Boolean(options.values.metrics_enabled) ? "good" : "warn")}
-              <p class="muted">Each sink keeps its own settings. Enabling telemetry gates all exports, while sink toggles decide which integrations receive data.</p>
+              <p class="muted">Telemetry gates all exports.</p>
             </div>
           </div>
         `,
     })}
       ${renderFormSection({
         title: "Repo-local presets",
-        intro: "Use presets only to stage the common local compose defaults. Review the resulting diff before you save anything.",
+        intro: "Use presets to stage local compose defaults.",
         body: `
-          <div class="banner">
-            Presets stage the repo-local compose defaults for one sink at a time. They turn telemetry on, enable the selected sink, keep unrelated sinks untouched, and still let you review the pending diff before save.
-          </div>
+          <div class="banner">Each preset stages one local sink without touching the others.</div>
           <div class="workflow-grid">
             ${OBSERVABILITY_PRESETS.map((preset) => renderObservabilityPresetCard(preset)).join("")}
           </div>
@@ -304,13 +302,13 @@ export function renderObservabilitySection(options) {
     })}
       ${renderFormSection({
         title: "Sink-specific configuration",
-        intro: "Only the sink cards below should carry raw endpoint and credential details. Keep the rest of the page summary-first.",
+        intro: "Keep raw endpoints and credentials in the sink cards only.",
         body: `
           <div class="stack">
             ${renderObservabilitySinkCard({
             sink: sinkById.get("prometheus"),
             title: "Prometheus",
-            description: "Local metrics stay inside the gateway and can be scraped from the built-in endpoints.",
+            description: "Built-in metrics endpoints.",
             body: `
                 <label class="checkbox-field">
                   <input name="sink_prometheus" type="checkbox" ${activeSinks.includes("prometheus") ? "checked" : ""} />
@@ -321,14 +319,14 @@ export function renderObservabilitySection(options) {
                     ${pill("Gateway: /metrics")}
                     ${pill("Admin: /admin/api/metrics")}
                   </div>
-                  <p class="muted">No extra credentials are required. Prometheus follows telemetry changes live without restart.</p>
+                  <p class="muted">No extra credentials.</p>
                 </div>
               `,
         })}
             ${renderObservabilitySinkCard({
             sink: sinkById.get("otlp"),
             title: "OTLP / HTTP",
-            description: "Send traces to an OpenTelemetry collector or compatible OTLP/HTTP endpoint.",
+            description: "Send traces to an OTLP/HTTP endpoint.",
             body: `
                 <label class="checkbox-field">
                   <input name="sink_otlp" type="checkbox" ${activeSinks.includes("otlp") ? "checked" : ""} />
@@ -359,7 +357,7 @@ export function renderObservabilitySection(options) {
                     <span>Headers override (JSON object)</span>
                     <textarea name="otlp_headers" placeholder='{"x-tenant":"demo","authorization":"Bearer ..."}'></textarea>
                   </label>
-                  <p class="field-note">Stored preview: <strong>${escapeHtml(renderHeaderPreview(otlp))}</strong>. Leave blank to keep the current headers; paste a JSON object to replace them.</p>
+                  <p class="field-note">Stored: <strong>${escapeHtml(renderHeaderPreview(otlp))}</strong>. Blank keeps it; paste JSON to replace.</p>
                   <label class="checkbox-field">
                     <input name="otlp_clear_headers" type="checkbox" />
                     <span>Clear stored OTLP headers on save</span>
@@ -370,7 +368,7 @@ export function renderObservabilitySection(options) {
             ${renderObservabilitySinkCard({
             sink: sinkById.get("langfuse"),
             title: "Langfuse",
-            description: "Forward traces to Langfuse with base URL, public key, and secret key managed from the control plane.",
+            description: "Forward traces to Langfuse.",
             body: `
                 <label class="checkbox-field">
                   <input name="sink_langfuse" type="checkbox" ${activeSinks.includes("langfuse") ? "checked" : ""} />
@@ -403,7 +401,7 @@ export function renderObservabilitySection(options) {
             ${renderObservabilitySinkCard({
             sink: sinkById.get("phoenix"),
             title: "Phoenix",
-            description: "Push traces to Phoenix with an optional API key and project-level routing.",
+            description: "Push traces to Phoenix.",
             body: `
                 <label class="checkbox-field">
                   <input name="sink_phoenix" type="checkbox" ${activeSinks.includes("phoenix") ? "checked" : ""} />
@@ -520,7 +518,7 @@ export function bindObservabilityPresetButtons(form, options) {
             preset.apply(fields);
             options.setActionState({
                 tone: "info",
-                message: `${preset.statusMessage} Review the staged diff, then save to persist it.`,
+                message: `${preset.statusMessage} Review the diff, then save.`,
             });
             options.refreshStatus();
         });
@@ -544,7 +542,7 @@ export function renderSetupObservabilityHandoff(values) {
             return banner(`${label} is enabled but still incomplete.`, "warn");
         })
             .join("")
-        : banner("Observability is optional during bootstrap. Configure sink endpoints and credentials after the core gateway posture is ready.");
+        : banner("Observability is optional during bootstrap.");
     return `
     <div class="stack">
       <div class="pill-row">
@@ -553,7 +551,7 @@ export function renderSetupObservabilityHandoff(values) {
         ${pill(Boolean(values.metrics_enabled) ? "Metrics endpoint: live" : "Metrics endpoint: disabled", Boolean(values.metrics_enabled) ? "good" : "warn")}
       </div>
       ${sinkSummaries}
-      <p class="muted">Setup keeps observability outside the bootstrap-critical path. Use the dedicated settings section for OTLP headers, Langfuse keys, Phoenix routing, and later sink tuning.</p>
+      <p class="muted">Use settings for sink tuning.</p>
       <div class="toolbar">
         <a class="button button--secondary" href="${escapeHtml(pathForPage("settings-observability"))}">Open observability settings</a>
       </div>
@@ -644,9 +642,9 @@ function renderObservabilitySinkCard(options) {
         ? configured
             ? "Enabled and configured."
             : missingFields.length
-                ? `Enabled, but still missing: ${missingFields.join(", ")}.`
-                : "Enabled, but still incomplete."
-        : "Disabled. Stored values remain available until you remove them.";
+                ? `Enabled, missing: ${missingFields.join(", ")}.`
+                : "Enabled, incomplete."
+        : "Disabled. Stored values remain until removed.";
     return `
     <article class="step-card ${enabled ? "step-card--ready" : ""}">
       <div class="stack">
@@ -682,7 +680,7 @@ function renderObservabilityPresetCard(preset) {
       <div class="pill-row">
         ${preset.pillLabels.map((label) => pill(label)).join("")}
       </div>
-      <p class="muted">Compose overlay: <strong>${escapeHtml(preset.composeOverlay)}</strong>. ${escapeHtml(preset.note)}</p>
+      <p class="muted">Overlay: <strong>${escapeHtml(preset.composeOverlay)}</strong>. ${escapeHtml(preset.note)}</p>
       <div class="workflow-card__actions">
         <button
           class="button button--secondary"

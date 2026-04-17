@@ -182,7 +182,7 @@ function renderFocusedSettingsPage(options) {
       ${card("Configuration map", renderSubpageNav({
             currentPage: options.currentPage,
             title: "Settings pages",
-            intro: "History keeps rollback and diff review separate from editing.",
+            intro: "History stays separate from editing.",
             items: subpagesFor(options.currentPage),
         }), "panel panel--span-12")}
       ${mainContent}
@@ -193,7 +193,7 @@ function renderFocusedSettingsPage(options) {
     ${card(`${SETTINGS_LABELS[options.activeSection]} navigation`, renderSubpageNav({
         currentPage: options.currentPage,
         title: "Settings pages",
-        intro: "Each child page keeps one primary task on screen.",
+        intro: "One task per page.",
         items: subpagesFor(options.currentPage),
     }), "panel panel--span-12")}
     ${mainContent}
@@ -203,7 +203,7 @@ function renderFocusedSettingsPage(options) {
 function renderSettingsMainCard(options) {
     if (options.activeSection === "application") {
         return card("Application", renderApplicationSection({
-            bannerMessage: "Saving always updates the persisted control-plane target. Runtime only reloads immediately when this batch contains no restart-sensitive fields.",
+            bannerMessage: "Saves the target config. Restart-sensitive fields wait for restart.",
             formId: "application-form",
             statusId: "settings-application-status",
             submitLabel: "Save application settings",
@@ -213,7 +213,7 @@ function renderSettingsMainCard(options) {
     }
     if (options.activeSection === "observability") {
         return card("Observability", renderObservabilitySection({
-            bannerMessage: "Observability has its own control-plane slice. Sink toggles, endpoints, and masked auth values save independently from the general application posture.",
+            bannerMessage: "Observability saves independently and applies live.",
             formId: "observability-form",
             statusId: "settings-observability-status",
             submitLabel: "Save observability settings",
@@ -222,7 +222,7 @@ function renderSettingsMainCard(options) {
     }
     if (options.activeSection === "gigachat") {
         return card("GigaChat", renderGigachatSection({
-            bannerMessage: "Connection tests use candidate values without persisting them. Saving updates the persisted target first and only reloads runtime for restart-safe batches.",
+            bannerMessage: "Connection test is dry-run. Restart-sensitive fields wait for restart.",
             formId: "gigachat-form",
             statusId: "settings-gigachat-status",
             submitLabel: "Save GigaChat settings",
@@ -234,7 +234,7 @@ function renderSettingsMainCard(options) {
     }
     if (options.activeSection === "security") {
         return card("Security", renderSecuritySection({
-            bannerMessage: "Auth and CORS save to the control plane first. If this batch includes restart-sensitive fields, the running process keeps the previous posture until restart.",
+            bannerMessage: "Saves the target config first. Restart-sensitive fields wait for restart.",
             formId: "security-form",
             statusId: "settings-security-status",
             submitLabel: "Save security settings",
@@ -367,10 +367,10 @@ function bindSettingsForms(options) {
             updatedAt: options.controlPlaneStatus.updated_at,
             buildPayload: () => buildApplicationPayload(applicationForm),
             buildEntries: (payload) => buildPendingDiffEntries("application", options.applicationValues, payload),
-            buildNote: () => "Mode, provider routing, runtime-store backend and auth-adjacent controls are the main restart-sensitive levers here.",
+            buildNote: () => "Restart-sensitive controls are flagged before save.",
             getValidationMessage: (_payload, report = false) => validateRequiredCsvField(applicationFields?.enabled_providers, "Provide at least one enabled provider.", { report }),
             endpoint: "/admin/api/settings/application",
-            pendingMessage: "Saving application settings. The persisted target updates first; runtime only reloads if this batch stays restart-safe.",
+            pendingMessage: "Saving application settings. Restart-sensitive fields wait for restart.",
             outcomeLabel: "Application settings",
             failurePrefix: "Application settings failed to save",
             rerenderPage: options.currentPage,
@@ -393,8 +393,8 @@ function bindSettingsForms(options) {
                     syncPhoenixApiKey(),
                 ]);
                 return observabilityFieldMessages.length
-                    ? `Sink changes apply live when telemetry stays enabled. ${observabilityFieldMessages.join(" ")}`
-                    : "Sink changes apply live and stay restart-safe unless a later backend slice marks them otherwise.";
+                    ? `Sink changes apply live. ${observabilityFieldMessages.join(" ")}`
+                    : "Sink changes apply live.";
             },
             getValidationMessage: (payload, report = false) => validateJsonObjectField(observabilityFields?.otlp_headers, (payload.otlp?.headers ?? null), {
                 invalidMessage: "OTLP headers must be valid JSON.",
@@ -402,7 +402,7 @@ function bindSettingsForms(options) {
                 report,
             }),
             endpoint: "/admin/api/settings/observability",
-            pendingMessage: "Saving observability settings. The persisted target updates first, then live sinks reload without a restart.",
+            pendingMessage: "Saving observability settings. Live sinks reload without restart.",
             outcomeLabel: "Observability settings",
             failurePrefix: "Observability settings failed to save",
             rerenderPage: options.currentPage,
@@ -428,12 +428,12 @@ function bindSettingsForms(options) {
                     syncAccessTokenSecret(),
                 ]);
                 return stagedSecretMessages.length
-                    ? `Connection tests never persist the form. ${stagedSecretMessages.join(" ")}`
-                    : "Connection tests never persist the form. Secret values stay masked after save.";
+                    ? `Connection test never saves. ${stagedSecretMessages.join(" ")}`
+                    : "Connection test never saves. Secret values stay masked after save.";
             },
             getValidationMessage: getGigachatValidationMessage,
             endpoint: "/admin/api/settings/gigachat",
-            pendingMessage: "Saving GigaChat settings. Secrets stay masked; the persisted target updates first and runtime reload only happens for restart-safe batches.",
+            pendingMessage: "Saving GigaChat settings. Secrets stay masked; restart-sensitive fields wait for restart.",
             outcomeLabel: "GigaChat settings",
             failurePrefix: "GigaChat settings failed to save",
             rerenderPage: options.currentPage,
@@ -448,7 +448,7 @@ function bindSettingsForms(options) {
             setActionState: (state) => {
                 gigachatBinding.setActionState(state);
             },
-            pendingMessage: "Testing candidate GigaChat settings only. Persisted control-plane values stay unchanged until you save.",
+            pendingMessage: "Testing candidate GigaChat settings only. Saved values stay unchanged.",
         });
     }
     if (securityForm && securityStatusNode) {
@@ -460,7 +460,7 @@ function bindSettingsForms(options) {
             updatedAt: options.controlPlaneStatus.updated_at,
             buildPayload: () => buildSecurityPayload(securityForm),
             buildEntries: (payload) => buildPendingDiffEntries("security", options.securityValues, payload),
-            buildNote: () => "Saved security changes always update the persisted target first. Runtime posture only changes immediately when the whole batch is restart-safe.",
+            buildNote: () => "Restart-sensitive controls are flagged before save.",
             getValidationMessage: (payload, report = false) => validateJsonArrayField(securityFields?.governance_limits, payload.governance_limits, {
                 invalidMessage: "Governance limits must be valid JSON.",
                 nonArrayMessage: "Governance limits must be a JSON array of rule descriptors.",
@@ -470,7 +470,7 @@ function bindSettingsForms(options) {
                 options.app.pushAlert(message, "danger");
             },
             endpoint: "/admin/api/settings/security",
-            pendingMessage: "Saving security settings. The persisted target updates first; runtime posture only changes immediately when the batch is restart-safe.",
+            pendingMessage: "Saving security settings. Restart-sensitive fields wait for restart.",
             outcomeLabel: "Security settings",
             failurePrefix: "Security settings failed to save",
             rerenderPage: options.currentPage,
@@ -484,7 +484,7 @@ function bindSettingsHistory(options) {
     }
     let revisionsActionState = null;
     const refreshRevisionsStatus = () => {
-        renderInlineBannerStatus(revisionsStatusNode, revisionsActionState, "Use history only when you need to restore a known-good persisted snapshot.");
+        renderInlineBannerStatus(revisionsStatusNode, revisionsActionState, "Use history only when you need a known-good snapshot.");
     };
     refreshRevisionsStatus();
     if (!options.revisions.length) {

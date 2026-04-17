@@ -165,8 +165,7 @@ export function renderSecretField(options: SecretFieldOptions): string {
         <textarea name="${escapeHtml(options.name)}" placeholder="${escapeHtml(options.placeholder)}"></textarea>
       </label>
       <p class="field-note">
-        Stored preview: <strong>${escapeHtml(options.preview || "not configured")}</strong>.
-        Leave blank to keep the current secret; paste a new value to replace it.
+        Stored: <strong>${escapeHtml(options.preview || "not configured")}</strong>. Blank keeps it; paste to replace.
       </p>
       <label class="checkbox-field">
         <input name="${escapeHtml(options.clearControlName)}" type="checkbox" />
@@ -468,10 +467,10 @@ export function renderFormChangeSummary(
     changeCount === 0
       ? idleMessage
       : restartCount > 0 && liveCount > 0
-        ? `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. ${liveCount} apply live after save, while ${restartCount} still require a restart before mounted routes fully reflect them.`
+        ? `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. ${liveCount} apply live after save; ${restartCount} wait for restart.`
         : restartCount > 0
-          ? `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. Save persists them now, but route posture still needs a restart before it fully matches the target state.`
-          : `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. This section can be persisted and applied without a restart.`;
+          ? `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. Save persists them now; runtime catches up after restart.`
+          : `${changeCount} pending field change${changeCount === 1 ? "" : "s"}. This section applies live after save.`;
 
   const previewFields = summary.changedFields.slice(0, 5);
   const remainingFields = summary.changedFields.length - previewFields.length;
@@ -508,7 +507,7 @@ export function renderFormChangeSummary(
           ? renderPendingFieldGroup(
               "Restart after save",
               summary.restartFields,
-              "Mounted routes and runtime posture will not fully match these changes until the process restarts.",
+              "Runtime posture does not fully match until restart.",
               "warn",
             )
           : ""
@@ -518,7 +517,7 @@ export function renderFormChangeSummary(
           ? renderPendingFieldGroup(
               "Applies live",
               summary.liveFields,
-              "These changes take effect as soon as the section is persisted.",
+              "These changes take effect after save.",
               "good",
             )
           : ""
@@ -528,7 +527,7 @@ export function renderFormChangeSummary(
           ? renderPendingFieldGroup(
               "Masked secret updates",
               summary.secretFields,
-              "Secret values stay masked after save, but this shows which secret surfaces will rotate or clear.",
+              "Shows which stored secret surfaces rotate or clear.",
               "default",
             )
           : ""
@@ -557,8 +556,8 @@ export function renderControlPlaneSectionStatus({
   const runtimeImpact = describePendingRuntimeImpact(plannedApply);
   const persistedLabel =
     persisted && updatedAt
-      ? `Persisted target: ${formatTimestamp(updatedAt)}`
-      : "Persisted target: not saved yet";
+      ? `Saved target: ${formatTimestamp(updatedAt)}`
+      : "Saved target: not saved yet";
 
   return `
     <div class="stack">
@@ -578,7 +577,7 @@ export function renderControlPlaneSectionStatus({
       </div>
       ${
         plannedApply.blockedLiveFields.length
-          ? `<p class="muted">These fields can reload live on their own, but this save batch still waits for restart: ${escapeHtml(plannedApply.blockedLiveFields.map((field) => humanizeField(field)).join(", "))}.</p>`
+          ? `<p class="muted">These fields apply live on their own, but this batch still waits for restart: ${escapeHtml(plannedApply.blockedLiveFields.map((field) => humanizeField(field)).join(", "))}.</p>`
           : ""
       }
       <p class="muted">${escapeHtml(runtimeImpact.detail)}</p>
