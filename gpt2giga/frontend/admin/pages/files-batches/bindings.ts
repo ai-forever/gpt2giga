@@ -30,6 +30,7 @@ import {
 import type {
   BatchRecord,
   DefinitionItem,
+  FileRecord,
   FilesBatchesFilters,
   FilesBatchesInventory,
   FilesBatchesPage,
@@ -52,6 +53,42 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
 
   let selection: InspectorSelection = { kind: "idle" };
   let previewObjectUrl: string | null = null;
+
+  const cacheFileRecord = (payload: Record<string, unknown>): FileRecord => {
+    const fileId = String(payload.id ?? "");
+    const source = payload as FileRecord;
+    if (!fileId) {
+      return source;
+    }
+    inventory.fileLookup.set(fileId, source);
+    const existingIndex = data.files.findIndex(
+      (item) => String(item.id ?? "") === fileId,
+    );
+    if (existingIndex >= 0) {
+      data.files[existingIndex] = source;
+    } else {
+      data.files.unshift(source);
+    }
+    return source;
+  };
+
+  const cacheBatchRecord = (payload: Record<string, unknown>): BatchRecord => {
+    const batchId = String(payload.id ?? "");
+    const source = payload as BatchRecord;
+    if (!batchId) {
+      return source;
+    }
+    inventory.batchLookup.set(batchId, source);
+    const existingIndex = data.batches.findIndex(
+      (item) => String(item.id ?? "") === batchId,
+    );
+    if (existingIndex >= 0) {
+      data.batches[existingIndex] = source;
+    } else {
+      data.batches.unshift(source);
+    }
+    return source;
+  };
 
   const setDefinitionBlock = (
     node: HTMLElement,
@@ -394,7 +431,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         { label: "Next step", value: "Populate inspector" },
       ],
       successSummary: (payload) => {
-        const source = inventory.fileLookup.get(fileId) ?? payload;
+        const source = cacheFileRecord(payload);
         const linkedBatches = getLinkedBatchesForFile(fileId, data.batches);
         const latestBatch = linkedBatches[0];
         return [
@@ -420,7 +457,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       },
       action: async () => {
         const payload = await fetchFileMetadata(app, fileId);
-        const source = inventory.fileLookup.get(fileId) ?? payload;
+        const source = cacheFileRecord(payload);
         const linkedBatches = getLinkedBatchesForFile(fileId, data.batches);
         const readyOutputs = linkedBatches.filter((batch) =>
           Boolean(String(batch.output_file_id ?? "")),
@@ -478,7 +515,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         { label: "Next step", value: "Populate lifecycle inspector" },
       ],
       successSummary: (payload) => {
-        const source = inventory.batchLookup.get(batchId) ?? payload;
+        const source = cacheBatchRecord(payload);
         return [
           { label: "Workflow state", value: "Batch selected" },
           { label: "Selected batch", value: batchId },
@@ -500,7 +537,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       },
       action: async () => {
         const payload = await fetchBatchMetadata(app, batchId);
-        const source = inventory.batchLookup.get(batchId) ?? payload;
+        const source = cacheBatchRecord(payload);
         const inputFileId = String(source.input_file_id ?? "");
         const outputFileId = String(source.output_file_id ?? "");
         selection = {
