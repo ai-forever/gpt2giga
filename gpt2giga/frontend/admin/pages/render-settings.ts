@@ -197,8 +197,7 @@ function renderSettingsHub(options: {
       renderSubpageNav({
         currentPage: options.currentPage,
         title: "Settings pages",
-        intro:
-          "Keep one configuration concern per page. Open a focused section instead of working through a single long settings screen.",
+        intro: "One settings concern per page.",
         items: subpagesFor(options.currentPage),
       }),
       "panel panel--span-12",
@@ -216,13 +215,10 @@ function renderSettingsHub(options: {
             )}
             ${pill(`Recent revisions: ${options.revisions.length}`)}
           </div>
-          <p class="muted">
-            The hub stays summary-first. Open a child page when one settings area needs actual edits, testing, or rollback.
-          </p>
           ${
             options.revisions.length
               ? banner(
-                  `Latest persisted revision covers ${escapeHtml(asArray<string>(options.revisions[0]?.sections).join(", ") || "no field diff")}.`,
+                  `Latest revision: ${escapeHtml(asArray<string>(options.revisions[0]?.sections).join(", ") || "no field diff")}.`,
                 )
               : banner("No persisted revisions yet. The first save will create history.", "warn")
           }
@@ -233,8 +229,7 @@ function renderSettingsHub(options: {
     ${renderSettingsEntryCard({
       title: "Application",
       href: "/admin/settings-application",
-      description:
-        "Runtime mode, provider posture, and restart-sensitive controls that shape the gateway baseline.",
+      description: "Runtime mode, provider posture, and restart-sensitive controls.",
       pills: [
         pill(`Mode: ${String(options.applicationValues.mode ?? "n/a")}`),
         pill(
@@ -248,8 +243,7 @@ function renderSettingsHub(options: {
     ${renderSettingsEntryCard({
       title: "Observability",
       href: "/admin/settings-observability",
-      description:
-        "Telemetry sink posture, preset staging, and runtime-safe observability changes.",
+      description: "Telemetry sinks, presets, and runtime-safe changes.",
       pills: [
         pill(
           `Telemetry: ${Boolean(options.observabilityValues.enable_telemetry) ? "on" : "off"}`,
@@ -267,8 +261,7 @@ function renderSettingsHub(options: {
     ${renderSettingsEntryCard({
       title: "GigaChat",
       href: "/admin/settings-gigachat",
-      description:
-        "Credentials, transport details, SSL posture, and connection testing for the provider surface.",
+      description: "Credentials, transport, SSL posture, and connection testing.",
       pills: [
         pill(
           `Credentials: ${options.gigachatValues.credentials_configured ? "configured" : "missing"}`,
@@ -281,8 +274,7 @@ function renderSettingsHub(options: {
     ${renderSettingsEntryCard({
       title: "Security",
       href: "/admin/settings-security",
-      description:
-        "Gateway auth, logs access, CORS, and governance controls that affect operator exposure.",
+      description: "Gateway auth, logs access, CORS, and governance controls.",
       pills: [
         pill(
           `API key auth: ${Boolean(options.securityValues.enable_api_key_auth) ? "on" : "off"}`,
@@ -300,9 +292,6 @@ function renderSettingsHub(options: {
       "History",
       `
         <div class="stack">
-          <p class="muted">
-            Rollback and revision review now live on their own page so they do not compete with the forms.
-          </p>
           ${
             options.revisions.length
               ? `
@@ -352,8 +341,7 @@ function renderFocusedSettingsPage(options: {
         renderSubpageNav({
           currentPage: options.currentPage,
           title: "Settings pages",
-          intro:
-            "History has its own page so rollback and diff review stay separate from form editing.",
+          intro: "History keeps rollback and diff review separate from editing.",
           items: subpagesFor(options.currentPage),
         }),
         "panel panel--span-12",
@@ -369,8 +357,7 @@ function renderFocusedSettingsPage(options: {
       renderSubpageNav({
         currentPage: options.currentPage,
         title: "Settings pages",
-        intro:
-          "Each child page keeps a single primary task on screen and leaves the rest available by URL.",
+        intro: "Each child page keeps one primary task on screen.",
         items: subpagesFor(options.currentPage),
       }),
       "panel panel--span-12",
@@ -502,22 +489,6 @@ function renderSettingsSidebar(options: {
   securityValues: Record<string, unknown>;
   revisions: Record<string, unknown>[];
 }): string {
-  const intro = (() => {
-    if (options.activeSection === "application") {
-      return "Keep this page focused on runtime posture. Observability, GigaChat, security, and rollback stay on their own URLs.";
-    }
-    if (options.activeSection === "observability") {
-      return "Use presets only to stage sink values quickly. The rest of the settings surface stays off this page.";
-    }
-    if (options.activeSection === "gigachat") {
-      return "Connection testing is intentionally local to this page so secrets and transport checks stay together.";
-    }
-    if (options.activeSection === "security") {
-      return "This page owns auth-adjacent operator posture. Key inventory remains on the dedicated API Keys page.";
-    }
-    return "Review diffs and rollback here without sharing space with editable forms.";
-  })();
-
   const detailPills = (() => {
     if (options.activeSection === "application") {
       return [
@@ -577,7 +548,6 @@ function renderSettingsSidebar(options: {
     options.activeSection === "history" ? "Rollback posture" : "Section posture",
     `
       <div class="stack">
-        <p class="muted">${escapeHtml(intro)}</p>
         <div class="stack">
           <div id="settings-revisions-status"></div>
           <div class="toolbar">
@@ -589,11 +559,11 @@ function renderSettingsSidebar(options: {
         ${
           options.activeSection === "history"
             ? banner(
-                "Rollback restores the persisted target first. Runtime follows immediately only when the restored change set is restart-safe.",
+                "Rollback restores the persisted target first. Runtime follows only for restart-safe changes.",
                 "warn",
               )
             : banner(
-                "Use history only when you need to restore a known-good persisted snapshot.",
+                "Use history only when you need a known-good snapshot.",
               )
         }
         <div class="toolbar">

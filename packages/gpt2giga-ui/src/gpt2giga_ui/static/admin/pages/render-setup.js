@@ -96,15 +96,15 @@ function renderSetupHub(options) {
     ${card("Setup map", renderSubpageNav({
         currentPage: options.currentPage,
         title: "Setup pages",
-        intro: "Use the hub for progress and warnings, then open one focused setup step per page.",
+        intro: "Use the hub for progress. Open one step at a time.",
         items: subpagesFor(options.currentPage),
     }), "panel panel--span-12")}
     ${card("Setup progress", `
         <div class="stack">
           ${renderSetupSteps(asArray(options.setup.wizard_steps))}
           ${options.bootstrap.required
-        ? banner(`Bootstrap gate is active. Admin setup is currently limited to localhost or the bootstrap token stored at ${String(options.bootstrap.token_path ?? "the control-plane volume")}.`, "warn")
-        : banner("Bootstrap gate is closed. Normal operator access now relies on the configured admin or global API key path.")}
+        ? banner(`Bootstrap gate is open. Setup is limited to localhost or the token at ${String(options.bootstrap.token_path ?? "the control-plane volume")}.`, "warn")
+        : banner("Bootstrap gate is closed. Admin or global API key access is active.")}
           <div class="toolbar">
             ${pill(`Claim: ${options.claim.claimed ? "done" : options.claim.required ? "pending" : "not required"}`, options.claim.claimed ? "good" : "warn")}
             ${pill(`Persisted config: ${options.setup.persisted ? "yes" : "no"}`, options.setup.persisted ? "good" : "warn")}
@@ -130,7 +130,7 @@ function renderSetupHub(options) {
       `, "panel panel--span-6")}
     ${card("Next recommended step", `
         <div class="stack">
-          <p class="muted">${escapeHtml(options.nextStep.note)}</p>
+          ${banner(options.nextStep.note)}
           <div class="toolbar">
             <a class="button" href="${escapeHtml(options.nextStep.href)}">${escapeHtml(options.nextStep.label)}</a>
             <a class="button button--secondary" href="/admin/settings-observability">Observability settings</a>
@@ -146,9 +146,9 @@ function renderSetupHub(options) {
         href: "/admin/setup-claim",
         description: options.claim.required
             ? options.claim.claimed
-                ? "Bootstrap claim is already recorded. Reopen the page to inspect claim details."
-                : "Record the first operator before continuing with bootstrap-critical changes."
-            : "Claiming is not required in the current runtime mode.",
+                ? "Bootstrap claim is already recorded."
+                : "Record the first operator."
+            : "Claiming is not required.",
         pills: [
             pill(`Required: ${options.claim.required ? "yes" : "no"}`),
             pill(`Claimed: ${options.claim.claimed ? "yes" : "no"}`, options.claim.claimed ? "good" : "warn"),
@@ -157,7 +157,7 @@ function renderSetupHub(options) {
     ${renderSetupStepCard({
         title: "Application",
         href: "/admin/setup-application",
-        description: "Persist runtime mode and provider posture without mixing it with GigaChat or security changes.",
+        description: "Persist runtime mode and provider posture.",
         pills: [
             pill(`Persisted config: ${options.setup.persisted ? "yes" : "no"}`, options.setup.persisted ? "good" : "warn"),
             pill(`Mode: ${String(options.runtime.mode ?? "n/a")}`),
@@ -166,7 +166,7 @@ function renderSetupHub(options) {
     ${renderSetupStepCard({
         title: "GigaChat",
         href: "/admin/setup-gigachat",
-        description: "Configure provider credentials and run connection testing on a dedicated page.",
+        description: "Configure credentials and test the connection.",
         pills: [
             pill(`Ready: ${options.setup.gigachat_ready ? "yes" : "no"}`, options.setup.gigachat_ready ? "good" : "warn"),
             pill(`Backend: ${String(options.runtime.gigachat_api_mode ?? "n/a")}`),
@@ -175,7 +175,7 @@ function renderSetupHub(options) {
     ${renderSetupStepCard({
         title: "Security",
         href: "/admin/setup-security",
-        description: "Close bootstrap access, stage gateway auth, and rotate the global key without setup overload.",
+        description: "Close bootstrap access and stage gateway auth.",
         pills: [
             pill(`Ready: ${options.setup.security_ready ? "yes" : "no"}`, options.setup.security_ready ? "good" : "warn"),
             pill(`Bootstrap gate: ${options.bootstrap.required ? "open" : "closed"}`, options.bootstrap.required ? "warn" : "good"),
@@ -188,7 +188,7 @@ function renderFocusedSetupPage(options) {
     ${card("Setup navigation", renderSubpageNav({
         currentPage: options.currentPage,
         title: "Setup pages",
-        intro: "Each setup page carries one primary task. Use the hub only for progress and next-step decisions.",
+        intro: "Each page owns one setup task.",
         items: subpagesFor(options.currentPage),
     }), "panel panel--span-12")}
     ${renderSetupMainCard(options)}
@@ -202,8 +202,8 @@ function renderSetupMainCard(options) {
           ${banner(options.claim.required
             ? options.claim.claimed
                 ? `This bootstrap session is already claimed${options.claim.operator_label ? ` by ${String(options.claim.operator_label)}` : ""}.`
-                : "First-run PROD bootstrap is active. Claim the instance before continuing with operator setup."
-            : "Claiming is not required in the current runtime mode.", options.claim.claimed ? "info" : "warn")}
+                : "First-run PROD bootstrap is active. Claim the instance before continuing."
+            : "Claiming is not required.", options.claim.claimed ? "info" : "warn")}
           ${options.claim.claimed
             ? `
                   <div class="dual-grid">
@@ -229,7 +229,7 @@ function renderSetupMainCard(options) {
                       </div>
                     </form>
                   `
-                : `<p class="muted">This environment does not require an explicit bootstrap claim.</p>`}
+                : `<p class="muted">No bootstrap claim is required in this runtime.</p>`}
         </div>
       `, "panel panel--span-8 panel--measure");
     }
@@ -285,7 +285,7 @@ function renderSetupSidebar(options) {
                 <a class="button button--secondary" href="/admin/keys">Open API keys page</a>
               </div>
             </div>
-            ${banner("Use the dedicated keys page for scoped key inventory. This page only keeps the bootstrap-critical global-key action nearby.")}
+            ${banner("Use the keys page for scoped inventory. This page keeps only the bootstrap global-key action nearby.")}
           </div>
         `, "panel panel--span-4 panel--aside")}
       ${card("Observability handoff", renderSetupObservabilityHandoff(options.observabilityValues), "panel panel--span-4 panel--aside")}
@@ -320,12 +320,11 @@ function renderSetupStatusCard(options) {
         <div class="stat-line"><strong>Security ready</strong><span class="muted">${options.setup.security_ready ? "yes" : "no"}</span></div>
         ${options.warnings.length
         ? options.warnings.slice(0, 2).map((warning) => banner(String(warning), "warn")).join("")
-        : banner("Setup warnings are clear right now.")}
+        : banner("No setup warnings right now.")}
         <div class="toolbar">
           <a class="button button--secondary" href="/admin/setup">Back to setup hub</a>
           <a class="button" href="${escapeHtml(options.nextStep.href)}">${escapeHtml(options.nextStep.label)}</a>
         </div>
-        <p class="muted">${escapeHtml(options.nextStep.note)}</p>
       </div>
     `, "panel panel--span-4 panel--aside");
 }

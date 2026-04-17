@@ -113,16 +113,14 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
       "Diagnostic workflows",
       `
         <div class="stack">
-          <p class="muted">
-            Start from the smallest workflow that resolves the question. Open detailed diagnostics only after the executive summary still feels inconsistent.
-          </p>
           <div class="workflow-grid">
             ${renderWorkflowCard({
               workflow: "start",
+              compact: true,
               title: setup.setup_complete ? "Bootstrap is stable" : "Close bootstrap gaps first",
               note: setup.setup_complete
-                ? "System already sees persisted bootstrap posture. Use Settings only for deliberate day-2 changes, not as the first reaction to every warning banner."
-                : "Missing persisted config, credentials, or security posture should be resolved before you spend time on deeper runtime forensics.",
+                ? "Use Settings only for deliberate day-2 changes."
+                : "Resolve persisted config, credentials, or security posture first.",
               pills: [
                 pill(`Persisted: ${setup.persisted ? "ready" : "missing"}`, setup.persisted ? "good" : "warn"),
                 pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
@@ -135,8 +133,9 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
             })}
             ${renderWorkflowCard({
               workflow: "observe",
+              compact: true,
               title: "Confirm live request behavior before deep forensics",
-              note: "If the runtime posture looks healthy here but clients still fail, move to Traffic first and only then hand off one narrowed request into Logs.",
+              note: "Move to Traffic first, then hand off one narrowed request into Logs.",
               pills: [
                 pill(`Routes: ${formatNumber(routeRows.length)}`),
                 pill(`Services: ${formatNumber(readyServiceCount)} ready`, readyServiceCount ? "good" : "warn"),
@@ -149,8 +148,9 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
             })}
             ${renderWorkflowCard({
               workflow: "diagnose",
+              compact: true,
               title: "Use staged diagnostics when the summary is not enough",
-              note: "Route coverage, effective config, and raw payload export stay secondary until the summary and workflow cards no longer explain the mismatch.",
+              note: "Route coverage, config, and raw export stay secondary.",
               pills: [
                 pill(`Warnings: ${formatNumber(systemWarnings.length)}`, systemWarnings.length ? "warn" : "good"),
                 pill(`Docs: ${runtime.docs_enabled ? "exposed" : "disabled"}`),
@@ -234,7 +234,11 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
             note: "Use the escalation map when System narrows the posture but the next surface is still ambiguous.",
           },
         ],
-        "System stays staged. Open the longer guides only when the executive summary, readiness, and workflow cards still do not explain the mismatch.",
+        {
+          compact: true,
+          collapsibleSummary: "Operator guides",
+          intro: "System stays staged.",
+        },
       ),
       "panel panel--span-4 panel--aside",
     )}
@@ -303,9 +307,7 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
       "Staged diagnostics and export",
       `
         <div class="stack">
-          <p class="muted">
-            Detailed diagnostics stay staged until the executive summary, readiness, and workflow handoff still leave ambiguity.
-          </p>
+          <p class="muted">Detailed diagnostics stay staged until the summary still leaves ambiguity.</p>
           <details class="surface details-disclosure" id="system-detailed-diagnostics">
             <summary>Runtime state detail</summary>
             <div class="dual-grid">
@@ -360,7 +362,7 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
           <details class="surface details-disclosure">
             <summary>Current system snapshot</summary>
             <p class="field-note">
-              Copy the full runtime, config, setup, and route payload when you need a precise snapshot for debugging or for a support handoff.
+              Copy the full runtime, config, setup, and route payload when you need a precise debug snapshot.
             </p>
             <pre class="code-block code-block--tall" id="system-diagnostics">${escapeHtml(JSON.stringify(diagnostics, null, 2))}</pre>
           </details>

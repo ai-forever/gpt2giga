@@ -301,8 +301,8 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert system_asset.status_code == 200
     assert "Confirm live request behavior before deep forensics" in system_asset.text
     assert (
-        "Detailed diagnostics stay staged until the executive summary, readiness"
-        in system_asset.text
+        "Detailed diagnostics stay staged until the summary still leaves ambiguity."
+        in (system_asset.text)
     )
     assert "Use staged diagnostics when the summary is not enough" in system_asset.text
     assert "Copy system snapshot" in system_asset.text
@@ -310,11 +310,18 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert "System stays staged." in system_asset.text
 
     assert providers_asset.status_code == 200
-    assert "Keep this page summary-first" in providers_asset.text
+    assert "Provider workflows" in providers_asset.text
     assert "Smoke the mounted provider surface" in providers_asset.text
-    assert "Route-family detail stays secondary" in providers_asset.text
+    assert (
+        "Open these disclosures only when the summary still leave a route-family mismatch unresolved."
+        not in providers_asset.text
+    )
+    assert (
+        "Open these disclosures only when the summary still leaves a route-family mismatch unresolved."
+        in providers_asset.text
+    )
     assert "Provider surface diagnostics" in providers_asset.text
-    assert "Provider workflow handoff" in providers_asset.text
+    assert "Operator guides" in providers_asset.text
     assert "Current route-family snapshot" in providers_asset.text
     assert "Full provider surface matrix" in providers_asset.text
     assert docs_links_asset.status_code == 200
@@ -369,6 +376,7 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert "Content preview stays secondary" in files_batches_asset.text
     assert "Open batches" in files_batches_asset.text
     assert "Files and batches lifecycle" in files_batches_asset.text
+    assert "Operator guides" in files_batches_asset.text
     assert files_batches_serializers_asset.status_code == 200
     assert "Open batch composer" in files_batches_serializers_asset.text
     assert (

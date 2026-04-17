@@ -38,8 +38,9 @@ function renderFilesBatchesHub(data, inventory) {
         <div class="step-grid">
           ${renderWorkflowCard({
         workflow: "start",
+        compact: true,
         title: "Stage one input on the files page",
-        note: "Use the dedicated files surface when the next operator move is upload, inventory review, or content preview.",
+        note: "Use Files for upload, inventory review, or preview.",
         pills: [pill("Upload"), pill("Inventory"), pill("Preview")],
         actions: [
             { label: "Open files", href: pathForPage("files"), primary: true },
@@ -48,8 +49,9 @@ function renderFilesBatchesHub(data, inventory) {
     })}
           ${renderWorkflowCard({
         workflow: "diagnose",
+        compact: true,
         title: "Queue and inspect jobs on the batches page",
-        note: "Use the dedicated batches surface when the next move is creation, lifecycle review, or output handoff.",
+        note: "Use Batches for creation, lifecycle review, or output handoff.",
         pills: [pill("Composer"), pill("Lifecycle"), pill("Output", "good")],
         actions: [
             { label: "Open batches", href: pathForPage("batches"), primary: true },
@@ -58,8 +60,9 @@ function renderFilesBatchesHub(data, inventory) {
     })}
           ${renderWorkflowCard({
         workflow: "observe",
+        compact: true,
         title: "Escalate only after one request is scoped",
-        note: "Traffic and Logs stay downstream from the workbench. Preview one output first, then hand off with request context.",
+        note: "Preview one output first, then hand off with request context.",
         pills: [pill("Traffic"), pill("Logs"), pill("Request scoped")],
         actions: [
             { label: "Open traffic", href: pathForPage("traffic"), primary: true },
@@ -149,7 +152,11 @@ function renderFilesBatchesHub(data, inventory) {
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
             note: "Use the escalation map once the issue moved from stored artifacts into runtime posture or log evidence.",
         },
-    ], "Use the hub for counts and recent activity only. Open the focused pages when one stored object now needs real operator work."), "panel panel--span-12")}
+    ], {
+        compact: true,
+        collapsibleSummary: "Operator guides",
+        intro: "Use the hub for counts and recent activity only.",
+    }), "panel panel--span-12")}
   `;
 }
 function renderFilesPage(data, inventory, filters) {
@@ -160,9 +167,7 @@ function renderFilesPage(data, inventory, filters) {
     ${kpi("Ready outputs", inventory.outputReadyBatches)}
     ${card("Files workbench", `
         <div class="stack">
-          <p class="muted">
-            Keep this page file-first: upload one artifact, inspect stored metadata, and preview content before deciding whether the next move belongs on the batches page.
-          </p>
+          <p class="muted">Upload one artifact, inspect metadata, then preview content.</p>
           <div class="toolbar">
             <a class="button" href="${pathForPage("batches")}">Open batches</a>
             <a class="button button--secondary" href="${pathForPage("traffic")}">Open traffic</a>
@@ -175,7 +180,7 @@ function renderFilesPage(data, inventory, filters) {
           <form id="files-upload-form" class="form-shell form-shell--compact">
             ${renderFormSection({
         title: "Upload source",
-        intro: "Start here when a fresh JSONL input or reference artifact needs to enter the gateway inventory.",
+        intro: "Add one JSONL input or reference artifact.",
         body: `
                 <label class="field">
                   <span>Purpose</span>
@@ -196,7 +201,7 @@ function renderFilesPage(data, inventory, filters) {
           </form>
         </div>
       `, "panel panel--span-4")}
-    ${renderInspectorCard("files", inventory, data, filters, "File selection and preview", "Select one stored file to unlock metadata, content preview, and a clean handoff into the dedicated batch composer.", "panel panel--span-8")}
+    ${renderInspectorCard("files", inventory, data, filters, "File selection and preview", "Select one file to unlock metadata, preview, and batch handoff.", "panel panel--span-8")}
     ${card("Stored files", inventory.filteredFiles.length
         ? `
             <div class="table-wrap">
@@ -243,7 +248,11 @@ function renderFilesPage(data, inventory, filters) {
             href: OPERATOR_GUIDE_LINKS.traffic,
             note: "Open Traffic only after one file output or batch result has been decoded into a request-level clue.",
         },
-    ], "File preview and metadata stay primary here. Batch creation, job history, and output triage live on the dedicated batches surface."), "panel panel--span-4")}
+    ], {
+        compact: true,
+        collapsibleSummary: "Operator guides",
+        intro: "File preview and metadata stay primary here.",
+    }), "panel panel--span-4")}
   `;
 }
 function renderBatchesPage(data, inventory, filters) {
@@ -254,9 +263,7 @@ function renderBatchesPage(data, inventory, filters) {
     ${kpi("Endpoints", new Set(inventory.filteredBatches.map((item) => String(item.endpoint ?? ""))).size)}
     ${card("Batch jobs workbench", `
         <div class="stack">
-          <p class="muted">
-            Keep this page batch-first: queue one job, inspect lifecycle state, preview input or output, and only then branch into request-level Traffic or Logs.
-          </p>
+          <p class="muted">Queue one job, inspect lifecycle, then preview input or output.</p>
           <div class="toolbar">
             <a class="button" href="${pathForPage("files")}">Open files</a>
             <a class="button button--secondary" href="${pathForPage("logs")}">Open logs</a>
@@ -269,7 +276,7 @@ function renderBatchesPage(data, inventory, filters) {
           <form id="batch-create-form" class="form-shell form-shell--compact">
             ${renderFormSection({
         title: "Queue one job",
-        intro: "Use this after staging an input file. If a new file still needs upload, switch to the files page first.",
+        intro: "Use this after staging an input file.",
         body: `
                 <label class="field">
                   <span>Endpoint</span>
@@ -288,7 +295,7 @@ function renderBatchesPage(data, inventory, filters) {
           </form>
         </div>
       `, "panel panel--span-4")}
-    ${renderInspectorCard("batches", inventory, data, filters, "Batch lifecycle and output", "Select one batch to inspect lifecycle metadata, preview input or output, and unlock request-scoped handoff only when one output is decoded.", "panel panel--span-8")}
+    ${renderInspectorCard("batches", inventory, data, filters, "Batch lifecycle and output", "Select one batch to inspect lifecycle, preview input or output, and unlock request handoff.", "panel panel--span-8")}
     ${card("Batch jobs", inventory.filteredBatches.length
         ? `
             <div class="table-wrap" id="files-batches-batches">
@@ -335,7 +342,11 @@ function renderBatchesPage(data, inventory, filters) {
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
             note: "Use the broader map once batch lifecycle signals are no longer enough and the issue moved into provider posture or request logs.",
         },
-    ], "Batch creation and lifecycle stay primary here. File staging is now a deliberate handoff back to the dedicated files page instead of another section on the same screen."), "panel panel--span-4")}
+    ], {
+        compact: true,
+        collapsibleSummary: "Operator guides",
+        intro: "Batch creation and lifecycle stay primary here.",
+    }), "panel panel--span-4")}
   `;
 }
 function renderFiltersCard(page, data, filters) {
@@ -374,8 +385,8 @@ function renderFiltersCard(page, data, filters) {
         ${renderFormSection({
         title: page === "files" ? "Inventory scope" : "Lifecycle scope",
         intro: page === "files"
-            ? "Keep the inventory narrow enough that preview and file-level actions still feel local to one artifact."
-            : "Narrow lifecycle review before opening one batch, previewing one output, or handing off into request-level tools.",
+            ? "Keep the inventory narrow enough for one-file review."
+            : "Narrow lifecycle review before opening one batch or one output.",
         body: `
             <div class="${page === "files" ? "dual-grid" : "quad-grid"}">
               ${page === "files" ? fileFields : batchFields}
@@ -384,7 +395,7 @@ function renderFiltersCard(page, data, filters) {
     })}
         <div class="form-actions">
           <button class="button" type="submit">Apply filters</button>
-          <span class="muted">${page === "files" ? "Keep the inventory small while preview and upload work stays local to one file." : "Narrow lifecycle review before opening one batch or output."}</span>
+          <span class="muted">${page === "files" ? "Keep the inventory small." : "Narrow review before opening one batch or output."}</span>
         </div>
       </form>
     `, "panel panel--span-12");
@@ -414,7 +425,7 @@ function renderInspectorCard(page, inventory, data, filters, title, intro, panel
           <details class="details-disclosure" id="files-batches-detail-disclosure">
             <summary id="files-batches-detail-summary-label">Selection metadata snapshot</summary>
             <p class="field-note">
-              Open this only when the selection summary is not enough and raw file or batch metadata still matters.
+              Open this only when the selection summary is not enough.
             </p>
             <div id="files-batches-detail-summary">
               ${renderDefinitionList([
@@ -427,7 +438,7 @@ function renderInspectorCard(page, inventory, data, filters, title, intro, panel
           <details class="details-disclosure" id="files-batches-content-disclosure">
             <summary id="files-batches-content-summary-label">Content preview</summary>
             <p class="field-note">
-              Content preview stays secondary until one file or batch output actually needs inspection.
+              Content preview stays secondary until one file or batch output needs inspection.
             </p>
             <div id="files-batches-content-summary">
               ${renderDefinitionList([

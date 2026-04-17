@@ -67,18 +67,16 @@ export async function renderProviders(app, token) {
     ], "Provider summary is unavailable.")}
         </div>
       `, "panel panel--span-8 panel--measure")}
-    ${card("Provider workflow handoff", `
+    ${card("Provider workflows", `
         <div class="stack">
-          <p class="muted">
-            Keep this page summary-first: confirm which provider surface should exist, smoke one route family, then widen into route diagnostics only if the mismatch still remains.
-          </p>
           <div class="workflow-grid">
             ${renderWorkflowCard({
         workflow: "configure",
-        title: enabledProviderRows.length ? "Adjust provider posture deliberately" : "Enable a provider family first",
+        compact: true,
+        title: enabledProviderRows.length ? "Adjust provider posture" : "Enable a provider family first",
         note: enabledProviderRows.length
-            ? "Settings owns provider toggles, observability sinks, and auth posture. Return to Setup only when bootstrap prerequisites are still incomplete."
-            : "No compatibility surface is enabled yet, so Setup and Settings remain the correct place to restore a usable provider path.",
+            ? "Settings owns toggles and auth posture."
+            : "Use Setup or Settings to restore a usable provider path.",
         pills: [
             pill(`Enabled: ${formatNumber(enabledProviderRows.length)}`, enabledProviderRows.length ? "good" : "warn"),
             pill(`Telemetry: ${backend.telemetry_enabled ? "on" : "off"}`, backend.telemetry_enabled ? "good" : "warn"),
@@ -91,10 +89,11 @@ export async function renderProviders(app, token) {
     })}
             ${renderWorkflowCard({
         workflow: "start",
+        compact: true,
         title: "Smoke the mounted provider surface",
         note: leadProvider
-            ? `${displayName(leadProvider)} currently exposes the widest mounted surface. Use Playground to confirm the compatibility route before inspecting lower-level diagnostics.`
-            : "Once a provider is enabled, Playground is the fastest way to prove the mounted compatibility route actually works.",
+            ? `${displayName(leadProvider)} currently exposes the widest surface.`
+            : "Use Playground after the first provider is enabled.",
         pills: [
             pill(`Lead provider: ${leadProvider ? displayName(leadProvider) : "n/a"}`),
             pill(`Routes: ${formatNumber(routeRows.length)}`),
@@ -107,10 +106,11 @@ export async function renderProviders(app, token) {
     })}
             ${renderWorkflowCard({
         workflow: "observe",
-        title: "Confirm the live request path before route forensics",
+        compact: true,
+        title: "Confirm the live request path",
         note: leadProvider
-            ? "Traffic opens already scoped to the current lead provider. Hand off into Logs only after one provider-specific request or failure becomes the real debugging target."
-            : "Traffic and Logs stay secondary until a provider family is enabled and you have a live request path worth following.",
+            ? "Traffic opens scoped to the current lead provider."
+            : "Traffic and Logs stay secondary until a provider is enabled.",
         pills: [
             pill(`Lead route owner: ${leadProvider ? displayName(leadProvider) : "none"}`),
             pill(`Admin routes: ${formatNumber(adminRouteCount)}`),
@@ -126,9 +126,6 @@ export async function renderProviders(app, token) {
       `, "panel panel--span-4 panel--aside")}
     ${card("Capability coverage", `
         <div class="stack">
-          <p class="muted">
-            Capability coverage stays primary. Route-family detail stays secondary until capability coverage and provider briefs still do not explain the mismatch.
-          </p>
           ${renderTable([
         { label: "Capability" },
         { label: "Enabled surfaces" },
@@ -158,7 +155,11 @@ export async function renderProviders(app, token) {
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
             note: "Use the escalation map when provider posture looks wrong but the next operator surface is still ambiguous.",
         },
-    ], "This page stays summary-first. Use the docs only after provider coverage, playground smoke, or live traffic still leave the mismatch unresolved."), "panel panel--span-4 panel--aside")}
+    ], {
+        compact: true,
+        collapsibleSummary: "Operator guides",
+        intro: "Open docs only after coverage, smoke, or live traffic still leave the mismatch unresolved.",
+    }), "panel panel--span-4 panel--aside")}
     ${card("Provider briefs", `
         <div class="step-grid">
           ${surfaceRows
@@ -226,9 +227,7 @@ export async function renderProviders(app, token) {
     ], "Backend capability metadata is unavailable."), "panel panel--span-4 panel--aside")}
     ${card("Staged route diagnostics", `
         <div class="stack">
-          <p class="muted">
-            Open these disclosures only when provider briefs, capability coverage, and workflow handoff still leave a route-family mismatch unresolved.
-          </p>
+          <p class="muted">Open these disclosures only when the summary still leaves a route-family mismatch unresolved.</p>
           <details class="surface details-disclosure" id="providers-route-detail">
             <summary>Current route-family snapshot</summary>
             ${renderTable([

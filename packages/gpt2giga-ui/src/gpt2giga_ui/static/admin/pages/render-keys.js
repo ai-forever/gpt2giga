@@ -60,16 +60,12 @@ export async function renderKeys(app, token) {
       `, "panel panel--span-8 panel--measure")}
     ${card("Key workflows", `
         <div class="stack">
-          <p class="muted">
-            Keep this page key-first: establish one reusable credential, hand it to Playground or a client, then confirm attribution in usage traffic only after the smoke request lands.
-          </p>
           <div class="workflow-grid">
             ${renderWorkflowCard({
         workflow: "configure",
-        title: global.configured ? "Rotate the broad fallback deliberately" : "Create the first broad fallback",
-        note: global.configured
-            ? "Use the global key when one broad credential is still operationally useful, but avoid treating it as the default for every SDK or team."
-            : "A global key is still the quickest recovery path when bootstrap is complete but no reusable client credential exists yet.",
+        compact: true,
+        title: global.configured ? "Rotate the global fallback" : "Create the first global fallback",
+        note: global.configured ? "Keep it broad only when needed." : "Use it as the first recovery path.",
         pills: [
             pill(`Global: ${global.configured ? "ready" : "missing"}`, global.configured ? "good" : "warn"),
             pill(`Scoped: ${formatNumber(scoped.length)}`),
@@ -82,10 +78,9 @@ export async function renderKeys(app, token) {
     })}
             ${renderWorkflowCard({
         workflow: "start",
-        title: scoped.length ? "Issue a client-specific key next" : "Create the first scoped key",
-        note: scoped.length
-            ? "Scoped keys are the safer day-2 handoff. Tighten provider, endpoint, or model reach before copying one into a real client."
-            : "Scoped keys keep SDK or tenant access narrow from the beginning and reduce accidental broad reuse of the global key.",
+        compact: true,
+        title: scoped.length ? "Issue a client-specific key" : "Create the first scoped key",
+        note: scoped.length ? "Tighten provider, endpoint, or model reach." : "Keep client access narrow from the start.",
         pills: [
             pill(`Restricted scopes: ${formatNumber(scopedRestrictionCount)}`),
             pill(`Preview: ${String(global.key_preview ?? "none")}`),
@@ -98,8 +93,9 @@ export async function renderKeys(app, token) {
     })}
             ${renderWorkflowCard({
         workflow: "observe",
-        title: "Confirm attribution after one smoke request",
-        note: "Usage traffic should stay the proof surface after one request lands. Return here only when rotation, deletion, or scope shape still need changes.",
+        compact: true,
+        title: "Confirm attribution after one request",
+        note: "Use Traffic as the proof surface.",
         pills: [
             pill(`Global requests: ${formatNumber(readUsageCount(globalUsage.request_count))}`),
             pill(`Scoped requests: ${formatNumber(scopedRequestCount)}`),
@@ -117,13 +113,10 @@ export async function renderKeys(app, token) {
         <form id="scoped-key-form" class="form-shell">
           <div class="form-shell__intro">
             <span class="eyebrow">Scoped handoff</span>
-            <p class="muted">
-              Create a client-specific key when one broad global credential would be too wide. Leave any restriction field empty to keep that axis unrestricted.
-            </p>
+            <p class="muted">Create one narrow client key.</p>
           </div>
           ${renderFormSection({
         title: "Identity",
-        intro: "Use a stable operator-facing label so rotation and audit trails stay readable later.",
         body: `
               <label class="field">
                 <span>Name</span>
@@ -133,7 +126,6 @@ export async function renderKeys(app, token) {
     })}
           ${renderFormSection({
         title: "Scope limits",
-        intro: "Tighten the credential only where it matters for this client or integration.",
         body: `
               <div class="triple-grid">
                 <label class="field">
@@ -153,9 +145,7 @@ export async function renderKeys(app, token) {
     })}
           <div class="form-actions">
             <button class="button" type="submit">Create scoped key</button>
-            <span class="muted">
-              The full key value is shown once in the alert banner after creation or rotation.
-            </span>
+            <span class="muted">The full key value is shown once after creation or rotation.</span>
           </div>
         </form>
       `, "panel panel--span-8 panel--measure")}
@@ -225,7 +215,11 @@ export async function renderKeys(app, token) {
             href: OPERATOR_GUIDE_LINKS.providers,
             note: "Use provider diagnostics only after a key works but the mounted compatibility surface still behaves differently than expected.",
         },
-    ], "Keys stay narrow on purpose. Open the longer playbooks only after key posture, smoke traffic, and usage attribution still leave the operator story unclear."), "panel panel--span-4 panel--aside")}
+    ], {
+        compact: true,
+        collapsibleSummary: "Operator guides",
+        intro: "Keys stay narrow on purpose.",
+    }), "panel panel--span-4 panel--aside")}
     ${card("Current key snapshot", `
         <details class="details-disclosure">
           <summary>Current key snapshot</summary>

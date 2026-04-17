@@ -19,10 +19,10 @@ export async function renderFilesBatches(app, token) {
         currentPage: page,
         title: "Files & batches pages",
         intro: page === "files-batches"
-            ? "Use the hub for counts and handoff only. Open the dedicated files or batches page when the work stops being summary-first."
+            ? "Use the hub for counts only. Open files or batches for real work."
             : page === "files"
-                ? "This page stays file-first: upload, inspect, preview, then hand off into the dedicated batch composer only when queueing is next."
-                : "This page stays batch-first: create jobs, inspect lifecycle state, and preview outputs without file-upload noise.",
+                ? "Keep this page file-first: upload, inspect, preview."
+                : "Keep this page batch-first: create jobs, inspect lifecycle, preview outputs.",
         items: subpagesFor(page),
     }), "panel panel--span-12")}
     ${renderFilesBatchesPage(page, data, inventory, filters)}
