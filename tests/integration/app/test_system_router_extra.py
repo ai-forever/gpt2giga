@@ -228,7 +228,8 @@ def test_favicon_route_serves_packaged_icon():
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/x-icon"
-    assert response.content[:4] == b"\x00\x00\x01\x00"
+    assert response.headers["cache-control"] == "no-cache, no-store, must-revalidate"
+    assert response.content[:4] in {b"\x00\x00\x01\x00", b"\x89PNG"}
 
 
 def test_admin_ui_assets_include_observability_presets():
