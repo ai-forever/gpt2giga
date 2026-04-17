@@ -60,6 +60,7 @@ def test_setup_endpoint_reports_persisted_status(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["persisted"] is False
     assert payload["gigachat_ready"] is False
+    assert payload["gigachat_auth_methods"] == []
     assert payload["security_ready"] is False
     assert payload["setup_complete"] is False
     assert payload["claim"]["required"] is False
@@ -315,9 +316,38 @@ def test_setup_endpoint_reports_env_only_mode_without_bootstrap():
     assert payload["disable_persist"] is True
     assert payload["persistence_enabled"] is False
     assert payload["persisted"] is False
+    assert payload["gigachat_auth_methods"] == ["credentials"]
     assert payload["setup_complete"] is True
     assert payload["bootstrap"]["required"] is False
     assert payload["claim"]["required"] is False
+
+
+def test_setup_endpoint_treats_user_password_auth_as_runtime_ready():
+    client = TestClient(
+        make_app(
+            config=ProxyConfig(
+                proxy=ProxySettings(
+                    mode="PROD",
+                    disable_persist=True,
+                    enable_api_key_auth=True,
+                    api_key="env-admin-key",
+                ),
+                gigachat={
+                    "user": "env-user",
+                    "password": "env-password",
+                    "scope": "GIGACHAT_API_PERS",
+                },
+            )
+        )
+    )
+
+    response = client.get("/admin/api/setup", headers={"x-api-key": "env-admin-key"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["gigachat_ready"] is True
+    assert payload["gigachat_auth_methods"] == ["user_password"]
+    assert payload["setup_complete"] is True
 
 
 def test_settings_mutation_is_rejected_when_persist_is_disabled(tmp_path, monkeypatch):

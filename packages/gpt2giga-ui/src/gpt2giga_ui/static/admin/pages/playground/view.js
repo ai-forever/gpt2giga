@@ -1,6 +1,6 @@
 import { pathForPage } from "../../routes.js";
 import { card, kpi, pill, renderDefinitionList, renderFormSection, renderWorkflowCard, } from "../../templates.js";
-import { asRecord, escapeHtml, formatBytes, formatDurationMs, } from "../../utils.js";
+import { asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatBytes, formatDurationMs, } from "../../utils.js";
 import { DEFAULT_ASSISTANT_OUTPUT, DEFAULT_OUTPUT, DEFAULT_PLAYGROUND_PRESET, PLAYGROUND_PRESETS, } from "./state.js";
 export function renderPlaygroundHeroActions() {
     return `
@@ -10,10 +10,12 @@ export function renderPlaygroundHeroActions() {
 }
 export function renderPlaygroundPage(setup, initialRequest) {
     const bootstrapRequired = asRecord(setup.bootstrap).required;
+    const persistence = describePersistenceStatus(setup);
+    const gigachatAuth = describeGigachatAuth(setup);
     return `
-    ${kpi("GigaChat", setup.gigachat_ready ? "ready" : "missing")}
+    ${kpi("GigaChat", gigachatAuth.value)}
     ${kpi("Security", setup.security_ready ? "ready" : "pending")}
-    ${kpi("Persisted", setup.persisted ? "yes" : "defaults")}
+    ${kpi("Persistence", persistence.value)}
     ${kpi("Bootstrap", bootstrapRequired ? "active" : "off")}
     ${card("Request builder", `
         <form id="playground-form" class="form-shell">
@@ -96,7 +98,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
         title: setup.gigachat_ready ? "Run one smoke request" : "Finish bootstrap first",
         compact: true,
         pills: [
-            pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
+            pill(gigachatAuth.pillLabel, gigachatAuth.tone),
             pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn"),
             pill(`Bootstrap: ${bootstrapRequired ? "active" : "off"}`, bootstrapRequired ? "warn" : "default"),
         ],
@@ -110,7 +112,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
         title: "Next surface",
         compact: true,
         pills: [
-            pill(`Persisted: ${setup.persisted ? "yes" : "defaults"}`, setup.persisted ? "good" : "default"),
+            pill(persistence.pillLabel, persistence.tone),
             pill(`Gateway auth: ${setup.security_ready ? "protected" : "open"}`),
             pill(`Zero-env path: ready`),
         ],
@@ -239,11 +241,16 @@ export function updatePlaygroundRequestPreview(options) {
     const { elements, gatewayKey, request, setup } = options;
     const gatewayKeyState = gatewayKey ? "configured" : "empty";
     const bootstrap = asRecord(setup.bootstrap);
+    const gigachatAuth = describeGigachatAuth(setup);
     elements.requestSummary.innerHTML = renderDefinitionList([
         { label: "Surface", value: request.label },
         { label: "Endpoint", value: `POST ${request.url}` },
         { label: "Streaming", value: request.stream ? "on" : "off" },
-        { label: "Auth", value: request.authLabel },
+        {
+            label: "Auth",
+            value: gatewayKey ? request.authLabel : "gateway key required",
+            note: gatewayKey ? "Current rail key will be attached." : `${request.authLabel} appears only when the rail key is filled.`,
+        },
         { label: "Gateway key", value: gatewayKeyState },
         {
             label: "Payload size",
@@ -260,7 +267,7 @@ export function updatePlaygroundRequestPreview(options) {
     elements.requestBody.textContent = JSON.stringify(request.body, null, 2);
     elements.authNote.textContent = gatewayKey
         ? `Gateway key present. Will attach ${request.authLabel}.`
-        : "Gateway key empty. Request will be sent without proxy auth headers.";
+        : `Gateway key empty. ${request.authLabel} stays absent until the rail key is filled.`;
     elements.formNote.textContent = describePreviewState(request, gatewayKey, setup);
     elements.bootstrapBanner.innerHTML = renderBootstrapBanner(setup, gatewayKey);
     elements.bootstrapSummary.innerHTML = renderDefinitionList(buildBootstrapSteps(setup, gatewayKey));
@@ -314,10 +321,11 @@ export function updatePlaygroundRunPanels(options) {
 }
 function renderBootstrapBanner(setup, gatewayKey) {
     const bootstrap = asRecord(setup.bootstrap);
+    const gigachatAuth = describeGigachatAuth(setup);
     if (!setup.gigachat_ready) {
         return `
       <div class="banner banner--warn">
-        GigaChat credentials are missing. Use <a href="/admin/setup"><strong>/admin/setup</strong></a>
+        Effective GigaChat auth is missing. Use <a href="/admin/setup"><strong>/admin/setup</strong></a>
         before trusting smoke results.
       </div>
     `;
@@ -340,22 +348,24 @@ function renderBootstrapBanner(setup, gatewayKey) {
     }
     return `
     <div class="banner">
-      Playground is ready for smoke traffic. Start with <strong>OpenAI hello</strong>, then try streaming.
+      Playground is ready for smoke traffic. Effective upstream auth uses <strong>${escapeHtml(gigachatAuth.value)}</strong>. Start with <strong>OpenAI hello</strong>, then try streaming.
     </div>
   `;
 }
 function buildBootstrapSteps(setup, gatewayKey) {
     const bootstrap = asRecord(setup.bootstrap);
+    const persistence = describePersistenceStatus(setup);
+    const gigachatAuth = describeGigachatAuth(setup);
     return [
         {
-            label: "Persisted config",
-            value: setup.persisted ? "yes" : "not yet",
-            note: setup.persisted ? "Changes survive restart." : "Values still look like defaults.",
+            label: "Persistence",
+            value: persistence.value,
+            note: persistence.note,
         },
         {
-            label: "GigaChat",
-            value: setup.gigachat_ready ? "ready" : "missing",
-            note: setup.gigachat_ready ? "Upstream credentials are present." : "Finish Setup before expecting success.",
+            label: "GigaChat auth",
+            value: gigachatAuth.value,
+            note: setup.gigachat_ready ? gigachatAuth.note : "Finish Setup before expecting success.",
         },
         {
             label: "Gateway key",
@@ -371,7 +381,7 @@ function buildBootstrapSteps(setup, gatewayKey) {
 }
 function describePreviewState(request, gatewayKey, setup) {
     if (!setup.gigachat_ready) {
-        return "Payload is ready, but upstream GigaChat credentials are still missing.";
+        return "Payload is ready, but effective upstream GigaChat auth is still missing.";
     }
     if (!gatewayKey && (setup.security_ready || asRecord(setup.bootstrap).required)) {
         return `Preview is valid, but ${request.authLabel} stays absent until the gateway key field is filled.`;

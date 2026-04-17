@@ -16,13 +16,22 @@ from .paths import (
 )
 
 
+def _gigachat_auth_methods(config: ProxyConfig) -> list[str]:
+    """Return the configured upstream GigaChat auth methods."""
+    gigachat = config.gigachat_settings
+    methods: list[str] = []
+    if getattr(gigachat, "credentials", None):
+        methods.append("credentials")
+    if getattr(gigachat, "access_token", None):
+        methods.append("access_token")
+    if getattr(gigachat, "user", None) and getattr(gigachat, "password", None):
+        methods.append("user_password")
+    return methods
+
+
 def is_gigachat_ready(config: ProxyConfig) -> bool:
     """Return whether upstream GigaChat auth is configured."""
-    gigachat = config.gigachat_settings
-    return bool(
-        getattr(gigachat, "credentials", None)
-        or getattr(gigachat, "access_token", None)
-    )
+    return bool(_gigachat_auth_methods(config))
 
 
 def is_security_ready(config: ProxyConfig) -> bool:
@@ -57,7 +66,8 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
     payload = load_control_plane_payload(config=config)
     bootstrap_state = load_bootstrap_state(config=config)
     persisted = has_persisted_control_plane(config)
-    gigachat_ready = is_gigachat_ready(config)
+    gigachat_auth_methods = _gigachat_auth_methods(config)
+    gigachat_ready = bool(gigachat_auth_methods)
     security_ready = is_security_ready(config)
     storage_ready = not persistence_enabled or persisted
     setup_complete = storage_ready and gigachat_ready and security_ready
@@ -112,6 +122,7 @@ def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
         "key_path": str(get_control_plane_key_file()) if persistence_enabled else None,
         "updated_at": payload.get("updated_at"),
         "gigachat_ready": gigachat_ready,
+        "gigachat_auth_methods": gigachat_auth_methods,
         "security_ready": security_ready,
         "global_api_key_configured": proxy.api_key is not None,
         "scoped_api_keys_configured": len(proxy.scoped_api_keys),

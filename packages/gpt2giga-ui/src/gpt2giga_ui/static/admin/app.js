@@ -1,7 +1,7 @@
 import { AdminApiClient } from "./api.js";
 import { PAGE_META, WORKFLOW_META, isConsolePathname, navEntryForPage, pageFromLocation, pathForPage, } from "./routes.js";
 import { renderLoadingGrid } from "./templates.js";
-import { escapeHtml, toErrorMessage } from "./utils.js";
+import { describePersistenceStatus, escapeHtml, toErrorMessage, } from "./utils.js";
 import { PAGE_RENDERERS } from "./pages/index.js";
 const ADMIN_KEY_STORAGE = "gpt2giga.adminKey";
 const GATEWAY_KEY_STORAGE = "gpt2giga.gatewayKey";
@@ -182,11 +182,12 @@ export class AdminApp {
                 this.api.json("/admin/api/runtime"),
                 this.api.json("/admin/api/setup"),
             ]);
+            const persistence = describePersistenceStatus(setup);
             this.modeChip.textContent = String(runtime.mode ?? "n/a");
             this.backendChip.textContent = String(runtime.gigachat_api_mode ?? "n/a");
-            this.persistedChip.textContent = setup.persisted ? "persisted" : "defaults";
+            this.persistedChip.textContent = persistence.chip;
             if (!setup.gigachat_ready) {
-                this.pushAlert("GigaChat credentials are not configured yet. Playground calls will fail until the GigaChat section is filled.", "warn");
+                this.pushAlert("Effective upstream GigaChat auth is missing. Playground calls will fail until credentials, access token, or user/password auth is configured.", "warn");
             }
             if (!setup.security_ready) {
                 this.pushAlert("Gateway auth bootstrap is incomplete. Create a global or scoped API key before exposing the proxy.", "warn");

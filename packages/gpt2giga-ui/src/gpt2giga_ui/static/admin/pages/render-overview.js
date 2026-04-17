@@ -1,7 +1,7 @@
 import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
 import { card, pill, renderDefinitionList, renderGuideLinks, renderTable, renderWorkflowCard, } from "../templates.js";
-import { asArray, asRecord, escapeHtml, formatNumber, formatTimestamp, } from "../utils.js";
+import { asArray, asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatNumber, formatTimestamp, } from "../utils.js";
 const MAX_SUMMARY_ROWS = 5;
 export async function renderOverview(app, token) {
     const [runtime, setup, usageProviders, errors] = await Promise.all([
@@ -24,6 +24,8 @@ export async function renderOverview(app, token) {
     const errorCount = Number(summary.error_count ?? 0);
     const totalTokens = Number(summary.total_tokens ?? 0);
     const topProvider = providerEntries[0] ?? null;
+    const persistence = describePersistenceStatus(setup);
+    const gigachatAuth = describeGigachatAuth(setup);
     app.setHeroActions(setup.setup_complete
         ? `
           <a class="button" href="/admin/playground">Try playground</a>
@@ -48,7 +50,9 @@ export async function renderOverview(app, token) {
             <p class="muted">
               ${escapeHtml(setup.setup_complete
         ? "Use playground, traffic, or settings as the next step."
-        : "Finish setup, GigaChat credentials, and gateway auth first.")}
+        : setup.persistence_enabled === false
+            ? "Finish effective GigaChat auth and gateway auth first. This runtime reads config from environment only."
+            : "Finish persisted setup, effective GigaChat auth, and gateway auth first.")}
             </p>
           </section>
           <div class="overview-stat-grid">
@@ -96,8 +100,8 @@ export async function renderOverview(app, token) {
             : "Finish setup",
         compact: true,
         pills: [
-            pill(`Persisted: ${setup.persisted ? "ready" : "missing"}`, setup.persisted ? "good" : "warn"),
-            pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
+            pill(persistence.pillLabel, persistence.tone),
+            pill(gigachatAuth.pillLabel, gigachatAuth.tone),
             pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn"),
         ],
         actions: setup.setup_complete

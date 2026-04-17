@@ -79,8 +79,11 @@ export interface RuntimePayload {
 }
 
 export interface SetupPayload {
+  persistence_enabled?: boolean;
+  disable_persist?: boolean;
   persisted?: boolean;
   gigachat_ready?: boolean;
+  gigachat_auth_methods?: string[];
   security_ready?: boolean;
   setup_complete?: boolean;
   scoped_api_keys_configured?: number;

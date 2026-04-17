@@ -1,7 +1,7 @@
 import { bindValidityReset, buildApplicationPayload, buildObservabilityDiffEntries, buildObservabilityPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, describePersistOutcome, validateJsonArrayField, validateJsonObjectField, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
 import { subpagesFor } from "../routes.js";
 import { banner, card, pill, renderDiffSections, renderSubpageNav, } from "../templates.js";
-import { asArray, asRecord, escapeHtml, formatTimestamp, toErrorMessage, } from "../utils.js";
+import { asArray, asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatTimestamp, toErrorMessage, } from "../utils.js";
 import {} from "./control-plane-actions.js";
 import { bindControlPlaneSectionForm, bindGigachatConnectionTestAction, } from "./control-plane-form-bindings.js";
 import { bindGigachatSecretFields, bindObservabilityPresetButtons, bindObservabilitySecretFields, renderApplicationSection, renderGigachatSection, renderObservabilitySection, renderSecuritySection, } from "./control-plane-sections.js";
@@ -86,6 +86,8 @@ async function renderSettingsPage(app, token, currentPage) {
 }
 function renderSettingsHub(options) {
     const activeSinks = asArray(options.observabilityValues.active_sinks);
+    const persistence = describePersistenceStatus(options.controlPlaneStatus);
+    const gigachatAuth = describeGigachatAuth(options.controlPlaneStatus);
     return `
     ${card("Configuration map", renderSubpageNav({
         currentPage: options.currentPage,
@@ -96,10 +98,12 @@ function renderSettingsHub(options) {
     ${card("Persistence posture", `
         <div class="stack">
           <div class="toolbar">
-            ${pill(Boolean(options.controlPlaneStatus.persisted) ? "Persisted target saved" : "Persisted target pending", Boolean(options.controlPlaneStatus.persisted) ? "good" : "warn")}
+            ${pill(persistence.pillLabel, persistence.tone)}
             ${pill(options.controlPlaneStatus.updated_at
         ? `Last update: ${formatTimestamp(options.controlPlaneStatus.updated_at)}`
-        : "No persisted updates yet")}
+        : options.controlPlaneStatus.persistence_enabled === false
+            ? "Persisted updates unavailable"
+            : "No persisted updates yet")}
             ${pill(`Recent revisions: ${options.revisions.length}`)}
           </div>
           ${options.revisions.length
@@ -135,7 +139,7 @@ function renderSettingsHub(options) {
         href: "/admin/settings-gigachat",
         description: "Credentials, transport, SSL posture, and connection testing.",
         pills: [
-            pill(`Credentials: ${options.gigachatValues.credentials_configured ? "configured" : "missing"}`, options.gigachatValues.credentials_configured ? "good" : "warn"),
+            pill(gigachatAuth.pillLabel, gigachatAuth.tone),
             pill(`Model: ${String(options.gigachatValues.model ?? "n/a")}`),
             pill(`Scope: ${String(options.gigachatValues.scope ?? "n/a")}`),
         ],
@@ -270,6 +274,8 @@ function renderSettingsMainCard(options) {
         : `<p>No persisted revisions yet. Save a settings change to start revision history.</p>`, "panel panel--span-8 panel--measure");
 }
 function renderSettingsSidebar(options) {
+    const persistence = describePersistenceStatus(options.controlPlaneStatus);
+    const gigachatAuth = describeGigachatAuth(options.controlPlaneStatus);
     const detailPills = (() => {
         if (options.activeSection === "application") {
             return [
@@ -287,7 +293,7 @@ function renderSettingsSidebar(options) {
         }
         if (options.activeSection === "gigachat") {
             return [
-                pill(`Credentials: ${options.gigachatValues.credentials_configured ? "configured" : "missing"}`, options.gigachatValues.credentials_configured ? "good" : "warn"),
+                pill(gigachatAuth.pillLabel, gigachatAuth.tone),
                 pill(`Model: ${String(options.gigachatValues.model ?? "n/a")}`),
                 pill(`Verify SSL: ${Boolean(options.gigachatValues.verify_ssl_certs) ? "on" : "off"}`),
             ];
@@ -303,8 +309,10 @@ function renderSettingsSidebar(options) {
             pill(`Revisions: ${options.revisions.length}`),
             pill(options.controlPlaneStatus.updated_at
                 ? `Last update: ${formatTimestamp(options.controlPlaneStatus.updated_at)}`
-                : "No persisted update yet"),
-            pill(Boolean(options.controlPlaneStatus.persisted) ? "Persisted target saved" : "Persisted target pending"),
+                : options.controlPlaneStatus.persistence_enabled === false
+                    ? "Persisted updates unavailable"
+                    : "No persisted update yet"),
+            pill(persistence.pillLabel, persistence.tone),
         ];
     })();
     return card(options.activeSection === "history" ? "Rollback posture" : "Section posture", `
@@ -314,7 +322,7 @@ function renderSettingsSidebar(options) {
           <div class="toolbar">
             ${detailPills.join("")}
           </div>
-          <div class="stat-line"><strong>Persisted target</strong><span class="muted">${Boolean(options.controlPlaneStatus.persisted) ? "saved" : "not saved yet"}</span></div>
+          <div class="stat-line"><strong>Persistence</strong><span class="muted">${escapeHtml(persistence.value)}</span></div>
           <div class="stat-line"><strong>Last update</strong><span class="muted">${escapeHtml(options.controlPlaneStatus.updated_at ? formatTimestamp(options.controlPlaneStatus.updated_at) : "n/a")}</span></div>
         </div>
         ${options.activeSection === "history"

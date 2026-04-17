@@ -1,7 +1,7 @@
 import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
 import { banner, card, kpi, pill, renderDefinitionList, renderGuideLinks, renderSetupSteps, renderStatLines, renderWorkflowCard, } from "../templates.js";
-import { asArray, asRecord, escapeHtml, formatNumber, humanizeField } from "../utils.js";
+import { asArray, asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatNumber, humanizeField, } from "../utils.js";
 export async function renderSystem(app, token) {
     const [runtime, config, routes, setup] = await Promise.all([
         app.api.json("/admin/api/runtime"),
@@ -33,6 +33,8 @@ export async function renderSystem(app, token) {
     const systemWarnings = buildSystemWarnings(setup, runtime, warnings, readyServiceCount);
     const setupActionPath = setup.setup_complete ? pathForPage("settings") : pathForPage("setup");
     const setupActionLabel = setup.setup_complete ? "Review settings" : "Finish setup";
+    const persistence = describePersistenceStatus(setup);
+    const gigachatAuth = describeGigachatAuth(setup);
     app.setHeroActions(`
     <button class="button button--secondary" id="copy-diagnostics" type="button">Copy system snapshot</button>
     <a class="button button--secondary" href="/admin/providers">Provider diagnostics</a>
@@ -56,11 +58,9 @@ export async function renderSystem(app, token) {
                 : "Bootstrap still needs attention.",
         },
         {
-            label: "Persisted config",
-            value: setup.persisted ? "present" : "defaults only",
-            note: setup.persisted
-                ? "Control-plane state is persisted."
-                : "Save Settings for restart-safe config.",
+            label: "Persistence posture",
+            value: persistence.value,
+            note: persistence.note,
         },
         {
             label: "Provider posture",
@@ -88,8 +88,8 @@ export async function renderSystem(app, token) {
             ? "Use Settings only for deliberate day-2 changes."
             : "Resolve persisted config, credentials, or security posture first.",
         pills: [
-            pill(`Persisted: ${setup.persisted ? "ready" : "missing"}`, setup.persisted ? "good" : "warn"),
-            pill(`GigaChat: ${setup.gigachat_ready ? "ready" : "missing"}`, setup.gigachat_ready ? "good" : "warn"),
+            pill(persistence.pillLabel, persistence.tone),
+            pill(gigachatAuth.pillLabel, gigachatAuth.tone),
             pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn"),
         ],
         actions: [
@@ -134,14 +134,14 @@ export async function renderSystem(app, token) {
         <div class="stack">
           ${renderStatLines([
         {
-            label: "Persisted control-plane config",
-            value: setup.persisted ? "ready" : "missing",
-            tone: setup.persisted ? "good" : "warn",
+            label: "Persistence posture",
+            value: persistence.value,
+            tone: persistence.tone,
         },
         {
-            label: "GigaChat credentials",
-            value: setup.gigachat_ready ? "ready" : "missing",
-            tone: setup.gigachat_ready ? "good" : "warn",
+            label: "GigaChat auth",
+            value: gigachatAuth.value,
+            tone: gigachatAuth.tone,
         },
         {
             label: "Security bootstrap",
@@ -329,7 +329,7 @@ function buildRouteSummaries(routes) {
 }
 function buildSystemWarnings(setup, runtime, setupWarnings, readyServiceCount) {
     const warnings = setupWarnings.map((warning) => banner(warning, "warn"));
-    if (!setup.persisted) {
+    if (setup.persistence_enabled !== false && !setup.persisted) {
         warnings.push(banner("Control-plane state is not persisted. Restart can revert posture to defaults.", "warn"));
     }
     if (!runtime.auth_required) {

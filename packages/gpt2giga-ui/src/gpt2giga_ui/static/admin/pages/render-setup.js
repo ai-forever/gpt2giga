@@ -1,7 +1,7 @@
 import { bindValidityReset, buildApplicationPayload, buildPendingDiffEntries, buildSecurityPayload, collectGigachatPayload, validatePositiveNumberField, validateRequiredCsvField, withBusyState, } from "../forms.js";
 import { subpagesFor } from "../routes.js";
 import { banner, card, pill, renderSetupSteps, renderSubpageNav, } from "../templates.js";
-import { asArray, asRecord, escapeHtml, } from "../utils.js";
+import { asArray, asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, } from "../utils.js";
 import { getSubmitterButton } from "./control-plane-actions.js";
 import { bindControlPlaneSectionForm, bindGigachatConnectionTestAction, } from "./control-plane-form-bindings.js";
 import { bindGigachatSecretFields, renderApplicationSection, renderGigachatSection, renderSetupObservabilityHandoff, renderSecuritySection, } from "./control-plane-sections.js";
@@ -92,6 +92,8 @@ async function renderSetupPage(app, token, currentPage) {
     });
 }
 function renderSetupHub(options) {
+    const persistence = describePersistenceStatus(options.setup);
+    const gigachatAuth = describeGigachatAuth(options.setup);
     return `
     ${card("Setup map", renderSubpageNav({
         currentPage: options.currentPage,
@@ -107,8 +109,8 @@ function renderSetupHub(options) {
         : banner("Bootstrap gate is closed. Admin or global API key access is active.")}
           <div class="toolbar">
             ${pill(`Claim: ${options.claim.claimed ? "done" : options.claim.required ? "pending" : "not required"}`, options.claim.claimed ? "good" : "warn")}
-            ${pill(`Persisted config: ${options.setup.persisted ? "yes" : "no"}`, options.setup.persisted ? "good" : "warn")}
-            ${pill(`GigaChat: ${options.setup.gigachat_ready ? "ready" : "pending"}`, options.setup.gigachat_ready ? "good" : "warn")}
+            ${pill(persistence.pillLabel, persistence.tone)}
+            ${pill(gigachatAuth.pillLabel, gigachatAuth.tone)}
             ${pill(`Security: ${options.setup.security_ready ? "ready" : "pending"}`, options.setup.security_ready ? "good" : "warn")}
           </div>
           <div class="toolbar">
@@ -159,7 +161,7 @@ function renderSetupHub(options) {
         href: "/admin/setup-application",
         description: "Persist runtime mode and provider posture.",
         pills: [
-            pill(`Persisted config: ${options.setup.persisted ? "yes" : "no"}`, options.setup.persisted ? "good" : "warn"),
+            pill(persistence.pillLabel, persistence.tone),
             pill(`Mode: ${String(options.runtime.mode ?? "n/a")}`),
         ],
     })}
@@ -168,7 +170,7 @@ function renderSetupHub(options) {
         href: "/admin/setup-gigachat",
         description: "Configure credentials and test the connection.",
         pills: [
-            pill(`Ready: ${options.setup.gigachat_ready ? "yes" : "no"}`, options.setup.gigachat_ready ? "good" : "warn"),
+            pill(gigachatAuth.pillLabel, gigachatAuth.tone),
             pill(`Backend: ${String(options.runtime.gigachat_api_mode ?? "n/a")}`),
         ],
     })}
@@ -307,6 +309,8 @@ function renderSetupSidebar(options) {
     });
 }
 function renderSetupStatusCard(options) {
+    const persistence = describePersistenceStatus(options.setup);
+    const gigachatAuth = describeGigachatAuth(options.setup);
     return card("Setup status", `
       <div class="stack">
         <div class="toolbar">
@@ -315,8 +319,8 @@ function renderSetupStatusCard(options) {
           ${pill(`Setup complete: ${options.setup.setup_complete ? "yes" : "no"}`, options.setup.setup_complete ? "good" : "warn")}
         </div>
         <div class="stat-line"><strong>Claim</strong><span class="muted">${options.claim.claimed ? "claimed" : options.claim.required ? "pending" : "not required"}</span></div>
-        <div class="stat-line"><strong>Persisted config</strong><span class="muted">${options.setup.persisted ? "yes" : "no"}</span></div>
-        <div class="stat-line"><strong>GigaChat ready</strong><span class="muted">${options.setup.gigachat_ready ? "yes" : "no"}</span></div>
+        <div class="stat-line"><strong>Persistence</strong><span class="muted">${escapeHtml(persistence.value)}</span></div>
+        <div class="stat-line"><strong>GigaChat auth</strong><span class="muted">${escapeHtml(gigachatAuth.value)}</span></div>
         <div class="stat-line"><strong>Security ready</strong><span class="muted">${options.setup.security_ready ? "yes" : "no"}</span></div>
         ${options.warnings.length
         ? options.warnings.slice(0, 2).map((warning) => banner(String(warning), "warn")).join("")
@@ -494,7 +498,7 @@ function getNextRecommendedSetupPage(setup) {
             note: "Claim the bootstrap session first.",
         };
     }
-    if (!setup.persisted) {
+    if (setup.persistence_enabled !== false && !setup.persisted) {
         return {
             href: "/admin/setup-application",
             label: "Open application step",
@@ -505,7 +509,7 @@ function getNextRecommendedSetupPage(setup) {
         return {
             href: "/admin/setup-gigachat",
             label: "Open GigaChat step",
-            note: "Provider credentials are still incomplete.",
+            note: "Effective upstream auth is still incomplete.",
         };
     }
     if (!setup.security_ready) {

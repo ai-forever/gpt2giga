@@ -1,3 +1,5 @@
+import type { SetupPayload } from "./types.js";
+
 export function escapeHtml(value: unknown): string {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -137,4 +139,79 @@ export function asRecord(value: unknown): Record<string, unknown> {
 
 export function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const GIGACHAT_AUTH_METHOD_LABELS: Record<string, string> = {
+  access_token: "access token",
+  credentials: "credentials",
+  user_password: "user/password",
+};
+
+export function describePersistenceStatus(
+  setup: Pick<SetupPayload, "persistence_enabled" | "persisted">,
+): {
+  chip: string;
+  note: string;
+  pillLabel: string;
+  tone: "default" | "good" | "warn";
+  value: string;
+} {
+  if (setup.persistence_enabled === false) {
+    return {
+      chip: "env-only",
+      note:
+        "Control-plane persistence is disabled. Runtime config is sourced from .env and process environment variables.",
+      pillLabel: "Persistence: env-only",
+      tone: "default",
+      value: "env-only",
+    };
+  }
+
+  if (setup.persisted) {
+    return {
+      chip: "persisted",
+      note: "Control-plane state is persisted and survives restart.",
+      pillLabel: "Persisted: ready",
+      tone: "good",
+      value: "ready",
+    };
+  }
+
+  return {
+    chip: "defaults",
+    note: "Save setup or settings values to survive restart.",
+    pillLabel: "Persisted: missing",
+    tone: "warn",
+    value: "missing",
+  };
+}
+
+export function describeGigachatAuth(
+  setup: Pick<SetupPayload, "gigachat_auth_methods" | "gigachat_ready">,
+): {
+  note: string;
+  pillLabel: string;
+  tone: "good" | "warn";
+  value: string;
+} {
+  const methods = uniqueSortedStrings(asArray<unknown>(setup.gigachat_auth_methods)).map(
+    (method) => GIGACHAT_AUTH_METHOD_LABELS[method] ?? humanizeField(method).toLowerCase(),
+  );
+
+  if (!setup.gigachat_ready) {
+    return {
+      note: "No effective upstream auth is loaded into the running GigaChat client.",
+      pillLabel: "GigaChat: missing",
+      tone: "warn",
+      value: "missing",
+    };
+  }
+
+  const value = methods.join(" + ") || "configured";
+  return {
+    note: `Effective runtime auth uses ${value}.`,
+    pillLabel: `GigaChat: ${value}`,
+    tone: "good",
+    value,
+  };
 }
