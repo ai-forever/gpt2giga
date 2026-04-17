@@ -471,7 +471,7 @@ function buildRouteFamilySummaries(routes: RouteRow[]): RouteFamilySummary[] {
 }
 
 function classifyRoute(path: string): RouteFamilyKey {
-  if (path.startsWith("/admin")) {
+  if (isOperatorSupportRoute(path) || path.startsWith("/admin")) {
     return "admin";
   }
   if (path.startsWith("/messages")) {
@@ -484,6 +484,10 @@ function classifyRoute(path: string): RouteFamilyKey {
     return "system";
   }
   return "openai";
+}
+
+function isOperatorSupportRoute(path: string): boolean {
+  return path === "/" || path === "/favicon.ico" || path === "/robots.txt";
 }
 
 function readStringList(value: unknown): string[] {

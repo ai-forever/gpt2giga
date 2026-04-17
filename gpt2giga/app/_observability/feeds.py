@@ -2,12 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from gpt2giga.app.dependencies import get_runtime_stores
 from gpt2giga.app.runtime_backends import EventFeed
 
 from .models import RequestAuditEvent
+
+_OPERATOR_NOISE_PATHS = {
+    "/",
+    "/admin",
+    "/docs",
+    "/favicon.ico",
+    "/logs",
+    "/logs/html",
+    "/logs/stream",
+    "/openapi.json",
+    "/redoc",
+    "/robots.txt",
+}
+_OPERATOR_NOISE_PREFIXES = ("/admin/",)
 
 
 def get_recent_request_feed_from_state(state: Any) -> EventFeed:
@@ -36,9 +51,14 @@ def filter_request_events(
     status_code: int | None = None,
     model: str | None = None,
     error_type: str | None = None,
+    exclude_noise: bool = False,
 ) -> list[RequestAuditEvent]:
     """Filter request events by normalized admin filter fields."""
-    filtered = events
+    filtered = (
+        [item for item in events if not is_operator_noise_event(item)]
+        if exclude_noise
+        else events
+    )
     if request_id is not None:
         filtered = [item for item in filtered if item.get("request_id") == request_id]
     if provider is not None:
@@ -56,6 +76,20 @@ def filter_request_events(
     return filtered
 
 
+def is_operator_noise_event(event: Mapping[str, object]) -> bool:
+    """Return whether an event is admin/browser support noise for operator views."""
+    path = str(event.get("path") or event.get("endpoint") or "")
+    endpoint = str(event.get("endpoint") or path)
+    return _is_operator_noise_path(path) or _is_operator_noise_path(endpoint)
+
+
+def filter_operator_noise(
+    events: Iterable[RequestAuditEvent],
+) -> list[RequestAuditEvent]:
+    """Remove admin/browser support requests from operator-focused event lists."""
+    return [event for event in events if not is_operator_noise_event(event)]
+
+
 def query_request_events(
     feed: EventFeed,
     *,
@@ -67,6 +101,7 @@ def query_request_events(
     status_code: int | None = None,
     model: str | None = None,
     error_type: str | None = None,
+    exclude_noise: bool = False,
 ) -> list[RequestAuditEvent]:
     """Query recent request events with a graceful fallback for legacy feeds."""
     filters = {
@@ -82,12 +117,13 @@ def query_request_events(
         }.items()
         if value is not None
     }
-    query = getattr(feed, "query", None)
-    if callable(query):
-        return list(query(limit=limit, filters=filters))
+    if not exclude_noise:
+        query = getattr(feed, "query", None)
+        if callable(query):
+            return list(query(limit=limit, filters=filters))
 
-    return filter_request_events(
-        feed.recent(limit=limit),
+    filtered = filter_request_events(
+        list(feed.recent(limit=None)),
         request_id=request_id,
         provider=provider,
         endpoint=endpoint,
@@ -95,4 +131,13 @@ def query_request_events(
         status_code=status_code,
         model=model,
         error_type=error_type,
+        exclude_noise=exclude_noise,
     )
+    if limit is None:
+        return filtered
+    return filtered[-limit:]
+
+
+def _is_operator_noise_path(path: str) -> bool:
+    """Return whether a route path is browser/admin support noise."""
+    return path in _OPERATOR_NOISE_PATHS or path.startswith(_OPERATOR_NOISE_PREFIXES)

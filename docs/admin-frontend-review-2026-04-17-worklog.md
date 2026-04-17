@@ -20,7 +20,7 @@
 - [x] Исправить misleading `cursor: wait` у disabled-кнопок.
 - [x] Пересобрать admin frontend.
 - [x] Прогнать адресные проверки.
-- [ ] Сделать отдельный commit завершённого среза.
+- [x] Сделать отдельный commit завершённого среза.
 
 ## Что делаю сейчас
 
@@ -41,3 +41,23 @@
 - `npm run build:admin`
 - `git diff --check -- gpt2giga/frontend/admin packages/gpt2giga-ui/src/gpt2giga_ui/static/admin docs/admin-frontend-review-2026-04-17-worklog.md`
 - live-check через `curl -sfI http://localhost:8090/admin` не выполнен: локальный сервер в момент проверки не отвечал
+
+## Следующий срез
+
+- [x] Отфильтровать browser/admin noise из primary recent request/error summaries.
+- [x] Убрать support/UI routes из OpenAI-family coverage в `Providers` и `System`.
+- [x] Пересобрать admin frontend.
+- [x] Прогнать адресные проверки.
+- [ ] Зафиксировать отдельным commit.
+
+## Результат следующего среза
+
+- `/admin/api/requests/recent` и `/admin/api/errors/recent` теперь по умолчанию скрывают operator-noise (`/`, `/favicon.ico`, `/robots.txt`, `/admin*`, docs/openapi/logs support routes) из primary summaries; для точечной диагностики шум можно вернуть через `include_noise=true`;
+- `Providers` и `System` больше не относят `/`, `/favicon.ico` и `/robots.txt` к OpenAI-facing coverage, а трактуют их как operator support/admin surface;
+- интеграционные тесты закрепляют оба поведения: filtered-by-default recent feeds и opt-in возврат шума.
+
+## Проверка следующего среза
+
+- `npm run build:admin`
+- `uv run ruff check gpt2giga/app/_observability/feeds.py gpt2giga/app/observability.py gpt2giga/app/admin_runtime.py gpt2giga/api/admin/runtime.py tests/integration/app/test_system_router_extra.py`
+- `uv run pytest tests/integration/app/test_system_router_extra.py -k 'recent_endpoints or operator_noise'`

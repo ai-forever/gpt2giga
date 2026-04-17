@@ -68,6 +68,7 @@ async def get_admin_metrics(request: Request):
 async def get_admin_recent_requests(
     request: Request,
     limit: int = Query(default=50, ge=1, le=500),
+    include_noise: bool = Query(default=False),
     request_id: str | None = Query(default=None),
     provider: str | None = Query(default=None),
     endpoint: str | None = Query(default=None),
@@ -88,6 +89,7 @@ async def get_admin_recent_requests(
         status_code=status_code,
         model=model,
         error_type=error_type,
+        include_noise=include_noise,
     )
 
 
@@ -96,6 +98,7 @@ async def get_admin_recent_requests(
 async def get_admin_recent_errors(
     request: Request,
     limit: int = Query(default=50, ge=1, le=500),
+    include_noise: bool = Query(default=False),
     request_id: str | None = Query(default=None),
     provider: str | None = Query(default=None),
     endpoint: str | None = Query(default=None),
@@ -116,6 +119,7 @@ async def get_admin_recent_errors(
         status_code=status_code,
         model=model,
         error_type=error_type,
+        include_noise=include_noise,
     )
 
 

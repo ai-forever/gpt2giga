@@ -10,8 +10,10 @@ from gpt2giga.app._observability.context import (
 )
 from gpt2giga.app._observability.feeds import (
     filter_request_events,
+    filter_operator_noise,
     get_recent_error_feed_from_state,
     get_recent_request_feed_from_state,
+    is_operator_noise_event,
     query_request_events,
 )
 from gpt2giga.app._observability.models import (
@@ -32,9 +34,11 @@ __all__ = [
     "annotate_request_audit_from_payload",
     "annotate_request_audit_request_payload",
     "filter_request_events",
+    "filter_operator_noise",
     "get_recent_error_feed_from_state",
     "get_recent_request_feed_from_state",
     "get_request_audit_metadata",
+    "is_operator_noise_event",
     "query_request_events",
     "record_request_event",
     "set_request_audit_error",

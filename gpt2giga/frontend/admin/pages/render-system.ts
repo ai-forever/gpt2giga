@@ -512,7 +512,7 @@ function buildConfigHighlightItems(
 }
 
 function classifyRoute(path: string): RouteGroupKey {
-  if (path.startsWith("/admin")) {
+  if (isOperatorSupportRoute(path) || path.startsWith("/admin")) {
     return "admin";
   }
   if (path.startsWith("/messages")) {
@@ -525,6 +525,10 @@ function classifyRoute(path: string): RouteGroupKey {
     return "system";
   }
   return "openai";
+}
+
+function isOperatorSupportRoute(path: string): boolean {
+  return path === "/" || path === "/favicon.ico" || path === "/robots.txt";
 }
 
 function countTruthyEntries(section: Record<string, unknown>): number {

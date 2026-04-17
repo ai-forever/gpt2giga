@@ -613,6 +613,91 @@ def test_admin_recent_endpoints_return_empty_payload_by_default():
     }
 
 
+def test_admin_recent_endpoints_filter_operator_noise_by_default():
+    app = make_app()
+    noise_events = [
+        {
+            "created_at": "2026-04-11T10:00:00Z",
+            "request_id": "req-root",
+            "provider": "openai",
+            "endpoint": "/",
+            "method": "GET",
+            "path": "/",
+            "status_code": 307,
+        },
+        {
+            "created_at": "2026-04-11T10:01:00Z",
+            "request_id": "req-admin",
+            "provider": "admin",
+            "endpoint": "/admin/api/runtime",
+            "method": "GET",
+            "path": "/admin/api/runtime",
+            "status_code": 200,
+        },
+    ]
+    useful_event = {
+        "created_at": "2026-04-11T10:02:00Z",
+        "request_id": "req-health",
+        "provider": "system",
+        "endpoint": "/health",
+        "method": "GET",
+        "path": "/health",
+        "status_code": 200,
+    }
+    for event in [*noise_events, useful_event]:
+        app.state.stores.recent_requests.append(event)
+        if event["status_code"] >= 400:
+            app.state.stores.recent_errors.append(event)
+
+    app.state.stores.recent_errors.append(
+        {
+            "created_at": "2026-04-11T10:03:00Z",
+            "request_id": "req-favicon",
+            "provider": "openai",
+            "endpoint": "/favicon.ico",
+            "method": "GET",
+            "path": "/favicon.ico",
+            "status_code": 404,
+            "error_type": "NotFound",
+        }
+    )
+    app.state.stores.recent_errors.append(
+        {
+            "created_at": "2026-04-11T10:04:00Z",
+            "request_id": "req-missing",
+            "provider": "openai",
+            "endpoint": "/v1/chat/completions",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "status_code": 401,
+            "error_type": "AuthenticationError",
+        }
+    )
+
+    client = TestClient(app)
+
+    recent_requests = client.get("/admin/api/requests/recent")
+    recent_errors = client.get("/admin/api/errors/recent")
+    noisy_requests = client.get(
+        "/admin/api/requests/recent", params={"include_noise": "true"}
+    )
+
+    assert recent_requests.status_code == 200
+    assert recent_requests.json()["count"] == 1
+    assert recent_requests.json()["events"][0]["endpoint"] == "/health"
+    assert recent_requests.json()["available_filters"]["endpoint"] == ["/health"]
+
+    assert recent_errors.status_code == 200
+    assert recent_errors.json()["count"] == 1
+    assert recent_errors.json()["events"][0]["endpoint"] == "/v1/chat/completions"
+    assert recent_errors.json()["available_filters"]["endpoint"] == [
+        "/v1/chat/completions"
+    ]
+
+    assert noisy_requests.status_code == 200
+    assert noisy_requests.json()["count"] == 3
+
+
 def test_admin_usage_endpoints_return_aggregated_payloads():
     app = make_app()
     app.state.stores.usage_by_api_key["sdk-openai"] = {

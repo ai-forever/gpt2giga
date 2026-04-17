@@ -15,6 +15,7 @@ from gpt2giga.app.dependencies import (
     get_runtime_stores,
 )
 from gpt2giga.app.observability import (
+    filter_operator_noise,
     get_recent_error_feed_from_state,
     get_recent_request_feed_from_state,
     query_request_events,
@@ -394,6 +395,7 @@ class AdminRuntimeSnapshotService:
         status_code: int | None,
         model: str | None,
         error_type: str | None,
+        include_noise: bool,
     ) -> dict[str, object]:
         """Build a filtered recent-events payload for admin tooling."""
         feed = (
@@ -401,7 +403,9 @@ class AdminRuntimeSnapshotService:
             if kind == "requests"
             else get_recent_error_feed_from_state(self.request.app.state)
         )
-        recent_events = feed.recent(limit=limit)
+        recent_events = list(feed.recent(limit=None))
+        if not include_noise:
+            recent_events = filter_operator_noise(recent_events)
         events = query_request_events(
             feed,
             limit=limit,
@@ -412,6 +416,7 @@ class AdminRuntimeSnapshotService:
             status_code=status_code,
             model=_normalize_optional_text(model),
             error_type=_normalize_optional_text(error_type),
+            exclude_noise=not include_noise,
         )
         return {
             "events": events,

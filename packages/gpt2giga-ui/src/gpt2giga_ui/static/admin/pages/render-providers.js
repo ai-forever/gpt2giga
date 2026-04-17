@@ -351,7 +351,7 @@ function buildRouteFamilySummaries(routes) {
     }));
 }
 function classifyRoute(path) {
-    if (path.startsWith("/admin")) {
+    if (isOperatorSupportRoute(path) || path.startsWith("/admin")) {
         return "admin";
     }
     if (path.startsWith("/messages")) {
@@ -364,6 +364,9 @@ function classifyRoute(path) {
         return "system";
     }
     return "openai";
+}
+function isOperatorSupportRoute(path) {
+    return path === "/" || path === "/favicon.ico" || path === "/robots.txt";
 }
 function readStringList(value) {
     return asArray(value).map(String);

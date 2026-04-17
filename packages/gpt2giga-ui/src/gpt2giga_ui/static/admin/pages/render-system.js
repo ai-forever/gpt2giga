@@ -395,7 +395,7 @@ function buildConfigHighlightItems(configSummary, runtime, setup, storeState) {
     ];
 }
 function classifyRoute(path) {
-    if (path.startsWith("/admin")) {
+    if (isOperatorSupportRoute(path) || path.startsWith("/admin")) {
         return "admin";
     }
     if (path.startsWith("/messages")) {
@@ -408,6 +408,9 @@ function classifyRoute(path) {
         return "system";
     }
     return "openai";
+}
+function isOperatorSupportRoute(path) {
+    return path === "/" || path === "/favicon.ico" || path === "/robots.txt";
 }
 function countTruthyEntries(section) {
     return Object.values(section).filter(Boolean).length;
