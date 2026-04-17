@@ -9,6 +9,15 @@
 - После каждой выполненной задачи и каждого завершённого slice нужен отдельный commit.
 - Завершённый slice не должен оставаться только в working tree.
 - В журнале остаются только фактические изменения, проверки и следующий шаг.
+- Для каждого slice нужно отдельно фиксировать:
+  - статус;
+  - цель;
+  - планируемый объём;
+  - что фактически сделано;
+  - какие проверки запускались;
+  - результат проверок;
+  - commit hash и commit message;
+  - следующий шаг.
 
 ## Slice Log
 
@@ -56,3 +65,52 @@
 Следующий шаг:
 
 - пройтись по hub pages второго приоритета (`Setup`, `Settings`, `Keys`, `System`, `Providers`, `Files`, `Batches`) и убрать оставшийся explanatory prose без новой structural split-волны.
+
+### Slice 2
+
+Статус: `done`
+
+Цель:
+
+- уменьшить copy-density на hub pages второго приоритета и на связанных focused surfaces;
+- сделать workflow / guide blocks компактнее без нового structural split;
+- сократить helper-text в `Setup`, `Settings`, `Keys`, `System`, `Providers`, `Files`, `Batches`.
+
+Планируемый объём:
+
+- укоротить hub copy в `Setup` и `Settings`;
+- убрать лишний explanatory prose в `Keys`, `Providers`, `System`;
+- сделать guide blocks компактными/disclosure-first;
+- сократить навигационный и inspector copy в `Files & Batches`;
+- пересобрать runtime admin assets и обновить integration asserts.
+
+Фактически сделано:
+
+- `Setup` упрощён: короче setup-map и focused nav intros, компактнее bootstrap/status copy, укорочены step card descriptions и security handoff copy;
+- `Settings` упрощён: короче map/history/persistence copy, entry cards получили более короткие descriptions, sidebar лишился отдельного intro-параграфа;
+- `Keys` упрощён: workflow cards переведены в compact mode, form intro и section intros сокращены, guide block свернут;
+- `Providers` упрощён: workflow column стала compact, capability section лишился лишнего intro, route diagnostics и guide block сокращены;
+- `System` упрощён: workflow cards стали compact, staged diagnostics/export copy сокращён, guide block свернут;
+- `Files & Batches` упрощены: короче workbench navigation, hub/file/batch workflow copy, filter/inspector/helper text и guide blocks;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration tests обновлены под новый copy на system/providers/files-batches surfaces.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
+- `uv run ruff check tests/integration/app/test_system_router_extra.py`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q` — 41 passed
+- `uv run ruff check tests/integration/app/test_system_router_extra.py` — green
+
+Commit hash и commit message:
+
+- `e0ccc33` — `refactor: trim admin operator copy`
+
+Следующий шаг:
+
+- пройтись по remaining copy-density в shared control-plane form sections и при необходимости дочистить остаточные verbose banners на focused admin pages без нового layout refactor.
