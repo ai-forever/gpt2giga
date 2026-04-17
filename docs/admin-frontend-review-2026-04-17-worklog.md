@@ -48,7 +48,7 @@
 - [x] Убрать support/UI routes из OpenAI-family coverage в `Providers` и `System`.
 - [x] Пересобрать admin frontend.
 - [x] Прогнать адресные проверки.
-- [ ] Зафиксировать отдельным commit.
+- [x] Зафиксировать отдельным commit.
 
 ## Результат следующего среза
 
