@@ -161,3 +161,48 @@ Commit hash и commit message:
 Следующий шаг:
 
 - пройтись по remaining focused observe/diagnose surfaces (`Traffic`, `Playground`, `Keys`) и добить остаточный explanatory prose в inspector/guide blocks без новой layout wave.
+
+### Slice 4
+
+Статус: `done`
+
+Цель:
+
+- уменьшить остаточную copy-density на focused observe/diagnose surfaces;
+- сделать `Traffic`, `Playground` и `Keys` суше без новой structural wave;
+- убрать лишний prose в filters/inspectors/guides и в правых колонках рабочих страниц.
+
+Планируемый объём:
+
+- укоротить filter/inspector/handoff copy в `Traffic`;
+- сделать `Playground` ближе к tool surface: без guide-tail на первом экране и с более коротким bootstrap/run copy;
+- убрать повторы между summary/workflow/guide blocks в `Keys`;
+- пересобрать runtime admin assets и синхронизировать integration asserts.
+
+Фактически сделано:
+
+- `Traffic` упрощён: суше subpage nav, lane cards, filters, inspectors, companion lanes и guide cards; request/error/usage child pages лишились лишнего handoff-prose;
+- `Playground` упрощён: короче form copy, smoke workflow/right rail, bootstrap banner/summary и run/transport copy; guide block убран с первого экрана;
+- `Keys` упрощены: короче summary notes, workflow cards, current posture/banner copy, guide notes и raw snapshot helper text;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration asserts обновлены под новый copy на `Traffic`, `Keys` и `Playground`.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
+- `uv run ruff check tests/integration/app/test_system_router_extra.py`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q` — 41 passed
+- `uv run ruff check tests/integration/app/test_system_router_extra.py` — green
+
+Commit hash и commit message:
+
+- `663143e` — `refactor: tighten admin working-surface copy`
+
+Следующий шаг:
+
+- пройтись по remaining follow-up polish в оставшихся admin surfaces и решить, где нужен ещё один точечный copy trim, а где уже выгоднее CSS-level quieting вторичного текста вместо новых текстовых правок.
