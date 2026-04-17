@@ -128,6 +128,31 @@ async def test_files_service_get_file_content_transforms_batch_output():
     assert line["response"]["body"]["model"] == "gpt-x"
 
 
+@pytest.mark.asyncio
+async def test_files_service_get_file_content_returns_raw_output_without_input_file():
+    service = FilesService()
+    giga_client = FakeFilesClient()
+    response_processor = ResponseProcessor(logger=logger)
+
+    content = await service.get_file_content(
+        "file-output-1",
+        giga_client=giga_client,
+        batch_store={
+            "batch-1": {
+                "endpoint": "/v1/chat/completions",
+                "input_file_id": "",
+                "completion_window": "24h",
+                "output_file_id": "file-output-1",
+            }
+        },
+        response_processor=response_processor,
+    )
+
+    line = json.loads(content.decode("utf-8").strip())
+    assert line["id"] == "req-1"
+    assert line["result"]["choices"][0]["message"]["content"] == "done"
+
+
 def test_get_files_service_from_state_reuses_existing_service():
     state = SimpleNamespace()
 

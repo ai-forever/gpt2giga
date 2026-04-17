@@ -126,7 +126,12 @@ class FilesService:
             if batch_store is not None
             else None
         )
-        if matching_batch and response_processor is not None:
+        if (
+            matching_batch
+            and response_processor is not None
+            and matching_batch.get("input_file_id")
+            and matching_batch.get("endpoint")
+        ):
             input_file = await giga_client.aget_file_content(
                 file_id=matching_batch["input_file_id"]
             )
