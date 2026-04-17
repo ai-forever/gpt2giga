@@ -55,6 +55,7 @@ export function bindControlPlaneSectionForm(
   setActionState: (state: InlineStatus | null) => void;
 } {
   let actionState: InlineStatus | null = null;
+  const dirtyStateKey = options.form.id || options.endpoint;
 
   const buildSnapshot = (report = false): ControlPlaneSectionSnapshot => {
     const payload = options.buildPayload();
@@ -68,6 +69,7 @@ export function bindControlPlaneSectionForm(
 
   const refreshStatus = () => {
     const snapshot = buildSnapshot();
+    options.app.setFormDirty(dirtyStateKey, snapshot.entries.length > 0);
     renderControlPlaneStatusNode(options.statusNode, {
       entries: snapshot.entries,
       persisted: options.persisted,
@@ -83,6 +85,7 @@ export function bindControlPlaneSectionForm(
   options.form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const snapshot = buildSnapshot(true);
+    options.app.setFormDirty(dirtyStateKey, snapshot.entries.length > 0);
     if (snapshot.validationMessage) {
       refreshStatus();
       options.onValidationError?.(snapshot.validationMessage);
@@ -104,6 +107,9 @@ export function bindControlPlaneSectionForm(
       failurePrefix: options.failurePrefix,
       rerenderPage: options.rerenderPage,
     });
+  });
+  options.app.registerCleanup(() => {
+    options.app.setFormDirty(dirtyStateKey, false);
   });
 
   refreshStatus();

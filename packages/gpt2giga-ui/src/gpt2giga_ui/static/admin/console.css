@@ -411,7 +411,7 @@ textarea {
 }
 
 .button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.68;
   transform: none;
 }
@@ -998,6 +998,22 @@ code {
 
 .code-block + .code-block {
   margin-top: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .button:hover,
+  .console-nav a:hover {
+    transform: none;
+  }
 }
 
 .legacy-admin {

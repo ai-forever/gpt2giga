@@ -356,19 +356,22 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           true,
         );
         if (preview.kind === "image") {
+          clearMediaPreview();
           const blobBytes = new Uint8Array(bytes.byteLength);
           blobBytes.set(bytes);
           const blob = new Blob([blobBytes], { type: preview.mimeType });
           previewObjectUrl = URL.createObjectURL(blob);
-          elements.mediaNode.innerHTML = `
-            <figure class="surface">
-              <img
-                alt="${preview.filename}"
-                src="${previewObjectUrl}"
-                style="display:block;max-width:100%;height:auto;border-radius:12px;"
-              />
-            </figure>
-          `;
+          const figure = document.createElement("figure");
+          figure.className = "surface";
+          const image = document.createElement("img");
+          image.alt = String(preview.filename ?? fileId);
+          image.src = previewObjectUrl;
+          image.style.display = "block";
+          image.style.maxWidth = "100%";
+          image.style.height = "auto";
+          image.style.borderRadius = "12px";
+          figure.append(image);
+          elements.mediaNode.replaceChildren(figure);
         } else {
           clearMediaPreview();
         }

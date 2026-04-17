@@ -15,13 +15,15 @@ import type {
   RuntimePayload,
   SetupPayload,
 } from "./types.js";
-import { toErrorMessage } from "./utils.js";
+import { escapeHtml, toErrorMessage } from "./utils.js";
 import { PAGE_RENDERERS } from "./pages/index.js";
 
 const ADMIN_KEY_STORAGE = "gpt2giga.adminKey";
 const GATEWAY_KEY_STORAGE = "gpt2giga.gatewayKey";
 const ADMIN_KEY_COOKIE = "gpt2giga_admin_key";
 const ADMIN_KEY_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+const UNSAVED_CHANGES_MESSAGE =
+  "You have unsaved setup or settings changes. Leave this page and discard them?";
 
 type CleanupFn = () => void | Promise<void>;
 
@@ -45,9 +47,11 @@ export class AdminApp {
 
   private readonly apiClient: AdminApiClient;
   private cleanups: CleanupFn[] = [];
+  private readonly dirtyForms = new Set<string>();
   private flashAlerts: AlertMessage[] = [];
   private renderToken = 0;
   private shouldFocusPageHeading = false;
+  private lastKnownUrl = this.currentUrl();
 
   constructor() {
     this.adminKeyInput.value = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
@@ -84,6 +88,14 @@ export class AdminApp {
 
   registerCleanup(cleanup: CleanupFn): void {
     this.cleanups.push(cleanup);
+  }
+
+  setFormDirty(formKey: string, dirty: boolean): void {
+    if (dirty) {
+      this.dirtyForms.add(formKey);
+      return;
+    }
+    this.dirtyForms.delete(formKey);
   }
 
   setHero(page: PageId): void {
@@ -134,9 +146,13 @@ export class AdminApp {
 
   navigateToLocation(locationLike: Pick<Location, "hash" | "pathname" | "search">): void {
     const nextUrl = `${locationLike.pathname}${locationLike.search}${locationLike.hash}`;
-    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const currentUrl = this.currentUrl();
+    if (currentUrl !== nextUrl && !this.confirmDiscardUnsavedChanges()) {
+      return;
+    }
     if (currentUrl !== nextUrl) {
       window.history.pushState({}, "", nextUrl);
+      this.lastKnownUrl = nextUrl;
     }
     this.shouldFocusPageHeading = true;
     void this.render(
@@ -185,7 +201,7 @@ export class AdminApp {
         <article class="panel panel--span-12">
           <div class="stack">
             <h3>Request failed</h3>
-            <pre class="code-block">${toErrorMessage(error)}</pre>
+            <pre class="code-block">${escapeHtml(toErrorMessage(error))}</pre>
           </div>
         </article>
       `);
@@ -271,6 +287,7 @@ export class AdminApp {
     const nextQuery = params.toString();
     const cleanUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
     window.history.replaceState({}, "", cleanUrl);
+    this.lastKnownUrl = cleanUrl;
   }
 
   private installNavigation(): void {
@@ -312,7 +329,22 @@ export class AdminApp {
       });
     });
 
+    window.addEventListener("beforeunload", (event) => {
+      if (!this.hasUnsavedChanges()) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = "";
+    });
+
     window.addEventListener("popstate", () => {
+      const nextUrl = this.currentUrl();
+      const previousUrl = this.lastKnownUrl;
+      if (nextUrl !== previousUrl && !this.confirmDiscardUnsavedChanges()) {
+        window.history.pushState({}, "", previousUrl);
+        return;
+      }
+      this.lastKnownUrl = nextUrl;
       this.shouldFocusPageHeading = true;
       void this.render();
     });
@@ -352,5 +384,17 @@ export class AdminApp {
     localStorage.setItem(ADMIN_KEY_STORAGE, value);
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
     document.cookie = `${ADMIN_KEY_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=${ADMIN_KEY_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
+  }
+
+  private hasUnsavedChanges(): boolean {
+    return this.dirtyForms.size > 0;
+  }
+
+  private confirmDiscardUnsavedChanges(): boolean {
+    return !this.hasUnsavedChanges() || window.confirm(UNSAVED_CHANGES_MESSAGE);
+  }
+
+  private currentUrl(): string {
+    return `${window.location.pathname}${window.location.search}${window.location.hash}`;
   }
 }
