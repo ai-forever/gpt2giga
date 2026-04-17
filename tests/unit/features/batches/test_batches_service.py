@@ -140,6 +140,9 @@ async def test_batches_service_create_batch_uses_transformer_and_stores_metadata
     assert translated_line["request"]["translated"] == "chat-v1"
     assert batch_store["batch-1"]["input_file_id"] == "input-file-1"
     assert file_store["file-output-1"]["purpose"] == "batch_output"
+    assert file_store["file-output-1"]["batch_input_file_id"] == "input-file-1"
+    assert file_store["file-output-1"]["batch_endpoint"] == "/v1/chat/completions"
+    assert file_store["file-output-1"]["batch_id"] == "batch-1"
     assert result["object"] == "batch"
 
 
@@ -205,6 +208,34 @@ async def test_batches_service_list_anthropic_batches_filters_by_metadata():
     assert records[0]["batch"].id_ == "batch-1"
     assert records[0]["metadata"]["output_file_id"] == "file-output-1"
     assert file_store["file-output-1"]["purpose"] == "batch_output"
+
+
+@pytest.mark.asyncio
+async def test_batches_service_retrieve_batch_backfills_metadata_from_output_file_store():
+    service = BatchesService(
+        FakeRequestTransformer(),
+        embeddings_model="EmbeddingsGigaR",
+    )
+    giga_client = FakeBatchesClient()
+
+    record = await service.get_batch_record(
+        "batch-1",
+        giga_client=giga_client,
+        batch_store={},
+        file_store={
+            "file-output-1": {
+                "purpose": "batch_output",
+                "batch_id": "batch-1",
+                "batch_input_file_id": "input-file-1",
+                "batch_endpoint": "/v1/chat/completions",
+            }
+        },
+        default_metadata_factory=service._build_openai_metadata,
+    )
+
+    assert record is not None
+    assert record["metadata"]["input_file_id"] == "input-file-1"
+    assert record["metadata"]["endpoint"] == "/v1/chat/completions"
 
 
 @pytest.mark.asyncio

@@ -314,6 +314,55 @@ def test_batches_endpoints_translate_openai_flow():
     assert transformed_line["response"]["body"]["model"] == "gpt-x"
 
 
+def test_batches_output_preview_survives_batch_store_loss():
+    app = make_app()
+    client = TestClient(app)
+
+    input_line = {
+        "custom_id": "req-1",
+        "method": "POST",
+        "url": "/v1/chat/completions",
+        "body": {
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    }
+    upload = client.post(
+        "/files",
+        data={"purpose": "batch"},
+        files={
+            "file": (
+                "batch.jsonl",
+                (json.dumps(input_line) + "\n").encode("utf-8"),
+                "application/json",
+            )
+        },
+    )
+    input_file_id = upload.json()["id"]
+
+    created = client.post(
+        "/batches",
+        json={
+            "completion_window": "24h",
+            "endpoint": "/v1/chat/completions",
+            "input_file_id": input_file_id,
+        },
+    )
+    assert created.status_code == 200
+
+    app.state.stores.batches.clear()
+
+    retrieved = client.get("/batches/batch-1")
+    assert retrieved.status_code == 200
+    assert retrieved.json()["input_file_id"] == input_file_id
+
+    output_content = client.get("/files/file-output-1/content")
+    assert output_content.status_code == 200
+    transformed_line = json.loads(output_content.content.decode("utf-8").strip())
+    assert transformed_line["custom_id"] == "req-1"
+    assert transformed_line["response"]["body"]["object"] == "chat.completion"
+
+
 def test_batches_create_defaults_completion_window_to_24h():
     app = make_app()
     client = TestClient(app)

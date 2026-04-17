@@ -130,6 +130,7 @@ export function renderInspectorActions(
       <div class="toolbar">
         <button class="button button--secondary" data-inspector-action="inspect-file" type="button">Refresh metadata</button>
         <button class="button button--secondary" data-inspector-action="preview-file" type="button">Preview content</button>
+        <button class="button button--secondary" data-inspector-action="download-file" type="button">Download file</button>
         <button class="button" data-inspector-action="use-file" type="button">${page === "files" ? "Open batch composer" : "Use for batch"}</button>
         <button class="button button--secondary" ${latestBatch ? 'data-inspector-action="inspect-linked-batch"' : 'disabled title="No linked batch record yet"'} type="button">Inspect latest batch</button>
         <button class="button button--secondary" ${latestOutputBatch ? 'data-inspector-action="preview-linked-output"' : 'disabled title="No linked output file yet"'} type="button">Preview latest output</button>

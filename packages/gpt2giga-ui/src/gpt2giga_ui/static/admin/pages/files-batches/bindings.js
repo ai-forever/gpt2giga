@@ -267,7 +267,43 @@ export function bindFilesBatchesPage(options) {
             },
         });
     };
+    const downloadFileContent = async (fileId, filename, button) => {
+        await runWorkflowAction({
+            root: button?.parentElement ?? elements.actionNode,
+            button,
+            pendingLabel: "Downloading…",
+            pendingSummary: [
+                { label: "Workflow state", value: "Downloading output" },
+                { label: "File id", value: fileId },
+                { label: "Filename", value: filename },
+            ],
+            successSummary: () => [
+                { label: "Workflow state", value: "Output downloaded" },
+                { label: "File id", value: fileId },
+                { label: "Filename", value: filename },
+            ],
+            action: async () => {
+                const bytes = await fetchFileContent(app, fileId);
+                const blobBytes = new Uint8Array(bytes.byteLength);
+                blobBytes.set(bytes);
+                const objectUrl = URL.createObjectURL(new Blob([blobBytes], { type: "application/x-ndjson" }));
+                const link = document.createElement("a");
+                link.href = objectUrl;
+                link.download = filename;
+                document.body.append(link);
+                link.click();
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+            },
+        });
+    };
+    const resolveDownloadFilename = (fileId) => {
+        const source = inventory.fileLookup.get(fileId);
+        const filename = String(source?.filename ?? "").trim();
+        return filename || `file-${fileId}.bin`;
+    };
     const inspectFile = async (fileId, button) => {
+        const shouldRefreshPage = button !== null;
         await runWorkflowAction({
             root: elements.actionNode,
             button,
@@ -339,8 +375,12 @@ export function bindFilesBatchesPage(options) {
                 return payload;
             },
         });
+        if (shouldRefreshPage) {
+            await app.render(page);
+        }
     };
     const inspectBatch = async (batchId, button) => {
+        const shouldRefreshPage = button !== null;
         await runWorkflowAction({
             root: elements.actionNode,
             button,
@@ -407,6 +447,9 @@ export function bindFilesBatchesPage(options) {
                 return payload;
             },
         });
+        if (shouldRefreshPage) {
+            await app.render(page);
+        }
     };
     updateInspectorActions();
     resetContentSurface();
@@ -546,6 +589,10 @@ export function bindFilesBatchesPage(options) {
             await previewFileContent(selection.fileId, button);
             return;
         }
+        if (action === "download-file" && selection.fileId) {
+            await downloadFileContent(selection.fileId, resolveDownloadFilename(selection.fileId), button);
+            return;
+        }
         if (action === "inspect-batch" && selection.batchId) {
             await inspectBatch(selection.batchId, button);
             return;
@@ -652,6 +699,16 @@ export function bindFilesBatchesPage(options) {
             await previewFileContent(fileId, item instanceof HTMLButtonElement ? item : null);
         });
     });
+    app.pageContent.querySelectorAll("[data-file-download]").forEach((item) => {
+        item.addEventListener("click", async () => {
+            const fileId = item.dataset.fileDownload;
+            if (!fileId) {
+                return;
+            }
+            const filename = item.dataset.fileDownloadName?.trim() || resolveDownloadFilename(fileId);
+            await downloadFileContent(fileId, filename, item instanceof HTMLButtonElement ? item : null);
+        });
+    });
     app.pageContent.querySelectorAll("[data-file-delete]").forEach((item) => {
         item.addEventListener("click", async () => {
             const fileId = item.dataset.fileDelete;
@@ -719,6 +776,16 @@ export function bindFilesBatchesPage(options) {
                 support: `Batch ${String(batch?.id ?? "unknown")}`,
                 relatedBatch: batch ?? null,
             });
+        });
+    });
+    app.pageContent.querySelectorAll("[data-batch-download]").forEach((item) => {
+        item.addEventListener("click", async () => {
+            const fileId = item.dataset.batchDownload;
+            if (!fileId) {
+                return;
+            }
+            const filename = item.dataset.batchDownloadName?.trim() || `batch-output-${fileId}.jsonl`;
+            await downloadFileContent(fileId, filename, item instanceof HTMLButtonElement ? item : null);
         });
     });
     app.pageContent.querySelectorAll("[data-batch-input]").forEach((item) => {

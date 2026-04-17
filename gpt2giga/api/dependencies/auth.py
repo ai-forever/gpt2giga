@@ -136,13 +136,22 @@ async def resolve_requested_model(
     if not callable(body_reader):
         return None
 
+    headers = getattr(request, "headers", {}) or {}
+    content_type = str(headers.get("content-type", "")).lower()
+    if (
+        content_type
+        and "application/json" not in content_type
+        and "+json" not in content_type
+    ):
+        return None
+
     body = await body_reader()
     if not body or not body.strip():
         return None
 
     try:
         payload = json.loads(body)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, ValueError):
         return None
 
     if not isinstance(payload, dict):

@@ -18,6 +18,7 @@ def make_request(
     provider_name: str,
     method: str = "GET",
     body: bytes = b"",
+    headers: dict[str, str] | None = None,
     api_key_name: str | None = None,
 ):
     app = SimpleNamespace(state=SimpleNamespace())
@@ -28,7 +29,7 @@ def make_request(
     req = SimpleNamespace(
         app=app,
         state=state,
-        headers={},
+        headers=headers or {},
         query_params={},
         path_params={},
         method=method,
@@ -134,3 +135,27 @@ async def test_provider_governance_token_quota_uses_recorded_usage(monkeypatch):
     assert ex.value.status_code == 429
     assert ex.value.headers["Retry-After"] == "55"
     assert "openai" in str(ex.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_governance_verifier_ignores_multipart_upload_body():
+    config = ProxyConfig(proxy=ProxySettings())
+    request, verifier = make_request(
+        config,
+        route_path="/v1/files",
+        provider_name="openai",
+        method="POST",
+        headers={"content-type": "multipart/form-data; boundary=abc123"},
+        body=(
+            b"--abc123\r\n"
+            b'Content-Disposition: form-data; name="purpose"\r\n\r\n'
+            b"batch\r\n"
+            b"--abc123\r\n"
+            b'Content-Disposition: form-data; name="file"; filename="image.png"\r\n'
+            b"Content-Type: image/png\r\n\r\n"
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+            b"\r\n--abc123--\r\n"
+        ),
+    )
+
+    await verifier(request)

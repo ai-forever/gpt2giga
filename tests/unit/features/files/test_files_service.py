@@ -129,6 +129,31 @@ async def test_files_service_get_file_content_transforms_batch_output():
 
 
 @pytest.mark.asyncio
+async def test_files_service_get_file_content_transforms_batch_output_from_file_store():
+    service = FilesService()
+    giga_client = FakeFilesClient()
+    response_processor = ResponseProcessor(logger=logger)
+
+    content = await service.get_file_content(
+        "file-output-1",
+        giga_client=giga_client,
+        batch_store={},
+        file_store={
+            "file-output-1": {
+                "purpose": "batch_output",
+                "batch_input_file_id": "input-file-1",
+                "batch_endpoint": "/v1/chat/completions",
+            }
+        },
+        response_processor=response_processor,
+    )
+
+    line = json.loads(content.decode("utf-8").strip())
+    assert line["custom_id"] == "req-1"
+    assert line["response"]["body"]["object"] == "chat.completion"
+
+
+@pytest.mark.asyncio
 async def test_files_service_get_file_content_returns_raw_output_without_input_file():
     service = FilesService()
     giga_client = FakeFilesClient()
@@ -143,6 +168,11 @@ async def test_files_service_get_file_content_returns_raw_output_without_input_f
                 "input_file_id": "",
                 "completion_window": "24h",
                 "output_file_id": "file-output-1",
+            }
+        },
+        file_store={
+            "file-output-1": {
+                "purpose": "batch_output",
             }
         },
         response_processor=response_processor,

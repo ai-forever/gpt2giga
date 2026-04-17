@@ -94,6 +94,7 @@ async def get_file_content(file_id: str, request: Request):
         file_id,
         giga_client=giga_client,
         batch_store=get_batch_store(request),
+        file_store=get_file_store(request),
         response_processor=get_response_processor_from_state(app_state),
     )
     return Response(content=content, media_type="application/octet-stream")

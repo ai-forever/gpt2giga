@@ -363,11 +363,35 @@ class BatchesService:
         file_store: FilesMetadataStore | None,
     ) -> BatchRecord:
         normalized_metadata: BatchMetadata = dict(metadata)
+        stored_output_metadata = (
+            dict(file_store.get(batch.output_file_id, {}))
+            if file_store is not None and batch.output_file_id
+            else {}
+        )
+        if not normalized_metadata.get("input_file_id"):
+            input_file_id = str(
+                stored_output_metadata.get("batch_input_file_id") or ""
+            ).strip()
+            if input_file_id:
+                normalized_metadata["input_file_id"] = input_file_id
+        if not normalized_metadata.get("endpoint"):
+            endpoint = str(stored_output_metadata.get("batch_endpoint") or "").strip()
+            if endpoint:
+                normalized_metadata["endpoint"] = endpoint
         normalized_metadata["output_file_id"] = batch.output_file_id
         if batch_store is not None:
             batch_store[batch.id_] = normalized_metadata
         if file_store is not None and batch.output_file_id:
-            file_store[batch.output_file_id] = {"purpose": "batch_output"}
+            output_metadata = dict(stored_output_metadata)
+            output_metadata["purpose"] = "batch_output"
+            output_metadata["batch_id"] = batch.id_
+            input_file_id = str(normalized_metadata.get("input_file_id") or "").strip()
+            if input_file_id:
+                output_metadata["batch_input_file_id"] = input_file_id
+            endpoint = str(normalized_metadata.get("endpoint") or "").strip()
+            if endpoint:
+                output_metadata["batch_endpoint"] = endpoint
+            file_store[batch.output_file_id] = output_metadata
         return {
             "batch": batch,
             "metadata": normalized_metadata,

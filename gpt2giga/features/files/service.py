@@ -117,21 +117,17 @@ class FilesService:
         *,
         giga_client: FilesUpstreamClient,
         batch_store: BatchesMetadataStore | None = None,
+        file_store: FilesMetadataStore | None = None,
         response_processor: BatchResultProcessor | None = None,
     ) -> bytes:
         """Load file content and post-process batch outputs when needed."""
         file_response = await giga_client.aget_file_content(file_id=file_id)
-        matching_batch = (
-            find_batch_metadata_by_output_file_id(batch_store, file_id)
-            if batch_store is not None
-            else None
+        matching_batch = _resolve_batch_output_metadata(
+            file_id,
+            batch_store=batch_store,
+            file_store=file_store,
         )
-        if (
-            matching_batch
-            and response_processor is not None
-            and matching_batch.get("input_file_id")
-            and matching_batch.get("endpoint")
-        ):
+        if matching_batch is not None and response_processor is not None:
             input_file = await giga_client.aget_file_content(
                 file_id=matching_batch["input_file_id"]
             )
@@ -177,6 +173,45 @@ def _serialize_file_object(
         "expires_at": stored_metadata.get("expires_at"),
         "status_details": stored_metadata.get("status_details"),
     }
+
+
+def _resolve_batch_output_metadata(
+    file_id: str,
+    *,
+    batch_store: BatchesMetadataStore | None,
+    file_store: FilesMetadataStore | None,
+) -> dict[str, Any] | None:
+    """Resolve batch transform hints for an output file."""
+    matching_batch = (
+        find_batch_metadata_by_output_file_id(batch_store, file_id)
+        if batch_store is not None
+        else None
+    )
+    stored_file_metadata = (
+        dict(file_store.get(file_id, {})) if file_store is not None else {}
+    )
+
+    input_file_id = str(
+        (matching_batch or {}).get("input_file_id")
+        or stored_file_metadata.get("batch_input_file_id")
+        or ""
+    ).strip()
+    endpoint = str(
+        (matching_batch or {}).get("endpoint")
+        or stored_file_metadata.get("batch_endpoint")
+        or ""
+    ).strip()
+    if not input_file_id or not endpoint:
+        return None
+
+    resolved_metadata = dict(matching_batch or {})
+    resolved_metadata["input_file_id"] = input_file_id
+    resolved_metadata["endpoint"] = endpoint
+    resolved_metadata["output_file_id"] = file_id
+    batch_id = str(stored_file_metadata.get("batch_id") or "").strip()
+    if batch_id and "id" not in resolved_metadata:
+        resolved_metadata["id"] = batch_id
+    return resolved_metadata
 
 
 def _paginate_items(

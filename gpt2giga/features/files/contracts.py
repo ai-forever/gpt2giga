@@ -18,6 +18,9 @@ class FileMetadata(TypedDict, total=False):
     status: str
     expires_at: int | None
     status_details: Any
+    batch_id: str
+    batch_endpoint: str
+    batch_input_file_id: str
 
 
 class FilesUpstreamClient(Protocol):

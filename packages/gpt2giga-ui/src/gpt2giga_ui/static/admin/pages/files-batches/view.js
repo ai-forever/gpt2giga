@@ -224,6 +224,7 @@ function renderFilesPage(data, inventory, filters) {
                             <div class="toolbar">
                               <button class="button button--secondary" data-file-view="${escapeHtml(id)}" type="button">Inspect</button>
                               <button class="button button--secondary" data-file-content="${escapeHtml(id)}" type="button">Content</button>
+                              <button class="button button--secondary" data-file-download="${escapeHtml(id)}" data-file-download-name="${escapeHtml(String(item.filename ?? `file-${id}.bin`))}" type="button">Download</button>
                               <button class="button" data-file-use="${escapeHtml(id)}" type="button">Open batches</button>
                               <button class="button button--danger" data-file-delete="${escapeHtml(id)}" type="button">Delete</button>
                             </div>
@@ -319,7 +320,8 @@ function renderBatchesPage(data, inventory, filters) {
                               <button class="button button--secondary" data-batch-view="${escapeHtml(id)}" type="button">Inspect</button>
                               <button class="button button--secondary" ${item.input_file_id ? `data-batch-input="${escapeHtml(id)}"` : 'disabled title="Input file metadata is missing"'} type="button">Input</button>
                               <button class="button button--secondary" ${item.input_file_id ? `data-batch-input-preview="${escapeHtml(id)}"` : 'disabled title="Input preview is unavailable without an input file"'} type="button">Preview input</button>
-                              <button class="button button--secondary" ${outputFile ? `data-batch-output="${escapeHtml(outputFile)}"` : 'disabled title="Output unlocks when the batch exposes output_file_id"'} type="button">Output</button>
+                              <button class="button button--secondary" ${outputFile ? `data-batch-output="${escapeHtml(outputFile)}"` : 'disabled title="Output unlocks when the batch exposes output_file_id"'} type="button">Preview output</button>
+                              <button class="button button--secondary" ${outputFile ? `data-batch-download="${escapeHtml(outputFile)}" data-batch-download-name="${escapeHtml(`batch-output-${id}.jsonl`)}"` : 'disabled title="Download unlocks when the batch exposes output_file_id"'} type="button">Download output</button>
                             </div>
                           </td>
                         </tr>
