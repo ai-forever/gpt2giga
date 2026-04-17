@@ -185,8 +185,8 @@ summary:focus-visible {
   overflow: hidden;
   opacity: 0;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.35;
   transition: max-height 140ms ease, margin 140ms ease, opacity 120ms ease;
 }
 
@@ -225,9 +225,9 @@ summary:focus-visible {
 
 .nav-group--active .nav-group__copy,
 .nav-group:focus-within .nav-group__copy {
-  max-height: 72px;
-  margin: -4px 0 2px;
-  opacity: 1;
+  max-height: 56px;
+  margin: -2px 0 0;
+  opacity: 0.84;
 }
 
 .console-nav a {
@@ -244,14 +244,14 @@ summary:focus-visible {
   overflow: hidden;
   opacity: 0;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 11px;
+  line-height: 1.35;
   transition: max-height 140ms ease, opacity 120ms ease;
 }
 
 .console-nav a.active .nav-link__meta {
-  max-height: 72px;
-  opacity: 1;
+  max-height: 56px;
+  opacity: 0.82;
 }
 
 .console-nav a:hover {
@@ -547,8 +547,8 @@ code {
 .field-note {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.42;
 }
 
 .alert-stack {
@@ -696,13 +696,18 @@ code {
 
 .form-shell__intro {
   display: grid;
-  gap: 12px;
-  padding: 18px 20px;
+  gap: 8px;
+  padding: 14px 16px;
   border-radius: 20px;
-  border: 1px solid rgba(15, 95, 90, 0.14);
+  border: 1px solid rgba(15, 95, 90, 0.1);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(246, 251, 249, 0.9)),
-    radial-gradient(circle at top right, rgba(15, 95, 90, 0.08), transparent 44%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(246, 251, 249, 0.82)),
+    radial-gradient(circle at top right, rgba(15, 95, 90, 0.05), transparent 44%);
+}
+
+.form-shell__intro .muted {
+  font-size: 13px;
+  line-height: 1.42;
 }
 
 .form-section {
@@ -775,15 +780,16 @@ code {
 }
 
 .details-disclosure {
-  padding: 16px 18px;
+  padding: 14px 16px;
   border-radius: 20px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.56);
 }
 
 .details-disclosure summary {
   cursor: pointer;
   font-weight: 600;
+  font-size: 14px;
   list-style: none;
 }
 
@@ -903,7 +909,8 @@ code {
 .workflow-card__header p {
   margin: 0;
   color: var(--muted);
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.42;
 }
 
 .workflow-card__actions {
@@ -925,11 +932,31 @@ code {
 }
 
 .guide-links {
-  gap: 12px;
+  gap: 10px;
 }
 
 .guide-links--compact {
+  gap: 8px;
+}
+
+.guide-links .step-grid {
   gap: 10px;
+}
+
+.guide-links .step-card {
+  padding: 14px 16px;
+}
+
+.guide-links .step-card h4 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.guide-links .step-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
 }
 
 .settings-switcher {

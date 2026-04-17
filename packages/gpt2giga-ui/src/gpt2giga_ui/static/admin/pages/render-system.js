@@ -46,33 +46,33 @@ export async function renderSystem(app, token) {
     ${kpi("Mounted routes", formatNumber(routeRows.length))}
     ${card("Executive summary", `
         <div class="stack">
-          ${systemWarnings.length ? systemWarnings.join("") : banner("No high-signal runtime blockers are visible from the current system snapshot.", "info")}
+          ${systemWarnings.length ? systemWarnings.join("") : banner("No high-signal blockers are visible in the current system snapshot.", "info")}
           ${renderDefinitionList([
         {
             label: "Version and mode",
             value: `${String(runtime.app_version ?? "n/a")} / ${String(runtime.mode ?? "n/a")}`,
             note: setup.setup_complete
-                ? "Setup is complete and the control-plane summary is stable."
-                : "Bootstrap and setup still need operator attention.",
+                ? "Setup is complete."
+                : "Bootstrap still needs attention.",
         },
         {
             label: "Persisted config",
             value: setup.persisted ? "present" : "defaults only",
             note: setup.persisted
-                ? "Runtime has a persisted control-plane source of truth."
-                : "Save Settings if you need restart-safe config.",
+                ? "Control-plane state is persisted."
+                : "Save Settings for restart-safe config.",
         },
         {
             label: "Provider posture",
             value: runtimeProviders.join(", ") || "none",
-            note: `${formatNumber(readyProviderCount)} provider-layer dependencies are currently wired.`,
+            note: `${formatNumber(readyProviderCount)} provider dependencies wired.`,
         },
         {
             label: "Diagnostics reach",
             value: `${formatNumber(routeRows.length)} mounted routes`,
             note: runtime.docs_enabled
-                ? "Docs/OpenAPI are exposed in the current runtime."
-                : "Docs/OpenAPI are disabled in the current runtime.",
+                ? "Docs/OpenAPI exposed."
+                : "Docs/OpenAPI disabled.",
         },
     ], "System summary is unavailable.")}
         </div>
@@ -100,8 +100,8 @@ export async function renderSystem(app, token) {
             ${renderWorkflowCard({
         workflow: "observe",
         compact: true,
-        title: "Confirm live request behavior before deep forensics",
-        note: "Move to Traffic first, then hand off one narrowed request into Logs.",
+        title: "Check live request behavior first",
+        note: "Use Traffic first, then Logs for one narrowed request.",
         pills: [
             pill(`Routes: ${formatNumber(routeRows.length)}`),
             pill(`Services: ${formatNumber(readyServiceCount)} ready`, readyServiceCount ? "good" : "warn"),
@@ -115,8 +115,8 @@ export async function renderSystem(app, token) {
             ${renderWorkflowCard({
         workflow: "diagnose",
         compact: true,
-        title: "Use staged diagnostics when the summary is not enough",
-        note: "Route coverage, config, and raw export stay secondary.",
+        title: "Open staged diagnostics last",
+        note: "Routes, config, and raw export stay secondary.",
         pills: [
             pill(`Warnings: ${formatNumber(systemWarnings.length)}`, systemWarnings.length ? "warn" : "good"),
             pill(`Docs: ${runtime.docs_enabled ? "exposed" : "disabled"}`),
@@ -173,22 +173,22 @@ export async function renderSystem(app, token) {
         {
             label: "Overview workflow guide",
             href: OPERATOR_GUIDE_LINKS.overview,
-            note: "Step back to the broader operator map when the current warning or runtime signal still lacks a clear owner.",
+            note: "Step back when the current warning still lacks a clear owner.",
         },
         {
             label: "Provider surface diagnostics",
             href: OPERATOR_GUIDE_LINKS.providers,
-            note: "Open the provider guide when the mismatch is really about mounted compatibility surfaces rather than raw runtime health.",
+            note: "Use this when the mismatch is about mounted compatibility surfaces.",
         },
         {
             label: "Troubleshooting handoff map",
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Use the escalation map when System narrows the posture but the next surface is still ambiguous.",
+            note: "Use this when the next surface is still unclear.",
         },
     ], {
         compact: true,
         collapsibleSummary: "Operator guides",
-        intro: "System stays staged.",
+        intro: "Open only after the summary stalls.",
     }), "panel panel--span-4 panel--aside")}
     ${card("Route coverage", renderDefinitionList(routeSummaries.map((group) => ({
         label: group.label,
@@ -232,7 +232,7 @@ export async function renderSystem(app, token) {
     ${card("Config highlights", renderDefinitionList(buildConfigHighlightItems(configSummary, runtime, setup, storeState), "No config highlights were reported."), "panel panel--span-4")}
     ${card("Staged diagnostics and export", `
         <div class="stack">
-          <p class="muted">Detailed diagnostics stay staged until the summary still leaves ambiguity.</p>
+          <p class="muted">Open these only when the summary is not enough.</p>
           <details class="surface details-disclosure" id="system-detailed-diagnostics">
             <summary>Runtime state detail</summary>
             <div class="dual-grid">
@@ -284,7 +284,7 @@ export async function renderSystem(app, token) {
           <details class="surface details-disclosure">
             <summary>Current system snapshot</summary>
             <p class="field-note">
-              Copy the full runtime, config, setup, and route payload when you need a precise debug snapshot.
+              Copy runtime, config, setup, and routes when you need a precise debug snapshot.
             </p>
             <pre class="code-block code-block--tall" id="system-diagnostics">${escapeHtml(JSON.stringify(diagnostics, null, 2))}</pre>
           </details>
@@ -330,16 +330,16 @@ function buildRouteSummaries(routes) {
 function buildSystemWarnings(setup, runtime, setupWarnings, readyServiceCount) {
     const warnings = setupWarnings.map((warning) => banner(warning, "warn"));
     if (!setup.persisted) {
-        warnings.push(banner("Control-plane state is not persisted. A restart can revert the operator posture back to defaults.", "warn"));
+        warnings.push(banner("Control-plane state is not persisted. Restart can revert posture to defaults.", "warn"));
     }
     if (!runtime.auth_required) {
-        warnings.push(banner("Gateway auth is currently open. Review security posture before treating this runtime as externally reachable.", "warn"));
+        warnings.push(banner("Gateway auth is open. Review security before treating this runtime as reachable.", "warn"));
     }
     if (runtime.docs_enabled && runtime.mode === "DEV") {
-        warnings.push(banner("Docs and OpenAPI are exposed in DEV mode. Useful for operators, but this remains a softer system posture than hardened PROD.", "info"));
+        warnings.push(banner("Docs and OpenAPI are exposed in DEV mode.", "info"));
     }
     if (readyServiceCount === 0) {
-        warnings.push(banner("No feature services are wired in app state. Mounted routes may exist, but request handling will not be operational.", "warn"));
+        warnings.push(banner("No feature services are wired. Mounted routes will not handle requests.", "warn"));
     }
     return warnings;
 }
@@ -358,7 +358,7 @@ function buildConfigHighlightItems(configSummary, runtime, setup, storeState) {
         {
             label: "Provider backends",
             value: `${String(providers.chat_backend_mode ?? providers.gigachat_api_mode ?? "n/a")} / ${String(providers.responses_backend_mode ?? "n/a")}`,
-            note: `${asArray(providers.enabled_providers).map(String).join(", ") || "No enabled providers"} using ${String(providers.runtime_store_backend ?? "n/a")} storage.`,
+            note: `${asArray(providers.enabled_providers).map(String).join(", ") || "No enabled providers"} on ${String(providers.runtime_store_backend ?? "n/a")} storage.`,
         },
         {
             label: "Security posture",
@@ -373,7 +373,7 @@ function buildConfigHighlightItems(configSummary, runtime, setup, storeState) {
                 features.enable_reasoning ? "reasoning" : "",
                 features.enable_images ? "images" : "",
             ]),
-            note: "These are the main protocol/runtime toggles changing operator-facing behavior.",
+            note: "Main protocol and runtime toggles.",
         },
         {
             label: "Logging",
@@ -385,12 +385,12 @@ function buildConfigHighlightItems(configSummary, runtime, setup, storeState) {
         {
             label: "Runtime stores",
             value: String(storeState.backend ?? "n/a"),
-            note: `${formatNumber(storeState.recent_requests ?? 0)} recent requests and ${formatNumber(storeState.recent_errors ?? 0)} recent errors are retained.`,
+            note: `${formatNumber(storeState.recent_requests ?? 0)} requests and ${formatNumber(storeState.recent_errors ?? 0)} errors retained.`,
         },
         {
             label: "Limits snapshot",
             value: formatNumber(limits.max_request_body_bytes ?? 0),
-            note: `Recent request ring retains ${formatNumber(limits.recent_requests_max_items ?? 0)} items.`,
+            note: `Recent request ring keeps ${formatNumber(limits.recent_requests_max_items ?? 0)} items.`,
         },
     ];
 }

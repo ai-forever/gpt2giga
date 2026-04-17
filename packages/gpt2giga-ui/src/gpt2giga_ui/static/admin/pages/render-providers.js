@@ -40,7 +40,7 @@ export async function renderProviders(app, token) {
     ${kpi("Metrics", backend.telemetry_enabled ? "on" : "off")}
     ${card("Executive summary", `
         <div class="stack">
-          ${warnings.length ? warnings.join("") : banner("Provider posture is readable and no urgent backend blockers were detected.", "info")}
+          ${warnings.length ? warnings.join("") : banner("Provider posture is readable. No urgent backend blockers were detected.", "info")}
           ${renderDefinitionList([
         {
             label: "Enabled provider mix",
@@ -75,8 +75,8 @@ export async function renderProviders(app, token) {
         compact: true,
         title: enabledProviderRows.length ? "Adjust provider posture" : "Enable a provider family first",
         note: enabledProviderRows.length
-            ? "Settings owns toggles and auth posture."
-            : "Use Setup or Settings to restore a usable provider path.",
+            ? "Settings owns toggles and auth."
+            : "Use Setup or Settings to restore a provider path.",
         pills: [
             pill(`Enabled: ${formatNumber(enabledProviderRows.length)}`, enabledProviderRows.length ? "good" : "warn"),
             pill(`Telemetry: ${backend.telemetry_enabled ? "on" : "off"}`, backend.telemetry_enabled ? "good" : "warn"),
@@ -109,8 +109,8 @@ export async function renderProviders(app, token) {
         compact: true,
         title: "Confirm the live request path",
         note: leadProvider
-            ? "Traffic opens scoped to the current lead provider."
-            : "Traffic and Logs stay secondary until a provider is enabled.",
+            ? "Traffic opens scoped to the lead provider."
+            : "Wait until a provider is enabled.",
         pills: [
             pill(`Lead route owner: ${leadProvider ? displayName(leadProvider) : "none"}`),
             pill(`Admin routes: ${formatNumber(adminRouteCount)}`),
@@ -143,22 +143,22 @@ export async function renderProviders(app, token) {
         {
             label: "Provider surface diagnostics",
             href: OPERATOR_GUIDE_LINKS.providers,
-            note: "Use the operator playbook for capability coverage, mounted route checks, and the expected page-to-page handoff from Settings to Playground to Traffic.",
+            note: "Coverage, route checks, and Settings to Playground to Traffic handoff.",
         },
         {
             label: "Rollout backend v2",
             href: OPERATOR_GUIDE_LINKS.rolloutV2,
-            note: "Open the rollout notes when the mismatch is really about backend mode selection rather than a missing route or disabled provider family.",
+            note: "Use this when the mismatch is about backend mode selection.",
         },
         {
             label: "Troubleshooting handoff map",
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Use the escalation map when provider posture looks wrong but the next operator surface is still ambiguous.",
+            note: "Use this when the next surface is still unclear.",
         },
     ], {
         compact: true,
         collapsibleSummary: "Operator guides",
-        intro: "Open docs only after coverage, smoke, or live traffic still leave the mismatch unresolved.",
+        intro: "Open only after coverage, smoke, or traffic still leave a mismatch.",
     }), "panel panel--span-4 panel--aside")}
     ${card("Provider briefs", `
         <div class="step-grid">
@@ -187,8 +187,8 @@ export async function renderProviders(app, token) {
                 label: "Best next step",
                 value: enabled ? "Smoke in playground" : "Check Settings",
                 note: enabled
-                    ? "Use Playground or Traffic to validate the enabled compatibility surface."
-                    : "Enable this provider family from Settings before expecting mounted routes.",
+                    ? "Use Playground or Traffic to validate it."
+                    : "Enable this family in Settings first.",
             },
         ], "No provider details were reported.")}
                   <div class="toolbar">
@@ -227,7 +227,7 @@ export async function renderProviders(app, token) {
     ], "Backend capability metadata is unavailable."), "panel panel--span-4 panel--aside")}
     ${card("Staged route diagnostics", `
         <div class="stack">
-          <p class="muted">Open these disclosures only when the summary still leaves a route-family mismatch unresolved.</p>
+          <p class="muted">Open these only when a route-family mismatch remains.</p>
           <details class="surface details-disclosure" id="providers-route-detail">
             <summary>Current route-family snapshot</summary>
             ${renderTable([
@@ -269,13 +269,13 @@ export async function renderProviders(app, token) {
 function buildProviderWarnings(enabledProviderCount, backend) {
     const warnings = [];
     if (enabledProviderCount === 0) {
-        warnings.push(banner("No provider compatibility surface is enabled. The gateway can mount Admin/System, but client traffic will not have a usable provider family.", "warn"));
+        warnings.push(banner("No provider surface is enabled. Admin and System can mount, but client traffic has no provider path.", "warn"));
     }
     if (!backend.telemetry_enabled) {
-        warnings.push(banner("Telemetry is disabled, so provider posture will stay configuration-only until you inspect raw logs or targeted traffic tables.", "warn"));
+        warnings.push(banner("Telemetry is disabled. Provider posture stays config-only until raw logs or traffic.", "warn"));
     }
     if (!backend.governance_enabled) {
-        warnings.push(banner("Governance limits are disabled. Throughput posture is visible here, but request shaping is not being constrained by configured limits.", "info"));
+        warnings.push(banner("Governance limits are disabled. Throughput is visible, but requests are not constrained.", "info"));
     }
     return warnings;
 }

@@ -221,6 +221,16 @@ def test_admin_ui_warning_banner():
     assert ".subpage-nav" in stylesheet.text
 
 
+def test_favicon_route_serves_packaged_icon():
+    client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
+
+    response = client.get("/favicon.ico")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/x-icon"
+    assert response.content[:4] == b"\x00\x00\x01\x00"
+
+
 def test_admin_ui_assets_include_observability_presets():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 
@@ -270,7 +280,7 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     assert "Live stream diagnostics" in logs_asset.text
     assert "Current scope snapshot" in logs_asset.text
     assert "Logs deep-dive guide" in logs_asset.text
-    assert "Keep Logs narrower than Traffic." in logs_asset.text
+    assert "Shape the tail first, then pin one request if needed." in logs_asset.text
     assert "Tail context" in logs_asset.text
     assert "Return to traffic summary" in logs_asset.text
     assert "Operator guides" in logs_asset.text
@@ -300,15 +310,12 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert "Run setup or playground" in overview_asset.text
 
     assert system_asset.status_code == 200
-    assert "Confirm live request behavior before deep forensics" in system_asset.text
-    assert (
-        "Detailed diagnostics stay staged until the summary still leaves ambiguity."
-        in (system_asset.text)
-    )
-    assert "Use staged diagnostics when the summary is not enough" in system_asset.text
+    assert "Check live request behavior first" in system_asset.text
+    assert "Open these only when the summary is not enough." in system_asset.text
+    assert "Open staged diagnostics last" in system_asset.text
     assert "Copy system snapshot" in system_asset.text
     assert "Current system snapshot" in system_asset.text
-    assert "System stays staged." in system_asset.text
+    assert "Open only after the summary stalls." in system_asset.text
 
     assert providers_asset.status_code == 200
     assert "Provider workflows" in providers_asset.text
@@ -318,8 +325,7 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
         not in providers_asset.text
     )
     assert (
-        "Open these disclosures only when the summary still leaves a route-family mismatch unresolved."
-        in providers_asset.text
+        "Open these only when a route-family mismatch remains." in providers_asset.text
     )
     assert "Provider surface diagnostics" in providers_asset.text
     assert "Operator guides" in providers_asset.text
