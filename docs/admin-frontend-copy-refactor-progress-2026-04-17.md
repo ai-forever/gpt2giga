@@ -206,3 +206,49 @@ Commit hash и commit message:
 Следующий шаг:
 
 - пройтись по remaining follow-up polish в оставшихся admin surfaces и решить, где нужен ещё один точечный copy trim, а где уже выгоднее CSS-level quieting вторичного текста вместо новых текстовых правок.
+
+### Slice 5
+
+Статус: `done`
+
+Цель:
+
+- добить remaining follow-up polish без новой structural wave;
+- уменьшить визуальный вес вторичного helper-text через shared CSS;
+- укоротить остаточный explanatory prose на `System`, `Providers` и `Logs`.
+
+Планируемый объём:
+
+- притушить secondary text в shared admin styles (`nav meta`, `form intros`, `details`, `guide cards`);
+- сократить оставшиеся verbose notes и banners в `System` и `Providers`;
+- сделать `Logs` суше в workflow/form/diagnostics copy без смены структуры;
+- пересобрать runtime admin assets и обновить integration asserts под новый copy.
+
+Фактически сделано:
+
+- shared admin CSS сделан тише: уменьшен визуальный вес `nav-group__copy`, `nav-link__meta`, `field-note`, `form-shell__intro`, `details-disclosure`, workflow paragraphs и guide-card copy;
+- `System` упрощён: короче executive summary notes, workflow copy, staged diagnostics intro, debug snapshot note и high-signal warning banners;
+- `Providers` упрощены: суше summary/workflow/guide copy, route diagnostics intro, provider brief handoff copy и backend warning banners;
+- `Logs` упрощены: короче form intro, filter/pinning/inspector copy, live-stream diagnostics copy, workflow handoff text и guide intro;
+- runtime admin assets пересобраны через `npm run build:admin`;
+- integration asserts обновлены под новый copy на `System`, `Providers` и `Logs`.
+
+Проверки:
+
+- `npm run build:admin`
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q`
+- `uv run ruff check tests/integration/app/test_system_router_extra.py`
+
+Результат проверок:
+
+- `npm run build:admin` — green
+- `uv run pytest tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py -q` — 42 passed
+- `uv run ruff check tests/integration/app/test_system_router_extra.py` — green
+
+Commit hash и commit message:
+
+- `7ebf0ab` — `refactor: quiet admin secondary copy`
+
+Следующий шаг:
+
+- сделать уже не текстовый, а визуальный follow-up pass по фактическим desktop surfaces и решить, остались ли единичные noisy outliers, которые стоит добрать точечно без новой массовой copy-wave.
