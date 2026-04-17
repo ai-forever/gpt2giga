@@ -86,7 +86,11 @@ def _register_favicon_route(app: FastAPI, *, favicon_path: Path | None) -> None:
 
     @app.api_route("/favicon.ico", methods=["GET", "HEAD"], include_in_schema=False)
     async def favicon() -> FileResponse:
-        return FileResponse(favicon_path, media_type="image/x-icon")
+        return FileResponse(
+            favicon_path,
+            media_type="image/x-icon",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
 
 def _register_middlewares(app: FastAPI, config) -> None:
