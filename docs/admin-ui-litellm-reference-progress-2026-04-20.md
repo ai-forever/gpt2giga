@@ -113,3 +113,20 @@
   - `refactor: move logs page to tool-first layout`
 - notes:
   - Это отдельный slice только для `Logs`. `Providers`, `Playground` и `Overview` остаются следующими независимыми шагами плана.
+
+## 2026-04-20 19:27
+
+- phase: Phase 3. Operational surfaces
+- step: `Providers` переведен в inventory-first / tool-first layout с provider table как первичным экраном.
+- status: done
+- changes:
+  - В `gpt2giga/frontend/admin/pages/render-providers.ts` добавлен page-level toolbar со status pills по enabled families, coverage, lead provider, telemetry и governance.
+  - Первый экран страницы переведен из executive summary и workflow cards в operational `Provider inventory` table плюс compact operational summary с прямыми handoff в `Playground`, `Traffic` и `Logs`.
+  - Capability coverage и route-family ownership вынесены в отдельный второй слой, а backend posture, raw diagnostics и operator guides оставлены в secondary diagnostics section.
+  - После `npm run build:admin` обновлен `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/render-providers.js`.
+- verification:
+  - `npm run build:admin`
+- commit:
+  - `refactor: move providers page to inventory-first layout`
+- notes:
+  - Это отдельный slice только для `Providers`. `Playground` и `Overview` остаются следующими независимыми шагами плана.

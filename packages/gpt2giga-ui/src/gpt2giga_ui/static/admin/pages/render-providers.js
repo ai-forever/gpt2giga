@@ -1,6 +1,6 @@
 import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
-import { banner, card, kpi, pill, renderDefinitionList, renderGuideLinks, renderPageFrame, renderPageSection, renderStatLines, renderTable, renderWorkflowCard, } from "../templates.js";
+import { banner, card, kpi, pill, renderGuideLinks, renderPageFrame, renderPageSection, renderStatLines, renderTable, } from "../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber } from "../utils.js";
 export async function renderProviders(app, token) {
     const [capabilities, routes, runtime] = await Promise.all([
@@ -21,6 +21,7 @@ export async function renderProviders(app, token) {
     const adminRouteCount = asArray(asRecord(capabilities.admin).routes).length;
     const routeFamilyRows = buildRouteFamilySummaries(routeRows);
     const capabilityRows = buildCapabilityCoverageRows(surfaceRows);
+    const inventoryRows = buildProviderInventoryRows(surfaceRows);
     const leadProvider = [...enabledProviderRows].sort((left, right) => Number(right.route_count ?? 0) - Number(left.route_count ?? 0))[0];
     const leadProviderName = String(leadProvider?.name ?? "");
     const warnings = buildProviderWarnings(enabledProviderRows.length, backend);
@@ -34,6 +35,7 @@ export async function renderProviders(app, token) {
     <a class="button button--secondary" href="/admin/system">Open system</a>
   `);
     app.setContent(renderPageFrame({
+        toolbar: renderProvidersToolbar(enabledProviders, routeRows.length, capabilityRows.length, backend, leadProviderName),
         stats: [
             kpi("Enabled providers", formatNumber(enabledProviders.length)),
             kpi("Mounted routes", formatNumber(routeRows.length)),
@@ -42,94 +44,62 @@ export async function renderProviders(app, token) {
         ],
         sections: [
             renderPageSection({
-                eyebrow: "Posture",
-                title: "Provider posture and next actions",
-                description: "Keep enabled-provider posture and the next operator move on the same screen before opening route diagnostics.",
+                eyebrow: "Operational Surface",
+                title: "Provider inventory",
+                description: "Start from the mounted provider inventory, then move into Playground, Traffic, or Settings only for one provider family at a time.",
+                actions: `
+            <a class="button button--secondary" href="${escapeHtml(smokeHref)}">Playground</a>
+            <a class="button button--secondary" href="${escapeHtml(trafficHref)}">Traffic</a>
+            <a class="button button--secondary" href="/admin/settings">Settings</a>
+          `,
                 bodyClassName: "page-grid",
                 body: `
-            ${card("Executive summary", `
+            ${card("Provider inventory", `
+                <div class="stack">
+                  ${renderTable([
+                    { label: "Provider" },
+                    { label: "Surface" },
+                    { label: "Capabilities" },
+                    { label: "Routes" },
+                    { label: "Next move" },
+                    { label: "Actions" },
+                ], inventoryRows, "No provider rows were reported by the admin API.")}
+                </div>
+              `, "panel panel--span-8 panel--measure")}
+            ${card("Operational summary", `
                 <div class="stack">
                   ${warnings.length ? warnings.join("") : banner("Provider posture is readable. No urgent backend blockers were detected.", "info")}
-                  ${renderDefinitionList([
+                  ${renderStatLines([
                     {
-                        label: "Enabled provider mix",
-                        value: enabledProviders.join(", ") || "none",
-                        note: leadProvider
-                            ? `${displayName(leadProvider)} currently owns the widest mounted provider surface.`
-                            : "No provider surface is enabled yet.",
+                        label: "Lead provider",
+                        value: leadProvider ? displayName(leadProvider) : "none",
+                        tone: leadProvider ? "good" : "warn",
                     },
                     {
                         label: "Backend modes",
                         value: `${String(backend.gigachat_api_mode ?? "n/a")} / ${String(backend.chat_backend_mode ?? "n/a")}`,
-                        note: `Responses mode: ${String(backend.responses_backend_mode ?? "n/a")}.`,
                     },
                     {
-                        label: "Operator surfaces",
-                        value: `${formatNumber(adminRouteCount)} admin routes / ${formatNumber(routeRows.length)} total`,
-                        note: "System and Admin surfaces stay mounted even when provider families are reduced.",
+                        label: "Responses mode",
+                        value: String(backend.responses_backend_mode ?? "n/a"),
+                    },
+                    {
+                        label: "Admin routes",
+                        value: formatNumber(adminRouteCount),
                     },
                     {
                         label: "Runtime store",
                         value: String(backend.runtime_store_backend ?? "n/a"),
-                        note: asArray(backend.observability_sinks).join(", ") || "No observability sinks are configured.",
+                    },
+                    {
+                        label: "Observability sinks",
+                        value: asArray(backend.observability_sinks).join(", ") || "none",
                     },
                 ], "Provider summary is unavailable.")}
-                </div>
-              `, "panel panel--span-8 panel--measure")}
-            ${card("Provider workflows", `
-                <div class="stack">
-                  <div class="workflow-grid">
-                    ${renderWorkflowCard({
-                    workflow: "configure",
-                    compact: true,
-                    title: enabledProviderRows.length ? "Adjust provider posture" : "Enable a provider family first",
-                    note: enabledProviderRows.length
-                        ? "Settings owns toggles and auth."
-                        : "Use Setup or Settings to restore a provider path.",
-                    pills: [
-                        pill(`Enabled: ${formatNumber(enabledProviderRows.length)}`, enabledProviderRows.length ? "good" : "warn"),
-                        pill(`Telemetry: ${backend.telemetry_enabled ? "on" : "off"}`, backend.telemetry_enabled ? "good" : "warn"),
-                        pill(`Governance: ${backend.governance_enabled ? "on" : "off"}`),
-                    ],
-                    actions: [
-                        { label: "Settings", href: pathForPage("settings"), primary: true },
-                        { label: "Setup", href: pathForPage("setup") },
-                    ],
-                })}
-                    ${renderWorkflowCard({
-                    workflow: "start",
-                    compact: true,
-                    title: "Smoke the mounted provider surface",
-                    note: leadProvider
-                        ? `${displayName(leadProvider)} currently exposes the widest surface.`
-                        : "Use Playground after the first provider is enabled.",
-                    pills: [
-                        pill(`Lead provider: ${leadProvider ? displayName(leadProvider) : "n/a"}`),
-                        pill(`Routes: ${formatNumber(routeRows.length)}`),
-                        pill(`Capabilities: ${formatNumber(capabilityRows.length)}`),
-                    ],
-                    actions: [
-                        { label: "Playground", href: smokeHref, primary: true },
-                        { label: "System", href: pathForPage("system") },
-                    ],
-                })}
-                    ${renderWorkflowCard({
-                    workflow: "observe",
-                    compact: true,
-                    title: "Confirm the live request path",
-                    note: leadProvider
-                        ? "Traffic opens scoped to the lead provider."
-                        : "Wait until a provider is enabled.",
-                    pills: [
-                        pill(`Lead route owner: ${leadProvider ? displayName(leadProvider) : "none"}`),
-                        pill(`Admin routes: ${formatNumber(adminRouteCount)}`),
-                        pill(`Store: ${String(backend.runtime_store_backend ?? "n/a")}`),
-                    ],
-                    actions: [
-                        { label: "Traffic", href: trafficHref, primary: true },
-                        { label: "Logs", href: logsHref },
-                    ],
-                })}
+                  <div class="toolbar">
+                    <a class="button button--secondary" href="${escapeHtml(smokeHref)}">Playground</a>
+                    <a class="button button--secondary" href="${escapeHtml(trafficHref)}">Traffic</a>
+                    <a class="button button--secondary" href="${escapeHtml(logsHref)}">Logs</a>
                   </div>
                 </div>
               `, "panel panel--span-4 panel--aside")}
@@ -137,8 +107,8 @@ export async function renderProviders(app, token) {
             }),
             renderPageSection({
                 eyebrow: "Coverage",
-                title: "Coverage table and provider briefs",
-                description: "Use the capability matrix for fast scanning, then drop into individual provider briefs only when you need per-family detail.",
+                title: "Capability and route coverage",
+                description: "Compare capability groups against mounted route families before opening raw provider-surface diagnostics.",
                 bodyClassName: "page-grid",
                 body: `
             ${card("Capability coverage", `
@@ -156,6 +126,23 @@ export async function renderProviders(app, token) {
                 ]), "No capability coverage rows were reported by the admin API.")}
                 </div>
               `, "panel panel--span-8 panel--measure")}
+            ${card("Route families", renderTable([
+                    { label: "Family" },
+                    { label: "Mounted routes" },
+                    { label: "Owner" },
+                ], routeFamilyRows.map((group) => [
+                    `<strong>${escapeHtml(group.label)}</strong><br /><span class="muted">${escapeHtml(group.samples.join(", ") || "No routes in this family.")}</span>`,
+                    `${escapeHtml(formatNumber(group.count))}<br /><span class="muted">${escapeHtml(group.count ? "mounted" : "idle")}</span>`,
+                    `<span class="muted">${escapeHtml(group.owner)}</span>`,
+                ]), "No mounted routes were reported by the admin API."), "panel panel--span-4 panel--aside")}
+          `,
+            }),
+            renderPageSection({
+                eyebrow: "Diagnostics",
+                title: "Backend posture and staged diagnostics",
+                description: "Keep backend mode summary, troubleshooting guides, and raw provider snapshots as a secondary escalation layer.",
+                bodyClassName: "page-grid",
+                body: `
             ${card("Backend posture", renderStatLines([
                     { label: "GigaChat API mode", value: String(backend.gigachat_api_mode ?? "n/a") },
                     { label: "Chat backend mode", value: String(backend.chat_backend_mode ?? "n/a") },
@@ -180,76 +167,6 @@ export async function renderProviders(app, token) {
                         tone: backend.governance_enabled ? "good" : "default",
                     },
                 ], "Backend capability metadata is unavailable."), "panel panel--span-4 panel--aside")}
-            ${card("Provider briefs", `
-                <div class="step-grid">
-                  ${surfaceRows
-                    .map((row) => {
-                    const capabilitiesList = readStringList(row.capabilities);
-                    const routesList = readStringList(row.routes);
-                    const enabled = Boolean(row.enabled);
-                    const providerName = String(row.name ?? "");
-                    return `
-                        <article class="step-card ${enabled ? "step-card--ready" : ""}">
-                          ${pill(enabled ? "enabled" : "disabled", enabled ? "good" : "warn")}
-                          <h4>${escapeHtml(displayName(row))}</h4>
-                          ${renderDefinitionList([
-                        {
-                            label: "Capabilities",
-                            value: formatNumber(capabilitiesList.length),
-                            note: capabilitiesList.slice(0, 4).join(", ") || "No capabilities declared.",
-                        },
-                        {
-                            label: "Declared routes",
-                            value: formatNumber(row.route_count ?? routesList.length),
-                            note: routesList.slice(0, 3).join(", ") || "No routes declared.",
-                        },
-                        {
-                            label: "Best next step",
-                            value: enabled ? "Smoke in playground" : "Check Settings",
-                            note: enabled
-                                ? "Use Playground or Traffic to validate it."
-                                : "Enable this family in Settings first.",
-                        },
-                    ], "No provider details were reported.")}
-                          <div class="toolbar">
-                            <a class="button button--secondary" href="/admin/playground">Playground</a>
-                            <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForProvider(providerName))}">Traffic</a>
-                          </div>
-                        </article>
-                      `;
-                })
-                    .join("")}
-                </div>
-              `, "panel panel--span-12")}
-          `,
-            }),
-            renderPageSection({
-                eyebrow: "Diagnostics",
-                title: "Guides and route diagnostics",
-                description: "Keep troubleshooting links next to the full route-family and provider-surface snapshots for escalation work.",
-                bodyClassName: "page-grid",
-                body: `
-            ${card("Guide and troubleshooting", renderGuideLinks([
-                    {
-                        label: "Provider surface diagnostics",
-                        href: OPERATOR_GUIDE_LINKS.providers,
-                        note: "Coverage, route checks, and Settings to Playground to Traffic handoff.",
-                    },
-                    {
-                        label: "Rollout backend v2",
-                        href: OPERATOR_GUIDE_LINKS.rolloutV2,
-                        note: "Use this when the mismatch is about backend mode selection.",
-                    },
-                    {
-                        label: "Troubleshooting handoff map",
-                        href: OPERATOR_GUIDE_LINKS.troubleshooting,
-                        note: "Use this when the next surface is still unclear.",
-                    },
-                ], {
-                    compact: true,
-                    collapsibleSummary: "Operator guides",
-                    intro: "Open only after coverage, smoke, or traffic still leave a mismatch.",
-                }), "panel panel--span-4 panel--aside")}
             ${card("Staged route diagnostics", `
                 <div class="stack">
                   <p class="muted">Open these only when a route-family mismatch remains.</p>
@@ -289,6 +206,27 @@ export async function renderProviders(app, token) {
                   </details>
                 </div>
               `, "panel panel--span-8 panel--measure")}
+            ${card("Operator handoff", renderGuideLinks([
+                    {
+                        label: "Provider surface diagnostics",
+                        href: OPERATOR_GUIDE_LINKS.providers,
+                        note: "Coverage, route checks, and Settings to Playground to Traffic handoff.",
+                    },
+                    {
+                        label: "Rollout backend v2",
+                        href: OPERATOR_GUIDE_LINKS.rolloutV2,
+                        note: "Use this when the mismatch is about backend mode selection.",
+                    },
+                    {
+                        label: "Troubleshooting handoff map",
+                        href: OPERATOR_GUIDE_LINKS.troubleshooting,
+                        note: "Use this when the next surface is still unclear.",
+                    },
+                ], {
+                    compact: true,
+                    collapsibleSummary: "Operator guides",
+                    intro: "Open only after coverage, smoke, or traffic still leave a mismatch.",
+                }), "panel panel--span-12")}
           `,
             }),
         ],
@@ -306,6 +244,43 @@ function buildProviderWarnings(enabledProviderCount, backend) {
         warnings.push(banner("Governance limits are disabled. Throughput is visible, but requests are not constrained.", "info"));
     }
     return warnings;
+}
+function renderProvidersToolbar(enabledProviders, routeCount, capabilityGroupCount, backend, leadProviderName) {
+    const leadProviderLabel = leadProviderName.trim() || "none";
+    return `
+    <div class="toolbar">
+      <span class="muted">Mounted provider families, route ownership, and backend mode posture stay on one page before you open raw diagnostics.</span>
+    </div>
+    <div class="pill-row">
+      ${pill(`Enabled ${formatNumber(enabledProviders.length)}`, enabledProviders.length ? "good" : "warn")}
+      ${pill(`Routes ${formatNumber(routeCount)}`)}
+      ${pill(`Coverage ${formatNumber(capabilityGroupCount)}`)}
+      ${pill(`Lead ${leadProviderLabel}`, leadProviderName.trim() ? "good" : "warn")}
+      ${pill(`Telemetry ${backend.telemetry_enabled ? "on" : "off"}`, backend.telemetry_enabled ? "good" : "warn")}
+      ${pill(`Governance ${backend.governance_enabled ? "on" : "off"}`)}
+    </div>
+  `;
+}
+function buildProviderInventoryRows(rows) {
+    return rows.map((row) => {
+        const capabilitiesList = readStringList(row.capabilities);
+        const routesList = readStringList(row.routes);
+        const enabled = Boolean(row.enabled);
+        const providerName = String(row.name ?? "");
+        return [
+            `<strong>${escapeHtml(displayName(row))}</strong><br /><span class="muted">${escapeHtml(providerName || "unknown")}</span>`,
+            `${pill(enabled ? "enabled" : "disabled", enabled ? "good" : "warn")}<br /><span class="muted">${escapeHtml(String(row.surface ?? "provider"))}</span>`,
+            `${escapeHtml(formatNumber(capabilitiesList.length))}<br /><span class="muted">${escapeHtml(capabilitiesList.slice(0, 4).join(", ") || "No capabilities declared.")}</span>`,
+            `${escapeHtml(formatNumber(row.route_count ?? routesList.length))}<br /><span class="muted">${escapeHtml(routesList.slice(0, 3).join(", ") || "No routes declared.")}</span>`,
+            `<strong>${escapeHtml(enabled ? "Smoke in playground" : "Enable in Settings")}</strong><br /><span class="muted">${escapeHtml(enabled ? "Validate request flow in Playground or Traffic." : "Restore auth and provider posture first.")}</span>`,
+            `
+        <div class="toolbar">
+          <a class="button button--secondary" href="/admin/playground">Playground</a>
+          <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForProvider(providerName))}">Traffic</a>
+        </div>
+      `,
+        ];
+    });
 }
 function buildCapabilityCoverageRows(rows) {
     const definitions = [
