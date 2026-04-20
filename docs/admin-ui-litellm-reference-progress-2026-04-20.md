@@ -130,3 +130,20 @@
   - `refactor: move providers page to inventory-first layout`
 - notes:
   - Это отдельный slice только для `Providers`. `Playground` и `Overview` остаются следующими независимыми шагами плана.
+
+## 2026-04-20 19:34
+
+- phase: Phase 4. Playground
+- step: `Playground` переведен в центральную tool surface с compact preset toolbar и request/response workspace как первым экраном.
+- status: done
+- changes:
+  - В `gpt2giga/frontend/admin/pages/playground/view.ts` страница переведена на shared `renderPageFrame` / `renderPageSection` вместо старого card-stack с workflow-heavy блоком.
+  - Presets вынесены в section toolbar как быстрый route-switching control, а сам form ужат до `Request` и `Transport` controls в отдельной боковой колонке.
+  - Основной экран перестроен вокруг `Response workspace`, `Request preview` и `Run inspector`, при этом все существующие ids и bindings сохранены без изменений в `bindings.ts`.
+  - Raw transcript и adjacent handoff в `Traffic`, `Logs`, `Setup`, `API Keys` вынесены в отдельный secondary diagnostics section; после `npm run build:admin` обновлен `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/playground/view.js`.
+- verification:
+  - `npm run build:admin`
+- commit:
+  - `refactor: move playground to central tool surface`
+- notes:
+  - Это отдельный slice только для `Playground`. Следующим независимым шагом плана остается `Overview` и финальный polish/responsive sync.

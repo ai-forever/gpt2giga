@@ -1,185 +1,268 @@
 import { pathForPage } from "../../routes.js";
-import { card, kpi, pill, renderDefinitionList, renderFormSection, renderWorkflowCard, } from "../../templates.js";
+import { card, kpi, pill, renderDefinitionList, renderFormSection, renderGuideLinks, renderPageFrame, renderPageSection, } from "../../templates.js";
 import { asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatBytes, formatDurationMs, } from "../../utils.js";
 import { DEFAULT_ASSISTANT_OUTPUT, DEFAULT_OUTPUT, DEFAULT_PLAYGROUND_PRESET, PLAYGROUND_PRESETS, } from "./state.js";
 export function renderPlaygroundHeroActions() {
     return `
     <button class="button button--secondary" id="playground-stop" type="button" disabled>Stop request</button>
     <button class="button button--secondary" id="playground-reset" type="button">Reset output</button>
+    <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic"))}">Traffic</a>
+    <a class="button button--secondary" href="${escapeHtml(pathForPage("logs"))}">Logs</a>
   `;
 }
 export function renderPlaygroundPage(setup, initialRequest) {
-    const bootstrapRequired = asRecord(setup.bootstrap).required;
+    const bootstrapRequired = Boolean(asRecord(setup.bootstrap).required);
     const persistence = describePersistenceStatus(setup);
     const gigachatAuth = describeGigachatAuth(setup);
-    return `
-    ${kpi("GigaChat", gigachatAuth.value)}
-    ${kpi("Security", setup.security_ready ? "ready" : "pending")}
-    ${kpi("Persistence", persistence.value)}
-    ${kpi("Bootstrap", bootstrapRequired ? "active" : "off")}
-    ${card("Request builder", `
-        <form id="playground-form" class="form-shell">
-          <div class="form-shell__intro">
-            <span class="eyebrow">Smoke flow</span>
-            <p class="muted">Load a preset and send one request.</p>
-          </div>
-          ${renderFormSection({
-        title: "Presets",
-        body: `
-              <div class="toolbar">
-                ${PLAYGROUND_PRESETS.map((preset) => `
-                    <button class="button button--secondary playground-preset" data-preset="${escapeHtml(preset.id)}" type="button">
-                      ${escapeHtml(preset.label)}
-                    </button>
-                  `).join("")}
-              </div>
-            `,
-    })}
-          ${renderFormSection({
-        title: "Request",
-        body: `
-              <div class="dual-grid">
-                <label class="field">
-                  <span>Surface</span>
-                  <select name="surface">
-                    <option value="openai-chat">OpenAI chat/completions</option>
-                    <option value="openai-responses">OpenAI responses</option>
-                    <option value="anthropic-messages">Anthropic messages</option>
-                    <option value="gemini-generate">Gemini generateContent</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <span>Model</span>
-                  <input name="model" value="${escapeHtml(String(initialRequest.body.model ?? "GigaChat"))}" />
-                </label>
-              </div>
-              <label class="field">
-                <span>System prompt</span>
-                <textarea name="system_prompt" placeholder="Optional system prompt">${escapeHtml(DEFAULT_PLAYGROUND_PRESET.systemPrompt)}</textarea>
-              </label>
-              <label class="field">
-                <span>User prompt</span>
-                <textarea name="user_prompt">${escapeHtml(DEFAULT_PLAYGROUND_PRESET.userPrompt)}</textarea>
-              </label>
-            `,
-    })}
-          ${renderFormSection({
-        title: "Transport",
-        body: `
-              <div class="dual-grid">
-                <label class="field">
-                  <span>Stream</span>
-                  <select name="stream">
-                    <option value="false">off</option>
-                    <option value="true">on</option>
-                  </select>
-                </label>
+    const surfaceCount = new Set(PLAYGROUND_PRESETS.map((preset) => preset.surface)).size;
+    return renderPageFrame({
+        toolbar: renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequired),
+        stats: [
+            kpi("Surfaces", surfaceCount),
+            kpi("Presets", PLAYGROUND_PRESETS.length),
+            kpi("GigaChat", gigachatAuth.value),
+            kpi("Persistence", persistence.value),
+        ],
+        sections: [
+            renderPageSection({
+                eyebrow: "Tool Surface",
+                title: "Request and response workspace",
+                description: "Keep request controls compact, run one smoke call, and inspect parsed output before reopening Traffic or Logs.",
+                actions: `
+          <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic"))}">Traffic</a>
+          <a class="button button--secondary" href="${escapeHtml(pathForPage("logs"))}">Logs</a>
+        `,
+                toolbar: renderPlaygroundPresetToolbar(),
+                bodyClassName: "page-grid",
+                body: `
+          ${card("Request controls", renderPlaygroundForm(initialRequest), "panel panel--span-4 panel--aside")}
+          ${card("Response workspace", `
+              <div class="stack">
+                <div class="surface surface--dark">
+                  <div class="stack">
+                    <div class="surface__header">
+                      <div class="stack">
+                        <h4>Parsed response</h4>
+                        <p class="muted">
+                          Parsed assistant text stays primary while raw transport and bootstrap posture remain secondary.
+                        </p>
+                      </div>
+                      <div class="surface__meta" id="playground-output-meta">${pill("waiting")}</div>
+                    </div>
+                    <pre class="code-block code-block--tall playground-output" id="playground-assistant-output">${escapeHtml(DEFAULT_ASSISTANT_OUTPUT)}</pre>
+                  </div>
+                </div>
                 <div class="surface">
                   <div class="stack">
-                    <h4>Gateway auth</h4>
-                    <p class="muted" id="playground-auth-note">Reuses the rail gateway key.</p>
+                    <div class="surface__header">
+                      <div class="stack">
+                        <h4>Current run</h4>
+                        <p class="muted">
+                          Lifecycle, status, and transport footprint stay visible while the run is active.
+                        </p>
+                      </div>
+                      <div class="surface__meta" id="playground-status-pill">${pill("idle")}</div>
+                    </div>
+                    <div id="playground-run-note" class="field-note">${escapeHtml(DEFAULT_OUTPUT)}</div>
+                    <div id="playground-run-summary"></div>
                   </div>
                 </div>
               </div>
-            `,
-    })}
-          <div class="form-actions">
-            <button class="button" id="playground-submit" type="submit">Send request</button>
-            <span class="muted" id="playground-form-note">Preview updates live.</span>
-          </div>
-        </form>
-      `, "panel panel--span-8 panel--measure")}
-    ${card("Smoke workflow", `
-        <div class="stack">
-          <div id="playground-bootstrap-banner"></div>
-          <div class="workflow-grid">
-            ${renderWorkflowCard({
-        workflow: "start",
-        title: setup.gigachat_ready ? "Run one smoke request" : "Finish bootstrap first",
-        compact: true,
-        pills: [
-            pill(gigachatAuth.pillLabel, gigachatAuth.tone),
-            pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn"),
-            pill(`Bootstrap: ${bootstrapRequired ? "active" : "off"}`, bootstrapRequired ? "warn" : "default"),
-        ],
-        actions: [
-            { label: setup.gigachat_ready ? "Run smoke request" : "Open setup", href: setup.gigachat_ready ? "#playground-submit" : pathForPage("setup"), primary: true },
-            { label: "API Keys", href: pathForPage("keys") },
-        ],
-    })}
-            ${renderWorkflowCard({
-        workflow: "observe",
-        title: "Next surface",
-        compact: true,
-        pills: [
-            pill(persistence.pillLabel, persistence.tone),
-            pill(`Gateway auth: ${setup.security_ready ? "protected" : "open"}`),
-            pill(`Zero-env path: ready`),
-        ],
-        actions: [
-            { label: "Traffic", href: pathForPage("traffic"), primary: true },
-            { label: "Logs", href: pathForPage("logs") },
-        ],
-    })}
-          </div>
-          <details class="details-disclosure">
-            <summary>Bootstrap posture</summary>
-            <div id="playground-bootstrap-summary"></div>
-          </details>
-        </div>
-      `, "panel panel--span-4 panel--aside")}
-    ${card("Request preview", `
-        <div class="stack">
-          <div class="surface">
-            <div class="stack">
-              <div id="playground-request-summary"></div>
-            </div>
-          </div>
-          <details class="details-disclosure">
-            <summary>Request payload</summary>
-            <pre class="code-block code-block--tall" id="playground-request-body">${escapeHtml(JSON.stringify(initialRequest.body, null, 2))}</pre>
-          </details>
-        </div>
-      `, "panel panel--span-8 panel--measure")}
-    ${card("Run state", `
-        <div class="stack">
-          <div class="surface">
-            <div class="stack">
-              <div class="surface__header">
-                <h4>Lifecycle</h4>
-                <div class="surface__meta" id="playground-status-pill">${pill("idle")}</div>
+            `, "panel panel--span-8")}
+          ${card("Request preview", `
+              <div class="stack">
+                <div class="surface">
+                  <div class="stack">
+                    <div class="surface__header">
+                      <div class="stack">
+                        <h4>Request summary</h4>
+                        <p class="muted" id="playground-auth-note">Reuses the rail gateway key.</p>
+                      </div>
+                    </div>
+                    <div id="playground-request-summary"></div>
+                  </div>
+                </div>
+                <details class="details-disclosure">
+                  <summary>Payload JSON</summary>
+                  <pre class="code-block code-block--tall" id="playground-request-body">${escapeHtml(JSON.stringify(initialRequest.body, null, 2))}</pre>
+                </details>
               </div>
-              <div id="playground-run-note" class="field-note">${escapeHtml(DEFAULT_OUTPUT)}</div>
-              <div id="playground-run-summary"></div>
+            `, "panel panel--span-8")}
+          ${card("Run inspector", `
+              <div class="stack">
+                <div id="playground-bootstrap-banner"></div>
+                <div class="surface">
+                  <div class="stack">
+                    <div class="surface__header">
+                      <div class="stack">
+                        <h4>Transport state</h4>
+                        <p class="muted">
+                          Run preview, gateway posture, and response transport status stay adjacent to the controls.
+                        </p>
+                      </div>
+                      <div class="surface__meta" id="playground-transport-meta">${pill("idle")}</div>
+                    </div>
+                    <p class="field-note" id="playground-form-note">Preview updates live.</p>
+                  </div>
+                </div>
+                <details class="details-disclosure">
+                  <summary>Bootstrap posture</summary>
+                  <div id="playground-bootstrap-summary"></div>
+                </details>
+              </div>
+            `, "panel panel--span-4 panel--aside")}
+        `,
+            }),
+            renderPageSection({
+                eyebrow: "Diagnostics",
+                title: "Transcript and handoff",
+                description: "Keep the raw exchange available for debugging, but move into adjacent surfaces only after the smoke request answers the immediate question.",
+                actions: `
+          <a class="button button--secondary" href="${escapeHtml(pathForPage("setup"))}">Setup</a>
+          <a class="button button--secondary" href="${escapeHtml(pathForPage("keys"))}">API Keys</a>
+        `,
+                bodyClassName: "page-grid",
+                body: `
+          ${card("Transport transcript", `
+              <div class="stack">
+                <div class="surface">
+                  <div class="surface__header">
+                    <div class="stack">
+                      <h4>Raw transport transcript</h4>
+                      <p class="muted">
+                        Use the full response body and SSE transcript only when parsed output and run summary are not enough.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+                <pre class="code-block code-block--tall playground-output" id="playground-output">${escapeHtml(DEFAULT_OUTPUT)}</pre>
+              </div>
+            `, "panel panel--span-8")}
+          ${card("Operational handoff", renderGuideLinks([
+                    {
+                        label: setup.gigachat_ready ? "Traffic inventory" : "Setup",
+                        href: setup.gigachat_ready ? pathForPage("traffic") : pathForPage("setup"),
+                        note: setup.gigachat_ready
+                            ? "Reopen recent request and error inventory after one smoke call proves the route you need."
+                            : "Finish upstream auth and bootstrap posture before treating smoke output as evidence.",
+                    },
+                    {
+                        label: "Logs",
+                        href: pathForPage("logs"),
+                        note: "Switch here when parsed output is insufficient and the transcript still needs request-level correlation.",
+                    },
+                    {
+                        label: "API Keys",
+                        href: pathForPage("keys"),
+                        note: "Use this only when the smoke request is blocked by proxy auth posture or scoped-key gaps.",
+                    },
+                ], {
+                    compact: true,
+                    intro: bootstrapRequired
+                        ? "Bootstrap mode is active, so keep auth posture visible while interpreting smoke results."
+                        : "Use adjacent surfaces only after the playground already narrowed the question.",
+                }), "panel panel--span-4 panel--aside")}
+        `,
+            }),
+        ],
+    });
+}
+function renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequired) {
+    return `
+    <div class="toolbar">
+      <span class="muted">
+        Reuse the rail gateway key, swap only the request shape, and compare compatible routes from one workspace.
+      </span>
+    </div>
+    <div class="pill-row">
+      ${pill(gigachatAuth.pillLabel, gigachatAuth.tone)}
+      ${pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn")}
+      ${pill(persistence.pillLabel, persistence.tone)}
+      ${pill(`Bootstrap: ${bootstrapRequired ? "active" : "off"}`, bootstrapRequired ? "warn" : "default")}
+    </div>
+  `;
+}
+function renderPlaygroundPresetToolbar() {
+    return `
+    <div class="stack">
+      <div class="toolbar">
+        <span class="muted">
+          Presets swap the full request shape first, so you only edit fields when the baseline smoke route is already correct.
+        </span>
+      </div>
+      <div class="toolbar">
+        ${PLAYGROUND_PRESETS.map((preset) => `
+            <button class="button button--secondary playground-preset" data-preset="${escapeHtml(preset.id)}" type="button">
+              ${escapeHtml(preset.label)}
+            </button>
+          `).join("")}
+      </div>
+    </div>
+  `;
+}
+function renderPlaygroundForm(initialRequest) {
+    return `
+    <form id="playground-form" class="form-shell">
+      <div class="form-shell__intro">
+        <span class="eyebrow">Request config</span>
+        <p class="muted">Choose one route, adjust the payload, and send the same scope into the response workspace.</p>
+      </div>
+      ${renderFormSection({
+        title: "Request",
+        intro: "Keep route and model selection compact, then edit prompts only when the preset is close.",
+        body: `
+          <div class="dual-grid">
+            <label class="field">
+              <span>Surface</span>
+              <select name="surface">
+                <option value="openai-chat">OpenAI chat/completions</option>
+                <option value="openai-responses">OpenAI responses</option>
+                <option value="anthropic-messages">Anthropic messages</option>
+                <option value="gemini-generate">Gemini generateContent</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Model</span>
+              <input name="model" value="${escapeHtml(String(initialRequest.body.model ?? "GigaChat"))}" />
+            </label>
+          </div>
+          <label class="field">
+            <span>System prompt</span>
+            <textarea name="system_prompt" placeholder="Optional system prompt">${escapeHtml(DEFAULT_PLAYGROUND_PRESET.systemPrompt)}</textarea>
+          </label>
+          <label class="field">
+            <span>User prompt</span>
+            <textarea name="user_prompt">${escapeHtml(DEFAULT_PLAYGROUND_PRESET.userPrompt)}</textarea>
+          </label>
+        `,
+    })}
+      ${renderFormSection({
+        title: "Transport",
+        intro: "Streaming changes the transport lane only; auth still reuses the rail gateway key.",
+        body: `
+          <div class="dual-grid">
+            <label class="field">
+              <span>Stream</span>
+              <select name="stream">
+                <option value="false">off</option>
+                <option value="true">on</option>
+              </select>
+            </label>
+            <div class="surface">
+              <div class="stack">
+                <h4>Gateway auth</h4>
+                <p class="muted">
+                  Route auth is inherited from the rail input. Use API Keys only when the request should stay protected outside localhost bootstrap.
+                </p>
+              </div>
             </div>
           </div>
-        </div>
-      `, "panel panel--span-4 panel--aside")}
-    ${card("Assistant output", `
-        <div class="surface surface--dark">
-          <div class="stack">
-            <div class="surface__header">
-              <h4>Parsed response</h4>
-              <div class="surface__meta" id="playground-output-meta">${pill("waiting")}</div>
-            </div>
-            <pre class="code-block code-block--tall playground-output" id="playground-assistant-output">${escapeHtml(DEFAULT_ASSISTANT_OUTPUT)}</pre>
-          </div>
-        </div>
-      `, "panel panel--span-8 panel--measure")}
-    ${card("Transport transcript", `
-        <div class="stack">
-          <div class="surface">
-            <div class="surface__header">
-              <h4>Transport</h4>
-              <div class="surface__meta" id="playground-transport-meta">${pill("idle")}</div>
-            </div>
-          </div>
-          <details class="details-disclosure">
-            <summary>Transport snapshot</summary>
-            <pre class="code-block code-block--tall playground-output" id="playground-output">${escapeHtml(DEFAULT_OUTPUT)}</pre>
-          </details>
-        </div>
-      `, "panel panel--span-4 panel--aside")}
+        `,
+    })}
+      <div class="form-actions">
+        <button class="button" id="playground-submit" type="submit">Send request</button>
+      </div>
+    </form>
   `;
 }
 export function resolvePlaygroundElements(pageContent) {
