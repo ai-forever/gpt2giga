@@ -1,5 +1,5 @@
 import { pathForPage } from "../../routes.js";
-import { card, kpi, pill, renderDefinitionList, renderFormSection, renderGuideLinks, renderPageFrame, renderPageSection, } from "../../templates.js";
+import { card, pill, renderDefinitionList, renderFormSection, renderGuideLinks, renderPageFrame, renderPageSection, } from "../../templates.js";
 import { asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatBytes, formatDurationMs, formatNumber, } from "../../utils.js";
 import { DEFAULT_ASSISTANT_OUTPUT, DEFAULT_OUTPUT, DEFAULT_PLAYGROUND_PRESET, PLAYGROUND_PRESETS, } from "./state.js";
 export function renderPlaygroundHeroActions() {
@@ -16,26 +16,20 @@ export function renderPlaygroundPage(setup, initialRequest) {
     const gigachatAuth = describeGigachatAuth(setup);
     const surfaceCount = new Set(PLAYGROUND_PRESETS.map((preset) => preset.surface)).size;
     return renderPageFrame({
+        className: "page-frame--playground",
         toolbar: renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequired),
-        stats: [
-            kpi("Surfaces", surfaceCount),
-            kpi("Presets", PLAYGROUND_PRESETS.length),
-            kpi("GigaChat", gigachatAuth.value),
-            kpi("Persistence", persistence.value),
-        ],
         sections: [
             renderPageSection({
-                eyebrow: "Tool Surface",
-                title: "Request and response workspace",
-                description: "Keep request controls compact, run one smoke call, and inspect parsed output before reopening Traffic or Logs.",
+                eyebrow: "Workspace",
+                title: "Run one smoke request",
+                description: "Start with the form, keep parsed output beside it, and reopen Traffic or Logs only after the smoke request narrows the question.",
                 actions: `
           <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic"))}">Traffic</a>
           <a class="button button--secondary" href="${escapeHtml(pathForPage("logs"))}">Logs</a>
         `,
-                toolbar: renderPlaygroundPresetToolbar(),
                 bodyClassName: "page-grid",
                 body: `
-          ${card("Request controls", renderPlaygroundForm(initialRequest), "panel panel--span-4 panel--aside")}
+          ${card("Request controls", renderPlaygroundForm(initialRequest), "panel panel--span-5 panel--aside playground-panel playground-panel--primary")}
           ${card("Response workspace", `
               <div class="stack">
                 <div class="surface surface--dark">
@@ -44,7 +38,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
                       <div class="stack">
                         <h4>Parsed response</h4>
                         <p class="muted">
-                          Parsed assistant text stays primary while raw transport and bootstrap posture remain secondary.
+                          Keep parsed assistant text primary while transport detail stays secondary.
                         </p>
                       </div>
                       <div class="surface__meta" id="playground-output-meta">${pill("waiting")}</div>
@@ -63,7 +57,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
                       <div class="stack">
                         <h4>Current run</h4>
                         <p class="muted">
-                          Lifecycle, status, and transport footprint stay visible while the run is active.
+                          Keep lifecycle and transport footprint visible while the run is active.
                         </p>
                       </div>
                       <div class="surface__meta" id="playground-status-pill">${pill("idle")}</div>
@@ -73,7 +67,30 @@ export function renderPlaygroundPage(setup, initialRequest) {
                   </div>
                 </div>
               </div>
-            `, "panel panel--span-8")}
+            `, "panel panel--span-7 playground-panel")}
+          ${card("Run inspector", `
+              <div class="stack">
+                <div id="playground-bootstrap-banner"></div>
+                <div class="surface">
+                  <div class="stack">
+                    <div class="surface__header">
+                      <div class="stack">
+                        <h4>Transport state</h4>
+                        <p class="muted">
+                          Preview updates live while auth posture and transport status stay beside the form.
+                        </p>
+                      </div>
+                      <div class="surface__meta" id="playground-transport-meta">${pill("idle")}</div>
+                    </div>
+                    <p class="field-note" id="playground-form-note">Preview updates live.</p>
+                  </div>
+                </div>
+                <details class="details-disclosure">
+                  <summary>Bootstrap posture</summary>
+                  <div id="playground-bootstrap-summary"></div>
+                </details>
+              </div>
+            `, "panel panel--span-5 panel--aside playground-panel")}
           ${card("Request preview", `
               <div class="stack">
                 <div class="surface">
@@ -92,30 +109,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
                   <pre class="code-block code-block--tall" id="playground-request-body">${escapeHtml(JSON.stringify(initialRequest.body, null, 2))}</pre>
                 </details>
               </div>
-            `, "panel panel--span-8")}
-          ${card("Run inspector", `
-              <div class="stack">
-                <div id="playground-bootstrap-banner"></div>
-                <div class="surface">
-                  <div class="stack">
-                    <div class="surface__header">
-                      <div class="stack">
-                        <h4>Transport state</h4>
-                        <p class="muted">
-                          Run preview, gateway posture, and response transport status stay adjacent to the controls.
-                        </p>
-                      </div>
-                      <div class="surface__meta" id="playground-transport-meta">${pill("idle")}</div>
-                    </div>
-                    <p class="field-note" id="playground-form-note">Preview updates live.</p>
-                  </div>
-                </div>
-                <details class="details-disclosure">
-                  <summary>Bootstrap posture</summary>
-                  <div id="playground-bootstrap-summary"></div>
-                </details>
-              </div>
-            `, "panel panel--span-4 panel--aside")}
+            `, "panel panel--span-7 playground-panel")}
         `,
             }),
             renderPageSection({
@@ -174,47 +168,58 @@ export function renderPlaygroundPage(setup, initialRequest) {
 }
 function renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequired) {
     return `
-    <div class="toolbar">
-      <span class="muted">
-        Reuse the rail gateway key, swap only the request shape, and compare compatible routes from one workspace.
-      </span>
-    </div>
-    <div class="pill-row">
-      ${pill(gigachatAuth.pillLabel, gigachatAuth.tone)}
-      ${pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn")}
-      ${pill(persistence.pillLabel, persistence.tone)}
-      ${pill(`Bootstrap: ${bootstrapRequired ? "active" : "off"}`, bootstrapRequired ? "warn" : "default")}
+    <div class="playground-toolbar">
+      <p class="playground-toolbar__lead">
+        Smoke one route, keep auth posture visible, and move into Traffic or Logs only after the parsed response stops being enough.
+      </p>
+      <div class="playground-toolbar__meta">
+        <div class="playground-toolbar__stats" aria-label="Playground context">
+          ${renderPlaygroundInlineStat("Surfaces", String(new Set(PLAYGROUND_PRESETS.map((preset) => preset.surface)).size))}
+          ${renderPlaygroundInlineStat("Presets", String(PLAYGROUND_PRESETS.length))}
+          ${renderPlaygroundInlineStat("GigaChat", gigachatAuth.value)}
+          ${renderPlaygroundInlineStat("Persistence", persistence.value)}
+        </div>
+        <div class="pill-row">
+          ${pill(gigachatAuth.pillLabel, gigachatAuth.tone)}
+          ${pill(`Security: ${setup.security_ready ? "ready" : "pending"}`, setup.security_ready ? "good" : "warn")}
+          ${pill(persistence.pillLabel, persistence.tone)}
+          ${pill(`Bootstrap: ${bootstrapRequired ? "active" : "off"}`, bootstrapRequired ? "warn" : "default")}
+        </div>
+      </div>
     </div>
   `;
 }
-function renderPlaygroundPresetToolbar() {
+function renderPlaygroundInlineStat(label, value) {
     return `
-    <div class="stack">
-      <div class="toolbar">
-        <span class="muted">
-          Presets swap the full request shape first, so you only edit fields when the baseline smoke route is already correct.
-        </span>
-      </div>
-      <div class="toolbar">
-        ${PLAYGROUND_PRESETS.map((preset) => `
-            <button class="button button--secondary playground-preset" data-preset="${escapeHtml(preset.id)}" type="button">
-              ${escapeHtml(preset.label)}
-            </button>
-          `).join("")}
-      </div>
+    <div class="playground-toolbar__stat">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
     </div>
   `;
 }
 function renderPlaygroundForm(initialRequest) {
     return `
     <form id="playground-form" class="form-shell">
+      <div class="playground-preset-strip">
+        <div class="playground-preset-strip__header">
+          <span class="eyebrow">Starting point</span>
+          <p class="muted">Pick a full request shape first, then edit fields only when the baseline route is already correct.</p>
+        </div>
+        <div class="playground-preset-strip__buttons">
+          ${PLAYGROUND_PRESETS.map((preset) => `
+              <button class="button button--secondary playground-preset" data-preset="${escapeHtml(preset.id)}" type="button">
+                ${escapeHtml(preset.label)}
+              </button>
+            `).join("")}
+        </div>
+      </div>
       <div class="form-shell__intro">
         <span class="eyebrow">Request config</span>
-        <p class="muted">Choose one route, adjust the payload, and send the same scope into the response workspace.</p>
+        <p class="muted">Choose a route, tune prompts, and send the same scope into the response workspace.</p>
       </div>
       ${renderFormSection({
         title: "Request",
-        intro: "Keep route and model selection compact, then edit prompts only when the preset is close.",
+        intro: "Keep route and model selection compact, then adjust prompts only when the preset is close.",
         body: `
           <div class="dual-grid">
             <label class="field">
