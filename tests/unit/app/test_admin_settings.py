@@ -108,6 +108,8 @@ async def test_admin_control_plane_settings_service_tests_gigachat_factory():
 
     payload = await AdminControlPlaneSettingsService(request).test_gigachat_settings(
         {
+            "user": "service-account",
+            "password": "super-secret-password",
             "credentials": "gigachat-secret",
             "scope": "GIGACHAT_API_PERS",
             "ca_bundle_file": "/certs/company-root.pem",
@@ -118,6 +120,8 @@ async def test_admin_control_plane_settings_service_tests_gigachat_factory():
     assert payload["ok"] is True
     assert payload["sample_models"] == ["GigaChat-Max"]
     assert captured_kwargs["ca_bundle_file"] == "/certs/company-root.pem"
+    assert captured_kwargs["user"] == "service-account"
+    assert captured_kwargs["password"].get_secret_value() == "super-secret-password"
 
 
 @pytest.mark.asyncio

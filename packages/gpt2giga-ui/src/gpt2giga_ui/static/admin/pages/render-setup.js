@@ -356,7 +356,7 @@ function bindSetupInteractions(options) {
     const applicationFields = applicationForm?.elements;
     const gigachatFields = gigachatForm?.elements;
     bindValidityReset(applicationFields?.enabled_providers, gigachatFields?.timeout);
-    const [syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(gigachatForm ?? null, options.gigachatValues);
+    const [syncPasswordSecret, syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(gigachatForm ?? null, options.gigachatValues);
     claimForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
         const form = event.currentTarget;
@@ -411,6 +411,7 @@ function bindSetupInteractions(options) {
             buildEntries: (payload) => buildPendingDiffEntries("gigachat", options.gigachatValues, payload),
             buildNote: () => {
                 const stagedSecretMessages = collectSecretFieldMessages([
+                    syncPasswordSecret(),
                     syncCredentialsSecret(),
                     syncAccessTokenSecret(),
                 ]);

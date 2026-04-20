@@ -661,7 +661,7 @@ function bindSettingsForms(options: {
     securityFields?.governance_limits,
   );
 
-  const [syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(
+  const [syncPasswordSecret, syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(
     gigachatForm ?? null,
     options.gigachatValues,
   );
@@ -764,6 +764,7 @@ function bindSettingsForms(options: {
         buildPendingDiffEntries("gigachat", options.gigachatValues, payload),
       buildNote: () => {
         const stagedSecretMessages = collectSecretFieldMessages([
+          syncPasswordSecret(),
           syncCredentialsSecret(),
           syncAccessTokenSecret(),
         ]);

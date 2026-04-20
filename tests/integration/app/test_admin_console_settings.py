@@ -93,6 +93,8 @@ def test_gigachat_settings_update_is_persisted(tmp_path, monkeypatch):
     response = client.put(
         "/admin/api/settings/gigachat",
         json={
+            "user": "service-account",
+            "password": "super-secret-password",
             "credentials": "gigachat-secret",
             "scope": "GIGACHAT_API_PERS",
             "model": "GigaChat-Max",
@@ -104,6 +106,9 @@ def test_gigachat_settings_update_is_persisted(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["section"] == "gigachat"
+    assert payload["values"]["user"] == "service-account"
+    assert payload["values"]["password_configured"] is True
+    assert payload["values"]["password_preview"] != "super-secret-password"
     assert payload["values"]["credentials_configured"] is True
     assert payload["values"]["model"] == "GigaChat-Max"
     assert payload["values"]["ca_bundle_file"] == "/certs/company-root.pem"
@@ -123,6 +128,8 @@ def test_gigachat_settings_partial_update_preserves_existing_secret(
     first_response = client.put(
         "/admin/api/settings/gigachat",
         json={
+            "user": "service-account",
+            "password": "super-secret-password",
             "credentials": "gigachat-secret",
             "scope": "GIGACHAT_API_PERS",
             "model": "GigaChat-Max",
@@ -140,11 +147,16 @@ def test_gigachat_settings_partial_update_preserves_existing_secret(
     assert second_response.status_code == 200
     second_payload = second_response.json()
     assert second_payload["values"]["model"] == "GigaChat-Pro"
+    assert second_payload["values"]["user"] == "service-account"
+    assert second_payload["values"]["password_configured"] is True
     assert second_payload["values"]["credentials_configured"] is True
 
     get_response = client.get("/admin/api/settings/gigachat")
     assert get_response.status_code == 200
-    assert get_response.json()["values"]["credentials_configured"] is True
+    values = get_response.json()["values"]
+    assert values["credentials_configured"] is True
+    assert values["password_configured"] is True
+    assert values["user"] == "service-account"
 
 
 def test_gigachat_settings_null_secret_clears_existing_secret(tmp_path, monkeypatch):

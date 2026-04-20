@@ -215,6 +215,7 @@ def _build_gigachat_settings(gigachat: GigaChatCLI) -> dict[str, Any]:
         "access_token_configured": gigachat.access_token is not None,
         "access_token_preview": _mask_secret(gigachat.access_token),
         "password_configured": gigachat.password is not None,
+        "password_preview": _mask_secret(gigachat.password),
         "key_file_password_configured": gigachat.key_file_password is not None,
     }
 

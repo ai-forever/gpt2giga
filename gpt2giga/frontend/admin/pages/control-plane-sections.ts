@@ -287,6 +287,23 @@ export function renderGigachatSection(options: GigachatSectionOptions): string {
         intro: "Blank keeps the stored secret.",
         body: `
           <div class="dual-grid">
+            <label class="field">
+              <span>User</span>
+              <input name="user" value="${escapeHtml(options.values.user ?? "")}" />
+            </label>
+            ${renderSecretField({
+              name: "password",
+              label: "Password",
+              placeholder: "Paste a new password to replace the stored secret",
+              preview: String(
+                options.values.password_preview ??
+                  (options.values.password_configured ? "configured" : "not configured"),
+              ),
+              clearControlName: "clear_password",
+              clearLabel: "Clear stored password on save",
+            })}
+          </div>
+          <div class="dual-grid">
             ${renderSecretField({
               name: "credentials",
               label: "Credentials",
@@ -560,12 +577,25 @@ export function renderObservabilitySection(
 export function bindGigachatSecretFields(
   form: HTMLFormElement | null,
   values: SectionValues,
-): [() => SecretFieldState | null, () => SecretFieldState | null] {
+): [
+  () => SecretFieldState | null,
+  () => SecretFieldState | null,
+  () => SecretFieldState | null,
+] {
   if (!form) {
-    return [() => null, () => null];
+    return [() => null, () => null, () => null];
   }
 
   return [
+    bindSecretFieldBehavior({
+      form,
+      fieldName: "password",
+      clearFieldName: "clear_password",
+      preview: String(
+        values.password_preview ??
+          (values.password_configured ? "configured" : "not configured"),
+      ),
+    }),
     bindSecretFieldBehavior({
       form,
       fieldName: "credentials",

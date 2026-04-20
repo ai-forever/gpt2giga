@@ -484,11 +484,14 @@ export function collectGigachatPayload(form: HTMLFormElement): Record<string, un
   const fields = form.elements as typeof form.elements & {
     model: HTMLInputElement;
     scope: HTMLInputElement;
+    user: HTMLInputElement;
     base_url: HTMLInputElement;
     auth_url: HTMLInputElement;
     ca_bundle_file: HTMLInputElement;
+    password: HTMLTextAreaElement;
     credentials: HTMLTextAreaElement;
     access_token: HTMLTextAreaElement;
+    clear_password?: HTMLInputElement;
     clear_credentials?: HTMLInputElement;
     clear_access_token?: HTMLInputElement;
     verify_ssl_certs: HTMLSelectElement;
@@ -498,12 +501,20 @@ export function collectGigachatPayload(form: HTMLFormElement): Record<string, un
   const payload: Record<string, unknown> = {
     model: fields.model.value.trim() || null,
     scope: fields.scope.value.trim() || null,
+    user: fields.user.value.trim() || null,
     base_url: fields.base_url.value.trim() || null,
     auth_url: fields.auth_url.value.trim() || null,
     ca_bundle_file: fields.ca_bundle_file.value.trim() || null,
     verify_ssl_certs: fields.verify_ssl_certs.value === "true",
     timeout: fields.timeout && fields.timeout.value ? Number(fields.timeout.value) : null,
   };
+
+  const password = fields.password.value.trim();
+  if (password) {
+    payload.password = password;
+  } else if (fields.clear_password?.checked) {
+    payload.password = null;
+  }
 
   const credentials = fields.credentials.value.trim();
   if (credentials) {
@@ -595,7 +606,12 @@ export function buildPendingDiffEntries(
       let current = currentValues[field];
       let target = originalTarget;
 
-      if (section === "gigachat" && field === "credentials") {
+      if (section === "gigachat" && field === "password") {
+        current = currentValues.password_configured
+          ? currentValues.password_preview || "configured"
+          : "not configured";
+        target = target ? "updated secret" : "clear secret";
+      } else if (section === "gigachat" && field === "credentials") {
         current = currentValues.credentials_configured
           ? currentValues.credentials_preview || "configured"
           : "not configured";

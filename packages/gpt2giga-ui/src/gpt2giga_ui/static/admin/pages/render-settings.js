@@ -364,7 +364,7 @@ function bindSettingsForms(options) {
     const gigachatFields = gigachatForm?.elements;
     const securityFields = securityForm?.elements;
     bindValidityReset(applicationFields?.enabled_providers, observabilityFields?.otlp_headers, gigachatFields?.timeout, securityFields?.governance_limits);
-    const [syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(gigachatForm ?? null, options.gigachatValues);
+    const [syncPasswordSecret, syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(gigachatForm ?? null, options.gigachatValues);
     const { syncOtlpHeadersField, syncLangfusePublicKey, syncLangfuseSecretKey, syncPhoenixApiKey, } = bindObservabilitySecretFields(observabilityForm, options.observabilityValues);
     if (applicationForm && applicationStatusNode) {
         bindControlPlaneSectionForm({
@@ -432,6 +432,7 @@ function bindSettingsForms(options) {
             buildEntries: (payload) => buildPendingDiffEntries("gigachat", options.gigachatValues, payload),
             buildNote: () => {
                 const stagedSecretMessages = collectSecretFieldMessages([
+                    syncPasswordSecret(),
                     syncCredentialsSecret(),
                     syncAccessTokenSecret(),
                 ]);

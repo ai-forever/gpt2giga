@@ -595,7 +595,7 @@ function bindSetupInteractions(options: {
 
   bindValidityReset(applicationFields?.enabled_providers, gigachatFields?.timeout);
 
-  const [syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(
+  const [syncPasswordSecret, syncCredentialsSecret, syncAccessTokenSecret] = bindGigachatSecretFields(
     gigachatForm ?? null,
     options.gigachatValues,
   );
@@ -679,6 +679,7 @@ function bindSetupInteractions(options: {
         buildPendingDiffEntries("gigachat", options.gigachatValues, payload),
       buildNote: () => {
         const stagedSecretMessages = collectSecretFieldMessages([
+          syncPasswordSecret(),
           syncCredentialsSecret(),
           syncAccessTokenSecret(),
         ]);
