@@ -28,7 +28,7 @@ import {
 } from "./state.js";
 
 export interface PlaygroundPageElements {
-  assistantOutput: HTMLPreElement;
+  assistantOutput: HTMLDivElement;
   authNote: HTMLElement;
   bootstrapBanner: HTMLElement;
   bootstrapSummary: HTMLElement;
@@ -41,6 +41,8 @@ export interface PlaygroundPageElements {
   requestBody: HTMLPreElement;
   requestSummary: HTMLElement;
   resetButton: HTMLButtonElement | null;
+  responseShell: HTMLDivElement;
+  responseState: HTMLElement;
   runNote: HTMLElement;
   runSummary: HTMLElement;
   statusPill: HTMLElement;
@@ -108,9 +110,14 @@ export function renderPlaygroundPage(
                       </div>
                       <div class="surface__meta" id="playground-output-meta">${pill("waiting")}</div>
                     </div>
-                    <pre class="code-block code-block--tall playground-output" id="playground-assistant-output">${escapeHtml(
-                      DEFAULT_ASSISTANT_OUTPUT,
-                    )}</pre>
+                    <div class="playground-response-shell" id="playground-response-shell" data-phase="idle">
+                      <div class="playground-response-body playground-output" id="playground-assistant-output">${escapeHtml(
+                        DEFAULT_ASSISTANT_OUTPUT,
+                      )}</div>
+                      <div class="playground-response-footer">
+                        <span class="playground-response-state" id="playground-response-state">Waiting for assistant output.</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div class="surface">
@@ -380,10 +387,12 @@ export function resolvePlaygroundElements(
   const runNote = pageContent.querySelector<HTMLElement>("#playground-run-note");
   const runSummary = pageContent.querySelector<HTMLElement>("#playground-run-summary");
   const statusPill = pageContent.querySelector<HTMLElement>("#playground-status-pill");
-  const assistantOutput = pageContent.querySelector<HTMLPreElement>("#playground-assistant-output");
+  const assistantOutput = pageContent.querySelector<HTMLDivElement>("#playground-assistant-output");
   const outputMeta = pageContent.querySelector<HTMLElement>("#playground-output-meta");
   const transportMeta = pageContent.querySelector<HTMLElement>("#playground-transport-meta");
   const output = pageContent.querySelector<HTMLPreElement>("#playground-output");
+  const responseShell = pageContent.querySelector<HTMLDivElement>("#playground-response-shell");
+  const responseState = pageContent.querySelector<HTMLElement>("#playground-response-state");
   const submitButton = pageContent.querySelector<HTMLButtonElement>("#playground-submit");
 
   if (
@@ -401,6 +410,8 @@ export function resolvePlaygroundElements(
     !outputMeta ||
     !transportMeta ||
     !output ||
+    !responseShell ||
+    !responseState ||
     !submitButton
   ) {
     return null;
@@ -422,6 +433,8 @@ export function resolvePlaygroundElements(
     requestBody,
     requestSummary,
     resetButton: document.getElementById("playground-reset") as HTMLButtonElement | null,
+    responseShell,
+    responseState,
     runNote,
     runSummary,
     statusPill,
@@ -489,12 +502,16 @@ export function updatePlaygroundRunPanels(options: {
 
   elements.statusPill.innerHTML = renderPhasePill(runState.phase);
   elements.outputMeta.innerHTML = pill(
-    runState.assistantOutput.trim()
-      ? "parsed"
+    runState.phase === "streaming"
+      ? "live"
+      : runState.assistantOutput.trim()
+        ? "parsed"
       : runState.phase === "error"
         ? "error"
         : "waiting",
-    runState.phase === "success"
+    runState.phase === "streaming"
+      ? "good"
+      : runState.phase === "success"
       ? "good"
       : runState.phase === "error"
         ? "warn"
@@ -532,9 +549,16 @@ export function updatePlaygroundRunPanels(options: {
     },
     ...(runState.errorText ? [{ label: "Error", value: runState.errorText }] : []),
   ]);
+  elements.responseShell.dataset.phase = runState.phase;
   elements.assistantOutput.textContent =
     runState.assistantOutput || DEFAULT_ASSISTANT_OUTPUT;
+  elements.responseState.textContent = describeAssistantSurfaceState(runState);
   elements.output.textContent = runState.rawOutput || DEFAULT_OUTPUT;
+
+  if (runState.phase === "streaming") {
+    elements.assistantOutput.scrollTop = elements.assistantOutput.scrollHeight;
+    elements.output.scrollTop = elements.output.scrollHeight;
+  }
 }
 
 function renderBootstrapBanner(setup: SetupPayload, gatewayKey: string): string {
@@ -669,4 +693,25 @@ function humanizePhase(phase: RunPhase): string {
     return "Error";
   }
   return "Aborted";
+}
+
+function describeAssistantSurfaceState(runState: PlaygroundPageState["runState"]): string {
+  if (runState.phase === "sending") {
+    return "Opening response stream…";
+  }
+  if (runState.phase === "streaming") {
+    return `Streaming live • ${runState.eventCount} event${runState.eventCount === 1 ? "" : "s"}`;
+  }
+  if (runState.phase === "success") {
+    return runState.eventCount > 0
+      ? `Stream complete • ${runState.eventCount} event${runState.eventCount === 1 ? "" : "s"}`
+      : "Response complete";
+  }
+  if (runState.phase === "error") {
+    return "Response interrupted";
+  }
+  if (runState.phase === "aborted") {
+    return "Request stopped";
+  }
+  return "Waiting for assistant output.";
 }

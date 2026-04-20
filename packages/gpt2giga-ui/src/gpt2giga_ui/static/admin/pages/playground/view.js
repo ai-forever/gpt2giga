@@ -49,7 +49,12 @@ export function renderPlaygroundPage(setup, initialRequest) {
                       </div>
                       <div class="surface__meta" id="playground-output-meta">${pill("waiting")}</div>
                     </div>
-                    <pre class="code-block code-block--tall playground-output" id="playground-assistant-output">${escapeHtml(DEFAULT_ASSISTANT_OUTPUT)}</pre>
+                    <div class="playground-response-shell" id="playground-response-shell" data-phase="idle">
+                      <div class="playground-response-body playground-output" id="playground-assistant-output">${escapeHtml(DEFAULT_ASSISTANT_OUTPUT)}</div>
+                      <div class="playground-response-footer">
+                        <span class="playground-response-state" id="playground-response-state">Waiting for assistant output.</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div class="surface">
@@ -280,6 +285,8 @@ export function resolvePlaygroundElements(pageContent) {
     const outputMeta = pageContent.querySelector("#playground-output-meta");
     const transportMeta = pageContent.querySelector("#playground-transport-meta");
     const output = pageContent.querySelector("#playground-output");
+    const responseShell = pageContent.querySelector("#playground-response-shell");
+    const responseState = pageContent.querySelector("#playground-response-state");
     const submitButton = pageContent.querySelector("#playground-submit");
     if (!form ||
         !requestSummary ||
@@ -295,6 +302,8 @@ export function resolvePlaygroundElements(pageContent) {
         !outputMeta ||
         !transportMeta ||
         !output ||
+        !responseShell ||
+        !responseState ||
         !submitButton) {
         return null;
     }
@@ -312,6 +321,8 @@ export function resolvePlaygroundElements(pageContent) {
         requestBody,
         requestSummary,
         resetButton: document.getElementById("playground-reset"),
+        responseShell,
+        responseState,
         runNote,
         runSummary,
         statusPill,
@@ -364,15 +375,19 @@ export function updatePlaygroundRunPanels(options) {
         elements.stopButton.textContent = "Stop request";
     }
     elements.statusPill.innerHTML = renderPhasePill(runState.phase);
-    elements.outputMeta.innerHTML = pill(runState.assistantOutput.trim()
-        ? "parsed"
-        : runState.phase === "error"
-            ? "error"
-            : "waiting", runState.phase === "success"
+    elements.outputMeta.innerHTML = pill(runState.phase === "streaming"
+        ? "live"
+        : runState.assistantOutput.trim()
+            ? "parsed"
+            : runState.phase === "error"
+                ? "error"
+                : "waiting", runState.phase === "streaming"
         ? "good"
-        : runState.phase === "error"
-            ? "warn"
-            : "default");
+        : runState.phase === "success"
+            ? "good"
+            : runState.phase === "error"
+                ? "warn"
+                : "default");
     elements.transportMeta.innerHTML = pill(runState.eventCount > 0 ? `${runState.eventCount} events` : runState.phase, runState.phase === "success"
         ? "good"
         : runState.phase === "error"
@@ -401,9 +416,15 @@ export function updatePlaygroundRunPanels(options) {
         },
         ...(runState.errorText ? [{ label: "Error", value: runState.errorText }] : []),
     ]);
+    elements.responseShell.dataset.phase = runState.phase;
     elements.assistantOutput.textContent =
         runState.assistantOutput || DEFAULT_ASSISTANT_OUTPUT;
+    elements.responseState.textContent = describeAssistantSurfaceState(runState);
     elements.output.textContent = runState.rawOutput || DEFAULT_OUTPUT;
+    if (runState.phase === "streaming") {
+        elements.assistantOutput.scrollTop = elements.assistantOutput.scrollHeight;
+        elements.output.scrollTop = elements.output.scrollHeight;
+    }
 }
 function renderBootstrapBanner(setup, gatewayKey) {
     const bootstrap = asRecord(setup.bootstrap);
@@ -521,4 +542,24 @@ function humanizePhase(phase) {
         return "Error";
     }
     return "Aborted";
+}
+function describeAssistantSurfaceState(runState) {
+    if (runState.phase === "sending") {
+        return "Opening response stream…";
+    }
+    if (runState.phase === "streaming") {
+        return `Streaming live • ${runState.eventCount} event${runState.eventCount === 1 ? "" : "s"}`;
+    }
+    if (runState.phase === "success") {
+        return runState.eventCount > 0
+            ? `Stream complete • ${runState.eventCount} event${runState.eventCount === 1 ? "" : "s"}`
+            : "Response complete";
+    }
+    if (runState.phase === "error") {
+        return "Response interrupted";
+    }
+    if (runState.phase === "aborted") {
+        return "Request stopped";
+    }
+    return "Waiting for assistant output.";
 }
