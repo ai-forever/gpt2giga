@@ -1133,9 +1133,10 @@ code {
 
 @media (max-width: 1240px) {
   .console-appbar {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     width: min(1180px, calc(100% - 32px));
     padding-top: 16px;
+    align-items: start;
   }
 
   .console-shell {
@@ -1148,6 +1149,52 @@ code {
     position: static;
     height: auto;
     overflow: visible;
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.95fr);
+    gap: 16px 18px;
+    align-items: start;
+  }
+
+  .appbar-status {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  .appbar-actions {
+    grid-column: 2;
+    justify-self: end;
+    width: auto;
+  }
+
+  .appbar-status__item {
+    min-width: 0;
+  }
+
+  .brand-block {
+    grid-column: 1;
+  }
+
+  .console-nav {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .nav-section {
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.62);
+  }
+
+  .auth-panel {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    margin-top: 0;
   }
 
   .panel--measure,
@@ -1164,12 +1211,47 @@ code {
 }
 
 @media (max-width: 1080px) {
+  .console-appbar {
+    grid-template-columns: 1fr;
+  }
+
   .appbar-actions {
+    grid-column: auto;
+    justify-self: start;
     width: 100%;
+  }
+
+  .appbar-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .page-frame__stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .console-rail {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .console-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .auth-panel {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .nav-link__meta {
+    display: none;
+  }
+
+  .console-nav a {
+    gap: 0;
+    min-height: 44px;
+    align-items: center;
   }
 
   .panel--span-3,
@@ -1194,12 +1276,18 @@ code {
   .definition-list__row {
     grid-template-columns: 1fr;
   }
+
+  .page-toolbar,
+  .page-section {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
 }
 
 @media (max-width: 720px) {
   .console-appbar {
     width: calc(100% - 24px);
-    gap: 12px;
+    gap: 10px;
     padding-top: 12px;
   }
 
@@ -1209,13 +1297,19 @@ code {
   }
 
   .appbar-actions {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .appbar-actions .button {
+    width: 100%;
   }
 
   .console-shell {
     width: calc(100% - 24px);
     padding: 12px 0 20px;
-    gap: 16px;
+    gap: 14px;
   }
 
   .console-rail,
@@ -1224,9 +1318,59 @@ code {
     border-radius: 20px;
   }
 
+  .console-rail {
+    padding: 16px;
+    gap: 14px;
+  }
+
+  .brand-block {
+    gap: 6px;
+  }
+
+  .brand-block p {
+    display: none;
+  }
+
+  .console-nav {
+    display: grid;
+    gap: 10px;
+  }
+
+  .nav-section {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .rail-section__label {
+    grid-column: 1 / -1;
+  }
+
+  .console-nav a {
+    display: inline-flex;
+    width: 100%;
+    min-height: 40px;
+    padding: 10px 14px;
+    border-radius: 999px;
+  }
+
+  .console-nav a strong {
+    font-size: 13px;
+  }
+
+  .auth-panel {
+    margin-top: 0;
+  }
+
+  .details-disclosure {
+    padding: 12px 14px;
+  }
+
   .console-hero {
-    padding: 22px;
+    padding: 20px;
     flex-direction: column;
+    gap: 16px;
   }
 
   .page-frame__stats,
@@ -1234,13 +1378,27 @@ code {
     grid-template-columns: 1fr;
   }
 
+  .page-toolbar,
+  .hero-actions {
+    gap: 8px;
+  }
+
   .page-section__header {
     flex-direction: column;
+  }
+
+  .page-section__header-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 
   .page-section {
     padding: 18px;
     border-radius: 20px;
+  }
+
+  .panel {
+    padding: 20px;
   }
 
   .overview-stat-grid {
@@ -1249,5 +1407,28 @@ code {
 
   .overview-callout__title {
     font-size: 22px;
+  }
+}
+
+@media (max-width: 540px) {
+  .appbar-brand {
+    padding: 12px 14px;
+  }
+
+  .appbar-status {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .appbar-status__item {
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .appbar-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .console-nav a {
+    width: 100%;
   }
 }

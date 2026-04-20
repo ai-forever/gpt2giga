@@ -164,3 +164,20 @@
   - `refactor: turn overview into compact dashboard`
 - notes:
   - Это отдельный slice только для `Overview`. Следующим независимым шагом плана остается финальный polish/responsive sync между страницами.
+
+## 2026-04-20 20:20
+
+- phase: Phase 5. Overview и polish
+- step: Выполнен финальный responsive/polish sync для shared admin shell между desktop, tablet и mobile viewport.
+- status: done
+- changes:
+  - В `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/console.css` пересобран narrow-width shell: `appbar` переведен в compact status grid, global actions ужаты для mobile, а left rail на medium/mobile перестроен из длинного vertical stack в multi-column navigation shell.
+  - Для `console-rail` и `console-nav` добавлены responsive layouts для `1240px`, `1080px`, `720px` и `540px`, чтобы primary sections (`Workspace`, `Control plane`, `Bootstrap & System`) читались как product navigation, а не как длинный preface перед content.
+  - Shared spacing для `page-toolbar`, `page-section`, `panel`, hero/actions и section headers синхронизирован между narrow viewport, чтобы page frames `Overview`, `Playground`, `Traffic`, `Logs`, `Providers` и `Keys` сохраняли один rhythm после перехода в stacked layout.
+- verification:
+  - `npm run build:admin`
+  - Browser check: `/admin` и `/admin/playground` на `1440px`, `860px` и `430px`
+- commit:
+  - `refactor: polish admin responsive shell`
+- notes:
+  - Это закрывает последний запланированный slice по responsive/polish sync в reference plan от 2026-04-20.
