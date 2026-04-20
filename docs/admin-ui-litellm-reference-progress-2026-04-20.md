@@ -62,3 +62,20 @@
   - `refactor: add shared admin page frames`
 - notes:
   - Этот slice стандартизирует layout language для основных operational surfaces, но не переводит их полностью в table-first/tool-first режим; это остается отдельным следующим шагом плана.
+
+## 2026-04-20 16:29
+
+- phase: Phase 3. Operational surfaces
+- step: `API Keys` переведен в table-first / tool-first layout с inventory-first первым экраном.
+- status: done
+- changes:
+  - В `gpt2giga/frontend/admin/pages/render-keys.ts` hero и page toolbar переведены в быстрые CTA для issue/rotate/usage/security вместо workflow-first narrative.
+  - Инвентарь ключей поднят на первый экран в одной operational table с global fallback строкой, scoped rows, usage counters и inline actions.
+  - Блок provision упрощен до рабочего surface: global fallback posture и scoped key creation оставлены рядом без workflow cards.
+  - Диагностический слой сокращен до restriction summary, guide links и raw snapshot; после `npm run build:admin` обновлен `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/render-keys.js`.
+- verification:
+  - `npm run build:admin`
+- commit:
+  - `refactor: move api keys page to tool-first layout`
+- notes:
+  - Это отдельный slice только для `API Keys`. `Traffic`, `Logs`, `Providers` и `Playground` остаются следующими независимыми шагами плана.

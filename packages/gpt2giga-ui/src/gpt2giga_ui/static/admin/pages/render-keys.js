@@ -1,6 +1,6 @@
 import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
-import { banner, card, kpi, pill, renderDefinitionList, renderFormSection, renderGuideLinks, renderJson, renderPageFrame, renderPageSection, renderTable, renderWorkflowCard, } from "../templates.js";
+import { banner, card, kpi, pill, renderDefinitionList, renderFormSection, renderGuideLinks, renderJson, renderPageFrame, renderPageSection, renderStatLines, renderTable, } from "../templates.js";
 import { asArray, asRecord, csv, escapeHtml, formatNumber, parseCsv } from "../utils.js";
 export async function renderKeys(app, token) {
     const keys = await app.api.json("/admin/api/keys");
@@ -13,12 +13,28 @@ export async function renderKeys(app, token) {
     const scopedRequestCount = scoped.reduce((total, item) => total + readUsageCount(asRecord(item.usage).request_count), 0);
     const scopedRestrictionCount = scoped.filter(hasScopedRestrictions).length;
     const totalRequestCount = readUsageCount(globalUsage.request_count) + scopedRequestCount;
+    const keyRows = buildKeyInventoryRows(global, scoped);
     app.setHeroActions(`
-    <button class="button" id="rotate-global-key" type="button">Rotate global key</button>
-    <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic-usage"))}">Open usage traffic</a>
+    <a class="button" href="#scoped-key-form">Create scoped key</a>
+    <button class="button button--secondary" id="rotate-global-key" type="button">Rotate global key</button>
+    <a class="button button--secondary" href="${escapeHtml(pathForPage("settings-security"))}">Security settings</a>
     <a class="button button--secondary" href="${escapeHtml(pathForPage("playground"))}">Smoke in playground</a>
   `);
     app.setContent(renderPageFrame({
+        toolbar: `
+        <div class="toolbar">
+          <a class="button" href="#scoped-key-form">Create scoped key</a>
+          <button class="button button--secondary" id="rotate-global-key-toolbar" type="button">Rotate global key</button>
+          <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic-usage"))}">Open usage traffic</a>
+          <a class="button button--secondary" href="${escapeHtml(pathForPage("settings-security"))}">Security settings</a>
+        </div>
+        <div class="pill-row">
+          ${pill(`Global ${global.configured ? "ready" : "missing"}`, global.configured ? "good" : "warn")}
+          ${pill(`Scoped ${formatNumber(scoped.length)}`)}
+          ${pill(`Restricted ${formatNumber(scopedRestrictionCount)}`)}
+          ${pill(`Observed requests ${formatNumber(totalRequestCount)}`, totalRequestCount ? "good" : "default")}
+        </div>
+      `,
         stats: [
             kpi("Global key", global.configured ? "configured" : "missing"),
             kpi("Scoped keys", formatNumber(scoped.length)),
@@ -27,128 +43,88 @@ export async function renderKeys(app, token) {
         ],
         sections: [
             renderPageSection({
-                eyebrow: "Control",
-                title: "Gateway key posture",
-                description: "Start with broad posture and next actions, then move into key issuance only when the current posture is acceptable.",
+                eyebrow: "Inventory",
+                title: "Key inventory and live usage",
+                description: "Scan current key posture from one table, then rotate or issue without leaving the page.",
+                actions: `
+            <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic-usage"))}">Usage traffic</a>
+            <a class="button button--secondary" href="${escapeHtml(pathForPage("playground"))}">Playground</a>
+          `,
                 bodyClassName: "page-grid",
                 body: `
-            ${card("Summary", `
+            ${card("Key inventory", `
                 <div class="stack">
                   ${renderKeysBanner(global, scoped)}
-                  ${renderDefinitionList([
-                    {
-                        label: "Global gateway posture",
-                        value: global.configured ? "ready" : "missing",
-                        note: global.configured
-                            ? `Preview ${String(global.key_preview ?? "hidden")} is the broad fallback key.`
-                            : "Create a global key if you need one broad fallback.",
-                    },
-                    {
-                        label: "Scoped inventory",
-                        value: formatNumber(scoped.length),
-                        note: scoped.length
-                            ? `${formatNumber(scopedRestrictionCount)} keys enforce provider, endpoint, or model limits.`
-                            : "No scoped keys exist yet.",
-                    },
-                    {
-                        label: "Recent usage signal",
-                        value: `${formatNumber(totalRequestCount)} observed requests`,
-                        note: totalRequestCount
-                            ? "Aggregated from Traffic > Usage counters."
-                            : "No requests have been attributed yet.",
-                    },
-                    {
-                        label: "Fastest next handoff",
-                        value: global.configured || scoped.length ? "Playground or Traffic" : "Create a key first",
-                        note: global.configured || scoped.length
-                            ? "Smoke one request, then confirm attribution in Traffic > Usage."
-                            : "Create one reusable key first.",
-                    },
-                ], "Key posture is unavailable.")}
+                  ${renderTable([
+                    { label: "Type" },
+                    { label: "Name" },
+                    { label: "Scope posture" },
+                    { label: "Requests" },
+                    { label: "Tokens" },
+                    { label: "Preview" },
+                    { label: "Actions" },
+                ], keyRows, "Key inventory is unavailable.")}
+                  <p class="field-note">Full key values are shown only once on create or rotate. Use Traffic > Usage to confirm which key actually received requests.</p>
                 </div>
               `, "panel panel--span-8 panel--measure")}
-            ${card("Current posture", `
-                <div class="stack">
-                  ${renderDefinitionList([
+            ${card("Operational summary", renderStatLines([
                     {
-                        label: "Global preview",
-                        value: String(global.key_preview ?? "not configured"),
-                        note: global.configured
-                            ? "Keep this for controlled broad access only."
-                            : "No broad fallback is configured.",
+                        label: "Global fallback",
+                        value: global.configured ? "ready" : "missing",
+                        tone: global.configured ? "good" : "warn",
                     },
                     {
-                        label: "Best smoke path",
-                        value: global.configured || scoped.length ? "Playground" : "Setup / Security",
-                        note: global.configured || scoped.length
-                            ? "Copy the target key into the rail before the next smoke run."
-                            : "Finish bootstrap or key creation first.",
+                        label: "Restricted scoped keys",
+                        value: formatNumber(scopedRestrictionCount),
                     },
                     {
-                        label: "Usage confirmation",
-                        value: totalRequestCount ? "Traffic usage is warm" : "Traffic usage is idle",
-                        note: "Traffic > Usage stays the confirmation surface.",
+                        label: "Keys with observed usage",
+                        value: formatNumber(countKeysWithUsage(global, scoped)),
+                        tone: totalRequestCount ? "good" : "default",
                     },
-                ], "Current key posture is unavailable.")}
-                  <div class="toolbar">
-                    <a class="button button--secondary" href="${escapeHtml(pathForPage("settings-security"))}">Security settings</a>
-                    <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic-usage"))}">Usage traffic</a>
-                  </div>
-                </div>
-              `, "panel panel--span-4 panel--aside")}
+                    {
+                        label: "Next move",
+                        value: describeNextKeyAction(global, scoped, totalRequestCount),
+                    },
+                ], "Operational summary is unavailable."), "panel panel--span-4 panel--aside")}
           `,
             }),
             renderPageSection({
                 eyebrow: "Provision",
                 title: "Rotate the fallback and issue scoped keys",
-                description: "Keep rotation and creation together so the operator can choose between broad fallback changes and narrow client issuance in one pass.",
+                description: "Keep broad fallback changes and narrow client issuance on the same work surface.",
+                actions: `
+            <button class="button button--secondary" id="rotate-global-key-section" type="button">Rotate global key</button>
+          `,
                 bodyClassName: "page-grid",
                 body: `
-            ${card("Key workflows", `
+            ${card("Global fallback", `
                 <div class="stack">
-                  <div class="workflow-grid">
-                    ${renderWorkflowCard({
-                    workflow: "configure",
-                    compact: true,
-                    title: global.configured ? "Rotate the global fallback" : "Create the first global fallback",
-                    pills: [
-                        pill(`Global: ${global.configured ? "ready" : "missing"}`, global.configured ? "good" : "warn"),
-                        pill(`Scoped: ${formatNumber(scoped.length)}`),
-                        pill(`Observed requests: ${formatNumber(totalRequestCount)}`),
-                    ],
-                    actions: [
-                        { label: "Rotate global key", href: "#rotate-global-key", primary: true },
-                        { label: "Security settings", href: pathForPage("settings-security") },
-                    ],
-                })}
-                    ${renderWorkflowCard({
-                    workflow: "start",
-                    compact: true,
-                    title: scoped.length ? "Issue a client-specific key" : "Create the first scoped key",
-                    pills: [
-                        pill(`Restricted scopes: ${formatNumber(scopedRestrictionCount)}`),
-                        pill(`Preview: ${String(global.key_preview ?? "none")}`),
-                        pill(`Traffic: ${totalRequestCount ? "warm" : "idle"}`, totalRequestCount ? "good" : "default"),
-                    ],
-                    actions: [
-                        { label: "Create scoped key", href: "#scoped-key-form", primary: true },
-                        { label: "Playground", href: pathForPage("playground") },
-                    ],
-                })}
-                    ${renderWorkflowCard({
-                    workflow: "observe",
-                    compact: true,
-                    title: "Confirm attribution after one request",
-                    pills: [
-                        pill(`Global requests: ${formatNumber(readUsageCount(globalUsage.request_count))}`),
-                        pill(`Scoped requests: ${formatNumber(scopedRequestCount)}`),
-                        pill(`Keys with usage: ${formatNumber(countKeysWithUsage(global, scoped))}`),
-                    ],
-                    actions: [
-                        { label: "Traffic usage", href: pathForPage("traffic-usage"), primary: true },
-                        { label: "Logs", href: pathForPage("logs") },
-                    ],
-                })}
+                  ${renderDefinitionList([
+                    {
+                        label: "Current preview",
+                        value: String(global.key_preview ?? "not configured"),
+                        note: global.configured
+                            ? "Keep this key for deliberate broad fallback access only."
+                            : "Rotate once to mint the first reusable broad fallback key.",
+                    },
+                    {
+                        label: "Observed requests",
+                        value: formatNumber(readUsageCount(globalUsage.request_count)),
+                        note: "Broad fallback usage should stay the exception, not the default distribution path.",
+                    },
+                    {
+                        label: "Preferred distribution model",
+                        value: scoped.length ? "Scoped-first" : "Broad fallback only",
+                        note: scoped.length
+                            ? "Issue narrow keys for real clients and keep the fallback as recovery capacity."
+                            : "Create at least one scoped key before wider rollout.",
+                    },
+                ], "Global fallback posture is unavailable.")}
+                  <div class="toolbar">
+                    <button class="button button--secondary" data-rotate-global type="button">Rotate global key</button>
+                    <a class="button button--secondary" href="${escapeHtml(pathForPage("settings-security"))}">Security settings</a>
+                    <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic-usage"))}">Usage traffic</a>
                   </div>
                 </div>
               `, "panel panel--span-4 panel--aside")}
@@ -195,32 +171,36 @@ export async function renderKeys(app, token) {
           `,
             }),
             renderPageSection({
-                eyebrow: "Inventory",
-                title: "Scoped inventory and diagnostics",
-                description: "Keep the operational table first, with diagnostics and guides adjacent instead of pushed into separate pages.",
+                eyebrow: "Diagnostics",
+                title: "Scope posture and raw snapshot",
+                description: "Use concise guardrails next to the page before falling back to raw payload inspection.",
                 bodyClassName: "page-grid",
                 body: `
-            ${card("Scoped key inventory", renderTable([
-                    { label: "Name" },
-                    { label: "Scope posture" },
-                    { label: "Usage" },
-                    { label: "Preview" },
-                    { label: "Actions" },
-                ], scoped.map((item) => {
-                    const name = String(item.name ?? "");
-                    return [
-                        `<strong>${escapeHtml(name)}</strong>`,
-                        `<span class="muted">${escapeHtml(describeScopePosture(item))}</span>`,
-                        `<span class="muted">${escapeHtml(describeUsage(asRecord(item.usage)))}</span>`,
-                        `<span class="muted">${escapeHtml(String(item.key_preview ?? ""))}</span>`,
-                        `
-                      <div class="toolbar">
-                        <button class="button button--secondary" data-rotate="${escapeHtml(name)}" type="button">Rotate</button>
-                        <button class="button button--danger" data-delete="${escapeHtml(name)}" type="button">Delete</button>
-                      </div>
-                    `,
-                    ];
-                }), "No scoped keys yet. Create one above to establish a narrower handoff than the global key."), "panel panel--span-8 panel--measure")}
+            ${card("Restriction diagnostics", renderDefinitionList([
+                    {
+                        label: "Restricted inventory",
+                        value: formatNumber(scopedRestrictionCount),
+                        note: scopedRestrictionCount
+                            ? "These keys constrain provider, endpoint, or model scope."
+                            : "Every scoped key currently has full scoped access.",
+                    },
+                    {
+                        label: "Unrestricted scoped keys",
+                        value: formatNumber(scoped.length - scopedRestrictionCount),
+                        note: scoped.length
+                            ? "Narrow these further if they are client-specific handoffs."
+                            : "Create a scoped key above before tuning restrictions.",
+                    },
+                    {
+                        label: "Busiest path",
+                        value: scopedRequestCount >= readUsageCount(globalUsage.request_count)
+                            ? "Scoped keys"
+                            : "Global fallback",
+                        note: totalRequestCount
+                            ? "Use Traffic > Usage to confirm whether the current distribution still matches policy."
+                            : "No attributed usage yet.",
+                    },
+                ], "Restriction diagnostics are unavailable."), "panel panel--span-4 panel--aside")}
             ${card("Guides", renderGuideLinks([
                     {
                         label: "Overview workflow guide",
@@ -257,8 +237,7 @@ export async function renderKeys(app, token) {
             }),
         ],
     }));
-    const rotateButton = document.getElementById("rotate-global-key");
-    rotateButton?.addEventListener("click", async () => {
+    const rotateGlobalKey = async () => {
         const response = await app.api.json("/admin/api/keys/global/rotate", {
             method: "POST",
             json: {},
@@ -268,6 +247,13 @@ export async function renderKeys(app, token) {
         app.saveGatewayKey(String(nextGlobal.value ?? ""));
         app.queueAlert(`Global key rotated. New value: ${String(nextGlobal.value ?? "")}`, "warn");
         await app.render("keys");
+    };
+    document
+        .querySelectorAll("#rotate-global-key, #rotate-global-key-toolbar, #rotate-global-key-section, [data-rotate-global]")
+        .forEach((button) => {
+        button.addEventListener("click", () => {
+            void rotateGlobalKey();
+        });
     });
     const scopedForm = app.pageContent.querySelector("#scoped-key-form");
     scopedForm?.addEventListener("submit", async (event) => {
@@ -328,6 +314,50 @@ function renderKeysBanner(global, scoped) {
     }
     return banner("Global fallback and scoped keys are present. Keep distribution narrow and confirm attribution in Traffic > Usage.", "info");
 }
+function buildKeyInventoryRows(global, scoped) {
+    const globalUsage = asRecord(global.usage);
+    const rows = [
+        [
+            pill("Global", global.configured ? "good" : "warn"),
+            `
+        <strong>Fallback key</strong>
+        <div class="field-note">Broad recovery path</div>
+      `,
+            `<span class="muted">${escapeHtml(global.configured ? "Broad fallback access" : "Not configured yet")}</span>`,
+            `<span class="muted">${escapeHtml(formatNumber(readUsageCount(globalUsage.request_count)))}</span>`,
+            `<span class="muted">${escapeHtml(formatNumber(readUsageCount(globalUsage.total_tokens)))}</span>`,
+            `<span class="muted">${escapeHtml(String(global.key_preview ?? "not configured"))}</span>`,
+            `
+        <div class="toolbar">
+          <button class="button button--secondary" data-rotate-global type="button">Rotate</button>
+          <a class="button button--secondary" href="${escapeHtml(pathForPage("settings-security"))}">Security</a>
+        </div>
+      `,
+        ],
+    ];
+    scoped.forEach((item) => {
+        const name = String(item.name ?? "");
+        const usage = asRecord(item.usage);
+        rows.push([
+            pill("Scoped", hasScopedRestrictions(item) ? "good" : "default"),
+            `
+        <strong>${escapeHtml(name)}</strong>
+        <div class="field-note">${escapeHtml(describeRestrictionSummary(item))}</div>
+      `,
+            `<span class="muted">${escapeHtml(describeScopePosture(item))}</span>`,
+            `<span class="muted">${escapeHtml(formatNumber(readUsageCount(usage.request_count)))}</span>`,
+            `<span class="muted">${escapeHtml(formatNumber(readUsageCount(usage.total_tokens)))}</span>`,
+            `<span class="muted">${escapeHtml(String(item.key_preview ?? ""))}</span>`,
+            `
+        <div class="toolbar">
+          <button class="button button--secondary" data-rotate="${escapeHtml(name)}" type="button">Rotate</button>
+          <button class="button button--danger" data-delete="${escapeHtml(name)}" type="button">Delete</button>
+        </div>
+      `,
+        ]);
+    });
+    return rows;
+}
 function describeScopePosture(item) {
     const parts = [
         csv(item.providers) ? `providers: ${csv(item.providers)}` : "",
@@ -336,13 +366,27 @@ function describeScopePosture(item) {
     ].filter(Boolean);
     return parts.join(" · ") || "full scoped access";
 }
-function describeUsage(usage) {
-    const requests = readUsageCount(usage.request_count);
-    const totalTokens = readUsageCount(usage.total_tokens);
-    if (requests === 0 && totalTokens === 0) {
-        return "No attributed usage yet";
+function describeRestrictionSummary(item) {
+    const restrictedDimensions = [
+        csv(item.providers) ? "providers" : "",
+        csv(item.endpoints) ? "endpoints" : "",
+        csv(item.models) ? "models" : "",
+    ].filter(Boolean);
+    return restrictedDimensions.length
+        ? `Restricted by ${restrictedDimensions.join(", ")}`
+        : "No explicit provider, endpoint, or model restrictions";
+}
+function describeNextKeyAction(global, scoped, totalRequestCount) {
+    if (!global.configured && scoped.length === 0) {
+        return "Create first key";
     }
-    return `${formatNumber(requests)} requests · ${formatNumber(totalTokens)} tokens`;
+    if (global.configured && scoped.length === 0) {
+        return "Issue first scoped key";
+    }
+    if (!global.configured && scoped.length > 0) {
+        return "Consider fallback rotation";
+    }
+    return totalRequestCount ? "Review usage attribution" : "Smoke one request";
 }
 function hasScopedRestrictions(item) {
     return Boolean(csv(item.providers) || csv(item.endpoints) || csv(item.models));
