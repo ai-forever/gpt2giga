@@ -147,3 +147,20 @@
   - `refactor: move playground to central tool surface`
 - notes:
   - Это отдельный slice только для `Playground`. Следующим независимым шагом плана остается `Overview` и финальный polish/responsive sync.
+
+## 2026-04-20 19:52
+
+- phase: Phase 5. Overview и polish
+- step: `Overview` переведен в компактный dashboard с status-first первым экраном вместо workflow-heavy handoff cards.
+- status: done
+- changes:
+  - В `gpt2giga/frontend/admin/pages/render-overview.ts` добавлен page-level toolbar с быстрыми переходами и posture pills для persistence, GigaChat auth, gateway auth, docs и telemetry.
+  - Первый экран overview перестроен вокруг `Gateway status`, `Fast actions`, `Recent issues` и `Provider snapshot`, чтобы key metrics, active failures и next surface читались сразу.
+  - Крупные workflow cards убраны; handoff-логика переведена в компактные `Surface handoff` и `Gateway posture`, а operator guides оставлены как secondary diagnostics слой ниже dashboard.
+  - После `npm run build:admin` обновлен `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/render-overview.js`.
+- verification:
+  - `npm run build:admin`
+- commit:
+  - `refactor: turn overview into compact dashboard`
+- notes:
+  - Это отдельный slice только для `Overview`. Следующим независимым шагом плана остается финальный polish/responsive sync между страницами.
