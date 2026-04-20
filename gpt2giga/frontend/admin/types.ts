@@ -68,6 +68,7 @@ export interface SetupStep {
 }
 
 export interface RuntimePayload {
+  app_version?: string;
   mode?: string;
   gigachat_api_mode?: string;
   gigachat_responses_api_mode?: string | null;

@@ -40,6 +40,7 @@ export class AdminApp {
   private readonly modeChip = this.requireElement<HTMLElement>("mode-chip");
   private readonly backendChip = this.requireElement<HTMLElement>("backend-chip");
   private readonly persistedChip = this.requireElement<HTMLElement>("persisted-chip");
+  private readonly versionChip = this.requireElement<HTMLElement>("version-chip");
   private readonly authDisclosure = document.getElementById("auth-disclosure") as HTMLDetailsElement | null;
   private readonly pageEyebrow = this.requireElement<HTMLElement>("page-eyebrow");
   private readonly pageTitle = this.requireElement<HTMLElement>("page-title");
@@ -109,10 +110,10 @@ export class AdminApp {
     const navSurface =
       navPage === page ? meta.eyebrow : `${PAGE_META[navPage].eyebrow} detail`;
 
-    this.pageEyebrow.textContent = `${workflow.label} · ${meta.eyebrow}`;
+    this.pageEyebrow.textContent = meta.eyebrow;
     this.pageTitle.textContent = meta.title;
     this.pageSubtitle.textContent = meta.subtitle;
-    this.workflowChip.textContent = `${workflow.label} workflow`;
+    this.workflowChip.textContent = workflow.label;
     this.surfaceChip.textContent = navSurface;
   }
 
@@ -244,6 +245,7 @@ export class AdminApp {
       this.modeChip.textContent = String(runtime.mode ?? "n/a");
       this.backendChip.textContent = String(runtime.gigachat_api_mode ?? "n/a");
       this.persistedChip.textContent = persistence.chip;
+      this.versionChip.textContent = String(runtime.app_version ?? "n/a");
 
       if (!setup.gigachat_ready) {
         this.pushAlert(
@@ -269,6 +271,7 @@ export class AdminApp {
       this.modeChip.textContent = "error";
       this.backendChip.textContent = "error";
       this.persistedChip.textContent = "error";
+      this.versionChip.textContent = "error";
     }
   }
 
@@ -357,11 +360,6 @@ export class AdminApp {
 
   private setNav(page: PageId): void {
     const navPage = navEntryForPage(page);
-    const workflow = PAGE_META[page].workflow;
-
-    this.nav.querySelectorAll<HTMLElement>(".nav-group").forEach((group) => {
-      group.classList.toggle("nav-group--active", group.dataset.workflow === workflow);
-    });
 
     this.nav.querySelectorAll("a[href]").forEach((link) => {
       const href = link.getAttribute("href");

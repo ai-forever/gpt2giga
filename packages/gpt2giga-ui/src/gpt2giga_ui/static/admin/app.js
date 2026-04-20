@@ -17,6 +17,7 @@ export class AdminApp {
     modeChip = this.requireElement("mode-chip");
     backendChip = this.requireElement("backend-chip");
     persistedChip = this.requireElement("persisted-chip");
+    versionChip = this.requireElement("version-chip");
     authDisclosure = document.getElementById("auth-disclosure");
     pageEyebrow = this.requireElement("page-eyebrow");
     pageTitle = this.requireElement("page-title");
@@ -72,10 +73,10 @@ export class AdminApp {
         const workflow = WORKFLOW_META[meta.workflow];
         const navPage = navEntryForPage(page);
         const navSurface = navPage === page ? meta.eyebrow : `${PAGE_META[navPage].eyebrow} detail`;
-        this.pageEyebrow.textContent = `${workflow.label} · ${meta.eyebrow}`;
+        this.pageEyebrow.textContent = meta.eyebrow;
         this.pageTitle.textContent = meta.title;
         this.pageSubtitle.textContent = meta.subtitle;
-        this.workflowChip.textContent = `${workflow.label} workflow`;
+        this.workflowChip.textContent = workflow.label;
         this.surfaceChip.textContent = navSurface;
     }
     setHeroActions(html) {
@@ -186,6 +187,7 @@ export class AdminApp {
             this.modeChip.textContent = String(runtime.mode ?? "n/a");
             this.backendChip.textContent = String(runtime.gigachat_api_mode ?? "n/a");
             this.persistedChip.textContent = persistence.chip;
+            this.versionChip.textContent = String(runtime.app_version ?? "n/a");
             if (!setup.gigachat_ready) {
                 this.pushAlert("Effective upstream GigaChat auth is missing. Playground calls will fail until credentials, access token, or user/password auth is configured.", "warn");
             }
@@ -202,6 +204,7 @@ export class AdminApp {
             this.modeChip.textContent = "error";
             this.backendChip.textContent = "error";
             this.persistedChip.textContent = "error";
+            this.versionChip.textContent = "error";
         }
     }
     hydrateKeysFromQuery() {
@@ -276,10 +279,6 @@ export class AdminApp {
     }
     setNav(page) {
         const navPage = navEntryForPage(page);
-        const workflow = PAGE_META[page].workflow;
-        this.nav.querySelectorAll(".nav-group").forEach((group) => {
-            group.classList.toggle("nav-group--active", group.dataset.workflow === workflow);
-        });
         this.nav.querySelectorAll("a[href]").forEach((link) => {
             const href = link.getAttribute("href");
             const matchesOverview = navPage === "overview" && (href === "/admin" || href === "/admin/overview");

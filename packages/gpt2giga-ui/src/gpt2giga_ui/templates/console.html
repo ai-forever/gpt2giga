@@ -10,83 +10,94 @@
   </head>
   <body class="console-body">
     <a class="skip-link" href="#page-title">Skip to page heading</a>
+    <header class="console-appbar">
+      <div class="appbar-brand">
+        <div class="brand-lockup">
+          <span class="eyebrow">Gateway Console</span>
+          <strong>gpt2giga</strong>
+        </div>
+        <p>Admin control plane</p>
+      </div>
+
+      <section class="appbar-status" aria-label="Global runtime status">
+        <div class="appbar-status__item">
+          <span>Mode</span>
+          <strong id="mode-chip">...</strong>
+        </div>
+        <div class="appbar-status__item">
+          <span>Backend</span>
+          <strong id="backend-chip">...</strong>
+        </div>
+        <div class="appbar-status__item">
+          <span>Config</span>
+          <strong id="persisted-chip">...</strong>
+        </div>
+        <div class="appbar-status__item">
+          <span>Version</span>
+          <strong id="version-chip">...</strong>
+        </div>
+      </section>
+
+      <div class="appbar-actions">
+        <a class="button button--ghost" href="/admin/playground">Open playground</a>
+        <a class="button button--secondary" href="/admin/system">System</a>
+      </div>
+    </header>
+
     <div class="console-shell">
       <aside class="console-rail">
         <div class="brand-block">
-          <span class="eyebrow">Gateway Console</span>
+          <span class="eyebrow">Admin Surfaces</span>
           <h1>gpt2giga</h1>
-          <p>Bootstrap, configure, observe, and diagnose the gateway.</p>
+          <p>Overview, playground, traffic, keys, providers, and settings in one operational shell.</p>
         </div>
 
-        <section class="rail-section">
-          <span class="rail-section__label">Runtime</span>
-          <div class="rail-status-grid">
-            <div class="status-chip">
-              <strong>Mode</strong>
-              <span id="mode-chip">...</span>
-            </div>
-            <div class="status-chip">
-              <strong>Backend</strong>
-              <span id="backend-chip">...</span>
-            </div>
-            <div class="status-chip">
-              <strong>Config</strong>
-              <span id="persisted-chip">...</span>
-            </div>
-          </div>
-        </section>
-
         <nav class="console-nav" id="nav" aria-label="Primary console navigation">
-          <div class="nav-group" data-workflow="start">
-            <span class="nav-group__label">Start</span>
-            <p class="nav-group__copy">Bootstrap and run one smoke request.</p>
+          <div class="nav-section">
+            <span class="rail-section__label">Workspace</span>
             <a href="/admin">
               <strong>Overview</strong>
-              <span class="nav-link__meta">Status and next step.</span>
-            </a>
-            <a href="/admin/setup">
-              <strong>Setup</strong>
-              <span class="nav-link__meta">Bootstrap tasks.</span>
+              <span class="nav-link__meta">Health and next actions.</span>
             </a>
             <a href="/admin/playground">
               <strong>Playground</strong>
-              <span class="nav-link__meta">Smoke request.</span>
+              <span class="nav-link__meta">Run manual requests.</span>
             </a>
-          </div>
-          <div class="nav-group" data-workflow="configure">
-            <span class="nav-group__label">Configure</span>
-            <p class="nav-group__copy">Persist settings and key posture.</p>
-            <a href="/admin/settings">
-              <strong>Settings</strong>
-              <span class="nav-link__meta">Config sections.</span>
-            </a>
-            <a href="/admin/keys">
-              <strong>API Keys</strong>
-              <span class="nav-link__meta">Global and scoped keys.</span>
-            </a>
-          </div>
-          <div class="nav-group" data-workflow="observe">
-            <span class="nav-group__label">Observe</span>
-            <p class="nav-group__copy">Review requests before raw logs.</p>
             <a href="/admin/traffic">
               <strong>Traffic</strong>
               <span class="nav-link__meta">Requests, errors, usage.</span>
             </a>
             <a href="/admin/logs">
               <strong>Logs</strong>
-              <span class="nav-link__meta">Pinned request logs.</span>
+              <span class="nav-link__meta">Tail and inspect failures.</span>
             </a>
           </div>
-          <div class="nav-group" data-workflow="diagnose">
-            <span class="nav-group__label">Diagnose</span>
-            <p class="nav-group__copy">Deeper runtime and provider checks.</p>
+
+          <div class="nav-section">
+            <span class="rail-section__label">Control plane</span>
+            <a href="/admin/keys">
+              <strong>API Keys</strong>
+              <span class="nav-link__meta">Global and scoped keys.</span>
+            </a>
             <a href="/admin/providers">
               <strong>Providers</strong>
-              <span class="nav-link__meta">Providers and routes.</span>
+              <span class="nav-link__meta">Routes and capabilities.</span>
             </a>
             <a href="/admin/files-batches">
               <strong>Files &amp; Batches</strong>
-              <span class="nav-link__meta">Files and batch jobs.</span>
+              <span class="nav-link__meta">Stored inputs and jobs.</span>
+            </a>
+            <a href="/admin/settings">
+              <strong>Settings</strong>
+              <span class="nav-link__meta">Config and revisions.</span>
+            </a>
+          </div>
+
+          <div class="nav-section">
+            <span class="rail-section__label">Bootstrap &amp; system</span>
+            <a href="/admin/setup">
+              <strong>Setup</strong>
+              <span class="nav-link__meta">Bootstrap tasks.</span>
             </a>
             <a href="/admin/system">
               <strong>System</strong>
