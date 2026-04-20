@@ -96,3 +96,20 @@
   - `refactor: move traffic page to data-first layout`
 - notes:
   - Это отдельный slice только для `Traffic`. `Logs`, `Providers`, `Playground` и `Overview` остаются следующими шагами плана.
+
+## 2026-04-20 19:23
+
+- phase: Phase 3. Operational surfaces
+- step: `Logs` переведен в tool-first / data-first layout с tail workspace как первичным экраном.
+- status: done
+- changes:
+  - В `gpt2giga/frontend/admin/pages/logs/view.ts` убран dominant workflow block и добавлен page-level toolbar со scope pills, чтобы текущий request/tail scope читался сразу.
+  - Первый operational section перестроен вокруг `Scope controls`, `Rendered tail`, `Tail request context` и объединенного aside `Selection and live stream`, без изменений в `bindings` и API-потоке страницы.
+  - Structured request/error inventory вынесен во второй section как secondary comparison layer, а operator guides оставлены ниже как handoff-only блок.
+  - После `npm run build:admin` обновлен `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/logs/view.js`.
+- verification:
+  - `npm run build:admin`
+- commit:
+  - `refactor: move logs page to tool-first layout`
+- notes:
+  - Это отдельный slice только для `Logs`. `Providers`, `Playground` и `Overview` остаются следующими независимыми шагами плана.

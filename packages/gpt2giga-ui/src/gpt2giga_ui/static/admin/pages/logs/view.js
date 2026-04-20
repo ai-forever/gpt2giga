@@ -1,6 +1,6 @@
 import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
-import { card, kpi, renderDefinitionList, renderFilterSelectOptions, renderFormSection, renderGuideLinks, renderPageFrame, renderPageSection, renderStatLines, renderStaticSelectOptions, } from "../../templates.js";
-import { asArray, asRecord, escapeHtml } from "../../utils.js";
+import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderFormSection, renderGuideLinks, renderPageFrame, renderPageSection, renderStatLines, renderStaticSelectOptions, } from "../../templates.js";
+import { asArray, asRecord, escapeHtml, formatNumber } from "../../utils.js";
 import { buildStreamDiagnostics, buildTailContextRows, buildTrafficUrlForRequest, countMatchingLines, formatRenderedLogOutput, indexEventsByRequestId, renderErrorRows, renderLogSelectionActions, renderRequestRows, renderStreamPill, renderTailContextTable, summarizeActiveFilters, } from "./serializers.js";
 import { createLogsStreamState, DEFAULT_LIMIT, DEFAULT_LINES } from "./state.js";
 import { normalizeLogText } from "./serializers.js";
@@ -18,59 +18,92 @@ export function renderLogsPage(data, filters) {
     const requestLookup = indexEventsByRequestId(data.requestEvents);
     const errorLookup = indexEventsByRequestId(data.errorEvents);
     const streamState = createLogsStreamState();
+    const requestPinned = Boolean(filters.requestId);
+    const matchingLines = countMatchingLines(rawLogLines, filters);
     return renderPageFrame({
+        toolbar: renderLogsToolbar(filters, matchingLines, data.errorEvents.length, data.requestEvents.length),
         stats: [
             kpi("Tail lines", filters.lines || DEFAULT_LINES),
-            kpi("Matching lines", countMatchingLines(rawLogLines, filters)),
+            kpi("Matching lines", matchingLines),
             kpi("Recent errors", data.errorEvents.length),
             kpi("Recent requests", data.requestEvents.length),
         ],
         sections: [
             renderPageSection({
-                eyebrow: "Scope",
-                title: "Filter and pin the current investigation",
-                description: "Shape the tail and event scope together before starting live stream work or opening raw diagnostics.",
-                bodyClassName: "page-grid",
-                body: `
-          ${card("Workflow", renderLogsWorkflowGuide(filters), "panel panel--span-12 panel--measure")}
-          ${card("Scope", renderLogsFiltersForm(data, filters), "panel panel--span-8 panel--measure")}
-          ${card("Posture", renderLogsInspector(data, filters, rawLogLines), "panel panel--span-4 panel--aside")}
+                eyebrow: "Operational Surface",
+                title: requestPinned ? "Pinned log workspace" : "Log tail workspace",
+                description: requestPinned
+                    ? "Keep one request pinned across rendered tail, extracted request ids, and recent structured rows."
+                    : "Filter the tail, extract one useful request id, and only then pin or escalate into cross-page traffic context.",
+                actions: `
+          <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForRequest(filters.requestId, filters))}">${escapeHtml(requestPinned ? "Open pinned traffic" : "Open traffic summary")}</a>
+          <a class="button button--secondary" href="/admin/logs">${escapeHtml(requestPinned ? "Reset request pin" : "Reset scope")}</a>
         `,
-            }),
-            renderPageSection({
-                eyebrow: "Workspace",
-                title: "Tail workspace",
-                description: "Keep rendered output, live stream controls, and request extraction on one working surface.",
                 bodyClassName: "page-grid",
                 body: `
-          ${card("Rendered log tail", `
+          ${card("Scope controls", renderLogsFiltersForm(data, filters), "panel panel--span-4 panel--aside")}
+          ${card(requestPinned ? "Pinned rendered tail" : "Rendered tail", `
               <div class="surface surface--dark">
                 <div class="stack">
                   <div class="surface__header">
                     <div class="stack">
-                      <h4>Rendered output</h4>
-                      <p class="muted">Read the rendered tail first. Open diagnostics or raw snapshots only after one request scope is clear.</p>
+                      <h4>${escapeHtml(requestPinned ? "Pinned request output" : "Rendered output")}</h4>
+                      <p class="muted">${escapeHtml(requestPinned
+                    ? "The current request pin filters the rendered tail and keeps the same scope ready for Traffic."
+                    : "Use the rendered tail as the first working surface. Pin a request only after one line or event row is clearly relevant.")}</p>
                     </div>
                     <div class="surface__meta">
-                      <span class="pill" id="logs-match-count">${escapeHtml(`${countMatchingLines(rawLogLines, filters)} matches`)}</span>
+                      <span class="pill" id="logs-match-count">${escapeHtml(`${matchingLines} matches`)}</span>
                     </div>
                   </div>
                   <pre class="code-block code-block--tall" id="log-output">${escapeHtml(formatRenderedLogOutput(rawLogLines, filters))}</pre>
                 </div>
               </div>
             `, "panel panel--span-8")}
-          ${card("Live stream", renderLogsStreamPanel(streamState, rawLogLines.length), "panel panel--span-4 panel--aside")}
-          ${card("Tail context", `
+          ${card(requestPinned ? "Pinned request context" : "Tail request context", `
               <div class="stack">
                 <p class="muted">
-                  Extract request ids only after the current scope is narrow enough to help.
+                  ${escapeHtml(requestPinned
+                    ? "Inspect extracted request ids to confirm the pinned investigation still matches the rendered tail."
+                    : "Extract request ids from the rendered tail only when they help reopen the same scope in Traffic.")}
                 </p>
                 <div id="logs-tail-context">
                   ${renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup), filters)}
                 </div>
               </div>
             `, "panel panel--span-8")}
-          ${card("Guides", renderGuideLinks([
+          ${card("Selection and live stream", `
+              <div class="stack">
+                ${renderLogsInspector(data, filters, rawLogLines)}
+                ${renderLogsStreamPanel(streamState, rawLogLines.length)}
+              </div>
+            `, "panel panel--span-4 panel--aside")}
+        `,
+            }),
+            renderPageSection({
+                eyebrow: "Recent Inventory",
+                title: requestPinned ? "Pinned request and failure rows" : "Recent request and failure rows",
+                description: requestPinned
+                    ? "Use the structured request and error rows to validate the same request pin before dropping into raw diagnostics."
+                    : "Compare the current tail scope against recent structured rows before moving back out to the broader Traffic surface.",
+                actions: `
+          <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForRequest(filters.requestId, filters))}">${escapeHtml(requestPinned ? "Open pinned traffic" : "Open traffic summary")}</a>
+        `,
+                bodyClassName: "page-grid",
+                body: `
+          ${card("Recent requests", `
+              <div class="stack">
+                ${renderRequestRows(data.requestEvents, filters)}
+                <p class="field-note">Inspect a row to review one request snapshot or reopen Traffic with the same request id and filters.</p>
+              </div>
+            `, "panel panel--span-6")}
+          ${card("Recent errors", `
+              <div class="stack">
+                ${renderErrorRows(data.errorEvents, filters)}
+                <p class="field-note">Failures stay adjacent to request rows so the same scope can be compared before escalation.</p>
+              </div>
+            `, "panel panel--span-6")}
+          ${card("Operator handoff", renderGuideLinks([
                     {
                         label: "Logs deep-dive guide",
                         href: OPERATOR_GUIDE_LINKS.logs,
@@ -89,34 +122,44 @@ export function renderLogsPage(data, filters) {
                 ], {
                     compact: true,
                     collapsibleSummary: "Operator guides",
-                    intro: filters.requestId ? "Open only if the pinned request still needs a handoff." : "Open only if this scope still needs a handoff.",
-                }), "panel panel--span-4 panel--aside")}
-        `,
-            }),
-            renderPageSection({
-                eyebrow: "Recent events",
-                title: "Recent request and error context",
-                description: "Use these panels to compare the current tail scope against structured request and error rows before escalating further.",
-                bodyClassName: "page-grid",
-                body: `
-          ${card("Recent errors", renderErrorRows(data.errorEvents, filters), "panel panel--span-6")}
-          ${card("Recent requests", renderRequestRows(data.requestEvents, filters), "panel panel--span-6")}
+                    intro: filters.requestId
+                        ? "Open only if the pinned request still needs a cross-page handoff."
+                        : "Open only if this scope still needs escalation into another operational surface.",
+                }), "panel panel--span-12")}
         `,
             }),
         ],
     });
+}
+function renderLogsToolbar(filters, matchingLines, errorCount, requestCount) {
+    const activeFilters = summarizeActiveFilters(filters);
+    const requestPinned = Boolean(filters.requestId);
+    return `
+    <div class="toolbar">
+      <span class="muted">${escapeHtml(requestPinned
+        ? "One request is pinned across rendered tail, extracted context, and recent event rows."
+        : "Keep the tail narrow, then pin exactly one request only when the investigation needs a durable scope.")}</span>
+    </div>
+    <div class="pill-row">
+      ${pill(requestPinned ? `Pinned ${filters.requestId}` : `Tail ${filters.lines || DEFAULT_LINES} lines`, requestPinned ? "good" : "default")}
+      ${pill(`Matches ${matchingLines}`)}
+      ${pill(`Requests ${formatNumber(requestCount)}`)}
+      ${pill(`Errors ${formatNumber(errorCount)}`, errorCount ? "warn" : "default")}
+      ${activeFilters ? pill(`Scope ${activeFilters}`) : pill("No event filters")}
+    </div>
+  `;
 }
 function renderLogsFiltersForm(data, filters) {
     return `
     <form id="logs-filters-form" class="form-shell form-shell--compact">
       <div class="form-shell__intro">
         <p class="muted">
-          Keep Logs narrower than Traffic. Shape the tail first, then pin one request if needed.
+          Tail window, request pin, and recent event scope stay linked on this page.
         </p>
       </div>
       ${renderFormSection({
         title: "Tail window",
-        intro: "Shape the tail first.",
+        intro: "Set the rendered log window before inspecting individual requests.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -134,7 +177,7 @@ function renderLogsFiltersForm(data, filters) {
     })}
       ${renderFormSection({
         title: "Request pinning",
-        intro: "Pin one request only when logs and traffic should stay aligned.",
+        intro: "Pin one request only when Logs and Traffic should stay aligned.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -147,7 +190,7 @@ function renderLogsFiltersForm(data, filters) {
             </label>
             <div class="surface">
               <p class="muted">
-                Pinning narrows the tail, recent panels, and handoff links together.
+                The request pin drives rendered tail filtering, recent event rows, and Traffic handoff together.
               </p>
             </div>
           </div>
@@ -155,7 +198,7 @@ function renderLogsFiltersForm(data, filters) {
     })}
       ${renderFormSection({
         title: "Event scope",
-        intro: "Keep recent panels on the same scope.",
+        intro: "Keep recent request and error rows on the same operational scope.",
         body: `
           <div class="quad-grid">
             <label class="field">
@@ -199,7 +242,7 @@ function renderLogsFiltersForm(data, filters) {
                 ${renderStaticSelectOptions(filters.limit || DEFAULT_LIMIT, ["5", "8", "12", "20"])}
               </select>
             </label>
-            <span class="muted">This scope also drives recent panels and Traffic handoff.</span>
+            <span class="muted">The same scope powers recent rows and Traffic handoff links.</span>
           </div>
         `,
     })}
@@ -217,7 +260,7 @@ function renderLogsInspector(data, filters, rawLogLines) {
     <div class="stack">
       ${renderFormSection({
         title: "Current posture",
-        intro: "Read this scope first.",
+        intro: "Read this scope before opening raw payloads or restarting the live stream.",
         body: renderStatLines([
             { label: "Tail lines loaded", value: String(rawLogLines.length) },
             { label: "Matching lines", value: countMatchingLines(rawLogLines, filters) },
@@ -228,7 +271,7 @@ function renderLogsInspector(data, filters, rawLogLines) {
     })}
       ${renderFormSection({
         title: "Selection and handoff",
-        intro: "Inspect the selected event or request here.",
+        intro: "Inspect one selected request or failure, then decide whether to pin or hand off.",
         body: `
           <div id="logs-selection-summary">
             ${renderDefinitionList([
@@ -269,7 +312,7 @@ function renderLogsStreamPanel(streamState, rawLineCount) {
         <div class="surface__header">
           <div class="stack">
             <h4>Live tail status</h4>
-            <p class="muted">Stream only after the current scope is clear.</p>
+            <p class="muted">Open SSE only after the working scope is already narrow enough to be useful.</p>
           </div>
           <div class="surface__meta" id="logs-stream-status">${renderStreamPill("idle")}</div>
         </div>
@@ -291,38 +334,6 @@ function renderLogsStreamPanel(streamState, rawLineCount) {
           </div>
         </details>
       </div>
-    </div>
-  `;
-}
-function renderLogsWorkflowGuide(filters) {
-    const trafficHref = buildTrafficUrlForRequest(filters.requestId, filters);
-    const scoped = Boolean(filters.requestId);
-    return `
-    <div class="workflow-grid">
-      <article class="workflow-card">
-        <div class="workflow-card__header">
-          <span class="eyebrow">Diagnose</span>
-          <h4>${escapeHtml(scoped ? "Keep the deep dive pinned" : "Use Logs after Traffic narrows the question")}</h4>
-          <p>${escapeHtml(scoped
-        ? "Logs is already pinned. Keep the same request across posture, tail, and recent events."
-        : "Start from Traffic when possible, then land here for one request, failure, or text pattern.")}</p>
-        </div>
-        <div class="workflow-card__actions">
-          <a class="button button--secondary" href="/admin/logs">${escapeHtml(scoped ? "Reset log scope" : "Reset to default tail")}</a>
-        </div>
-      </article>
-      <article class="workflow-card">
-        <div class="workflow-card__header">
-          <span class="eyebrow">Observe</span>
-          <h4>${escapeHtml(scoped ? "Return to matching traffic" : "Return to traffic summary")}</h4>
-          <p>${escapeHtml(scoped
-        ? "Jump back to Traffic to compare the same request against recent request and error summaries."
-        : "Return to Traffic for the broader request, error, or usage summary.")}</p>
-        </div>
-        <div class="workflow-card__actions">
-          <a class="button" href="${escapeHtml(trafficHref)}">${escapeHtml(scoped ? "Open pinned traffic" : "Open traffic summary")}</a>
-        </div>
-      </article>
     </div>
   `;
 }
