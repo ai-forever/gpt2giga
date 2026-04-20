@@ -79,3 +79,20 @@
   - `refactor: move api keys page to tool-first layout`
 - notes:
   - Это отдельный slice только для `API Keys`. `Traffic`, `Logs`, `Providers` и `Playground` остаются следующими независимыми шагами плана.
+
+## 2026-04-20 17:01
+
+- phase: Phase 3. Operational surfaces
+- step: `Traffic` переведен в data-first / tool-first layout с request inventory как первичным экраном.
+- status: done
+- changes:
+  - В `gpt2giga/frontend/admin/pages/traffic/view.ts` добавлен page-level traffic toolbar с lane switcher и scope pills вместо отдельного narrative-heavy surface map блока.
+  - Summary surface переведен на filters + recent request inventory + compact scope/handoff aside, а ошибки и usage оставлены как secondary lanes ниже первого рабочего слоя.
+  - `traffic-usage` упрощен: workflow cards заменены на operational handoff summary с прямыми переходами в `Requests`, `Errors` и `Logs`.
+  - После `npm run build:admin` обновлен `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/traffic/view.js`.
+- verification:
+  - `npm run build:admin`
+- commit:
+  - `refactor: move traffic page to data-first layout`
+- notes:
+  - Это отдельный slice только для `Traffic`. `Logs`, `Providers`, `Playground` и `Overview` остаются следующими шагами плана.

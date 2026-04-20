@@ -13,7 +13,6 @@ import {
   renderStaticSelectOptions,
   renderStatLines,
   renderSubpageNav,
-  renderWorkflowCard,
 } from "../../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber, formatTimestamp } from "../../utils.js";
 import type { TrafficPageData } from "./api.js";
@@ -27,6 +26,7 @@ import {
   renderTrafficSelectionActions,
   renderUsageKeyRows,
   renderUsageProviderRows,
+  summarizeTrafficFilters,
 } from "./serializers.js";
 import type { TrafficFilters, TrafficPage } from "./state.js";
 
@@ -49,9 +49,9 @@ export function renderTrafficHeroActions(page: TrafficPage, filters: TrafficFilt
   if (page === "traffic") {
     return `
       <button class="button button--secondary" id="reset-traffic-filters" type="button">Reset filters</button>
-      <a class="button" href="${escapeHtml(logsHref)}">
-        ${escapeHtml(logsLabel)}
-      </a>
+      <a class="button" href="${escapeHtml(buildTrafficUrl(filters, "traffic-requests"))}">Open requests</a>
+      <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic-errors"))}">Open errors</a>
+      <a class="button button--secondary" href="${escapeHtml(logsHref)}">${escapeHtml(logsLabel)}</a>
     `;
   }
 
@@ -81,6 +81,7 @@ export function renderTrafficPage(
   );
 
   return renderPageFrame({
+    toolbar: renderTrafficToolbar(page, filters, scopeSummary, requestPinned),
     stats: [
       kpi(requestPinned ? "Pinned requests" : "Requests", formatNumber(scopeSummary.requestCount)),
       kpi(requestPinned ? "Pinned errors" : "Errors", formatNumber(scopeSummary.errorCount)),
@@ -89,35 +90,86 @@ export function renderTrafficPage(
     ],
     sections: [
       renderPageSection({
-        eyebrow: "Surface map",
-        title: "Traffic lanes",
-        description:
-          requestPinned
-            ? "Stay pinned to one request while switching between summary, request, error, and usage lanes."
-            : "Choose the lane that matches the current question, then keep filters stable while drilling deeper.",
-        body: renderTrafficNavigation(page, filters),
-      }),
-      renderPageSection({
-        eyebrow: page === "traffic" ? "Summary" : "Operational lane",
-        title:
-          page === "traffic"
-            ? "Traffic summary and handoff"
-            : page === "traffic-requests"
-              ? "Request-first traffic view"
-              : page === "traffic-errors"
-                ? "Error-first traffic view"
-                : "Usage-first traffic view",
+        eyebrow: page === "traffic" ? "Operational Surface" : "Operational Lane",
+        title: resolveTrafficTitle(page),
         description:
           page === "traffic"
-            ? "Keep the overview broad until one lane clearly becomes primary."
+            ? "Start with filters and recent request inventory, then drill into error or usage lanes only when the scope is clear."
             : page === "traffic-usage"
-              ? "Grouped usage stays aggregate even when request pinning is active."
-              : "Filters, table, and inspector stay on one surface so the next handoff remains obvious.",
+              ? "Grouped usage stays aggregate while provider and key tables remain immediately visible."
+              : "Keep filters, the primary table, and the selection inspector on the same working surface.",
+        actions: renderTrafficSectionActions(page, filters),
         bodyClassName: "page-grid",
         body: renderTrafficSurface(page, data, filters, requestPinned),
       }),
     ],
   });
+}
+
+function renderTrafficToolbar(
+  page: TrafficPage,
+  filters: TrafficFilters,
+  scopeSummary: {
+    errorCount: number;
+    providerCount: number;
+    requestCount: number;
+    totalTokens: number;
+  },
+  requestPinned: boolean,
+): string {
+  return `
+    ${renderSubpageNav({
+      currentPage: page,
+      title: "Traffic",
+      intro: requestPinned
+        ? "One request is pinned across requests, errors, and logs."
+        : "Switch lanes without dropping the current scope.",
+      items: subpagesFor(page),
+      hrefForPage: (target) => buildTrafficUrl(filters, target as TrafficPage),
+    })}
+    <div class="pill-row">
+      ${pill(requestPinned ? `Pinned ${filters.requestId}` : "Recent traffic window", requestPinned ? "good" : "default")}
+      ${pill(`Requests ${formatNumber(scopeSummary.requestCount)}`)}
+      ${pill(`Errors ${formatNumber(scopeSummary.errorCount)}`, scopeSummary.errorCount ? "warn" : "default")}
+      ${pill(`Tokens ${formatNumber(scopeSummary.totalTokens)}`)}
+      ${pill(`Providers ${formatNumber(scopeSummary.providerCount)}`)}
+    </div>
+  `;
+}
+
+function resolveTrafficTitle(page: TrafficPage): string {
+  if (page === "traffic-requests") {
+    return "Request inventory";
+  }
+  if (page === "traffic-errors") {
+    return "Error inventory";
+  }
+  if (page === "traffic-usage") {
+    return "Usage inventory";
+  }
+  return "Traffic inventory";
+}
+
+function renderTrafficSectionActions(page: TrafficPage, filters: TrafficFilters): string {
+  if (page === "traffic") {
+    return `
+      <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic-errors"))}">Error lane</a>
+      <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic-usage"))}">Usage lane</a>
+      <a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(filters.requestId, filters))}">Logs</a>
+    `;
+  }
+  if (page === "traffic-usage") {
+    return `
+      <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic-requests"))}">Requests</a>
+      <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic-errors"))}">Errors</a>
+      <a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(filters.requestId, filters))}">Logs</a>
+    `;
+  }
+  return `
+    <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic"))}">Summary</a>
+    <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic-usage"))}">Usage</a>
+    <a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(filters.requestId, filters))}">Logs</a>
+  `;
 }
 
 function renderTrafficSurface(
@@ -138,23 +190,6 @@ function renderTrafficSurface(
   return renderTrafficOverviewPage(data, filters, requestPinned);
 }
 
-function renderTrafficNavigation(page: TrafficPage, filters: TrafficFilters): string {
-  return renderSubpageNav({
-    currentPage: page,
-    title: "Traffic pages",
-    intro:
-      page === "traffic"
-        ? "Pick a lane when needed."
-        : page === "traffic-requests"
-          ? "Requests first."
-          : page === "traffic-errors"
-            ? "Errors first."
-            : "Usage first.",
-    items: subpagesFor(page),
-    hrefForPage: (target) => buildTrafficUrl(filters, target as TrafficPage),
-  });
-}
-
 function renderTrafficOverviewPage(
   data: TrafficPageData,
   filters: TrafficFilters,
@@ -162,35 +197,29 @@ function renderTrafficOverviewPage(
 ): string {
   return `
     ${card(
-      requestPinned ? "Pinned traffic handoff" : "Traffic handoff",
-      renderTrafficWorkflowGuide(filters, requestPinned),
-      "panel panel--span-12",
-    )}
-    ${card(
       "Traffic filters",
       renderTrafficFilters(data, filters, "overview"),
       "panel panel--span-12 panel--measure",
     )}
     ${card(
-      "Requests lane",
-      renderTrafficPreviewLane({
-        title: "Recent request sample",
-        rows: renderRequestPreviewRows(data.requestEvents, filters),
-        stats: [
-          { label: "Rows in scope", value: formatNumber(data.requestEvents.length) },
-          { label: "Pinned request", value: filters.requestId || "none" },
-        ],
-        primaryHref: buildTrafficUrl(filters, "traffic-requests"),
-        primaryLabel: "Open requests",
-        secondaryHref: buildLogsUrlForRequest(filters.requestId, filters),
-        secondaryLabel: "Open logs",
-      }),
-      "panel panel--span-4",
+      requestPinned ? "Pinned request inventory" : "Recent requests",
+      `
+        <div class="stack">
+          ${renderRequestRows(data.requestEvents, filters)}
+          <p class="field-note">Requests stay primary on the summary page. Use the row actions to pin one request or reopen Logs with the same scope.</p>
+        </div>
+      `,
+      "panel panel--span-8 panel--measure",
     )}
     ${card(
-      "Errors lane",
+      "Scope and next move",
+      renderTrafficOverviewAside(data, filters, requestPinned),
+      "panel panel--span-4 panel--aside",
+    )}
+    ${card(
+      "Error lane",
       renderTrafficPreviewLane({
-        title: "Recent error sample",
+        title: "Recent failure sample",
         rows: renderErrorPreviewRows(data.errorEvents, filters),
         stats: [
           { label: "Rows in scope", value: formatNumber(data.errorEvents.length) },
@@ -207,10 +236,10 @@ function renderTrafficOverviewPage(
         ],
         primaryHref: buildTrafficUrl(filters, "traffic-errors"),
         primaryLabel: "Open errors",
-        secondaryHref: buildTrafficUrl(filters, "traffic-requests"),
-        secondaryLabel: "Open requests",
+        secondaryHref: buildLogsUrlForRequest(filters.requestId, filters),
+        secondaryLabel: "Open logs",
       }),
-      "panel panel--span-4",
+      "panel panel--span-8",
     )}
     ${card(
       "Usage lane",
@@ -229,16 +258,16 @@ function renderTrafficOverviewPage(
         secondaryHref: buildTrafficUrl(filters, "traffic-requests"),
         secondaryLabel: "Open requests",
       }),
-      "panel panel--span-4",
+      "panel panel--span-4 panel--aside",
     )}
     ${card(
-      "Current scope",
+      "Selection inspector",
       renderTrafficInspector({
         filters,
         summaryIntro:
           requestPinned
-            ? "Pinned to one request. Stay broad here, then open a child page when one lane becomes primary."
-            : "Confirm scope here, then open a lane only when the summary stops being enough.",
+            ? "Pinned request context is active. Inspect the selected row here before switching lanes."
+            : "Use the summary page to inspect one row, then move into a dedicated lane only when needed.",
         statItems: [
           { label: "Request rows", value: formatNumber(data.requestEvents.length) },
           { label: "Error rows", value: formatNumber(data.errorEvents.length) },
@@ -252,7 +281,7 @@ function renderTrafficOverviewPage(
           usage_summary: data.providerSummary,
         },
       }),
-      "panel panel--span-12",
+      "panel panel--span-8 panel--aside",
     )}
     ${card(
       "Guides",
@@ -279,7 +308,7 @@ function renderTrafficOverviewPage(
           compact: true,
         },
       ),
-      "panel panel--span-12",
+      "panel panel--span-4 panel--aside",
     )}
   `;
 }
@@ -515,64 +544,63 @@ function renderTrafficUsagePage(
         ${requestPinned ? '<div class="banner banner--warn">Request pinning narrows recent request and error feeds only. Usage rows stay aggregate and continue following provider, model, key, and source filters.</div>' : ""}
         ${renderUsageKeyRows(data.keyEntries)}
       `,
-      "panel panel--span-12",
+      "panel panel--span-8",
     )}
     ${card(
       "Next handoff",
       `
-        <div class="step-grid">
-          ${renderWorkflowCard({
-            workflow: "observe",
-            title: "Move into request review",
-            compact: true,
-            pills: [pill("Requests"), pill("Pinned request"), pill("Logs")],
-            actions: [
+        <div class="stack">
+          ${renderDefinitionList(
+            [
               {
-                label: "Open requests",
-                href: buildTrafficUrl(filters, "traffic-requests"),
-                primary: true,
+                label: "Aggregate scope",
+                value: requestPinned ? "Usage stays unpinned" : "Following active filters",
+                note: requestPinned
+                  ? "Request pinning only narrows recent request and error feeds."
+                  : "Provider, model, key, and source filters still drive grouped usage.",
               },
-              { label: "Open traffic summary", href: buildTrafficUrl(filters, "traffic") },
-            ],
-          })}
-          ${renderWorkflowCard({
-            workflow: "diagnose",
-            title: "Escalate into logs later",
-            compact: true,
-            pills: [pill("Usage first"), pill("Logs later"), pill("Request scoped")],
-            actions: [
               {
-                label: "Open errors",
-                href: buildTrafficUrl(filters, "traffic-errors"),
-                primary: true,
+                label: "Best next move",
+                value: data.keyEntries.length ? "Inspect the noisiest key" : "Open request traffic",
+                note: data.keyEntries.length
+                  ? "Use the key table to see which distribution path deserves a request-level drill-down."
+                  : "No key rollups are available yet, so move back to recent requests.",
               },
-              { label: "Open logs", href: buildLogsUrlForRequest(filters.requestId, filters) },
+              {
+                label: "Logs handoff",
+                value: filters.requestId ? "Ready for the pinned request" : "Needs one request selection",
+                note: filters.requestId
+                  ? "Open raw logs with the same request id already applied."
+                  : "Pin a request from Requests or Errors before escalating into raw logs.",
+              },
             ],
-          })}
+            "Grouped usage handoff is unavailable.",
+          )}
+          <div class="toolbar">
+            <a class="button" href="${escapeHtml(buildTrafficUrl(filters, "traffic-requests"))}">Open requests</a>
+            <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic-errors"))}">Open errors</a>
+            <a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(filters.requestId, filters))}">Open logs</a>
+          </div>
+          ${renderGuideLinks(
+            [
+              {
+                label: "Traffic workflow guide",
+                href: OPERATOR_GUIDE_LINKS.traffic,
+                note: "Use the grouped-usage path when the first question is where the traffic went before picking one request.",
+              },
+              {
+                label: "Troubleshooting handoff map",
+                href: OPERATOR_GUIDE_LINKS.troubleshooting,
+                note: "Open the escalation map once grouped usage already pointed at the next request or provider surface.",
+              },
+            ],
+            {
+              collapsibleSummary: "Operator guides",
+              compact: true,
+            },
+          )}
         </div>
       `,
-      "panel panel--span-8",
-    )}
-    ${card(
-      "Guides",
-      renderGuideLinks(
-        [
-          {
-            label: "Traffic workflow guide",
-            href: OPERATOR_GUIDE_LINKS.traffic,
-            note: "Use the grouped-usage path when the first question is where the traffic went before picking one request.",
-          },
-          {
-            label: "Troubleshooting handoff map",
-            href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Open the escalation map once grouped usage already pointed at the next request or provider surface.",
-          },
-        ],
-        {
-          collapsibleSummary: "Operator guides",
-          compact: true,
-        },
-      ),
       "panel panel--span-4 panel--aside",
     )}
   `;
@@ -824,46 +852,52 @@ function renderTrafficInspector(options: {
   `;
 }
 
-function renderTrafficWorkflowGuide(filters: TrafficFilters, requestPinned: boolean): string {
-  const logsHref = buildLogsUrlForRequest(filters.requestId, filters);
+function renderTrafficOverviewAside(
+  data: TrafficPageData,
+  filters: TrafficFilters,
+  requestPinned: boolean,
+): string {
+  const activeFilters = summarizeTrafficFilters(filters);
+  const errorTypeCount = new Set(
+    data.errorEvents.map((item) => String(item.error_type ?? "").trim()).filter(Boolean),
+  ).size;
+
   return `
-    <div class="step-grid">
-      ${renderWorkflowCard({
-        workflow: "observe",
-        title: requestPinned
-          ? "Stay scoped to one request"
-          : "Stay broad until one lane stands out",
-        compact: true,
-        pills: [
-          pill("Overview"),
-          pill(requestPinned ? "Pinned request" : "Summary first"),
-          pill("Focused lanes"),
-        ],
-        actions: [
+    <div class="stack">
+      ${renderDefinitionList(
+        [
           {
-            label: "Open requests",
-            href: buildTrafficUrl(filters, "traffic-requests"),
-            primary: true,
+            label: "Active scope",
+            value: activeFilters || "Recent traffic window",
+            note: requestPinned
+              ? "The request pin stays aligned across requests, errors, and logs."
+              : "Use filters first; only pin a request after the table already isolated one target.",
           },
-          { label: "Open errors", href: buildTrafficUrl(filters, "traffic-errors") },
-        ],
-      })}
-      ${renderWorkflowCard({
-        workflow: "diagnose",
-        title: requestPinned
-          ? "Escalate only when raw context is needed"
-          : "Open logs only after one request exists",
-        compact: true,
-        pills: [pill("Logs"), pill("Request scoped"), pill("Raw evidence")],
-        actions: [
           {
-            label: requestPinned ? "Open pinned logs" : "Open logs with current filters",
-            href: logsHref,
-            primary: true,
+            label: "Request posture",
+            value: requestPinned ? "Pinned request" : "Broad request inventory",
+            note: requestPinned ? filters.requestId : "Requests remain the primary inventory surface on this page.",
           },
-          { label: "Open usage", href: buildTrafficUrl(filters, "traffic-usage") },
+          {
+            label: "Error pressure",
+            value: `${formatNumber(data.errorEvents.length)} rows / ${formatNumber(errorTypeCount)} types`,
+            note: data.errorEvents.length
+              ? "Open the error lane when failure patterns become the main question."
+              : "No recent failures matched the current scope.",
+          },
+          {
+            label: "Usage posture",
+            value: `${formatNumber(data.providerEntries.length)} providers / ${formatNumber(data.keyEntries.length)} keys`,
+            note: "Grouped usage is secondary here. Open Usage when rollups matter more than individual requests.",
+          },
         ],
-      })}
+        "Traffic scope summary is unavailable.",
+      )}
+      <div class="toolbar">
+        <a class="button" href="${escapeHtml(buildTrafficUrl(filters, "traffic-errors"))}">Open errors</a>
+        <a class="button button--secondary" href="${escapeHtml(buildTrafficUrl(filters, "traffic-usage"))}">Open usage</a>
+        <a class="button button--secondary" href="${escapeHtml(buildLogsUrlForRequest(filters.requestId, filters))}">Open logs</a>
+      </div>
     </div>
   `;
 }
