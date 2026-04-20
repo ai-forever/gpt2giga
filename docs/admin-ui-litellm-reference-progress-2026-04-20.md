@@ -181,3 +181,19 @@
   - `refactor: polish admin responsive shell`
 - notes:
   - Это закрывает последний запланированный slice по responsive/polish sync в reference plan от 2026-04-20.
+
+## 2026-04-20 20:27
+
+- phase: Post-plan bugfix
+- step: Исправлен desktop layout regression, из-за которого KPI stats strip рендерился узкой вертикальной колонкой на широких экранах.
+- status: done
+- changes:
+  - В `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/console.css` добавлен shared override для `.page-frame__stats > *`, чтобы stats cards внутри отдельной 4-column grid не наследовали `panel--span-*` поведение из 12-column page grid.
+  - Фикс применяется ко всем страницам, использующим `renderPageFrame({ stats: ... })`, без page-specific правок.
+- verification:
+  - `npm run build:admin`
+  - Browser check: `/admin` на desktop viewport `2048x1280`
+- commit:
+  - `fix: restore desktop stats strip layout`
+- notes:
+  - Корень проблемы был в конфликте между `kpi()` default class `panel panel--span-3` и `page-frame__stats`, которая использует собственную 4-column grid.

@@ -353,6 +353,10 @@ summary:focus-visible {
   gap: 12px;
 }
 
+.page-frame__stats > * {
+  grid-column: auto;
+}
+
 .page-toolbar {
   display: flex;
   flex-wrap: wrap;
