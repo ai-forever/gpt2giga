@@ -73,6 +73,24 @@ interface SubpageNavLink {
   page: PageId;
 }
 
+interface PageFrameOptions {
+  className?: string;
+  sections: string[];
+  stats?: string[];
+  toolbar?: string;
+}
+
+interface PageSectionOptions {
+  actions?: string;
+  body: string;
+  bodyClassName?: string;
+  className?: string;
+  description?: string;
+  eyebrow?: string;
+  title: string;
+  toolbar?: string;
+}
+
 export function banner(message: string, tone: "info" | "warn" | "danger" = "info"): string {
   const toneClass =
     tone === "danger" ? "banner banner--danger" : tone === "warn" ? "banner banner--warn" : "banner";
@@ -97,6 +115,55 @@ export function kpi(label: string, value: string | number, className = "panel pa
         <span class="metric__value">${escapeHtml(value)}</span>
       </div>
     </article>
+  `;
+}
+
+export function renderPageFrame(options: PageFrameOptions): string {
+  const className = ["page-frame", options.className].filter(Boolean).join(" ");
+  return `
+    <div class="${escapeHtml(className)}">
+      ${
+        options.stats?.length
+          ? `
+              <section class="page-frame__stats">
+                ${options.stats.join("")}
+              </section>
+            `
+          : ""
+      }
+      ${
+        options.toolbar
+          ? `
+              <section class="page-toolbar">
+                ${options.toolbar}
+              </section>
+            `
+          : ""
+      }
+      ${options.sections.join("")}
+    </div>
+  `;
+}
+
+export function renderPageSection(options: PageSectionOptions): string {
+  const className = ["page-section", options.className].filter(Boolean).join(" ");
+  const bodyClassName = ["page-section__body", options.bodyClassName].filter(Boolean).join(" ");
+
+  return `
+    <section class="${escapeHtml(className)}">
+      <div class="page-section__header">
+        <div class="page-section__header-copy">
+          ${options.eyebrow ? `<span class="eyebrow">${escapeHtml(options.eyebrow)}</span>` : ""}
+          <h3 class="page-section__title">${escapeHtml(options.title)}</h3>
+          ${options.description ? `<p class="muted">${escapeHtml(options.description)}</p>` : ""}
+        </div>
+        ${options.actions ? `<div class="page-section__header-actions">${options.actions}</div>` : ""}
+      </div>
+      ${options.toolbar ? `<div class="page-toolbar page-toolbar--section">${options.toolbar}</div>` : ""}
+      <div class="${escapeHtml(bodyClassName)}">
+        ${options.body}
+      </div>
+    </section>
   `;
 }
 
@@ -586,15 +653,16 @@ export function renderControlPlaneSectionStatus({
 }
 
 export function renderLoadingGrid(): string {
-  return `
-    <article class="panel panel--span-12">
-      <div class="stack">
-        <span class="eyebrow">Loading</span>
-        <h3>Collecting console data…</h3>
-        <p class="muted">The page is fetching runtime and control-plane state.</p>
-      </div>
-    </article>
-  `;
+  return renderPageFrame({
+    sections: [
+      renderPageSection({
+        eyebrow: "Loading",
+        title: "Collecting console data…",
+        description: "The page is fetching runtime and control-plane state.",
+        body: "",
+      }),
+    ],
+  });
 }
 
 function formatDiffValue(value: unknown): string {

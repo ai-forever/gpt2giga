@@ -6,6 +6,8 @@ import {
   renderFilterSelectOptions,
   renderFormSection,
   renderGuideLinks,
+  renderPageFrame,
+  renderPageSection,
   renderStatLines,
   renderStaticSelectOptions,
 } from "../../templates.js";
@@ -68,100 +70,131 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
   const errorLookup = indexEventsByRequestId(data.errorEvents);
   const streamState = createLogsStreamState();
 
-  return `
-    ${kpi("Tail lines", filters.lines || DEFAULT_LINES)}
-    ${kpi("Matching lines", countMatchingLines(rawLogLines, filters))}
-    ${kpi("Recent errors", data.errorEvents.length)}
-    ${kpi("Recent requests", data.requestEvents.length)}
-    ${card(
-      "Workflow",
-      renderLogsWorkflowGuide(filters),
-      "panel panel--span-12 panel--measure",
-    )}
-    ${card(
-      "Scope",
-      renderLogsFiltersForm(data, filters),
-      "panel panel--span-8 panel--measure",
-    )}
-    ${card(
-      "Posture",
-      renderLogsInspector(data, filters, rawLogLines),
-      "panel panel--span-4 panel--aside",
-    )}
-    ${card(
-      "Rendered log tail",
-      `
-        <div class="surface surface--dark">
-          <div class="stack">
-            <div class="surface__header">
+  return renderPageFrame({
+    stats: [
+      kpi("Tail lines", filters.lines || DEFAULT_LINES),
+      kpi("Matching lines", countMatchingLines(rawLogLines, filters)),
+      kpi("Recent errors", data.errorEvents.length),
+      kpi("Recent requests", data.requestEvents.length),
+    ],
+    sections: [
+      renderPageSection({
+        eyebrow: "Scope",
+        title: "Filter and pin the current investigation",
+        description:
+          "Shape the tail and event scope together before starting live stream work or opening raw diagnostics.",
+        bodyClassName: "page-grid",
+        body: `
+          ${card(
+            "Workflow",
+            renderLogsWorkflowGuide(filters),
+            "panel panel--span-12 panel--measure",
+          )}
+          ${card(
+            "Scope",
+            renderLogsFiltersForm(data, filters),
+            "panel panel--span-8 panel--measure",
+          )}
+          ${card(
+            "Posture",
+            renderLogsInspector(data, filters, rawLogLines),
+            "panel panel--span-4 panel--aside",
+          )}
+        `,
+      }),
+      renderPageSection({
+        eyebrow: "Workspace",
+        title: "Tail workspace",
+        description:
+          "Keep rendered output, live stream controls, and request extraction on one working surface.",
+        bodyClassName: "page-grid",
+        body: `
+          ${card(
+            "Rendered log tail",
+            `
+              <div class="surface surface--dark">
+                <div class="stack">
+                  <div class="surface__header">
+                    <div class="stack">
+                      <h4>Rendered output</h4>
+                      <p class="muted">Read the rendered tail first. Open diagnostics or raw snapshots only after one request scope is clear.</p>
+                    </div>
+                    <div class="surface__meta">
+                      <span class="pill" id="logs-match-count">${escapeHtml(
+                        `${countMatchingLines(rawLogLines, filters)} matches`,
+                      )}</span>
+                    </div>
+                  </div>
+                  <pre class="code-block code-block--tall" id="log-output">${escapeHtml(
+                    formatRenderedLogOutput(rawLogLines, filters),
+                  )}</pre>
+                </div>
+              </div>
+            `,
+            "panel panel--span-8",
+          )}
+          ${card(
+            "Live stream",
+            renderLogsStreamPanel(streamState, rawLogLines.length),
+            "panel panel--span-4 panel--aside",
+          )}
+          ${card(
+            "Tail context",
+            `
               <div class="stack">
-                <h4>Rendered output</h4>
-                <p class="muted">Read the rendered tail first. Open diagnostics or raw snapshots only after one request scope is clear.</p>
+                <p class="muted">
+                  Extract request ids only after the current scope is narrow enough to help.
+                </p>
+                <div id="logs-tail-context">
+                  ${renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup), filters)}
+                </div>
               </div>
-              <div class="surface__meta">
-                <span class="pill" id="logs-match-count">${escapeHtml(
-                  `${countMatchingLines(rawLogLines, filters)} matches`,
-                )}</span>
-              </div>
-            </div>
-            <pre class="code-block code-block--tall" id="log-output">${escapeHtml(
-              formatRenderedLogOutput(rawLogLines, filters),
-            )}</pre>
-          </div>
-        </div>
-      `,
-      "panel panel--span-8",
-    )}
-    ${card(
-      "Live stream",
-      renderLogsStreamPanel(streamState, rawLogLines.length),
-      "panel panel--span-4 panel--aside",
-    )}
-    ${card(
-      "Tail context",
-      `
-        <div class="stack">
-          <p class="muted">
-            Extract request ids only after the current scope is narrow enough to help.
-          </p>
-          <div id="logs-tail-context">
-            ${renderTailContextTable(buildTailContextRows(rawLogLines, filters, requestLookup, errorLookup), filters)}
-          </div>
-        </div>
-      `,
-      "panel panel--span-8",
-    )}
-    ${card(
-      "Guides",
-      renderGuideLinks(
-        [
-          {
-            label: "Logs deep-dive guide",
-            href: OPERATOR_GUIDE_LINKS.logs,
-            note: "Request-pinned tail inspection and live streaming.",
-          },
-          {
-            label: "Traffic workflow guide",
-            href: OPERATOR_GUIDE_LINKS.traffic,
-            note: "Step back when you need the broader request summary.",
-          },
-          {
-            label: "Troubleshooting handoff map",
-            href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Cross-page escalation map.",
-          },
-        ],
-        {
-          compact: true,
-          collapsibleSummary: "Operator guides",
-          intro: filters.requestId ? "Open only if the pinned request still needs a handoff." : "Open only if this scope still needs a handoff.",
-        },
-      ),
-      "panel panel--span-4 panel--aside",
-    )}
-    ${card("Recent errors", renderErrorRows(data.errorEvents, filters), "panel panel--span-6")}
-    ${card("Recent requests", renderRequestRows(data.requestEvents, filters), "panel panel--span-6")}
-  `;
+            `,
+            "panel panel--span-8",
+          )}
+          ${card(
+            "Guides",
+            renderGuideLinks(
+              [
+                {
+                  label: "Logs deep-dive guide",
+                  href: OPERATOR_GUIDE_LINKS.logs,
+                  note: "Request-pinned tail inspection and live streaming.",
+                },
+                {
+                  label: "Traffic workflow guide",
+                  href: OPERATOR_GUIDE_LINKS.traffic,
+                  note: "Step back when you need the broader request summary.",
+                },
+                {
+                  label: "Troubleshooting handoff map",
+                  href: OPERATOR_GUIDE_LINKS.troubleshooting,
+                  note: "Cross-page escalation map.",
+                },
+              ],
+              {
+                compact: true,
+                collapsibleSummary: "Operator guides",
+                intro: filters.requestId ? "Open only if the pinned request still needs a handoff." : "Open only if this scope still needs a handoff.",
+              },
+            ),
+            "panel panel--span-4 panel--aside",
+          )}
+        `,
+      }),
+      renderPageSection({
+        eyebrow: "Recent events",
+        title: "Recent request and error context",
+        description:
+          "Use these panels to compare the current tail scope against structured request and error rows before escalating further.",
+        bodyClassName: "page-grid",
+        body: `
+          ${card("Recent errors", renderErrorRows(data.errorEvents, filters), "panel panel--span-6")}
+          ${card("Recent requests", renderRequestRows(data.requestEvents, filters), "panel panel--span-6")}
+        `,
+      }),
+    ],
+  });
 }
 
 function renderLogsFiltersForm(data: LogsPageData, filters: LogsFilters): string {

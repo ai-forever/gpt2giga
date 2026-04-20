@@ -1,6 +1,6 @@
 import { pathForPage, subpagesFor } from "../../routes.js";
 import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
-import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderFormSection, renderGuideLinks, renderStaticSelectOptions, renderStatLines, renderSubpageNav, renderWorkflowCard, } from "../../templates.js";
+import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderFormSection, renderGuideLinks, renderPageFrame, renderPageSection, renderStaticSelectOptions, renderStatLines, renderSubpageNav, renderWorkflowCard, } from "../../templates.js";
 import { asArray, asRecord, escapeHtml, formatNumber, formatTimestamp } from "../../utils.js";
 import { buildLogsUrlForRequest, buildTrafficScopeSummary, buildTrafficSelectionSummary, buildTrafficUrl, renderErrorRows, renderRequestRows, renderTrafficSelectionActions, renderUsageKeyRows, renderUsageProviderRows, } from "./serializers.js";
 const PREVIEW_LIMIT = 4;
@@ -28,14 +28,41 @@ export function renderTrafficHeroActions(page, filters) {
 export function renderTrafficPage(page, data, filters) {
     const requestPinned = Boolean(filters.requestId);
     const scopeSummary = buildTrafficScopeSummary(filters, data.requestEvents, data.errorEvents, data.providerEntries, data.providerSummary);
-    return `
-    ${kpi(requestPinned ? "Pinned requests" : "Requests", formatNumber(scopeSummary.requestCount))}
-    ${kpi(requestPinned ? "Pinned errors" : "Errors", formatNumber(scopeSummary.errorCount))}
-    ${kpi(requestPinned ? "Pinned tokens" : "Tokens", formatNumber(scopeSummary.totalTokens))}
-    ${kpi(requestPinned ? "Pinned providers" : "Providers", formatNumber(scopeSummary.providerCount))}
-    ${card("Traffic navigation", renderTrafficNavigation(page, filters), "panel panel--span-12")}
-    ${renderTrafficSurface(page, data, filters, requestPinned)}
-  `;
+    return renderPageFrame({
+        stats: [
+            kpi(requestPinned ? "Pinned requests" : "Requests", formatNumber(scopeSummary.requestCount)),
+            kpi(requestPinned ? "Pinned errors" : "Errors", formatNumber(scopeSummary.errorCount)),
+            kpi(requestPinned ? "Pinned tokens" : "Tokens", formatNumber(scopeSummary.totalTokens)),
+            kpi(requestPinned ? "Pinned providers" : "Providers", formatNumber(scopeSummary.providerCount)),
+        ],
+        sections: [
+            renderPageSection({
+                eyebrow: "Surface map",
+                title: "Traffic lanes",
+                description: requestPinned
+                    ? "Stay pinned to one request while switching between summary, request, error, and usage lanes."
+                    : "Choose the lane that matches the current question, then keep filters stable while drilling deeper.",
+                body: renderTrafficNavigation(page, filters),
+            }),
+            renderPageSection({
+                eyebrow: page === "traffic" ? "Summary" : "Operational lane",
+                title: page === "traffic"
+                    ? "Traffic summary and handoff"
+                    : page === "traffic-requests"
+                        ? "Request-first traffic view"
+                        : page === "traffic-errors"
+                            ? "Error-first traffic view"
+                            : "Usage-first traffic view",
+                description: page === "traffic"
+                    ? "Keep the overview broad until one lane clearly becomes primary."
+                    : page === "traffic-usage"
+                        ? "Grouped usage stays aggregate even when request pinning is active."
+                        : "Filters, table, and inspector stay on one surface so the next handoff remains obvious.",
+                bodyClassName: "page-grid",
+                body: renderTrafficSurface(page, data, filters, requestPinned),
+            }),
+        ],
+    });
 }
 function renderTrafficSurface(page, data, filters, requestPinned) {
     if (page === "traffic-requests") {

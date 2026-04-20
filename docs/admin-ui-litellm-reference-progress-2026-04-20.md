@@ -45,3 +45,20 @@
   - `feat: refresh admin shell and surface navigation`
 - notes:
   - Это первый slice только для shell/navigation. Внутренние layouts `Overview`, `Keys`, `Traffic`, `Logs`, `Providers`, `Playground` пока не перерабатывались.
+
+## 2026-04-20 16:15
+
+- phase: Phase 2. Shared primitives
+- step: Добавлен единый page frame и на него переведены `Overview`, `Keys`, `Traffic`, `Logs`, `Providers`.
+- status: done
+- changes:
+  - В `gpt2giga/frontend/admin/templates.ts` добавлены shared primitives `renderPageFrame` и `renderPageSection`, а loading-state переведен на тот же layout language.
+  - В `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/console.css` добавлены общие стили для page frame, section headers, stats strip и section-level toolbar.
+  - `Overview`, `Keys`, `Traffic`, `Logs`, `Providers` перегруппированы в повторяемые frame sections вместо ad-hoc плоской сетки панелей, при этом интерактивная логика и API handoff не менялись.
+  - После `npm run build:admin` обновлены собранные admin assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
+- verification:
+  - `npm run build:admin`
+- commit:
+  - `refactor: add shared admin page frames`
+- notes:
+  - Этот slice стандартизирует layout language для основных operational surfaces, но не переводит их полностью в table-first/tool-first режим; это остается отдельным следующим шагом плана.
