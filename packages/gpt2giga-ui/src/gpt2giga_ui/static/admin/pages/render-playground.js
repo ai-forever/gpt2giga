@@ -1,13 +1,13 @@
 import { bindPlaygroundPage } from "./playground/bindings.js";
 import { buildRequestFromPreset } from "./playground/serializers.js";
-import { DEFAULT_PLAYGROUND_PRESET } from "./playground/state.js";
+import { DEFAULT_PLAYGROUND_PRESET, PLAYGROUND_PRESETS, } from "./playground/state.js";
 import { renderPlaygroundHeroActions, renderPlaygroundPage, resolvePlaygroundElements, } from "./playground/view.js";
 export async function renderPlayground(app, token) {
     const setup = await app.api.json("/admin/api/setup");
     if (!app.isCurrentRender(token)) {
         return;
     }
-    const initialRequest = buildRequestFromPreset(DEFAULT_PLAYGROUND_PRESET);
+    const initialRequest = buildRequestFromPreset(resolveInitialPlaygroundPreset(window.location));
     app.setHeroActions(renderPlaygroundHeroActions());
     app.setContent(renderPlaygroundPage(setup, initialRequest));
     const elements = resolvePlaygroundElements(app.pageContent);
@@ -20,4 +20,11 @@ export async function renderPlayground(app, token) {
         setup,
         token,
     });
+}
+function resolveInitialPlaygroundPreset(location) {
+    const presetId = new URLSearchParams(location.search).get("preset")?.trim();
+    if (!presetId) {
+        return DEFAULT_PLAYGROUND_PRESET;
+    }
+    return PLAYGROUND_PRESETS.find((preset) => preset.id === presetId) ?? DEFAULT_PLAYGROUND_PRESET;
 }

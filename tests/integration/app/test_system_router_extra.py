@@ -336,6 +336,24 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert "provider-surface-diagnostics" in docs_links_asset.text
 
 
+def test_admin_ui_assets_include_provider_playground_preset_handoff():
+    client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
+
+    providers_asset = client.get("/admin/assets/admin/pages/render-providers.js")
+    render_playground_asset = client.get(
+        "/admin/assets/admin/pages/render-playground.js"
+    )
+
+    assert providers_asset.status_code == 200
+    assert "openai-chat-hello" in providers_asset.text
+    assert "anthropic-messages" in providers_asset.text
+    assert "gemini-stream" in providers_asset.text
+
+    assert render_playground_asset.status_code == 200
+    assert 'get("preset")' in render_playground_asset.text
+    assert "PLAYGROUND_PRESETS.find" in render_playground_asset.text
+
+
 def test_admin_ui_assets_include_polished_keys_and_playground_copy():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 

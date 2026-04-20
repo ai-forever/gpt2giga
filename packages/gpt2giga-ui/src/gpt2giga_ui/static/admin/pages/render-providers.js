@@ -25,7 +25,7 @@ export async function renderProviders(app, token) {
     const leadProvider = [...enabledProviderRows].sort((left, right) => Number(right.route_count ?? 0) - Number(left.route_count ?? 0))[0];
     const leadProviderName = String(leadProvider?.name ?? "");
     const warnings = buildProviderWarnings(enabledProviderRows.length, backend);
-    const smokeHref = pathForPage("playground");
+    const smokeHref = buildPlaygroundUrlForProvider(leadProviderName);
     const trafficHref = buildTrafficUrlForProvider(leadProviderName);
     const logsHref = buildLogsUrlForProvider(leadProviderName);
     app.setHeroActions(`
@@ -275,7 +275,7 @@ function buildProviderInventoryRows(rows) {
             `<strong>${escapeHtml(enabled ? "Smoke in playground" : "Enable in Settings")}</strong><br /><span class="muted">${escapeHtml(enabled ? "Validate request flow in Playground or Traffic." : "Restore auth and provider posture first.")}</span>`,
             `
         <div class="toolbar">
-          <a class="button button--secondary" href="/admin/playground">Playground</a>
+          <a class="button button--secondary" href="${escapeHtml(buildPlaygroundUrlForProvider(providerName))}">Playground</a>
           <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForProvider(providerName))}">Traffic</a>
         </div>
       `,
@@ -377,6 +377,15 @@ function readStringList(value) {
 function displayName(row) {
     return String(row.display_name ?? row.name ?? "unknown");
 }
+function buildPlaygroundUrlForProvider(providerName) {
+    const presetId = resolvePlaygroundPresetIdForProvider(providerName);
+    if (!presetId) {
+        return pathForPage("playground");
+    }
+    const params = new URLSearchParams();
+    params.set("preset", presetId);
+    return `${pathForPage("playground")}?${params.toString()}`;
+}
 function buildTrafficUrlForProvider(providerName) {
     const params = new URLSearchParams();
     if (providerName.trim()) {
@@ -392,4 +401,20 @@ function buildLogsUrlForProvider(providerName) {
     }
     const query = params.toString();
     return query ? `/admin/logs?${query}` : "/admin/logs";
+}
+function resolvePlaygroundPresetIdForProvider(providerName) {
+    const normalizedName = providerName.trim().toLowerCase();
+    if (!normalizedName) {
+        return null;
+    }
+    if (normalizedName.includes("anthropic")) {
+        return "anthropic-messages";
+    }
+    if (normalizedName.includes("gemini")) {
+        return "gemini-stream";
+    }
+    if (normalizedName.includes("openai")) {
+        return "openai-chat-hello";
+    }
+    return null;
 }

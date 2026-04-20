@@ -60,7 +60,7 @@ export async function renderProviders(app: AdminApp, token: number): Promise<voi
   )[0];
   const leadProviderName = String(leadProvider?.name ?? "");
   const warnings = buildProviderWarnings(enabledProviderRows.length, backend);
-  const smokeHref = pathForPage("playground");
+  const smokeHref = buildPlaygroundUrlForProvider(leadProviderName);
   const trafficHref = buildTrafficUrlForProvider(leadProviderName);
   const logsHref = buildLogsUrlForProvider(leadProviderName);
 
@@ -410,7 +410,7 @@ function buildProviderInventoryRows(rows: ProviderRow[]): string[][] {
       )}</span>`,
       `
         <div class="toolbar">
-          <a class="button button--secondary" href="/admin/playground">Playground</a>
+          <a class="button button--secondary" href="${escapeHtml(buildPlaygroundUrlForProvider(providerName))}">Playground</a>
           <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForProvider(providerName))}">Traffic</a>
         </div>
       `,
@@ -527,6 +527,17 @@ function displayName(row: ProviderRow): string {
   return String(row.display_name ?? row.name ?? "unknown");
 }
 
+function buildPlaygroundUrlForProvider(providerName: string): string {
+  const presetId = resolvePlaygroundPresetIdForProvider(providerName);
+  if (!presetId) {
+    return pathForPage("playground");
+  }
+
+  const params = new URLSearchParams();
+  params.set("preset", presetId);
+  return `${pathForPage("playground")}?${params.toString()}`;
+}
+
 function buildTrafficUrlForProvider(providerName: string): string {
   const params = new URLSearchParams();
   if (providerName.trim()) {
@@ -543,4 +554,21 @@ function buildLogsUrlForProvider(providerName: string): string {
   }
   const query = params.toString();
   return query ? `/admin/logs?${query}` : "/admin/logs";
+}
+
+function resolvePlaygroundPresetIdForProvider(providerName: string): string | null {
+  const normalizedName = providerName.trim().toLowerCase();
+  if (!normalizedName) {
+    return null;
+  }
+  if (normalizedName.includes("anthropic")) {
+    return "anthropic-messages";
+  }
+  if (normalizedName.includes("gemini")) {
+    return "gemini-stream";
+  }
+  if (normalizedName.includes("openai")) {
+    return "openai-chat-hello";
+  }
+  return null;
 }
