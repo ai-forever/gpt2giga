@@ -207,13 +207,31 @@ def test_admin_static_assets_are_served():
     response = client.get("/admin/assets/admin/index.js")
 
     assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=300"
     assert "AdminApp" in response.text
     assert 'from "./app.js"' in response.text
 
     app_module = client.get("/admin/assets/admin/app.js")
 
     assert app_module.status_code == 200
+    assert app_module.headers["cache-control"] == "public, max-age=300"
     assert 'from "./api.js"' in app_module.text
+
+
+def test_admin_static_assets_keep_cache_headers_on_not_modified():
+    app = create_app(config=_default_config())
+    client = TestClient(app)
+
+    response = client.get("/admin/assets/admin/index.js")
+    assert response.status_code == 200
+
+    not_modified = client.get(
+        "/admin/assets/admin/index.js",
+        headers={"If-None-Match": response.headers["etag"]},
+    )
+
+    assert not_modified.status_code == 304
+    assert not_modified.headers["cache-control"] == "public, max-age=300"
 
 
 def test_root_redirect_falls_back_to_docs_when_ui_is_disabled():

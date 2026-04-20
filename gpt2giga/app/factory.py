@@ -1,12 +1,14 @@
 """FastAPI application factory and HTTP wiring."""
 
+import os
 from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI
+from starlette.datastructures import Headers
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse, RedirectResponse
-from starlette.staticfiles import StaticFiles
+from starlette.staticfiles import NotModifiedResponse, StaticFiles
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
 from gpt2giga.api.admin.access import build_admin_access_verifier
@@ -32,6 +34,30 @@ from gpt2giga.core.config.control_plane import (
     requires_admin_bootstrap,
 )
 from gpt2giga.providers import iter_enabled_provider_descriptors
+
+_ADMIN_ASSETS_CACHE_CONTROL = "public, max-age=300"
+
+
+class AdminStaticFiles(StaticFiles):
+    """Serve admin UI assets with an explicit short-lived cache policy."""
+
+    def file_response(
+        self,
+        full_path: os.PathLike[str] | str,
+        stat_result: os.stat_result,
+        scope,
+        status_code: int = 200,
+    ):
+        request_headers = Headers(scope=scope)
+        response = FileResponse(
+            full_path,
+            status_code=status_code,
+            stat_result=stat_result,
+            headers={"Cache-Control": _ADMIN_ASSETS_CACHE_CONTROL},
+        )
+        if self.is_not_modified(response.headers, request_headers):
+            return NotModifiedResponse(response.headers)
+        return response
 
 
 def _build_cors_options(config) -> tuple[list[str], list[str], list[str], bool]:
@@ -74,7 +100,7 @@ def _mount_admin_assets(app: FastAPI, *, assets_dir: Path | None) -> None:
         return
     app.mount(
         "/admin/assets",
-        StaticFiles(directory=assets_dir),
+        AdminStaticFiles(directory=assets_dir),
         name="admin-assets",
     )
 
