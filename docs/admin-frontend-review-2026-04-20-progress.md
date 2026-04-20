@@ -25,8 +25,8 @@
 |---|---|---|---|---|
 | 0. Проверка `/admin` route | `done` | Проверка прямого входа, refresh, history, чистого состояния браузера | Route smoke / browser pass | `ef896fb docs: record admin route verification` |
 | 1. Playground above-the-fold | `done` | Уплотнение верхнего слоя и поднятие `Request controls` | Desktop + mobile visual pass | `2af58a3 refactor: tighten playground above the fold` |
-| 2. Редактура copy | `done` | Сокращение повторов и explanatory copy | UI review по затронутым страницам | `pending` |
-| 3. Визуальная иерархия | `todo` | Primary/secondary states, warning/danger emphasis | Visual regression pass | — |
+| 2. Редактура copy | `done` | Сокращение повторов и explanatory copy | UI review по затронутым страницам | `190f94d refactor: trim admin console copy` |
+| 3. Визуальная иерархия | `done` | Primary/secondary states, warning/danger emphasis | Visual regression pass | `pending` |
 | 4. Mobile и navigation | `todo` | Responsive navigation и длина mobile flow | Mobile viewport pass | — |
 | 5. Верхний слой shell | `todo` | Top bar, rail, browser keys, hero-actions | Shell walkthrough | — |
 | 6. Финальный QA | `todo` | Финальный проход и хвосты | Targeted QA + quality checks | — |
@@ -103,6 +103,30 @@ Commit:
 Остаточные риски:
 - Часть shell-copy вне текущих страниц всё ещё остаётся более многословной; это уже не блокер текущего среза.
 - Следующий срез про визуальную иерархию всё ещё нужен, потому что даже после сокращения текста primary/secondary веса спорят между собой.
+
+Commit:
+- `190f94d refactor: trim admin console copy`
+
+#### Срез 3. Визуальная иерархия
+
+Статус:
+- `done`
+
+Что сделано:
+- Разведён вес `button` и `button--secondary`, чтобы primary actions быстрее отделялись от secondary controls.
+- Усилены `banner`, `button--danger`, `pill--warn`, а также diagnostic workflow cards через workflow-specific accents.
+- Ослаблены вторичные контейнеры (`panel--aside`, `details-disclosure`, базовые `pill`), чтобы главный рабочий сценарий считывался выше.
+- Обновлены shipped assets: `templates.js` и `console.css`.
+
+Что проверено:
+- `npm run build:admin`
+- Reload без cache и browser-проход по `Overview`, `Playground`, `System`
+- В headless Chrome на проверенных страницах не появилось console `error`/`warn`
+- В viewport screenshots подтверждены: более заметные warning banners, более сильный primary CTA и более спокойные secondary cards/disclosures
+
+Остаточные риски:
+- Mobile-ветка ещё не перепроверена после новых CSS-акцентов; это пересекается со следующим срезом про mobile/navigation.
+- Верхний слой shell всё ещё перегружен по ролям, но это уже предмет отдельного `Среза 5`.
 
 Commit:
 - `pending`

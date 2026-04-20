@@ -206,7 +206,11 @@ export function renderSetupSteps(steps) {
 }
 export function renderWorkflowCard(options) {
     const workflow = WORKFLOW_META[options.workflow];
-    const className = ["workflow-card", options.compact ? "workflow-card--compact" : ""]
+    const className = [
+        "workflow-card",
+        `workflow-card--${options.workflow}`,
+        options.compact ? "workflow-card--compact" : "",
+    ]
         .filter(Boolean)
         .join(" ");
     return `
