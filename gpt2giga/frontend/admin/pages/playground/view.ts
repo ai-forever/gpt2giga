@@ -17,6 +17,7 @@ import {
   escapeHtml,
   formatBytes,
   formatDurationMs,
+  formatNumber,
 } from "../../utils.js";
 import type { PlaygroundPageState, PlaygroundRequest, RunPhase } from "./state.js";
 import {
@@ -480,6 +481,12 @@ export function updatePlaygroundRunPanels(options: {
   const { elements, state } = options;
   const { activeController, runState } = state;
 
+  elements.submitButton.disabled = activeController !== null;
+  if (elements.stopButton) {
+    elements.stopButton.disabled = activeController === null;
+    elements.stopButton.textContent = "Stop request";
+  }
+
   elements.statusPill.innerHTML = renderPhasePill(runState.phase);
   elements.outputMeta.innerHTML = pill(
     runState.assistantOutput.trim()
@@ -514,6 +521,9 @@ export function updatePlaygroundRunPanels(options: {
     },
     { label: "Bytes", value: formatBytes(runState.bytesReceived) },
     { label: "Chunks", value: String(runState.chunkCount) },
+    { label: "Input tokens", value: formatTokenCount(runState.tokenUsage.inputTokens) },
+    { label: "Output tokens", value: formatTokenCount(runState.tokenUsage.outputTokens) },
+    { label: "Total tokens", value: formatTokenCount(runState.tokenUsage.totalTokens) },
     { label: "Content type", value: runState.contentType || "n/a" },
     {
       label: "Request",
@@ -525,11 +535,6 @@ export function updatePlaygroundRunPanels(options: {
   elements.assistantOutput.textContent =
     runState.assistantOutput || DEFAULT_ASSISTANT_OUTPUT;
   elements.output.textContent = runState.rawOutput || DEFAULT_OUTPUT;
-  if (elements.stopButton) {
-    elements.stopButton.disabled = activeController === null;
-    elements.stopButton.textContent = "Stop request";
-  }
-  elements.submitButton.disabled = activeController !== null;
 }
 
 function renderBootstrapBanner(setup: SetupPayload, gatewayKey: string): string {
@@ -641,6 +646,10 @@ function formatStatus(statusCode: number | null, statusText: string): string {
     return "n/a";
   }
   return `${statusCode}${statusText ? ` ${statusText}` : ""}`;
+}
+
+function formatTokenCount(value: number | null): string {
+  return value === null ? "n/a" : formatNumber(value);
 }
 
 function humanizePhase(phase: RunPhase): string {

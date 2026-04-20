@@ -53,6 +53,13 @@ export const PLAYGROUND_PRESETS = [
     },
 ];
 export const DEFAULT_PLAYGROUND_PRESET = PLAYGROUND_PRESETS[0];
+export function createEmptyTokenUsage() {
+    return {
+        inputTokens: null,
+        outputTokens: null,
+        totalTokens: null,
+    };
+}
 export function createIdleRunState() {
     return {
         phase: "idle",
@@ -66,6 +73,7 @@ export function createIdleRunState() {
         bytesReceived: 0,
         chunkCount: 0,
         eventCount: 0,
+        tokenUsage: createEmptyTokenUsage(),
         assistantOutput: "",
         rawOutput: "",
         errorText: "",

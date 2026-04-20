@@ -8,12 +8,15 @@ import type {
 import {
   applyPlainResponse,
   buildGatewayHeaders,
+  extractTokenUsage,
   extractAssistantText,
   formatSseTranscript,
   isAbortError,
   mergeAssistantOutput,
+  mergeTokenUsage,
   tryParseJson,
 } from "./serializers.js";
+import { createEmptyTokenUsage } from "./state.js";
 
 interface ExecutePlaygroundRequestOptions {
   gatewayKey: string;
@@ -56,6 +59,7 @@ export async function executePlaygroundRequest(
     bytesReceived: 0,
     chunkCount: 0,
     eventCount: 0,
+    tokenUsage: createEmptyTokenUsage(),
     assistantOutput: "",
     rawOutput: "",
     errorText: "",
@@ -65,7 +69,7 @@ export async function executePlaygroundRequest(
   try {
     const response = await fetch(request.url, {
       method: "POST",
-      headers: buildGatewayHeaders(request.surface, gatewayKey),
+      headers: buildGatewayHeaders(request.surface, gatewayKey, request.stream),
       body: JSON.stringify(request.body),
       signal: state.activeController.signal,
     });
@@ -78,9 +82,12 @@ export async function executePlaygroundRequest(
     state.runState.statusText = response.statusText;
     state.runState.contentType = response.headers.get("content-type") ?? "";
 
-    if (request.stream || state.runState.contentType.includes("text/event-stream")) {
+    const shouldConsumeStream = shouldConsumeStreamResponse(response, request.stream);
+    if (shouldConsumeStream) {
       state.runState.phase = "streaming";
-      state.runState.note = "Stream opened. Waiting for events…";
+      state.runState.note = state.runState.contentType.includes("text/event-stream")
+        ? "Stream opened. Waiting for events…"
+        : "Stream requested and a chunked response started without an SSE content-type. Parsing as a stream.";
       onUpdate();
       await consumeStreamResponse(
         response,
@@ -102,6 +109,10 @@ export async function executePlaygroundRequest(
       state.runState.bytesReceived = new Blob([rawText]).size;
       state.runState.chunkCount = rawText ? 1 : 0;
       applyPlainResponse(rawText, request, state.runState);
+      if (request.stream) {
+        state.runState.note =
+          "Stream was requested, but the gateway returned a regular response body instead of SSE.";
+      }
     }
 
     if (!isCurrentRender(token) || runId !== state.activeRunId) {
@@ -175,6 +186,10 @@ async function consumeStreamResponse(
         }
 
         const payload = tryParseJson(event.data);
+        state.runState.tokenUsage = mergeTokenUsage(
+          state.runState.tokenUsage,
+          payload === null ? null : extractTokenUsage(payload),
+        );
         const textDelta = payload === null ? event.data : extractAssistantText(payload, request.surface);
         state.runState.assistantOutput = mergeAssistantOutput(
           state.runState.assistantOutput,
@@ -189,6 +204,14 @@ async function consumeStreamResponse(
     },
     signal,
   );
+}
+
+function shouldConsumeStreamResponse(
+  response: Response,
+  streamRequested: boolean,
+): boolean {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  return contentType.includes("text/event-stream") || (streamRequested && response.ok);
 }
 
 async function readSseStream(

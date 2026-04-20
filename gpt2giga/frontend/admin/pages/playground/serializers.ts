@@ -5,8 +5,13 @@ import type {
   PlaygroundRequest,
   PlaygroundRunState,
   SurfaceId,
+  PlaygroundTokenUsage,
 } from "./state.js";
-import { DEFAULT_OUTPUT, getPlaygroundFields } from "./state.js";
+import {
+  createEmptyTokenUsage,
+  DEFAULT_OUTPUT,
+  getPlaygroundFields,
+} from "./state.js";
 
 export function applyPreset(form: HTMLFormElement, preset: PlaygroundPreset): void {
   const fields = getPlaygroundFields(form);
@@ -56,12 +61,24 @@ export function applyPlainResponse(
   runState.assistantOutput =
     (parsedJson !== null ? extractAssistantText(parsedJson, request.surface) : rawText).trim() ||
     "";
+  runState.tokenUsage = mergeTokenUsage(
+    runState.tokenUsage,
+    parsedJson !== null ? extractTokenUsage(parsedJson) : null,
+  );
 }
 
-export function buildGatewayHeaders(surface: SurfaceId, gatewayKey: string): Headers {
+export function buildGatewayHeaders(
+  surface: SurfaceId,
+  gatewayKey: string,
+  stream: boolean,
+): Headers {
   const headers = new Headers({
     "Content-Type": "application/json",
   });
+
+  if (stream) {
+    headers.set("Accept", "text/event-stream");
+  }
 
   if (!gatewayKey) {
     return headers;
@@ -72,6 +89,37 @@ export function buildGatewayHeaders(surface: SurfaceId, gatewayKey: string): Hea
     headers.set("x-goog-api-key", gatewayKey);
   }
   return headers;
+}
+
+export function extractTokenUsage(payload: unknown): PlaygroundTokenUsage | null {
+  const record = asRecord(payload);
+  return (
+    extractUsageFromContainer(record) ??
+    extractUsageFromContainer(asRecord(record.response)) ??
+    extractUsageFromContainer(asRecord(record.message))
+  );
+}
+
+export function mergeTokenUsage(
+  current: PlaygroundTokenUsage,
+  next: PlaygroundTokenUsage | null,
+): PlaygroundTokenUsage {
+  if (next === null) {
+    return current;
+  }
+
+  const inputTokens = next.inputTokens ?? current.inputTokens;
+  const outputTokens = next.outputTokens ?? current.outputTokens;
+  const totalTokens =
+    next.totalTokens ??
+    current.totalTokens ??
+    (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null);
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+  };
 }
 
 export function tryParseJson(value: string): unknown | null {
@@ -347,4 +395,51 @@ function extractTextValue(value: unknown): string {
     return record.partial_json;
   }
   return "";
+}
+
+function extractUsageFromContainer(
+  container: Record<string, unknown>,
+): PlaygroundTokenUsage | null {
+  const usage = asRecord(container.usage);
+  const usageMetadata = asRecord(container.usageMetadata);
+  return normalizeTokenUsage({
+    inputTokens:
+      usage.input_tokens ??
+      usage.prompt_tokens ??
+      container.input_tokens ??
+      container.prompt_tokens ??
+      usageMetadata.promptTokenCount,
+    outputTokens:
+      usage.output_tokens ??
+      usage.completion_tokens ??
+      container.output_tokens ??
+      container.completion_tokens ??
+      usageMetadata.candidatesTokenCount,
+    totalTokens:
+      usage.total_tokens ?? container.total_tokens ?? usageMetadata.totalTokenCount,
+  });
+}
+
+function normalizeTokenUsage(candidate: {
+  inputTokens: unknown;
+  outputTokens: unknown;
+  totalTokens: unknown;
+}): PlaygroundTokenUsage | null {
+  const inputTokens = readTokenCount(candidate.inputTokens);
+  const outputTokens = readTokenCount(candidate.outputTokens);
+  const totalTokens = readTokenCount(candidate.totalTokens);
+  if (inputTokens === null && outputTokens === null && totalTokens === null) {
+    return null;
+  }
+
+  return mergeTokenUsage(createEmptyTokenUsage(), {
+    inputTokens,
+    outputTokens,
+    totalTokens,
+  });
+}
+
+function readTokenCount(value: unknown): number | null {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
 }

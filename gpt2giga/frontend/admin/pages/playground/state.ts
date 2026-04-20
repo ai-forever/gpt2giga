@@ -15,6 +15,12 @@ export interface PlaygroundRequest {
   body: Record<string, unknown>;
 }
 
+export interface PlaygroundTokenUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  totalTokens: number | null;
+}
+
 export interface PlaygroundPreset {
   id: string;
   label: string;
@@ -38,6 +44,7 @@ export interface PlaygroundRunState {
   bytesReceived: number;
   chunkCount: number;
   eventCount: number;
+  tokenUsage: PlaygroundTokenUsage;
   assistantOutput: string;
   rawOutput: string;
   errorText: string;
@@ -121,6 +128,14 @@ export const PLAYGROUND_PRESETS: PlaygroundPreset[] = [
 
 export const DEFAULT_PLAYGROUND_PRESET = PLAYGROUND_PRESETS[0]!;
 
+export function createEmptyTokenUsage(): PlaygroundTokenUsage {
+  return {
+    inputTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+  };
+}
+
 export function createIdleRunState(): PlaygroundRunState {
   return {
     phase: "idle",
@@ -134,6 +149,7 @@ export function createIdleRunState(): PlaygroundRunState {
     bytesReceived: 0,
     chunkCount: 0,
     eventCount: 0,
+    tokenUsage: createEmptyTokenUsage(),
     assistantOutput: "",
     rawOutput: "",
     errorText: "",

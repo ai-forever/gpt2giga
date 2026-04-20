@@ -1,6 +1,6 @@
 import { pathForPage } from "../../routes.js";
 import { card, kpi, pill, renderDefinitionList, renderFormSection, renderGuideLinks, renderPageFrame, renderPageSection, } from "../../templates.js";
-import { asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatBytes, formatDurationMs, } from "../../utils.js";
+import { asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatBytes, formatDurationMs, formatNumber, } from "../../utils.js";
 import { DEFAULT_ASSISTANT_OUTPUT, DEFAULT_OUTPUT, DEFAULT_PLAYGROUND_PRESET, PLAYGROUND_PRESETS, } from "./state.js";
 export function renderPlaygroundHeroActions() {
     return `
@@ -358,6 +358,11 @@ export function updatePlaygroundRequestPreview(options) {
 export function updatePlaygroundRunPanels(options) {
     const { elements, state } = options;
     const { activeController, runState } = state;
+    elements.submitButton.disabled = activeController !== null;
+    if (elements.stopButton) {
+        elements.stopButton.disabled = activeController === null;
+        elements.stopButton.textContent = "Stop request";
+    }
     elements.statusPill.innerHTML = renderPhasePill(runState.phase);
     elements.outputMeta.innerHTML = pill(runState.assistantOutput.trim()
         ? "parsed"
@@ -385,6 +390,9 @@ export function updatePlaygroundRunPanels(options) {
         },
         { label: "Bytes", value: formatBytes(runState.bytesReceived) },
         { label: "Chunks", value: String(runState.chunkCount) },
+        { label: "Input tokens", value: formatTokenCount(runState.tokenUsage.inputTokens) },
+        { label: "Output tokens", value: formatTokenCount(runState.tokenUsage.outputTokens) },
+        { label: "Total tokens", value: formatTokenCount(runState.tokenUsage.totalTokens) },
         { label: "Content type", value: runState.contentType || "n/a" },
         {
             label: "Request",
@@ -396,11 +404,6 @@ export function updatePlaygroundRunPanels(options) {
     elements.assistantOutput.textContent =
         runState.assistantOutput || DEFAULT_ASSISTANT_OUTPUT;
     elements.output.textContent = runState.rawOutput || DEFAULT_OUTPUT;
-    if (elements.stopButton) {
-        elements.stopButton.disabled = activeController === null;
-        elements.stopButton.textContent = "Stop request";
-    }
-    elements.submitButton.disabled = activeController !== null;
 }
 function renderBootstrapBanner(setup, gatewayKey) {
     const bootstrap = asRecord(setup.bootstrap);
@@ -497,6 +500,9 @@ function formatStatus(statusCode, statusText) {
         return "n/a";
     }
     return `${statusCode}${statusText ? ` ${statusText}` : ""}`;
+}
+function formatTokenCount(value) {
+    return value === null ? "n/a" : formatNumber(value);
 }
 function humanizePhase(phase) {
     if (phase === "idle") {

@@ -1,5 +1,5 @@
 import { asRecord } from "../../utils.js";
-import { DEFAULT_OUTPUT, getPlaygroundFields } from "./state.js";
+import { createEmptyTokenUsage, DEFAULT_OUTPUT, getPlaygroundFields, } from "./state.js";
 export function applyPreset(form, preset) {
     const fields = getPlaygroundFields(form);
     fields.surface.value = preset.surface;
@@ -39,11 +39,15 @@ export function applyPlainResponse(rawText, request, runState) {
     runState.assistantOutput =
         (parsedJson !== null ? extractAssistantText(parsedJson, request.surface) : rawText).trim() ||
             "";
+    runState.tokenUsage = mergeTokenUsage(runState.tokenUsage, parsedJson !== null ? extractTokenUsage(parsedJson) : null);
 }
-export function buildGatewayHeaders(surface, gatewayKey) {
+export function buildGatewayHeaders(surface, gatewayKey, stream) {
     const headers = new Headers({
         "Content-Type": "application/json",
     });
+    if (stream) {
+        headers.set("Accept", "text/event-stream");
+    }
     if (!gatewayKey) {
         return headers;
     }
@@ -52,6 +56,27 @@ export function buildGatewayHeaders(surface, gatewayKey) {
         headers.set("x-goog-api-key", gatewayKey);
     }
     return headers;
+}
+export function extractTokenUsage(payload) {
+    const record = asRecord(payload);
+    return (extractUsageFromContainer(record) ??
+        extractUsageFromContainer(asRecord(record.response)) ??
+        extractUsageFromContainer(asRecord(record.message)));
+}
+export function mergeTokenUsage(current, next) {
+    if (next === null) {
+        return current;
+    }
+    const inputTokens = next.inputTokens ?? current.inputTokens;
+    const outputTokens = next.outputTokens ?? current.outputTokens;
+    const totalTokens = next.totalTokens ??
+        current.totalTokens ??
+        (inputTokens !== null && outputTokens !== null ? inputTokens + outputTokens : null);
+    return {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+    };
 }
 export function tryParseJson(value) {
     if (!value.trim()) {
@@ -282,4 +307,38 @@ function extractTextValue(value) {
         return record.partial_json;
     }
     return "";
+}
+function extractUsageFromContainer(container) {
+    const usage = asRecord(container.usage);
+    const usageMetadata = asRecord(container.usageMetadata);
+    return normalizeTokenUsage({
+        inputTokens: usage.input_tokens ??
+            usage.prompt_tokens ??
+            container.input_tokens ??
+            container.prompt_tokens ??
+            usageMetadata.promptTokenCount,
+        outputTokens: usage.output_tokens ??
+            usage.completion_tokens ??
+            container.output_tokens ??
+            container.completion_tokens ??
+            usageMetadata.candidatesTokenCount,
+        totalTokens: usage.total_tokens ?? container.total_tokens ?? usageMetadata.totalTokenCount,
+    });
+}
+function normalizeTokenUsage(candidate) {
+    const inputTokens = readTokenCount(candidate.inputTokens);
+    const outputTokens = readTokenCount(candidate.outputTokens);
+    const totalTokens = readTokenCount(candidate.totalTokens);
+    if (inputTokens === null && outputTokens === null && totalTokens === null) {
+        return null;
+    }
+    return mergeTokenUsage(createEmptyTokenUsage(), {
+        inputTokens,
+        outputTokens,
+        totalTokens,
+    });
+}
+function readTokenCount(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
 }
