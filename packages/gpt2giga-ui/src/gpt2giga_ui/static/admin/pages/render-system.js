@@ -48,7 +48,7 @@ export async function renderSystem(app, token) {
     ${kpi("Mounted routes", formatNumber(routeRows.length))}
     ${card("Executive summary", `
         <div class="stack">
-          ${systemWarnings.length ? systemWarnings.join("") : banner("No high-signal blockers are visible in the current system snapshot.", "info")}
+          ${systemWarnings.length ? systemWarnings.join("") : banner("No high-signal blockers are visible.", "info")}
           ${renderDefinitionList([
         {
             label: "Version and mode",
@@ -86,7 +86,7 @@ export async function renderSystem(app, token) {
         title: setup.setup_complete ? "Bootstrap is stable" : "Close bootstrap gaps first",
         note: setup.setup_complete
             ? "Use Settings only for deliberate day-2 changes."
-            : "Resolve persisted config, credentials, or security posture first.",
+            : "Resolve config, credentials, or security posture first.",
         pills: [
             pill(persistence.pillLabel, persistence.tone),
             pill(gigachatAuth.pillLabel, gigachatAuth.tone),

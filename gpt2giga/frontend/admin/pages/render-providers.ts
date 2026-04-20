@@ -91,7 +91,7 @@ export async function renderProviders(app: AdminApp, token: number): Promise<voi
           eyebrow: "Operational Surface",
           title: "Provider inventory",
           description:
-            "Start from the mounted provider inventory, then move into Playground, Traffic, or Settings only for one provider family at a time.",
+            "Start from the mounted provider inventory, then move into Playground, Traffic, or Settings for one provider family at a time.",
           actions: `
             <a class="button button--secondary" href="${escapeHtml(smokeHref)}">Playground</a>
             <a class="button button--secondary" href="${escapeHtml(trafficHref)}">Traffic</a>
@@ -123,7 +123,7 @@ export async function renderProviders(app: AdminApp, token: number): Promise<voi
               "Operational summary",
               `
                 <div class="stack">
-                  ${warnings.length ? warnings.join("") : banner("Provider posture is readable. No urgent backend blockers were detected.", "info")}
+                  ${warnings.length ? warnings.join("") : banner("Provider posture is readable. No urgent backend blockers detected.", "info")}
                   ${renderStatLines(
                     [
                       {
@@ -169,7 +169,7 @@ export async function renderProviders(app: AdminApp, token: number): Promise<voi
           eyebrow: "Coverage",
           title: "Capability and route coverage",
           description:
-            "Compare capability groups against mounted route families before opening raw provider-surface diagnostics.",
+            "Compare capability groups against mounted route families before opening raw diagnostics.",
           bodyClassName: "page-grid",
           body: `
             ${card(
@@ -218,7 +218,7 @@ export async function renderProviders(app: AdminApp, token: number): Promise<voi
           eyebrow: "Diagnostics",
           title: "Backend posture and staged diagnostics",
           description:
-            "Keep backend mode summary, troubleshooting guides, and raw provider snapshots as a secondary escalation layer.",
+            "Keep backend mode summary, guides, and raw provider snapshots as a secondary layer.",
           bodyClassName: "page-grid",
           body: `
             ${card(
@@ -380,7 +380,7 @@ function renderProvidersToolbar(
   const leadProviderLabel = leadProviderName.trim() || "none";
   return `
     <div class="toolbar">
-      <span class="muted">Mounted provider families, route ownership, and backend mode posture stay on one page before you open raw diagnostics.</span>
+      <span class="muted">Mounted provider families, route ownership, and backend mode posture stay on one page before raw diagnostics.</span>
     </div>
     <div class="pill-row">
       ${pill(`Enabled ${formatNumber(enabledProviders.length)}`, enabledProviders.length ? "good" : "warn")}

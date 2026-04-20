@@ -22,7 +22,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
             renderPageSection({
                 eyebrow: "Workspace",
                 title: "Run one smoke request",
-                description: "Start with the form, keep parsed output beside it, and reopen Traffic or Logs only after the smoke request narrows the question.",
+                description: "Start with the form, keep parsed output beside it, and use Traffic or Logs after one useful smoke call.",
                 actions: `
           <a class="button button--secondary" href="${escapeHtml(pathForPage("traffic"))}">Traffic</a>
           <a class="button button--secondary" href="${escapeHtml(pathForPage("logs"))}">Logs</a>
@@ -37,9 +37,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
                     <div class="surface__header">
                       <div class="stack">
                         <h4>Parsed response</h4>
-                        <p class="muted">
-                          Keep parsed assistant text primary while transport detail stays secondary.
-                        </p>
+                        <p class="muted">Keep parsed output primary.</p>
                       </div>
                       <div class="surface__meta" id="playground-output-meta">${pill("waiting")}</div>
                     </div>
@@ -56,9 +54,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
                     <div class="surface__header">
                       <div class="stack">
                         <h4>Current run</h4>
-                        <p class="muted">
-                          Keep lifecycle and transport footprint visible while the run is active.
-                        </p>
+                        <p class="muted">Keep lifecycle and transport visible.</p>
                       </div>
                       <div class="surface__meta" id="playground-status-pill">${pill("idle")}</div>
                     </div>
@@ -76,9 +72,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
                     <div class="surface__header">
                       <div class="stack">
                         <h4>Transport state</h4>
-                        <p class="muted">
-                          Preview updates live while auth posture and transport status stay beside the form.
-                        </p>
+                        <p class="muted">Preview updates live beside the form.</p>
                       </div>
                       <div class="surface__meta" id="playground-transport-meta">${pill("idle")}</div>
                     </div>
@@ -115,7 +109,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
             renderPageSection({
                 eyebrow: "Diagnostics",
                 title: "Transcript and handoff",
-                description: "Keep the raw exchange available for debugging, but move into adjacent surfaces only after the smoke request answers the immediate question.",
+                description: "Keep the raw exchange available, but move into adjacent surfaces only after the smoke request narrows the question.",
                 actions: `
           <a class="button button--secondary" href="${escapeHtml(pathForPage("setup"))}">Setup</a>
           <a class="button button--secondary" href="${escapeHtml(pathForPage("keys"))}">API Keys</a>
@@ -128,9 +122,7 @@ export function renderPlaygroundPage(setup, initialRequest) {
                   <div class="surface__header">
                     <div class="stack">
                       <h4>Raw transport transcript</h4>
-                      <p class="muted">
-                        Use the full response body and SSE transcript only when parsed output and run summary are not enough.
-                      </p>
+                      <p class="muted">Open full body and SSE only when parsed output is not enough.</p>
                     </div>
                   </div>
                 </div>
@@ -142,24 +134,24 @@ export function renderPlaygroundPage(setup, initialRequest) {
                         label: setup.gigachat_ready ? "Traffic inventory" : "Setup",
                         href: setup.gigachat_ready ? pathForPage("traffic") : pathForPage("setup"),
                         note: setup.gigachat_ready
-                            ? "Reopen recent request and error inventory after one smoke call proves the route you need."
-                            : "Finish upstream auth and bootstrap posture before treating smoke output as evidence.",
+                            ? "Reopen request and error inventory after one useful smoke call."
+                            : "Finish upstream auth and bootstrap posture first.",
                     },
                     {
                         label: "Logs",
                         href: pathForPage("logs"),
-                        note: "Switch here when parsed output is insufficient and the transcript still needs request-level correlation.",
+                        note: "Switch here when parsed output is insufficient and you need request-level correlation.",
                     },
                     {
                         label: "API Keys",
                         href: pathForPage("keys"),
-                        note: "Use this only when the smoke request is blocked by proxy auth posture or scoped-key gaps.",
+                        note: "Use this only when proxy auth or scoped keys block the smoke request.",
                     },
                 ], {
                     compact: true,
                     intro: bootstrapRequired
-                        ? "Bootstrap mode is active, so keep auth posture visible while interpreting smoke results."
-                        : "Use adjacent surfaces only after the playground already narrowed the question.",
+                        ? "Bootstrap mode is active, so keep auth posture visible."
+                        : "Use adjacent surfaces only after playground narrows the question.",
                 }), "panel panel--span-4 panel--aside")}
         `,
             }),
@@ -170,7 +162,7 @@ function renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequ
     return `
     <div class="playground-toolbar">
       <p class="playground-toolbar__lead">
-        Smoke one route, keep auth posture visible, and move into Traffic or Logs only after the parsed response stops being enough.
+        Smoke one route first. Use Traffic or Logs only after the response stops being enough.
       </p>
       <div class="playground-toolbar__meta">
         <div class="playground-toolbar__stats" aria-label="Playground context">
@@ -203,7 +195,7 @@ function renderPlaygroundForm(initialRequest) {
       <div class="playground-preset-strip">
         <div class="playground-preset-strip__header">
           <span class="eyebrow">Starting point</span>
-          <p class="muted">Pick a full request shape first, then edit fields only when the baseline route is already correct.</p>
+          <p class="muted">Pick a baseline request, then edit.</p>
         </div>
         <div class="playground-preset-strip__buttons">
           ${PLAYGROUND_PRESETS.map((preset) => `
@@ -215,11 +207,11 @@ function renderPlaygroundForm(initialRequest) {
       </div>
       <div class="form-shell__intro">
         <span class="eyebrow">Request config</span>
-        <p class="muted">Choose a route, tune prompts, and send the same scope into the response workspace.</p>
+        <p class="muted">Choose a route, tune prompts, and send.</p>
       </div>
       ${renderFormSection({
         title: "Request",
-        intro: "Keep route and model selection compact, then adjust prompts only when the preset is close.",
+        intro: "Keep route and model compact, then adjust prompts.",
         body: `
           <div class="dual-grid">
             <label class="field">

@@ -92,7 +92,7 @@ function renderSettingsHub(options) {
     ${card("Configuration map", renderSubpageNav({
         currentPage: options.currentPage,
         title: "Settings pages",
-        intro: "One settings concern per page.",
+        intro: "One concern per page.",
         items: subpagesFor(options.currentPage),
     }), "panel panel--span-12")}
     ${card("Persistence posture", `
@@ -124,7 +124,7 @@ function renderSettingsHub(options) {
     ${renderSettingsEntryCard({
         title: "Observability",
         href: "/admin/settings-observability",
-        description: "Telemetry sinks, presets, and runtime-safe changes.",
+        description: "Telemetry sinks, presets, and live-safe changes.",
         pills: [
             pill(`Telemetry: ${Boolean(options.observabilityValues.enable_telemetry) ? "on" : "off"}`, Boolean(options.observabilityValues.enable_telemetry) ? "good" : "warn"),
             pill(`Sinks: ${activeSinks.join(", ") || "none"}`),
@@ -137,7 +137,7 @@ function renderSettingsHub(options) {
     ${renderSettingsEntryCard({
         title: "GigaChat",
         href: "/admin/settings-gigachat",
-        description: "Credentials, transport, SSL posture, and connection testing.",
+        description: "Credentials, transport, SSL posture, and connection tests.",
         pills: [
             pill(gigachatAuth.pillLabel, gigachatAuth.tone),
             pill(`Model: ${String(options.gigachatValues.model ?? "n/a")}`),
@@ -147,7 +147,7 @@ function renderSettingsHub(options) {
     ${renderSettingsEntryCard({
         title: "Security",
         href: "/admin/settings-security",
-        description: "Gateway auth, logs access, CORS, and governance controls.",
+        description: "Gateway auth, logs access, CORS, and governance.",
         pills: [
             pill(`API key auth: ${Boolean(options.securityValues.enable_api_key_auth) ? "on" : "off"}`, Boolean(options.securityValues.enable_api_key_auth) ? "good" : "warn"),
             pill(`Logs allowlist: ${asArray(options.securityValues.logs_ip_allowlist).length || 0}`),
@@ -207,7 +207,7 @@ function renderFocusedSettingsPage(options) {
 function renderSettingsMainCard(options) {
     if (options.activeSection === "application") {
         return card("Application", renderApplicationSection({
-            bannerMessage: "Saves the target config. Restart-sensitive fields wait for restart.",
+            bannerMessage: "Saves target config. Restart-sensitive fields wait for restart.",
             formId: "application-form",
             statusId: "settings-application-status",
             submitLabel: "Save application settings",
@@ -238,7 +238,7 @@ function renderSettingsMainCard(options) {
     }
     if (options.activeSection === "security") {
         return card("Security", renderSecuritySection({
-            bannerMessage: "Saves the target config first. Restart-sensitive fields wait for restart.",
+            bannerMessage: "Saves target config first. Restart-sensitive fields wait for restart.",
             formId: "security-form",
             statusId: "settings-security-status",
             submitLabel: "Save security settings",

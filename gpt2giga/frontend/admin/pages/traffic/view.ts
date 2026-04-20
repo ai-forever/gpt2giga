@@ -94,10 +94,10 @@ export function renderTrafficPage(
         title: resolveTrafficTitle(page),
         description:
           page === "traffic"
-            ? "Start with filters and recent request inventory, then drill into error or usage lanes only when the scope is clear."
+            ? "Start with filters and recent requests, then drill into errors or usage only when the scope is clear."
             : page === "traffic-usage"
-              ? "Grouped usage stays aggregate while provider and key tables remain immediately visible."
-              : "Keep filters, the primary table, and the selection inspector on the same working surface.",
+              ? "Grouped usage stays aggregate while provider and key tables stay visible."
+              : "Keep filters, the primary table, and the inspector on one surface.",
         actions: renderTrafficSectionActions(page, filters),
         bodyClassName: "page-grid",
         body: renderTrafficSurface(page, data, filters, requestPinned),
@@ -123,7 +123,7 @@ function renderTrafficToolbar(
       title: "Traffic",
       intro: requestPinned
         ? "One request is pinned across requests, errors, and logs."
-        : "Switch lanes without dropping the current scope.",
+        : "Switch lanes without losing scope.",
       items: subpagesFor(page),
       hrefForPage: (target) => buildTrafficUrl(filters, target as TrafficPage),
     })}
@@ -206,7 +206,7 @@ function renderTrafficOverviewPage(
       `
         <div class="stack">
           ${renderRequestRows(data.requestEvents, filters)}
-          <p class="field-note">Requests stay primary on the summary page. Use the row actions to pin one request or reopen Logs with the same scope.</p>
+          <p class="field-note">Requests stay primary here. Pin one request or reopen Logs with the same scope.</p>
         </div>
       `,
       "panel panel--span-8 panel--measure",
@@ -266,8 +266,8 @@ function renderTrafficOverviewPage(
         filters,
         summaryIntro:
           requestPinned
-            ? "Pinned request context is active. Inspect the selected row here before switching lanes."
-            : "Use the summary page to inspect one row, then move into a dedicated lane only when needed.",
+            ? "Pinned request context is active. Inspect it here before switching lanes."
+            : "Inspect one row here, then move into a dedicated lane only when needed.",
         statItems: [
           { label: "Request rows", value: formatNumber(data.requestEvents.length) },
           { label: "Error rows", value: formatNumber(data.errorEvents.length) },
@@ -290,17 +290,17 @@ function renderTrafficOverviewPage(
           {
             label: "Traffic workflow guide",
             href: OPERATOR_GUIDE_LINKS.traffic,
-            note: "Follow the summary-first request workflow and know when to stay broad versus when to pin one request.",
+            note: "Follow the summary-first flow and know when to pin one request.",
           },
           {
             label: "Logs deep-dive guide",
             href: OPERATOR_GUIDE_LINKS.logs,
-            note: "Open this once the traffic surface already narrowed the issue to one request or one failure pattern.",
+            note: "Open this once traffic already narrowed the issue.",
           },
           {
             label: "Troubleshooting handoff map",
             href: OPERATOR_GUIDE_LINKS.troubleshooting,
-            note: "Use the escalation map when the current traffic lane still does not clearly point at the next surface.",
+            note: "Use when the current lane still does not point clearly at the next surface.",
           },
         ],
         {
@@ -385,7 +385,7 @@ function renderTrafficRequestsPage(
           {
             label: "Logs deep-dive guide",
             href: OPERATOR_GUIDE_LINKS.logs,
-            note: "Escalate here only after one request row already proved that raw logs are the next step.",
+            note: "Escalate only after one request row proves raw logs are next.",
           },
         ],
         {
@@ -473,7 +473,7 @@ function renderTrafficErrorsPage(
           {
             label: "Logs deep-dive guide",
             href: OPERATOR_GUIDE_LINKS.logs,
-            note: "Open this when the error row is already isolated and only raw log evidence is missing.",
+            note: "Open this when the error row is isolated and only raw log evidence is missing.",
           },
         ],
         {
@@ -512,8 +512,8 @@ function renderTrafficUsagePage(
         filters,
         summaryIntro:
           requestPinned
-            ? "Request pinning still only narrows request and error feeds. Keep usage aggregate here."
-            : "Select one provider or key row, then return to requests only when grouped usage already exposed the next target.",
+            ? "Request pinning narrows only request and error feeds. Usage stays aggregate here."
+            : "Select one provider or key row, then return to requests only when grouped usage exposed the next target.",
         statItems: [
           {
             label: "Provider rows",
@@ -533,15 +533,14 @@ function renderTrafficUsagePage(
           active_filters: filters,
           usage_summary: data.providerSummary,
         },
-        emptySelectionMessage:
-          "Select one provider or API-key row to inspect aggregate usage payload.",
+        emptySelectionMessage: "Select one provider or API-key row to inspect aggregate usage.",
       }),
       "panel panel--span-4 panel--aside",
     )}
     ${card(
       "Usage by key",
       `
-        ${requestPinned ? '<div class="banner banner--warn">Request pinning narrows recent request and error feeds only. Usage rows stay aggregate and continue following provider, model, key, and source filters.</div>' : ""}
+        ${requestPinned ? '<div class="banner banner--warn">Request pinning narrows only recent requests and errors. Usage rows stay aggregate.</div>' : ""}
         ${renderUsageKeyRows(data.keyEntries)}
       `,
       "panel panel--span-8",
@@ -563,14 +562,14 @@ function renderTrafficUsagePage(
                 label: "Best next move",
                 value: data.keyEntries.length ? "Inspect the noisiest key" : "Open request traffic",
                 note: data.keyEntries.length
-                  ? "Use the key table to see which distribution path deserves a request-level drill-down."
-                  : "No key rollups are available yet, so move back to recent requests.",
+                  ? "Use the key table to see which path deserves a request-level drill-down."
+                  : "No key rollups yet, so move back to recent requests.",
               },
               {
                 label: "Logs handoff",
                 value: filters.requestId ? "Ready for the pinned request" : "Needs one request selection",
                 note: filters.requestId
-                  ? "Open raw logs with the same request id already applied."
+                  ? "Open raw logs with the same request id applied."
                   : "Pin a request from Requests or Errors before escalating into raw logs.",
               },
             ],
@@ -586,12 +585,12 @@ function renderTrafficUsagePage(
               {
                 label: "Traffic workflow guide",
                 href: OPERATOR_GUIDE_LINKS.traffic,
-                note: "Use the grouped-usage path when the first question is where the traffic went before picking one request.",
+                note: "Use the grouped-usage path when the first question is where traffic went.",
               },
               {
                 label: "Troubleshooting handoff map",
                 href: OPERATOR_GUIDE_LINKS.troubleshooting,
-                note: "Open the escalation map once grouped usage already pointed at the next request or provider surface.",
+                note: "Open once grouped usage pointed at the next request or provider surface.",
               },
             ],
             {
@@ -794,7 +793,7 @@ function renderTrafficFilters(
               <p class="muted">
                 ${escapeHtml(
                   variant === "usage"
-                    ? "Usage stays aggregate even when a request id is pinned."
+                    ? "Usage stays aggregate even with a request pin."
                     : "Pinned request ids keep Requests, Errors, and Logs aligned.",
                 )}
               </p>
@@ -804,7 +803,7 @@ function renderTrafficFilters(
       })}
       <div class="toolbar">
         <button class="button" type="submit">Apply filters</button>
-        <span class="muted">Scope carries across traffic pages.</span>
+        <span class="muted">Scope carries across pages.</span>
       </div>
     </form>
   `;
@@ -871,12 +870,12 @@ function renderTrafficOverviewAside(
             value: activeFilters || "Recent traffic window",
             note: requestPinned
               ? "The request pin stays aligned across requests, errors, and logs."
-              : "Use filters first; only pin a request after the table already isolated one target.",
+              : "Use filters first; pin only after the table isolates one target.",
           },
           {
             label: "Request posture",
             value: requestPinned ? "Pinned request" : "Broad request inventory",
-            note: requestPinned ? filters.requestId : "Requests remain the primary inventory surface on this page.",
+            note: requestPinned ? filters.requestId : "Requests remain primary on this page.",
           },
           {
             label: "Error pressure",

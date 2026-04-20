@@ -24,8 +24,8 @@
 | Срез | Статус | Объём | Целевые проверки | Commit |
 |---|---|---|---|---|
 | 0. Проверка `/admin` route | `done` | Проверка прямого входа, refresh, history, чистого состояния браузера | Route smoke / browser pass | `ef896fb docs: record admin route verification` |
-| 1. Playground above-the-fold | `done` | Уплотнение верхнего слоя и поднятие `Request controls` | Desktop + mobile visual pass | `pending` |
-| 2. Редактура copy | `todo` | Сокращение повторов и explanatory copy | UI review по затронутым страницам | — |
+| 1. Playground above-the-fold | `done` | Уплотнение верхнего слоя и поднятие `Request controls` | Desktop + mobile visual pass | `2af58a3 refactor: tighten playground above the fold` |
+| 2. Редактура copy | `done` | Сокращение повторов и explanatory copy | UI review по затронутым страницам | `pending` |
 | 3. Визуальная иерархия | `todo` | Primary/secondary states, warning/danger emphasis | Visual regression pass | — |
 | 4. Mobile и navigation | `todo` | Responsive navigation и длина mobile flow | Mobile viewport pass | — |
 | 5. Верхний слой shell | `todo` | Top bar, rail, browser keys, hero-actions | Shell walkthrough | — |
@@ -83,7 +83,29 @@ Commit:
 - Визуальный приоритет primary/secondary состояний ещё не полностью разведён; это остаётся предметом `Среза 3`.
 
 Commit:
-- —
+- `2af58a3 refactor: tighten playground above the fold`
+
+#### Срез 2. Редактура copy
+
+Статус:
+- `done`
+
+Что сделано:
+- Сокращён explanatory copy в `overview`, `playground`, `traffic`, `logs`, `settings`, `system`, `providers`.
+- Укорочены section descriptions, muted подсказки, handoff notes, settings/form intros и несколько banner-сообщений без изменения IA и action flow.
+- Пересобраны runtime assets в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, чтобы source и shipped UI не расходились.
+
+Что проверено:
+- `npm run build:admin`
+- Browser/UI проход по `Overview`, `Playground`, `Traffic`, `Logs`, `Settings`, `Providers`, `System` на `http://127.0.0.1:8090/admin*`
+- В headless Chrome не появилось console `error`/`warn` на проверенных страницах после reload без cache
+
+Остаточные риски:
+- Часть shell-copy вне текущих страниц всё ещё остаётся более многословной; это уже не блокер текущего среза.
+- Следующий срез про визуальную иерархию всё ещё нужен, потому что даже после сокращения текста primary/secondary веса спорят между собой.
+
+Commit:
+- `pending`
 
 ### Шаблон записи по срезу
 

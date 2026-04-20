@@ -97,7 +97,7 @@ export function renderApplicationSection(options) {
       </div>
       ${renderFormSection({
         title: "Gateway mode and compatibility",
-        intro: "Set the top-level runtime posture here.",
+        intro: "Set runtime posture here.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -125,8 +125,8 @@ export function renderApplicationSection(options) {
       ${renderFormSection({
         title: options.variant === "setup" ? "Bootstrap posture" : "Runtime posture details",
         intro: options.variant === "setup"
-            ? "Only bootstrap-critical application fields stay here."
-            : "Keep provider routing and runtime storage together here.",
+            ? "Keep only bootstrap-critical application fields here."
+            : "Keep provider routing and runtime storage together.",
         body: options.variant === "setup"
             ? renderSetupApplicationFields(options.values)
             : renderSettingsApplicationFields(options.values),
@@ -156,7 +156,7 @@ export function renderGigachatSection(options) {
       </div>
       ${renderFormSection({
         title: "Provider routing and transport",
-        intro: "Keep request target and transport settings together.",
+        intro: "Keep target and transport settings together.",
         body: `
           <div class="dual-grid">
             <label class="field"><span>Model</span><input name="model" value="${escapeHtml(options.values.model ?? "")}" /></label>
@@ -221,7 +221,7 @@ export function renderGigachatSection(options) {
     })}
       ${renderFormSection({
         title: "Candidate connectivity check",
-        intro: "Test candidate values before saving them.",
+        intro: "Test candidate values before saving.",
         body: `
           <div class="${options.variant === "setup" ? "stack" : "dual-grid"}">
             ${timeoutField}
@@ -252,7 +252,7 @@ export function renderSecuritySection(options) {
             : "Gateway access and operator guardrails",
         intro: options.variant === "setup"
             ? "Use the minimum auth posture needed to close bootstrap exposure."
-            : "API key auth, logs exposure, CORS, and governance stay together here.",
+            : "Keep API key auth, logs exposure, CORS, and governance together.",
         body: `
           <label class="field">
             <span>${escapeHtml(authLabel)}</span>
@@ -317,7 +317,7 @@ export function renderObservabilitySection(options) {
     })}
       ${renderFormSection({
         title: "Sink-specific configuration",
-        intro: "Keep raw endpoints and credentials in the sink cards only.",
+        intro: "Keep raw endpoints and credentials in the sink cards.",
         body: `
           <div class="stack">
             ${renderObservabilitySinkCard({

@@ -108,9 +108,8 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
       sections: [
         renderPageSection({
           eyebrow: "Dashboard",
-          title: "Status, fast actions, and recent issues",
-          description:
-            "Keep the first screen focused on posture, active failures, and the next operator surface.",
+          title: "Status and next actions",
+          description: "Keep the first screen on posture, failures, and the next surface.",
           bodyClassName: "page-grid",
           body: `
             ${card(
@@ -122,17 +121,17 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
                     <h4 class="overview-callout__title">
                       ${escapeHtml(
                         setup.setup_complete
-                          ? "Gateway is ready for active operator work."
-                          : "Gateway still needs bootstrap work.",
+                          ? "Gateway is ready for operator work."
+                          : "Bootstrap is still open.",
                       )}
                     </h4>
                     <p class="muted">
                       ${escapeHtml(
                         setup.setup_complete
-                          ? `Next surface: ${nextSurface}.`
+                          ? `Next: ${nextSurface}.`
                           : setup.persistence_enabled === false
-                            ? "Finish effective GigaChat auth and gateway auth first. This runtime reads config from environment only."
-                            : "Finish persisted setup, effective GigaChat auth, and gateway auth first.",
+                            ? "Finish GigaChat auth and gateway auth first. This runtime reads env only."
+                            : "Finish persisted setup, GigaChat auth, and gateway auth first.",
                       )}
                     </p>
                   </section>
@@ -169,32 +168,32 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
                         value: String(runtime.mode ?? "n/a"),
                         note: setup.setup_complete
                           ? runtimeRecord.docs_enabled
-                            ? "Docs remain exposed in the current runtime."
-                            : "Docs are disabled in the current runtime."
-                          : "Use DEV mode for bootstrap, then harden before production exposure.",
+                            ? "Docs stay exposed."
+                            : "Docs are disabled."
+                          : "Use DEV for bootstrap, then harden before rollout.",
                       },
                       {
                         label: "Provider mix",
                         value: enabledProviders.join(", ") || "none",
                         note: topProvider
-                          ? `${String(topProvider.provider ?? "unknown")} currently carries the most visible traffic.`
-                          : "No provider usage has been recorded yet.",
+                          ? `${String(topProvider.provider ?? "unknown")} carries the most visible traffic.`
+                          : "No provider usage yet.",
                       },
                       {
                         label: "Traffic snapshot",
                         value: `${formatNumber(requestCount)} requests / ${formatNumber(totalTokens)} tokens`,
                         note:
                           errorCount > 0
-                            ? `${formatNumber(errorCount)} recent errors require inspection.`
-                            : "No recent errors are recorded in the provider usage rollup.",
+                            ? `${formatNumber(errorCount)} recent errors need review.`
+                            : "No recent errors in the rollup.",
                       },
                       {
                         label: "Next surface",
                         value: nextSurface,
                         note:
                           errorCount > 0
-                            ? "Stay in Logs or Traffic until the active failures are explained."
-                            : "Use the surface below that best matches the next operator task.",
+                            ? "Stay in Logs or Traffic until failures are explained."
+                            : "Open the next surface that matches the task.",
                       },
                     ],
                     "Overview summary is unavailable.",
@@ -300,9 +299,8 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
         }),
         renderPageSection({
           eyebrow: "Handoff",
-          title: "Surface map and secondary diagnostics",
-          description:
-            "Keep guides and broader posture below the dashboard so the first screen stays operational.",
+          title: "Surface map",
+          description: "Keep posture details and guides below the main dashboard.",
           bodyClassName: "page-grid",
           body: `
             ${card(
@@ -328,8 +326,8 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
                     label: "Runtime mode",
                     value: String(runtime.mode ?? "n/a"),
                     note: docsEnabled
-                      ? "Operator docs remain exposed in this runtime."
-                      : "Operator docs are disabled in this runtime.",
+                      ? "Operator docs stay exposed."
+                      : "Operator docs are disabled.",
                   },
                   {
                     label: "Persistence",
@@ -345,7 +343,7 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
                     label: "Gateway auth",
                     value: gatewayAuthReady ? "Required" : "Open",
                     note: gatewayAuthReady
-                      ? "Client access already depends on a configured gateway API key."
+                      ? "Client access already depends on a gateway API key."
                       : "Close this before broader exposure.",
                   },
                 ],
@@ -360,23 +358,23 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
                   {
                     label: "Overview workflow guide",
                     href: OPERATOR_GUIDE_LINKS.overview,
-                    note: "Open only when the dashboard still does not make the next surface obvious.",
+                    note: "Open only if the next surface is still unclear.",
                   },
                   {
                     label: "Traffic workflow guide",
                     href: OPERATOR_GUIDE_LINKS.traffic,
-                    note: "Use this when the next step is broad request review rather than a request-pinned log dive.",
+                    note: "Use this for broad request review instead of a request-pinned log dive.",
                   },
                   {
                     label: "Troubleshooting handoff map",
                     href: OPERATOR_GUIDE_LINKS.troubleshooting,
-                    note: "Use the escalation map only when the dashboard and surface cards still leave the handoff unclear.",
+                    note: "Use only when the dashboard and surface cards still leave handoff unclear.",
                   },
                 ],
                 {
                   collapsibleSummary: "Operator guides",
                   compact: true,
-                  intro: "Treat guides as secondary depth, not as the first working surface.",
+                  intro: "Treat guides as secondary depth.",
                 },
               ),
               "panel panel--span-4 panel--aside",
@@ -473,12 +471,12 @@ function buildProviderSnapshot(
         value: enabledProviders.join(", ") || "none",
         note: requestCount
           ? `${formatNumber(requestCount)} requests are recorded, but no provider breakdown is available.`
-          : "No provider traffic has been recorded yet.",
+          : "No provider traffic yet.",
       },
       {
         label: "Observed tokens",
         value: formatNumber(totalTokens),
-        note: "Run the playground or real traffic to populate provider rollups.",
+        note: "Run playground or live traffic to populate rollups.",
       },
     ];
   }
@@ -523,16 +521,16 @@ function buildSurfaceHandoffs(
       label: "Playground",
       value: setup.setup_complete ? "Smoke requests" : "Finish bootstrap first",
       note: setup.setup_complete
-        ? "Use it for route validation, prompt smoke tests, and provider posture checks."
-        : "Complete persisted auth and gateway auth before relying on runtime checks.",
+        ? "Use it for route validation and smoke tests."
+        : "Finish persisted auth and gateway auth first.",
     },
     {
       label: "Traffic",
       value: requestCount > 0 ? "Review recent requests" : "Wait for live traffic",
       note:
         requestCount > 0
-          ? `${formatNumber(requestCount)} requests are already available for request-first inspection.`
-          : "Traffic becomes the next surface after the first real requests land.",
+          ? `${formatNumber(requestCount)} requests are ready for inspection.`
+          : "Traffic becomes useful after the first real requests land.",
     },
     {
       label: "Logs",
@@ -540,7 +538,7 @@ function buildSurfaceHandoffs(
       note:
         errorCount > 0
           ? `${formatNumber(errorCount)} recent errors make Logs the first escalation surface.`
-          : "Open Logs when one request needs a deeper rendered tail and event-level view.",
+          : "Open Logs when one request needs deeper tail detail.",
     },
     {
       label: "Providers",
@@ -548,7 +546,7 @@ function buildSurfaceHandoffs(
       note: topProvider
         ? `${String(topProvider.provider ?? "Unknown")} currently carries the most visible traffic.`
         : docsEnabled
-          ? "No provider usage yet; docs remain exposed while posture is still being validated."
+          ? "No provider usage yet; docs stay exposed while posture is still being validated."
           : "No provider usage yet; validate provider posture before rollout.",
     },
   ];

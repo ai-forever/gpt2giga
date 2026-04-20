@@ -87,8 +87,8 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
         title: requestPinned ? "Pinned log workspace" : "Log tail workspace",
         description:
           requestPinned
-            ? "Keep one request pinned across rendered tail, extracted request ids, and recent structured rows."
-            : "Filter the tail, extract one useful request id, and only then pin or escalate into cross-page traffic context.",
+            ? "Keep one request pinned across rendered tail, extracted ids, and recent structured rows."
+            : "Filter the tail, extract one useful request id, and then pin or escalate into Traffic.",
         actions: `
           <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForRequest(filters.requestId, filters))}">${escapeHtml(
             requestPinned ? "Open pinned traffic" : "Open traffic summary",
@@ -115,7 +115,7 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
                       <p class="muted">${escapeHtml(
                         requestPinned
                           ? "The current request pin filters the rendered tail and keeps the same scope ready for Traffic."
-                          : "Use the rendered tail as the first working surface. Pin a request only after one line or event row is clearly relevant.",
+                          : "Use the rendered tail first. Pin a request only after one line or row is clearly relevant.",
                       )}</p>
                     </div>
                     <div class="surface__meta">
@@ -137,8 +137,8 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
                 <p class="muted">
                   ${escapeHtml(
                     requestPinned
-                      ? "Inspect extracted request ids to confirm the pinned investigation still matches the rendered tail."
-                      : "Extract request ids from the rendered tail only when they help reopen the same scope in Traffic.",
+                      ? "Use extracted request ids to confirm the pinned investigation still matches the tail."
+                      : "Extract request ids only when they help reopen the same scope in Traffic.",
                   )}
                 </p>
                 <div id="logs-tail-context">
@@ -165,8 +165,8 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
         title: requestPinned ? "Pinned request and failure rows" : "Recent request and failure rows",
         description:
           requestPinned
-            ? "Use the structured request and error rows to validate the same request pin before dropping into raw diagnostics."
-            : "Compare the current tail scope against recent structured rows before moving back out to the broader Traffic surface.",
+            ? "Use structured rows to validate the same request pin before raw diagnostics."
+            : "Compare the current tail scope against recent structured rows before moving back to Traffic.",
         actions: `
           <a class="button button--secondary" href="${escapeHtml(buildTrafficUrlForRequest(filters.requestId, filters))}">${escapeHtml(
             requestPinned ? "Open pinned traffic" : "Open traffic summary",
@@ -179,7 +179,7 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
             `
               <div class="stack">
                 ${renderRequestRows(data.requestEvents, filters)}
-                <p class="field-note">Inspect a row to review one request snapshot or reopen Traffic with the same request id and filters.</p>
+                <p class="field-note">Inspect a row to review one request or reopen Traffic with the same scope.</p>
               </div>
             `,
             "panel panel--span-6",
@@ -189,7 +189,7 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
             `
               <div class="stack">
                 ${renderErrorRows(data.errorEvents, filters)}
-                <p class="field-note">Failures stay adjacent to request rows so the same scope can be compared before escalation.</p>
+                <p class="field-note">Failures stay beside request rows so the same scope can be compared before escalation.</p>
               </div>
             `,
             "panel panel--span-6",
@@ -219,7 +219,7 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
                 collapsibleSummary: "Operator guides",
                 intro: filters.requestId
                   ? "Open only if the pinned request still needs a cross-page handoff."
-                  : "Open only if this scope still needs escalation into another operational surface.",
+                  : "Open only if this scope still needs another surface.",
               },
             ),
             "panel panel--span-12",
@@ -243,8 +243,8 @@ function renderLogsToolbar(
     <div class="toolbar">
       <span class="muted">${escapeHtml(
         requestPinned
-          ? "One request is pinned across rendered tail, extracted context, and recent event rows."
-          : "Keep the tail narrow, then pin exactly one request only when the investigation needs a durable scope.",
+          ? "One request is pinned across rendered tail, extracted context, and recent rows."
+          : "Keep the tail narrow, then pin one request only when the investigation needs durable scope.",
       )}</span>
     </div>
     <div class="pill-row">
@@ -262,12 +262,12 @@ function renderLogsFiltersForm(data: LogsPageData, filters: LogsFilters): string
     <form id="logs-filters-form" class="form-shell form-shell--compact">
       <div class="form-shell__intro">
         <p class="muted">
-          Tail window, request pin, and recent event scope stay linked on this page.
+          Tail window, request pin, and recent event scope stay linked.
         </p>
       </div>
       ${renderFormSection({
         title: "Tail window",
-        intro: "Set the rendered log window before inspecting individual requests.",
+        intro: "Set the rendered window before inspecting requests.",
         body: `
           <div class="dual-grid">
             <label class="field">
@@ -298,7 +298,7 @@ function renderLogsFiltersForm(data: LogsPageData, filters: LogsFilters): string
             </label>
             <div class="surface">
               <p class="muted">
-                The request pin drives rendered tail filtering, recent event rows, and Traffic handoff together.
+                The request pin drives rendered tail filtering, recent rows, and Traffic handoff together.
               </p>
             </div>
           </div>
@@ -306,7 +306,7 @@ function renderLogsFiltersForm(data: LogsPageData, filters: LogsFilters): string
       })}
       ${renderFormSection({
         title: "Event scope",
-        intro: "Keep recent request and error rows on the same operational scope.",
+        intro: "Keep recent request and error rows on the same scope.",
         body: `
           <div class="quad-grid">
             <label class="field">
@@ -362,7 +362,7 @@ function renderLogsFiltersForm(data: LogsPageData, filters: LogsFilters): string
                 ${renderStaticSelectOptions(filters.limit || DEFAULT_LIMIT, ["5", "8", "12", "20"])}
               </select>
             </label>
-            <span class="muted">The same scope powers recent rows and Traffic handoff links.</span>
+            <span class="muted">The same scope powers recent rows and Traffic handoff.</span>
           </div>
         `,
       })}
@@ -407,7 +407,7 @@ function renderLogsInspector(data: LogsPageData, filters: LogsFilters, rawLogLin
                   value: filters.requestId || "Recent log window",
                   note: filters.requestId
                     ? "Tail and recent panels stay pinned to one request."
-                    : "Pick a tail-derived request line or recent event row.",
+                    : "Pick a tail-derived request line or recent row.",
                 },
               ],
               "No event selected yet.",
@@ -446,7 +446,7 @@ function renderLogsStreamPanel(streamState: ReturnType<typeof createLogsStreamSt
         <div class="surface__header">
           <div class="stack">
             <h4>Live tail status</h4>
-            <p class="muted">Open SSE only after the working scope is already narrow enough to be useful.</p>
+            <p class="muted">Open SSE only after the working scope is narrow enough to be useful.</p>
           </div>
           <div class="surface__meta" id="logs-stream-status">${renderStreamPill("idle")}</div>
         </div>
