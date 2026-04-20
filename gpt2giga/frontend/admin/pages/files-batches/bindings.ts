@@ -438,10 +438,11 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       ],
       action: async () => {
         const bytes = await fetchFileContent(app, fileId);
+        const mimeType = buildFilePreview(bytes, filename).mimeType;
         const blobBytes = new Uint8Array(bytes.byteLength);
         blobBytes.set(bytes);
         const objectUrl = URL.createObjectURL(
-          new Blob([blobBytes], { type: "application/x-ndjson" }),
+          new Blob([blobBytes], { type: mimeType }),
         );
         const link = document.createElement("a");
         link.href = objectUrl;

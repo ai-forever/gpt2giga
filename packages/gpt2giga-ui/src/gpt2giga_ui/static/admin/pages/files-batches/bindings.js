@@ -284,9 +284,10 @@ export function bindFilesBatchesPage(options) {
             ],
             action: async () => {
                 const bytes = await fetchFileContent(app, fileId);
+                const mimeType = buildFilePreview(bytes, filename).mimeType;
                 const blobBytes = new Uint8Array(bytes.byteLength);
                 blobBytes.set(bytes);
-                const objectUrl = URL.createObjectURL(new Blob([blobBytes], { type: "application/x-ndjson" }));
+                const objectUrl = URL.createObjectURL(new Blob([blobBytes], { type: mimeType }));
                 const link = document.createElement("a");
                 link.href = objectUrl;
                 link.download = filename;
