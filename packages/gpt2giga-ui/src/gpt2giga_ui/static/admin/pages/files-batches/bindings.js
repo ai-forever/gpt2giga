@@ -2,7 +2,7 @@ import { withBusyState } from "../../forms.js";
 import { banner, pill, renderDefinitionList } from "../../templates.js";
 import { escapeHtml, formatBytes, formatNumber, formatTimestamp, safeJsonParse, } from "../../utils.js";
 import { createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, syncFilesBatchesPageDataCache, uploadFile, validateBatchInput, } from "./api.js";
-import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, extractErrorReason, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
+import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, describeFileValidationSnapshot, extractErrorReason, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, isBatchValidationCandidate, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
 import { INVALID_JSON } from "./state.js";
 export function bindFilesBatchesPage(options) {
     const { app, data, elements, filters, inventory, page } = options;
@@ -22,16 +22,20 @@ export function bindFilesBatchesPage(options) {
         if (!fileId) {
             return payload;
         }
-        inventory.fileLookup.set(fileId, payload);
+        const existing = inventory.fileLookup.get(fileId);
+        const mergedPayload = payload.validation !== undefined || !existing?.validation
+            ? payload
+            : { ...payload, validation: existing.validation };
+        inventory.fileLookup.set(fileId, mergedPayload);
         const existingIndex = data.files.findIndex((item) => String(item.id ?? "") === fileId);
         if (existingIndex >= 0) {
-            data.files[existingIndex] = payload;
+            data.files[existingIndex] = mergedPayload;
         }
         else {
-            data.files.unshift(payload);
+            data.files.unshift(mergedPayload);
         }
         syncFilesBatchesPageDataCache(data);
-        return payload;
+        return mergedPayload;
     };
     const cacheBatchRecord = (payload) => {
         const batchId = String(payload.id ?? "");
@@ -238,6 +242,149 @@ export function bindFilesBatchesPage(options) {
             error: `${formatApiFormatLabel(apiFormat)} batches need a staged input file id or inline requests before validation.`,
         };
     };
+    const buildStoredFileValidationSnapshot = (report, validatedAt) => ({
+        status: !report.valid
+            ? "invalid"
+            : report.summary.warning_count > 0
+                ? "valid_with_warnings"
+                : "valid",
+        total_rows: report.summary.total_rows,
+        error_count: report.summary.error_count,
+        warning_count: report.summary.warning_count,
+        detected_format: report.detected_format ?? null,
+        validated_at: validatedAt,
+    });
+    const resolveDisplayedFileValidationSnapshot = (fileId, source) => {
+        if (!isBatchValidationCandidate(source)) {
+            return source?.validation ?? null;
+        }
+        const currentRequest = buildBatchValidationRequest();
+        const activeInputFileId = currentRequest.requests && currentRequest.requests.length > 0
+            ? undefined
+            : currentRequest.inputFileId;
+        const storedSnapshot = source?.validation ?? null;
+        if (activeInputFileId !== fileId) {
+            return storedSnapshot ?? { status: "not_validated" };
+        }
+        if (validationReport &&
+            !validationDirty &&
+            validationSignature !== null &&
+            validationSignature === currentRequest.signature) {
+            return buildStoredFileValidationSnapshot(validationReport, validationValidatedAt);
+        }
+        if (validationDirty) {
+            if (storedSnapshot) {
+                return { ...storedSnapshot, status: "stale" };
+            }
+            if (validationReport) {
+                return {
+                    ...buildStoredFileValidationSnapshot(validationReport, validationValidatedAt),
+                    status: "stale",
+                };
+            }
+        }
+        return storedSnapshot ?? { status: "not_validated" };
+    };
+    const cacheValidationSnapshotForFile = (fileId, snapshot) => {
+        const existing = inventory.fileLookup.get(fileId);
+        if (!existing) {
+            return;
+        }
+        cacheFileRecord({
+            ...existing,
+            validation: snapshot,
+        });
+    };
+    const applyFileSelectionSurfaces = (fileId, source, mode, detailPayload) => {
+        const linkedBatches = getLinkedBatchesForFile(fileId, data.batches);
+        const readyOutputs = linkedBatches.filter((batch) => Boolean(String(batch.output_file_id ?? ""))).length;
+        const validationSnapshot = resolveDisplayedFileValidationSnapshot(fileId, source);
+        const validationSummary = validationSnapshot
+            ? describeFileValidationSnapshot(validationSnapshot)
+            : null;
+        const validationItem = validationSummary
+            ? [
+                {
+                    label: "Validation",
+                    value: validationSummary.label,
+                    note: validationSummary.note,
+                },
+            ]
+            : [];
+        const lastValidationItem = validationSnapshot?.validated_at != null
+            ? [
+                {
+                    label: "Last validation",
+                    value: formatTimestamp(validationSnapshot.validated_at),
+                    note: validationSnapshot.status === "stale"
+                        ? "The stored report no longer matches the current composer input."
+                        : "Most recent staged-file validation snapshot.",
+                },
+            ]
+            : [];
+        if (mode === "composer") {
+            setSummary([
+                { label: "Selection", value: "Batch input ready" },
+                { label: "File id", value: fileId },
+                { label: "Purpose", value: String(source?.purpose ?? "batch") },
+                { label: "Filename", value: String(source?.filename ?? fileId) },
+                { label: "API format", value: String(source?.api_format ?? "openai") },
+                ...validationItem,
+                {
+                    label: "Next step",
+                    value: "Create batch",
+                    note: "The input field has been populated for the batch form.",
+                },
+            ]);
+            setDetailSurface("Composer handoff", [
+                { label: "Detail surface", value: "Composer handoff" },
+                { label: "Selected input", value: fileId },
+                { label: "Endpoint target", value: "Choose an endpoint in the batch form" },
+                ...validationItem,
+                ...lastValidationItem,
+            ], detailPayload, false);
+            return;
+        }
+        setSummary([
+            { label: "Selection", value: "File" },
+            { label: "File id", value: fileId },
+            { label: "Purpose", value: String(source?.purpose ?? "user_data") },
+            { label: "Filename", value: String(source?.filename ?? fileId) },
+            {
+                label: "Created",
+                value: formatTimestamp(source?.created_at),
+                note: formatBytes(source?.bytes),
+            },
+            ...validationItem,
+            {
+                label: "Batch linkage",
+                value: `${linkedBatches.length} linked batch${linkedBatches.length === 1 ? "" : "es"}`,
+                note: readyOutputs
+                    ? `${readyOutputs} output file${readyOutputs === 1 ? "" : "s"} ready`
+                    : "No completed output linked yet.",
+            },
+        ]);
+        setDetailSurface("Selection metadata snapshot", [
+            { label: "Detail surface", value: "File metadata" },
+            { label: "Linked batches", value: String(linkedBatches.length) },
+            { label: "Stored bytes", value: formatBytes(source?.bytes) },
+            { label: "Status", value: String(source?.status ?? "processed") },
+            ...validationItem,
+            ...lastValidationItem,
+        ], detailPayload, true);
+    };
+    const refreshSelectedFileValidationSurface = () => {
+        if (selection.kind !== "file" || !selection.fileId) {
+            return;
+        }
+        const source = inventory.fileLookup.get(selection.fileId);
+        const mode = elements.batchInput?.value.trim() === selection.fileId
+            ? "composer"
+            : "inspect";
+        applyFileSelectionSurfaces(selection.fileId, source, mode, mode === "composer"
+            ? `Selected ${selection.fileId} as batch input.`
+            : JSON.stringify(source ?? { id: selection.fileId }, null, 2));
+    };
     const resolveValidationStatus = () => {
         if (validationInFlight) {
             return { label: "Validating", tone: "default" };
@@ -436,6 +583,7 @@ export function bindFilesBatchesPage(options) {
         validationMessage = null;
         updateBatchValidationSurface();
         updateBatchCreateAvailability();
+        refreshSelectedFileValidationSurface();
         if (!options?.auto || !hadValidationState) {
             clearValidationRefreshTimer();
             return;
@@ -483,6 +631,10 @@ export function bindFilesBatchesPage(options) {
             validationSignature = requestPayload.signature;
             validationValidatedAt = Math.floor(Date.now() / 1000);
             validationDirty = false;
+            if (requestPayload.inputFileId && !requestPayload.requests?.length) {
+                cacheValidationSnapshotForFile(requestPayload.inputFileId, buildStoredFileValidationSnapshot(report, validationValidatedAt));
+            }
+            refreshSelectedFileValidationSurface();
             setWorkflowSummary([
                 { label: "Workflow state", value: "Batch input validated" },
                 { label: "API format", value: formatApiFormatLabel(report.api_format) },
@@ -756,23 +908,7 @@ export function bindFilesBatchesPage(options) {
         clearSelectionHandoff();
         resetContentSurface();
         syncSelectionRouteState(selection);
-        setSummary([
-            { label: "Selection", value: "Batch input ready" },
-            { label: "File id", value: fileId },
-            { label: "Purpose", value: String(source?.purpose ?? "batch") },
-            { label: "Filename", value: String(source?.filename ?? fileId) },
-            { label: "API format", value: preferredApiFormat },
-            {
-                label: "Next step",
-                value: "Create batch",
-                note: "The input field has been populated for the batch form.",
-            },
-        ]);
-        setDetailSurface("Composer handoff", [
-            { label: "Detail surface", value: "Composer handoff" },
-            { label: "Selected input", value: fileId },
-            { label: "Endpoint target", value: "Choose an endpoint in the batch form" },
-        ], `Selected ${fileId} as batch input.`, false);
+        applyFileSelectionSurfaces(fileId, source, "composer", `Selected ${fileId} as batch input.`);
         setWorkflowSummary([
             { label: "Workflow state", value: "Batch input primed" },
             { label: "Input file", value: fileId },
@@ -958,36 +1094,11 @@ export function bindFilesBatchesPage(options) {
             action: async () => {
                 const payload = await fetchFileMetadata(app, fileId);
                 const source = cacheFileRecord(payload);
-                const linkedBatches = getLinkedBatchesForFile(fileId, data.batches);
-                const readyOutputs = linkedBatches.filter((batch) => Boolean(String(batch.output_file_id ?? ""))).length;
                 selection = { kind: "file", fileId };
                 clearSelectionHandoff();
                 resetContentSurface();
                 syncSelectionRouteState(selection);
-                setSummary([
-                    { label: "Selection", value: "File" },
-                    { label: "File id", value: fileId },
-                    { label: "Purpose", value: String(source.purpose ?? "user_data") },
-                    { label: "Filename", value: String(source.filename ?? fileId) },
-                    {
-                        label: "Created",
-                        value: formatTimestamp(source.created_at),
-                        note: formatBytes(source.bytes),
-                    },
-                    {
-                        label: "Batch linkage",
-                        value: `${linkedBatches.length} linked batch${linkedBatches.length === 1 ? "" : "es"}`,
-                        note: readyOutputs
-                            ? `${readyOutputs} output file${readyOutputs === 1 ? "" : "s"} ready`
-                            : "No completed output linked yet.",
-                    },
-                ]);
-                setDetailSurface("Selection metadata snapshot", [
-                    { label: "Detail surface", value: "File metadata" },
-                    { label: "Linked batches", value: String(linkedBatches.length) },
-                    { label: "Stored bytes", value: formatBytes(source.bytes) },
-                    { label: "Status", value: String(source.status ?? "processed") },
-                ], JSON.stringify(payload, null, 2), true);
+                applyFileSelectionSurfaces(fileId, source, "inspect", JSON.stringify(payload, null, 2));
                 updateInspectorActions();
                 return payload;
             },

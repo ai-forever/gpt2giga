@@ -14,6 +14,7 @@ import type {
   FileSort,
   FilePreview,
   FileRecord,
+  FileValidationSnapshot,
   FilesBatchesFilters,
   FilesBatchesInventory,
   FilesBatchesPage,
@@ -596,6 +597,68 @@ export function renderBatchStatus(value: string): string {
     return pill(normalized, "warn");
   }
   return pill(normalized);
+}
+
+export function isBatchValidationCandidate(file: FileRecord | null | undefined): boolean {
+  if (!file) {
+    return false;
+  }
+  const purpose = String(file.purpose ?? "").toLowerCase();
+  const contentKind = String(file.content_kind ?? "").toLowerCase();
+  if (purpose === "batch_output" || contentKind === "batch_output") {
+    return false;
+  }
+  return purpose === "batch" || contentKind === "jsonl";
+}
+
+export function describeFileValidationSnapshot(
+  snapshot: FileValidationSnapshot | null | undefined,
+): {
+  label: string;
+  tone: "default" | "good" | "warn";
+  note: string;
+} {
+  if (!snapshot || snapshot.status === "not_validated") {
+    return {
+      label: "Not validated",
+      tone: "default",
+      note: "Run Validate file from the batch composer to get row-level diagnostics.",
+    };
+  }
+
+  const errorCount = Number(snapshot.error_count ?? 0);
+  const warningCount = Number(snapshot.warning_count ?? 0);
+  const totalRows = Number(snapshot.total_rows ?? 0);
+  const counts = `${totalRows} rows · ${errorCount} errors · ${warningCount} warnings`;
+  const detectedFormat = snapshot.detected_format
+    ? `Detected ${snapshot.detected_format}.`
+    : "Format detection is unavailable.";
+  if (snapshot.status === "valid") {
+    return {
+      label: "Valid",
+      tone: "good",
+      note: `${counts}. ${detectedFormat}`,
+    };
+  }
+  if (snapshot.status === "valid_with_warnings") {
+    return {
+      label: "Valid with warnings",
+      tone: "warn",
+      note: `${counts}. ${detectedFormat}`,
+    };
+  }
+  if (snapshot.status === "invalid") {
+    return {
+      label: "Invalid",
+      tone: "warn",
+      note: `${counts}. Fix blocking issues before creating the batch.`,
+    };
+  }
+  return {
+    label: "Stale report",
+    tone: "warn",
+    note: `${counts}. Re-run validation after changing the current composer input.`,
+  };
 }
 
 export function humanizeBatchLifecycle(value: unknown): string {

@@ -88,6 +88,22 @@ export interface BatchValidationReport {
   issues: BatchValidationIssue[];
 }
 
+export type FileValidationStatus =
+  | "not_validated"
+  | "valid"
+  | "valid_with_warnings"
+  | "invalid"
+  | "stale";
+
+export interface FileValidationSnapshot {
+  status: FileValidationStatus;
+  total_rows?: number | null;
+  error_count?: number | null;
+  warning_count?: number | null;
+  detected_format?: ArtifactApiFormat | null;
+  validated_at?: number | null;
+}
+
 export interface FileRecord {
   id: string;
   api_format: ArtifactApiFormat;
@@ -100,6 +116,7 @@ export interface FileRecord {
   download_path?: string | null;
   content_path?: string | null;
   delete_path?: string | null;
+  validation?: FileValidationSnapshot | null;
   raw?: Record<string, unknown>;
 }
 

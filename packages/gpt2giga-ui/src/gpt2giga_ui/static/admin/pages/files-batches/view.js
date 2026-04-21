@@ -2,7 +2,7 @@ import { pathForPage } from "../../routes.js";
 import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
 import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderFormSection, renderGuideLinks, renderStaticSelectOptions, renderWorkflowCard, } from "../../templates.js";
 import { escapeHtml, formatBytes, formatTimestamp } from "../../utils.js";
-import { buildFilesBatchesUrl, buildIdleSelectionSummary, buildIdleWorkflowSummary, getLatestLinkedBatch, renderBatchStatus, } from "./serializers.js";
+import { buildFilesBatchesUrl, buildIdleSelectionSummary, buildIdleWorkflowSummary, describeFileValidationSnapshot, getLatestLinkedBatch, isBatchValidationCandidate, renderBatchStatus, } from "./serializers.js";
 import { DEFAULT_FILE_SORT } from "./state.js";
 export function renderFilesBatchesHeroActions(page) {
     if (page === "files-batches") {
@@ -84,9 +84,12 @@ function renderFilesBatchesHub(data, inventory) {
             .map((item) => {
             const id = String(item.id ?? "");
             const latestBatch = getLatestLinkedBatch(id, data.batches);
+            const validationSummary = isBatchValidationCandidate(item)
+                ? describeFileValidationSnapshot(item.validation)
+                : null;
             return `
                         <tr>
-                          <td><strong>${escapeHtml(item.filename ?? id)}</strong><br /><span class="muted">${escapeHtml(id)}</span></td>
+                          <td><strong>${escapeHtml(item.filename ?? id)}</strong><br /><span class="muted">${escapeHtml(id)}</span>${validationSummary ? `<br />${pill(validationSummary.label, validationSummary.tone)} <span class="muted">${escapeHtml(validationSummary.note)}</span>` : ""}</td>
                           <td>${escapeHtml(item.purpose ?? "user_data")}</td>
                           <td>${escapeHtml(formatBytes(item.bytes))}</td>
                           <td>${latestBatch ? `${escapeHtml(String(latestBatch.id ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(latestBatch.status ?? "unknown"))}</span>` : '<span class="muted">No linked batch</span>'}</td>
@@ -228,9 +231,12 @@ function renderFilesPage(data, inventory, filters) {
             const hasContent = Boolean(item.content_path);
             const hasDownload = Boolean(item.download_path || item.content_path);
             const hasDelete = Boolean(item.delete_path);
+            const validationSummary = isBatchValidationCandidate(item)
+                ? describeFileValidationSnapshot(item.validation)
+                : null;
             return `
                         <tr>
-                          <td><strong>${escapeHtml(item.filename ?? id)}</strong><br /><span class="muted">${escapeHtml(id)} · ${escapeHtml(String(item.api_format ?? "openai"))}</span></td>
+                          <td><strong>${escapeHtml(item.filename ?? id)}</strong><br /><span class="muted">${escapeHtml(id)} · ${escapeHtml(String(item.api_format ?? "openai"))}</span>${validationSummary ? `<br />${pill(validationSummary.label, validationSummary.tone)} <span class="muted">${escapeHtml(validationSummary.note)}</span>` : ""}</td>
                           <td>${escapeHtml(item.purpose ?? "user_data")}</td>
                           <td>${escapeHtml(formatBytes(item.bytes))}</td>
                           <td>${latestBatch ? `${escapeHtml(String(latestBatch.id ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(latestBatch.status ?? "unknown"))}</span>` : '<span class="muted">No linked batch</span>'}</td>
