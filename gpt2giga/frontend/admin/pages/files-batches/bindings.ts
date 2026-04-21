@@ -16,7 +16,7 @@ import {
   buildContentPreviewSummary,
   buildFilePreview,
   buildFilesBatchesUrl,
-  firstErrorLine,
+  extractErrorReason,
   getLatestLinkedBatch,
   getLatestOutputBatch,
   getLinkedBatchesForFile,
@@ -351,7 +351,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       setWorkflowSummary([
         { label: "Workflow state", value: "Action failed" },
         { label: "Failed step", value: pendingSummary[0]?.value ?? "Unknown action" },
-        { label: "Reason", value: firstErrorLine(message) },
+        { label: "Reason", value: extractErrorReason(message) },
       ]);
       throw error;
     }

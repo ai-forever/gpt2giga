@@ -556,3 +556,17 @@ def test_admin_files_batches_create_gemini_batch_from_inline_requests():
     assert body["display_name"] == "Gemini Inline Batch"
     assert body["model"] == "gemini-inline"
     assert body["input_file_id"] is None
+
+
+def test_admin_files_batches_create_openai_batch_returns_field_error_detail():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={"api_format": "openai"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": {"input_file_id": "`input_file_id` is required for OpenAI batches."}
+    }

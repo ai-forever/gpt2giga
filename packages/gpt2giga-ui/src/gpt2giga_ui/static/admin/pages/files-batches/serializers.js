@@ -243,8 +243,82 @@ export function scopeFilesBatchesRouteState(page, routeState) {
             : "",
     };
 }
-export function firstErrorLine(message) {
-    return message.split("\n").map((line) => line.trim()).find(Boolean) ?? "Unknown error";
+export function extractErrorReason(message) {
+    const lines = String(message)
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+    if (!lines.length) {
+        return "Unknown error";
+    }
+    const payloadText = lines.length > 1 ? lines.slice(1).join("\n") : lines[0];
+    const payload = safeJsonParse(payloadText, null);
+    const summary = summarizeErrorPayload(payload);
+    if (summary) {
+        return summary;
+    }
+    if (lines.length > 1) {
+        return lines.slice(1).join(" ");
+    }
+    return lines[0];
+}
+function summarizeErrorPayload(payload) {
+    if (typeof payload === "string") {
+        return payload.trim();
+    }
+    if (typeof payload === "number" ||
+        typeof payload === "boolean" ||
+        typeof payload === "bigint") {
+        return String(payload);
+    }
+    if (Array.isArray(payload)) {
+        return payload
+            .map((item) => summarizeErrorPayload(item))
+            .filter(Boolean)
+            .join("; ");
+    }
+    if (!payload || typeof payload !== "object") {
+        return "";
+    }
+    const record = payload;
+    const directMessage = typeof record.message === "string" ? record.message.trim() : "";
+    if (directMessage) {
+        return directMessage;
+    }
+    const validationMessage = summarizeValidationError(record);
+    if (validationMessage) {
+        return validationMessage;
+    }
+    for (const preferredKey of ["detail", "error"]) {
+        const nestedSummary = summarizeErrorPayload(record[preferredKey]);
+        if (nestedSummary) {
+            return nestedSummary;
+        }
+    }
+    const fieldSummaries = Object.entries(record)
+        .filter(([key]) => key !== "url")
+        .map(([key, value]) => {
+        const entrySummary = summarizeErrorPayload(value);
+        if (!entrySummary) {
+            return "";
+        }
+        return `${key}: ${entrySummary}`;
+    })
+        .filter(Boolean);
+    return fieldSummaries.join("; ");
+}
+function summarizeValidationError(record) {
+    const message = typeof record.msg === "string" ? record.msg.trim() : "";
+    if (!message) {
+        return "";
+    }
+    const location = Array.isArray(record.loc)
+        ? record.loc
+            .map((part) => String(part ?? "").trim())
+            .filter(Boolean)
+            .join(".")
+        : "";
+    return location ? `${location}: ${message}` : message;
 }
 export function summarizePreviewOutcome(preview) {
     return [

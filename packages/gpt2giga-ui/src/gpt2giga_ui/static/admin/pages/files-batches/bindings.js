@@ -2,7 +2,7 @@ import { withBusyState } from "../../forms.js";
 import { renderDefinitionList } from "../../templates.js";
 import { formatBytes, formatTimestamp, safeJsonParse } from "../../utils.js";
 import { createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, uploadFile, } from "./api.js";
-import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, firstErrorLine, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
+import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, extractErrorReason, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
 import { INVALID_JSON } from "./state.js";
 export function bindFilesBatchesPage(options) {
     const { app, data, elements, filters, inventory, page } = options;
@@ -218,7 +218,7 @@ export function bindFilesBatchesPage(options) {
             setWorkflowSummary([
                 { label: "Workflow state", value: "Action failed" },
                 { label: "Failed step", value: pendingSummary[0]?.value ?? "Unknown action" },
-                { label: "Reason", value: firstErrorLine(message) },
+                { label: "Reason", value: extractErrorReason(message) },
             ]);
             throw error;
         }
