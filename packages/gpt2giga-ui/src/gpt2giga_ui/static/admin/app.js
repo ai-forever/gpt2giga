@@ -26,6 +26,7 @@ export class AdminApp {
     surfaceChip = this.requireElement("surface-chip");
     nav = this.requireElement("nav");
     saveAuthButton = this.requireElement("save-auth");
+    compactNavMedia = window.matchMedia("(max-width: 720px)");
     apiClient;
     cleanups = [];
     dirtyForms = new Set();
@@ -276,6 +277,10 @@ export class AdminApp {
             this.shouldFocusPageHeading = true;
             void this.render();
         });
+        const syncCompactNav = () => {
+            this.syncNavSections();
+        };
+        this.compactNavMedia.addEventListener("change", syncCompactNav);
     }
     setNav(page) {
         const navPage = navEntryForPage(page);
@@ -290,6 +295,26 @@ export class AdminApp {
             else {
                 link.removeAttribute("aria-current");
             }
+        });
+        this.syncNavSections();
+    }
+    syncNavSections() {
+        const compactNav = this.compactNavMedia.matches;
+        this.nav.querySelectorAll("[data-nav-section]").forEach((section) => {
+            const links = Array.from(section.querySelectorAll("a[href]"));
+            const activeLink = links.find((link) => link.classList.contains("active")) ?? null;
+            const summaryMeta = section.querySelector("[data-nav-section-meta]");
+            section.toggleAttribute("data-active", activeLink !== null);
+            section.open = compactNav ? false : true;
+            if (!summaryMeta) {
+                return;
+            }
+            if (activeLink) {
+                const activeLabel = activeLink.querySelector("strong")?.textContent?.trim() ?? "Current surface";
+                summaryMeta.textContent = `${activeLabel} active`;
+                return;
+            }
+            summaryMeta.textContent = `${links.length} surfaces`;
         });
     }
     requireElement(id) {

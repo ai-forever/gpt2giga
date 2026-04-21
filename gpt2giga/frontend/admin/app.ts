@@ -49,6 +49,7 @@ export class AdminApp {
   private readonly surfaceChip = this.requireElement<HTMLElement>("surface-chip");
   private readonly nav = this.requireElement<HTMLElement>("nav");
   private readonly saveAuthButton = this.requireElement<HTMLButtonElement>("save-auth");
+  private readonly compactNavMedia = window.matchMedia("(max-width: 720px)");
 
   private readonly apiClient: AdminApiClient;
   private cleanups: CleanupFn[] = [];
@@ -356,6 +357,11 @@ export class AdminApp {
       this.shouldFocusPageHeading = true;
       void this.render();
     });
+
+    const syncCompactNav = (): void => {
+      this.syncNavSections();
+    };
+    this.compactNavMedia.addEventListener("change", syncCompactNav);
   }
 
   private setNav(page: PageId): void {
@@ -372,6 +378,35 @@ export class AdminApp {
       } else {
         link.removeAttribute("aria-current");
       }
+    });
+
+    this.syncNavSections();
+  }
+
+  private syncNavSections(): void {
+    const compactNav = this.compactNavMedia.matches;
+
+    this.nav.querySelectorAll<HTMLDetailsElement>("[data-nav-section]").forEach((section) => {
+      const links = Array.from(section.querySelectorAll<HTMLAnchorElement>("a[href]"));
+      const activeLink =
+        links.find((link) => link.classList.contains("active")) ?? null;
+      const summaryMeta = section.querySelector<HTMLElement>("[data-nav-section-meta]");
+
+      section.toggleAttribute("data-active", activeLink !== null);
+      section.open = compactNav ? false : true;
+
+      if (!summaryMeta) {
+        return;
+      }
+
+      if (activeLink) {
+        const activeLabel =
+          activeLink.querySelector("strong")?.textContent?.trim() ?? "Current surface";
+        summaryMeta.textContent = `${activeLabel} active`;
+        return;
+      }
+
+      summaryMeta.textContent = `${links.length} surfaces`;
     });
   }
 

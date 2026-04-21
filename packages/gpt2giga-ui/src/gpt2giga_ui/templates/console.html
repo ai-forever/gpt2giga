@@ -53,57 +53,72 @@
         </div>
 
         <nav class="console-nav" id="nav" aria-label="Primary console navigation">
-          <div class="nav-section">
-            <span class="rail-section__label">Workspace</span>
-            <a href="/admin">
-              <strong>Overview</strong>
-              <span class="nav-link__meta">Health and next actions.</span>
-            </a>
-            <a href="/admin/playground">
-              <strong>Playground</strong>
-              <span class="nav-link__meta">Run manual requests.</span>
-            </a>
-            <a href="/admin/traffic">
-              <strong>Traffic</strong>
-              <span class="nav-link__meta">Requests, errors, usage.</span>
-            </a>
-            <a href="/admin/logs">
-              <strong>Logs</strong>
-              <span class="nav-link__meta">Tail and inspect failures.</span>
-            </a>
-          </div>
+          <details class="nav-section" data-nav-section="workspace" open>
+            <summary>
+              <span class="rail-section__label">Workspace</span>
+              <span class="nav-section__summary-meta" data-nav-section-meta>4 surfaces</span>
+            </summary>
+            <div class="nav-section__body">
+              <a href="/admin">
+                <strong>Overview</strong>
+                <span class="nav-link__meta">Health and next actions.</span>
+              </a>
+              <a href="/admin/playground">
+                <strong>Playground</strong>
+                <span class="nav-link__meta">Run manual requests.</span>
+              </a>
+              <a href="/admin/traffic">
+                <strong>Traffic</strong>
+                <span class="nav-link__meta">Requests, errors, usage.</span>
+              </a>
+              <a href="/admin/logs">
+                <strong>Logs</strong>
+                <span class="nav-link__meta">Tail and inspect failures.</span>
+              </a>
+            </div>
+          </details>
 
-          <div class="nav-section">
-            <span class="rail-section__label">Control plane</span>
-            <a href="/admin/keys">
-              <strong>API Keys</strong>
-              <span class="nav-link__meta">Global and scoped keys.</span>
-            </a>
-            <a href="/admin/providers">
-              <strong>Providers</strong>
-              <span class="nav-link__meta">Routes and capabilities.</span>
-            </a>
-            <a href="/admin/files-batches">
-              <strong>Files &amp; Batches</strong>
-              <span class="nav-link__meta">Stored inputs and jobs.</span>
-            </a>
-            <a href="/admin/settings">
-              <strong>Settings</strong>
-              <span class="nav-link__meta">Config and revisions.</span>
-            </a>
-          </div>
+          <details class="nav-section" data-nav-section="control-plane" open>
+            <summary>
+              <span class="rail-section__label">Control plane</span>
+              <span class="nav-section__summary-meta" data-nav-section-meta>4 surfaces</span>
+            </summary>
+            <div class="nav-section__body">
+              <a href="/admin/keys">
+                <strong>API Keys</strong>
+                <span class="nav-link__meta">Global and scoped keys.</span>
+              </a>
+              <a href="/admin/providers">
+                <strong>Providers</strong>
+                <span class="nav-link__meta">Routes and capabilities.</span>
+              </a>
+              <a href="/admin/files-batches">
+                <strong>Files &amp; Batches</strong>
+                <span class="nav-link__meta">Stored inputs and jobs.</span>
+              </a>
+              <a href="/admin/settings">
+                <strong>Settings</strong>
+                <span class="nav-link__meta">Config and revisions.</span>
+              </a>
+            </div>
+          </details>
 
-          <div class="nav-section">
-            <span class="rail-section__label">Bootstrap &amp; system</span>
-            <a href="/admin/setup">
-              <strong>Setup</strong>
-              <span class="nav-link__meta">Bootstrap tasks.</span>
-            </a>
-            <a href="/admin/system">
-              <strong>System</strong>
-              <span class="nav-link__meta">Runtime diagnostics.</span>
-            </a>
-          </div>
+          <details class="nav-section" data-nav-section="bootstrap-system" open>
+            <summary>
+              <span class="rail-section__label">Bootstrap &amp; system</span>
+              <span class="nav-section__summary-meta" data-nav-section-meta>2 surfaces</span>
+            </summary>
+            <div class="nav-section__body">
+              <a href="/admin/setup">
+                <strong>Setup</strong>
+                <span class="nav-link__meta">Bootstrap tasks.</span>
+              </a>
+              <a href="/admin/system">
+                <strong>System</strong>
+                <span class="nav-link__meta">Runtime diagnostics.</span>
+              </a>
+            </div>
+          </details>
         </nav>
 
         <section class="rail-section auth-panel">
