@@ -5,6 +5,73 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [1.0.0rc1] - 2026-04-21
+### Добавлено
+- **Gemini API surface**: добавлены Gemini-совместимые маршруты и модули `content`, `models`, `files`, `batches`, `request`, `response`, `streaming` и `openapi` в `gpt2giga/api/gemini/`
+- **Translate API**: добавлен отдельный слой `gpt2giga/api/translate.py` и примеры `examples/translate/` для преобразования payload-форматов между OpenAI, Anthropic, Gemini и GigaChat
+- **Provider-aware routing**: добавлена конфигурация `enabled_providers` и возможность поднимать только нужные provider groups с OpenAPI-схемой, зависящей от реально включённых поверхностей
+- **Новый app-layer**: добавлены `gpt2giga/app/factory.py`, `lifespan.py`, `run.py`, `wiring.py`, `dependencies.py` и `cli.py` как новая точка сборки и wiring FastAPI-приложения
+- **Control plane persistence**: добавлена подсистема `gpt2giga/core/config/_control_plane/` с bootstrap, crypto, paths, payloads, revisions и status-модулями
+- **Runtime backends**: добавлен отдельный runtime backend слой в `gpt2giga/app/_runtime_backends/` с memory/sqlite реализациями и registry/contracts
+- **Observability and telemetry**: добавлены подсистемы `gpt2giga/app/_observability/` и `gpt2giga/app/_telemetry/` с sink-ами built-in, OTLP, Phoenix, Prometheus и Langfuse
+- **Prometheus metrics**: добавлены `/metrics` и `/admin/api/metrics` эндпоинты и связанная runtime-телеметрия
+- **Admin runtime feeds**: добавлены recent requests/errors feed endpoints для операторской диагностики из admin console
+- **Scoped API keys**: добавлена поддержка scoped API keys с ограничением по provider/endpoints
+- **Governance limits**: добавлены policy/rate-limit ограничения для API ключей и route scopes
+- **Admin UI как optional package**: добавлен `gpt2giga-ui` как optional dependency `gpt2giga[ui]` и установлен runtime source of truth для shipped UI assets
+- **Новый admin frontend**: добавлен TypeScript frontend в `gpt2giga/frontend/admin/` и packaged runtime assets в `packages/gpt2giga-ui/src/gpt2giga_ui/`
+- **Новый admin shell**: добавлены HTML shell, packaged static assets, favicon и page-based navigation для `/admin`
+- **Admin pages**: добавлены и разложены по отдельным поверхностям страницы overview, setup, settings, providers, system, traffic, logs, playground, keys, files and batches
+- **Files and batches inventory**: добавлены normalized admin uploads, batch creation flows, inventory-first layout и унифицированные content endpoints для файлов и батчей
+- **Batch validation foundation**: добавлены primitives и provider-level validators для batch input validation и улучшена интеграция validation в batch creation flow
+- **Gemini batch flows**: добавлены inline Gemini batch composer и Gemini batch examples
+- **Примеры Gemini**: добавлен новый каталог `examples/gemini/` с content, embeddings, files, batches и count tokens сценариями
+- **Примеры agents**: добавлен каталог `examples/agents/` для agent-oriented сценариев
+- **Документационный hub**: добавлен `docs/README.md` как навигационный центр проекта
+- **Новая базовая документация**: добавлены `docs/configuration.md`, `docs/operator-guide.md`, `docs/architecture.md`, `docs/api-compatibility.md` и `docs/how-to-add-provider.md`
+- **Deploy documentation**: добавлен `deploy/README.md` и compose-сценарии для runtime backends (`postgres`, `redis`, `s3`) и observability-стеков
+- **Новые тестовые слои**: добавлены крупные блоки unit, integration, smoke и compat тестов под новую архитектуру, включая golden fixtures для provider payload compatibility
+
+### Изменено
+- **Версия продукта**: версия пакета поднята с `0.1.6a1` до `1.0.0rc1`
+- **Архитектура проекта**: кодовая база переразложена из плоской структуры в слои `api/`, `app/`, `core/`, `features/`, `providers/`
+- **OpenAI surface**: OpenAI-compatible endpoints вынесены в отдельный пакет `gpt2giga/api/openai/` с явным разделением `chat`, `responses`, `embeddings`, `files`, `batches`, `models` и `streaming`
+- **Anthropic surface**: Anthropic-compatible handlers и маппинг вынесены в `gpt2giga/api/anthropic/` с отдельными `messages`, `batches`, `request_adapter`, `response`, `streaming` и `openapi`
+- **Provider mapping**: provider-specific mapping и orchestration укреплены в `gpt2giga/providers/` и `gpt2giga/features/`, особенно для `providers/gigachat/responses/`
+- **OpenAPI tags**: теги OpenAPI теперь группируются по `provider + capability`, а не только по capability
+- **Admin console**: админка перестроена из вспомогательного UI в полноценную operator-facing control plane console
+- **Playground UX**: playground стал центральной рабочей поверхностью, улучшены streaming diagnostics, parsed output errors и preset flows
+- **Traffic и logs UX**: traffic и logs получили отдельные tool/data-first layouts и handoff по request id
+- **Files and batches UX**: страницы files/batches переведены на normalized inventory model и более явный workflow для staged artifacts
+- **Control plane bootstrap**: первичный setup для PROD теперь идёт через bootstrap/claim flow и может блокировать provider routes до завершения настройки
+- **CORS policy в PROD**: PROD режим теперь автоматически ужесточает wildcard CORS конфигурацию
+- **Admin/docs exposure policy**: поведение `/docs`, `/redoc`, `/openapi.json`, `/logs*` и admin routes стало строже и сильнее зависит от режима и auth
+- **Структура документации**: подробные инструкции вынесены из корневого `README.md` в `docs/`
+- **Интеграции**: каталог `integrations/` перенесён в `docs/integrations/`
+- **Примеры**: examples переразложены по capability/provider каталогам вместо более плоской структуры
+- **Deploy layout**: `compose/` перенесён в `deploy/compose/`, а `traefik/` в `deploy/traefik/`
+- **Packaging**: обновлены зависимости, включая `starlette>=1.0.0,<2`, `fastapi>=0.135.3,<1`, `google-genai`, `cryptography`, `opentelemetry-proto`
+- **CI/CD**: workflows адаптированы под frontend build, новый deploy layout и docker publish guardrails
+- **Тестовая структура**: тесты переразложены по `unit/`, `integration/`, `smoke/`, `compat/`
+
+### Исправлено
+- **Admin auth/session flows**: усилена обработка bootstrap, session handling, API-key handoff и safety flows в admin console
+- **Admin navigation**: исправлены проблемы с page-local hash navigation, direct-entry и handoff URL внутри `/admin`
+- **Playground errors**: исправлено surfacing stream failures и backend/playground errors в response workspace
+- **Files and batches state sync**: исправлены лишние refetch/delete сценарии и обновление inventory после мутаций
+- **Gemini batch behavior**: исправлены Gemini file input, fallback model, completed statuses и inline batch defaults
+- **Responses/GigaChat mode split**: исправлено разделение режимов GigaChat API для responses/chat compatibility
+- **Admin readiness/auth alignment**: приведены в соответствие runtime auth policy и готовность admin console
+- **Observability integrations**: исправлены сценарии Phoenix telemetry и связанная конфигурация observability sink-ов
+- **OpenAI/Anthropic/Gemini compatibility edges**: закрыт ряд ошибок request mapping, streaming и transport normalization по новым protocol surfaces
+- **Тестовый baseline**: стабилизированы integration assertions и добавлен отдельный smoke для Starlette 1.x
+
+### Удалено
+- **Старый app entrypoint**: удалён монолитный `gpt2giga/api_server.py` в пользу app factory
+- **Плоские legacy-модули**: убраны или отодвинуты на второй план старые `app_state.py`, `auth.py`, `cli.py` и часть прежних flat imports
+- **Старый layout deploy/docs**: старое расположение `compose/`, `traefik/` и `integrations/` заменено новым `deploy/` и `docs/` layout
+- **Устаревшие тестовые файлы**: удалён заметный объём прежних плоских тестов после переноса на новую layered test-структуру
+
 ## [0.1.6a1] - 2026-03-24
 ### Добавлено
 - **OpenAI Files API**: добавлены эндпоинты `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`
