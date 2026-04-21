@@ -411,6 +411,36 @@ def test_admin_files_batches_create_openai_batch_from_inline_requests():
     assert body["input_file_id"] is None
 
 
+def test_admin_files_batches_create_openai_batch_from_inline_requests_with_fallback_model():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "openai",
+            "endpoint": "/v1/chat/completions",
+            "model": "GigaChat-2-Max",
+            "requests": [
+                {
+                    "custom_id": "req-inline-1",
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": {
+                        "messages": [
+                            {"role": "user", "content": "hello inline openai"}
+                        ],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "openai"
+    assert body["input_file_id"] is None
+
+
 def test_admin_files_batches_create_anthropic_file_returns_normalized_record():
     client = TestClient(make_app())
 
@@ -516,6 +546,38 @@ def test_admin_files_batches_create_anthropic_batch_from_inline_requests():
     body = response.json()
     assert body["api_format"] == "anthropic"
     assert body["display_name"] == "Anthropic Inline Batch"
+    assert body["input_file_id"] is None
+    assert body["output_kind"] == "results"
+
+
+def test_admin_files_batches_create_anthropic_batch_from_inline_requests_with_fallback_model():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "anthropic",
+            "model": "GigaChat-2-Max",
+            "requests": [
+                {
+                    "custom_id": "anthropic-inline-1",
+                    "params": {
+                        "max_tokens": 64,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "hello inline anthropic",
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "anthropic"
     assert body["input_file_id"] is None
     assert body["output_kind"] == "results"
 

@@ -139,22 +139,23 @@ export function bindFilesBatchesPage(options) {
     };
     const getBatchFormatHint = (apiFormat) => {
         if (apiFormat === "anthropic") {
-            return "Anthropic batches accept either a staged JSONL file shaped like `{custom_id, params}` per line or an inline JSON array shaped like `[{custom_id, params}]`.";
+            return "Anthropic batches accept either a staged JSONL file shaped like `{custom_id, params}` per line or an inline JSON array shaped like `[{custom_id, params}]`. Provide a fallback model when rows omit `params.model`.";
         }
         if (apiFormat === "gemini") {
             return "Gemini batches accept either a staged JSONL file shaped like `{key, request}` per line or an inline JSON array shaped like `[{key?, request, metadata?}]`. Provide a fallback model when file rows omit `request.model`.";
         }
-        return "OpenAI batches accept either a staged JSONL file in OpenAI batch input format or an inline JSON array shaped like `[{custom_id, method, url, body}]`.";
+        return "OpenAI batches accept either a staged JSONL file in OpenAI batch input format or an inline JSON array shaped like `[{custom_id, method, url, body}]`. Provide a fallback model when rows omit `body.model`.";
     };
     const readBatchEndpoint = () => elements.batchEndpoint?.value.trim() || "/v1/chat/completions";
     const readConfiguredFallbackModel = () => app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash";
     const buildBatchInlineRequestsTemplate = (apiFormat) => {
+        const fallbackModel = elements.batchModel?.value.trim() || readConfiguredFallbackModel();
         if (apiFormat === "anthropic") {
             return JSON.stringify([
                 {
                     custom_id: "anthropic-row-1",
                     params: {
-                        model: "claude-sonnet-4-20250514",
+                        model: fallbackModel,
                         max_tokens: 64,
                         messages: [
                             {
@@ -167,7 +168,7 @@ export function bindFilesBatchesPage(options) {
             ], null, 2);
         }
         if (apiFormat === "gemini") {
-            const normalizedModel = elements.batchModel?.value.trim() || readConfiguredFallbackModel();
+            const normalizedModel = fallbackModel;
             const requestModel = normalizedModel.startsWith("models/")
                 ? normalizedModel
                 : `models/${normalizedModel}`;
@@ -196,7 +197,7 @@ export function bindFilesBatchesPage(options) {
                     method: "POST",
                     url: "/v1/embeddings",
                     body: {
-                        model: "text-embedding-3-small",
+                        model: fallbackModel,
                         input: "hello openai",
                     },
                 },
@@ -209,7 +210,7 @@ export function bindFilesBatchesPage(options) {
                     method: "POST",
                     url: "/v1/responses",
                     body: {
-                        model: "gpt-4.1-mini",
+                        model: fallbackModel,
                         input: "hello openai",
                     },
                 },
@@ -221,7 +222,7 @@ export function bindFilesBatchesPage(options) {
                 method: "POST",
                 url: "/v1/chat/completions",
                 body: {
-                    model: "gpt-4.1-mini",
+                    model: fallbackModel,
                     messages: [
                         {
                             role: "user",
@@ -267,7 +268,7 @@ export function bindFilesBatchesPage(options) {
             });
         }
         if (elements.batchModelField && elements.batchModel) {
-            const showModel = apiFormat === "gemini";
+            const showModel = true;
             elements.batchModelField.hidden = !showModel;
             elements.batchModel.required = false;
             if (!showModel) {
@@ -1116,9 +1117,6 @@ export function bindFilesBatchesPage(options) {
         syncBatchInlineRequestsTemplate();
     });
     elements.batchModel?.addEventListener("input", () => {
-        if (readBatchApiFormat() !== "gemini") {
-            return;
-        }
         syncBatchInlineRequestsTemplate();
     });
     const routeState = readFilesBatchesRouteState(page);

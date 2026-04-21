@@ -130,6 +130,7 @@ class FilesBatchesService:
                 input_file_id=input_file_id,
                 endpoint=endpoint,
                 metadata=metadata,
+                model=model,
                 requests=requests,
                 giga_client=giga_client,
                 batches_service=batches_service,
@@ -290,6 +291,7 @@ class FilesBatchesService:
         input_file_id: str | None,
         endpoint: str | None,
         metadata: dict[str, Any] | None,
+        model: str | None,
         requests: list[dict[str, Any]] | None,
         giga_client: Any,
         batches_service: Any,
@@ -298,14 +300,20 @@ class FilesBatchesService:
     ) -> dict[str, Any]:
         normalized_endpoint = _normalize_openai_endpoint(endpoint)
         if requests:
+            requests_payload = _apply_openai_fallback_model(
+                list(requests),
+                fallback_model=model,
+            )
             stored_metadata: dict[str, Any] = {
                 "metadata": dict(metadata or {}),
             }
             resolved_input_file_id = _string_or_none(input_file_id)
             if resolved_input_file_id:
                 stored_metadata["input_file_id"] = resolved_input_file_id
+            if _string_or_none(model):
+                stored_metadata["model"] = model.strip()
             return await batches_service.create_batch_from_rows(
-                list(requests),
+                requests_payload,
                 endpoint=normalized_endpoint,
                 completion_window="24h",
                 metadata=stored_metadata,
@@ -353,7 +361,10 @@ class FilesBatchesService:
         resolved_input_file_id = _string_or_none(input_file_id)
         requests_payload: list[dict[str, Any]]
         if requests:
-            requests_payload = list(requests)
+            requests_payload = _apply_anthropic_fallback_model(
+                list(requests),
+                fallback_model=model,
+            )
         else:
             resolved_input_file_id = _require_non_empty(
                 input_file_id,
@@ -815,6 +826,56 @@ def _resolve_gemini_model(
             )
         },
     )
+
+
+def _apply_openai_fallback_model(
+    requests_payload: list[dict[str, Any]],
+    *,
+    fallback_model: str | None,
+) -> list[dict[str, Any]]:
+    normalized_fallback = _string_or_none(fallback_model)
+    if normalized_fallback is None:
+        return requests_payload
+
+    normalized_requests: list[dict[str, Any]] = []
+    for request_item in requests_payload:
+        if not isinstance(request_item, dict):
+            normalized_requests.append(request_item)
+            continue
+
+        next_request = dict(request_item)
+        body = next_request.get("body")
+        if isinstance(body, dict) and not _string_or_none(body.get("model")):
+            next_body = dict(body)
+            next_body["model"] = normalized_fallback
+            next_request["body"] = next_body
+        normalized_requests.append(next_request)
+    return normalized_requests
+
+
+def _apply_anthropic_fallback_model(
+    requests_payload: list[dict[str, Any]],
+    *,
+    fallback_model: str | None,
+) -> list[dict[str, Any]]:
+    normalized_fallback = _string_or_none(fallback_model)
+    if normalized_fallback is None:
+        return requests_payload
+
+    normalized_requests: list[dict[str, Any]] = []
+    for request_item in requests_payload:
+        if not isinstance(request_item, dict):
+            normalized_requests.append(request_item)
+            continue
+
+        next_request = dict(request_item)
+        params = next_request.get("params")
+        if isinstance(params, dict) and not _string_or_none(params.get("model")):
+            next_params = dict(params)
+            next_params["model"] = normalized_fallback
+            next_request["params"] = next_params
+        normalized_requests.append(next_request)
+    return normalized_requests
 
 
 def _resolve_gemini_display_name(

@@ -494,6 +494,39 @@ async def test_files_batches_service_creates_openai_batch_from_inline_requests()
 
 
 @pytest.mark.asyncio
+async def test_files_batches_service_applies_openai_fallback_model_to_inline_requests():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    await service.create_batch(
+        api_format="openai",
+        endpoint="/v1/chat/completions",
+        model="GigaChat-2-Max",
+        requests=[
+            {
+                "custom_id": "req-inline-1",
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "messages": [{"role": "user", "content": "hello inline openai"}],
+                },
+            }
+        ],
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert batches_service.last_create_from_rows is not None
+    assert (
+        batches_service.last_create_from_rows["rows"][0]["body"]["model"]
+        == "GigaChat-2-Max"
+    )
+
+
+@pytest.mark.asyncio
 async def test_files_batches_service_creates_anthropic_batch_from_staged_file():
     service = FilesBatchesService()
     batches_service = FakeBatchesService()
@@ -558,6 +591,39 @@ async def test_files_batches_service_creates_anthropic_batch_from_inline_request
             "content"
         ]
         == "hello inline anthropic"
+    )
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_applies_anthropic_fallback_model_to_inline_requests():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    await service.create_batch(
+        api_format="anthropic",
+        model="GigaChat-2-Max",
+        requests=[
+            {
+                "custom_id": "anthropic-inline-1",
+                "params": {
+                    "max_tokens": 64,
+                    "messages": [{"role": "user", "content": "hello inline anthropic"}],
+                },
+            }
+        ],
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert batches_service.last_create_from_rows is not None
+    assert (
+        batches_service.last_create_from_rows["metadata"]["requests"][0]["params"][
+            "model"
+        ]
+        == "GigaChat-2-Max"
     )
 
 

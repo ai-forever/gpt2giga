@@ -431,14 +431,15 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert 'app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash"' in (
         files_batches_bindings_asset.text
     )
-    assert 'model: "gpt-4.1-mini"' in files_batches_bindings_asset.text
-    assert 'model: "claude-sonnet-4-20250514"' in files_batches_bindings_asset.text
+    assert "const fallbackModel =" in files_batches_bindings_asset.text
+    assert "model: fallbackModel" in files_batches_bindings_asset.text
     assert "readConfiguredFallbackModel()" in files_batches_bindings_asset.text
     assert 'normalizedModel.startsWith("models/")' in files_batches_bindings_asset.text
     assert 'requestLabel: "row-1"' in files_batches_bindings_asset.text
     assert 'elements.batchEndpoint?.addEventListener("change"' in (
         files_batches_bindings_asset.text
     )
+    assert "const showModel = true" in files_batches_bindings_asset.text
     assert (
         'elements.batchModel?.addEventListener("input"'
         in files_batches_bindings_asset.text
