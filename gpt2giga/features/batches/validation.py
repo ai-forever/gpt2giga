@@ -29,6 +29,8 @@ from gpt2giga.features.batches.validation_contracts import (
 )
 from gpt2giga.providers.gigachat.embeddings_mapper import transform_embedding_body
 
+GIGACHAT_BATCH_MAX_ROWS = 100
+
 
 def validate_batch_input_bytes(
     content: bytes,
@@ -49,16 +51,18 @@ def validate_batch_input_bytes(
 
     normalized_api_format = _normalize_validation_api_format(api_format)
     detected_format = detect_batch_input_format(rows)
+    total_rows = _count_candidate_rows(content)
     issues.extend(
         _build_format_mismatch_issues(
             api_format=normalized_api_format,
             detected_format=detected_format,
         )
     )
+    issues.extend(_build_row_limit_issues(total_rows))
     return _build_report(
         api_format=normalized_api_format,
         detected_format=detected_format,
-        total_rows=_count_candidate_rows(content),
+        total_rows=total_rows,
         issues=issues,
     )
 
@@ -82,16 +86,18 @@ def validate_batch_input_rows(
 
     normalized_api_format = _normalize_validation_api_format(api_format)
     detected_format = detect_batch_input_format(rows)
+    total_rows = len(rows)
     issues.extend(
         _build_format_mismatch_issues(
             api_format=normalized_api_format,
             detected_format=detected_format,
         )
     )
+    issues.extend(_build_row_limit_issues(total_rows))
     return _build_report(
         api_format=normalized_api_format,
         detected_format=detected_format,
-        total_rows=len(rows),
+        total_rows=total_rows,
         issues=issues,
     )
 
@@ -137,12 +143,14 @@ class BatchInputValidator:
 
         normalized_api_format = _normalize_validation_api_format(api_format)
         detected_format = detect_batch_input_format(row for _, row in numbered_rows)
+        total_rows = _count_candidate_rows(content)
         issues.extend(
             _build_format_mismatch_issues(
                 api_format=normalized_api_format,
                 detected_format=detected_format,
             )
         )
+        issues.extend(_build_row_limit_issues(total_rows))
         issues.extend(
             await self._validate_numbered_rows(
                 numbered_rows,
@@ -153,7 +161,7 @@ class BatchInputValidator:
         return _build_report(
             api_format=normalized_api_format,
             detected_format=detected_format,
-            total_rows=_count_candidate_rows(content),
+            total_rows=total_rows,
             issues=issues,
         )
 
@@ -179,12 +187,14 @@ class BatchInputValidator:
 
         normalized_api_format = _normalize_validation_api_format(api_format)
         detected_format = detect_batch_input_format(row for _, row in numbered_rows)
+        total_rows = len(numbered_rows)
         issues.extend(
             _build_format_mismatch_issues(
                 api_format=normalized_api_format,
                 detected_format=detected_format,
             )
         )
+        issues.extend(_build_row_limit_issues(total_rows))
         issues.extend(
             await self._validate_numbered_rows(
                 numbered_rows,
@@ -195,7 +205,7 @@ class BatchInputValidator:
         return _build_report(
             api_format=normalized_api_format,
             detected_format=detected_format,
-            total_rows=len(numbered_rows),
+            total_rows=total_rows,
             issues=issues,
         )
 
@@ -812,6 +822,25 @@ def _build_format_mismatch_issues(
             hint=(
                 f"Switch the selected format to `{detected_format.value}` or "
                 f"reshape the rows for `{api_format.value}`."
+            ),
+        )
+    ]
+
+
+def _build_row_limit_issues(total_rows: int) -> list[BatchValidationIssue]:
+    if total_rows <= GIGACHAT_BATCH_MAX_ROWS:
+        return []
+    return [
+        _build_issue(
+            severity=BatchValidationSeverity.ERROR,
+            code="row_limit_exceeded",
+            message=(
+                "GigaChat backend does not support more than "
+                f"{GIGACHAT_BATCH_MAX_ROWS} batch rows."
+            ),
+            hint=(
+                "Split the input into multiple batches with "
+                f"{GIGACHAT_BATCH_MAX_ROWS} rows or fewer."
             ),
         )
     ]

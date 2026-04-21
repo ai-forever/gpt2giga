@@ -851,6 +851,34 @@ def test_admin_files_batches_validate_inline_gemini_rows_returns_warnings_only()
     }
 
 
+def test_admin_files_batches_validate_reports_gigachat_row_limit():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "requests": [
+                {
+                    "custom_id": f"row-{index}",
+                    "url": "/v1/chat/completions",
+                    "body": {"messages": []},
+                }
+                for index in range(101)
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is False
+    assert body["summary"]["total_rows"] == 101
+    assert body["summary"]["error_count"] == 1
+    assert body["issues"][0]["severity"] == "error"
+    assert body["issues"][0]["code"] == "row_limit_exceeded"
+    assert "does not support more than 100 batch rows" in body["issues"][0]["message"]
+
+
 def test_admin_files_batches_validate_requires_file_or_requests():
     client = TestClient(make_app())
 
