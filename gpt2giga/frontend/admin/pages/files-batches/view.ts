@@ -63,6 +63,8 @@ export interface FilesBatchesPageElements {
   uploadDisplayName: HTMLInputElement | null;
   uploadDisplayNameField: HTMLElement | null;
   uploadForm: HTMLFormElement | null;
+  uploadPurpose: HTMLSelectElement | null;
+  uploadValidateButton: HTMLButtonElement | null;
   workflowNode: HTMLElement;
 }
 
@@ -331,7 +333,7 @@ function renderFilesPage(
                 </label>
                 <label class="field">
                   <span>Purpose</span>
-                  <select name="purpose">
+                  <select id="upload-purpose" name="purpose">
                     ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
                   </select>
                 </label>
@@ -348,6 +350,13 @@ function renderFilesPage(
             })}
             <div class="form-actions">
               <button class="button" type="submit">Upload file</button>
+              <button
+                class="button button--secondary"
+                id="upload-and-validate-button"
+                type="submit"
+              >
+                Upload and validate
+              </button>
             </div>
           </form>
         </div>
@@ -865,6 +874,10 @@ export function resolveFilesBatchesElements(
       "#upload-display-name-field",
     ),
     uploadForm: pageContent.querySelector<HTMLFormElement>("#files-upload-form"),
+    uploadPurpose: pageContent.querySelector<HTMLSelectElement>("#upload-purpose"),
+    uploadValidateButton: pageContent.querySelector<HTMLButtonElement>(
+      "#upload-and-validate-button",
+    ),
     workflowNode,
   };
 }

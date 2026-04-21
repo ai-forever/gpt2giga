@@ -194,7 +194,7 @@ function renderFilesPage(data, inventory, filters) {
                 </label>
                 <label class="field">
                   <span>Purpose</span>
-                  <select name="purpose">
+                  <select id="upload-purpose" name="purpose">
                     ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
                   </select>
                 </label>
@@ -211,6 +211,13 @@ function renderFilesPage(data, inventory, filters) {
     })}
             <div class="form-actions">
               <button class="button" type="submit">Upload file</button>
+              <button
+                class="button button--secondary"
+                id="upload-and-validate-button"
+                type="submit"
+              >
+                Upload and validate
+              </button>
             </div>
           </form>
         </div>
@@ -579,6 +586,8 @@ export function resolveFilesBatchesElements(pageContent) {
         uploadDisplayName: pageContent.querySelector("#upload-display-name"),
         uploadDisplayNameField: pageContent.querySelector("#upload-display-name-field"),
         uploadForm: pageContent.querySelector("#files-upload-form"),
+        uploadPurpose: pageContent.querySelector("#upload-purpose"),
+        uploadValidateButton: pageContent.querySelector("#upload-and-validate-button"),
         workflowNode,
     };
 }

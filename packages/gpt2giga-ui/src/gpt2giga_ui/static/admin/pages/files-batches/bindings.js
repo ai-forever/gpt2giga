@@ -925,6 +925,17 @@ export function bindFilesBatchesPage(options) {
             uploadHint.textContent = getUploadFormatHint(apiFormat);
         }
     };
+    const syncUploadActionAvailability = () => {
+        if (!elements.uploadValidateButton) {
+            return;
+        }
+        const isBatchPurpose = elements.uploadPurpose?.value === "batch";
+        elements.uploadValidateButton.hidden = !isBatchPurpose;
+        elements.uploadValidateButton.disabled = !isBatchPurpose;
+        elements.uploadValidateButton.title = isBatchPurpose
+            ? "Upload the file, open the batch composer, and run validation immediately."
+            : "";
+    };
     const runWorkflowAction = async ({ button, root, pendingLabel, pendingSummary, successSummary, action, }) => {
         setWorkflowSummary(pendingSummary);
         try {
@@ -1272,6 +1283,8 @@ export function bindFilesBatchesPage(options) {
         const button = submitter instanceof HTMLButtonElement
             ? submitter
             : form.querySelector('button[type="submit"]');
+        const shouldValidateAfterUpload = button?.id === "upload-and-validate-button" &&
+            fields.purpose.value === "batch";
         await runWorkflowAction({
             root: form,
             button,
@@ -1300,8 +1313,19 @@ export function bindFilesBatchesPage(options) {
                     displayName: fields.display_name?.value,
                 });
                 app.queueAlert(`Uploaded file ${String(response.id ?? "")}.`, "info");
+                const fileId = String(response.id ?? "");
+                if (shouldValidateAfterUpload && fileId) {
+                    window.history.pushState({}, "", buildFilesBatchesUrl(scopeFilesBatchesFilters("batches", filters), { composeInputFileId: fileId }, "batches"));
+                    await app.render("batches");
+                    window.requestAnimationFrame(() => {
+                        app.pageContent
+                            .querySelector("#batch-validate-button")
+                            ?.click();
+                    });
+                    return response;
+                }
                 replaceStateForPage(page, {
-                    selectedFileId: String(response.id ?? ""),
+                    selectedFileId: fileId,
                 });
                 await app.render(page);
                 return response;
@@ -1310,6 +1334,9 @@ export function bindFilesBatchesPage(options) {
     });
     elements.uploadApiFormat?.addEventListener("change", () => {
         syncUploadComposerFormat(readUploadApiFormat());
+    });
+    elements.uploadPurpose?.addEventListener("change", () => {
+        syncUploadActionAvailability();
     });
     elements.batchForm?.addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -1697,12 +1724,16 @@ export function bindFilesBatchesPage(options) {
             syncBatchEndpointControl("gemini");
         }
         syncBatchInlineRequestsTemplate();
+        invalidateBatchValidation();
     });
     elements.batchModel?.addEventListener("change", () => {
         if (readBatchApiFormat() === "gemini") {
             syncBatchEndpointControl("gemini");
         }
         invalidateBatchValidation({ auto: true });
+    });
+    elements.batchInput?.addEventListener("input", () => {
+        invalidateBatchValidation();
     });
     elements.batchInput?.addEventListener("change", () => {
         invalidateBatchValidation({ auto: true });
@@ -1712,9 +1743,13 @@ export function bindFilesBatchesPage(options) {
         elements.batchInlineRequests?.focus();
         invalidateBatchValidation({ auto: true });
     });
+    elements.batchInlineRequests?.addEventListener("input", () => {
+        invalidateBatchValidation();
+    });
     elements.batchInlineRequests?.addEventListener("change", () => {
         invalidateBatchValidation({ auto: true });
     });
+    syncUploadActionAvailability();
     const routeState = readFilesBatchesRouteState(page);
     if (routeState.composeInputFileId && elements.batchInput) {
         elements.batchInput.value = routeState.composeInputFileId;
