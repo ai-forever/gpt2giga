@@ -16,6 +16,7 @@
 | `examples/openai/batches/` | OpenAI Batches API example |
 | `examples/openai/embeddings/` | OpenAI embeddings example |
 | `examples/openai/models/` | OpenAI models listing/retrieval example |
+| `examples/batch_validation/` | Standalone batch validation examples |
 | `examples/anthropic/messages/` | Anthropic Messages API examples |
 | `examples/anthropic/count_tokens/` | Anthropic Messages token counting example |
 | `examples/anthropic/batches/` | Anthropic Message Batches API examples |
@@ -37,6 +38,9 @@
 - `openai/responses/structured_output.py`: structured outputs
 - `openai/files/files.py`: Files API upload/list/content/delete flow
 - `openai/batches/batches.py`: Batches API end-to-end flow
+- `batch_validation/openai_validate.py`: standalone batch validation for OpenAI rows
+- `batch_validation/anthropic_validate.py`: standalone batch validation for Anthropic rows
+- `batch_validation/gemini_validate.py`: standalone batch validation for Gemini rows
 - `anthropic/messages/messages.py`: basic Messages API call
 - `anthropic/messages/messages_stream.py`: streaming Messages API
 - `anthropic/batches/message_batches.py`: Anthropic Message Batches API
@@ -76,6 +80,7 @@ uv run python examples/openai/chat/chat_completion.py
 uv run python examples/openai/responses/single_prompt.py
 uv run python examples/openai/files/files.py
 uv run python examples/openai/batches/batches.py
+uv run python examples/batch_validation/openai_validate.py
 uv run python examples/anthropic/messages/messages.py
 uv run python examples/gemini/content/generate_content.py
 uv run python examples/agents/openai_agents.py
