@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
@@ -59,7 +59,7 @@ def test_root_head_allowed():
     assert response.headers["location"] == "/admin"
 
 
-def test_root_redirect_includes_api_key_query_in_dev_when_auth_enabled():
+def test_root_redirect_sets_session_cookie_in_dev_when_auth_enabled():
     app = create_app(
         config=ProxyConfig(
             proxy=ProxySettings(
@@ -76,7 +76,12 @@ def test_root_redirect_includes_api_key_query_in_dev_when_auth_enabled():
     assert response.status_code == 307
     parsed = urlparse(response.headers["location"])
     assert parsed.path == "/admin"
-    assert parse_qs(parsed.query) == {"x-api-key": ["dev-secret+/="]}
+    assert parsed.query == ""
+    cookie_header = response.headers["set-cookie"]
+    assert f'{ADMIN_AUTH_COOKIE_NAME}="dev-secret+/="' in cookie_header
+    assert "HttpOnly" in cookie_header
+    assert "SameSite=lax" in cookie_header
+    assert "Max-Age" not in cookie_header
 
 
 def test_cors_headers_present():

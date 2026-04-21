@@ -2,7 +2,6 @@
 
 import os
 from pathlib import Path
-from urllib.parse import urlencode
 
 from fastapi import Depends, FastAPI
 from starlette.datastructures import Headers
@@ -11,7 +10,10 @@ from starlette.responses import FileResponse, RedirectResponse
 from starlette.staticfiles import NotModifiedResponse, StaticFiles
 
 from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
-from gpt2giga.api.admin.access import build_admin_access_verifier
+from gpt2giga.api.admin.access import (
+    ADMIN_AUTH_COOKIE_NAME,
+    build_admin_access_verifier,
+)
 from gpt2giga.api.dependencies.auth import build_api_key_verifier
 from gpt2giga.api.dependencies.governance import build_governance_verifier
 from gpt2giga.api.gemini.request import GeminiAPIError
@@ -182,7 +184,15 @@ def _register_root_redirect(
             return {"status": "ok", "mode": config.proxy_settings.mode}
         if config.proxy_settings.enable_api_key_auth and config.proxy_settings.api_key:
             if target == "/admin":
-                target = f"{target}?{urlencode({'x-api-key': config.proxy_settings.api_key})}"
+                response = RedirectResponse(url=target)
+                response.set_cookie(
+                    ADMIN_AUTH_COOKIE_NAME,
+                    config.proxy_settings.api_key,
+                    httponly=True,
+                    path="/",
+                    samesite="lax",
+                )
+                return response
         return RedirectResponse(url=target)
 
 

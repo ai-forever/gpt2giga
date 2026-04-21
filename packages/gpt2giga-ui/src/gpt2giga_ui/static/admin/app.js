@@ -6,7 +6,6 @@ import { PAGE_RENDERERS } from "./pages/index.js";
 const ADMIN_KEY_STORAGE = "gpt2giga.adminKey";
 const GATEWAY_KEY_STORAGE = "gpt2giga.gatewayKey";
 const ADMIN_KEY_COOKIE = "gpt2giga_admin_key";
-const ADMIN_KEY_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 const UNSAVED_CHANGES_MESSAGE = "You have unsaved setup or settings changes. Leave this page and discard them?";
 export class AdminApp {
     pageContent = this.requireElement("page-content");
@@ -35,9 +34,9 @@ export class AdminApp {
     shouldFocusPageHeading = false;
     lastKnownUrl = this.currentUrl();
     constructor() {
-        this.adminKeyInput.value = localStorage.getItem(ADMIN_KEY_STORAGE) || "";
+        this.adminKeyInput.value = this.restoreSessionValue(ADMIN_KEY_STORAGE);
         this.gatewayKeyInput.value =
-            localStorage.getItem(GATEWAY_KEY_STORAGE) || this.adminKeyInput.value;
+            this.restoreSessionValue(GATEWAY_KEY_STORAGE) || this.adminKeyInput.value;
         if (!this.adminKeyInput.value || !this.gatewayKeyInput.value) {
             this.authDisclosure?.setAttribute("open", "open");
         }
@@ -45,8 +44,8 @@ export class AdminApp {
         this.hydrateKeysFromQuery();
         this.saveAuthButton.addEventListener("click", () => {
             this.persistAdminKey(this.adminKeyInput.value.trim());
-            localStorage.setItem(GATEWAY_KEY_STORAGE, this.gatewayKeyInput.value.trim());
-            this.pushAlert("Saved API keys in browser local storage.", "info");
+            this.persistSessionValue(GATEWAY_KEY_STORAGE, this.gatewayKeyInput.value.trim());
+            this.pushAlert("Saved API keys for this browser session.", "info");
         });
         this.installNavigation();
     }
@@ -126,7 +125,7 @@ export class AdminApp {
     }
     saveGatewayKey(value) {
         this.gatewayKeyInput.value = value;
-        localStorage.setItem(GATEWAY_KEY_STORAGE, value);
+        this.persistSessionValue(GATEWAY_KEY_STORAGE, value);
     }
     saveAdminKey(value) {
         this.adminKeyInput.value = value;
@@ -216,10 +215,10 @@ export class AdminApp {
         }
         this.adminKeyInput.value = queryKey;
         this.persistAdminKey(queryKey);
-        const storedGatewayKey = localStorage.getItem(GATEWAY_KEY_STORAGE)?.trim();
+        const storedGatewayKey = sessionStorage.getItem(GATEWAY_KEY_STORAGE)?.trim();
         if (!storedGatewayKey) {
             this.gatewayKeyInput.value = queryKey;
-            localStorage.setItem(GATEWAY_KEY_STORAGE, queryKey);
+            this.persistSessionValue(GATEWAY_KEY_STORAGE, queryKey);
         }
         params.delete("x-api-key");
         const nextQuery = params.toString();
@@ -325,9 +324,34 @@ export class AdminApp {
         return node;
     }
     persistAdminKey(value) {
-        localStorage.setItem(ADMIN_KEY_STORAGE, value);
+        this.persistSessionValue(ADMIN_KEY_STORAGE, value);
         const secure = window.location.protocol === "https:" ? "; Secure" : "";
-        document.cookie = `${ADMIN_KEY_COOKIE}=${encodeURIComponent(value)}; Path=/; Max-Age=${ADMIN_KEY_COOKIE_MAX_AGE_SECONDS}; SameSite=Lax${secure}`;
+        if (!value) {
+            document.cookie = `${ADMIN_KEY_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+            return;
+        }
+        document.cookie = `${ADMIN_KEY_COOKIE}=${encodeURIComponent(value)}; Path=/; SameSite=Lax${secure}`;
+    }
+    restoreSessionValue(key) {
+        const sessionValue = sessionStorage.getItem(key)?.trim();
+        if (sessionValue) {
+            return sessionValue;
+        }
+        const legacyValue = localStorage.getItem(key)?.trim();
+        if (!legacyValue) {
+            return "";
+        }
+        this.persistSessionValue(key, legacyValue);
+        return legacyValue;
+    }
+    persistSessionValue(key, value) {
+        if (value) {
+            sessionStorage.setItem(key, value);
+        }
+        else {
+            sessionStorage.removeItem(key);
+        }
+        localStorage.removeItem(key);
     }
     hasUnsavedChanges() {
         return this.dirtyForms.size > 0;

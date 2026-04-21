@@ -217,6 +217,8 @@ def test_admin_ui_warning_banner():
     assert "class AdminApp" in app_asset.text
     assert "navigateToLocation" in app_asset.text
     assert "window.history.pushState" in app_asset.text
+    assert "sessionStorage" in app_asset.text
+    assert "Saved API keys for this browser session." in app_asset.text
     assert "[data-nav-section]" in app_asset.text
     assert "aria-current" in app_asset.text
     assert "pageTitle.focus()" in app_asset.text
