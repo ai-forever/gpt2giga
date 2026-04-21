@@ -535,6 +535,13 @@ summary:focus-visible {
   font-size: 13px;
 }
 
+.field__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .field > span:first-child {
   color: var(--muted);
 }
@@ -608,6 +615,14 @@ textarea {
   background: rgba(255, 255, 255, 0.94);
   border-color: rgba(15, 23, 42, 0.18);
   box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+}
+
+.button--inline {
+  min-height: 28px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
 }
 
 .button--ghost {

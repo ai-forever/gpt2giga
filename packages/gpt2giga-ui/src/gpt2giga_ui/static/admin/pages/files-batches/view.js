@@ -312,7 +312,14 @@ function renderBatchesPage(data, inventory, filters) {
                   </select>
                 </label>
                 <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-... (optional when using inline requests)" /></label>
-                <label class="field" id="batch-inline-requests-field"><span>Inline requests (JSON array)</span><textarea id="batch-inline-requests" name="requests" placeholder='[{"custom_id":"openai-row-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hello openai"}]}}]'></textarea></label>
+                <label class="field" id="batch-inline-requests-field">
+                  <span class="field__header">
+                    <span>Inline requests (JSON array)</span>
+                    <button class="button button--secondary button--inline" id="batch-inline-requests-example" type="button">Use example</button>
+                  </span>
+                  <textarea id="batch-inline-requests" name="requests" placeholder='[{"custom_id":"openai-row-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hello openai"}]}}]'></textarea>
+                  <p class="field-note">Leave this empty to use <code>input_file_id</code>. Use the example button only when you want inline requests to be the active source.</p>
+                </label>
                 <label class="field" id="batch-model-field" hidden><span>Fallback model (optional)</span><input id="batch-model" name="model" placeholder="gemini-2.5-flash" /></label>
                 <label class="field" id="batch-display-name-field" hidden><span>Display name</span><input id="batch-display-name" name="display_name" placeholder="nightly-gemini-import" /></label>
                 <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
@@ -549,6 +556,7 @@ export function resolveFilesBatchesElements(pageContent) {
         batchForm: pageContent.querySelector("#batch-create-form"),
         batchInput: pageContent.querySelector("#batch-input-file-id"),
         batchHint: pageContent.querySelector("#batch-format-hint"),
+        batchInlineRequestsExampleButton: pageContent.querySelector("#batch-inline-requests-example"),
         batchInlineRequests: pageContent.querySelector("#batch-inline-requests"),
         batchInlineRequestsField: pageContent.querySelector("#batch-inline-requests-field"),
         batchModel: pageContent.querySelector("#batch-model"),

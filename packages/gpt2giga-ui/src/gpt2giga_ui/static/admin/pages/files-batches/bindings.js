@@ -791,8 +791,7 @@ export function bindFilesBatchesPage(options) {
         elements.batchInlineRequests.placeholder = nextTemplate;
         const currentValue = elements.batchInlineRequests.value.trim();
         if (options?.forceValue ||
-            !currentValue ||
-            currentValue === lastInlineRequestsTemplate) {
+            (currentValue && currentValue === lastInlineRequestsTemplate)) {
             elements.batchInlineRequests.value = nextTemplate;
         }
         lastInlineRequestsTemplate = nextTemplate;
@@ -1649,6 +1648,11 @@ export function bindFilesBatchesPage(options) {
         invalidateBatchValidation({ auto: true });
     });
     elements.batchInput?.addEventListener("change", () => {
+        invalidateBatchValidation({ auto: true });
+    });
+    elements.batchInlineRequestsExampleButton?.addEventListener("click", () => {
+        syncBatchInlineRequestsTemplate({ forceValue: true });
+        elements.batchInlineRequests?.focus();
         invalidateBatchValidation({ auto: true });
     });
     elements.batchInlineRequests?.addEventListener("change", () => {
