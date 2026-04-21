@@ -215,19 +215,22 @@ function renderFilesPage(data, inventory, filters) {
             .map((item) => {
             const id = String(item.id ?? "");
             const latestBatch = getLatestLinkedBatch(id, data.batches);
+            const hasContent = Boolean(item.content_path);
+            const hasDownload = Boolean(item.download_path || item.content_path);
+            const hasDelete = Boolean(item.delete_path);
             return `
                         <tr>
-                          <td><strong>${escapeHtml(item.filename ?? id)}</strong><br /><span class="muted">${escapeHtml(id)}</span></td>
+                          <td><strong>${escapeHtml(item.filename ?? id)}</strong><br /><span class="muted">${escapeHtml(id)} · ${escapeHtml(String(item.api_format ?? "openai"))}</span></td>
                           <td>${escapeHtml(item.purpose ?? "user_data")}</td>
                           <td>${escapeHtml(formatBytes(item.bytes))}</td>
                           <td>${latestBatch ? `${escapeHtml(String(latestBatch.id ?? "unknown"))}<br /><span class="muted">${escapeHtml(String(latestBatch.status ?? "unknown"))}</span>` : '<span class="muted">No linked batch</span>'}</td>
                           <td>
                             <div class="toolbar">
                               <button class="button button--secondary" data-file-view="${escapeHtml(id)}" type="button">Inspect</button>
-                              <button class="button button--secondary" data-file-content="${escapeHtml(id)}" type="button">Content</button>
-                              <button class="button button--secondary" data-file-download="${escapeHtml(id)}" data-file-download-name="${escapeHtml(String(item.filename ?? `file-${id}.bin`))}" type="button">Download</button>
+                              <button class="button button--secondary" ${hasContent ? `data-file-content="${escapeHtml(id)}"` : 'disabled title="Content preview is unavailable for this file"'} type="button">Content</button>
+                              <button class="button button--secondary" ${hasDownload ? `data-file-download="${escapeHtml(id)}" data-file-download-name="${escapeHtml(String(item.filename ?? `file-${id}.bin`))}"` : 'disabled title="Download is unavailable for this file"'} type="button">Download</button>
                               <button class="button" data-file-use="${escapeHtml(id)}" type="button">Open batches</button>
-                              <button class="button button--danger" data-file-delete="${escapeHtml(id)}" type="button">Delete</button>
+                              <button class="button button--danger" ${hasDelete ? `data-file-delete="${escapeHtml(id)}"` : 'disabled title="Delete is unavailable for this file"'} type="button">Delete</button>
                             </div>
                           </td>
                         </tr>
@@ -310,9 +313,10 @@ function renderBatchesPage(data, inventory, filters) {
             .map((item) => {
             const id = String(item.id ?? "");
             const outputFile = String(item.output_file_id ?? "");
+            const outputReady = Boolean(item.output_path || outputFile);
             return `
                         <tr>
-                          <td><strong>${escapeHtml(id)}</strong><br /><span class="muted">${escapeHtml(String(item.input_file_id ?? "no input file"))}</span></td>
+                          <td><strong>${escapeHtml(id)}</strong><br /><span class="muted">${escapeHtml(String(item.input_file_id ?? "no input file"))} · ${escapeHtml(String(item.api_format ?? "openai"))}</span></td>
                           <td>${renderBatchStatus(String(item.status ?? "unknown"))}</td>
                           <td>${escapeHtml(item.endpoint ?? "n/a")}</td>
                           <td>${escapeHtml(outputFile || "n/a")}</td>
@@ -321,8 +325,8 @@ function renderBatchesPage(data, inventory, filters) {
                               <button class="button button--secondary" data-batch-view="${escapeHtml(id)}" type="button">Inspect</button>
                               <button class="button button--secondary" ${item.input_file_id ? `data-batch-input="${escapeHtml(id)}"` : 'disabled title="Input file metadata is missing"'} type="button">Input</button>
                               <button class="button button--secondary" ${item.input_file_id ? `data-batch-input-preview="${escapeHtml(id)}"` : 'disabled title="Input preview is unavailable without an input file"'} type="button">Preview input</button>
-                              <button class="button button--secondary" ${outputFile ? `data-batch-output="${escapeHtml(outputFile)}"` : 'disabled title="Output unlocks when the batch exposes output_file_id"'} type="button">Preview output</button>
-                              <button class="button button--secondary" ${outputFile ? `data-batch-download="${escapeHtml(outputFile)}" data-batch-download-name="${escapeHtml(`batch-output-${id}.jsonl`)}"` : 'disabled title="Download unlocks when the batch exposes output_file_id"'} type="button">Download output</button>
+                              <button class="button button--secondary" ${outputReady ? `data-batch-output="${escapeHtml(outputFile)}"` : 'disabled title="Output unlocks when the batch exposes a preview path"'} type="button">Preview output</button>
+                              <button class="button button--secondary" ${outputReady ? `data-batch-download="${escapeHtml(outputFile)}" data-batch-download-name="${escapeHtml(`batch-output-${id}.jsonl`)}"` : 'disabled title="Download unlocks when the batch exposes a preview path"'} type="button">Download output</button>
                             </div>
                           </td>
                         </tr>

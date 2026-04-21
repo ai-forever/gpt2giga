@@ -1,24 +1,27 @@
-import { asArray } from "../../utils.js";
 export async function loadFilesBatchesPageData(app) {
-    const [filesPayload, batchesPayload] = await Promise.all([
-        app.api.json("/v1/files?order=desc&limit=100", {}, true),
-        app.api.json("/v1/batches?limit=100", {}, true),
-    ]);
+    const inventoryPayload = await app.api.json("/admin/api/files-batches/inventory", {}, true);
     return {
-        filesPayload,
-        batchesPayload,
-        files: asArray(filesPayload.data),
-        batches: asArray(batchesPayload.data),
+        inventoryPayload,
+        files: inventoryPayload.files ?? [],
+        batches: inventoryPayload.batches ?? [],
+        counts: inventoryPayload.counts ?? {
+            files: 0,
+            batches: 0,
+            output_ready: 0,
+            needs_attention: 0,
+        },
     };
 }
 export async function fetchFileMetadata(app, fileId) {
-    return app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, {}, true);
+    return app.api.json(`/admin/api/files-batches/files/${encodeURIComponent(fileId)}`, {}, true);
 }
 export async function fetchBatchMetadata(app, batchId) {
-    return app.api.json(`/v1/batches/${encodeURIComponent(batchId)}`, {}, true);
+    return app.api.json(`/admin/api/files-batches/batches/${encodeURIComponent(batchId)}`, {}, true);
 }
-export async function fetchFileContent(app, fileId) {
-    const response = await app.api.raw(`/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
+export async function fetchFileContent(app, fileId, contentPath) {
+    const normalizedContentPath = contentPath?.trim();
+    const response = await app.api.raw(normalizedContentPath ||
+        `/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
     return new Uint8Array(await response.arrayBuffer());
 }
 export async function uploadFile(app, purpose, file) {
@@ -38,6 +41,7 @@ export async function createBatch(app, payload) {
         },
     }, true);
 }
-export async function deleteFile(app, fileId) {
-    await app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
+export async function deleteFile(app, fileId, deletePath) {
+    const normalizedDeletePath = deletePath?.trim();
+    await app.api.json(normalizedDeletePath || `/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
 }

@@ -1,36 +1,54 @@
 import type { AdminApp } from "../../app.js";
-import { asArray } from "../../utils.js";
 import type { BatchRecord, FileRecord } from "./state.js";
 
-export interface FilesBatchesPageData {
-  filesPayload: Record<string, unknown>;
-  batchesPayload: Record<string, unknown>;
+interface FilesBatchesInventoryCounts {
+  files: number;
+  batches: number;
+  output_ready: number;
+  needs_attention: number;
+}
+
+interface FilesBatchesInventoryPayload {
   files: FileRecord[];
   batches: BatchRecord[];
+  counts: FilesBatchesInventoryCounts;
+}
+
+export interface FilesBatchesPageData {
+  inventoryPayload: FilesBatchesInventoryPayload;
+  files: FileRecord[];
+  batches: BatchRecord[];
+  counts: FilesBatchesInventoryCounts;
 }
 
 export async function loadFilesBatchesPageData(
   app: AdminApp,
 ): Promise<FilesBatchesPageData> {
-  const [filesPayload, batchesPayload] = await Promise.all([
-    app.api.json<Record<string, unknown>>("/v1/files?order=desc&limit=100", {}, true),
-    app.api.json<Record<string, unknown>>("/v1/batches?limit=100", {}, true),
-  ]);
+  const inventoryPayload = await app.api.json<FilesBatchesInventoryPayload>(
+    "/admin/api/files-batches/inventory",
+    {},
+    true,
+  );
 
   return {
-    filesPayload,
-    batchesPayload,
-    files: asArray<FileRecord>(filesPayload.data),
-    batches: asArray<BatchRecord>(batchesPayload.data),
+    inventoryPayload,
+    files: inventoryPayload.files ?? [],
+    batches: inventoryPayload.batches ?? [],
+    counts: inventoryPayload.counts ?? {
+      files: 0,
+      batches: 0,
+      output_ready: 0,
+      needs_attention: 0,
+    },
   };
 }
 
 export async function fetchFileMetadata(
   app: AdminApp,
   fileId: string,
-): Promise<Record<string, unknown>> {
-  return app.api.json<Record<string, unknown>>(
-    `/v1/files/${encodeURIComponent(fileId)}`,
+): Promise<FileRecord> {
+  return app.api.json<FileRecord>(
+    `/admin/api/files-batches/files/${encodeURIComponent(fileId)}`,
     {},
     true,
   );
@@ -39,9 +57,9 @@ export async function fetchFileMetadata(
 export async function fetchBatchMetadata(
   app: AdminApp,
   batchId: string,
-): Promise<Record<string, unknown>> {
-  return app.api.json<Record<string, unknown>>(
-    `/v1/batches/${encodeURIComponent(batchId)}`,
+): Promise<BatchRecord> {
+  return app.api.json<BatchRecord>(
+    `/admin/api/files-batches/batches/${encodeURIComponent(batchId)}`,
     {},
     true,
   );
@@ -50,9 +68,12 @@ export async function fetchBatchMetadata(
 export async function fetchFileContent(
   app: AdminApp,
   fileId: string,
+  contentPath?: string | null,
 ): Promise<Uint8Array> {
+  const normalizedContentPath = contentPath?.trim();
   const response = await app.api.raw(
-    `/v1/files/${encodeURIComponent(fileId)}/content`,
+    normalizedContentPath ||
+      `/v1/files/${encodeURIComponent(fileId)}/content`,
     {},
     true,
   );
@@ -97,6 +118,15 @@ export async function createBatch(
   );
 }
 
-export async function deleteFile(app: AdminApp, fileId: string): Promise<void> {
-  await app.api.json(`/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);
+export async function deleteFile(
+  app: AdminApp,
+  fileId: string,
+  deletePath?: string | null,
+): Promise<void> {
+  const normalizedDeletePath = deletePath?.trim();
+  await app.api.json(
+    normalizedDeletePath || `/v1/files/${encodeURIComponent(fileId)}`,
+    { method: "DELETE" },
+    true,
+  );
 }

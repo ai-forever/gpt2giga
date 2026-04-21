@@ -59,8 +59,50 @@ export interface InspectorSelection {
   handoffRequestCount?: number;
 }
 
-export type FileRecord = Record<string, unknown>;
-export type BatchRecord = Record<string, unknown>;
+export type ArtifactApiFormat = "openai" | "anthropic" | "gemini";
+
+export interface FileRecord {
+  id: string;
+  api_format: ArtifactApiFormat;
+  filename: string;
+  purpose?: string | null;
+  bytes?: number | null;
+  status?: string | null;
+  created_at?: number | null;
+  content_kind?: string | null;
+  download_path?: string | null;
+  content_path?: string | null;
+  delete_path?: string | null;
+  raw?: Record<string, unknown>;
+}
+
+export interface BatchRequestCounts {
+  total?: number | null;
+  completed?: number | null;
+  failed?: number | null;
+  succeeded?: number | null;
+  errored?: number | null;
+  processing?: number | null;
+  pending?: number | null;
+  cancelled?: number | null;
+  expired?: number | null;
+}
+
+export interface BatchRecord {
+  id: string;
+  api_format: ArtifactApiFormat;
+  endpoint?: string | null;
+  status?: string | null;
+  created_at?: number | null;
+  input_file_id?: string | null;
+  output_file_id?: string | null;
+  output_kind?: "file" | "results" | null;
+  output_path?: string | null;
+  request_counts?: BatchRequestCounts;
+  model?: string | null;
+  display_name?: string | null;
+  raw?: Record<string, unknown>;
+}
 
 export interface FilesBatchesInventory {
   filteredFiles: FileRecord[];

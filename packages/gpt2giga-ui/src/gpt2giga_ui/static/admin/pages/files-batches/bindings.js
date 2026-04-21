@@ -10,35 +10,33 @@ export function bindFilesBatchesPage(options) {
     let previewObjectUrl = null;
     const cacheFileRecord = (payload) => {
         const fileId = String(payload.id ?? "");
-        const source = payload;
         if (!fileId) {
-            return source;
+            return payload;
         }
-        inventory.fileLookup.set(fileId, source);
+        inventory.fileLookup.set(fileId, payload);
         const existingIndex = data.files.findIndex((item) => String(item.id ?? "") === fileId);
         if (existingIndex >= 0) {
-            data.files[existingIndex] = source;
+            data.files[existingIndex] = payload;
         }
         else {
-            data.files.unshift(source);
+            data.files.unshift(payload);
         }
-        return source;
+        return payload;
     };
     const cacheBatchRecord = (payload) => {
         const batchId = String(payload.id ?? "");
-        const source = payload;
         if (!batchId) {
-            return source;
+            return payload;
         }
-        inventory.batchLookup.set(batchId, source);
+        inventory.batchLookup.set(batchId, payload);
         const existingIndex = data.batches.findIndex((item) => String(item.id ?? "") === batchId);
         if (existingIndex >= 0) {
-            data.batches[existingIndex] = source;
+            data.batches[existingIndex] = payload;
         }
         else {
-            data.batches.unshift(source);
+            data.batches.unshift(payload);
         }
-        return source;
+        return payload;
     };
     const setDefinitionBlock = (node, items, emptyMessage) => {
         node.innerHTML = renderDefinitionList(items, emptyMessage);
@@ -219,7 +217,7 @@ export function bindFilesBatchesPage(options) {
                     : []),
             ],
             action: async () => {
-                const bytes = await fetchFileContent(app, fileId);
+                const bytes = await fetchFileContent(app, fileId, source?.content_path ?? undefined);
                 const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
                 if (preview.handoffRequestId && options?.relatedBatch) {
                     selection = {
@@ -283,7 +281,8 @@ export function bindFilesBatchesPage(options) {
                 { label: "Filename", value: filename },
             ],
             action: async () => {
-                const bytes = await fetchFileContent(app, fileId);
+                const source = inventory.fileLookup.get(fileId);
+                const bytes = await fetchFileContent(app, fileId, source?.download_path ?? source?.content_path ?? undefined);
                 const mimeType = buildFilePreview(bytes, filename).mimeType;
                 const blobBytes = new Uint8Array(bytes.byteLength);
                 blobBytes.set(bytes);
@@ -726,12 +725,17 @@ export function bindFilesBatchesPage(options) {
                 button: item instanceof HTMLButtonElement ? item : null,
                 pendingLabel: "Deleting…",
                 action: async () => {
+                    const source = inventory.fileLookup.get(fileId);
+                    if (!source?.delete_path) {
+                        app.pushAlert(`Delete is unavailable for ${fileId} in the current API format.`, "warn");
+                        return;
+                    }
                     setWorkflowSummary([
                         { label: "Workflow state", value: "Deleting file" },
                         { label: "File id", value: fileId },
                         { label: "Next step", value: "Refresh inventory" },
                     ]);
-                    await deleteFile(app, fileId);
+                    await deleteFile(app, fileId, source.delete_path);
                     app.queueAlert(`Deleted file ${fileId}.`, "info");
                     replaceStateForPage(page, undefined);
                     await app.render(page);
