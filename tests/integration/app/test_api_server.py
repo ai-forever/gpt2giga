@@ -209,6 +209,16 @@ def test_openapi_json_available_in_dev_mode():
         "examples"
     ]
     assert batch_validation_examples[0]["api_format"] == "openai"
+    batch_validation_description = schema["paths"]["/batches/validate"]["post"][
+        "description"
+    ]
+    assert "does not enqueue or persist a" in batch_validation_description
+    assert "batch run" in batch_validation_description
+    tag_positions = {
+        tag["name"]: index for index, tag in enumerate(schema.get("tags", []))
+    }
+    assert tag_positions["Batches"] < tag_positions["Translations"]
+    assert tag_positions["Batches"] < tag_positions["Admin"]
 
 
 def test_admin_static_assets_are_served():
@@ -772,6 +782,7 @@ def test_openapi_groups_routes_by_provider_and_function(monkeypatch):
     assert schema["paths"]["/model/info"]["get"]["tags"] == [
         provider_tag(TAG_MODELS, PROVIDER_OPENAI)
     ]
+    assert schema["paths"]["/batches/validate"]["post"]["tags"] == [TAG_BATCHES]
 
 
 def test_admin_recent_requests_endpoint_collects_runtime_events(monkeypatch):

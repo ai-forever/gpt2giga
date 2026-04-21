@@ -143,6 +143,45 @@ def test_path_norm_keeps_v1beta_prefix():
     assert resp.json() == {"ok": True}
 
 
+def test_path_norm_collapses_duplicate_v1_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["v1", "messages"],
+    )
+
+    @test_app.post("/v1/messages")
+    def create_message():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+    resp = client.post("/v1/v1/messages", json={"messages": []})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
+def test_path_norm_collapses_duplicate_v1beta_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["v1beta", "models"],
+    )
+
+    @test_app.post("/v1beta/models/test:generateContent")
+    def generate_content():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+    resp = client.post(
+        "/v1beta/v1beta/models/test:generateContent",
+        json={"contents": [{"parts": [{"text": "hello"}]}]},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+
+
 def test_path_norm_keeps_upload_v1beta_prefix():
     test_app = FastAPI()
     test_app.add_middleware(

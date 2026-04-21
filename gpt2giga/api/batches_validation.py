@@ -79,7 +79,14 @@ async def validate_batch_input(
     payload: BatchValidateRequest,
     request: Request,
 ):
-    """Validate provider-specific batch input without creating a batch."""
+    """Validate provider-specific batch input without creating a batch job.
+
+    Accepts OpenAI, Anthropic, or Gemini batch payloads via `api_format` and
+    inspects either a staged file (`input_file_id`) or inline `requests`.
+    Returns normalized diagnostics with detected format, row counts, and
+    blocking issues or warnings. The endpoint does not enqueue or persist a
+    batch run.
+    """
     return await validate_batch_input_request(
         request=request,
         api_format=payload.api_format,
