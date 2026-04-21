@@ -16,6 +16,7 @@ from gpt2giga.features.batches import BatchesService
 from gpt2giga.features.chat import ChatService
 from gpt2giga.features.embeddings import EmbeddingsService
 from gpt2giga.features.files import FilesService
+from gpt2giga.features.files_batches import FilesBatchesService
 from gpt2giga.features.models import ModelsService
 from gpt2giga.features.responses import ResponsesService
 from gpt2giga.providers.gigachat import (
@@ -81,6 +82,7 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
         embeddings_model=config.proxy_settings.embeddings,
         gigachat_api_mode=chat_backend_mode,
     )
+    services.files_batches = FilesBatchesService()
     services.responses = ResponsesService(
         providers.request_transformer,
         providers.response_processor,

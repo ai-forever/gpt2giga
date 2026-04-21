@@ -25,6 +25,7 @@ class RuntimeServices:
     models: Any = None
     files: Any = None
     batches: Any = None
+    files_batches: Any = None
 
 
 @dataclass(slots=True)
@@ -74,6 +75,7 @@ _SERVICE_ALIASES = {
     "models": "models_service",
     "files": "files_service",
     "batches": "batches_service",
+    "files_batches": "files_batches_service",
 }
 
 _STORE_ALIASES = {
