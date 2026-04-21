@@ -213,11 +213,30 @@ function renderFilesPage(data, inventory, filters) {
               <button class="button" type="submit">Upload file</button>
               <button
                 class="button button--secondary"
-                id="upload-and-validate-button"
-                type="submit"
+                id="upload-validate-button"
+                type="button"
               >
-                Upload and validate
+                Validate
               </button>
+            </div>
+            <div class="surface batch-validation" id="upload-validation-report">
+              <div class="batch-validation__header">
+                <div>
+                  <h4>Batch validation</h4>
+                  <p class="muted">Validate the selected file before creating a batch.</p>
+                </div>
+                <div class="batch-validation__meta">
+                  ${pill("Not validated")}
+                </div>
+              </div>
+              <div class="batch-validation__summary">
+                ${renderDefinitionList([
+        { label: "Status", value: "No report yet" },
+        { label: "Purpose", value: "Choose batch" },
+        { label: "Selected file", value: "No file chosen" },
+        { label: "Result", value: "Validation reads the selected local file" },
+    ], "No validation report yet.")}
+              </div>
             </div>
           </form>
         </div>
@@ -587,7 +606,8 @@ export function resolveFilesBatchesElements(pageContent) {
         uploadDisplayNameField: pageContent.querySelector("#upload-display-name-field"),
         uploadForm: pageContent.querySelector("#files-upload-form"),
         uploadPurpose: pageContent.querySelector("#upload-purpose"),
-        uploadValidateButton: pageContent.querySelector("#upload-and-validate-button"),
+        uploadValidateButton: pageContent.querySelector("#upload-validate-button"),
+        uploadValidationNode: pageContent.querySelector("#upload-validation-report"),
         workflowNode,
     };
 }

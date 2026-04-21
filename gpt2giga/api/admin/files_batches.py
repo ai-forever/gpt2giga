@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -50,6 +51,7 @@ class AdminBatchValidateRequest(BaseModel):
 
     api_format: str = "openai"
     input_file_id: str | None = None
+    input_content_base64: str | None = None
     model: str | None = None
     requests: list[dict[str, Any]] | None = None
 
@@ -149,6 +151,7 @@ async def create_files_batches_batch(
         request=request,
         api_format=payload.api_format,
         input_file_id=payload.input_file_id,
+        input_bytes=None,
         fallback_model=payload.model,
         requests=payload.requests,
     )
@@ -189,10 +192,16 @@ async def validate_files_batches_batch(
 ):
     """Validate staged or inline batch input and return a diagnostic report."""
     verify_logs_ip_allowlist(request)
+    input_bytes = (
+        base64.b64decode(payload.input_content_base64)
+        if payload.input_content_base64
+        else None
+    )
     return await validate_batch_input_request(
         request=request,
         api_format=payload.api_format,
         input_file_id=payload.input_file_id,
+        input_bytes=input_bytes,
         fallback_model=payload.model,
         requests=payload.requests,
     )

@@ -197,6 +197,7 @@ export async function validateBatchInput(
   payload: {
     apiFormat: "openai" | "anthropic" | "gemini";
     inputFileId?: string;
+    inputContentBase64?: string;
     model?: string;
     requests?: Array<Record<string, unknown>>;
   },
@@ -208,6 +209,7 @@ export async function validateBatchInput(
       json: {
         api_format: payload.apiFormat,
         input_file_id: payload.inputFileId,
+        input_content_base64: payload.inputContentBase64,
         model: payload.model,
         requests: payload.requests,
       },

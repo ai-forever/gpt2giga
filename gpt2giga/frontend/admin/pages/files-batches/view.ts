@@ -65,6 +65,7 @@ export interface FilesBatchesPageElements {
   uploadForm: HTMLFormElement | null;
   uploadPurpose: HTMLSelectElement | null;
   uploadValidateButton: HTMLButtonElement | null;
+  uploadValidationNode: HTMLElement | null;
   workflowNode: HTMLElement;
 }
 
@@ -352,11 +353,33 @@ function renderFilesPage(
               <button class="button" type="submit">Upload file</button>
               <button
                 class="button button--secondary"
-                id="upload-and-validate-button"
-                type="submit"
+                id="upload-validate-button"
+                type="button"
               >
-                Upload and validate
+                Validate
               </button>
+            </div>
+            <div class="surface batch-validation" id="upload-validation-report">
+              <div class="batch-validation__header">
+                <div>
+                  <h4>Batch validation</h4>
+                  <p class="muted">Validate the selected file before creating a batch.</p>
+                </div>
+                <div class="batch-validation__meta">
+                  ${pill("Not validated")}
+                </div>
+              </div>
+              <div class="batch-validation__summary">
+                ${renderDefinitionList(
+                  [
+                    { label: "Status", value: "No report yet" },
+                    { label: "Purpose", value: "Choose batch" },
+                    { label: "Selected file", value: "No file chosen" },
+                    { label: "Result", value: "Validation reads the selected local file" },
+                  ],
+                  "No validation report yet.",
+                )}
+              </div>
             </div>
           </form>
         </div>
@@ -876,7 +899,10 @@ export function resolveFilesBatchesElements(
     uploadForm: pageContent.querySelector<HTMLFormElement>("#files-upload-form"),
     uploadPurpose: pageContent.querySelector<HTMLSelectElement>("#upload-purpose"),
     uploadValidateButton: pageContent.querySelector<HTMLButtonElement>(
-      "#upload-and-validate-button",
+      "#upload-validate-button",
+    ),
+    uploadValidationNode: pageContent.querySelector<HTMLElement>(
+      "#upload-validation-report",
     ),
     workflowNode,
   };

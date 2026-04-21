@@ -95,6 +95,7 @@ export async function validateBatchInput(app, payload) {
         json: {
             api_format: payload.apiFormat,
             input_file_id: payload.inputFileId,
+            input_content_base64: payload.inputContentBase64,
             model: payload.model,
             requests: payload.requests,
         },

@@ -39,11 +39,18 @@ async def run_batch_input_validation(
     request: Request,
     api_format: str | NormalizedArtifactFormat,
     input_file_id: str | None,
+    input_bytes: bytes | None,
     fallback_model: str | None,
     requests: list[dict[str, Any]] | None,
 ) -> BatchValidationReport | None:
     """Validate staged or inline batch input and return a report when possible."""
     validator = build_batch_input_validator(request)
+    if input_bytes is not None:
+        return await validator.validate_bytes(
+            input_bytes,
+            api_format=api_format,
+            fallback_model=fallback_model,
+        )
     resolved_input_file_id = _normalize_optional_string(input_file_id)
     if resolved_input_file_id is not None:
         file_response = await get_gigachat_client(request).aget_file_content(
@@ -69,6 +76,7 @@ async def validate_batch_input_request(
     request: Request,
     api_format: str | NormalizedArtifactFormat,
     input_file_id: str | None,
+    input_bytes: bytes | None,
     fallback_model: str | None,
     requests: list[dict[str, Any]] | None,
 ) -> BatchValidationReport:
@@ -77,6 +85,7 @@ async def validate_batch_input_request(
         request=request,
         api_format=api_format,
         input_file_id=input_file_id,
+        input_bytes=input_bytes,
         fallback_model=fallback_model,
         requests=requests,
     )
@@ -84,7 +93,7 @@ async def validate_batch_input_request(
         return report
     raise HTTPException(
         status_code=400,
-        detail="`input_file_id` or `requests` is required for validation.",
+        detail="`input_file_id`, `input_bytes`, or `requests` is required for validation.",
     )
 
 

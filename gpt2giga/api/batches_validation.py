@@ -91,6 +91,7 @@ async def validate_batch_input(
         request=request,
         api_format=payload.api_format,
         input_file_id=payload.input_file_id,
+        input_bytes=None,
         fallback_model=payload.model,
         requests=payload.requests,
     )
