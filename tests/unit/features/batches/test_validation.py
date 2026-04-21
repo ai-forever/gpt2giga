@@ -2,6 +2,7 @@ import pytest
 
 from gpt2giga.core.contracts import NormalizedArtifactFormat
 from gpt2giga.features.batches.validation import (
+    BatchInputValidator,
     detect_batch_input_format,
     parse_jsonl_with_diagnostics,
     validate_batch_input_bytes,
@@ -97,3 +98,105 @@ def test_validate_batch_input_rows_marks_empty_payload_invalid():
     assert report.summary.total_rows == 0
     assert report.summary.error_count == 1
     assert report.issues[0].code == "empty_rows"
+
+
+class FakeValidationTransformer:
+    async def prepare_chat_completion(self, data, giga_client=None):
+        if data.get("messages") == "explode":
+            raise ValueError("Chat normalization failed.")
+        return data
+
+
+@pytest.mark.asyncio
+async def test_batch_input_validator_openai_collects_errors_and_warnings():
+    validator = BatchInputValidator(
+        request_transformer=FakeValidationTransformer(),
+        embeddings_model="EmbeddingsGigaR",
+        gigachat_api_mode="v2",
+        default_model="GigaChat-2-Max",
+    )
+
+    report = await validator.validate_rows(
+        [
+            {"url": "/v1/chat/completions", "body": {"messages": []}},
+            {
+                "custom_id": "dup",
+                "url": "/v1/embeddings",
+                "body": {"input": "hello"},
+            },
+            {
+                "custom_id": "dup",
+                "method": "GET",
+                "url": "/v1/chat/completions",
+                "body": {"messages": "explode"},
+            },
+        ],
+        api_format="openai",
+    )
+
+    codes = [issue.code for issue in report.issues]
+    assert report.valid is False
+    assert "missing_identifier" in codes
+    assert "default_model_applied" in codes
+    assert "compatibility_warning" in codes
+    assert "mixed_endpoint_family" in codes
+    assert "duplicate_identifier" in codes
+    assert "invalid_field" in codes
+    assert "missing_field" in codes
+
+
+@pytest.mark.asyncio
+async def test_batch_input_validator_anthropic_reports_schema_and_duplicate_issues():
+    validator = BatchInputValidator()
+
+    report = await validator.validate_rows(
+        [
+            {"custom_id": "dup", "params": {"model": "claude"}},
+            {
+                "custom_id": "dup",
+                "params": {"messages": [], "stream": True},
+                "metadata": {"source": "ignored"},
+            },
+            {"params": {"messages": []}},
+        ],
+        api_format="anthropic",
+    )
+
+    codes = [issue.code for issue in report.issues]
+    assert report.valid is False
+    assert "missing_field" in codes
+    assert "duplicate_identifier" in codes
+    assert "invalid_field" in codes
+    assert "ignored_fields" in codes
+
+
+@pytest.mark.asyncio
+async def test_batch_input_validator_gemini_uses_fallback_model_and_flags_metadata():
+    validator = BatchInputValidator(gemini_fallback_model="models/gemini-2.5-flash")
+
+    report = await validator.validate_rows(
+        [
+            {
+                "request": {
+                    "contents": [{"role": "user", "parts": [{"text": "hello"}]}]
+                },
+                "metadata": {"source": "test"},
+            },
+            {
+                "key": "dup",
+                "request": {
+                    "model": "models/gemini-2.5-flash",
+                    "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+                },
+            },
+            {"key": "dup", "request": {"model": "models/gemini-2.5-flash"}},
+        ],
+        api_format="gemini",
+    )
+
+    codes = [issue.code for issue in report.issues]
+    assert report.valid is False
+    assert "default_model_applied" in codes
+    assert "metadata_ignored" in codes
+    assert "duplicate_identifier" in codes
+    assert "request_normalization_failed" in codes

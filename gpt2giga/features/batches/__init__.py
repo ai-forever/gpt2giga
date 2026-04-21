@@ -5,6 +5,7 @@ from gpt2giga.features.batches.service import (
     get_batches_service_from_state,
 )
 from gpt2giga.features.batches.validation import (
+    BatchInputValidator,
     detect_batch_input_format,
     parse_jsonl_with_diagnostics,
     validate_batch_input_bytes,
@@ -22,6 +23,7 @@ __all__ = [
     "BatchValidationReport",
     "BatchValidationSeverity",
     "BatchValidationSummary",
+    "BatchInputValidator",
     "BatchesService",
     "detect_batch_input_format",
     "get_batches_service_from_state",
