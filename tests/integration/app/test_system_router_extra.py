@@ -404,6 +404,9 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 
     files_batches_asset = client.get("/admin/assets/admin/pages/files-batches/view.js")
+    files_batches_bindings_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/bindings.js"
+    )
     files_batches_serializers_asset = client.get(
         "/admin/assets/admin/pages/files-batches/serializers.js"
     )
@@ -423,6 +426,16 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert 'name="file_sort"' in files_batches_asset.text
     assert "Files and batches lifecycle" in files_batches_asset.text
     assert "Operator guides" in files_batches_asset.text
+    assert files_batches_bindings_asset.status_code == 200
+    assert 'const normalizedModel = modelValue?.trim() || "gemini-2.5-flash"' in (
+        files_batches_bindings_asset.text
+    )
+    assert 'normalizedModel.startsWith("models/")' in files_batches_bindings_asset.text
+    assert 'requestLabel: "row-1"' in files_batches_bindings_asset.text
+    assert (
+        'elements.batchModel?.addEventListener("input"'
+        in files_batches_bindings_asset.text
+    )
     assert files_batches_serializers_asset.status_code == 200
     assert "Open batch composer" in files_batches_serializers_asset.text
     assert '"file_sort"' in files_batches_serializers_asset.text

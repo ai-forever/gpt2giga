@@ -54,6 +54,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
 
   let selection: InspectorSelection = { kind: "idle" };
   let previewObjectUrl: string | null = null;
+  let lastGeminiInlineRequestsTemplate = "";
 
   const cacheFileRecord = (payload: FileRecord): FileRecord => {
     const fileId = String(payload.id ?? "");
@@ -243,6 +244,54 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     return "OpenAI batches expect a staged JSONL file in OpenAI batch input format.";
   };
 
+  const buildGeminiInlineRequestsTemplate = (modelValue?: string): string => {
+    const normalizedModel = modelValue?.trim() || "gemini-2.5-flash";
+    const requestModel = normalizedModel.startsWith("models/")
+      ? normalizedModel
+      : `models/${normalizedModel}`;
+    return JSON.stringify(
+      [
+        {
+          request: {
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: "hello gemini" }],
+              },
+            ],
+            model: requestModel,
+          },
+          metadata: {
+            requestLabel: "row-1",
+          },
+        },
+      ],
+      null,
+      2,
+    );
+  };
+
+  const syncGeminiInlineRequestsTemplate = (options?: {
+    forceValue?: boolean;
+  }): void => {
+    if (!elements.batchInlineRequests) {
+      return;
+    }
+    const nextTemplate = buildGeminiInlineRequestsTemplate(
+      elements.batchModel?.value,
+    );
+    elements.batchInlineRequests.placeholder = nextTemplate;
+    const currentValue = elements.batchInlineRequests.value.trim();
+    if (
+      options?.forceValue ||
+      !currentValue ||
+      currentValue === lastGeminiInlineRequestsTemplate
+    ) {
+      elements.batchInlineRequests.value = nextTemplate;
+    }
+    lastGeminiInlineRequestsTemplate = nextTemplate;
+  };
+
   const syncBatchComposerFormat = (
     apiFormat: ArtifactApiFormat,
     options?: {
@@ -267,6 +316,9 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       elements.batchInlineRequestsField.hidden = !showInlineRequests;
       if (!showInlineRequests) {
         elements.batchInlineRequests.value = "";
+        elements.batchInlineRequests.placeholder = "";
+      } else {
+        syncGeminiInlineRequestsTemplate();
       }
     }
     if (elements.batchModelField && elements.batchModel) {
@@ -1311,6 +1363,13 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     syncBatchComposerFormat(readBatchApiFormat(), {
       inputFileId: elements.batchInput?.value.trim() ?? "",
     });
+  });
+
+  elements.batchModel?.addEventListener("input", () => {
+    if (readBatchApiFormat() !== "gemini") {
+      return;
+    }
+    syncGeminiInlineRequestsTemplate();
   });
 
   const routeState = readFilesBatchesRouteState(page);
