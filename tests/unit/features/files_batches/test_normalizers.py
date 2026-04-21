@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from gpt2giga.core.contracts import NormalizedArtifactFormat
 from gpt2giga.features.files_batches.normalizers import (
+    normalize_anthropic_file,
     normalize_anthropic_batch,
     normalize_anthropic_output_file,
     normalize_gemini_batch,
@@ -156,3 +157,21 @@ def test_normalize_anthropic_output_file_points_to_results_path():
     assert record.content_kind == "batch_results"
     assert record.content_path == "/admin/api/files-batches/files/file-output-1/content"
     assert record.delete_path is None
+
+
+def test_normalize_anthropic_input_file_uses_staged_file_shape():
+    record = normalize_anthropic_file(
+        {
+            "id": "file-input-1",
+            "filename": "anthropic-input.jsonl",
+            "purpose": "batch",
+            "bytes": 14,
+            "created_at": 123,
+        },
+        metadata={"api_format": "anthropic", "purpose": "batch"},
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
+    assert record.content_kind == "jsonl"
+    assert record.content_path == "/admin/api/files-batches/files/file-input-1/content"
+    assert record.delete_path == "/v1/files/file-input-1"

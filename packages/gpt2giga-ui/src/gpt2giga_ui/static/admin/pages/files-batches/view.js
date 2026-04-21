@@ -181,19 +181,29 @@ function renderFilesPage(data, inventory, filters) {
           <form id="files-upload-form" class="form-shell form-shell--compact">
             ${renderFormSection({
         title: "Upload source",
-        intro: "Add one JSONL input or reference artifact.",
+        intro: "Add one staged artifact and keep its intended API format attached.",
         body: `
+                <label class="field">
+                  <span>API format</span>
+                  <select id="upload-api-format" name="api_format">
+                    ${renderBatchApiFormatOptions("openai")}
+                  </select>
+                </label>
                 <label class="field">
                   <span>Purpose</span>
                   <select name="purpose">
                     ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
                   </select>
                 </label>
+                <label class="field" id="upload-display-name-field" hidden>
+                  <span>Display name</span>
+                  <input id="upload-display-name" name="display_name" placeholder="gemini-reference-artifact" />
+                </label>
                 <label class="field">
                   <span>File</span>
                   <input name="file" type="file" required />
                 </label>
-                <div class="banner">Uploads go through the OpenAI-compatible gateway surface and use the gateway API key from the rail.</div>
+                <div class="banner" id="upload-format-hint">OpenAI uploads stage one file through the gateway files surface. Switch formats here when this artifact is meant for Anthropic or Gemini flows.</div>
               `,
     })}
             <div class="form-actions">
@@ -523,6 +533,9 @@ export function resolveFilesBatchesElements(pageContent) {
         filtersForm: pageContent.querySelector("#files-batches-filters-form"),
         mediaNode,
         summaryNode,
+        uploadApiFormat: pageContent.querySelector("#upload-api-format"),
+        uploadDisplayName: pageContent.querySelector("#upload-display-name"),
+        uploadDisplayNameField: pageContent.querySelector("#upload-display-name-field"),
         uploadForm: pageContent.querySelector("#files-upload-form"),
         workflowNode,
     };

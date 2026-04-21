@@ -229,6 +229,9 @@ Frontend should no longer:
 - done: admin API exposes `POST /admin/api/files-batches/batches` and returns normalized batch records immediately after create
 - done: frontend batch composer is format-aware, including Gemini model/display-name inputs and provider-specific input-shape guidance
 - done: unit and integration coverage now exercises normalized admin batch creation for OpenAI, Anthropic, and Gemini
+- done: admin file uploader now stages artifacts through `POST /admin/api/files-batches/files` instead of posting directly to `/v1/files`
+- done: uploaded file metadata now preserves intended `api_format`, so later batch handoff can default to Anthropic or Gemini without frontend guesswork
+- done: Gemini-oriented uploads keep normalized display-name and MIME metadata through the same admin upload surface
 
 #### Commit slice
 
@@ -236,6 +239,8 @@ The current commit should include:
 
 - `docs/files-batches-backend-normalization-plan-2026-04-21.md`
 - `gpt2giga/api/admin/files_batches.py`
+- `gpt2giga/features/files/contracts.py`
+- `gpt2giga/features/files_batches/normalizers.py`
 - `gpt2giga/features/files_batches/service.py`
 - `gpt2giga/frontend/admin/pages/files-batches/api.ts`
 - `gpt2giga/frontend/admin/pages/files-batches/bindings.ts`
@@ -243,6 +248,7 @@ The current commit should include:
 - `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/files-batches/api.js`
 - `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/files-batches/bindings.js`
 - `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/files-batches/view.js`
+- `tests/unit/features/files_batches/test_normalizers.py`
 - `tests/unit/features/files_batches/test_service.py`
 - `tests/integration/app/test_admin_files_batches_api.py`
 
@@ -252,15 +258,19 @@ Explicitly keep out of this commit:
 - unrelated repo-level draft docs
 - unrelated examples and deployment files
 
-### Phase 5. Batch creation follow-up
+### Phase 5. Creation and upload follow-up
 
-Once normalized inventory exists, add backend-backed creation helpers for format-aware batch creation:
+Once normalized inventory exists, add backend-backed creation helpers for format-aware batch creation and file staging:
 
 - OpenAI: create from staged file id
 - Anthropic: load staged file content, convert JSONL rows into `requests`, create message batch
 - Gemini: create from Gemini file id or inline normalized requests
+- file uploads: keep intended `api_format` and provider-specific metadata behind one admin surface
 
-This can remain a second slice after inventory normalization if we want to reduce initial risk.
+Status:
+
+- done: normalized backend batch creation
+- done: normalized backend file staging with format-aware metadata
 
 ## Testing Plan
 

@@ -13,6 +13,7 @@ from gpt2giga.api.anthropic.batches import _build_anthropic_batch_results
 from gpt2giga.api.gemini.batches import build_gemini_batch_output_file
 from gpt2giga.app.dependencies import get_logger_from_state, get_runtime_providers
 from gpt2giga.core.errors import exceptions_handler
+from gpt2giga.core.http.form_body import read_request_multipart
 from gpt2giga.features.batches import get_batches_service_from_state
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.files import get_files_service_from_state
@@ -89,6 +90,33 @@ async def get_files_batches_file(file_id: str, request: Request):
                 status_code=404, detail=f"File `{file_id}` not found."
             ) from exc
         raise
+
+
+@admin_files_batches_api_router.post("/admin/api/files-batches/files")
+@exceptions_handler
+async def create_files_batches_file(request: Request):
+    """Create a normalized staged file through the admin API."""
+    verify_logs_ip_allowlist(request)
+    multipart = await read_request_multipart(request)
+    form = multipart.get("form") or {}
+    upload = (multipart.get("files") or {}).get("file")
+    if upload is None:
+        raise HTTPException(status_code=400, detail="`file` is required.")
+
+    app_state = request.app.state
+    service = get_files_batches_service_from_state(app_state)
+    purpose = str(form.get("purpose") or "batch").strip() or "batch"
+    api_format = str(form.get("api_format") or "openai").strip() or "openai"
+    display_name = str(form.get("display_name") or "").strip() or None
+    return await service.create_file(
+        api_format=api_format,
+        purpose=purpose,
+        upload=upload,
+        display_name=display_name,
+        giga_client=get_gigachat_client(request),
+        files_service=get_files_service_from_state(app_state),
+        file_store=get_file_store(request),
+    )
 
 
 @admin_files_batches_api_router.post("/admin/api/files-batches/batches")

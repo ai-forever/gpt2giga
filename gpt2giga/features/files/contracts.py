@@ -13,6 +13,7 @@ BatchesMetadataStore: TypeAlias = MutableMapping[str, dict[str, Any]]
 class FileMetadata(TypedDict, total=False):
     """In-memory metadata tracked for an uploaded file."""
 
+    api_format: str
     purpose: str
     filename: str
     status: str
@@ -21,6 +22,10 @@ class FileMetadata(TypedDict, total=False):
     batch_id: str
     batch_endpoint: str
     batch_input_file_id: str
+    display_name: str
+    mime_type: str
+    source: str
+    sha256_hash: str
 
 
 class FilesUpstreamClient(Protocol):

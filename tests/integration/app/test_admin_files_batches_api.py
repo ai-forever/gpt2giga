@@ -171,7 +171,23 @@ class FakeGigaChat:
         raise AssertionError(f"Unexpected delete: {file}")
 
     async def aupload_file(self, file, purpose):
-        raise AssertionError(f"Unexpected upload: {file} {purpose}")
+        filename, content, _content_type = file
+        file_id = f"file-created-{self.next_file_index}"
+        created_at = 131 + self.next_file_index
+        self.next_file_index += 1
+        uploaded = FakeUploadedFile(
+            id=file_id,
+            object="file",
+            bytes=len(content),
+            created_at=created_at,
+            filename=filename or file_id,
+            purpose="general",
+        )
+        self.files[file_id] = {
+            "content": content,
+            "object": uploaded,
+        }
+        return uploaded
 
     async def acreate_batch(self, file, method):
         batch_id = f"batch-created-{self.next_batch_index}"
@@ -362,6 +378,49 @@ def test_admin_files_batches_create_openai_batch_returns_normalized_record():
     assert (
         body["output_path"] == f"/admin/api/files-batches/batches/{body['id']}/output"
     )
+
+
+def test_admin_files_batches_create_anthropic_file_returns_normalized_record():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/files",
+        data={"api_format": "anthropic", "purpose": "batch"},
+        files={
+            "file": (
+                "anthropic-input.jsonl",
+                b'{"custom_id":"anthropic-1"}\n',
+                "application/json",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "anthropic"
+    assert body["content_kind"] == "jsonl"
+    assert body["delete_path"] == f"/v1/files/{body['id']}"
+
+
+def test_admin_files_batches_create_gemini_file_returns_normalized_record():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/files",
+        data={
+            "api_format": "gemini",
+            "purpose": "user_data",
+            "display_name": "Gemini Diagram",
+        },
+        files={"file": ("diagram.png", b"png-bytes", "image/png")},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "gemini"
+    assert body["filename"] == "Gemini Diagram"
+    assert body["delete_path"] == f"/v1beta/files/{body['id']}"
+    assert body["raw"]["metadata"]["mime_type"] == "image/png"
 
 
 def test_admin_files_batches_create_anthropic_batch_from_staged_file():

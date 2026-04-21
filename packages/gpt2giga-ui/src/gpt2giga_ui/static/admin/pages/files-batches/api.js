@@ -24,11 +24,15 @@ export async function fetchFileContent(app, fileId, contentPath) {
         `/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
     return new Uint8Array(await response.arrayBuffer());
 }
-export async function uploadFile(app, purpose, file) {
+export async function uploadFile(app, payload) {
     const body = new FormData();
-    body.set("purpose", purpose);
-    body.set("file", file, file.name);
-    return app.api.json("/v1/files", { method: "POST", body }, true);
+    body.set("api_format", payload.apiFormat);
+    body.set("purpose", payload.purpose);
+    if (payload.displayName?.trim()) {
+        body.set("display_name", payload.displayName.trim());
+    }
+    body.set("file", payload.file, payload.file.name);
+    return app.api.json("/admin/api/files-batches/files", { method: "POST", body }, true);
 }
 export async function createBatch(app, payload) {
     return app.api.json("/admin/api/files-batches/batches", {

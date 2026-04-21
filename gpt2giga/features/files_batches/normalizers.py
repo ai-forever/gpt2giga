@@ -84,6 +84,57 @@ def normalize_anthropic_batch(
     )
 
 
+def normalize_anthropic_file(
+    file_obj: dict[str, Any],
+    *,
+    metadata: dict[str, Any] | None = None,
+    batch_id: str | None = None,
+    batch_metadata: dict[str, Any] | None = None,
+) -> NormalizedFileRecord:
+    """Normalize an Anthropic-oriented staged file or results artifact."""
+    metadata = dict(metadata or {})
+    if batch_id or batch_metadata or metadata.get("batch_id"):
+        return normalize_anthropic_output_file(
+            file_obj,
+            metadata=metadata,
+            batch_id=batch_id,
+            batch_metadata=batch_metadata,
+        )
+
+    file_id = str(file_obj.get("id") or "").strip()
+    purpose = _string_or_none(metadata.get("purpose")) or _string_or_none(
+        file_obj.get("purpose")
+    )
+    filename = (
+        _string_or_none(metadata.get("filename"))
+        or _string_or_none(file_obj.get("filename"))
+        or file_id
+        or "unknown"
+    )
+    content_path = _admin_file_content_path(file_id) if file_id else None
+    raw = deepcopy(file_obj)
+    if metadata:
+        raw["metadata"] = deepcopy(metadata)
+    return NormalizedFileRecord(
+        id=file_id,
+        api_format=NormalizedArtifactFormat.ANTHROPIC,
+        filename=filename,
+        purpose=purpose,
+        bytes=_int_or_none(file_obj.get("bytes")),
+        status=_string_or_none(metadata.get("status"))
+        or _string_or_none(file_obj.get("status"))
+        or "processed",
+        created_at=_int_or_none(file_obj.get("created_at")),
+        content_kind=_infer_openai_content_kind(
+            {"filename": filename, "purpose": purpose}
+        ),
+        download_path=content_path,
+        content_path=content_path,
+        delete_path=f"/v1/files/{file_id}" if file_id else None,
+        raw=raw,
+    )
+
+
 def normalize_gemini_file(
     file_obj: dict[str, Any],
     *,

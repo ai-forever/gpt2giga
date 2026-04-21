@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from typing import Any
 
 from fastapi import HTTPException
@@ -21,8 +22,8 @@ from gpt2giga.features.batches.transforms import build_openai_batch_object
 from gpt2giga.features.batches.transforms import parse_jsonl
 from gpt2giga.features.files_batches.contracts import normalize_api_format
 from gpt2giga.features.files_batches.normalizers import (
+    normalize_anthropic_file,
     normalize_anthropic_batch,
-    normalize_anthropic_output_file,
     normalize_gemini_batch,
     normalize_gemini_file,
     normalize_openai_batch,
@@ -35,6 +36,49 @@ _NEEDS_ATTENTION_STATUSES = {"failed", "cancelled", "expired"}
 
 class FilesBatchesService:
     """Build a normalized mixed-provider inventory for the admin UI."""
+
+    async def create_file(
+        self,
+        *,
+        api_format: str,
+        purpose: str,
+        upload: dict[str, Any],
+        giga_client: Any,
+        files_service: Any,
+        file_store: Any | None = None,
+        display_name: str | None = None,
+    ) -> NormalizedFileRecord:
+        """Create a normalized staged file for the admin UI."""
+        normalized_api_format = normalize_api_format(api_format)
+        resolved_purpose = _require_non_empty(
+            purpose,
+            field_name="purpose",
+            message="`purpose` is required for file uploads.",
+        )
+        created = await files_service.create_file(
+            purpose=resolved_purpose,
+            upload=upload,
+            giga_client=giga_client,
+            file_store=file_store,
+        )
+        created_file_id = str(created.get("id") or "").strip()
+        file_metadata = dict(file_store.get(created_file_id, {})) if file_store else {}
+        file_metadata.update(
+            _build_uploaded_file_metadata(
+                api_format=normalized_api_format,
+                purpose=resolved_purpose,
+                upload=upload,
+                display_name=display_name,
+            )
+        )
+        if file_store is not None and created_file_id:
+            file_store[created_file_id] = file_metadata
+        return _normalize_file_record(
+            created,
+            file_metadata=file_metadata,
+            batch_id=None,
+            batch_metadata=None,
+        )
 
     async def create_batch(
         self,
@@ -413,7 +457,7 @@ def _normalize_file_record(
     if api_format is NormalizedArtifactFormat.GEMINI:
         return normalize_gemini_file(file_obj, metadata=file_metadata)
     if api_format is NormalizedArtifactFormat.ANTHROPIC:
-        return normalize_anthropic_output_file(
+        return normalize_anthropic_file(
             file_obj,
             metadata=file_metadata,
             batch_id=batch_id,
@@ -457,6 +501,8 @@ def _resolve_file_api_format(
 ) -> NormalizedArtifactFormat:
     if batch_metadata is not None:
         return normalize_api_format(batch_metadata.get("api_format"))
+    if file_metadata.get("api_format"):
+        return normalize_api_format(file_metadata.get("api_format"))
     if any(
         key in file_metadata
         for key in ("display_name", "mime_type", "source", "sha256_hash")
@@ -635,6 +681,34 @@ def _normalize_openai_endpoint(value: str | None) -> str:
     if normalized is None:
         return "/v1/chat/completions"
     return normalized
+
+
+def _build_uploaded_file_metadata(
+    *,
+    api_format: NormalizedArtifactFormat,
+    purpose: str,
+    upload: dict[str, Any],
+    display_name: str | None,
+) -> dict[str, Any]:
+    metadata = {
+        "api_format": api_format.value,
+        "purpose": purpose,
+        "filename": upload["filename"],
+        "status": "processed",
+    }
+    if api_format is not NormalizedArtifactFormat.GEMINI:
+        return metadata
+    metadata.update(
+        {
+            "display_name": _string_or_none(display_name) or upload["filename"],
+            "mime_type": upload["content_type"],
+            "sha256_hash": base64.b64encode(
+                hashlib.sha256(upload["content"]).digest()
+            ).decode("ascii"),
+            "source": "UPLOADED",
+        }
+    )
+    return metadata
 
 
 async def _resolve_gemini_requests_payload(

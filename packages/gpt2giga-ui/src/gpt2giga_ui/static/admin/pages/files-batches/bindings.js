@@ -114,6 +114,13 @@ export function bindFilesBatchesPage(options) {
         }
         return "openai";
     };
+    const readUploadApiFormat = () => {
+        const normalized = elements.uploadApiFormat?.value.trim();
+        if (normalized === "anthropic" || normalized === "gemini") {
+            return normalized;
+        }
+        return "openai";
+    };
     const getBatchFormatHint = (apiFormat) => {
         if (apiFormat === "anthropic") {
             return "Anthropic batches load staged JSONL rows shaped like `{custom_id, params}` and convert them into message-batch requests.";
@@ -157,6 +164,31 @@ export function bindFilesBatchesPage(options) {
         }
         if (elements.batchHint) {
             elements.batchHint.textContent = getBatchFormatHint(apiFormat);
+        }
+    };
+    const getUploadFormatHint = (apiFormat) => {
+        if (apiFormat === "anthropic") {
+            return "Anthropic staging keeps the file on the shared files surface but marks it as Anthropic-oriented so the batch composer can default correctly later.";
+        }
+        if (apiFormat === "gemini") {
+            return "Gemini staging stores Gemini-specific metadata such as display name and MIME type so the inventory stays provider-aware.";
+        }
+        return "OpenAI uploads stage one file through the gateway files surface. Switch formats here when this artifact is meant for Anthropic or Gemini flows.";
+    };
+    const syncUploadComposerFormat = (apiFormat) => {
+        if (elements.uploadApiFormat) {
+            elements.uploadApiFormat.value = apiFormat;
+        }
+        if (elements.uploadDisplayNameField && elements.uploadDisplayName) {
+            const showDisplayName = apiFormat === "gemini";
+            elements.uploadDisplayNameField.hidden = !showDisplayName;
+            if (!showDisplayName) {
+                elements.uploadDisplayName.value = "";
+            }
+        }
+        const uploadHint = document.getElementById("upload-format-hint");
+        if (uploadHint) {
+            uploadHint.textContent = getUploadFormatHint(apiFormat);
         }
     };
     const runWorkflowAction = async ({ button, root, pendingLabel, pendingSummary, successSummary, action, }) => {
@@ -510,6 +542,7 @@ export function bindFilesBatchesPage(options) {
     };
     updateInspectorActions();
     resetContentSurface();
+    syncUploadComposerFormat(readUploadApiFormat());
     setDetailSurface("Selection metadata snapshot", [
         { label: "Detail surface", value: "Idle" },
         { label: "Loaded object", value: "No file or batch metadata loaded" },
@@ -534,6 +567,7 @@ export function bindFilesBatchesPage(options) {
         const form = event.currentTarget;
         const fields = form.elements;
         const upload = fields.file.files?.[0];
+        const apiFormat = readUploadApiFormat();
         if (!upload) {
             app.pushAlert("Choose a file before uploading.", "warn");
             return;
@@ -548,12 +582,14 @@ export function bindFilesBatchesPage(options) {
             pendingLabel: "Uploading…",
             pendingSummary: [
                 { label: "Workflow state", value: "Uploading file" },
+                { label: "API format", value: apiFormat },
                 { label: "Purpose", value: fields.purpose.value },
                 { label: "Source", value: upload.name, note: formatBytes(upload.size) },
             ],
             successSummary: (response) => [
                 { label: "Workflow state", value: "File uploaded" },
                 { label: "File id", value: String(response.id ?? "unknown") },
+                { label: "API format", value: String(response.api_format ?? apiFormat) },
                 {
                     label: "Next step",
                     value: "Inspect or open batches",
@@ -561,7 +597,12 @@ export function bindFilesBatchesPage(options) {
                 },
             ],
             action: async () => {
-                const response = await uploadFile(app, fields.purpose.value, upload);
+                const response = await uploadFile(app, {
+                    apiFormat,
+                    purpose: fields.purpose.value,
+                    file: upload,
+                    displayName: fields.display_name?.value,
+                });
                 app.queueAlert(`Uploaded file ${String(response.id ?? "")}.`, "info");
                 replaceStateForPage(page, {
                     selectedFileId: String(response.id ?? ""),
@@ -570,6 +611,9 @@ export function bindFilesBatchesPage(options) {
                 return response;
             },
         });
+    });
+    elements.uploadApiFormat?.addEventListener("change", () => {
+        syncUploadComposerFormat(readUploadApiFormat());
     });
     elements.batchForm?.addEventListener("submit", async (event) => {
         event.preventDefault();

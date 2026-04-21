@@ -82,14 +82,22 @@ export async function fetchFileContent(
 
 export async function uploadFile(
   app: AdminApp,
-  purpose: string,
-  file: File,
-): Promise<Record<string, unknown>> {
+  payload: {
+    apiFormat: "openai" | "anthropic" | "gemini";
+    purpose: string;
+    file: File;
+    displayName?: string;
+  },
+): Promise<FileRecord> {
   const body = new FormData();
-  body.set("purpose", purpose);
-  body.set("file", file, file.name);
-  return app.api.json<Record<string, unknown>>(
-    "/v1/files",
+  body.set("api_format", payload.apiFormat);
+  body.set("purpose", payload.purpose);
+  if (payload.displayName?.trim()) {
+    body.set("display_name", payload.displayName.trim());
+  }
+  body.set("file", payload.file, payload.file.name);
+  return app.api.json<FileRecord>(
+    "/admin/api/files-batches/files",
     { method: "POST", body },
     true,
   );

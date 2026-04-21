@@ -46,6 +46,22 @@ class FakeBatch:
 
 
 class FakeFilesService:
+    def __init__(self):
+        self.last_create_file = None
+
+    async def create_file(self, **kwargs):
+        self.last_create_file = dict(kwargs)
+        upload = kwargs["upload"]
+        purpose = kwargs["purpose"]
+        return {
+            "id": "file-created-1",
+            "filename": upload["filename"],
+            "purpose": purpose,
+            "bytes": len(upload["content"]),
+            "status": "processed",
+            "created_at": 126,
+        }
+
     async def list_files(self, **kwargs):
         del kwargs
         return {
@@ -353,6 +369,59 @@ async def test_files_batches_service_retrieves_provider_specific_records():
     assert file_record.api_format is NormalizedArtifactFormat.GEMINI
     assert batch_record is not None
     assert batch_record.api_format is NormalizedArtifactFormat.GEMINI
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_creates_anthropic_input_file():
+    service = FilesBatchesService()
+    files_service = FakeFilesService()
+    file_store = {}
+
+    record = await service.create_file(
+        api_format="anthropic",
+        purpose="batch",
+        upload={
+            "filename": "anthropic-input.jsonl",
+            "content": b'{"custom_id":"anthropic-1"}\n',
+            "content_type": "application/json",
+        },
+        display_name=None,
+        giga_client=SimpleNamespace(),
+        files_service=files_service,
+        file_store=file_store,
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
+    assert record.content_kind == "jsonl"
+    assert record.delete_path == "/v1/files/file-created-1"
+    assert file_store["file-created-1"]["api_format"] == "anthropic"
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_creates_gemini_input_file_with_metadata():
+    service = FilesBatchesService()
+    files_service = FakeFilesService()
+    file_store = {}
+
+    record = await service.create_file(
+        api_format="gemini",
+        purpose="user_data",
+        upload={
+            "filename": "diagram.png",
+            "content": b"png-bytes",
+            "content_type": "image/png",
+        },
+        display_name="Gemini Diagram",
+        giga_client=SimpleNamespace(),
+        files_service=files_service,
+        file_store=file_store,
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.GEMINI
+    assert record.filename == "Gemini Diagram"
+    assert record.delete_path == "/v1beta/files/file-created-1"
+    assert file_store["file-created-1"]["display_name"] == "Gemini Diagram"
+    assert file_store["file-created-1"]["mime_type"] == "image/png"
 
 
 @pytest.mark.asyncio
