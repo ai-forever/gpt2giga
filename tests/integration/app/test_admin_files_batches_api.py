@@ -699,3 +699,95 @@ def test_admin_files_batches_create_openai_batch_returns_field_error_detail():
             "input_file_id": "`input_file_id` or `requests` is required for OpenAI batches."
         }
     }
+
+
+def test_admin_files_batches_validate_staged_file_returns_diagnostic_report():
+    app = make_app()
+    app.state.gigachat_client.files["file-openai-invalid-1"] = {
+        "content": (
+            b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":[]}}\n'
+            b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":"bad"}}\n'
+        ),
+        "object": FakeUploadedFile(
+            id="file-openai-invalid-1",
+            object="file",
+            bytes=146,
+            created_at=140,
+            filename="openai-invalid.jsonl",
+            purpose="general",
+        ),
+    }
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-invalid-1",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is False
+    assert body["api_format"] == "openai"
+    assert body["detected_format"] == "openai"
+    assert body["summary"]["total_rows"] == 2
+    assert body["summary"]["error_count"] >= 2
+    assert {issue["code"] for issue in body["issues"]} >= {
+        "duplicate_identifier",
+        "missing_field",
+    }
+
+
+def test_admin_files_batches_validate_inline_gemini_rows_returns_warnings_only():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "gemini",
+            "model": "models/gemini-2.5-flash",
+            "requests": [
+                {
+                    "request": {
+                        "contents": [
+                            {
+                                "role": "user",
+                                "parts": [{"text": "hello validate gemini"}],
+                            }
+                        ]
+                    },
+                    "metadata": {"label": "row-1"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert body["api_format"] == "gemini"
+    assert body["detected_format"] == "gemini"
+    assert body["summary"]["total_rows"] == 1
+    assert body["summary"]["error_count"] == 0
+    assert body["summary"]["warning_count"] == 2
+    assert {issue["code"] for issue in body["issues"]} == {
+        "default_model_applied",
+        "metadata_ignored",
+    }
+
+
+def test_admin_files_batches_validate_requires_file_or_requests():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={"api_format": "openai"},
+    )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "`input_file_id` or `requests` is required for validation."
+    )

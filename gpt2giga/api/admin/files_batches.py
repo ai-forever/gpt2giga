@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -11,10 +12,18 @@ from starlette.requests import Request
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
 from gpt2giga.api.anthropic.batches import _build_anthropic_batch_results
 from gpt2giga.api.gemini.batches import build_gemini_batch_output_file
-from gpt2giga.app.dependencies import get_logger_from_state, get_runtime_providers
+from gpt2giga.app.dependencies import (
+    get_config_from_state,
+    get_logger_from_state,
+    get_request_transformer_from_state,
+    get_runtime_providers,
+)
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.form_body import read_request_multipart
-from gpt2giga.features.batches import get_batches_service_from_state
+from gpt2giga.features.batches import (
+    BatchInputValidator,
+    get_batches_service_from_state,
+)
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.files import get_files_service_from_state
 from gpt2giga.features.files.store import get_file_store
@@ -32,6 +41,15 @@ class AdminBatchCreateRequest(BaseModel):
     input_file_id: str | None = None
     metadata: dict[str, Any] | None = None
     display_name: str | None = None
+    model: str | None = None
+    requests: list[dict[str, Any]] | None = None
+
+
+class AdminBatchValidateRequest(BaseModel):
+    """Admin-only normalized batch-validation payload."""
+
+    api_format: str = "openai"
+    input_file_id: str | None = None
     model: str | None = None
     requests: list[dict[str, Any]] | None = None
 
@@ -142,6 +160,38 @@ async def create_files_batches_batch(
         logger=get_logger_from_state(app_state),
         batch_store=get_batch_store(request),
         file_store=get_file_store(request),
+    )
+
+
+@admin_files_batches_api_router.post("/admin/api/files-batches/batches/validate")
+@exceptions_handler
+async def validate_files_batches_batch(
+    payload: AdminBatchValidateRequest,
+    request: Request,
+):
+    """Validate staged or inline batch input and return a diagnostic report."""
+    verify_logs_ip_allowlist(request)
+    validator = _build_batch_input_validator(request)
+    resolved_input_file_id = _normalize_optional_string(payload.input_file_id)
+    if resolved_input_file_id is not None:
+        file_response = await get_gigachat_client(request).aget_file_content(
+            file_id=resolved_input_file_id
+        )
+        content = base64.b64decode(file_response.content)
+        return await validator.validate_bytes(
+            content,
+            api_format=payload.api_format,
+            fallback_model=payload.model,
+        )
+    if payload.requests is not None:
+        return await validator.validate_rows(
+            list(payload.requests),
+            api_format=payload.api_format,
+            fallback_model=payload.model,
+        )
+    raise HTTPException(
+        status_code=400,
+        detail="`input_file_id` or `requests` is required for validation.",
     )
 
 
@@ -332,3 +382,20 @@ def _resolve_output_batch_id(
         if metadata.get("output_file_id") == file_id:
             return str(batch_id)
     return None
+
+
+def _build_batch_input_validator(request: Request) -> BatchInputValidator:
+    app_state = request.app.state
+    config = get_config_from_state(app_state)
+    return BatchInputValidator(
+        request_transformer=get_request_transformer_from_state(app_state),
+        embeddings_model=config.proxy_settings.embeddings,
+        gigachat_api_mode=config.proxy_settings.chat_backend_mode,
+        logger=get_logger_from_state(app_state),
+        default_model=getattr(config.gigachat_settings, "model", None),
+    )
+
+
+def _normalize_optional_string(value: str | None) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
