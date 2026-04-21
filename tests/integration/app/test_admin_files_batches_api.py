@@ -459,7 +459,7 @@ def test_admin_files_batches_create_gemini_batch_from_staged_file():
     app = make_app()
     app.state.gigachat_client.files["file-gemini-input-1"] = {
         "content": (
-            b'{"request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-test"},"metadata":{"requestLabel":"row-1"}}\n'
+            b'{"key":"row-1","request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-test"},"metadata":{"requestLabel":"row-1"}}\n'
         ),
         "object": FakeUploadedFile(
             id="file-gemini-input-1",
@@ -486,6 +486,43 @@ def test_admin_files_batches_create_gemini_batch_from_staged_file():
     assert body["api_format"] == "gemini"
     assert body["display_name"] == "Gemini Admin Batch"
     assert body["model"] == "gemini-test"
+
+
+def test_admin_files_batches_create_gemini_batch_from_doc_style_file_with_model():
+    app = make_app()
+    app.state.gigachat_client.files["file-gemini-input-keyed-1"] = {
+        "content": (
+            b'{"key":"doc-row-1","request":{"contents":[{"role":"user","parts":[{"text":"hello keyed gemini"}]}]}}\n'
+        ),
+        "object": FakeUploadedFile(
+            id="file-gemini-input-keyed-1",
+            object="file",
+            bytes=101,
+            created_at=116,
+            filename="gemini-keyed-input.jsonl",
+            purpose="general",
+        ),
+    }
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "gemini",
+            "input_file_id": "file-gemini-input-keyed-1",
+            "model": (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                "gemini-2.5-flash:batchGenerateContent"
+            ),
+            "display_name": "Gemini Keyed Batch",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "gemini"
+    assert body["display_name"] == "Gemini Keyed Batch"
+    assert body["model"] == "gemini-2.5-flash"
 
 
 def test_admin_files_batches_create_gemini_batch_from_inline_requests():

@@ -85,6 +85,7 @@ def _build_input_config(metadata: dict[str, Any]) -> dict[str, Any]:
         "requests": {
             "requests": [
                 {
+                    **({"key": request_item["key"]} if "key" in request_item else {}),
                     "request": request_item.get("request", {}),
                     **(
                         {"metadata": request_item["metadata"]}
@@ -185,6 +186,7 @@ def build_gemini_batch_output_file(
             and "body" not in row
         ):
             transformed_row = {
+                **({"key": request_item["key"]} if "key" in request_item else {}),
                 **(
                     {"metadata": request_metadata}
                     if request_metadata is not None
@@ -221,6 +223,7 @@ def build_gemini_batch_output_file(
                     request_data=request_payload,
                 )
             transformed_row = {
+                **({"key": request_item["key"]} if "key" in request_item else {}),
                 **(
                     {"metadata": request_metadata}
                     if request_metadata is not None
@@ -291,6 +294,9 @@ def _build_batch_rows(
             }
         )
         stored_item = {"request": request_payload}
+        request_key = request_item.get("key")
+        if isinstance(request_key, str) and request_key.strip():
+            stored_item["key"] = request_key.strip()
         if "metadata" in request_item:
             stored_item["metadata"] = request_item["metadata"]
         stored_requests.append(stored_item)

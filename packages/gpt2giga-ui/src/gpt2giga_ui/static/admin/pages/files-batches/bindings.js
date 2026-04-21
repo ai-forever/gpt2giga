@@ -126,7 +126,7 @@ export function bindFilesBatchesPage(options) {
             return "Anthropic batches load staged JSONL rows shaped like `{custom_id, params}` and convert them into message-batch requests.";
         }
         if (apiFormat === "gemini") {
-            return "Gemini batches accept either a staged file id or an inline JSON array shaped like `[{request, metadata?}]`. Provide a fallback model only when rows omit `request.model`.";
+            return "Gemini batches accept either a staged JSONL file shaped like `{key, request}` per line or an inline JSON array shaped like `[{key?, request, metadata?}]`. Provide a fallback model when file rows omit `request.model`.";
         }
         return "OpenAI batches expect a staged JSONL file in OpenAI batch input format.";
     };

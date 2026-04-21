@@ -31,10 +31,23 @@ class GeminiAPIError(Exception):
 
 def normalize_model_name(model: Optional[str]) -> str:
     """Normalize a Gemini model resource name to a plain model id."""
-    model = (model or "").strip()
-    if model.startswith("models/"):
-        return model.split("/", 1)[1]
-    return model
+    value = (model or "").strip().strip("/")
+    if not value:
+        return ""
+
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        value = parsed.path.strip("/")
+
+    if "/models/" in value:
+        value = value.rsplit("/models/", 1)[-1]
+    elif value.startswith("models/"):
+        value = value.split("/", 1)[1]
+
+    if ":" in value:
+        value = value.split(":", 1)[0]
+
+    return value.strip("/")
 
 
 def model_resource_name(model: str) -> str:

@@ -256,7 +256,10 @@ class FakeFilesContentClient:
                 b'{"custom_id":"anthropic-1","params":{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hello anthropic"}]}}\n'
             ),
             "file-gemini-1": (
-                b'{"request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-test"},"metadata":{"requestLabel":"row-1"}}\n'
+                b'{"key":"row-1","request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-test"},"metadata":{"requestLabel":"row-1"}}\n'
+            ),
+            "file-gemini-keyed-1": (
+                b'{"key":"doc-row-1","request":{"contents":[{"role":"user","parts":[{"text":"hello keyed gemini"}]}]}}\n'
             ),
         }
 
@@ -507,10 +510,53 @@ async def test_files_batches_service_creates_gemini_batch_from_staged_file():
         == "gemini_generate_content"
     )
     assert (
+        batches_service.last_create_from_rows["metadata"]["requests"][0]["key"]
+        == "row-1"
+    )
+    assert (
         batches_service.last_create_from_rows["rows"][0]["body"]["messages"][0][
             "content"
         ]
         == "hello gemini"
+    )
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_creates_gemini_batch_from_doc_style_file_with_fallback_model():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    record = await service.create_batch(
+        api_format="gemini",
+        input_file_id="file-gemini-keyed-1",
+        model=(
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-2.5-flash:batchGenerateContent"
+        ),
+        display_name="Gemini Keyed Import",
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.GEMINI
+    assert record.model == "gemini-2.5-flash"
+    assert record.display_name == "Gemini Keyed Import"
+    assert batches_service.last_create_from_rows is not None
+    assert (
+        batches_service.last_create_from_rows["metadata"]["requests"][0]["key"]
+        == "doc-row-1"
+    )
+    assert (
+        batches_service.last_create_from_rows["metadata"]["model"] == "gemini-2.5-flash"
+    )
+    assert (
+        batches_service.last_create_from_rows["rows"][0]["body"]["messages"][0][
+            "content"
+        ]
+        == "hello keyed gemini"
     )
 
 

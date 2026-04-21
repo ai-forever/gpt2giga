@@ -229,6 +229,8 @@ Frontend should no longer:
 - done: admin API exposes `POST /admin/api/files-batches/batches` and returns normalized batch records immediately after create
 - done: frontend batch composer is format-aware, including Gemini model/display-name inputs and provider-specific input-shape guidance
 - done: Gemini batch composer accepts either a staged file id or inline normalized `requests`
+- done: Gemini file-backed batch staging now accepts doc-compatible JSONL rows shaped like `{key, request}`
+- done: Gemini model fallback normalization now resolves Gemini resource paths and action-suffixed model names
 - done: unit and integration coverage now exercises normalized admin batch creation for OpenAI, Anthropic, and Gemini
 - done: admin file uploader now stages artifacts through `POST /admin/api/files-batches/files` instead of posting directly to `/v1/files`
 - done: uploaded file metadata now preserves intended `api_format`, so later batch handoff can default to Anthropic or Gemini without frontend guesswork
@@ -273,6 +275,7 @@ Status:
 - done: normalized backend batch creation
 - done: normalized backend file staging with format-aware metadata
 - done: Gemini inline request batches are reachable through the same admin composer path
+- done: Gemini file-mode batches preserve per-row `key` values through output serialization
 
 ## Testing Plan
 

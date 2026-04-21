@@ -999,3 +999,52 @@ def test_batch_generate_content_routes_and_download_results():
     cancel_response = client.post("/batches/batch-1:cancel")
     assert cancel_response.status_code == 501
     assert cancel_response.json()["error"]["status"] == "UNIMPLEMENTED"
+
+
+def test_batch_generate_content_supports_doc_style_file_input_and_keyed_output():
+    app = make_app()
+    giga_client = app.state.gigachat_client
+    giga_client.files["file-input-1"] = {
+        "content": (
+            b'{"key":"request-1","request":{"contents":[{"role":"user","parts":[{"text":"Hello from file batch"}]}]}}\n'
+        ),
+        "object": FakeUploadedFile(
+            "file-input-1",
+            bytes_=101,
+            created_at=200,
+            filename="my-batch-requests.jsonl",
+            purpose="general",
+        ),
+    }
+    client = TestClient(app)
+
+    create_response = client.post(
+        "/models/gemini-test:batchGenerateContent",
+        json={
+            "batch": {
+                "displayName": "integration-file-batch",
+                "inputConfig": {
+                    "fileName": "files/file-input-1",
+                },
+            }
+        },
+    )
+
+    assert create_response.status_code == 200
+    operation = create_response.json()
+    assert operation["response"]["inputConfig"]["fileName"] == "files/file-input-1"
+
+    translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
+    assert translated_line["request"]["model"] == "gemini-test"
+    assert translated_line["request"]["messages"] == [
+        {"role": "user", "content": "Hello from file batch"}
+    ]
+
+    output_response = client.get("/files/file-output-1:download")
+    assert output_response.status_code == 200
+    output_line = json.loads(output_response.text.strip())
+    assert output_line["key"] == "request-1"
+    assert (
+        output_line["response"]["candidates"][0]["content"]["parts"][0]["text"]
+        == "done"
+    )
