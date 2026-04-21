@@ -61,6 +61,33 @@ export interface InspectorSelection {
 
 export type ArtifactApiFormat = "openai" | "anthropic" | "gemini";
 
+export type BatchValidationSeverity = "error" | "warning" | "info";
+
+export interface BatchValidationIssue {
+  severity: BatchValidationSeverity;
+  code: string;
+  message: string;
+  hint?: string | null;
+  line?: number | null;
+  column?: number | null;
+  field?: string | null;
+  raw_excerpt?: string | null;
+}
+
+export interface BatchValidationSummary {
+  total_rows: number;
+  error_count: number;
+  warning_count: number;
+}
+
+export interface BatchValidationReport {
+  valid: boolean;
+  api_format: ArtifactApiFormat;
+  detected_format?: ArtifactApiFormat | null;
+  summary: BatchValidationSummary;
+  issues: BatchValidationIssue[];
+}
+
 export interface FileRecord {
   id: string;
   api_format: ArtifactApiFormat;

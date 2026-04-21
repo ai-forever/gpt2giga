@@ -32,6 +32,7 @@ import { DEFAULT_FILE_SORT } from "./state.js";
 export interface FilesBatchesPageElements {
   actionNode: HTMLElement;
   batchApiFormat: HTMLSelectElement | null;
+  batchCreateButton: HTMLButtonElement | null;
   batchDisplayName: HTMLInputElement | null;
   batchDisplayNameField: HTMLElement | null;
   batchForm: HTMLFormElement | null;
@@ -42,6 +43,8 @@ export interface FilesBatchesPageElements {
   batchModel: HTMLInputElement | null;
   batchModelField: HTMLElement | null;
   batchEndpoint: HTMLSelectElement | null;
+  batchValidateButton: HTMLButtonElement | null;
+  batchValidationNode: HTMLElement | null;
   contentNode: HTMLPreElement;
   contentDisclosure: HTMLDetailsElement;
   contentSummaryNode: HTMLElement;
@@ -480,7 +483,32 @@ function renderBatchesPage(
               `,
             })}
             <div class="form-actions">
-              <button class="button" type="submit">Create batch job</button>
+              <button class="button button--secondary" id="batch-validate-button" type="button">Validate file</button>
+              <button class="button" id="batch-create-button" type="submit">Create batch job</button>
+              <span class="muted">Validate first to get line-level diagnostics before queueing the batch.</span>
+            </div>
+            <div class="surface batch-validation" id="batch-validation-report">
+              <div class="batch-validation__header">
+                <div>
+                  <h4>Validation report</h4>
+                  <p class="muted">Run preflight validation before creating a batch.</p>
+                </div>
+                <div class="batch-validation__meta">
+                  ${pill("Not validated")}
+                </div>
+              </div>
+              <div class="batch-validation__summary">
+                ${renderDefinitionList(
+                  [
+                    { label: "Status", value: "No report yet" },
+                    { label: "Selected format", value: "OpenAI" },
+                    { label: "Input source", value: "Choose a staged file or inline requests" },
+                    { label: "Next step", value: "Run Validate file" },
+                  ],
+                  "No validation report yet.",
+                )}
+              </div>
+              <p class="muted">The report will show detected format, row counts, and line-by-line issues for the current composer input.</p>
             </div>
           </form>
         </div>
@@ -774,6 +802,9 @@ export function resolveFilesBatchesElements(
   return {
     actionNode,
     batchApiFormat: pageContent.querySelector<HTMLSelectElement>("#batch-api-format"),
+    batchCreateButton: pageContent.querySelector<HTMLButtonElement>(
+      "#batch-create-button",
+    ),
     batchDisplayName: pageContent.querySelector<HTMLInputElement>(
       "#batch-display-name",
     ),
@@ -792,6 +823,12 @@ export function resolveFilesBatchesElements(
     batchModel: pageContent.querySelector<HTMLInputElement>("#batch-model"),
     batchModelField: pageContent.querySelector<HTMLElement>("#batch-model-field"),
     batchEndpoint: pageContent.querySelector<HTMLSelectElement>("#batch-endpoint"),
+    batchValidateButton: pageContent.querySelector<HTMLButtonElement>(
+      "#batch-validate-button",
+    ),
+    batchValidationNode: pageContent.querySelector<HTMLElement>(
+      "#batch-validation-report",
+    ),
     contentNode,
     contentDisclosure,
     contentSummaryNode,

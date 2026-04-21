@@ -974,6 +974,83 @@ code {
   background: rgba(255, 255, 255, 0.68);
 }
 
+.batch-validation {
+  display: grid;
+  gap: 14px;
+}
+
+.batch-validation__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.batch-validation__header h4 {
+  margin: 0;
+}
+
+.batch-validation__header p {
+  margin: 4px 0 0;
+}
+
+.batch-validation__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.batch-validation__summary,
+.batch-validation__issues {
+  display: grid;
+  gap: 12px;
+}
+
+.batch-validation__message {
+  display: grid;
+  gap: 6px;
+}
+
+.batch-validation__severity {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.batch-validation__severity--error {
+  background: rgba(190, 24, 93, 0.12);
+  color: #be185d;
+}
+
+.batch-validation__severity--warning {
+  background: rgba(180, 83, 9, 0.14);
+  color: #b45309;
+}
+
+.batch-validation__severity--info {
+  background: rgba(15, 95, 90, 0.12);
+  color: #0f5f5a;
+}
+
+.batch-validation__excerpt {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.94);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .form-shell {
   display: grid;
   gap: 18px;

@@ -314,7 +314,29 @@ function renderBatchesPage(data, inventory, filters) {
               `,
     })}
             <div class="form-actions">
-              <button class="button" type="submit">Create batch job</button>
+              <button class="button button--secondary" id="batch-validate-button" type="button">Validate file</button>
+              <button class="button" id="batch-create-button" type="submit">Create batch job</button>
+              <span class="muted">Validate first to get line-level diagnostics before queueing the batch.</span>
+            </div>
+            <div class="surface batch-validation" id="batch-validation-report">
+              <div class="batch-validation__header">
+                <div>
+                  <h4>Validation report</h4>
+                  <p class="muted">Run preflight validation before creating a batch.</p>
+                </div>
+                <div class="batch-validation__meta">
+                  ${pill("Not validated")}
+                </div>
+              </div>
+              <div class="batch-validation__summary">
+                ${renderDefinitionList([
+        { label: "Status", value: "No report yet" },
+        { label: "Selected format", value: "OpenAI" },
+        { label: "Input source", value: "Choose a staged file or inline requests" },
+        { label: "Next step", value: "Run Validate file" },
+    ], "No validation report yet.")}
+              </div>
+              <p class="muted">The report will show detected format, row counts, and line-by-line issues for the current composer input.</p>
             </div>
           </form>
         </div>
@@ -515,6 +537,7 @@ export function resolveFilesBatchesElements(pageContent) {
     return {
         actionNode,
         batchApiFormat: pageContent.querySelector("#batch-api-format"),
+        batchCreateButton: pageContent.querySelector("#batch-create-button"),
         batchDisplayName: pageContent.querySelector("#batch-display-name"),
         batchDisplayNameField: pageContent.querySelector("#batch-display-name-field"),
         batchForm: pageContent.querySelector("#batch-create-form"),
@@ -525,6 +548,8 @@ export function resolveFilesBatchesElements(pageContent) {
         batchModel: pageContent.querySelector("#batch-model"),
         batchModelField: pageContent.querySelector("#batch-model-field"),
         batchEndpoint: pageContent.querySelector("#batch-endpoint"),
+        batchValidateButton: pageContent.querySelector("#batch-validate-button"),
+        batchValidationNode: pageContent.querySelector("#batch-validation-report"),
         contentNode,
         contentDisclosure,
         contentSummaryNode,

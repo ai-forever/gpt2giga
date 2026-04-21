@@ -89,6 +89,17 @@ export async function createBatch(app, payload) {
         },
     }, true);
 }
+export async function validateBatchInput(app, payload) {
+    return app.api.json("/admin/api/files-batches/batches/validate", {
+        method: "POST",
+        json: {
+            api_format: payload.apiFormat,
+            input_file_id: payload.inputFileId,
+            model: payload.model,
+            requests: payload.requests,
+        },
+    }, true);
+}
 export async function deleteFile(app, fileId, deletePath) {
     const normalizedDeletePath = deletePath?.trim();
     await app.api.json(normalizedDeletePath || `/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, true);

@@ -1,5 +1,5 @@
 import type { AdminApp } from "../../app.js";
-import type { BatchRecord, FileRecord } from "./state.js";
+import type { BatchRecord, BatchValidationReport, FileRecord } from "./state.js";
 
 interface FilesBatchesInventoryCounts {
   files: number;
@@ -184,6 +184,30 @@ export async function createBatch(
         input_file_id: payload.inputFileId,
         metadata: payload.metadata,
         display_name: payload.displayName,
+        model: payload.model,
+        requests: payload.requests,
+      },
+    },
+    true,
+  );
+}
+
+export async function validateBatchInput(
+  app: AdminApp,
+  payload: {
+    apiFormat: "openai" | "anthropic" | "gemini";
+    inputFileId?: string;
+    model?: string;
+    requests?: Array<Record<string, unknown>>;
+  },
+): Promise<BatchValidationReport> {
+  return app.api.json<BatchValidationReport>(
+    "/admin/api/files-batches/batches/validate",
+    {
+      method: "POST",
+      json: {
+        api_format: payload.apiFormat,
+        input_file_id: payload.inputFileId,
         model: payload.model,
         requests: payload.requests,
       },

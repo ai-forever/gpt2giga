@@ -1,7 +1,7 @@
 import { withBusyState } from "../../forms.js";
-import { renderDefinitionList } from "../../templates.js";
-import { formatBytes, formatTimestamp, safeJsonParse } from "../../utils.js";
-import { createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, syncFilesBatchesPageDataCache, uploadFile, } from "./api.js";
+import { banner, pill, renderDefinitionList } from "../../templates.js";
+import { escapeHtml, formatBytes, formatNumber, formatTimestamp, safeJsonParse, } from "../../utils.js";
+import { createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, syncFilesBatchesPageDataCache, uploadFile, validateBatchInput, } from "./api.js";
 import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, extractErrorReason, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
 import { INVALID_JSON } from "./state.js";
 export function bindFilesBatchesPage(options) {
@@ -9,6 +9,14 @@ export function bindFilesBatchesPage(options) {
     let selection = { kind: "idle" };
     let previewObjectUrl = null;
     let lastInlineRequestsTemplate = "";
+    let validationReport = null;
+    let validationSignature = null;
+    let validationValidatedAt = null;
+    let validationDirty = false;
+    let validationInFlight = false;
+    let validationMessage = null;
+    let validationRefreshTimer = null;
+    let validationRunId = 0;
     const cacheFileRecord = (payload) => {
         const fileId = String(payload.id ?? "");
         if (!fileId) {
@@ -148,6 +156,372 @@ export function bindFilesBatchesPage(options) {
     };
     const readBatchEndpoint = () => elements.batchEndpoint?.value.trim() || "/v1/chat/completions";
     const readConfiguredFallbackModel = () => app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash";
+    const formatApiFormatLabel = (apiFormat) => {
+        if (apiFormat === "anthropic") {
+            return "Anthropic";
+        }
+        if (apiFormat === "gemini") {
+            return "Gemini";
+        }
+        return "OpenAI";
+    };
+    const readInlineRequestsPayload = () => {
+        const inlineRequestsText = elements.batchInlineRequests?.value.trim() ?? "";
+        if (!inlineRequestsText) {
+            return { provided: false };
+        }
+        const parsed = safeJsonParse(inlineRequestsText, INVALID_JSON);
+        if (parsed === INVALID_JSON || !Array.isArray(parsed)) {
+            return {
+                provided: true,
+                error: "Inline requests must be a JSON array.",
+            };
+        }
+        return {
+            provided: true,
+            requests: parsed,
+        };
+    };
+    const buildBatchValidationRequest = () => {
+        const apiFormat = readBatchApiFormat();
+        const endpoint = apiFormat === "openai" ? readBatchEndpoint() : "/v1/chat/completions";
+        const inputFileId = elements.batchInput?.value.trim() ?? "";
+        const fallbackModel = elements.batchModel?.value.trim() || undefined;
+        const inlinePayload = readInlineRequestsPayload();
+        if (inlinePayload.error) {
+            return {
+                apiFormat,
+                endpoint,
+                sourceLabel: "Inline requests",
+                error: inlinePayload.error,
+            };
+        }
+        const inlineRequests = inlinePayload.requests;
+        if (inlineRequests && inlineRequests.length > 0) {
+            return {
+                apiFormat,
+                endpoint,
+                model: fallbackModel,
+                requests: inlineRequests,
+                signature: JSON.stringify({
+                    apiFormat,
+                    endpoint,
+                    model: fallbackModel ?? "",
+                    requests: inlineRequests,
+                }),
+                sourceLabel: `${inlineRequests.length} inline request${inlineRequests.length === 1 ? "" : "s"}`,
+                sourceNote: inputFileId
+                    ? `Inline requests override staged file ${inputFileId} for validation and batch creation.`
+                    : "Inline requests are the active batch source.",
+            };
+        }
+        if (inputFileId) {
+            return {
+                apiFormat,
+                endpoint,
+                inputFileId,
+                model: fallbackModel,
+                signature: JSON.stringify({
+                    apiFormat,
+                    endpoint,
+                    inputFileId,
+                    model: fallbackModel ?? "",
+                }),
+                sourceLabel: `Staged file ${inputFileId}`,
+                sourceNote: "Validation reads the staged JSONL file through the admin API.",
+            };
+        }
+        return {
+            apiFormat,
+            endpoint,
+            sourceLabel: "No active input",
+            error: `${formatApiFormatLabel(apiFormat)} batches need a staged input file id or inline requests before validation.`,
+        };
+    };
+    const resolveValidationStatus = () => {
+        if (validationInFlight) {
+            return { label: "Validating", tone: "default" };
+        }
+        if (validationDirty) {
+            return { label: "Stale report", tone: "warn" };
+        }
+        if (!validationReport) {
+            return { label: "Not validated", tone: "default" };
+        }
+        if (!validationReport.valid) {
+            return { label: "Invalid", tone: "warn" };
+        }
+        if (validationReport.summary.warning_count > 0) {
+            return { label: "Valid with warnings", tone: "warn" };
+        }
+        return { label: "Valid", tone: "good" };
+    };
+    const renderValidationIssueRows = (issues) => {
+        if (!issues.length) {
+            return '<p class="muted">No line-level issues were reported for the current validation run.</p>';
+        }
+        return `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Line</th>
+              <th>Severity</th>
+              <th>Field</th>
+              <th>Issue</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${issues
+            .map((issue) => {
+            const severityLabel = issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1);
+            const location = issue.line
+                ? issue.column
+                    ? `${issue.line}:${issue.column}`
+                    : String(issue.line)
+                : "File";
+            return `
+                  <tr>
+                    <td>${escapeHtml(location)}</td>
+                    <td>
+                      <span class="batch-validation__severity batch-validation__severity--${escapeHtml(issue.severity)}">
+                        ${escapeHtml(severityLabel)}
+                      </span>
+                    </td>
+                    <td>${escapeHtml(issue.field || "n/a")}</td>
+                    <td>
+                      <div class="batch-validation__message">
+                        <strong>${escapeHtml(issue.message)}</strong>
+                        ${issue.hint
+                ? `<span class="muted">Hint: ${escapeHtml(issue.hint)}</span>`
+                : ""}
+                        <span class="muted">Code: ${escapeHtml(issue.code)}</span>
+                        ${issue.raw_excerpt
+                ? `<pre class="batch-validation__excerpt">${escapeHtml(issue.raw_excerpt)}</pre>`
+                : ""}
+                      </div>
+                    </td>
+                  </tr>
+                `;
+        })
+            .join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+    };
+    const updateBatchValidationSurface = () => {
+        if (!elements.batchValidationNode) {
+            return;
+        }
+        const status = resolveValidationStatus();
+        const currentRequest = buildBatchValidationRequest();
+        const summaryItems = [
+            { label: "Status", value: status.label },
+            {
+                label: "Selected format",
+                value: formatApiFormatLabel(readBatchApiFormat()),
+            },
+            {
+                label: "Detected format",
+                value: validationReport?.detected_format
+                    ? formatApiFormatLabel(validationReport.detected_format)
+                    : "n/a",
+                note: validationReport?.detected_format
+                    ? "Detected from the current batch row shape."
+                    : "Detection appears after a successful validation run.",
+            },
+            {
+                label: "Input source",
+                value: currentRequest.sourceLabel,
+                note: currentRequest.sourceNote,
+            },
+            {
+                label: "Last validation",
+                value: validationValidatedAt
+                    ? formatTimestamp(validationValidatedAt)
+                    : "n/a",
+                note: validationDirty
+                    ? "Composer inputs changed after the last report."
+                    : validationReport
+                        ? "Report matches the current composer input."
+                        : "No validation run for the current composer input yet.",
+            },
+        ];
+        if (readBatchApiFormat() === "openai") {
+            summaryItems.push({
+                label: "Endpoint target",
+                value: readBatchEndpoint(),
+            });
+        }
+        const metaPills = [pill(status.label, status.tone)];
+        if (validationReport && !validationDirty) {
+            metaPills.push(pill(`${formatNumber(validationReport.summary.total_rows)} rows`));
+            metaPills.push(pill(`${formatNumber(validationReport.summary.error_count)} errors`));
+            metaPills.push(pill(`${formatNumber(validationReport.summary.warning_count)} warnings`));
+        }
+        let reportBanner = "";
+        if (validationMessage) {
+            reportBanner = banner(validationMessage, validationMessage.includes("JSON array") ? "danger" : "warn");
+        }
+        else if (validationInFlight) {
+            reportBanner = banner("Validation is running for the current composer input.", "info");
+        }
+        else if (validationDirty) {
+            reportBanner = banner("The last validation report is stale. Re-run validation before creating the batch.", "warn");
+        }
+        else if (validationReport && !validationReport.valid) {
+            reportBanner = banner("Validation found blocking errors. Fix them or change the selected format before creating the batch.", "danger");
+        }
+        else if (validationReport && validationReport.summary.warning_count > 0) {
+            reportBanner = banner("Validation passed with warnings. Batch creation stays enabled.", "warn");
+        }
+        else if (validationReport) {
+            reportBanner = banner("Validation passed with no blocking issues.", "info");
+        }
+        else {
+            reportBanner = banner("Run Validate file to get row-level diagnostics before queueing the batch.", "info");
+        }
+        elements.batchValidationNode.innerHTML = `
+      <div class="batch-validation__header">
+        <div>
+          <h4>Validation report</h4>
+          <p class="muted">Run preflight validation before creating a batch.</p>
+        </div>
+        <div class="batch-validation__meta">
+          ${metaPills.join("")}
+        </div>
+      </div>
+      ${reportBanner}
+      <div class="batch-validation__summary">
+        ${renderDefinitionList(summaryItems, "No validation report yet.")}
+      </div>
+      <div class="batch-validation__issues">
+        <div class="surface__header">
+          <h4>Issues</h4>
+          <span class="muted">${validationReport && !validationDirty
+            ? `${formatNumber(validationReport.issues.length)} reported`
+            : validationReport && validationDirty
+                ? "Showing the previous report until validation is re-run."
+                : "No issues to show yet."}</span>
+        </div>
+        ${validationReport ? renderValidationIssueRows(validationReport.issues) : '<p class="muted">Validate the current composer input to populate the issue list.</p>'}
+      </div>
+    `;
+    };
+    const updateBatchCreateAvailability = () => {
+        if (!elements.batchCreateButton) {
+            return;
+        }
+        const hasFreshBlockingErrors = Boolean(validationReport) &&
+            !validationDirty &&
+            validationReport.summary.error_count > 0;
+        elements.batchCreateButton.disabled =
+            validationInFlight || hasFreshBlockingErrors;
+        elements.batchCreateButton.title = validationInFlight
+            ? "Validation is running."
+            : hasFreshBlockingErrors
+                ? "Fix validation errors or change the current composer input first."
+                : "";
+    };
+    const clearValidationRefreshTimer = () => {
+        if (validationRefreshTimer !== null) {
+            window.clearTimeout(validationRefreshTimer);
+            validationRefreshTimer = null;
+        }
+    };
+    const invalidateBatchValidation = (options) => {
+        const hadValidationState = validationReport !== null || validationValidatedAt !== null;
+        validationDirty = hadValidationState;
+        validationMessage = null;
+        updateBatchValidationSurface();
+        updateBatchCreateAvailability();
+        if (!options?.auto || !hadValidationState) {
+            clearValidationRefreshTimer();
+            return;
+        }
+        clearValidationRefreshTimer();
+        validationRefreshTimer = window.setTimeout(() => {
+            validationRefreshTimer = null;
+            void runBatchValidation(null, { automatic: true });
+        }, 250);
+    };
+    const runBatchValidation = async (button, options) => {
+        const requestPayload = buildBatchValidationRequest();
+        if (!requestPayload.signature || requestPayload.error) {
+            validationMessage =
+                requestPayload.error ??
+                    "Validation needs a staged input file or inline requests.";
+            updateBatchValidationSurface();
+            updateBatchCreateAvailability();
+            if (!options?.automatic) {
+                app.pushAlert(validationMessage, "warn");
+            }
+            return;
+        }
+        validationMessage = null;
+        validationInFlight = true;
+        updateBatchValidationSurface();
+        updateBatchCreateAvailability();
+        const runId = ++validationRunId;
+        try {
+            const report = await withBusyState({
+                root: elements.batchForm,
+                button,
+                pendingLabel: "Validating…",
+                action: async () => validateBatchInput(app, {
+                    apiFormat: requestPayload.apiFormat,
+                    inputFileId: requestPayload.inputFileId,
+                    model: requestPayload.model,
+                    requests: requestPayload.requests,
+                }),
+            });
+            if (runId !== validationRunId) {
+                return;
+            }
+            validationReport = report;
+            validationSignature = requestPayload.signature;
+            validationValidatedAt = Math.floor(Date.now() / 1000);
+            validationDirty = false;
+            setWorkflowSummary([
+                { label: "Workflow state", value: "Batch input validated" },
+                { label: "API format", value: formatApiFormatLabel(report.api_format) },
+                {
+                    label: "Status",
+                    value: report.valid ? "Ready to create" : "Needs fixes",
+                    note: `${formatNumber(report.summary.error_count)} errors · ${formatNumber(report.summary.warning_count)} warnings`,
+                },
+                {
+                    label: "Input source",
+                    value: requestPayload.sourceLabel,
+                    note: requestPayload.sourceNote,
+                },
+            ]);
+            if (!options?.automatic) {
+                const alertTone = report.valid ? "info" : "warn";
+                app.pushAlert(report.valid
+                    ? `Validation passed for ${formatApiFormatLabel(report.api_format)} batch input.`
+                    : `Validation found ${report.summary.error_count} blocking issue${report.summary.error_count === 1 ? "" : "s"}.`, alertTone);
+            }
+        }
+        catch (error) {
+            if (runId !== validationRunId) {
+                return;
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            validationMessage = extractErrorReason(message);
+            if (!options?.automatic) {
+                app.pushAlert(validationMessage, "danger");
+            }
+        }
+        finally {
+            if (runId === validationRunId) {
+                validationInFlight = false;
+                updateBatchValidationSurface();
+                updateBatchCreateAvailability();
+            }
+        }
+    };
     const buildBatchInlineRequestsTemplate = (apiFormat) => {
         const fallbackModel = elements.batchModel?.value.trim() || readConfiguredFallbackModel();
         if (apiFormat === "anthropic") {
@@ -353,6 +727,7 @@ export function bindFilesBatchesPage(options) {
             : "openai";
         elements.batchInput.value = fileId;
         syncBatchComposerFormat(preferredApiFormat, { inputFileId: fileId });
+        invalidateBatchValidation();
         selection = { kind: "file", fileId };
         clearSelectionHandoff();
         resetContentSurface();
@@ -672,6 +1047,8 @@ export function bindFilesBatchesPage(options) {
     updateInspectorActions();
     resetContentSurface();
     syncUploadComposerFormat(readUploadApiFormat());
+    updateBatchValidationSurface();
+    updateBatchCreateAvailability();
     setDetailSurface("Selection metadata snapshot", [
         { label: "Detail surface", value: "Idle" },
         { label: "Loaded object", value: "No file or batch metadata loaded" },
@@ -753,19 +1130,19 @@ export function bindFilesBatchesPage(options) {
         const metadata = metadataText
             ? safeJsonParse(metadataText, INVALID_JSON)
             : undefined;
-        const inlineRequestsText = fields.requests?.value.trim() ?? "";
-        const inlineRequests = inlineRequestsText
-            ? safeJsonParse(inlineRequestsText, INVALID_JSON)
-            : undefined;
+        const inlinePayload = readInlineRequestsPayload();
+        const inlineRequests = inlinePayload.requests;
         if (metadata === INVALID_JSON ||
             (metadata !== undefined &&
                 (metadata === null || Array.isArray(metadata) || typeof metadata !== "object"))) {
             app.pushAlert("Batch metadata must be a JSON object.", "danger");
             return;
         }
-        if (inlineRequests === INVALID_JSON ||
-            (inlineRequests !== undefined && !Array.isArray(inlineRequests))) {
-            app.pushAlert("Inline requests must be a JSON array.", "danger");
+        if (inlinePayload.error) {
+            validationMessage = inlinePayload.error;
+            updateBatchValidationSurface();
+            updateBatchCreateAvailability();
+            app.pushAlert(inlinePayload.error, "danger");
             return;
         }
         const inputFileId = fields.input_file_id.value.trim();
@@ -782,6 +1159,9 @@ export function bindFilesBatchesPage(options) {
         const button = submitter instanceof HTMLButtonElement
             ? submitter
             : form.querySelector('button[type="submit"]');
+        if (!validationReport || validationDirty || validationSignature === null) {
+            app.pushAlert("Validate the current composer input first to get line-level diagnostics before creating the batch.", "warn");
+        }
         await runWorkflowAction({
             root: form,
             button,
@@ -836,6 +1216,9 @@ export function bindFilesBatchesPage(options) {
                 return response;
             },
         });
+    });
+    elements.batchValidateButton?.addEventListener("click", async () => {
+        await runBatchValidation(elements.batchValidateButton, { automatic: false });
     });
     elements.actionNode.addEventListener("click", async (event) => {
         const target = event.target;
@@ -1109,15 +1492,27 @@ export function bindFilesBatchesPage(options) {
             inputFileId: elements.batchInput?.value.trim() ?? "",
             forceInlineTemplate: true,
         });
+        invalidateBatchValidation({ auto: true });
     });
     elements.batchEndpoint?.addEventListener("change", () => {
         if (readBatchApiFormat() !== "openai") {
+            invalidateBatchValidation({ auto: true });
             return;
         }
         syncBatchInlineRequestsTemplate();
+        invalidateBatchValidation({ auto: true });
     });
     elements.batchModel?.addEventListener("input", () => {
         syncBatchInlineRequestsTemplate();
+    });
+    elements.batchModel?.addEventListener("change", () => {
+        invalidateBatchValidation({ auto: true });
+    });
+    elements.batchInput?.addEventListener("change", () => {
+        invalidateBatchValidation({ auto: true });
+    });
+    elements.batchInlineRequests?.addEventListener("change", () => {
+        invalidateBatchValidation({ auto: true });
     });
     const routeState = readFilesBatchesRouteState(page);
     if (routeState.composeInputFileId && elements.batchInput) {
@@ -1129,15 +1524,18 @@ export function bindFilesBatchesPage(options) {
         syncBatchComposerFormat(apiFormat, {
             inputFileId: routeState.composeInputFileId,
         });
+        invalidateBatchValidation();
         setWorkflowSummary([
             { label: "Workflow state", value: "Batch composer primed" },
             { label: "API format", value: apiFormat },
             { label: "Input file", value: routeState.composeInputFileId },
-            { label: "Next step", value: "Review format settings and create batch" },
+            { label: "Next step", value: "Review format settings and validate batch input" },
         ]);
     }
     else {
         syncBatchComposerFormat(readBatchApiFormat());
+        updateBatchValidationSurface();
+        updateBatchCreateAvailability();
     }
     if (routeState.selectedBatchId &&
         inventory.batchLookup.has(routeState.selectedBatchId)) {
