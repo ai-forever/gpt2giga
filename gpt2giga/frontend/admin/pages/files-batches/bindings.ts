@@ -650,6 +650,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       purpose?: HTMLSelectElement;
       batch_status?: HTMLSelectElement;
       endpoint?: HTMLSelectElement;
+      file_sort?: HTMLSelectElement;
     };
 
     const nextFilters: FilesBatchesFilters = {
@@ -657,6 +658,9 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       purpose: fields.purpose?.value ?? "",
       batchStatus: fields.batch_status?.value ?? "",
       endpoint: fields.endpoint?.value ?? "",
+      fileSort:
+        (fields.file_sort?.value as FilesBatchesFilters["fileSort"] | undefined) ??
+        filters.fileSort,
     };
     window.history.replaceState(
       {},

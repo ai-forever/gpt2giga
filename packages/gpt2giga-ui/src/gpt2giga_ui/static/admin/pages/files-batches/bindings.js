@@ -467,6 +467,8 @@ export function bindFilesBatchesPage(options) {
             purpose: fields.purpose?.value ?? "",
             batchStatus: fields.batch_status?.value ?? "",
             endpoint: fields.endpoint?.value ?? "",
+            fileSort: fields.file_sort?.value ??
+                filters.fileSort,
         };
         window.history.replaceState({}, "", buildFilesBatchesUrl(nextFilters, undefined, page));
         void app.render(page);

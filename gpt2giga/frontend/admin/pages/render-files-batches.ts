@@ -8,6 +8,7 @@ import {
   buildFilesBatchesUrl,
   readFilesBatchesFiltersForPage,
 } from "./files-batches/serializers.js";
+import { DEFAULT_FILE_SORT } from "./files-batches/state.js";
 import {
   renderFilesBatchesHeroActions,
   renderFilesBatchesPage,
@@ -58,7 +59,13 @@ export async function renderFilesBatches(
         {},
         "",
         buildFilesBatchesUrl(
-          { query: "", purpose: "", batchStatus: "", endpoint: "" },
+          {
+            query: "",
+            purpose: "",
+            batchStatus: "",
+            endpoint: "",
+            fileSort: DEFAULT_FILE_SORT,
+          },
           undefined,
           page,
         ),

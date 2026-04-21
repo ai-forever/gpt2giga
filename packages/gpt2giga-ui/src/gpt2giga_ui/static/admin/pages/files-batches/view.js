@@ -3,6 +3,7 @@ import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
 import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderFormSection, renderGuideLinks, renderStaticSelectOptions, renderWorkflowCard, } from "../../templates.js";
 import { escapeHtml, formatBytes, formatTimestamp } from "../../utils.js";
 import { buildFilesBatchesUrl, buildIdleSelectionSummary, buildIdleWorkflowSummary, getLatestLinkedBatch, renderBatchStatus, } from "./serializers.js";
+import { DEFAULT_FILE_SORT } from "./state.js";
 export function renderFilesBatchesHeroActions(page) {
     if (page === "files-batches") {
         return `
@@ -363,6 +364,12 @@ function renderFiltersCard(page, data, filters) {
         ${renderFilterSelectOptions(filters.purpose, data.files.map((item) => item.purpose))}
       </select>
     </label>
+    <label class="field">
+      <span>Sort by</span>
+      <select name="file_sort">
+        ${renderFileSortOptions(filters.fileSort)}
+      </select>
+    </label>
   `;
     const batchFields = `
     <label class="field">
@@ -390,7 +397,7 @@ function renderFiltersCard(page, data, filters) {
             ? "Keep the inventory narrow enough for one-file review."
             : "Narrow lifecycle review before opening one batch or one output.",
         body: `
-            <div class="${page === "files" ? "dual-grid" : "quad-grid"}">
+            <div class="${page === "files" ? "triple-grid" : "quad-grid"}">
               ${page === "files" ? fileFields : batchFields}
             </div>
           `,
@@ -507,5 +514,18 @@ function emptyFilters() {
         purpose: "",
         batchStatus: "",
         endpoint: "",
+        fileSort: DEFAULT_FILE_SORT,
     };
+}
+function renderFileSortOptions(selected) {
+    return [
+        { value: DEFAULT_FILE_SORT, label: "Newest first" },
+        { value: "created_asc", label: "Oldest first" },
+        { value: "name_asc", label: "Name (A-Z)" },
+        { value: "name_desc", label: "Name (Z-A)" },
+        { value: "size_desc", label: "Size (largest)" },
+        { value: "size_asc", label: "Size (smallest)" },
+    ]
+        .map(({ value, label }) => `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`)
+        .join("");
 }

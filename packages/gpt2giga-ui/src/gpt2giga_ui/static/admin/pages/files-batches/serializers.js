@@ -1,8 +1,10 @@
 import { pill } from "../../templates.js";
 import { escapeHtml, formatBytes, formatTimestamp, safeJsonParse, setQueryParamIfPresent, } from "../../utils.js";
-import { INVALID_JSON } from "./state.js";
+import { DEFAULT_FILE_SORT, INVALID_JSON } from "./state.js";
 export function buildFilesBatchesInventory(data, filters) {
-    const filteredFiles = data.files.filter((item) => matchesFile(item, filters));
+    const filteredFiles = data.files
+        .filter((item) => matchesFile(item, filters))
+        .sort((left, right) => compareFiles(left, right, filters.fileSort));
     const filteredBatches = data.batches.filter((item) => matchesBatch(item, filters));
     return {
         filteredFiles,
@@ -186,6 +188,7 @@ export function readFilesBatchesFilters() {
         purpose: params.get("purpose") || "",
         batchStatus: params.get("batch_status") || "",
         endpoint: params.get("endpoint") || "",
+        fileSort: parseFileSort(params.get("file_sort")),
     });
 }
 export function readFilesBatchesFiltersForPage(page) {
@@ -195,6 +198,7 @@ export function readFilesBatchesFiltersForPage(page) {
         purpose: params.get("purpose") || "",
         batchStatus: params.get("batch_status") || "",
         endpoint: params.get("endpoint") || "",
+        fileSort: parseFileSort(params.get("file_sort")),
     });
 }
 export function readFilesBatchesRouteState(page = "files-batches") {
@@ -213,6 +217,7 @@ export function buildFilesBatchesUrl(filters, routeState, page = "files-batches"
     setQueryParamIfPresent(params, "purpose", scopedFilters.purpose);
     setQueryParamIfPresent(params, "batch_status", scopedFilters.batchStatus);
     setQueryParamIfPresent(params, "endpoint", scopedFilters.endpoint);
+    setQueryParamIfPresent(params, "file_sort", scopedFilters.fileSort === DEFAULT_FILE_SORT ? "" : scopedFilters.fileSort);
     setQueryParamIfPresent(params, "selected_file", scopedRouteState.selectedFileId);
     setQueryParamIfPresent(params, "selected_batch", scopedRouteState.selectedBatchId);
     setQueryParamIfPresent(params, "compose_input", scopedRouteState.composeInputFileId);
@@ -226,6 +231,7 @@ export function scopeFilesBatchesFilters(page, filters) {
         purpose: page === "batches" ? "" : filters.purpose,
         batchStatus: page === "files" ? "" : filters.batchStatus,
         endpoint: page === "files" ? "" : filters.endpoint,
+        fileSort: page === "batches" ? DEFAULT_FILE_SORT : parseFileSort(filters.fileSort),
     };
 }
 export function scopeFilesBatchesRouteState(page, routeState) {
@@ -414,9 +420,74 @@ function summarizeFilters(filters) {
         filters.purpose ? `purpose=${filters.purpose}` : "",
         filters.batchStatus ? `status=${filters.batchStatus}` : "",
         filters.endpoint ? `endpoint=${filters.endpoint}` : "",
+        filters.fileSort !== DEFAULT_FILE_SORT
+            ? `sort=${describeFileSort(filters.fileSort)}`
+            : "",
     ]
         .filter(Boolean)
         .join(" · ");
+}
+function parseFileSort(value) {
+    switch (value) {
+        case "created_asc":
+        case "name_asc":
+        case "name_desc":
+        case "size_desc":
+        case "size_asc":
+            return value;
+        case "created_desc":
+        default:
+            return DEFAULT_FILE_SORT;
+    }
+}
+function compareFiles(left, right, sort) {
+    const createdComparison = compareNumbers(Number(left.created_at ?? 0), Number(right.created_at ?? 0));
+    const nameComparison = compareText(fileDisplayName(left), fileDisplayName(right));
+    const sizeComparison = compareNumbers(Number(left.bytes ?? 0), Number(right.bytes ?? 0));
+    switch (sort) {
+        case "created_asc":
+            return createdComparison || nameComparison;
+        case "name_asc":
+            return nameComparison || -createdComparison;
+        case "name_desc":
+            return -nameComparison || -createdComparison;
+        case "size_desc":
+            return -sizeComparison || -createdComparison || nameComparison;
+        case "size_asc":
+            return sizeComparison || -createdComparison || nameComparison;
+        case "created_desc":
+        default:
+            return -createdComparison || nameComparison;
+    }
+}
+function fileDisplayName(item) {
+    return String(item.filename ?? item.id ?? "");
+}
+function compareNumbers(left, right) {
+    return left - right;
+}
+function compareText(left, right) {
+    return left.localeCompare(right, undefined, {
+        numeric: true,
+        sensitivity: "base",
+    });
+}
+function describeFileSort(sort) {
+    switch (sort) {
+        case "created_asc":
+            return "oldest";
+        case "name_asc":
+            return "name-a-z";
+        case "name_desc":
+            return "name-z-a";
+        case "size_desc":
+            return "largest";
+        case "size_asc":
+            return "smallest";
+        case "created_desc":
+        default:
+            return "newest";
+    }
 }
 function analyzeContentText(text) {
     const lines = text ? text.split(/\r?\n/).length : 0;

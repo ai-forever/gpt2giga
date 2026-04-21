@@ -556,8 +556,7 @@ export function updatePlaygroundRunPanels(options: {
     ...(runState.errorText ? [{ label: "Error", value: runState.errorText }] : []),
   ]);
   elements.responseShell.dataset.phase = runState.phase;
-  elements.assistantOutput.textContent =
-    runState.assistantOutput || DEFAULT_ASSISTANT_OUTPUT;
+  elements.assistantOutput.textContent = resolveAssistantOutput(runState);
   elements.responseState.textContent = describeAssistantSurfaceState(runState);
   elements.output.textContent = runState.rawOutput || DEFAULT_OUTPUT;
 
@@ -565,6 +564,16 @@ export function updatePlaygroundRunPanels(options: {
     elements.assistantOutput.scrollTop = elements.assistantOutput.scrollHeight;
     elements.output.scrollTop = elements.output.scrollHeight;
   }
+}
+
+function resolveAssistantOutput(runState: PlaygroundPageState["runState"]): string {
+  if (runState.assistantOutput) {
+    return runState.assistantOutput;
+  }
+  if (runState.phase === "error" && runState.errorText) {
+    return runState.errorText;
+  }
+  return DEFAULT_ASSISTANT_OUTPUT;
 }
 
 function renderBootstrapBanner(setup: SetupPayload, gatewayKey: string): string {

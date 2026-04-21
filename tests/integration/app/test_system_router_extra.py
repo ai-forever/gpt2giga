@@ -401,10 +401,14 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert "Selection metadata snapshot" in files_batches_asset.text
     assert "Content preview stays secondary" in files_batches_asset.text
     assert "Open batches" in files_batches_asset.text
+    assert "Sort by" in files_batches_asset.text
+    assert "Name (A-Z)" in files_batches_asset.text
+    assert 'name="file_sort"' in files_batches_asset.text
     assert "Files and batches lifecycle" in files_batches_asset.text
     assert "Operator guides" in files_batches_asset.text
     assert files_batches_serializers_asset.status_code == 200
     assert "Open batch composer" in files_batches_serializers_asset.text
+    assert '"file_sort"' in files_batches_serializers_asset.text
     assert (
         "Preview one output first to unlock request-scoped Traffic and Logs handoff."
         in (files_batches_serializers_asset.text)

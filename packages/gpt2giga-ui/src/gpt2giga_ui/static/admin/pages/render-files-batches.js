@@ -3,6 +3,7 @@ import { card, renderSubpageNav } from "../templates.js";
 import { bindFilesBatchesPage } from "./files-batches/bindings.js";
 import { loadFilesBatchesPageData } from "./files-batches/api.js";
 import { buildFilesBatchesInventory, buildFilesBatchesUrl, readFilesBatchesFiltersForPage, } from "./files-batches/serializers.js";
+import { DEFAULT_FILE_SORT } from "./files-batches/state.js";
 import { renderFilesBatchesHeroActions, renderFilesBatchesPage, resolveFilesBatchesElements, } from "./files-batches/view.js";
 export async function renderFilesBatches(app, token) {
     const currentPage = app.currentPage();
@@ -33,7 +34,13 @@ export async function renderFilesBatches(app, token) {
     document
         .getElementById("reset-files-batches-filters")
         ?.addEventListener("click", () => {
-        window.history.replaceState({}, "", buildFilesBatchesUrl({ query: "", purpose: "", batchStatus: "", endpoint: "" }, undefined, page));
+        window.history.replaceState({}, "", buildFilesBatchesUrl({
+            query: "",
+            purpose: "",
+            batchStatus: "",
+            endpoint: "",
+            fileSort: DEFAULT_FILE_SORT,
+        }, undefined, page));
         void app.render(page);
     });
     const elements = resolveFilesBatchesElements(app.pageContent);

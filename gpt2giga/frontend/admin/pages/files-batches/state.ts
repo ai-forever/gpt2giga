@@ -1,10 +1,21 @@
 export type FilesBatchesPage = "files-batches" | "files" | "batches";
 
+export type FileSort =
+  | "created_desc"
+  | "created_asc"
+  | "name_asc"
+  | "name_desc"
+  | "size_desc"
+  | "size_asc";
+
+export const DEFAULT_FILE_SORT: FileSort = "created_desc";
+
 export interface FilesBatchesFilters {
   query: string;
   purpose: string;
   batchStatus: string;
   endpoint: string;
+  fileSort: FileSort;
 }
 
 export interface FilesBatchesRouteState {

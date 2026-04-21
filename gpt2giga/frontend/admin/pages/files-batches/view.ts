@@ -21,10 +21,12 @@ import {
   renderBatchStatus,
 } from "./serializers.js";
 import type {
+  FileSort,
   FilesBatchesFilters,
   FilesBatchesInventory,
   FilesBatchesPage,
 } from "./state.js";
+import { DEFAULT_FILE_SORT } from "./state.js";
 
 export interface FilesBatchesPageElements {
   actionNode: HTMLElement;
@@ -544,6 +546,12 @@ function renderFiltersCard(
         )}
       </select>
     </label>
+    <label class="field">
+      <span>Sort by</span>
+      <select name="file_sort">
+        ${renderFileSortOptions(filters.fileSort)}
+      </select>
+    </label>
   `;
 
   const batchFields = `
@@ -582,7 +590,7 @@ function renderFiltersCard(
               ? "Keep the inventory narrow enough for one-file review."
               : "Narrow lifecycle review before opening one batch or one output.",
           body: `
-            <div class="${page === "files" ? "dual-grid" : "quad-grid"}">
+            <div class="${page === "files" ? "triple-grid" : "quad-grid"}">
               ${page === "files" ? fileFields : batchFields}
             </div>
           `,
@@ -753,5 +761,22 @@ function emptyFilters(): FilesBatchesFilters {
     purpose: "",
     batchStatus: "",
     endpoint: "",
+    fileSort: DEFAULT_FILE_SORT,
   };
+}
+
+function renderFileSortOptions(selected: FileSort): string {
+  return [
+    { value: DEFAULT_FILE_SORT, label: "Newest first" },
+    { value: "created_asc", label: "Oldest first" },
+    { value: "name_asc", label: "Name (A-Z)" },
+    { value: "name_desc", label: "Name (Z-A)" },
+    { value: "size_desc", label: "Size (largest)" },
+    { value: "size_asc", label: "Size (smallest)" },
+  ]
+    .map(
+      ({ value, label }) =>
+        `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`,
+    )
+    .join("");
 }
