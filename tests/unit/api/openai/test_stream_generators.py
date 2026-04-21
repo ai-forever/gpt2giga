@@ -160,14 +160,18 @@ class FakeClientError:
 class FakeClientGigaChatError:
     def astream(self, chat):
         async def gen():
-            raise gigachat.exceptions.GigaChatException("GigaChat API error occurred")
+            exc = gigachat.exceptions.GigaChatException("GigaChat API error occurred")
+            exc.status_code = 403
+            raise exc
             yield  # pragma: no cover
 
         return gen()
 
     def astream_v2(self, chat):
         async def gen():
-            raise gigachat.exceptions.GigaChatException("GigaChat API error occurred")
+            exc = gigachat.exceptions.GigaChatException("GigaChat API error occurred")
+            exc.status_code = 403
+            raise exc
             yield  # pragma: no cover
 
         return gen()
@@ -279,8 +283,10 @@ async def test_stream_chat_completion_generator_gigachat_exception():
     ):
         lines.append(line)
     assert len(lines) == 2
-    assert "GigaChatException" in lines[0]
-    assert "stream_error" in lines[0]
+    payload = json.loads(lines[0].removeprefix("data: "))
+    assert payload["error"]["type"] == "GigaChatException"
+    assert payload["error"]["code"] == "stream_error"
+    assert payload["error"]["status_code"] == 403
     assert lines[1].strip() == "data: [DONE]"
 
 

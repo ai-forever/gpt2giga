@@ -84,6 +84,11 @@ export async function executePlaygroundRequest(options) {
             state.runState.note =
                 "Gateway returned a non-2xx response. Check parsed output, transport body, or bootstrap hints.";
         }
+        else if (state.runState.phase === "error") {
+            state.runState.note =
+                state.runState.note ||
+                    "Stream reported an error event. Check parsed output and transport transcript.";
+        }
         else if (state.runState.phase !== "aborted") {
             state.runState.phase = "success";
             state.runState.note = request.stream
@@ -131,15 +136,30 @@ async function consumeStreamResponse(response, request, state, onUpdate, signal)
             state.runState.eventCount = state.streamEvents.length;
             state.runState.rawOutput = formatSseTranscript(state.streamEvents);
             if (event.data === "[DONE]") {
-                state.runState.note = "Received stream terminator.";
+                state.runState.note =
+                    state.runState.phase === "error"
+                        ? "Received stream terminator after an error event."
+                        : "Received stream terminator.";
                 onUpdate();
                 return;
             }
             const payload = tryParseJson(event.data);
+            const failure = extractStreamFailure(event, payload);
+            if (failure !== null) {
+                state.runState.phase = "error";
+                state.runState.errorText = formatStreamFailure(failure);
+                if (failure.statusCode !== null) {
+                    state.runState.statusCode = failure.statusCode;
+                    state.runState.statusText = failure.errorType;
+                }
+                state.runState.note = `Stream emitted ${failure.errorType} after ${state.runState.eventCount} event${state.runState.eventCount === 1 ? "" : "s"}.`;
+            }
             state.runState.tokenUsage = mergeTokenUsage(state.runState.tokenUsage, payload === null ? null : extractTokenUsage(payload));
             const textDelta = payload === null ? event.data : extractAssistantText(payload, request.surface);
             state.runState.assistantOutput = mergeAssistantOutput(state.runState.assistantOutput, textDelta, event.type, payload, request.surface);
-            state.runState.note = `Streaming… ${state.runState.eventCount} event${state.runState.eventCount === 1 ? "" : "s"} parsed.`;
+            if (failure === null) {
+                state.runState.note = `Streaming… ${state.runState.eventCount} event${state.runState.eventCount === 1 ? "" : "s"} parsed.`;
+            }
             onUpdate();
         },
     }, signal);
@@ -147,6 +167,54 @@ async function consumeStreamResponse(response, request, state, onUpdate, signal)
 function shouldConsumeStreamResponse(response, streamRequested) {
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     return contentType.includes("text/event-stream") || (streamRequested && response.ok);
+}
+function extractStreamFailure(event, payload) {
+    const payloadRecord = payload && typeof payload === "object" && !Array.isArray(payload)
+        ? payload
+        : null;
+    const errorRecord = payloadRecord?.error && typeof payloadRecord.error === "object" && !Array.isArray(payloadRecord.error)
+        ? payloadRecord.error
+        : null;
+    const eventType = event.type.trim().toLowerCase();
+    const failureRecord = errorRecord ?? (eventType === "error" && payloadRecord !== null ? payloadRecord : null);
+    if (failureRecord === null && eventType !== "error") {
+        return null;
+    }
+    const message = typeof failureRecord?.message === "string" && failureRecord.message.trim()
+        ? failureRecord.message.trim()
+        : event.data.trim();
+    const errorType = typeof failureRecord?.type === "string" && failureRecord.type.trim()
+        ? failureRecord.type.trim()
+        : typeof failureRecord?.code === "string" && failureRecord.code.trim()
+            ? failureRecord.code.trim()
+            : eventType === "error"
+                ? "stream_error"
+                : "error";
+    const parsedStatusCode = normalizeStatusCode(failureRecord?.status_code);
+    return {
+        errorType,
+        message,
+        statusCode: parsedStatusCode ?? inferStatusCodeFromText(message),
+    };
+}
+function normalizeStatusCode(value) {
+    const numeric = Number(value);
+    if (!Number.isInteger(numeric) || numeric < 100 || numeric > 599) {
+        return null;
+    }
+    return numeric;
+}
+function inferStatusCodeFromText(message) {
+    const match = message.match(/(^|\\D)([1-5]\\d{2})(?=\\D|$)/u);
+    if (!match) {
+        return null;
+    }
+    return normalizeStatusCode(match[2]);
+}
+function formatStreamFailure(failure) {
+    return failure.statusCode === null
+        ? `${failure.errorType}: ${failure.message}`
+        : `${failure.errorType}: HTTP ${failure.statusCode} • ${failure.message}`;
 }
 async function readSseStream(stream, handlers, signal) {
     const reader = stream.getReader();

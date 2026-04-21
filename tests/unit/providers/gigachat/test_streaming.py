@@ -55,9 +55,11 @@ def test_report_stream_failure_wraps_provider_error():
     request = DummyRequest([False])
     logger = MagicMock()
 
+    error = gigachat.exceptions.GigaChatException("provider boom")
+    error.status_code = 403
     failure = report_stream_failure(
         request,
-        gigachat.exceptions.GigaChatException("provider boom"),
+        error,
         logger=logger,
         rquid="rq-2",
     )
@@ -65,6 +67,7 @@ def test_report_stream_failure_wraps_provider_error():
     assert failure.error_type == "GigaChatException"
     assert failure.message == "provider boom"
     assert failure.code == "stream_error"
+    assert failure.status_code == 403
     assert request.state._request_audit_context["error_type"] == "GigaChatException"
     logger.error.assert_called_once()
 

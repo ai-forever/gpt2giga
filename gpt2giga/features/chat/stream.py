@@ -86,6 +86,7 @@ async def stream_chat_completion_generator(
                 "message": failure.message,
                 "type": failure.error_type,
                 "code": failure.code,
+                "status_code": failure.status_code,
             }
         }
         yield format_chat_stream_chunk(error_response)
