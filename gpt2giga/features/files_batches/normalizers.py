@@ -27,8 +27,8 @@ def normalize_openai_file(file_obj: dict[str, Any]) -> NormalizedFileRecord:
         status=_string_or_none(file_obj.get("status")) or "processed",
         created_at=_int_or_none(file_obj.get("created_at")),
         content_kind=_infer_openai_content_kind(file_obj),
-        download_path=_openai_file_content_path(file_id) if file_id else None,
-        content_path=_openai_file_content_path(file_id) if file_id else None,
+        download_path=_admin_file_content_path(file_id) if file_id else None,
+        content_path=_admin_file_content_path(file_id) if file_id else None,
         delete_path=f"/v1/files/{file_id}" if file_id else None,
         raw=deepcopy(file_obj),
     )
@@ -47,8 +47,8 @@ def normalize_openai_batch(batch_obj: dict[str, Any]) -> NormalizedBatchRecord:
         input_file_id=_string_or_none(batch_obj.get("input_file_id")),
         output_file_id=output_file_id,
         output_kind="file" if output_file_id else None,
-        output_path=_openai_file_content_path(output_file_id)
-        if output_file_id
+        output_path=_admin_batch_output_path(batch_id)
+        if batch_id and output_file_id
         else None,
         request_counts=_normalize_request_counts(batch_obj.get("request_counts")),
         model=_string_or_none(batch_obj.get("model")),
@@ -74,9 +74,9 @@ def normalize_anthropic_batch(
         input_file_id=_string_or_none(metadata.get("input_file_id")),
         output_file_id=output_file_id,
         output_kind="results" if output_file_id else None,
-        output_path=(
-            f"/v1/messages/batches/{batch_id}/results" if output_file_id else None
-        ),
+        output_path=_admin_batch_output_path(batch_id)
+        if batch_id and output_file_id
+        else None,
         request_counts=_normalize_anthropic_request_counts(batch, metadata),
         model=_string_or_none(metadata.get("model")),
         display_name=_string_or_none(metadata.get("display_name")) or batch_id or None,
@@ -113,8 +113,8 @@ def normalize_gemini_file(
         or "processed",
         created_at=_int_or_none(file_obj.get("created_at")),
         content_kind=_infer_gemini_content_kind(file_obj, metadata),
-        download_path=f"/v1beta/files/{file_id}:download" if file_id else None,
-        content_path=f"/v1beta/files/{file_id}:download" if file_id else None,
+        download_path=_admin_file_content_path(file_id) if file_id else None,
+        content_path=_admin_file_content_path(file_id) if file_id else None,
         delete_path=f"/v1beta/files/{file_id}" if file_id else None,
         raw=raw,
     )
@@ -137,7 +137,9 @@ def normalize_gemini_batch(
         input_file_id=_string_or_none(metadata.get("input_file_id")),
         output_file_id=output_file_id,
         output_kind="file" if output_file_id else None,
-        output_path=f"/v1beta/batches/{batch_id}:download" if output_file_id else None,
+        output_path=_admin_batch_output_path(batch_id)
+        if batch_id and output_file_id
+        else None,
         request_counts=_normalize_gemini_request_counts(batch, metadata),
         model=_string_or_none(metadata.get("model")),
         display_name=_string_or_none(metadata.get("display_name")) or batch_id or None,
@@ -169,11 +171,7 @@ def normalize_anthropic_output_file(
         or file_id
         or "unknown"
     )
-    content_path = (
-        f"/v1/messages/batches/{resolved_batch_id}/results"
-        if resolved_batch_id
-        else None
-    )
+    content_path = _admin_file_content_path(file_id) if file_id else None
     raw = deepcopy(file_obj)
     if metadata:
         raw["metadata"] = deepcopy(metadata)
@@ -202,6 +200,20 @@ def _openai_file_content_path(file_id: str | None) -> str | None:
     if normalized_file_id is None:
         return None
     return f"/v1/files/{normalized_file_id}/content"
+
+
+def _admin_file_content_path(file_id: str | None) -> str | None:
+    normalized_file_id = _string_or_none(file_id)
+    if normalized_file_id is None:
+        return None
+    return f"/admin/api/files-batches/files/{normalized_file_id}/content"
+
+
+def _admin_batch_output_path(batch_id: str | None) -> str | None:
+    normalized_batch_id = _string_or_none(batch_id)
+    if normalized_batch_id is None:
+        return None
+    return f"/admin/api/files-batches/batches/{normalized_batch_id}/output"
 
 
 def _infer_openai_content_kind(file_obj: dict[str, Any]) -> str:

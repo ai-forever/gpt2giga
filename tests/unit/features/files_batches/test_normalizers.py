@@ -36,7 +36,7 @@ def test_normalize_openai_file_builds_canonical_paths():
     )
 
     assert record.api_format is NormalizedArtifactFormat.OPENAI
-    assert record.content_path == "/v1/files/file-1/content"
+    assert record.content_path == "/admin/api/files-batches/files/file-1/content"
     assert record.delete_path == "/v1/files/file-1"
     assert record.content_kind == "jsonl"
 
@@ -57,7 +57,7 @@ def test_normalize_openai_batch_preserves_output_file_linkage():
 
     assert record.api_format is NormalizedArtifactFormat.OPENAI
     assert record.output_kind == "file"
-    assert record.output_path == "/v1/files/file-output-1/content"
+    assert record.output_path == "/admin/api/files-batches/batches/batch-1/output"
     assert record.request_counts.total == 2
     assert record.request_counts.succeeded == 2
 
@@ -84,7 +84,7 @@ def test_normalize_anthropic_batch_recovers_results_endpoint():
 
     assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
     assert record.output_kind == "results"
-    assert record.output_path == "/v1/messages/batches/batch-1/results"
+    assert record.output_path == "/admin/api/files-batches/batches/batch-1/output"
     assert record.request_counts.errored == 1
     assert record.request_counts.succeeded == 1
 
@@ -107,7 +107,7 @@ def test_normalize_gemini_file_uses_gemini_paths_and_display_name():
 
     assert record.api_format is NormalizedArtifactFormat.GEMINI
     assert record.filename == "Poem"
-    assert record.content_path == "/v1beta/files/file-1:download"
+    assert record.content_path == "/admin/api/files-batches/files/file-1/content"
     assert record.delete_path == "/v1beta/files/file-1"
 
 
@@ -133,7 +133,7 @@ def test_normalize_gemini_batch_builds_download_path():
     )
 
     assert record.api_format is NormalizedArtifactFormat.GEMINI
-    assert record.output_path == "/v1beta/batches/batch-1:download"
+    assert record.output_path == "/admin/api/files-batches/batches/batch-1/output"
     assert record.request_counts.pending == 0
     assert record.display_name == "Gemini batch"
 
@@ -154,5 +154,5 @@ def test_normalize_anthropic_output_file_points_to_results_path():
 
     assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
     assert record.content_kind == "batch_results"
-    assert record.content_path == "/v1/messages/batches/batch-1/results"
+    assert record.content_path == "/admin/api/files-batches/files/file-output-1/content"
     assert record.delete_path is None

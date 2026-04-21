@@ -61,7 +61,28 @@ class FakeGigaChat:
                 ),
             },
             "file-anthropic-output-1": {
-                "content": b'{"hello":"anthropic"}\n',
+                "content": (
+                    json.dumps(
+                        {
+                            "custom_id": "req-1",
+                            "response": {
+                                "status_code": 200,
+                                "body": {
+                                    "choices": [
+                                        {
+                                            "message": {
+                                                "content": "anthropic result",
+                                            },
+                                            "finish_reason": "stop",
+                                        }
+                                    ],
+                                    "usage": {},
+                                },
+                            },
+                        }
+                    )
+                    + "\n"
+                ).encode("utf-8"),
                 "object": FakeUploadedFile(
                     id="file-anthropic-output-1",
                     object="file",
@@ -263,10 +284,30 @@ def test_admin_files_batches_detail_endpoints_return_normalized_records():
 
     assert file_response.status_code == 200
     assert (
-        file_response.json()["content_path"] == "/v1beta/files/file-gemini-1:download"
+        file_response.json()["content_path"]
+        == "/admin/api/files-batches/files/file-gemini-1/content"
     )
     assert batch_response.status_code == 200
     assert (
         batch_response.json()["output_path"]
-        == "/v1/messages/batches/batch-anthropic-1/results"
+        == "/admin/api/files-batches/batches/batch-anthropic-1/output"
     )
+
+
+def test_admin_files_batches_content_endpoints_proxy_canonical_artifacts():
+    client = TestClient(make_app())
+
+    file_response = client.get("/admin/api/files-batches/files/file-gemini-1/content")
+    anthropic_output_response = client.get(
+        "/admin/api/files-batches/files/file-anthropic-output-1/content"
+    )
+    batch_output_response = client.get(
+        "/admin/api/files-batches/batches/batch-gemini-1/output"
+    )
+
+    assert file_response.status_code == 200
+    assert file_response.content == b"gemini upload"
+    assert anthropic_output_response.status_code == 200
+    assert b'"type": "succeeded"' in anthropic_output_response.content
+    assert batch_output_response.status_code == 200
+    assert b'"response"' in batch_output_response.content
