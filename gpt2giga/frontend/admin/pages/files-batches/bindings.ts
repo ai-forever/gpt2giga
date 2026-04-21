@@ -28,6 +28,7 @@ import {
   summarizePreviewOutcome,
 } from "./serializers.js";
 import type {
+  ArtifactApiFormat,
   BatchRecord,
   DefinitionItem,
   FileRecord,
@@ -216,6 +217,65 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     });
   };
 
+  const readBatchApiFormat = (): ArtifactApiFormat => {
+    const normalized = elements.batchApiFormat?.value.trim();
+    if (normalized === "anthropic" || normalized === "gemini") {
+      return normalized;
+    }
+    return "openai";
+  };
+
+  const getBatchFormatHint = (apiFormat: ArtifactApiFormat): string => {
+    if (apiFormat === "anthropic") {
+      return "Anthropic batches load staged JSONL rows shaped like `{custom_id, params}` and convert them into message-batch requests.";
+    }
+    if (apiFormat === "gemini") {
+      return "Gemini batches load staged JSONL rows shaped like `{request, metadata?}`. Provide a fallback model when rows omit `request.model`.";
+    }
+    return "OpenAI batches expect a staged JSONL file in OpenAI batch input format.";
+  };
+
+  const syncBatchComposerFormat = (
+    apiFormat: ArtifactApiFormat,
+    options?: {
+      inputFileId?: string;
+    },
+  ): void => {
+    if (elements.batchApiFormat) {
+      elements.batchApiFormat.value = apiFormat;
+    }
+    if (elements.batchEndpoint) {
+      const openaiMode = apiFormat === "openai";
+      elements.batchEndpoint.disabled = !openaiMode;
+      if (!openaiMode) {
+        elements.batchEndpoint.value = "/v1/chat/completions";
+      }
+    }
+    if (elements.batchModelField && elements.batchModel) {
+      const showModel = apiFormat === "gemini";
+      elements.batchModelField.hidden = !showModel;
+      elements.batchModel.required = showModel;
+      if (!showModel) {
+        elements.batchModel.value = "";
+      }
+    }
+    if (elements.batchDisplayNameField && elements.batchDisplayName) {
+      const showDisplayName = apiFormat === "gemini";
+      elements.batchDisplayNameField.hidden = !showDisplayName;
+      if (!showDisplayName) {
+        elements.batchDisplayName.value = "";
+      } else if (!elements.batchDisplayName.value.trim()) {
+        const inputFileId = options?.inputFileId?.trim() ?? elements.batchInput?.value.trim() ?? "";
+        elements.batchDisplayName.value = inputFileId
+          ? `gemini-${inputFileId}`
+          : "gemini-batch";
+      }
+    }
+    if (elements.batchHint) {
+      elements.batchHint.textContent = getBatchFormatHint(apiFormat);
+    }
+  };
+
   const runWorkflowAction = async <T>({
     button,
     root,
@@ -258,7 +318,12 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       return;
     }
     const source = inventory.fileLookup.get(fileId);
+    const preferredApiFormat =
+      source?.api_format === "anthropic" || source?.api_format === "gemini"
+        ? source.api_format
+        : "openai";
     elements.batchInput.value = fileId;
+    syncBatchComposerFormat(preferredApiFormat, { inputFileId: fileId });
     selection = { kind: "file", fileId };
     clearSelectionHandoff();
     resetContentSurface();
@@ -268,6 +333,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       { label: "File id", value: fileId },
       { label: "Purpose", value: String(source?.purpose ?? "batch") },
       { label: "Filename", value: String(source?.filename ?? fileId) },
+      { label: "API format", value: preferredApiFormat },
       {
         label: "Next step",
         value: "Create batch",
@@ -729,10 +795,14 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
     const fields = form.elements as typeof form.elements & {
+      api_format: HTMLSelectElement;
+      display_name: HTMLInputElement;
       endpoint: HTMLSelectElement;
       input_file_id: HTMLInputElement;
       metadata: HTMLTextAreaElement;
+      model: HTMLInputElement;
     };
+    const apiFormat = readBatchApiFormat();
     const metadataText = fields.metadata.value.trim();
     const metadata = metadataText
       ? safeJsonParse<Record<string, unknown> | typeof INVALID_JSON>(
@@ -760,12 +830,20 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       pendingLabel: "Creating…",
       pendingSummary: [
         { label: "Workflow state", value: "Creating batch" },
+        { label: "API format", value: apiFormat },
         { label: "Input file", value: fields.input_file_id.value.trim() || "missing" },
-        { label: "Endpoint", value: fields.endpoint.value },
+        {
+          label: "Endpoint",
+          value:
+            apiFormat === "openai"
+              ? fields.endpoint.value
+              : "/v1/chat/completions",
+        },
       ],
       successSummary: (response) => [
         { label: "Workflow state", value: "Batch created" },
         { label: "Batch id", value: String(response.id ?? "unknown") },
+        { label: "API format", value: String(response.api_format ?? apiFormat) },
         {
           label: "Next step",
           value: "Inspect lifecycle",
@@ -774,12 +852,19 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       ],
       action: async () => {
         const response = await createBatch(app, {
-          endpoint: fields.endpoint.value,
+          apiFormat,
+          endpoint:
+            apiFormat === "openai"
+              ? fields.endpoint.value
+              : "/v1/chat/completions",
           inputFileId: fields.input_file_id.value.trim(),
           metadata,
+          displayName: fields.display_name.value.trim() || undefined,
+          model: fields.model.value.trim() || undefined,
         });
+        cacheBatchRecord(response);
         app.queueAlert(
-          `Created batch ${String(response.id ?? "")} for ${String(response.endpoint ?? "")}.`,
+          `Created ${String(response.api_format ?? apiFormat)} batch ${String(response.id ?? "")}.`,
           "info",
         );
         replaceStateForPage(page, {
@@ -1126,14 +1211,31 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       });
     });
 
+  elements.batchApiFormat?.addEventListener("change", () => {
+    syncBatchComposerFormat(readBatchApiFormat(), {
+      inputFileId: elements.batchInput?.value.trim() ?? "",
+    });
+  });
+
   const routeState = readFilesBatchesRouteState(page);
   if (routeState.composeInputFileId && elements.batchInput) {
     elements.batchInput.value = routeState.composeInputFileId;
+    const source = inventory.fileLookup.get(routeState.composeInputFileId);
+    const apiFormat =
+      source?.api_format === "anthropic" || source?.api_format === "gemini"
+        ? source.api_format
+        : readBatchApiFormat();
+    syncBatchComposerFormat(apiFormat, {
+      inputFileId: routeState.composeInputFileId,
+    });
     setWorkflowSummary([
       { label: "Workflow state", value: "Batch composer primed" },
+      { label: "API format", value: apiFormat },
       { label: "Input file", value: routeState.composeInputFileId },
-      { label: "Next step", value: "Choose endpoint and create batch" },
+      { label: "Next step", value: "Review format settings and create batch" },
     ]);
+  } else {
+    syncBatchComposerFormat(readBatchApiFormat());
   }
   if (
     routeState.selectedBatchId &&

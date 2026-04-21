@@ -281,17 +281,25 @@ function renderBatchesPage(data, inventory, filters) {
           <form id="batch-create-form" class="form-shell form-shell--compact">
             ${renderFormSection({
         title: "Queue one job",
-        intro: "Use this after staging an input file.",
+        intro: "Use this after staging an input file, then choose the target API format.",
         body: `
                 <label class="field">
+                  <span>API format</span>
+                  <select id="batch-api-format" name="api_format">
+                    ${renderBatchApiFormatOptions("openai")}
+                  </select>
+                </label>
+                <label class="field">
                   <span>Endpoint</span>
-                  <select name="endpoint">
+                  <select id="batch-endpoint" name="endpoint">
                     ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
                   </select>
                 </label>
                 <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required /></label>
+                <label class="field" id="batch-model-field" hidden><span>Model</span><input id="batch-model" name="model" placeholder="gemini-2.5-flash" /></label>
+                <label class="field" id="batch-display-name-field" hidden><span>Display name</span><input id="batch-display-name" name="display_name" placeholder="nightly-gemini-import" /></label>
                 <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
-                <div class="banner banner--warn">Batch creation expects an uploaded JSONL file in OpenAI batch input format.</div>
+                <div class="banner banner--warn" id="batch-format-hint">OpenAI batches expect a staged JSONL file in OpenAI batch input format.</div>
               `,
     })}
             <div class="form-actions">
@@ -495,8 +503,15 @@ export function resolveFilesBatchesElements(pageContent) {
     }
     return {
         actionNode,
+        batchApiFormat: pageContent.querySelector("#batch-api-format"),
+        batchDisplayName: pageContent.querySelector("#batch-display-name"),
+        batchDisplayNameField: pageContent.querySelector("#batch-display-name-field"),
         batchForm: pageContent.querySelector("#batch-create-form"),
         batchInput: pageContent.querySelector("#batch-input-file-id"),
+        batchHint: pageContent.querySelector("#batch-format-hint"),
+        batchModel: pageContent.querySelector("#batch-model"),
+        batchModelField: pageContent.querySelector("#batch-model-field"),
+        batchEndpoint: pageContent.querySelector("#batch-endpoint"),
         contentNode,
         contentDisclosure,
         contentSummaryNode,
@@ -511,6 +526,16 @@ export function resolveFilesBatchesElements(pageContent) {
         uploadForm: pageContent.querySelector("#files-upload-form"),
         workflowNode,
     };
+}
+function renderBatchApiFormatOptions(selected) {
+    const options = [
+        ["openai", "OpenAI"],
+        ["anthropic", "Anthropic"],
+        ["gemini", "Gemini"],
+    ];
+    return options
+        .map(([value, label]) => `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`)
+        .join("");
 }
 function emptyFilters() {
     return {

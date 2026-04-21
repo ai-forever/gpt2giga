@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
+from fastapi import HTTPException
+
+from gpt2giga.api.gemini.request import normalize_model_name
+from gpt2giga.api.gemini.batches import _build_batch_rows
 from gpt2giga.app.dependencies import get_runtime_services, set_runtime_service
 from gpt2giga.core.contracts import (
     NormalizedArtifactFormat,
@@ -13,6 +18,7 @@ from gpt2giga.core.contracts import (
     NormalizedFileRecord,
 )
 from gpt2giga.features.batches.transforms import build_openai_batch_object
+from gpt2giga.features.batches.transforms import parse_jsonl
 from gpt2giga.features.files_batches.contracts import normalize_api_format
 from gpt2giga.features.files_batches.normalizers import (
     normalize_anthropic_batch,
@@ -22,12 +28,68 @@ from gpt2giga.features.files_batches.normalizers import (
     normalize_openai_batch,
     normalize_openai_file,
 )
+from gpt2giga.providers.anthropic import anthropic_provider_adapters
 
 _NEEDS_ATTENTION_STATUSES = {"failed", "cancelled", "expired"}
 
 
 class FilesBatchesService:
     """Build a normalized mixed-provider inventory for the admin UI."""
+
+    async def create_batch(
+        self,
+        *,
+        api_format: str,
+        input_file_id: str | None = None,
+        endpoint: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        display_name: str | None = None,
+        model: str | None = None,
+        requests: list[dict[str, Any]] | None = None,
+        giga_client: Any,
+        batches_service: Any,
+        logger: Any = None,
+        file_store: Any | None = None,
+        batch_store: Any | None = None,
+    ) -> NormalizedBatchRecord:
+        """Create a normalized batch through the provider-aware admin surface."""
+        normalized_api_format = normalize_api_format(api_format)
+        if normalized_api_format is NormalizedArtifactFormat.ANTHROPIC:
+            record = await self._create_anthropic_batch(
+                input_file_id=input_file_id,
+                metadata=metadata,
+                display_name=display_name,
+                model=model,
+                giga_client=giga_client,
+                batches_service=batches_service,
+                logger=logger,
+                file_store=file_store,
+                batch_store=batch_store,
+            )
+        elif normalized_api_format is NormalizedArtifactFormat.GEMINI:
+            record = await self._create_gemini_batch(
+                input_file_id=input_file_id,
+                metadata=metadata,
+                display_name=display_name,
+                model=model,
+                requests=requests,
+                giga_client=giga_client,
+                batches_service=batches_service,
+                logger=logger,
+                file_store=file_store,
+                batch_store=batch_store,
+            )
+        else:
+            record = await self._create_openai_batch(
+                input_file_id=input_file_id,
+                endpoint=endpoint,
+                metadata=metadata,
+                giga_client=giga_client,
+                batches_service=batches_service,
+                file_store=file_store,
+                batch_store=batch_store,
+            )
+        return _normalize_batch_record(record)
 
     async def list_inventory(
         self,
@@ -174,6 +236,146 @@ class FilesBatchesService:
         records: list[dict[str, Any]],
     ) -> list[NormalizedBatchRecord]:
         return [_normalize_batch_record(record) for record in records]
+
+    async def _create_openai_batch(
+        self,
+        *,
+        input_file_id: str | None,
+        endpoint: str | None,
+        metadata: dict[str, Any] | None,
+        giga_client: Any,
+        batches_service: Any,
+        file_store: Any | None,
+        batch_store: Any | None,
+    ) -> dict[str, Any]:
+        resolved_input_file_id = _require_non_empty(
+            input_file_id,
+            field_name="input_file_id",
+            message="`input_file_id` is required for OpenAI batches.",
+        )
+        content = await _load_file_bytes(
+            giga_client,
+            file_id=resolved_input_file_id,
+        )
+        return await batches_service.create_batch_from_content(
+            content,
+            endpoint=_normalize_openai_endpoint(endpoint),
+            completion_window="24h",
+            metadata={
+                "input_file_id": resolved_input_file_id,
+                "metadata": dict(metadata or {}),
+            },
+            giga_client=giga_client,
+            batch_store=batch_store,
+            file_store=file_store,
+        )
+
+    async def _create_anthropic_batch(
+        self,
+        *,
+        input_file_id: str | None,
+        metadata: dict[str, Any] | None,
+        display_name: str | None,
+        model: str | None,
+        giga_client: Any,
+        batches_service: Any,
+        logger: Any,
+        file_store: Any | None,
+        batch_store: Any | None,
+    ) -> dict[str, Any]:
+        resolved_input_file_id = _require_non_empty(
+            input_file_id,
+            field_name="input_file_id",
+            message="`input_file_id` is required for Anthropic batches.",
+        )
+        requests_payload = parse_jsonl(
+            await _load_file_bytes(
+                giga_client,
+                file_id=resolved_input_file_id,
+            )
+        )
+        batch_payload = anthropic_provider_adapters.batches.build_create_payload(
+            {
+                "completion_window": "24h",
+                "requests": requests_payload,
+            },
+            logger=logger,
+        )
+        stored_metadata: dict[str, Any] = {
+            "api_format": "anthropic_messages",
+            "input_file_id": resolved_input_file_id,
+            "requests": batch_payload.stored_requests,
+        }
+        if metadata:
+            stored_metadata["metadata"] = dict(metadata)
+        if display_name:
+            stored_metadata["display_name"] = display_name.strip()
+        if model:
+            stored_metadata["model"] = model.strip()
+        return await batches_service.create_batch_from_rows(
+            batch_payload.rows,
+            endpoint="/v1/chat/completions",
+            completion_window=batch_payload.completion_window,
+            metadata=stored_metadata,
+            giga_client=giga_client,
+            batch_store=batch_store,
+            file_store=file_store,
+        )
+
+    async def _create_gemini_batch(
+        self,
+        *,
+        input_file_id: str | None,
+        metadata: dict[str, Any] | None,
+        display_name: str | None,
+        model: str | None,
+        requests: list[dict[str, Any]] | None,
+        giga_client: Any,
+        batches_service: Any,
+        logger: Any,
+        file_store: Any | None,
+        batch_store: Any | None,
+    ) -> dict[str, Any]:
+        (
+            requests_payload,
+            resolved_input_file_id,
+        ) = await _resolve_gemini_requests_payload(
+            giga_client,
+            input_file_id=input_file_id,
+            requests=requests,
+        )
+        resolved_model = _resolve_gemini_model(
+            requests_payload,
+            fallback_model=model,
+        )
+        rows, stored_requests = _build_batch_rows(
+            requests_payload,
+            model=resolved_model,
+            logger=logger,
+        )
+        stored_metadata: dict[str, Any] = {
+            "api_format": "gemini_generate_content",
+            "display_name": _resolve_gemini_display_name(
+                display_name,
+                input_file_id=resolved_input_file_id,
+            ),
+            "model": resolved_model,
+            "priority": 0,
+            "requests": stored_requests,
+        }
+        if metadata:
+            stored_metadata["metadata"] = dict(metadata)
+        if resolved_input_file_id:
+            stored_metadata["input_file_id"] = resolved_input_file_id
+        return await batches_service.create_batch_from_rows(
+            rows,
+            endpoint="/v1/chat/completions",
+            completion_window="24h",
+            metadata=stored_metadata,
+            giga_client=giga_client,
+            batch_store=batch_store,
+            file_store=file_store,
+        )
 
 
 def get_files_batches_service_from_state(state: Any) -> Any:
@@ -405,3 +607,105 @@ def _string_or_none(value: Any) -> str | None:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+
+def _require_non_empty(
+    value: str | None,
+    *,
+    field_name: str,
+    message: str,
+) -> str:
+    normalized = _string_or_none(value)
+    if normalized is None:
+        raise HTTPException(status_code=400, detail={field_name: message})
+    return normalized
+
+
+async def _load_file_bytes(
+    giga_client: Any,
+    *,
+    file_id: str,
+) -> bytes:
+    file_response = await giga_client.aget_file_content(file_id=file_id)
+    return base64.b64decode(file_response.content)
+
+
+def _normalize_openai_endpoint(value: str | None) -> str:
+    normalized = _string_or_none(value)
+    if normalized is None:
+        return "/v1/chat/completions"
+    return normalized
+
+
+async def _resolve_gemini_requests_payload(
+    giga_client: Any,
+    *,
+    input_file_id: str | None,
+    requests: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if requests:
+        return list(requests), _string_or_none(input_file_id)
+    resolved_input_file_id = _require_non_empty(
+        input_file_id,
+        field_name="input_file_id",
+        message=("`input_file_id` or `requests` is required for Gemini batches."),
+    )
+    return (
+        parse_jsonl(
+            await _load_file_bytes(
+                giga_client,
+                file_id=resolved_input_file_id,
+            )
+        ),
+        resolved_input_file_id,
+    )
+
+
+def _resolve_gemini_model(
+    requests_payload: list[dict[str, Any]],
+    *,
+    fallback_model: str | None,
+) -> str:
+    normalized_fallback = normalize_model_name(_string_or_none(fallback_model))
+    request_models = {
+        normalize_model_name(str(request_item.get("request", {}).get("model") or ""))
+        for request_item in requests_payload
+        if isinstance(request_item, dict)
+        and isinstance(request_item.get("request"), dict)
+        and str(request_item.get("request", {}).get("model") or "").strip()
+    }
+    if normalized_fallback:
+        return normalized_fallback
+    if len(request_models) == 1:
+        return next(iter(request_models))
+    if request_models:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "model": (
+                    "`model` is required when Gemini batch rows mix multiple request models."
+                )
+            },
+        )
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "model": (
+                "`model` is required for Gemini batches when request rows omit `request.model`."
+            )
+        },
+    )
+
+
+def _resolve_gemini_display_name(
+    display_name: str | None,
+    *,
+    input_file_id: str | None,
+) -> str:
+    normalized_display_name = _string_or_none(display_name)
+    if normalized_display_name is not None:
+        return normalized_display_name
+    normalized_input_file_id = _string_or_none(input_file_id)
+    if normalized_input_file_id is not None:
+        return f"Gemini batch for {normalized_input_file_id}"
+    return "Gemini batch"

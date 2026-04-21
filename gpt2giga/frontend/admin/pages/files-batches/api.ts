@@ -98,20 +98,25 @@ export async function uploadFile(
 export async function createBatch(
   app: AdminApp,
   payload: {
-    endpoint: string;
-    inputFileId: string;
+    apiFormat: "openai" | "anthropic" | "gemini";
+    endpoint?: string;
+    inputFileId?: string;
     metadata?: Record<string, unknown>;
+    displayName?: string;
+    model?: string;
   },
-): Promise<Record<string, unknown>> {
-  return app.api.json<Record<string, unknown>>(
-    "/v1/batches",
+): Promise<BatchRecord> {
+  return app.api.json<BatchRecord>(
+    "/admin/api/files-batches/batches",
     {
       method: "POST",
       json: {
+        api_format: payload.apiFormat,
         endpoint: payload.endpoint,
         input_file_id: payload.inputFileId,
-        completion_window: "24h",
         metadata: payload.metadata,
+        display_name: payload.displayName,
+        model: payload.model,
       },
     },
     true,

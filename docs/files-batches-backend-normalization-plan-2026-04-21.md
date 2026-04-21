@@ -224,19 +224,27 @@ Frontend should no longer:
 - done: delete action now respects canonical `delete_path` and stays disabled for formats without delete support
 - done: UI renders `api_format` directly from normalized records instead of inferring provider shape
 - done: shipped admin assets under `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` were rebuilt in sync with source TS
+- done: admin batch composer now creates OpenAI, Anthropic, and Gemini jobs through one normalized backend endpoint
+- done: backend batch creation lives in `FilesBatchesService` and reuses provider adapters instead of pushing wire-format branching back into the frontend
+- done: admin API exposes `POST /admin/api/files-batches/batches` and returns normalized batch records immediately after create
+- done: frontend batch composer is format-aware, including Gemini model/display-name inputs and provider-specific input-shape guidance
+- done: unit and integration coverage now exercises normalized admin batch creation for OpenAI, Anthropic, and Gemini
 
 #### Commit slice
 
 The current commit should include:
 
 - `docs/files-batches-backend-normalization-plan-2026-04-21.md`
+- `gpt2giga/api/admin/files_batches.py`
+- `gpt2giga/features/files_batches/service.py`
 - `gpt2giga/frontend/admin/pages/files-batches/api.ts`
 - `gpt2giga/frontend/admin/pages/files-batches/bindings.ts`
-- `gpt2giga/frontend/admin/pages/files-batches/state.ts`
 - `gpt2giga/frontend/admin/pages/files-batches/view.ts`
 - `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/files-batches/api.js`
 - `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/files-batches/bindings.js`
 - `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/pages/files-batches/view.js`
+- `tests/unit/features/files_batches/test_service.py`
+- `tests/integration/app/test_admin_files_batches_api.py`
 
 Explicitly keep out of this commit:
 

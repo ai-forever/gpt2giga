@@ -21,6 +21,7 @@ import {
   renderBatchStatus,
 } from "./serializers.js";
 import type {
+  ArtifactApiFormat,
   FileSort,
   FilesBatchesFilters,
   FilesBatchesInventory,
@@ -30,8 +31,15 @@ import { DEFAULT_FILE_SORT } from "./state.js";
 
 export interface FilesBatchesPageElements {
   actionNode: HTMLElement;
+  batchApiFormat: HTMLSelectElement | null;
+  batchDisplayName: HTMLInputElement | null;
+  batchDisplayNameField: HTMLElement | null;
   batchForm: HTMLFormElement | null;
   batchInput: HTMLInputElement | null;
+  batchHint: HTMLElement | null;
+  batchModel: HTMLInputElement | null;
+  batchModelField: HTMLElement | null;
+  batchEndpoint: HTMLSelectElement | null;
   contentNode: HTMLPreElement;
   contentDisclosure: HTMLDetailsElement;
   contentSummaryNode: HTMLElement;
@@ -434,17 +442,25 @@ function renderBatchesPage(
           <form id="batch-create-form" class="form-shell form-shell--compact">
             ${renderFormSection({
               title: "Queue one job",
-              intro: "Use this after staging an input file.",
+              intro: "Use this after staging an input file, then choose the target API format.",
               body: `
                 <label class="field">
+                  <span>API format</span>
+                  <select id="batch-api-format" name="api_format">
+                    ${renderBatchApiFormatOptions("openai")}
+                  </select>
+                </label>
+                <label class="field">
                   <span>Endpoint</span>
-                  <select name="endpoint">
+                  <select id="batch-endpoint" name="endpoint">
                     ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
                   </select>
                 </label>
                 <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required /></label>
+                <label class="field" id="batch-model-field" hidden><span>Model</span><input id="batch-model" name="model" placeholder="gemini-2.5-flash" /></label>
+                <label class="field" id="batch-display-name-field" hidden><span>Display name</span><input id="batch-display-name" name="display_name" placeholder="nightly-gemini-import" /></label>
                 <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
-                <div class="banner banner--warn">Batch creation expects an uploaded JSONL file in OpenAI batch input format.</div>
+                <div class="banner banner--warn" id="batch-format-hint">OpenAI batches expect a staged JSONL file in OpenAI batch input format.</div>
               `,
             })}
             <div class="form-actions">
@@ -741,8 +757,19 @@ export function resolveFilesBatchesElements(
 
   return {
     actionNode,
+    batchApiFormat: pageContent.querySelector<HTMLSelectElement>("#batch-api-format"),
+    batchDisplayName: pageContent.querySelector<HTMLInputElement>(
+      "#batch-display-name",
+    ),
+    batchDisplayNameField: pageContent.querySelector<HTMLElement>(
+      "#batch-display-name-field",
+    ),
     batchForm: pageContent.querySelector<HTMLFormElement>("#batch-create-form"),
     batchInput: pageContent.querySelector<HTMLInputElement>("#batch-input-file-id"),
+    batchHint: pageContent.querySelector<HTMLElement>("#batch-format-hint"),
+    batchModel: pageContent.querySelector<HTMLInputElement>("#batch-model"),
+    batchModelField: pageContent.querySelector<HTMLElement>("#batch-model-field"),
+    batchEndpoint: pageContent.querySelector<HTMLSelectElement>("#batch-endpoint"),
     contentNode,
     contentDisclosure,
     contentSummaryNode,
@@ -757,6 +784,20 @@ export function resolveFilesBatchesElements(
     uploadForm: pageContent.querySelector<HTMLFormElement>("#files-upload-form"),
     workflowNode,
   };
+}
+
+function renderBatchApiFormatOptions(selected: ArtifactApiFormat): string {
+  const options: Array<[ArtifactApiFormat, string]> = [
+    ["openai", "OpenAI"],
+    ["anthropic", "Anthropic"],
+    ["gemini", "Gemini"],
+  ];
+  return options
+    .map(
+      ([value, label]) =>
+        `<option value="${escapeHtml(value)}"${value === selected ? " selected" : ""}>${escapeHtml(label)}</option>`,
+    )
+    .join("");
 }
 
 function emptyFilters(): FilesBatchesFilters {

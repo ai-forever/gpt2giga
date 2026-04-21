@@ -31,13 +31,15 @@ export async function uploadFile(app, purpose, file) {
     return app.api.json("/v1/files", { method: "POST", body }, true);
 }
 export async function createBatch(app, payload) {
-    return app.api.json("/v1/batches", {
+    return app.api.json("/admin/api/files-batches/batches", {
         method: "POST",
         json: {
+            api_format: payload.apiFormat,
             endpoint: payload.endpoint,
             input_file_id: payload.inputFileId,
-            completion_window: "24h",
             metadata: payload.metadata,
+            display_name: payload.displayName,
+            model: payload.model,
         },
     }, true);
 }

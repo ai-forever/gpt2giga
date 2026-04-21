@@ -1,6 +1,8 @@
+import base64
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from gpt2giga.core.contracts import NormalizedArtifactFormat
 from gpt2giga.features.files_batches.service import FilesBatchesService
@@ -90,6 +92,10 @@ class FakeFilesService:
 
 
 class FakeBatchesService:
+    def __init__(self):
+        self.last_create_from_content = None
+        self.last_create_from_rows = None
+
     async def list_batch_records(self, **kwargs):
         del kwargs
         return [
@@ -158,6 +164,90 @@ class FakeBatchesService:
                 "requests": [{}],
             },
         }
+
+    async def create_batch_from_content(
+        self,
+        content: bytes,
+        *,
+        endpoint: str,
+        completion_window: str,
+        metadata: dict,
+        giga_client,
+        batch_store,
+        file_store,
+    ):
+        del giga_client, batch_store, file_store
+        self.last_create_from_content = {
+            "content": content,
+            "endpoint": endpoint,
+            "completion_window": completion_window,
+            "metadata": metadata,
+        }
+        return {
+            "batch": FakeBatch(
+                "batch-openai-created-1",
+                output_file_id="file-openai-output-created-1",
+                created_at=126,
+            ),
+            "metadata": {
+                "endpoint": endpoint,
+                **metadata,
+            },
+        }
+
+    async def create_batch_from_rows(
+        self,
+        rows: list[dict],
+        *,
+        endpoint: str,
+        completion_window: str,
+        metadata: dict,
+        giga_client,
+        batch_store,
+        file_store,
+    ):
+        del giga_client, batch_store, file_store
+        self.last_create_from_rows = {
+            "rows": rows,
+            "endpoint": endpoint,
+            "completion_window": completion_window,
+            "metadata": metadata,
+        }
+        batch_id = {
+            "anthropic_messages": "batch-anthropic-created-1",
+            "gemini_generate_content": "batch-gemini-created-1",
+        }.get(str(metadata.get("api_format")), "batch-created-1")
+        return {
+            "batch": FakeBatch(
+                batch_id,
+                output_file_id=f"file-output-{batch_id}",
+                created_at=127,
+            ),
+            "metadata": {
+                "endpoint": endpoint,
+                **metadata,
+            },
+        }
+
+
+class FakeFilesContentClient:
+    def __init__(self):
+        self.files = {
+            "file-openai-1": (
+                b'{"custom_id":"req-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-test","messages":[{"role":"user","content":"hello"}]}}\n'
+            ),
+            "file-anthropic-1": (
+                b'{"custom_id":"anthropic-1","params":{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hello anthropic"}]}}\n'
+            ),
+            "file-gemini-1": (
+                b'{"request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-test"},"metadata":{"requestLabel":"row-1"}}\n'
+            ),
+        }
+
+    async def aget_file_content(self, file_id: str):
+        return SimpleNamespace(
+            content=base64.b64encode(self.files[file_id]).decode("utf-8")
+        )
 
 
 @pytest.mark.asyncio
@@ -263,3 +353,122 @@ async def test_files_batches_service_retrieves_provider_specific_records():
     assert file_record.api_format is NormalizedArtifactFormat.GEMINI
     assert batch_record is not None
     assert batch_record.api_format is NormalizedArtifactFormat.GEMINI
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_creates_openai_batch_from_staged_file():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    record = await service.create_batch(
+        api_format="openai",
+        endpoint="/v1/responses",
+        input_file_id="file-openai-1",
+        metadata={"label": "openai"},
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.OPENAI
+    assert record.endpoint == "/v1/responses"
+    assert record.input_file_id == "file-openai-1"
+    assert batches_service.last_create_from_content is not None
+    assert (
+        batches_service.last_create_from_content["content"]
+        == FakeFilesContentClient().files["file-openai-1"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_creates_anthropic_batch_from_staged_file():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    record = await service.create_batch(
+        api_format="anthropic",
+        input_file_id="file-anthropic-1",
+        metadata={"label": "anthropic"},
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
+    assert record.input_file_id == "file-anthropic-1"
+    assert batches_service.last_create_from_rows is not None
+    assert (
+        batches_service.last_create_from_rows["metadata"]["api_format"]
+        == "anthropic_messages"
+    )
+    assert (
+        batches_service.last_create_from_rows["rows"][0]["body"]["messages"][0][
+            "content"
+        ]
+        == "hello anthropic"
+    )
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_creates_gemini_batch_from_staged_file():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    record = await service.create_batch(
+        api_format="gemini",
+        input_file_id="file-gemini-1",
+        display_name="Gemini Import",
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.GEMINI
+    assert record.model == "gemini-test"
+    assert record.display_name == "Gemini Import"
+    assert batches_service.last_create_from_rows is not None
+    assert (
+        batches_service.last_create_from_rows["metadata"]["api_format"]
+        == "gemini_generate_content"
+    )
+    assert (
+        batches_service.last_create_from_rows["rows"][0]["body"]["messages"][0][
+            "content"
+        ]
+        == "hello gemini"
+    )
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_requires_model_for_gemini_rows_without_model():
+    service = FilesBatchesService()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.create_batch(
+            api_format="gemini",
+            requests=[
+                {
+                    "request": {
+                        "contents": [
+                            {
+                                "role": "user",
+                                "parts": [{"text": "hello gemini"}],
+                            }
+                        ]
+                    }
+                }
+            ],
+            giga_client=FakeFilesContentClient(),
+            batches_service=FakeBatchesService(),
+            logger=None,
+            batch_store={},
+            file_store={},
+        )
+
+    assert "`model` is required for Gemini batches" in str(exc_info.value)

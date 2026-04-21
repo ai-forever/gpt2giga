@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import BaseModel
 from starlette.requests import Request
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
 from gpt2giga.api.anthropic.batches import _build_anthropic_batch_results
 from gpt2giga.api.gemini.batches import build_gemini_batch_output_file
-from gpt2giga.app.dependencies import get_runtime_providers
+from gpt2giga.app.dependencies import get_logger_from_state, get_runtime_providers
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.features.batches import get_batches_service_from_state
 from gpt2giga.features.batches.store import get_batch_store
@@ -18,6 +21,18 @@ from gpt2giga.features.files_batches import get_files_batches_service_from_state
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
 admin_files_batches_api_router = APIRouter(tags=["Admin"])
+
+
+class AdminBatchCreateRequest(BaseModel):
+    """Admin-only normalized batch-create payload."""
+
+    api_format: str = "openai"
+    endpoint: str | None = None
+    input_file_id: str | None = None
+    metadata: dict[str, Any] | None = None
+    display_name: str | None = None
+    model: str | None = None
+    requests: list[dict[str, Any]] | None = None
 
 
 @admin_files_batches_api_router.get("/admin/api/files-batches/inventory")
@@ -74,6 +89,32 @@ async def get_files_batches_file(file_id: str, request: Request):
                 status_code=404, detail=f"File `{file_id}` not found."
             ) from exc
         raise
+
+
+@admin_files_batches_api_router.post("/admin/api/files-batches/batches")
+@exceptions_handler
+async def create_files_batches_batch(
+    payload: AdminBatchCreateRequest,
+    request: Request,
+):
+    """Create a normalized batch artifact through the admin API."""
+    verify_logs_ip_allowlist(request)
+    app_state = request.app.state
+    service = get_files_batches_service_from_state(app_state)
+    return await service.create_batch(
+        api_format=payload.api_format,
+        endpoint=payload.endpoint,
+        input_file_id=payload.input_file_id,
+        metadata=payload.metadata,
+        display_name=payload.display_name,
+        model=payload.model,
+        requests=payload.requests,
+        giga_client=get_gigachat_client(request),
+        batches_service=get_batches_service_from_state(app_state),
+        logger=get_logger_from_state(app_state),
+        batch_store=get_batch_store(request),
+        file_store=get_file_store(request),
+    )
 
 
 @admin_files_batches_api_router.get("/admin/api/files-batches/files/{file_id}/content")

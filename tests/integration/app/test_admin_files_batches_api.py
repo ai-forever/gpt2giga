@@ -48,13 +48,17 @@ class FakeFileContent(BaseModel):
 
 class FakeGigaChat:
     def __init__(self):
+        self.next_batch_index = 4
+        self.next_file_index = 4
         self.files = {
             "file-openai-1": {
-                "content": b'{"hello":"openai"}\n',
+                "content": (
+                    b'{"custom_id":"req-openai-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-test","messages":[{"role":"user","content":"hello openai"}]}}\n'
+                ),
                 "object": FakeUploadedFile(
                     id="file-openai-1",
                     object="file",
-                    bytes=19,
+                    bytes=156,
                     created_at=110,
                     filename="openai-input.jsonl",
                     purpose="general",
@@ -170,7 +174,31 @@ class FakeGigaChat:
         raise AssertionError(f"Unexpected upload: {file} {purpose}")
 
     async def acreate_batch(self, file, method):
-        raise AssertionError(f"Unexpected batch create: {method}")
+        batch_id = f"batch-created-{self.next_batch_index}"
+        output_file_id = f"file-created-output-{self.next_file_index}"
+        self.next_batch_index += 1
+        self.next_file_index += 1
+        self.batches[batch_id] = FakeBatch(
+            id=batch_id,
+            method=method,
+            request_counts=FakeRequestCounts(total=1, completed=1, failed=0),
+            status="completed",
+            output_file_id=output_file_id,
+            created_at=130,
+            updated_at=131,
+        )
+        self.files[output_file_id] = {
+            "content": file,
+            "object": FakeUploadedFile(
+                id=output_file_id,
+                object="file",
+                bytes=len(file),
+                created_at=131,
+                filename=f"{output_file_id}.jsonl",
+                purpose="general",
+            ),
+        }
+        return self.batches[batch_id]
 
     async def aget_batches(self, batch_id=None):
         if batch_id is None:
@@ -311,3 +339,91 @@ def test_admin_files_batches_content_endpoints_proxy_canonical_artifacts():
     assert b'"type": "succeeded"' in anthropic_output_response.content
     assert batch_output_response.status_code == 200
     assert b'"response"' in batch_output_response.content
+
+
+def test_admin_files_batches_create_openai_batch_returns_normalized_record():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "openai",
+            "endpoint": "/v1/chat/completions",
+            "input_file_id": "file-openai-1",
+            "metadata": {"label": "openai-admin"},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "openai"
+    assert body["endpoint"] == "/v1/chat/completions"
+    assert body["input_file_id"] == "file-openai-1"
+    assert (
+        body["output_path"] == f"/admin/api/files-batches/batches/{body['id']}/output"
+    )
+
+
+def test_admin_files_batches_create_anthropic_batch_from_staged_file():
+    app = make_app()
+    app.state.gigachat_client.files["file-anthropic-input-1"] = {
+        "content": (
+            b'{"custom_id":"anthropic-1","params":{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hello anthropic"}]}}\n'
+        ),
+        "object": FakeUploadedFile(
+            id="file-anthropic-input-1",
+            object="file",
+            bytes=132,
+            created_at=114,
+            filename="anthropic-input.jsonl",
+            purpose="general",
+        ),
+    }
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "anthropic",
+            "input_file_id": "file-anthropic-input-1",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "anthropic"
+    assert body["input_file_id"] == "file-anthropic-input-1"
+    assert body["output_kind"] == "results"
+
+
+def test_admin_files_batches_create_gemini_batch_from_staged_file():
+    app = make_app()
+    app.state.gigachat_client.files["file-gemini-input-1"] = {
+        "content": (
+            b'{"request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-test"},"metadata":{"requestLabel":"row-1"}}\n'
+        ),
+        "object": FakeUploadedFile(
+            id="file-gemini-input-1",
+            object="file",
+            bytes=143,
+            created_at=115,
+            filename="gemini-input.jsonl",
+            purpose="general",
+        ),
+    }
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "gemini",
+            "input_file_id": "file-gemini-input-1",
+            "display_name": "Gemini Admin Batch",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "gemini"
+    assert body["display_name"] == "Gemini Admin Batch"
+    assert body["model"] == "gemini-test"
