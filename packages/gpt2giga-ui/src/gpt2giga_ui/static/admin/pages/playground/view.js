@@ -199,7 +199,13 @@ function renderPlaygroundForm(initialPreset) {
         </div>
         <div class="playground-preset-strip__buttons">
           ${PLAYGROUND_PRESETS.map((preset) => `
-              <button class="button button--secondary playground-preset" data-preset="${escapeHtml(preset.id)}" type="button">
+              <button
+                class="button${preset.id === initialPreset.id ? "" : " button--secondary"} playground-preset"
+                data-active="${preset.id === initialPreset.id ? "true" : "false"}"
+                data-preset="${escapeHtml(preset.id)}"
+                aria-pressed="${preset.id === initialPreset.id ? "true" : "false"}"
+                type="button"
+              >
                 ${escapeHtml(preset.label)}
               </button>
             `).join("")}

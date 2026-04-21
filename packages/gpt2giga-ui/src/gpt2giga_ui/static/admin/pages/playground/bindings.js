@@ -44,17 +44,18 @@ export function bindPlaygroundPage(options) {
         });
     };
     const syncPresetButtons = () => {
-        const request = buildRequest(elements.form);
         const fields = getPlaygroundFields(elements.form);
         elements.presetButtons.forEach((button) => {
             const preset = PLAYGROUND_PRESETS.find((item) => item.id === button.dataset.preset);
             const selected = preset !== undefined &&
-                preset.surface === request.surface &&
-                preset.model === String(request.body.model ?? "") &&
-                preset.stream === request.stream &&
+                preset.surface === fields.surface.value &&
+                preset.model === fields.model.value.trim() &&
+                preset.stream === (fields.stream.value === "true") &&
                 preset.systemPrompt === fields.system_prompt.value &&
                 preset.userPrompt === fields.user_prompt.value;
             button.dataset.active = selected ? "true" : "false";
+            button.setAttribute("aria-pressed", selected ? "true" : "false");
+            button.classList.toggle("button--secondary", !selected);
         });
     };
     elements.form.addEventListener("submit", async (event) => {
