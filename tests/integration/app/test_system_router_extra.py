@@ -55,22 +55,25 @@ def test_admin_ui_ok():
     assert "<html" in resp.text.lower()
     assert "gpt2giga Console" in resp.text
     assert "Gateway Console" in resp.text
-    assert "Start" in resp.text
-    assert "Configure" in resp.text
-    assert "Observe" in resp.text
-    assert "Diagnose" in resp.text
-    assert "Playground" in resp.text
-    assert "Files &amp; Batches" in resp.text
     assert 'class="skip-link"' in resp.text
     assert 'href="#page-title"' in resp.text
     assert 'aria-label="Primary console navigation"' in resp.text
     assert 'id="page-title" tabindex="-1"' in resp.text
-    assert 'data-workflow="start"' in resp.text
-    assert 'data-workflow="configure"' in resp.text
-    assert 'data-workflow="observe"' in resp.text
-    assert 'data-workflow="diagnose"' in resp.text
+    assert 'data-nav-section="workspace"' in resp.text
+    assert 'data-nav-section="control-plane"' in resp.text
+    assert 'data-nav-section="bootstrap-system"' in resp.text
+    assert 'id="auth-disclosure"' in resp.text
+    assert 'id="admin-key-input"' in resp.text
+    assert 'id="gateway-key-input"' in resp.text
+    assert 'id="save-auth"' in resp.text
     assert 'id="workflow-chip"' in resp.text
     assert 'id="surface-chip"' in resp.text
+    assert 'id="hero-actions"' in resp.text
+    assert 'id="page-content"' in resp.text
+    assert 'href="/admin/playground"' in resp.text
+    assert 'href="/admin/traffic"' in resp.text
+    assert 'href="/admin/logs"' in resp.text
+    assert 'href="/admin/files-batches"' in resp.text
     assert 'id="page-context"' not in resp.text
 
 
@@ -210,13 +213,16 @@ def test_admin_ui_warning_banner():
     assert app_asset.status_code == 200
     assert stylesheet.status_code == 200
     assert "AdminApp" in index_asset.text
+    assert "new AdminApp()" in index_asset.text
+    assert "class AdminApp" in app_asset.text
     assert "navigateToLocation" in app_asset.text
-    assert "url.search" in app_asset.text
-    assert "url.pathname === window.location.pathname" in app_asset.text
-    assert "url.hash" in app_asset.text
+    assert "window.history.pushState" in app_asset.text
+    assert "[data-nav-section]" in app_asset.text
+    assert "aria-current" in app_asset.text
     assert "pageTitle.focus()" in app_asset.text
     assert ".hero-context" in stylesheet.text
-    assert ".nav-group--active" in stylesheet.text
+    assert ".console-nav a.active" in stylesheet.text
+    assert ".nav-section[data-active]" in stylesheet.text
     assert ".skip-link" in stylesheet.text
     assert ".subpage-nav" in stylesheet.text
 
@@ -258,33 +264,35 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
 
     assert traffic_asset.status_code == 200
     assert traffic_bindings_asset.status_code == 200
-    assert "Traffic navigation" in traffic_asset.text
-    assert "Traffic pages" in traffic_asset.text
+    assert "renderSubpageNav" in traffic_asset.text
+    assert 'buildTrafficUrl(filters, "traffic-requests")' in traffic_asset.text
+    assert 'buildTrafficUrl(filters, "traffic-errors")' in traffic_asset.text
+    assert 'buildTrafficUrl(filters, "traffic-usage")' in traffic_asset.text
+    assert "Traffic inventory" in traffic_asset.text
     assert "Open requests" in traffic_asset.text
     assert "Open errors" in traffic_asset.text
     assert "Open usage" in traffic_asset.text
-    assert "Current posture" in traffic_asset.text
-    assert "Selection" in traffic_asset.text
-    assert "Request inspector" in traffic_asset.text
-    assert "Error inspector" in traffic_asset.text
-    assert "Usage inspector" in traffic_asset.text
     assert "Current scope snapshot" in traffic_asset.text
+    assert "[data-traffic-action]" in traffic_bindings_asset.text
     assert "Selected request snapshot" in traffic_bindings_asset.text
+    assert "Selected error snapshot" in traffic_bindings_asset.text
+    assert "Selected usage-by-key snapshot" in traffic_bindings_asset.text
+    assert "Selected usage-by-provider snapshot" in traffic_bindings_asset.text
     assert "Traffic workflow guide" in traffic_asset.text
     assert "Troubleshooting handoff map" in traffic_asset.text
 
     assert logs_asset.status_code == 200
     assert logs_bindings_asset.status_code == 200
-    assert "Open traffic summary" in logs_asset.text
-    assert "Posture" in logs_asset.text
-    assert "Rendered log tail" in logs_asset.text
-    assert "Live stream diagnostics" in logs_asset.text
+    assert 'id="reset-log-filters"' in logs_asset.text
+    assert 'id="refresh-logs"' in logs_asset.text
+    assert 'id="toggle-stream"' in logs_asset.text
+    assert 'id="log-output"' in logs_asset.text
+    assert 'id="logs-tail-context"' in logs_asset.text
     assert "Current scope snapshot" in logs_asset.text
     assert "Logs deep-dive guide" in logs_asset.text
-    assert "Shape the tail first, then pin one request if needed." in logs_asset.text
-    assert "Tail context" in logs_asset.text
-    assert "Return to traffic summary" in logs_asset.text
     assert "Operator guides" in logs_asset.text
+    assert "[data-log-action]" in logs_bindings_asset.text
+    assert "[data-log-detail]" in logs_bindings_asset.text
     assert "Selected request snapshot" in logs_bindings_asset.text
     assert "Selected error snapshot" in logs_bindings_asset.text
     assert "Selected tail context snapshot" in logs_bindings_asset.text
@@ -304,23 +312,27 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert overview_asset.status_code == 200
-    assert "Workflow handoff" in overview_asset.text
-    assert "Recent error handoff" in overview_asset.text
+    assert "Status and next actions" in overview_asset.text
+    assert "Recent issues" in overview_asset.text
     assert "Overview workflow guide" in overview_asset.text
     assert "Operator guides" in overview_asset.text
-    assert "Run setup or playground" in overview_asset.text
+    assert 'pathForPage("playground")' in overview_asset.text
+    assert 'pathForPage("traffic")' in overview_asset.text
+    assert 'pathForPage("logs")' in overview_asset.text
+    assert 'pathForPage("settings")' in overview_asset.text
 
     assert system_asset.status_code == 200
     assert "Check live request behavior first" in system_asset.text
-    assert "Open these only when the summary is not enough." in system_asset.text
     assert "Open staged diagnostics last" in system_asset.text
     assert "Copy system snapshot" in system_asset.text
     assert "Current system snapshot" in system_asset.text
     assert "Open only after the summary stalls." in system_asset.text
+    assert 'id="copy-diagnostics"' in system_asset.text
 
     assert providers_asset.status_code == 200
-    assert "Provider workflows" in providers_asset.text
-    assert "Smoke the mounted provider surface" in providers_asset.text
+    assert "Provider inventory" in providers_asset.text
+    assert "Capability and route coverage" in providers_asset.text
+    assert "Backend posture and staged diagnostics" in providers_asset.text
     assert (
         "Open these disclosures only when the summary still leave a route-family mismatch unresolved."
         not in providers_asset.text
@@ -362,20 +374,23 @@ def test_admin_ui_assets_include_polished_keys_and_playground_copy():
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
     assert keys_asset.status_code == 200
-    assert "Key workflows" in keys_asset.text
     assert "Create scoped key" in keys_asset.text
-    assert "Scoped key inventory" in keys_asset.text
-    assert "Current key snapshot" in keys_asset.text
+    assert "Key inventory" in keys_asset.text
     assert "Open usage traffic" in keys_asset.text
     assert "Operator guides" in keys_asset.text
+    assert 'id="rotate-global-key"' in keys_asset.text
+    assert 'id="rotate-global-key-toolbar"' in keys_asset.text
+    assert "data-rotate-global" in keys_asset.text
+    assert 'data-rotate="' in keys_asset.text
+    assert 'data-delete="' in keys_asset.text
 
     assert playground_asset.status_code == 200
-    assert "Smoke workflow" in playground_asset.text
+    assert 'id="playground-stop"' in playground_asset.text
+    assert 'id="playground-reset"' in playground_asset.text
+    assert 'id="playground-request-body"' in playground_asset.text
+    assert 'id="playground-response-shell"' in playground_asset.text
     assert "Request preview" in playground_asset.text
-    assert "Request payload" in playground_asset.text
-    assert "Transport snapshot" in playground_asset.text
     assert "Run one smoke request" in playground_asset.text
-    assert "Run state" in playground_asset.text
     assert "Bootstrap posture" in playground_asset.text
 
     assert docs_links_asset.status_code == 200
