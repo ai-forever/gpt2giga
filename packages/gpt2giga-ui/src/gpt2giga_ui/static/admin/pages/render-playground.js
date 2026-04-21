@@ -7,9 +7,10 @@ export async function renderPlayground(app, token) {
     if (!app.isCurrentRender(token)) {
         return;
     }
-    const initialRequest = buildRequestFromPreset(resolveInitialPlaygroundPreset(window.location));
+    const initialPreset = resolveInitialPlaygroundPreset(window.location);
+    const initialRequest = buildRequestFromPreset(initialPreset);
     app.setHeroActions(renderPlaygroundHeroActions());
-    app.setContent(renderPlaygroundPage(setup, initialRequest));
+    app.setContent(renderPlaygroundPage(setup, initialPreset, initialRequest));
     const elements = resolvePlaygroundElements(app.pageContent);
     if (!elements) {
         return;

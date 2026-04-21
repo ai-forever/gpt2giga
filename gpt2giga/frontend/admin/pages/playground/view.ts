@@ -18,7 +18,12 @@ import {
   formatDurationMs,
   formatNumber,
 } from "../../utils.js";
-import type { PlaygroundPageState, PlaygroundRequest, RunPhase } from "./state.js";
+import type {
+  PlaygroundPageState,
+  PlaygroundPreset,
+  PlaygroundRequest,
+  RunPhase,
+} from "./state.js";
 import {
   DEFAULT_ASSISTANT_OUTPUT,
   DEFAULT_OUTPUT,
@@ -61,6 +66,7 @@ export function renderPlaygroundHeroActions(): string {
 
 export function renderPlaygroundPage(
   setup: SetupPayload,
+  initialPreset: PlaygroundPreset,
   initialRequest: PlaygroundRequest,
 ): string {
   const bootstrapRequired = Boolean(asRecord(setup.bootstrap).required);
@@ -85,7 +91,7 @@ export function renderPlaygroundPage(
         body: `
           ${card(
             "Request controls",
-            renderPlaygroundForm(initialRequest),
+            renderPlaygroundForm(initialPreset),
             "panel panel--span-5 panel--aside playground-panel playground-panel--primary",
           )}
           ${card(
@@ -285,7 +291,7 @@ function renderPlaygroundInlineStat(label: string, value: string): string {
   `;
 }
 
-function renderPlaygroundForm(initialRequest: PlaygroundRequest): string {
+function renderPlaygroundForm(initialPreset: PlaygroundPreset): string {
   return `
     <form id="playground-form" class="form-shell">
       <div class="playground-preset-strip">
@@ -317,26 +323,26 @@ function renderPlaygroundForm(initialRequest: PlaygroundRequest): string {
             <label class="field">
               <span>Surface</span>
               <select name="surface">
-                <option value="openai-chat">OpenAI chat/completions</option>
-                <option value="openai-responses">OpenAI responses</option>
-                <option value="anthropic-messages">Anthropic messages</option>
-                <option value="gemini-generate">Gemini generateContent</option>
+                <option value="openai-chat"${initialPreset.surface === "openai-chat" ? " selected" : ""}>OpenAI chat/completions</option>
+                <option value="openai-responses"${initialPreset.surface === "openai-responses" ? " selected" : ""}>OpenAI responses</option>
+                <option value="anthropic-messages"${initialPreset.surface === "anthropic-messages" ? " selected" : ""}>Anthropic messages</option>
+                <option value="gemini-generate"${initialPreset.surface === "gemini-generate" ? " selected" : ""}>Gemini generateContent</option>
               </select>
             </label>
             <label class="field">
               <span>Model</span>
-              <input name="model" value="${escapeHtml(String(initialRequest.body.model ?? "GigaChat"))}" />
+              <input name="model" value="${escapeHtml(initialPreset.model)}" />
             </label>
           </div>
           <label class="field">
             <span>System prompt</span>
             <textarea name="system_prompt" placeholder="Optional system prompt">${escapeHtml(
-              DEFAULT_PLAYGROUND_PRESET.systemPrompt,
+              initialPreset.systemPrompt,
             )}</textarea>
           </label>
           <label class="field">
             <span>User prompt</span>
-            <textarea name="user_prompt">${escapeHtml(DEFAULT_PLAYGROUND_PRESET.userPrompt)}</textarea>
+            <textarea name="user_prompt">${escapeHtml(initialPreset.userPrompt)}</textarea>
           </label>
         `,
       })}
@@ -348,8 +354,8 @@ function renderPlaygroundForm(initialRequest: PlaygroundRequest): string {
             <label class="field">
               <span>Stream</span>
               <select name="stream">
-                <option value="false">off</option>
-                <option value="true">on</option>
+                <option value="false"${initialPreset.stream ? "" : " selected"}>off</option>
+                <option value="true"${initialPreset.stream ? " selected" : ""}>on</option>
               </select>
             </label>
             <div class="surface">
