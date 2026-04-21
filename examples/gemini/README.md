@@ -22,34 +22,29 @@ uv sync --group integrations
 ## Запуск
 
 ```bash
-uv run python examples/gemini/generate_content.py
-uv run python examples/gemini/stream_generate_content.py
-uv run python examples/gemini/chat.py
-uv run python examples/gemini/files.py
-uv run python examples/gemini/batches.py
-uv run python examples/gemini/function_calling.py
-uv run python examples/gemini/structured_output.py
-uv run python examples/gemini/count_tokens.py
-uv run python examples/gemini/embeddings.py
+uv run python examples/gemini/content/generate_content.py
+uv run python examples/gemini/content/stream_generate_content.py
+uv run python examples/gemini/content/chat.py
+uv run python examples/gemini/count_tokens/count_tokens.py
+uv run python examples/gemini/files/files.py
+uv run python examples/gemini/batches/batches.py
+uv run python examples/gemini/embeddings/embeddings.py
 ```
 
-## Что есть в папке
+## Структура по capability
 
-- `generate_content.py`: базовый `models.generate_content(...)`
-- `stream_generate_content.py`: streaming через `generate_content_stream(...)`
-- `chat.py`: клиентский chat-session поверх `generateContent`
-- `files.py`: upload/list/get/download/delete для Gemini Files API
-- `batches.py`: `batchGenerateContent` через uploaded JSONL source
-- `batch_generate_content.jsonl`: готовые JSONL-строки для `batch.inputConfig.fileName`
-- `function_calling.py`: function declarations и tool response
-- `structured_output.py`: JSON schema / structured output
-- `count_tokens.py`: `models.count_tokens(...)`
-- `embeddings.py`: `models.embed_content(...)` c несколькими строками за один запрос
+| Capability | Каталог | Что внутри |
+|---|---|---|
+| content generation | [content/README.md](./content/README.md) | `generate_content`, stream, chat-session, function calling, structured output |
+| `countTokens` | [count_tokens/README.md](./count_tokens/README.md) | Подсчёт токенов для `models.count_tokens(...)` |
+| files | [files/README.md](./files/README.md) | Upload, list, get, download, delete |
+| batches | [batches/README.md](./batches/README.md) | `batchGenerateContent` и bundled JSONL source |
+| embeddings | [embeddings/README.md](./embeddings/README.md) | `models.embed_content(...)` с несколькими строками |
 
 ## Нюансы
 
 - Генерация использует реальные GigaChat model ids, например `GigaChat-2-Max`.
 - Эмбеддинги используют модель, настроенную на стороне proxy. По умолчанию это `EmbeddingsGigaR`; если вы поменяли `GPT2GIGA_EMBEDDINGS`, обновите `model=...` в примере.
-- `embeddings.py` передаёт список `contents=[...]`, поэтому пример покрывает batch-style embeddings flow поверх Gemini-compatible embeddings routes.
+- `embeddings/embeddings.py` передаёт список `contents=[...]`, поэтому пример покрывает batch-style embeddings flow поверх Gemini-compatible embeddings routes.
 - Совместимость в этой итерации сфокусирована на text, function calling, files, batchGenerateContent и embeddings.
 - Built-in Gemini tools и часть мультимодальных/file-backed сценариев всё ещё остаются вне scope.

@@ -33,24 +33,20 @@ Anthropic SDK не входит в обязательные зависимост
 ## Запуск
 
 ```bash
-uv run python examples/anthropic/messages.py
-uv run python examples/anthropic/messages_stream.py
-uv run python examples/anthropic/message_batches.py
-uv run python examples/anthropic/message_batches_from_jsonl.py
+uv run python examples/anthropic/messages/messages.py
+uv run python examples/anthropic/messages/messages_stream.py
+uv run python examples/anthropic/count_tokens/count_tokens.py
+uv run python examples/anthropic/batches/message_batches.py
+uv run python examples/anthropic/batches/message_batches_from_jsonl.py
 ```
 
-## Что есть в папке
+## Структура по capability
 
-- `messages.py`: базовый запрос (не стрим)
-- `messages_stream.py`: streaming
-- `message_batches.py`: Message Batches API
-- `message_batches_from_jsonl.py`: Message Batches API c чтением готового `message_batches.jsonl`
-- `message_batches.jsonl`: готовые строки batch-запросов в формате `custom_id` + `params` для сборки поля `requests`
-- `multi_turn.py`: многоходовый диалог
-- `system_prompt.py`: системный промпт
-- `function_calling.py`: tool use / function calling
-- `reasoning.py`: extended thinking (`thinking`) → `reasoning_effort`
-- `image_url.py`, `base64_image.py`: изображения (URL и base64)
+| Capability | Каталог | Что внутри |
+|---|---|---|
+| `messages` | [messages/README.md](./messages/README.md) | Базовые запросы, streaming, multi-turn, system prompt, tools, vision, reasoning |
+| `count_tokens` | [count_tokens/README.md](./count_tokens/README.md) | Подсчёт токенов для Messages payload |
+| `message_batches` | [batches/README.md](./batches/README.md) | Создание batches и запуск из готового JSONL |
 
 ## Что сейчас недоступно
 

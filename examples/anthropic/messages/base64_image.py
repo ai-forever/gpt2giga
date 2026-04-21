@@ -1,6 +1,7 @@
 """Anthropic Messages API example with base64-encoded image."""
 
 import base64
+from pathlib import Path
 
 from anthropic import Anthropic
 
@@ -12,8 +13,8 @@ def encode_image(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-image_path = "../../image.png"
-base64_image = encode_image(image_path)
+image_path = Path(__file__).resolve().parents[3] / "image.png"
+base64_image = encode_image(str(image_path))
 
 message = client.messages.create(
     model="GigaChat-2-Max",
