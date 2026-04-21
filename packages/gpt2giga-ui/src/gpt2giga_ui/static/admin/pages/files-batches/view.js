@@ -305,12 +305,12 @@ function renderBatchesPage(data, inventory, filters) {
                     ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
                   </select>
                 </label>
-                <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-... (optional for Gemini inline requests)" required /></label>
-                <label class="field" id="batch-inline-requests-field" hidden><span>Inline requests (JSON array)</span><textarea id="batch-inline-requests" name="requests" placeholder='[{"key":"row-1","request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-2.5-flash"},"metadata":{"requestLabel":"row-1"}}]'></textarea></label>
+                <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-... (optional when using inline requests)" /></label>
+                <label class="field" id="batch-inline-requests-field"><span>Inline requests (JSON array)</span><textarea id="batch-inline-requests" name="requests" placeholder='[{"custom_id":"openai-row-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hello openai"}]}}]'></textarea></label>
                 <label class="field" id="batch-model-field" hidden><span>Fallback model (optional)</span><input id="batch-model" name="model" placeholder="gemini-2.5-flash" /></label>
                 <label class="field" id="batch-display-name-field" hidden><span>Display name</span><input id="batch-display-name" name="display_name" placeholder="nightly-gemini-import" /></label>
                 <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
-                <div class="banner banner--warn" id="batch-format-hint">OpenAI batches expect a staged JSONL file in OpenAI batch input format.</div>
+                <div class="banner banner--warn" id="batch-format-hint">OpenAI batches accept either a staged JSONL file in OpenAI batch input format or an inline JSON array shaped like [{custom_id, method, url, body}].</div>
               `,
     })}
             <div class="form-actions">

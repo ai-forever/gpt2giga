@@ -33,7 +33,8 @@ def test_admin_runtime_snapshot_service_reports_runtime_state():
             proxy=ProxySettings(
                 enable_telemetry=False,
                 enabled_providers=["openai", "gemini"],
-            )
+            ),
+            gigachat={"model": "GigaChat-2-Max"},
         )
     )
 
@@ -43,6 +44,7 @@ def test_admin_runtime_snapshot_service_reports_runtime_state():
     assert payload["telemetry_enabled"] is False
     assert payload["metrics_enabled"] is False
     assert payload["enabled_providers"] == ["openai", "gemini"]
+    assert payload["gigachat_model"] == "GigaChat-2-Max"
     assert payload["state"]["stores"]["backend"] == "memory"
     assert payload["state"]["stores"]["usage_by_api_key"] == 0
 

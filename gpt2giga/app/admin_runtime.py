@@ -296,6 +296,7 @@ class AdminRuntimeSnapshotService:
             "enabled_providers": list(proxy.enabled_providers),
             "gigachat_api_mode": proxy.gigachat_api_mode,
             "gigachat_responses_api_mode": proxy.gigachat_responses_api_mode,
+            "gigachat_model": self.config.gigachat_settings.model,
             "chat_backend_mode": proxy.chat_backend_mode,
             "responses_backend_mode": proxy.responses_backend_mode,
             "runtime_store_backend": runtime_store.backend,

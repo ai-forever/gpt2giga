@@ -105,6 +105,7 @@ class FilesBatchesService:
                 metadata=metadata,
                 display_name=display_name,
                 model=model,
+                requests=requests,
                 giga_client=giga_client,
                 batches_service=batches_service,
                 logger=logger,
@@ -129,6 +130,7 @@ class FilesBatchesService:
                 input_file_id=input_file_id,
                 endpoint=endpoint,
                 metadata=metadata,
+                requests=requests,
                 giga_client=giga_client,
                 batches_service=batches_service,
                 file_store=file_store,
@@ -288,15 +290,34 @@ class FilesBatchesService:
         input_file_id: str | None,
         endpoint: str | None,
         metadata: dict[str, Any] | None,
+        requests: list[dict[str, Any]] | None,
         giga_client: Any,
         batches_service: Any,
         file_store: Any | None,
         batch_store: Any | None,
     ) -> dict[str, Any]:
+        normalized_endpoint = _normalize_openai_endpoint(endpoint)
+        if requests:
+            stored_metadata: dict[str, Any] = {
+                "metadata": dict(metadata or {}),
+            }
+            resolved_input_file_id = _string_or_none(input_file_id)
+            if resolved_input_file_id:
+                stored_metadata["input_file_id"] = resolved_input_file_id
+            return await batches_service.create_batch_from_rows(
+                list(requests),
+                endpoint=normalized_endpoint,
+                completion_window="24h",
+                metadata=stored_metadata,
+                giga_client=giga_client,
+                batch_store=batch_store,
+                file_store=file_store,
+            )
+
         resolved_input_file_id = _require_non_empty(
             input_file_id,
             field_name="input_file_id",
-            message="`input_file_id` is required for OpenAI batches.",
+            message="`input_file_id` or `requests` is required for OpenAI batches.",
         )
         content = await _load_file_bytes(
             giga_client,
@@ -304,7 +325,7 @@ class FilesBatchesService:
         )
         return await batches_service.create_batch_from_content(
             content,
-            endpoint=_normalize_openai_endpoint(endpoint),
+            endpoint=normalized_endpoint,
             completion_window="24h",
             metadata={
                 "input_file_id": resolved_input_file_id,
@@ -322,23 +343,31 @@ class FilesBatchesService:
         metadata: dict[str, Any] | None,
         display_name: str | None,
         model: str | None,
+        requests: list[dict[str, Any]] | None,
         giga_client: Any,
         batches_service: Any,
         logger: Any,
         file_store: Any | None,
         batch_store: Any | None,
     ) -> dict[str, Any]:
-        resolved_input_file_id = _require_non_empty(
-            input_file_id,
-            field_name="input_file_id",
-            message="`input_file_id` is required for Anthropic batches.",
-        )
-        requests_payload = parse_jsonl(
-            await _load_file_bytes(
-                giga_client,
-                file_id=resolved_input_file_id,
+        resolved_input_file_id = _string_or_none(input_file_id)
+        requests_payload: list[dict[str, Any]]
+        if requests:
+            requests_payload = list(requests)
+        else:
+            resolved_input_file_id = _require_non_empty(
+                input_file_id,
+                field_name="input_file_id",
+                message=(
+                    "`input_file_id` or `requests` is required for Anthropic batches."
+                ),
             )
-        )
+            requests_payload = parse_jsonl(
+                await _load_file_bytes(
+                    giga_client,
+                    file_id=resolved_input_file_id,
+                )
+            )
         batch_payload = anthropic_provider_adapters.batches.build_create_payload(
             {
                 "completion_window": "24h",
@@ -348,9 +377,10 @@ class FilesBatchesService:
         )
         stored_metadata: dict[str, Any] = {
             "api_format": "anthropic_messages",
-            "input_file_id": resolved_input_file_id,
             "requests": batch_payload.stored_requests,
         }
+        if resolved_input_file_id:
+            stored_metadata["input_file_id"] = resolved_input_file_id
         if metadata:
             stored_metadata["metadata"] = dict(metadata)
         if display_name:

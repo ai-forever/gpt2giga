@@ -55,7 +55,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
 
   let selection: InspectorSelection = { kind: "idle" };
   let previewObjectUrl: string | null = null;
-  let lastGeminiInlineRequestsTemplate = "";
+  let lastInlineRequestsTemplate = "";
 
   const cacheFileRecord = (payload: FileRecord): FileRecord => {
     const fileId = String(payload.id ?? "");
@@ -255,33 +255,121 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
 
   const getBatchFormatHint = (apiFormat: ArtifactApiFormat): string => {
     if (apiFormat === "anthropic") {
-      return "Anthropic batches load staged JSONL rows shaped like `{custom_id, params}` and convert them into message-batch requests.";
+      return "Anthropic batches accept either a staged JSONL file shaped like `{custom_id, params}` per line or an inline JSON array shaped like `[{custom_id, params}]`.";
     }
     if (apiFormat === "gemini") {
       return "Gemini batches accept either a staged JSONL file shaped like `{key, request}` per line or an inline JSON array shaped like `[{key?, request, metadata?}]`. Provide a fallback model when file rows omit `request.model`.";
     }
-    return "OpenAI batches expect a staged JSONL file in OpenAI batch input format.";
+    return "OpenAI batches accept either a staged JSONL file in OpenAI batch input format or an inline JSON array shaped like `[{custom_id, method, url, body}]`.";
   };
 
-  const buildGeminiInlineRequestsTemplate = (modelValue?: string): string => {
-    const normalizedModel = modelValue?.trim() || "gemini-2.5-flash";
-    const requestModel = normalizedModel.startsWith("models/")
-      ? normalizedModel
-      : `models/${normalizedModel}`;
+  const readBatchEndpoint = (): string =>
+    elements.batchEndpoint?.value.trim() || "/v1/chat/completions";
+
+  const readConfiguredFallbackModel = (): string =>
+    app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash";
+
+  const buildBatchInlineRequestsTemplate = (
+    apiFormat: ArtifactApiFormat,
+  ): string => {
+    if (apiFormat === "anthropic") {
+      return JSON.stringify(
+        [
+          {
+            custom_id: "anthropic-row-1",
+            params: {
+              model: "claude-sonnet-4-20250514",
+              max_tokens: 64,
+              messages: [
+                {
+                  role: "user",
+                  content: "hello anthropic",
+                },
+              ],
+            },
+          },
+        ],
+        null,
+        2,
+      );
+    }
+    if (apiFormat === "gemini") {
+      const normalizedModel =
+        elements.batchModel?.value.trim() || readConfiguredFallbackModel();
+      const requestModel = normalizedModel.startsWith("models/")
+        ? normalizedModel
+        : `models/${normalizedModel}`;
+      return JSON.stringify(
+        [
+          {
+            request: {
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: "hello gemini" }],
+                },
+              ],
+              model: requestModel,
+            },
+            metadata: {
+              requestLabel: "row-1",
+            },
+          },
+        ],
+        null,
+        2,
+      );
+    }
+
+    const endpoint = readBatchEndpoint();
+    if (endpoint === "/v1/embeddings") {
+      return JSON.stringify(
+        [
+          {
+            custom_id: "openai-row-1",
+            method: "POST",
+            url: "/v1/embeddings",
+            body: {
+              model: "text-embedding-3-small",
+              input: "hello openai",
+            },
+          },
+        ],
+        null,
+        2,
+      );
+    }
+    if (endpoint === "/v1/responses") {
+      return JSON.stringify(
+        [
+          {
+            custom_id: "openai-row-1",
+            method: "POST",
+            url: "/v1/responses",
+            body: {
+              model: "gpt-4.1-mini",
+              input: "hello openai",
+            },
+          },
+        ],
+        null,
+        2,
+      );
+    }
     return JSON.stringify(
       [
         {
-          request: {
-            contents: [
+          custom_id: "openai-row-1",
+          method: "POST",
+          url: "/v1/chat/completions",
+          body: {
+            model: "gpt-4.1-mini",
+            messages: [
               {
                 role: "user",
-                parts: [{ text: "hello gemini" }],
+                content: "hello openai",
               },
             ],
-            model: requestModel,
-          },
-          metadata: {
-            requestLabel: "row-1",
           },
         },
       ],
@@ -290,31 +378,30 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     );
   };
 
-  const syncGeminiInlineRequestsTemplate = (options?: {
+  const syncBatchInlineRequestsTemplate = (options?: {
     forceValue?: boolean;
   }): void => {
     if (!elements.batchInlineRequests) {
       return;
     }
-    const nextTemplate = buildGeminiInlineRequestsTemplate(
-      elements.batchModel?.value,
-    );
+    const nextTemplate = buildBatchInlineRequestsTemplate(readBatchApiFormat());
     elements.batchInlineRequests.placeholder = nextTemplate;
     const currentValue = elements.batchInlineRequests.value.trim();
     if (
       options?.forceValue ||
       !currentValue ||
-      currentValue === lastGeminiInlineRequestsTemplate
+      currentValue === lastInlineRequestsTemplate
     ) {
       elements.batchInlineRequests.value = nextTemplate;
     }
-    lastGeminiInlineRequestsTemplate = nextTemplate;
+    lastInlineRequestsTemplate = nextTemplate;
   };
 
   const syncBatchComposerFormat = (
     apiFormat: ArtifactApiFormat,
     options?: {
       inputFileId?: string;
+      forceInlineTemplate?: boolean;
     },
   ): void => {
     if (elements.batchApiFormat) {
@@ -328,17 +415,13 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       }
     }
     if (elements.batchInput) {
-      elements.batchInput.required = apiFormat !== "gemini";
+      elements.batchInput.required = false;
     }
     if (elements.batchInlineRequestsField && elements.batchInlineRequests) {
-      const showInlineRequests = apiFormat === "gemini";
-      elements.batchInlineRequestsField.hidden = !showInlineRequests;
-      if (!showInlineRequests) {
-        elements.batchInlineRequests.value = "";
-        elements.batchInlineRequests.placeholder = "";
-      } else {
-        syncGeminiInlineRequestsTemplate();
-      }
+      elements.batchInlineRequestsField.hidden = false;
+      syncBatchInlineRequestsTemplate({
+        forceValue: options?.forceInlineTemplate,
+      });
     }
     if (elements.batchModelField && elements.batchModel) {
       const showModel = apiFormat === "gemini";
@@ -346,6 +429,8 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       elements.batchModel.required = false;
       if (!showModel) {
         elements.batchModel.value = "";
+      } else if (!elements.batchModel.value.trim()) {
+        elements.batchModel.value = readConfiguredFallbackModel();
       }
     }
     if (elements.batchDisplayNameField && elements.batchDisplayName) {
@@ -961,20 +1046,21 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       inlineRequests === INVALID_JSON ||
       (inlineRequests !== undefined && !Array.isArray(inlineRequests))
     ) {
-      app.pushAlert("Inline Gemini requests must be a JSON array.", "danger");
+      app.pushAlert("Inline requests must be a JSON array.", "danger");
       return;
     }
     const inputFileId = fields.input_file_id.value.trim();
-    if (apiFormat === "gemini") {
-      if (!inputFileId && !inlineRequests?.length) {
-        app.pushAlert(
-          "Gemini batches need either a staged input file id or inline requests.",
-          "warn",
-        );
-        return;
-      }
-    } else if (!inputFileId) {
-      app.pushAlert("Choose an input file before creating the batch.", "warn");
+    if (!inputFileId && !inlineRequests?.length) {
+      const formatLabel =
+        apiFormat === "anthropic"
+          ? "Anthropic"
+          : apiFormat === "gemini"
+            ? "Gemini"
+            : "OpenAI";
+      app.pushAlert(
+        `${formatLabel} batches need either a staged input file id or inline requests.`,
+        "warn",
+      );
       return;
     }
     const submitter = (event as SubmitEvent).submitter;
@@ -1382,14 +1468,22 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   elements.batchApiFormat?.addEventListener("change", () => {
     syncBatchComposerFormat(readBatchApiFormat(), {
       inputFileId: elements.batchInput?.value.trim() ?? "",
+      forceInlineTemplate: true,
     });
+  });
+
+  elements.batchEndpoint?.addEventListener("change", () => {
+    if (readBatchApiFormat() !== "openai") {
+      return;
+    }
+    syncBatchInlineRequestsTemplate();
   });
 
   elements.batchModel?.addEventListener("input", () => {
     if (readBatchApiFormat() !== "gemini") {
       return;
     }
-    syncGeminiInlineRequestsTemplate();
+    syncBatchInlineRequestsTemplate();
   });
 
   const routeState = readFilesBatchesRouteState(page);

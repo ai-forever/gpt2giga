@@ -455,6 +455,45 @@ async def test_files_batches_service_creates_openai_batch_from_staged_file():
 
 
 @pytest.mark.asyncio
+async def test_files_batches_service_creates_openai_batch_from_inline_requests():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    record = await service.create_batch(
+        api_format="openai",
+        endpoint="/v1/chat/completions",
+        requests=[
+            {
+                "custom_id": "req-inline-1",
+                "method": "POST",
+                "url": "/v1/chat/completions",
+                "body": {
+                    "model": "gpt-4.1-mini",
+                    "messages": [{"role": "user", "content": "hello inline openai"}],
+                },
+            }
+        ],
+        metadata={"label": "openai-inline"},
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.OPENAI
+    assert record.endpoint == "/v1/chat/completions"
+    assert record.input_file_id is None
+    assert batches_service.last_create_from_rows is not None
+    assert (
+        batches_service.last_create_from_rows["rows"][0]["body"]["messages"][0][
+            "content"
+        ]
+        == "hello inline openai"
+    )
+
+
+@pytest.mark.asyncio
 async def test_files_batches_service_creates_anthropic_batch_from_staged_file():
     service = FilesBatchesService()
     batches_service = FakeBatchesService()
@@ -482,6 +521,43 @@ async def test_files_batches_service_creates_anthropic_batch_from_staged_file():
             "content"
         ]
         == "hello anthropic"
+    )
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_creates_anthropic_batch_from_inline_requests():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    record = await service.create_batch(
+        api_format="anthropic",
+        requests=[
+            {
+                "custom_id": "anthropic-inline-1",
+                "params": {
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 64,
+                    "messages": [{"role": "user", "content": "hello inline anthropic"}],
+                },
+            }
+        ],
+        display_name="Anthropic Inline Import",
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
+    assert record.input_file_id is None
+    assert record.display_name == "Anthropic Inline Import"
+    assert batches_service.last_create_from_rows is not None
+    assert (
+        batches_service.last_create_from_rows["rows"][0]["body"]["messages"][0][
+            "content"
+        ]
+        == "hello inline anthropic"
     )
 
 
@@ -630,3 +706,41 @@ async def test_files_batches_service_requires_model_for_gemini_rows_without_mode
         )
 
     assert "`model` is required for Gemini batches" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_requires_openai_input_file_or_requests():
+    service = FilesBatchesService()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.create_batch(
+            api_format="openai",
+            giga_client=FakeFilesContentClient(),
+            batches_service=FakeBatchesService(),
+            logger=None,
+            batch_store={},
+            file_store={},
+        )
+
+    assert "`input_file_id` or `requests` is required for OpenAI batches." in str(
+        exc_info.value
+    )
+
+
+@pytest.mark.asyncio
+async def test_files_batches_service_requires_anthropic_input_file_or_requests():
+    service = FilesBatchesService()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.create_batch(
+            api_format="anthropic",
+            giga_client=FakeFilesContentClient(),
+            batches_service=FakeBatchesService(),
+            logger=None,
+            batch_store={},
+            file_store={},
+        )
+
+    assert "`input_file_id` or `requests` is required for Anthropic batches." in str(
+        exc_info.value
+    )

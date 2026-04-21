@@ -380,6 +380,37 @@ def test_admin_files_batches_create_openai_batch_returns_normalized_record():
     )
 
 
+def test_admin_files_batches_create_openai_batch_from_inline_requests():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "openai",
+            "endpoint": "/v1/chat/completions",
+            "requests": [
+                {
+                    "custom_id": "req-inline-1",
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": {
+                        "model": "gpt-4.1-mini",
+                        "messages": [
+                            {"role": "user", "content": "hello inline openai"}
+                        ],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "openai"
+    assert body["endpoint"] == "/v1/chat/completions"
+    assert body["input_file_id"] is None
+
+
 def test_admin_files_batches_create_anthropic_file_returns_normalized_record():
     client = TestClient(make_app())
 
@@ -452,6 +483,40 @@ def test_admin_files_batches_create_anthropic_batch_from_staged_file():
     body = response.json()
     assert body["api_format"] == "anthropic"
     assert body["input_file_id"] == "file-anthropic-input-1"
+    assert body["output_kind"] == "results"
+
+
+def test_admin_files_batches_create_anthropic_batch_from_inline_requests():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "anthropic",
+            "display_name": "Anthropic Inline Batch",
+            "requests": [
+                {
+                    "custom_id": "anthropic-inline-1",
+                    "params": {
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 64,
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "hello inline anthropic",
+                            }
+                        ],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "anthropic"
+    assert body["display_name"] == "Anthropic Inline Batch"
+    assert body["input_file_id"] is None
     assert body["output_kind"] == "results"
 
 
@@ -568,5 +633,7 @@ def test_admin_files_batches_create_openai_batch_returns_field_error_detail():
 
     assert response.status_code == 400
     assert response.json() == {
-        "detail": {"input_file_id": "`input_file_id` is required for OpenAI batches."}
+        "detail": {
+            "input_file_id": "`input_file_id` or `requests` is required for OpenAI batches."
+        }
     }

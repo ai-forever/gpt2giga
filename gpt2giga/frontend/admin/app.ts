@@ -57,6 +57,7 @@ export class AdminApp {
   private renderToken = 0;
   private shouldFocusPageHeading = false;
   private lastKnownUrl = this.currentUrl();
+  private runtimePayload: RuntimePayload | null = null;
 
   constructor() {
     this.adminKeyInput.value = this.restoreSessionValue(ADMIN_KEY_STORAGE);
@@ -81,6 +82,10 @@ export class AdminApp {
 
   get api(): AdminApiClient {
     return this.apiClient;
+  }
+
+  get runtime(): RuntimePayload | null {
+    return this.runtimePayload;
   }
 
   currentPage(): PageId {
@@ -240,6 +245,7 @@ export class AdminApp {
         this.api.json<RuntimePayload>("/admin/api/runtime"),
         this.api.json<SetupPayload>("/admin/api/setup"),
       ]);
+      this.runtimePayload = runtime;
 
       const persistence = describePersistenceStatus(setup);
       this.modeChip.textContent = String(runtime.mode ?? "n/a");
@@ -267,6 +273,7 @@ export class AdminApp {
         );
       }
     } catch (error) {
+      this.runtimePayload = null;
       this.pushAlert(`Failed to load global admin status. ${toErrorMessage(error)}`, "danger");
       this.modeChip.textContent = "error";
       this.backendChip.textContent = "error";

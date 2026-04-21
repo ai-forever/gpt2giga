@@ -426,12 +426,19 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert 'name="file_sort"' in files_batches_asset.text
     assert "Files and batches lifecycle" in files_batches_asset.text
     assert "Operator guides" in files_batches_asset.text
+    assert "optional when using inline requests" in files_batches_asset.text
     assert files_batches_bindings_asset.status_code == 200
-    assert 'const normalizedModel = modelValue?.trim() || "gemini-2.5-flash"' in (
+    assert 'app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash"' in (
         files_batches_bindings_asset.text
     )
+    assert 'model: "gpt-4.1-mini"' in files_batches_bindings_asset.text
+    assert 'model: "claude-sonnet-4-20250514"' in files_batches_bindings_asset.text
+    assert "readConfiguredFallbackModel()" in files_batches_bindings_asset.text
     assert 'normalizedModel.startsWith("models/")' in files_batches_bindings_asset.text
     assert 'requestLabel: "row-1"' in files_batches_bindings_asset.text
+    assert 'elements.batchEndpoint?.addEventListener("change"' in (
+        files_batches_bindings_asset.text
+    )
     assert (
         'elements.batchModel?.addEventListener("input"'
         in files_batches_bindings_asset.text
@@ -470,12 +477,24 @@ def test_admin_runtime_endpoint():
     assert payload["admin_enabled"] is True
     assert payload["telemetry_enabled"] is True
     assert payload["runtime_store_backend"] == "memory"
+    assert payload["gigachat_model"] is None
     assert payload["state"]["stores"]["backend"] == "memory"
     assert payload["state"]["stores"]["usage_by_api_key"] == 0
     assert payload["state"]["stores"]["usage_by_provider"] == 0
     assert payload["state"]["stores"]["governance_counters"] == 0
     assert payload["governance_enabled"] is False
     assert payload["governance_limits_configured"] == 0
+
+
+def test_admin_runtime_endpoint_exposes_configured_gigachat_model():
+    app = make_app(config=ProxyConfig(gigachat={"model": "GigaChat-2-Max"}))
+    client = TestClient(app)
+
+    resp = client.get("/admin/api/runtime")
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["gigachat_model"] == "GigaChat-2-Max"
 
 
 def test_admin_capabilities_reflect_enabled_providers():
