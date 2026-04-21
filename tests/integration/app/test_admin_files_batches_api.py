@@ -295,6 +295,9 @@ def test_admin_files_batches_inventory_returns_mixed_formats():
         "anthropic",
         "gemini",
     }
+    batch_endpoints = {item["api_format"]: item["endpoint"] for item in body["batches"]}
+    assert batch_endpoints["anthropic"] == "/v1/messages"
+    assert batch_endpoints["gemini"] == "/v1beta/models/gemini-test:generateContent"
     assert body["counts"] == {
         "files": 4,
         "batches": 3,
@@ -332,6 +335,7 @@ def test_admin_files_batches_detail_endpoints_return_normalized_records():
         == "/admin/api/files-batches/files/file-gemini-1/content"
     )
     assert batch_response.status_code == 200
+    assert batch_response.json()["endpoint"] == "/v1/messages"
     assert (
         batch_response.json()["output_path"]
         == "/admin/api/files-batches/batches/batch-anthropic-1/output"
@@ -512,6 +516,7 @@ def test_admin_files_batches_create_anthropic_batch_from_staged_file():
     assert response.status_code == 200
     body = response.json()
     assert body["api_format"] == "anthropic"
+    assert body["endpoint"] == "/v1/messages"
     assert body["input_file_id"] == "file-anthropic-input-1"
     assert body["output_kind"] == "results"
 
@@ -546,6 +551,7 @@ def test_admin_files_batches_create_anthropic_batch_from_inline_requests():
     body = response.json()
     assert body["api_format"] == "anthropic"
     assert body["display_name"] == "Anthropic Inline Batch"
+    assert body["endpoint"] == "/v1/messages"
     assert body["input_file_id"] is None
     assert body["output_kind"] == "results"
 
@@ -578,6 +584,7 @@ def test_admin_files_batches_create_anthropic_batch_from_inline_requests_with_fa
     assert response.status_code == 200
     body = response.json()
     assert body["api_format"] == "anthropic"
+    assert body["endpoint"] == "/v1/messages"
     assert body["input_file_id"] is None
     assert body["output_kind"] == "results"
 
@@ -612,6 +619,7 @@ def test_admin_files_batches_create_gemini_batch_from_staged_file():
     body = response.json()
     assert body["api_format"] == "gemini"
     assert body["display_name"] == "Gemini Admin Batch"
+    assert body["endpoint"] == "/v1beta/models/gemini-test:generateContent"
     assert body["model"] == "gemini-test"
 
 
@@ -649,6 +657,7 @@ def test_admin_files_batches_create_gemini_batch_from_doc_style_file_with_model(
     body = response.json()
     assert body["api_format"] == "gemini"
     assert body["display_name"] == "Gemini Keyed Batch"
+    assert body["endpoint"] == "/v1beta/models/gemini-2.5-flash:generateContent"
     assert body["model"] == "gemini-2.5-flash"
 
 
@@ -681,6 +690,7 @@ def test_admin_files_batches_create_gemini_batch_from_inline_requests():
     body = response.json()
     assert body["api_format"] == "gemini"
     assert body["display_name"] == "Gemini Inline Batch"
+    assert body["endpoint"] == "/v1beta/models/gemini-inline:generateContent"
     assert body["model"] == "gemini-inline"
     assert body["input_file_id"] is None
 

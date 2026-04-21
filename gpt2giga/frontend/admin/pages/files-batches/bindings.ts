@@ -62,6 +62,14 @@ interface BindFilesBatchesPageOptions {
   page: FilesBatchesPage;
 }
 
+const OPENAI_BATCH_ENDPOINT_OPTIONS = [
+  "/v1/chat/completions",
+  "/v1/responses",
+  "/v1/embeddings",
+] as const;
+const ANTHROPIC_BATCH_ENDPOINT = "/v1/messages";
+const GEMINI_BATCH_ENDPOINT_TEMPLATE = "/v1beta/models/{model}:generateContent";
+
 export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void {
   const { app, data, elements, filters, inventory, page } = options;
 
@@ -288,8 +296,85 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     return "OpenAI batches accept either a staged JSONL file in OpenAI batch input format or an inline JSON array shaped like `[{custom_id, method, url, body}]`. Provide a fallback model when rows omit `body.model`.";
   };
 
-  const readBatchEndpoint = (): string =>
-    elements.batchEndpoint?.value.trim() || "/v1/chat/completions";
+  const normalizeGeminiBatchModel = (value: string | null | undefined): string => {
+    let normalized = value?.trim() ?? "";
+    if (!normalized) {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(normalized);
+      normalized = parsed.pathname.trim();
+    } catch {
+      // Keep non-URL forms untouched.
+    }
+
+    normalized = normalized.replace(/^\/+|\/+$/g, "");
+    if (normalized.includes("/models/")) {
+      normalized = normalized.split("/models/").at(-1) ?? normalized;
+    } else if (normalized.startsWith("models/")) {
+      normalized = normalized.slice("models/".length);
+    }
+    if (normalized.includes(":")) {
+      normalized = normalized.split(":", 1)[0] ?? normalized;
+    }
+    return normalized.trim();
+  };
+
+  const resolveGeminiBatchEndpoint = (): string => {
+    const normalizedModel = normalizeGeminiBatchModel(
+      elements.batchModel?.value.trim() || readConfiguredFallbackModel(),
+    );
+    return GEMINI_BATCH_ENDPOINT_TEMPLATE.replace(
+      "{model}",
+      normalizedModel || "{model}",
+    );
+  };
+
+  const resolveBatchEndpoint = (
+    apiFormat: ArtifactApiFormat = readBatchApiFormat(),
+  ): string => {
+    if (apiFormat === "anthropic") {
+      return ANTHROPIC_BATCH_ENDPOINT;
+    }
+    if (apiFormat === "gemini") {
+      return resolveGeminiBatchEndpoint();
+    }
+    const selectedEndpoint = elements.batchEndpoint?.value.trim() ?? "";
+    return OPENAI_BATCH_ENDPOINT_OPTIONS.includes(
+      selectedEndpoint as (typeof OPENAI_BATCH_ENDPOINT_OPTIONS)[number],
+    )
+      ? selectedEndpoint
+      : "/v1/chat/completions";
+  };
+
+  const syncBatchEndpointControl = (
+    apiFormat: ArtifactApiFormat,
+  ): void => {
+    if (!elements.batchEndpoint) {
+      return;
+    }
+
+    if (apiFormat === "openai") {
+      const selectedEndpoint = resolveBatchEndpoint("openai");
+      elements.batchEndpoint.replaceChildren(
+        ...OPENAI_BATCH_ENDPOINT_OPTIONS.map(
+          (value) => new Option(value, value, value === selectedEndpoint, value === selectedEndpoint),
+        ),
+      );
+      elements.batchEndpoint.disabled = false;
+      elements.batchEndpoint.value = selectedEndpoint;
+      return;
+    }
+
+    const providerEndpoint = resolveBatchEndpoint(apiFormat);
+    elements.batchEndpoint.replaceChildren(
+      new Option(providerEndpoint, providerEndpoint, true, true),
+    );
+    elements.batchEndpoint.disabled = true;
+  };
+
+  const readBatchEndpoint = (): string => resolveBatchEndpoint();
 
   const readConfiguredFallbackModel = (): string =>
     app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash";
@@ -342,8 +427,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     error?: string;
   } => {
     const apiFormat = readBatchApiFormat();
-    const endpoint =
-      apiFormat === "openai" ? readBatchEndpoint() : "/v1/chat/completions";
+    const endpoint = readBatchEndpoint();
     const inputFileId = elements.batchInput?.value.trim() ?? "";
     const fallbackModel = elements.batchModel?.value.trim() || undefined;
     const inlinePayload = readInlineRequestsPayload();
@@ -1114,13 +1198,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     if (elements.batchApiFormat) {
       elements.batchApiFormat.value = apiFormat;
     }
-    if (elements.batchEndpoint) {
-      const openaiMode = apiFormat === "openai";
-      elements.batchEndpoint.disabled = !openaiMode;
-      if (!openaiMode) {
-        elements.batchEndpoint.value = "/v1/chat/completions";
-      }
-    }
+    syncBatchEndpointControl(apiFormat);
     if (elements.batchInput) {
       elements.batchInput.required = false;
     }
@@ -1761,10 +1839,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         },
         {
           label: "Endpoint",
-          value:
-            apiFormat === "openai"
-              ? fields.endpoint.value
-              : "/v1/chat/completions",
+          value: readBatchEndpoint(),
         },
       ],
       successSummary: (response) => [
@@ -1780,10 +1855,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       action: async () => {
         const response = await createBatch(app, {
           apiFormat,
-          endpoint:
-            apiFormat === "openai"
-              ? fields.endpoint.value
-              : "/v1/chat/completions",
+          endpoint: readBatchEndpoint(),
           inputFileId,
           metadata,
           displayName: fields.display_name.value.trim() || undefined,
@@ -2147,7 +2219,6 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   elements.batchApiFormat?.addEventListener("change", () => {
     syncBatchComposerFormat(readBatchApiFormat(), {
       inputFileId: elements.batchInput?.value.trim() ?? "",
-      forceInlineTemplate: true,
     });
     invalidateBatchValidation({ auto: true });
   });
@@ -2162,9 +2233,15 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   });
 
   elements.batchModel?.addEventListener("input", () => {
+    if (readBatchApiFormat() === "gemini") {
+      syncBatchEndpointControl("gemini");
+    }
     syncBatchInlineRequestsTemplate();
   });
   elements.batchModel?.addEventListener("change", () => {
+    if (readBatchApiFormat() === "gemini") {
+      syncBatchEndpointControl("gemini");
+    }
     invalidateBatchValidation({ auto: true });
   });
   elements.batchInput?.addEventListener("change", () => {

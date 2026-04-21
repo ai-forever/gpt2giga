@@ -28,6 +28,8 @@ from gpt2giga.features.files_batches.normalizers import (
     normalize_gemini_file,
     normalize_openai_batch,
     normalize_openai_file,
+    resolve_anthropic_batch_endpoint,
+    resolve_gemini_batch_endpoint,
 )
 from gpt2giga.providers.anthropic import anthropic_provider_adapters
 
@@ -387,6 +389,7 @@ class FilesBatchesService:
         )
         stored_metadata: dict[str, Any] = {
             "api_format": "anthropic_messages",
+            "provider_endpoint": resolve_anthropic_batch_endpoint(),
             "requests": batch_payload.stored_requests,
         }
         if resolved_input_file_id:
@@ -445,9 +448,13 @@ class FilesBatchesService:
                 input_file_id=resolved_input_file_id,
             ),
             "model": resolved_model,
+            "provider_model": resolved_model,
             "priority": 0,
             "requests": stored_requests,
         }
+        stored_metadata["provider_endpoint"] = resolve_gemini_batch_endpoint(
+            stored_metadata
+        )
         if metadata:
             stored_metadata["metadata"] = dict(metadata)
         if resolved_input_file_id:

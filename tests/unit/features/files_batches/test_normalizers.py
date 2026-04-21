@@ -84,6 +84,7 @@ def test_normalize_anthropic_batch_recovers_results_endpoint():
     )
 
     assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
+    assert record.endpoint == "/v1/messages"
     assert record.output_kind == "results"
     assert record.output_path == "/admin/api/files-batches/batches/batch-1/output"
     assert record.request_counts.errored == 1
@@ -134,6 +135,7 @@ def test_normalize_gemini_batch_builds_download_path():
     )
 
     assert record.api_format is NormalizedArtifactFormat.GEMINI
+    assert record.endpoint == "/v1beta/models/gemini-test:generateContent"
     assert record.output_path == "/admin/api/files-batches/batches/batch-1/output"
     assert record.request_counts.pending == 0
     assert record.display_name == "Gemini batch"
