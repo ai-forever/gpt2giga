@@ -927,7 +927,7 @@ wheels = [
 
 [[package]]
 name = "gpt2giga"
-version = "1.0.0rc1"
+version = "1.0.0rc2"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -1009,7 +1009,7 @@ integrations = [
 
 [[package]]
 name = "gpt2giga-ui"
-version = "1.0.0rc1"
+version = "1.0.0rc2"
 source = { directory = "packages/gpt2giga-ui" }
 
 [[package]]
