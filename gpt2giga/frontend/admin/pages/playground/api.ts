@@ -297,9 +297,15 @@ function inferStatusCodeFromText(message: string): number | null {
 }
 
 function formatStreamFailure(failure: StreamFailureDetails): string {
-  return failure.statusCode === null
-    ? `${failure.errorType}: ${failure.message}`
-    : `${failure.errorType}: HTTP ${failure.statusCode} • ${failure.message}`;
+  const message = failure.message.trim();
+  if (!message) {
+    return failure.statusCode === null
+      ? failure.errorType
+      : `${failure.errorType}: ${failure.statusCode}`;
+  }
+  return message.startsWith(`${failure.errorType}:`)
+    ? message
+    : `${failure.errorType}: ${message}`;
 }
 
 async function readSseStream(
