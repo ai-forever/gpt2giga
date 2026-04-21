@@ -223,15 +223,16 @@ export function mergeAssistantOutput(
   payload: unknown,
   surface: SurfaceId,
 ): string {
-  const candidate = next.trim();
-  if (!candidate) {
+  if (!next) {
     return current;
   }
 
+  const candidate = next;
   const lowerType = eventType.toLowerCase();
   const payloadRecord = asRecord(payload);
   const choiceList = Array.isArray(payloadRecord.choices) ? payloadRecord.choices : [];
   const isDeltaEvent =
+    surface === "gemini-generate" ||
     lowerType.includes("delta") ||
     lowerType.includes("chunk") ||
     Boolean(payloadRecord.delta) ||
@@ -241,18 +242,15 @@ export function mergeAssistantOutput(
     return candidate;
   }
 
-  if (candidate.startsWith(current) || candidate.length > current.length * 1.5) {
+  if (candidate.startsWith(current)) {
     return candidate;
   }
 
-  if (!isDeltaEvent || surface === "gemini-generate") {
+  if (!isDeltaEvent) {
     return candidate.length >= current.length ? candidate : current;
   }
 
-  if (current.endsWith(candidate)) {
-    return current;
-  }
-  return current + candidate;
+  return appendTextDelta(current, candidate);
 }
 
 export function formatSseTranscript(events: ParsedSseEvent[]): string {
@@ -395,6 +393,18 @@ function extractTextValue(value: unknown): string {
     return record.partial_json;
   }
   return "";
+}
+
+function appendTextDelta(current: string, next: string): string {
+  if (!next) {
+    return current;
+  }
+
+  if (current.endsWith(next)) {
+    return current;
+  }
+
+  return current + next;
 }
 
 function extractUsageFromContainer(
