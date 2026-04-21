@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import base64
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -10,18 +9,19 @@ from pydantic import BaseModel
 from starlette.requests import Request
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.api.batch_validation import (
+    validate_batch_input_request,
+    run_batch_input_validation,
+)
 from gpt2giga.api.anthropic.batches import _build_anthropic_batch_results
 from gpt2giga.api.gemini.batches import build_gemini_batch_output_file
 from gpt2giga.app.dependencies import (
-    get_config_from_state,
     get_logger_from_state,
-    get_request_transformer_from_state,
     get_runtime_providers,
 )
 from gpt2giga.core.errors import exceptions_handler
 from gpt2giga.core.http.form_body import read_request_multipart
 from gpt2giga.features.batches import (
-    BatchInputValidator,
     get_batches_service_from_state,
 )
 from gpt2giga.features.batches.store import get_batch_store
@@ -145,6 +145,24 @@ async def create_files_batches_batch(
 ):
     """Create a normalized batch artifact through the admin API."""
     verify_logs_ip_allowlist(request)
+    validation_report = await run_batch_input_validation(
+        request=request,
+        api_format=payload.api_format,
+        input_file_id=payload.input_file_id,
+        fallback_model=payload.model,
+        requests=payload.requests,
+    )
+    if validation_report is not None and not validation_report.valid:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    "Batch input validation failed. "
+                    "Run validation and fix blocking issues before creating the batch."
+                ),
+                "validation_report": validation_report.model_dump(mode="json"),
+            },
+        )
     app_state = request.app.state
     service = get_files_batches_service_from_state(app_state)
     return await service.create_batch(
@@ -171,27 +189,12 @@ async def validate_files_batches_batch(
 ):
     """Validate staged or inline batch input and return a diagnostic report."""
     verify_logs_ip_allowlist(request)
-    validator = _build_batch_input_validator(request)
-    resolved_input_file_id = _normalize_optional_string(payload.input_file_id)
-    if resolved_input_file_id is not None:
-        file_response = await get_gigachat_client(request).aget_file_content(
-            file_id=resolved_input_file_id
-        )
-        content = base64.b64decode(file_response.content)
-        return await validator.validate_bytes(
-            content,
-            api_format=payload.api_format,
-            fallback_model=payload.model,
-        )
-    if payload.requests is not None:
-        return await validator.validate_rows(
-            list(payload.requests),
-            api_format=payload.api_format,
-            fallback_model=payload.model,
-        )
-    raise HTTPException(
-        status_code=400,
-        detail="`input_file_id` or `requests` is required for validation.",
+    return await validate_batch_input_request(
+        request=request,
+        api_format=payload.api_format,
+        input_file_id=payload.input_file_id,
+        fallback_model=payload.model,
+        requests=payload.requests,
     )
 
 
@@ -382,20 +385,3 @@ def _resolve_output_batch_id(
         if metadata.get("output_file_id") == file_id:
             return str(batch_id)
     return None
-
-
-def _build_batch_input_validator(request: Request) -> BatchInputValidator:
-    app_state = request.app.state
-    config = get_config_from_state(app_state)
-    return BatchInputValidator(
-        request_transformer=get_request_transformer_from_state(app_state),
-        embeddings_model=config.proxy_settings.embeddings,
-        gigachat_api_mode=config.proxy_settings.chat_backend_mode,
-        logger=get_logger_from_state(app_state),
-        default_model=getattr(config.gigachat_settings, "model", None),
-    )
-
-
-def _normalize_optional_string(value: str | None) -> str | None:
-    normalized = str(value or "").strip()
-    return normalized or None

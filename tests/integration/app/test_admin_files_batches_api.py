@@ -701,6 +701,79 @@ def test_admin_files_batches_create_openai_batch_returns_field_error_detail():
     }
 
 
+def test_admin_files_batches_create_rejects_invalid_staged_input_with_validation_report():
+    app = make_app()
+    app.state.gigachat_client.files["file-openai-invalid-create-1"] = {
+        "content": (
+            b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":[]}}\n'
+            b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":"bad"}}\n'
+        ),
+        "object": FakeUploadedFile(
+            id="file-openai-invalid-create-1",
+            object="file",
+            bytes=146,
+            created_at=141,
+            filename="openai-invalid-create.jsonl",
+            purpose="general",
+        ),
+    }
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-invalid-create-1",
+        },
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["detail"]["message"] == (
+        "Batch input validation failed. "
+        "Run validation and fix blocking issues before creating the batch."
+    )
+    assert body["detail"]["validation_report"]["valid"] is False
+    assert body["detail"]["validation_report"]["summary"]["error_count"] >= 2
+    assert {
+        issue["code"] for issue in body["detail"]["validation_report"]["issues"]
+    } >= {
+        "duplicate_identifier",
+        "missing_field",
+    }
+
+
+def test_admin_files_batches_create_rejects_invalid_inline_input_with_validation_report():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "gemini",
+            "requests": [
+                {
+                    "request": {
+                        "contents": [
+                            {
+                                "role": "user",
+                                "parts": [{"text": "hello broken gemini"}],
+                            }
+                        ]
+                    }
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["detail"]["validation_report"]["valid"] is False
+    assert body["detail"]["validation_report"]["api_format"] == "gemini"
+    assert {
+        issue["code"] for issue in body["detail"]["validation_report"]["issues"]
+    } == {"missing_field"}
+
+
 def test_admin_files_batches_validate_staged_file_returns_diagnostic_report():
     app = make_app()
     app.state.gigachat_client.files["file-openai-invalid-1"] = {

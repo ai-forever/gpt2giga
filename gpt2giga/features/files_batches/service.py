@@ -98,7 +98,6 @@ class FilesBatchesService:
     ) -> NormalizedBatchRecord:
         """Create a normalized batch through the provider-aware admin surface."""
         normalized_api_format = normalize_api_format(api_format)
-        print(normalized_api_format)
         if normalized_api_format is NormalizedArtifactFormat.ANTHROPIC:
             record = await self._create_anthropic_batch(
                 input_file_id=input_file_id,
@@ -430,18 +429,15 @@ class FilesBatchesService:
             input_file_id=input_file_id,
             requests=requests,
         )
-        print("RESOLVE REQUESTS OK")
         resolved_model = _resolve_gemini_model(
             requests_payload,
             fallback_model=model,
         )
-        print("RESOLVE MODEL OK")
         rows, stored_requests = _build_batch_rows(
             requests_payload,
             model=resolved_model,
             logger=logger,
         )
-        print("BUILD BATCH ROWS OK")
         stored_metadata: dict[str, Any] = {
             "api_format": "gemini_generate_content",
             "display_name": _resolve_gemini_display_name(
@@ -456,7 +452,6 @@ class FilesBatchesService:
             stored_metadata["metadata"] = dict(metadata)
         if resolved_input_file_id:
             stored_metadata["input_file_id"] = resolved_input_file_id
-        print("HERE")
         return await batches_service.create_batch_from_rows(
             rows,
             endpoint="/v1/chat/completions",

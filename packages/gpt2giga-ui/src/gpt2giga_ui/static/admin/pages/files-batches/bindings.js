@@ -522,6 +522,30 @@ export function bindFilesBatchesPage(options) {
             }
         }
     };
+    const ensureFreshBatchValidation = async (button) => {
+        const currentRequest = buildBatchValidationRequest();
+        if (currentRequest.error) {
+            validationMessage = currentRequest.error;
+            updateBatchValidationSurface();
+            updateBatchCreateAvailability();
+            app.pushAlert(currentRequest.error, "warn");
+            return false;
+        }
+        const hasFreshValidation = validationReport !== null &&
+            !validationDirty &&
+            validationSignature !== null &&
+            validationSignature === currentRequest.signature;
+        if (!hasFreshValidation) {
+            await runBatchValidation(button, { automatic: false });
+        }
+        const latestRequest = buildBatchValidationRequest();
+        const hasBlockingErrors = validationReport !== null &&
+            !validationDirty &&
+            validationSignature !== null &&
+            validationSignature === latestRequest.signature &&
+            validationReport.summary.error_count > 0;
+        return !validationInFlight && !latestRequest.error && !hasBlockingErrors;
+    };
     const buildBatchInlineRequestsTemplate = (apiFormat) => {
         const fallbackModel = elements.batchModel?.value.trim() || readConfiguredFallbackModel();
         if (apiFormat === "anthropic") {
@@ -1159,8 +1183,13 @@ export function bindFilesBatchesPage(options) {
         const button = submitter instanceof HTMLButtonElement
             ? submitter
             : form.querySelector('button[type="submit"]');
-        if (!validationReport || validationDirty || validationSignature === null) {
-            app.pushAlert("Validate the current composer input first to get line-level diagnostics before creating the batch.", "warn");
+        if (!(await ensureFreshBatchValidation(button))) {
+            if (validationReport &&
+                !validationDirty &&
+                validationReport.summary.error_count > 0) {
+                app.pushAlert("Fix validation errors before creating the batch.", "warn");
+            }
+            return;
         }
         await runWorkflowAction({
             root: form,
