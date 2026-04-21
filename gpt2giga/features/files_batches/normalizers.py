@@ -381,13 +381,20 @@ def _normalize_gemini_request_counts(
 
 def _canonical_batch_status(value: Any) -> str:
     normalized = str(value or "").strip().lower()
-    if normalized in {"created", "queued"}:
+    if "." in normalized:
+        normalized = normalized.rsplit(".", 1)[-1]
+    if normalized.startswith("batch_state_"):
+        normalized = normalized.removeprefix("batch_state_")
+
+    if normalized in {"created", "queued", "pending"}:
         return "queued"
-    if normalized == "in_progress":
+    if normalized in {"in_progress", "running", "processing"}:
         return "in_progress"
+    if normalized == "canceled":
+        return "cancelled"
     if normalized in _FAILED_BATCH_STATUSES:
         return normalized
-    if normalized == "completed":
+    if normalized in {"completed", "succeeded", "success"}:
         return "completed"
     return "in_progress"
 

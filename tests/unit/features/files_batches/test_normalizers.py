@@ -139,6 +139,32 @@ def test_normalize_gemini_batch_builds_download_path():
     assert record.display_name == "Gemini batch"
 
 
+def test_normalize_gemini_batch_maps_enum_style_completed_status():
+    batch = SimpleNamespace(
+        id_="batch-1",
+        status="BatchStatus.COMPLETED",
+        created_at=123,
+        updated_at=124,
+        output_file_id="file-output-1",
+        request_counts=FakeRequestCounts(total=2, completed=2, failed=0),
+    )
+
+    record = normalize_gemini_batch(
+        batch,
+        {
+            "api_format": "gemini_generate_content",
+            "display_name": "Gemini batch",
+            "model": "gemini-test",
+            "input_file_id": "file-input-1",
+            "requests": [{}, {}],
+        },
+    )
+
+    assert record.status == "completed"
+    assert record.request_counts.pending == 0
+    assert record.request_counts.succeeded == 2
+
+
 def test_normalize_anthropic_output_file_points_to_results_path():
     record = normalize_anthropic_output_file(
         {
