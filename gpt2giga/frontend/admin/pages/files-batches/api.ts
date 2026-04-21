@@ -14,6 +14,13 @@ interface FilesBatchesInventoryPayload {
   counts: FilesBatchesInventoryCounts;
 }
 
+const FILES_BATCHES_CACHE_TTL_MS = 15_000;
+
+interface CachedFilesBatchesPageData {
+  cachedAt: number;
+  data: FilesBatchesPageData;
+}
+
 export interface FilesBatchesPageData {
   inventoryPayload: FilesBatchesInventoryPayload;
   files: FileRecord[];
@@ -21,15 +28,25 @@ export interface FilesBatchesPageData {
   counts: FilesBatchesInventoryCounts;
 }
 
-export async function loadFilesBatchesPageData(
-  app: AdminApp,
-): Promise<FilesBatchesPageData> {
-  const inventoryPayload = await app.api.json<FilesBatchesInventoryPayload>(
-    "/admin/api/files-batches/inventory",
-    {},
-    true,
-  );
+let cachedFilesBatchesPageData: CachedFilesBatchesPageData | null = null;
 
+function isAttentionBatchStatus(value: unknown): boolean {
+  const status = String(value ?? "").toLowerCase();
+  return ["failed", "cancelled", "expired"].includes(status);
+}
+
+function buildInventoryCounts(data: Pick<FilesBatchesPageData, "files" | "batches">): FilesBatchesInventoryCounts {
+  return {
+    files: data.files.length,
+    batches: data.batches.length,
+    output_ready: data.batches.filter((item) => Boolean(String(item.output_file_id ?? ""))).length,
+    needs_attention: data.batches.filter((item) =>
+      isAttentionBatchStatus(item.status),
+    ).length,
+  };
+}
+
+function buildPageData(inventoryPayload: FilesBatchesInventoryPayload): FilesBatchesPageData {
   return {
     inventoryPayload,
     files: inventoryPayload.files ?? [],
@@ -41,6 +58,48 @@ export async function loadFilesBatchesPageData(
       needs_attention: 0,
     },
   };
+}
+
+function hasFreshCache(): boolean {
+  return (
+    cachedFilesBatchesPageData !== null &&
+    Date.now() - cachedFilesBatchesPageData.cachedAt <= FILES_BATCHES_CACHE_TTL_MS
+  );
+}
+
+export function clearFilesBatchesPageDataCache(): void {
+  cachedFilesBatchesPageData = null;
+}
+
+export function syncFilesBatchesPageDataCache(
+  data: FilesBatchesPageData,
+): FilesBatchesPageData {
+  const counts = buildInventoryCounts(data);
+  data.counts = counts;
+  data.inventoryPayload = {
+    files: data.files,
+    batches: data.batches,
+    counts,
+  };
+  cachedFilesBatchesPageData = {
+    cachedAt: Date.now(),
+    data,
+  };
+  return data;
+}
+
+export async function loadFilesBatchesPageData(
+  app: AdminApp,
+): Promise<FilesBatchesPageData> {
+  if (hasFreshCache()) {
+    return cachedFilesBatchesPageData!.data;
+  }
+  const inventoryPayload = await app.api.json<FilesBatchesInventoryPayload>(
+    "/admin/api/files-batches/inventory",
+    {},
+    true,
+  );
+  return syncFilesBatchesPageDataCache(buildPageData(inventoryPayload));
 }
 
 export async function fetchFileMetadata(

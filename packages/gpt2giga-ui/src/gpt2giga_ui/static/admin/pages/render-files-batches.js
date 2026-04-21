@@ -1,7 +1,7 @@
 import { subpagesFor } from "../routes.js";
 import { card, renderSubpageNav } from "../templates.js";
 import { bindFilesBatchesPage } from "./files-batches/bindings.js";
-import { loadFilesBatchesPageData } from "./files-batches/api.js";
+import { clearFilesBatchesPageDataCache, loadFilesBatchesPageData, } from "./files-batches/api.js";
 import { buildFilesBatchesInventory, buildFilesBatchesUrl, readFilesBatchesFiltersForPage, } from "./files-batches/serializers.js";
 import { DEFAULT_FILE_SORT } from "./files-batches/state.js";
 import { renderFilesBatchesHeroActions, renderFilesBatchesPage, resolveFilesBatchesElements, } from "./files-batches/view.js";
@@ -29,6 +29,7 @@ export async function renderFilesBatches(app, token) {
     ${renderFilesBatchesPage(page, data, inventory, filters)}
   `);
     document.getElementById("refresh-files-batches")?.addEventListener("click", () => {
+        clearFilesBatchesPageDataCache();
         void app.render(page);
     });
     document

@@ -2,7 +2,10 @@ import type { AdminApp } from "../app.js";
 import { subpagesFor } from "../routes.js";
 import { card, renderSubpageNav } from "../templates.js";
 import { bindFilesBatchesPage } from "./files-batches/bindings.js";
-import { loadFilesBatchesPageData } from "./files-batches/api.js";
+import {
+  clearFilesBatchesPageDataCache,
+  loadFilesBatchesPageData,
+} from "./files-batches/api.js";
 import {
   buildFilesBatchesInventory,
   buildFilesBatchesUrl,
@@ -50,6 +53,7 @@ export async function renderFilesBatches(
   `);
 
   document.getElementById("refresh-files-batches")?.addEventListener("click", () => {
+    clearFilesBatchesPageDataCache();
     void app.render(page);
   });
   document

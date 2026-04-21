@@ -1,7 +1,7 @@
 import { withBusyState } from "../../forms.js";
 import { renderDefinitionList } from "../../templates.js";
 import { formatBytes, formatTimestamp, safeJsonParse } from "../../utils.js";
-import { createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, uploadFile, } from "./api.js";
+import { createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, syncFilesBatchesPageDataCache, uploadFile, } from "./api.js";
 import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, extractErrorReason, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
 import { INVALID_JSON } from "./state.js";
 export function bindFilesBatchesPage(options) {
@@ -22,6 +22,7 @@ export function bindFilesBatchesPage(options) {
         else {
             data.files.unshift(payload);
         }
+        syncFilesBatchesPageDataCache(data);
         return payload;
     };
     const cacheBatchRecord = (payload) => {
@@ -37,7 +38,21 @@ export function bindFilesBatchesPage(options) {
         else {
             data.batches.unshift(payload);
         }
+        syncFilesBatchesPageDataCache(data);
         return payload;
+    };
+    const removeFileRecord = (fileId) => {
+        const existing = inventory.fileLookup.get(fileId) ?? null;
+        if (!existing) {
+            return null;
+        }
+        inventory.fileLookup.delete(fileId);
+        const existingIndex = data.files.findIndex((item) => String(item.id ?? "") === fileId);
+        if (existingIndex >= 0) {
+            data.files.splice(existingIndex, 1);
+        }
+        syncFilesBatchesPageDataCache(data);
+        return existing;
     };
     const setDefinitionBlock = (node, items, emptyMessage) => {
         node.innerHTML = renderDefinitionList(items, emptyMessage);
@@ -927,9 +942,10 @@ export function bindFilesBatchesPage(options) {
                     setWorkflowSummary([
                         { label: "Workflow state", value: "Deleting file" },
                         { label: "File id", value: fileId },
-                        { label: "Next step", value: "Refresh inventory" },
+                        { label: "Next step", value: "Rebuild page from cached inventory" },
                     ]);
                     await deleteFile(app, fileId, source.delete_path);
+                    removeFileRecord(fileId);
                     app.queueAlert(`Deleted file ${fileId}.`, "info");
                     replaceStateForPage(page, undefined);
                     await app.render(page);

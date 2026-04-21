@@ -9,6 +9,7 @@ import {
   fetchFileContent,
   fetchFileMetadata,
   type FilesBatchesPageData,
+  syncFilesBatchesPageDataCache,
   uploadFile,
 } from "./api.js";
 import {
@@ -70,6 +71,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     } else {
       data.files.unshift(payload);
     }
+    syncFilesBatchesPageDataCache(data);
     return payload;
   };
 
@@ -87,7 +89,24 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     } else {
       data.batches.unshift(payload);
     }
+    syncFilesBatchesPageDataCache(data);
     return payload;
+  };
+
+  const removeFileRecord = (fileId: string): FileRecord | null => {
+    const existing = inventory.fileLookup.get(fileId) ?? null;
+    if (!existing) {
+      return null;
+    }
+    inventory.fileLookup.delete(fileId);
+    const existingIndex = data.files.findIndex(
+      (item) => String(item.id ?? "") === fileId,
+    );
+    if (existingIndex >= 0) {
+      data.files.splice(existingIndex, 1);
+    }
+    syncFilesBatchesPageDataCache(data);
+    return existing;
   };
 
   const setDefinitionBlock = (
@@ -1224,9 +1243,10 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           setWorkflowSummary([
             { label: "Workflow state", value: "Deleting file" },
             { label: "File id", value: fileId },
-            { label: "Next step", value: "Refresh inventory" },
+            { label: "Next step", value: "Rebuild page from cached inventory" },
           ]);
           await deleteFile(app, fileId, source.delete_path);
+          removeFileRecord(fileId);
           app.queueAlert(`Deleted file ${fileId}.`, "info");
           replaceStateForPage(page, undefined);
           await app.render(page);

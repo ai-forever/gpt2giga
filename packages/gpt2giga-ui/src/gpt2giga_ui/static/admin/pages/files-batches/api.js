@@ -1,5 +1,18 @@
-export async function loadFilesBatchesPageData(app) {
-    const inventoryPayload = await app.api.json("/admin/api/files-batches/inventory", {}, true);
+const FILES_BATCHES_CACHE_TTL_MS = 15_000;
+let cachedFilesBatchesPageData = null;
+function isAttentionBatchStatus(value) {
+    const status = String(value ?? "").toLowerCase();
+    return ["failed", "cancelled", "expired"].includes(status);
+}
+function buildInventoryCounts(data) {
+    return {
+        files: data.files.length,
+        batches: data.batches.length,
+        output_ready: data.batches.filter((item) => Boolean(String(item.output_file_id ?? ""))).length,
+        needs_attention: data.batches.filter((item) => isAttentionBatchStatus(item.status)).length,
+    };
+}
+function buildPageData(inventoryPayload) {
     return {
         inventoryPayload,
         files: inventoryPayload.files ?? [],
@@ -11,6 +24,34 @@ export async function loadFilesBatchesPageData(app) {
             needs_attention: 0,
         },
     };
+}
+function hasFreshCache() {
+    return (cachedFilesBatchesPageData !== null &&
+        Date.now() - cachedFilesBatchesPageData.cachedAt <= FILES_BATCHES_CACHE_TTL_MS);
+}
+export function clearFilesBatchesPageDataCache() {
+    cachedFilesBatchesPageData = null;
+}
+export function syncFilesBatchesPageDataCache(data) {
+    const counts = buildInventoryCounts(data);
+    data.counts = counts;
+    data.inventoryPayload = {
+        files: data.files,
+        batches: data.batches,
+        counts,
+    };
+    cachedFilesBatchesPageData = {
+        cachedAt: Date.now(),
+        data,
+    };
+    return data;
+}
+export async function loadFilesBatchesPageData(app) {
+    if (hasFreshCache()) {
+        return cachedFilesBatchesPageData.data;
+    }
+    const inventoryPayload = await app.api.json("/admin/api/files-batches/inventory", {}, true);
+    return syncFilesBatchesPageDataCache(buildPageData(inventoryPayload));
 }
 export async function fetchFileMetadata(app, fileId) {
     return app.api.json(`/admin/api/files-batches/files/${encodeURIComponent(fileId)}`, {}, true);
