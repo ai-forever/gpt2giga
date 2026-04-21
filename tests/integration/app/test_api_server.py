@@ -189,6 +189,8 @@ def test_openapi_json_available_in_dev_mode():
     assert response.status_code == 200
     schema = response.json()
     assert "/chat/completions" in schema["paths"]
+    assert "/batches/validate" in schema["paths"]
+    assert "/v1/batches/validate" in schema["paths"]
     assert "/translate" in schema["paths"]
     assert "/v1/translate" in schema["paths"]
     assert "/messages" in schema["paths"]
@@ -203,6 +205,10 @@ def test_openapi_json_available_in_dev_mode():
         "content"
     ]["application/json"]["examples"]
     assert "minimal" in chat_examples
+    batch_validation_examples = schema["components"]["schemas"]["BatchValidateRequest"][
+        "examples"
+    ]
+    assert batch_validation_examples[0]["api_format"] == "openai"
 
 
 def test_admin_static_assets_are_served():

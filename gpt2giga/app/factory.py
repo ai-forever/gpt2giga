@@ -14,6 +14,7 @@ from gpt2giga.api.admin.access import (
     ADMIN_AUTH_COOKIE_NAME,
     build_admin_access_verifier,
 )
+from gpt2giga.api.batches_validation import router as batches_validation_router
 from gpt2giga.api.dependencies.auth import build_api_key_verifier
 from gpt2giga.api.dependencies.governance import build_governance_verifier
 from gpt2giga.api.gemini.request import GeminiAPIError
@@ -244,6 +245,12 @@ def _register_routes(
             )
 
     app.include_router(system_router)
+    app.include_router(batches_validation_router, dependencies=api_dependencies)
+    app.include_router(
+        batches_validation_router,
+        prefix="/v1",
+        dependencies=api_dependencies,
+    )
     app.include_router(translate_router, dependencies=api_dependencies)
     app.include_router(translate_router, prefix="/v1", dependencies=api_dependencies)
     app.include_router(metrics_router, dependencies=api_dependencies)
