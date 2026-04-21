@@ -515,6 +515,49 @@ async def test_files_batches_service_creates_gemini_batch_from_staged_file():
 
 
 @pytest.mark.asyncio
+async def test_files_batches_service_creates_gemini_batch_from_inline_requests():
+    service = FilesBatchesService()
+    batches_service = FakeBatchesService()
+
+    record = await service.create_batch(
+        api_format="gemini",
+        requests=[
+            {
+                "request": {
+                    "contents": [
+                        {
+                            "role": "user",
+                            "parts": [{"text": "hello inline gemini"}],
+                        }
+                    ],
+                    "model": "models/gemini-inline",
+                },
+                "metadata": {"requestLabel": "row-inline-1"},
+            }
+        ],
+        display_name="Gemini Inline Import",
+        giga_client=FakeFilesContentClient(),
+        batches_service=batches_service,
+        logger=None,
+        batch_store={},
+        file_store={},
+    )
+
+    assert record.api_format is NormalizedArtifactFormat.GEMINI
+    assert record.model == "gemini-inline"
+    assert record.display_name == "Gemini Inline Import"
+    assert record.input_file_id is None
+    assert batches_service.last_create_from_rows is not None
+    assert batches_service.last_create_from_rows["metadata"]["model"] == "gemini-inline"
+    assert (
+        batches_service.last_create_from_rows["rows"][0]["body"]["messages"][0][
+            "content"
+        ]
+        == "hello inline gemini"
+    )
+
+
+@pytest.mark.asyncio
 async def test_files_batches_service_requires_model_for_gemini_rows_without_model():
     service = FilesBatchesService()
 

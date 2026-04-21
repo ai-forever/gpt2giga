@@ -305,8 +305,9 @@ function renderBatchesPage(data, inventory, filters) {
                     ${renderStaticSelectOptions("/v1/chat/completions", ["/v1/chat/completions", "/v1/responses", "/v1/embeddings"])}
                   </select>
                 </label>
-                <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-..." required /></label>
-                <label class="field" id="batch-model-field" hidden><span>Model</span><input id="batch-model" name="model" placeholder="gemini-2.5-flash" /></label>
+                <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-... (optional for Gemini inline requests)" required /></label>
+                <label class="field" id="batch-inline-requests-field" hidden><span>Inline requests (JSON array)</span><textarea id="batch-inline-requests" name="requests" placeholder='[{"request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-2.5-flash"},"metadata":{"requestLabel":"row-1"}}]'></textarea></label>
+                <label class="field" id="batch-model-field" hidden><span>Fallback model (optional)</span><input id="batch-model" name="model" placeholder="gemini-2.5-flash" /></label>
                 <label class="field" id="batch-display-name-field" hidden><span>Display name</span><input id="batch-display-name" name="display_name" placeholder="nightly-gemini-import" /></label>
                 <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
                 <div class="banner banner--warn" id="batch-format-hint">OpenAI batches expect a staged JSONL file in OpenAI batch input format.</div>
@@ -519,6 +520,8 @@ export function resolveFilesBatchesElements(pageContent) {
         batchForm: pageContent.querySelector("#batch-create-form"),
         batchInput: pageContent.querySelector("#batch-input-file-id"),
         batchHint: pageContent.querySelector("#batch-format-hint"),
+        batchInlineRequests: pageContent.querySelector("#batch-inline-requests"),
+        batchInlineRequestsField: pageContent.querySelector("#batch-inline-requests-field"),
         batchModel: pageContent.querySelector("#batch-model"),
         batchModelField: pageContent.querySelector("#batch-model-field"),
         batchEndpoint: pageContent.querySelector("#batch-endpoint"),

@@ -44,6 +44,7 @@ export async function createBatch(app, payload) {
             metadata: payload.metadata,
             display_name: payload.displayName,
             model: payload.model,
+            requests: payload.requests,
         },
     }, true);
 }

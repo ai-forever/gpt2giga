@@ -238,7 +238,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       return "Anthropic batches load staged JSONL rows shaped like `{custom_id, params}` and convert them into message-batch requests.";
     }
     if (apiFormat === "gemini") {
-      return "Gemini batches load staged JSONL rows shaped like `{request, metadata?}`. Provide a fallback model when rows omit `request.model`.";
+      return "Gemini batches accept either a staged file id or an inline JSON array shaped like `[{request, metadata?}]`. Provide a fallback model only when rows omit `request.model`.";
     }
     return "OpenAI batches expect a staged JSONL file in OpenAI batch input format.";
   };
@@ -259,10 +259,20 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         elements.batchEndpoint.value = "/v1/chat/completions";
       }
     }
+    if (elements.batchInput) {
+      elements.batchInput.required = apiFormat !== "gemini";
+    }
+    if (elements.batchInlineRequestsField && elements.batchInlineRequests) {
+      const showInlineRequests = apiFormat === "gemini";
+      elements.batchInlineRequestsField.hidden = !showInlineRequests;
+      if (!showInlineRequests) {
+        elements.batchInlineRequests.value = "";
+      }
+    }
     if (elements.batchModelField && elements.batchModel) {
       const showModel = apiFormat === "gemini";
       elements.batchModelField.hidden = !showModel;
-      elements.batchModel.required = showModel;
+      elements.batchModel.required = false;
       if (!showModel) {
         elements.batchModel.value = "";
       }
@@ -851,6 +861,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       input_file_id: HTMLInputElement;
       metadata: HTMLTextAreaElement;
       model: HTMLInputElement;
+      requests?: HTMLTextAreaElement;
     };
     const apiFormat = readBatchApiFormat();
     const metadataText = fields.metadata.value.trim();
@@ -860,12 +871,39 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           INVALID_JSON,
         )
       : undefined;
+    const inlineRequestsText = fields.requests?.value.trim() ?? "";
+    const inlineRequests = inlineRequestsText
+      ? safeJsonParse<Array<Record<string, unknown>> | typeof INVALID_JSON>(
+          inlineRequestsText,
+          INVALID_JSON,
+        )
+      : undefined;
     if (
       metadata === INVALID_JSON ||
       (metadata !== undefined &&
         (metadata === null || Array.isArray(metadata) || typeof metadata !== "object"))
     ) {
       app.pushAlert("Batch metadata must be a JSON object.", "danger");
+      return;
+    }
+    if (
+      inlineRequests === INVALID_JSON ||
+      (inlineRequests !== undefined && !Array.isArray(inlineRequests))
+    ) {
+      app.pushAlert("Inline Gemini requests must be a JSON array.", "danger");
+      return;
+    }
+    const inputFileId = fields.input_file_id.value.trim();
+    if (apiFormat === "gemini") {
+      if (!inputFileId && !inlineRequests?.length) {
+        app.pushAlert(
+          "Gemini batches need either a staged input file id or inline requests.",
+          "warn",
+        );
+        return;
+      }
+    } else if (!inputFileId) {
+      app.pushAlert("Choose an input file before creating the batch.", "warn");
       return;
     }
     const submitter = (event as SubmitEvent).submitter;
@@ -881,7 +919,14 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       pendingSummary: [
         { label: "Workflow state", value: "Creating batch" },
         { label: "API format", value: apiFormat },
-        { label: "Input file", value: fields.input_file_id.value.trim() || "missing" },
+        {
+          label: "Input source",
+          value: inputFileId
+            ? `file ${inputFileId}`
+            : inlineRequests?.length
+              ? `${inlineRequests.length} inline request${inlineRequests.length === 1 ? "" : "s"}`
+              : "missing",
+        },
         {
           label: "Endpoint",
           value:
@@ -907,10 +952,11 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
             apiFormat === "openai"
               ? fields.endpoint.value
               : "/v1/chat/completions",
-          inputFileId: fields.input_file_id.value.trim(),
+          inputFileId,
           metadata,
           displayName: fields.display_name.value.trim() || undefined,
           model: fields.model.value.trim() || undefined,
+          requests: inlineRequests,
         });
         cacheBatchRecord(response);
         app.queueAlert(
@@ -918,7 +964,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           "info",
         );
         replaceStateForPage(page, {
-          composeInputFileId: fields.input_file_id.value.trim(),
+          composeInputFileId: inputFileId,
           selectedBatchId: String(response.id ?? ""),
         });
         await app.render(page);

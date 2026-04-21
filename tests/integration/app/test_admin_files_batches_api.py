@@ -486,3 +486,36 @@ def test_admin_files_batches_create_gemini_batch_from_staged_file():
     assert body["api_format"] == "gemini"
     assert body["display_name"] == "Gemini Admin Batch"
     assert body["model"] == "gemini-test"
+
+
+def test_admin_files_batches_create_gemini_batch_from_inline_requests():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "gemini",
+            "display_name": "Gemini Inline Batch",
+            "requests": [
+                {
+                    "request": {
+                        "contents": [
+                            {
+                                "role": "user",
+                                "parts": [{"text": "hello inline gemini"}],
+                            }
+                        ],
+                        "model": "models/gemini-inline",
+                    },
+                    "metadata": {"requestLabel": "inline-row-1"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["api_format"] == "gemini"
+    assert body["display_name"] == "Gemini Inline Batch"
+    assert body["model"] == "gemini-inline"
+    assert body["input_file_id"] is None

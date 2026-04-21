@@ -112,6 +112,7 @@ export async function createBatch(
     metadata?: Record<string, unknown>;
     displayName?: string;
     model?: string;
+    requests?: Array<Record<string, unknown>>;
   },
 ): Promise<BatchRecord> {
   return app.api.json<BatchRecord>(
@@ -125,6 +126,7 @@ export async function createBatch(
         metadata: payload.metadata,
         display_name: payload.displayName,
         model: payload.model,
+        requests: payload.requests,
       },
     },
     true,
