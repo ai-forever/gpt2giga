@@ -58,6 +58,8 @@ interface ReplaceableFieldBindingOptions extends SecretFieldBindingOptions {
   messageKeep: string;
 }
 
+type ReplaceableFieldElement = HTMLInputElement | HTMLTextAreaElement;
+
 export interface SecretFieldState {
   intent: "keep" | "replace" | "clear";
   message: string;
@@ -358,23 +360,28 @@ export function validateJsonObjectField(
 export function bindReplaceableFieldBehavior(
   options: ReplaceableFieldBindingOptions,
 ): () => SecretFieldState | null {
-  const textarea = options.form.elements.namedItem(options.fieldName);
+  const field = options.form.elements.namedItem(options.fieldName);
   const clearToggle = options.form.elements.namedItem(options.clearFieldName);
-  if (!(textarea instanceof HTMLTextAreaElement) || !(clearToggle instanceof HTMLInputElement)) {
+  if (
+    !(
+      field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement
+    ) ||
+    !(clearToggle instanceof HTMLInputElement)
+  ) {
     return () => null;
   }
 
-  const note = textarea.closest(".stack")?.querySelector<HTMLElement>(".field-note");
-  const originalPlaceholder = textarea.placeholder;
+  const note = field.closest(".stack")?.querySelector<HTMLElement>(".field-note");
+  const originalPlaceholder = field.placeholder;
   const preview = options.preview || "not configured";
 
   const sync = (): SecretFieldState => {
-    const hasValue = textarea.value.trim().length > 0;
+    const hasValue = field.value.trim().length > 0;
     if (hasValue) {
       clearToggle.checked = false;
       clearToggle.disabled = true;
-      textarea.disabled = false;
-      textarea.placeholder = originalPlaceholder;
+      field.disabled = false;
+      field.placeholder = originalPlaceholder;
       if (note) {
         note.textContent = `Stored: ${preview}. Save: ${options.noteReplace}`;
       }
@@ -386,8 +393,8 @@ export function bindReplaceableFieldBehavior(
 
     clearToggle.disabled = false;
     if (clearToggle.checked) {
-      textarea.disabled = true;
-      textarea.placeholder = options.clearPlaceholder;
+      field.disabled = true;
+      field.placeholder = options.clearPlaceholder;
       if (note) {
         note.textContent = `Stored: ${preview}. Save: ${options.noteClear}`;
       }
@@ -397,8 +404,8 @@ export function bindReplaceableFieldBehavior(
       };
     }
 
-    textarea.disabled = false;
-    textarea.placeholder = originalPlaceholder;
+    field.disabled = false;
+    field.placeholder = originalPlaceholder;
     if (note) {
       note.textContent = `Stored: ${preview}. Save: ${options.noteKeep}`;
     }
@@ -408,7 +415,7 @@ export function bindReplaceableFieldBehavior(
     };
   };
 
-  textarea.addEventListener("input", sync);
+  field.addEventListener("input", sync);
   clearToggle.addEventListener("change", sync);
   return sync;
 }
@@ -488,9 +495,9 @@ export function collectGigachatPayload(form: HTMLFormElement): Record<string, un
     base_url: HTMLInputElement;
     auth_url: HTMLInputElement;
     ca_bundle_file: HTMLInputElement;
-    password: HTMLTextAreaElement;
-    credentials: HTMLTextAreaElement;
-    access_token: HTMLTextAreaElement;
+    password: ReplaceableFieldElement;
+    credentials: ReplaceableFieldElement;
+    access_token: ReplaceableFieldElement;
     clear_password?: HTMLInputElement;
     clear_credentials?: HTMLInputElement;
     clear_access_token?: HTMLInputElement;

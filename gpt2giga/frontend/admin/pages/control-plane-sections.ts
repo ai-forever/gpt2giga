@@ -301,6 +301,7 @@ export function renderGigachatSection(options: GigachatSectionOptions): string {
               ),
               clearControlName: "clear_password",
               clearLabel: "Clear stored password on save",
+              masked: true,
             })}
           </div>
           <div class="dual-grid">
@@ -311,6 +312,7 @@ export function renderGigachatSection(options: GigachatSectionOptions): string {
               preview: String(options.values.credentials_preview ?? "not configured"),
               clearControlName: "clear_credentials",
               clearLabel: "Clear stored credentials on save",
+              masked: true,
             })}
             ${renderSecretField({
               name: "access_token",
@@ -319,6 +321,7 @@ export function renderGigachatSection(options: GigachatSectionOptions): string {
               preview: String(options.values.access_token_preview ?? "not configured"),
               clearControlName: "clear_access_token",
               clearLabel: "Clear stored access token on save",
+              masked: true,
             })}
           </div>
         `,

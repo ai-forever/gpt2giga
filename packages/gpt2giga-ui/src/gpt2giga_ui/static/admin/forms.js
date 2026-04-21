@@ -206,21 +206,21 @@ export function validateJsonObjectField(field, value, { invalidMessage, nonObjec
     return error;
 }
 export function bindReplaceableFieldBehavior(options) {
-    const textarea = options.form.elements.namedItem(options.fieldName);
+    const field = options.form.elements.namedItem(options.fieldName);
     const clearToggle = options.form.elements.namedItem(options.clearFieldName);
-    if (!(textarea instanceof HTMLTextAreaElement) || !(clearToggle instanceof HTMLInputElement)) {
+    if (!((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) || !(clearToggle instanceof HTMLInputElement)) {
         return () => null;
     }
-    const note = textarea.closest(".stack")?.querySelector(".field-note");
-    const originalPlaceholder = textarea.placeholder;
+    const note = field.closest(".stack")?.querySelector(".field-note");
+    const originalPlaceholder = field.placeholder;
     const preview = options.preview || "not configured";
     const sync = () => {
-        const hasValue = textarea.value.trim().length > 0;
+        const hasValue = field.value.trim().length > 0;
         if (hasValue) {
             clearToggle.checked = false;
             clearToggle.disabled = true;
-            textarea.disabled = false;
-            textarea.placeholder = originalPlaceholder;
+            field.disabled = false;
+            field.placeholder = originalPlaceholder;
             if (note) {
                 note.textContent = `Stored: ${preview}. Save: ${options.noteReplace}`;
             }
@@ -231,8 +231,8 @@ export function bindReplaceableFieldBehavior(options) {
         }
         clearToggle.disabled = false;
         if (clearToggle.checked) {
-            textarea.disabled = true;
-            textarea.placeholder = options.clearPlaceholder;
+            field.disabled = true;
+            field.placeholder = options.clearPlaceholder;
             if (note) {
                 note.textContent = `Stored: ${preview}. Save: ${options.noteClear}`;
             }
@@ -241,8 +241,8 @@ export function bindReplaceableFieldBehavior(options) {
                 message: options.messageClear,
             };
         }
-        textarea.disabled = false;
-        textarea.placeholder = originalPlaceholder;
+        field.disabled = false;
+        field.placeholder = originalPlaceholder;
         if (note) {
             note.textContent = `Stored: ${preview}. Save: ${options.noteKeep}`;
         }
@@ -251,7 +251,7 @@ export function bindReplaceableFieldBehavior(options) {
             message: options.messageKeep,
         };
     };
-    textarea.addEventListener("input", sync);
+    field.addEventListener("input", sync);
     clearToggle.addEventListener("change", sync);
     return sync;
 }
