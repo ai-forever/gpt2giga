@@ -1,7 +1,7 @@
 import { pathForPage } from "../../routes.js";
 import { card, pill, renderDefinitionList, renderFormSection, renderGuideLinks, renderPageFrame, renderPageSection, } from "../../templates.js";
 import { asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatBytes, formatDurationMs, formatNumber, } from "../../utils.js";
-import { DEFAULT_ASSISTANT_OUTPUT, DEFAULT_OUTPUT, DEFAULT_PLAYGROUND_PRESET, PLAYGROUND_PRESETS, } from "./state.js";
+import { DEFAULT_ASSISTANT_OUTPUT, DEFAULT_OUTPUT, } from "./state.js";
 export function renderPlaygroundHeroActions() {
     return `
     <button class="button button--secondary" id="playground-stop" type="button" disabled>Stop request</button>
@@ -10,14 +10,14 @@ export function renderPlaygroundHeroActions() {
     <a class="button button--secondary" href="${escapeHtml(pathForPage("logs"))}">Logs</a>
   `;
 }
-export function renderPlaygroundPage(setup, initialPreset, initialRequest) {
+export function renderPlaygroundPage(setup, presets, initialPreset, initialRequest) {
     const bootstrapRequired = Boolean(asRecord(setup.bootstrap).required);
     const persistence = describePersistenceStatus(setup);
     const gigachatAuth = describeGigachatAuth(setup);
-    const surfaceCount = new Set(PLAYGROUND_PRESETS.map((preset) => preset.surface)).size;
+    const surfaceCount = new Set(presets.map((preset) => preset.surface)).size;
     return renderPageFrame({
         className: "page-frame--playground",
-        toolbar: renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequired),
+        toolbar: renderPlaygroundToolbar(setup, presets, persistence, gigachatAuth, bootstrapRequired),
         sections: [
             renderPageSection({
                 eyebrow: "Workspace",
@@ -29,7 +29,7 @@ export function renderPlaygroundPage(setup, initialPreset, initialRequest) {
         `,
                 bodyClassName: "page-grid",
                 body: `
-          ${card("Request controls", renderPlaygroundForm(initialPreset), "panel panel--span-5 panel--aside playground-panel playground-panel--primary")}
+          ${card("Request controls", renderPlaygroundForm(initialPreset, presets), "panel panel--span-5 panel--aside playground-panel playground-panel--primary")}
           ${card("Response workspace", `
               <div class="stack">
                 <div class="surface surface--dark">
@@ -158,7 +158,7 @@ export function renderPlaygroundPage(setup, initialPreset, initialRequest) {
         ],
     });
 }
-function renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequired) {
+function renderPlaygroundToolbar(setup, presets, persistence, gigachatAuth, bootstrapRequired) {
     return `
     <div class="playground-toolbar">
       <p class="playground-toolbar__lead">
@@ -166,8 +166,8 @@ function renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequ
       </p>
       <div class="playground-toolbar__meta">
         <div class="playground-toolbar__stats" aria-label="Playground context">
-          ${renderPlaygroundInlineStat("Surfaces", String(new Set(PLAYGROUND_PRESETS.map((preset) => preset.surface)).size))}
-          ${renderPlaygroundInlineStat("Presets", String(PLAYGROUND_PRESETS.length))}
+          ${renderPlaygroundInlineStat("Surfaces", String(new Set(presets.map((preset) => preset.surface)).size))}
+          ${renderPlaygroundInlineStat("Presets", String(presets.length))}
           ${renderPlaygroundInlineStat("GigaChat", gigachatAuth.value)}
           ${renderPlaygroundInlineStat("Persistence", persistence.value)}
         </div>
@@ -189,7 +189,7 @@ function renderPlaygroundInlineStat(label, value) {
     </div>
   `;
 }
-function renderPlaygroundForm(initialPreset) {
+function renderPlaygroundForm(initialPreset, presets) {
     return `
     <form id="playground-form" class="form-shell">
       <div class="playground-preset-strip">
@@ -198,7 +198,7 @@ function renderPlaygroundForm(initialPreset) {
           <p class="muted">Pick a baseline request, then edit.</p>
         </div>
         <div class="playground-preset-strip__buttons">
-          ${PLAYGROUND_PRESETS.map((preset) => `
+          ${presets.map((preset) => `
               <button
                 class="button${preset.id === initialPreset.id ? "" : " button--secondary"} playground-preset"
                 data-active="${preset.id === initialPreset.id ? "true" : "false"}"

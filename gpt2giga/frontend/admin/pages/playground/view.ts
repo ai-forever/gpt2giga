@@ -27,8 +27,6 @@ import type {
 import {
   DEFAULT_ASSISTANT_OUTPUT,
   DEFAULT_OUTPUT,
-  DEFAULT_PLAYGROUND_PRESET,
-  PLAYGROUND_PRESETS,
 } from "./state.js";
 
 export interface PlaygroundPageElements {
@@ -66,17 +64,24 @@ export function renderPlaygroundHeroActions(): string {
 
 export function renderPlaygroundPage(
   setup: SetupPayload,
+  presets: PlaygroundPreset[],
   initialPreset: PlaygroundPreset,
   initialRequest: PlaygroundRequest,
 ): string {
   const bootstrapRequired = Boolean(asRecord(setup.bootstrap).required);
   const persistence = describePersistenceStatus(setup);
   const gigachatAuth = describeGigachatAuth(setup);
-  const surfaceCount = new Set(PLAYGROUND_PRESETS.map((preset) => preset.surface)).size;
+  const surfaceCount = new Set(presets.map((preset) => preset.surface)).size;
 
   return renderPageFrame({
     className: "page-frame--playground",
-    toolbar: renderPlaygroundToolbar(setup, persistence, gigachatAuth, bootstrapRequired),
+    toolbar: renderPlaygroundToolbar(
+      setup,
+      presets,
+      persistence,
+      gigachatAuth,
+      bootstrapRequired,
+    ),
     sections: [
       renderPageSection({
         eyebrow: "Workspace",
@@ -91,7 +96,7 @@ export function renderPlaygroundPage(
         body: `
           ${card(
             "Request controls",
-            renderPlaygroundForm(initialPreset),
+            renderPlaygroundForm(initialPreset, presets),
             "panel panel--span-5 panel--aside playground-panel playground-panel--primary",
           )}
           ${card(
@@ -255,6 +260,7 @@ export function renderPlaygroundPage(
 
 function renderPlaygroundToolbar(
   setup: SetupPayload,
+  presets: PlaygroundPreset[],
   persistence: ReturnType<typeof describePersistenceStatus>,
   gigachatAuth: ReturnType<typeof describeGigachatAuth>,
   bootstrapRequired: boolean,
@@ -266,8 +272,8 @@ function renderPlaygroundToolbar(
       </p>
       <div class="playground-toolbar__meta">
         <div class="playground-toolbar__stats" aria-label="Playground context">
-          ${renderPlaygroundInlineStat("Surfaces", String(new Set(PLAYGROUND_PRESETS.map((preset) => preset.surface)).size))}
-          ${renderPlaygroundInlineStat("Presets", String(PLAYGROUND_PRESETS.length))}
+          ${renderPlaygroundInlineStat("Surfaces", String(new Set(presets.map((preset) => preset.surface)).size))}
+          ${renderPlaygroundInlineStat("Presets", String(presets.length))}
           ${renderPlaygroundInlineStat("GigaChat", gigachatAuth.value)}
           ${renderPlaygroundInlineStat("Persistence", persistence.value)}
         </div>
@@ -291,7 +297,10 @@ function renderPlaygroundInlineStat(label: string, value: string): string {
   `;
 }
 
-function renderPlaygroundForm(initialPreset: PlaygroundPreset): string {
+function renderPlaygroundForm(
+  initialPreset: PlaygroundPreset,
+  presets: PlaygroundPreset[],
+): string {
   return `
     <form id="playground-form" class="form-shell">
       <div class="playground-preset-strip">
@@ -300,7 +309,7 @@ function renderPlaygroundForm(initialPreset: PlaygroundPreset): string {
           <p class="muted">Pick a baseline request, then edit.</p>
         </div>
         <div class="playground-preset-strip__buttons">
-          ${PLAYGROUND_PRESETS.map(
+          ${presets.map(
             (preset) => `
               <button
                 class="button${preset.id === initialPreset.id ? "" : " button--secondary"} playground-preset"

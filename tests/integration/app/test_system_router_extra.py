@@ -365,7 +365,8 @@ def test_admin_ui_assets_include_provider_playground_preset_handoff():
 
     assert render_playground_asset.status_code == 200
     assert 'get("preset")' in render_playground_asset.text
-    assert "PLAYGROUND_PRESETS.find" in render_playground_asset.text
+    assert "buildPlaygroundPresets" in render_playground_asset.text
+    assert "app.runtime?.gigachat_model" in render_playground_asset.text
 
 
 def test_admin_ui_assets_include_polished_keys_and_playground_copy():

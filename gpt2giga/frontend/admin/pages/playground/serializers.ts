@@ -11,6 +11,7 @@ import {
   createEmptyTokenUsage,
   DEFAULT_OUTPUT,
   getPlaygroundFields,
+  resolvePlaygroundModel,
 } from "./state.js";
 
 export function applyPreset(form: HTMLFormElement, preset: PlaygroundPreset): void {
@@ -22,11 +23,14 @@ export function applyPreset(form: HTMLFormElement, preset: PlaygroundPreset): vo
   fields.stream.value = String(preset.stream);
 }
 
-export function buildRequest(form: HTMLFormElement): PlaygroundRequest {
+export function buildRequest(
+  form: HTMLFormElement,
+  configuredModel?: string | null,
+): PlaygroundRequest {
   const fields = getPlaygroundFields(form);
   return buildRequestFromState({
     surface: fields.surface.value as SurfaceId,
-    model: fields.model.value.trim() || "GigaChat",
+    model: fields.model.value.trim() || resolvePlaygroundModel(configuredModel),
     systemPrompt: fields.system_prompt.value.trim(),
     userPrompt: fields.user_prompt.value.trim(),
     stream: fields.stream.value === "true",
