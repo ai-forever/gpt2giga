@@ -140,3 +140,10 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 - Summary: documented a temporary repository-wide lifecycle policy for compatibility facades, migration-only wrappers, and legacy HTTP/API shims; that standalone document was later retired after the remaining transitional layers were removed and the guidance was folded back into the main docs/AGENTS notes
 - Checks: `git diff --check`; commit hooks (`trim trailing whitespace`, `detect hardcoded secrets`, `mypy`)
 - Notes: at the time, the policy distinguished public underscore-backed import modules such as `gpt2giga.app.runtime_backends` and `gpt2giga.core.config.control_plane` from temporary wrapper paths such as the old top-level `providers/gigachat/responses_*` modules
+
+## 2026-04-22 — S17 — done
+
+- Commit: `fa4688b`
+- Summary: added an explicit `docs/design-notes.md` document that explains the current rationale for the frameworkless admin UI, committed compiled admin assets, and the feature-vs-provider boundary; linked it from the docs index, architecture guide, and provider-extension guide so contributors see those tradeoffs in the normal navigation flow
+- Checks: `git diff --check -- docs/design-notes.md docs/README.md docs/architecture.md docs/how-to-add-provider.md`; commit hooks (`trim trailing whitespace`, `detect hardcoded secrets`, `mypy`)
+- Notes: this slice intentionally records current decisions and revisit triggers without introducing a heavier ADR directory/process; the three source brief files in `docs/` remain untracked and were left untouched
