@@ -28,6 +28,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-011 — done
 - [x] RLS-012 — done
 - [x] RLS-013 — done
+- [x] RLS-014 — done
 
 ---
 
@@ -563,6 +564,14 @@ Do not redesign the page.
 - main view file is thinner and easier to review
 - render logic gets more localized tests where reasonable
 - no copy or DOM regressions
+
+**Status**
+
+Completed in the current repository state: traffic-page render helpers for the
+selection inspector, overview aside, and preview rows now live in
+`frontend/admin/pages/traffic/view-helpers.ts`, while `view.ts` keeps the page
+composition and routing surface. Frontend coverage now directly exercises these
+helpers, and the committed admin assets have been rebuilt in sync.
 
 ---
 
