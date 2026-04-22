@@ -54,7 +54,7 @@ def _build_anthropic_response(
                     arguments = json.loads(arguments)
                 except json.JSONDecodeError:
                     arguments = {}
-            elif not isinstance(arguments, dict):
+            if not isinstance(arguments, dict):
                 arguments = {}
 
             content_blocks.append(

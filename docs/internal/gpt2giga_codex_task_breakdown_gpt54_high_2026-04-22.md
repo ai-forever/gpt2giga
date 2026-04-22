@@ -23,6 +23,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-006 — done
 - [x] RLS-007 — done
 - [x] RLS-008 — done
+- [x] RLS-009 — done
 
 ---
 
@@ -379,6 +380,13 @@ Add or strengthen golden behavior tests for:
 - tests are stable and focused
 - fixtures are readable
 - at least the highest-risk provider compatibility edges are guarded
+
+**Status**
+
+Completed in the current repository state: provider regression coverage now
+locks down v2-to-legacy chat tool-call normalization, Gemini response-builder
+structured-output and provider-error coercion, and Anthropic response ordering
+plus non-object tool-argument normalization.
 
 ---
 
