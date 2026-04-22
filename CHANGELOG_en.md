@@ -5,6 +5,31 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0rc3] - 2026-04-22
+
+### Added
+- **Admin frontend quality gates**: added compiled-admin-asset sync checks, browser smoke tests, and a frontend unit baseline so source files and packaged UI assets stay aligned
+- **Runtime store visibility in the admin UI**: setup/settings flows and the admin header now expose the active runtime storage backend explicitly
+- **Mypy in the dev toolchain**: added `mypy` to dev dependencies and pre-commit, and expanded typing coverage across runtime wiring, provider adapters, responses mapping, and request normalization
+- **Architecture design notes**: added `docs/design-notes.md` to document the frameworkless admin UI direction, committed admin assets policy, and feature/provider layer boundaries
+
+### Changed
+- **Product version**: bumped the package version from `1.0.0rc2` to `1.0.0rc3`
+- **Admin console internals**: split setup/settings/runtime services and files/batches bindings into smaller modules with clearer responsibility boundaries
+- **Configuration and runtime wiring**: extracted proxy settings helpers, tightened runtime dependency typing, and routed admin settings DTOs through stable facade layers
+- **CI and release automation**: refreshed GitHub workflows, labeler/release-drafter categories, and added guardrails against shipping stale admin assets
+
+### Fixed
+- **Legacy control-plane payload compatibility**: admin settings now ignore deprecated stored fields instead of failing while loading configuration
+- **Responses service lifecycle**: restored lazy initialization for the responses service after the refactor
+- **Batch/admin artifact statuses**: normalized batch-output status checks and related admin artifact flows
+- **SQLite logging**: corrected logger metadata emission for the sqlite runtime backend
+- **Dependency hygiene**: bumped `python-multipart` to address a Dependabot alert and fixed type/runtime regressions surfaced during the refactor
+
+### Removed
+- **Legacy compatibility shims**: removed old logs/responses shim modules and the remaining temporary compatibility layers
+- **Deprecated image toggle**: removed the unused `enable_images` flag
+
 ## [1.0.0rc2] - 2026-04-22
 
 ### Added

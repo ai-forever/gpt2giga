@@ -5,6 +5,30 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [1.0.0rc3] - 2026-04-22
+### Добавлено
+- **Quality gates для admin frontend**: добавлены проверки синхронизации compiled admin assets, browser smoke tests и frontend unit baseline, чтобы source и packaged UI не расходились
+- **Видимость runtime store в admin UI**: в setup/settings flow и в заголовке admin console теперь явно показывается и настраивается активный runtime backend хранения
+- **Mypy в dev toolchain**: `mypy` добавлен в dev-зависимости и pre-commit, а типизация усилена в runtime wiring, provider adapters, responses mapping и request normalization
+- **Architecture design notes**: добавлен `docs/design-notes.md` с зафиксированными решениями по frameworkless admin UI, committed admin assets и границе feature/provider layers
+
+### Изменено
+- **Версия продукта**: версия пакета поднята с `1.0.0rc2` до `1.0.0rc3`
+- **Admin console internals**: setup/settings/runtime services и files/batches bindings переразложены на более мелкие модули с более явными границами ответственности
+- **Конфигурация и runtime wiring**: выделены proxy settings helpers, ужесточена типизация runtime dependencies и admin settings DTO routed через стабильные facade-слои
+- **CI и release automation**: обновлены GitHub workflows, labeler/release-drafter categories и добавлены guardrails против устаревших admin assets при публикации
+
+### Исправлено
+- **Совместимость legacy control-plane payloads**: admin settings теперь игнорируют устаревшие сохранённые поля вместо ошибки при загрузке конфигурации
+- **Lifecycle responses service**: после рефакторинга восстановлена lazy initialization для responses service
+- **Batch/admin artifact statuses**: нормализована проверка статусов batch output и связанных admin artifact flows
+- **SQLite logging**: исправлено формирование logger metadata для sqlite runtime backend
+- **Dependency hygiene**: обновлён `python-multipart` для закрытия dependabot alert и устранены типовые/runtime-регрессии, всплывшие во время рефакторинга
+
+### Удалено
+- **Legacy compatibility shims**: убраны старые logs/responses shim-модули и оставшиеся временные compatibility layers
+- **Deprecated image toggle**: удалён больше не используемый флаг `enable_images`
+
 ## [1.0.0rc2] - 2026-04-22
 ### Добавлено
 - **Примеры standalone batch validation**: добавлен каталог `examples/batch_validation/` с отдельными runnable-примерами для OpenAI-, Anthropic- и Gemini-форматов через `POST /batches/validate`
