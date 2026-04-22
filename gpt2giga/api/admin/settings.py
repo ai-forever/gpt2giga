@@ -7,15 +7,13 @@ from pydantic import BaseModel, Field
 from starlette.requests import Request
 
 from gpt2giga.api.admin.access import verify_admin_ip_allowlist
-from gpt2giga.app._admin_settings.models import (
+from gpt2giga.app.admin_settings import (
+    AdminControlPlaneSettingsService,
+    AdminKeyManagementService,
     ApplicationSettingsUpdate,
     ClaimInstanceRequest,
     GigaChatSettingsUpdate,
     SecuritySettingsUpdate,
-)
-from gpt2giga.app.admin_settings import (
-    AdminControlPlaneSettingsService,
-    AdminKeyManagementService,
 )
 from gpt2giga.core.config.observability import ObservabilitySettingsUpdate
 from gpt2giga.core.errors import exceptions_handler
