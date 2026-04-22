@@ -389,8 +389,7 @@ class SqliteRuntimeStateBackend(RuntimeStateBackend):
             self._connection = connection
             if self._logger is not None:
                 self._logger.info(
-                    "Runtime SQLite backend initialized at %s",
-                    str(self._path),
+                    f"Runtime SQLite backend initialized at {str(self._path)}"
                 )
             return connection
 
