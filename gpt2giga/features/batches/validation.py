@@ -237,19 +237,16 @@ class BatchInputValidator:
         fallback_model: str | None,
     ) -> list[BatchValidationIssue]:
         if api_format is NormalizedArtifactFormat.ANTHROPIC:
-            validator = AnthropicBatchValidator(logger=self.logger)
-            return validator.validate(numbered_rows)
+            return AnthropicBatchValidator(logger=self.logger).validate(numbered_rows)
         if api_format is NormalizedArtifactFormat.GEMINI:
-            validator = GeminiBatchValidator(
+            return GeminiBatchValidator(
                 logger=self.logger,
                 fallback_model=fallback_model or self.gemini_fallback_model,
-            )
-            return validator.validate(numbered_rows)
+            ).validate(numbered_rows)
 
-        validator = OpenAIBatchValidator(
+        return await OpenAIBatchValidator(
             request_transformer=self.request_transformer,
             embeddings_model=self.embeddings_model,
             gigachat_api_mode=self.gigachat_api_mode,
             default_model=self.default_model,
-        )
-        return await validator.validate(numbered_rows)
+        ).validate(numbered_rows)

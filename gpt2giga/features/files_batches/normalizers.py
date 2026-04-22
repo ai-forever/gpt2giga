@@ -344,14 +344,20 @@ def _normalize_request_counts(value: Any) -> NormalizedBatchRequestCounts:
     )
 
 
+def _model_dump_or_empty(value: Any) -> dict[str, Any]:
+    if value is not None and hasattr(value, "model_dump"):
+        payload = value.model_dump()
+        if isinstance(payload, dict):
+            return payload
+    return {}
+
+
 def _normalize_anthropic_request_counts(
     batch: Any,
     metadata: dict[str, Any],
 ) -> NormalizedBatchRequestCounts:
     request_counts = getattr(batch, "request_counts", None)
-    dumped = (
-        request_counts.model_dump() if hasattr(request_counts, "model_dump") else {}
-    )
+    dumped = _model_dump_or_empty(request_counts)
     total = _int_or_none(dumped.get("total"))
     if total is None:
         total = len(metadata.get("requests", []))
@@ -384,9 +390,7 @@ def _normalize_gemini_request_counts(
     metadata: dict[str, Any],
 ) -> NormalizedBatchRequestCounts:
     request_counts = getattr(batch, "request_counts", None)
-    dumped = (
-        request_counts.model_dump() if hasattr(request_counts, "model_dump") else {}
-    )
+    dumped = _model_dump_or_empty(request_counts)
     total = _int_or_none(dumped.get("total"))
     if total is None:
         total = len(metadata.get("requests", []))
@@ -438,8 +442,9 @@ def _build_batch_raw(batch: Any, metadata: dict[str, Any]) -> dict[str, Any]:
         "metadata": deepcopy(metadata),
     }
     request_counts = getattr(batch, "request_counts", None)
-    if hasattr(request_counts, "model_dump"):
-        raw["batch"]["request_counts"] = request_counts.model_dump()
+    dumped_request_counts = _model_dump_or_empty(request_counts)
+    if dumped_request_counts:
+        raw["batch"]["request_counts"] = dumped_request_counts
     return raw
 
 

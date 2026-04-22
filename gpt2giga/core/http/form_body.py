@@ -90,11 +90,12 @@ async def read_request_multipart(request: Request) -> dict[str, Any]:
     files: dict[str, dict[str, Any]] = {}
     for part in message.iter_parts():
         field_name = part.get_param("name", header="content-disposition")
-        if not field_name:
+        if not isinstance(field_name, str) or not field_name:
             continue
 
         filename = part.get_filename()
-        payload = part.get_payload(decode=True) or b""
+        raw_payload = part.get_payload(decode=True)
+        payload = raw_payload if isinstance(raw_payload, bytes) else b""
         if filename is None:
             charset = part.get_content_charset() or "utf-8"
             form[field_name] = payload.decode(charset)

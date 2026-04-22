@@ -316,8 +316,9 @@ class FilesBatchesService:
             resolved_input_file_id = _string_or_none(input_file_id)
             if resolved_input_file_id:
                 stored_metadata["input_file_id"] = resolved_input_file_id
-            if _string_or_none(model):
-                stored_metadata["model"] = model.strip()
+            normalized_model = _string_or_none(model)
+            if normalized_model:
+                stored_metadata["model"] = normalized_model
             return await batches_service.create_batch_from_rows(
                 requests_payload,
                 endpoint=normalized_endpoint,
