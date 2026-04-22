@@ -167,7 +167,7 @@ def load_control_plane_overrides() -> tuple[dict[str, Any], dict[str, Any]]:
 def build_proxy_config_from_control_plane_payload(
     payload: dict[str, Any],
     *,
-    env_path: Path | None = None,
+    env_path: str | Path | None = None,
 ) -> ProxyConfig:
     """Build a validated runtime config from a persisted control-plane payload."""
     proxy_overrides, gigachat_overrides = load_control_plane_overrides_from_payload(
@@ -176,9 +176,9 @@ def build_proxy_config_from_control_plane_payload(
     proxy = ProxySettings.model_validate(proxy_overrides)
     gigachat = GigaChatCLI.model_validate(gigachat_overrides)
     return ProxyConfig(
-        proxy=proxy.model_dump(),
-        gigachat=gigachat.model_dump(),
-        env_path=env_path,
+        proxy=proxy,
+        gigachat=gigachat,
+        env_path=str(env_path) if env_path is not None else None,
     )
 
 
@@ -215,7 +215,9 @@ def apply_control_plane_overrides(config: ProxyConfig) -> ProxyConfig:
     )
 
     return ProxyConfig(
-        proxy=proxy_payload, gigachat=gigachat_payload, env_path=config.env_path
+        proxy=ProxySettings.model_validate(proxy_payload),
+        gigachat=GigaChatCLI.model_validate(gigachat_payload),
+        env_path=config.env_path,
     )
 
 
