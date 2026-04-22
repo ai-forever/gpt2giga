@@ -4,6 +4,16 @@
 
 Если вы переходите с `0.1.x`, сначала пройдите [upgrade-0.x-to-1.0.md](./upgrade-0.x-to-1.0.md), а затем возвращайтесь сюда за деталями runtime posture.
 
+## Support boundary для релизной линии `1.0`
+
+Для операторского планирования полезно считать surface-ы так:
+
+- `Stable` surface можно экспонировать в production, если он реально нужен вашим клиентам.
+- `Partial` surface публикуется честно, но может не покрывать весь upstream contract и в отдельных мутациях возвращать `501`.
+- `Unsupported` surface не должен фигурировать в ваших обещаниях клиентам как часть стандартного rollout-а.
+
+Практическое правило простое: в `PROD` включайте через `GPT2GIGA_ENABLED_PROVIDERS` только те API surface-ы, которые вы реально протестировали на своих сценариях, а route-level maturity сверяйте по [api-compatibility.md](./api-compatibility.md).
+
 ## Базовые runtime switches
 
 Ключевые настройки:

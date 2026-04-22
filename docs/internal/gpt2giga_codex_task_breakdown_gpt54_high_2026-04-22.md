@@ -21,7 +21,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-004 — done
 - [x] RLS-005 — done
 - [x] RLS-006 — done
-- [ ] RLS-007
+- [x] RLS-007 — done
 
 ---
 
@@ -303,6 +303,10 @@ Be honest about `501`/partial routes and provider-specific limitations.
 - a reader can tell what 1.0 commits to
 - provider/endpoint maturity is clearly labeled
 - docs do not oversell incomplete surfaces
+
+**Status**
+
+Completed in the tracked repository state: `README.md`, `docs/api-compatibility.md`, and `docs/operator-guide.md` now define an explicit `Stable`/`Partial`/`Unsupported` support boundary for the 1.0 release line.
 
 ---
 

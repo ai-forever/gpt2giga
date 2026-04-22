@@ -93,11 +93,11 @@ make compose-base-dev-d
 
 `gpt2giga` не пытается реализовать все официальные API целиком. Он покрывает тот набор маршрутов, который обычно нужен в proxy-сценариях.
 
-| Surface | Основное покрытие |
-|---|---|
-| OpenAI-compatible | `chat/completions`, `responses`, `embeddings`, `files`, `batches`, `models`, LiteLLM-compatible `/model/info` |
-| Anthropic-compatible | `messages`, `messages/count_tokens`, `messages/batches*` |
-| Gemini-compatible | `models`, `generateContent`, `streamGenerateContent`, `countTokens`, `embedContent`, `batchEmbedContents`, `files`, `batchGenerateContent`, `batches` |
+| Surface | Support boundary | Основное покрытие |
+|---|---|---|
+| OpenAI-compatible | `Stable` для core proxy routes; `Partial` для частей `responses`; `Unsupported` для legacy/completions, assistants, audio, images и realtime | `chat/completions`, `responses`, `embeddings`, `files`, `batches`, `models`, LiteLLM-compatible `/model/info` |
+| Anthropic-compatible | `Stable` для `Messages API`; `Partial` для batch cancel/delete; `Unsupported` вне `messages*` surface | `messages`, `messages/count_tokens`, `messages/batches*` |
+| Gemini-compatible | `Stable` для core content/models/embeddings/files/batches flows; `Partial` для metadata-only file create и batch cancel/delete | `models`, `generateContent`, `streamGenerateContent`, `countTokens`, `embedContent`, `batchEmbedContents`, `files`, `batchGenerateContent`, `batches` |
 
 Полная матрица route-by-route, ограничения и неподдерживаемые API вынесены в [docs/api-compatibility.md](./docs/api-compatibility.md).
 
