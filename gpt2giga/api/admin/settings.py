@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Body, Query
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 
 from gpt2giga.api.admin.access import verify_admin_ip_allowlist
+from gpt2giga.app._admin_settings.models import (
+    ApplicationSettingsUpdate,
+    ClaimInstanceRequest,
+    GigaChatSettingsUpdate,
+    SecuritySettingsUpdate,
+)
 from gpt2giga.app.admin_settings import (
     AdminControlPlaneSettingsService,
     AdminKeyManagementService,
@@ -39,12 +43,6 @@ class ScopedKeyRotateRequest(BaseModel):
     """Rotate a scoped key in place."""
 
     key: str | None = Field(default=None, min_length=1)
-
-
-class ClaimInstanceRequest(BaseModel):
-    """Capture optional operator context for the first-run claim step."""
-
-    operator_label: str | None = Field(default=None, min_length=1)
 
 
 @admin_settings_api_router.get("/admin/api/setup")
@@ -80,7 +78,7 @@ async def get_application_settings(request: Request):
 @exceptions_handler
 async def update_application_settings(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: ApplicationSettingsUpdate,
 ):
     """Persist and optionally apply application settings."""
     verify_admin_ip_allowlist(request)
@@ -122,7 +120,7 @@ async def get_gigachat_settings(request: Request):
 @exceptions_handler
 async def update_gigachat_settings(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: GigaChatSettingsUpdate,
 ):
     """Persist and apply GigaChat settings."""
     verify_admin_ip_allowlist(request)
@@ -135,7 +133,7 @@ async def update_gigachat_settings(
 @exceptions_handler
 async def test_gigachat_settings(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: GigaChatSettingsUpdate,
 ):
     """Test candidate GigaChat settings without persisting them."""
     verify_admin_ip_allowlist(request)
@@ -156,7 +154,7 @@ async def get_security_settings(request: Request):
 @exceptions_handler
 async def update_security_settings(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: SecuritySettingsUpdate,
 ):
     """Persist and optionally apply security settings."""
     verify_admin_ip_allowlist(request)

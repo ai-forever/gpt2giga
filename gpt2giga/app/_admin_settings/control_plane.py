@@ -30,9 +30,13 @@ from gpt2giga.core.config.observability import (
 )
 from gpt2giga.core.config.settings import ProxyConfig
 
+from gpt2giga.app._admin_settings.models import (
+    ApplicationSettingsUpdate,
+    GigaChatSettingsUpdate,
+    SecuritySettingsUpdate,
+)
 from gpt2giga.app._admin_settings.shared import (
     _RESTART_REQUIRED_FIELDS,
-    _SECTION_FIELDS,
     _build_application_settings_payload,
     _build_gigachat_settings,
     _build_security_settings,
@@ -77,15 +81,6 @@ class AdminControlPlaneSettingsService:
             "control_plane": build_control_plane_status(self.config),
         }
 
-    def validate_section_payload(self, section: str, payload: dict[str, Any]) -> None:
-        """Validate that a settings payload contains only known fields."""
-        unknown = sorted(set(payload) - _SECTION_FIELDS[section])
-        if unknown:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Unknown {section} setting fields: {', '.join(unknown)}",
-            )
-
     def build_application_payload(self) -> dict[str, Any]:
         """Return UI-facing application settings."""
         stores = get_runtime_stores(self.state)
@@ -101,11 +96,12 @@ class AdminControlPlaneSettingsService:
         }
 
     async def update_application_settings(
-        self, payload: dict[str, Any]
+        self,
+        payload: ApplicationSettingsUpdate,
     ) -> dict[str, Any]:
         """Persist and optionally apply application settings."""
-        self.validate_section_payload("application", payload)
-        requested_backend = str(payload.get("runtime_store_backend") or "").strip()
+        updates = payload.to_updates()
+        requested_backend = str(updates.get("runtime_store_backend") or "").strip()
         if requested_backend and requested_backend not in {
             descriptor.name for descriptor in list_runtime_backend_descriptors()
         }:
@@ -117,10 +113,10 @@ class AdminControlPlaneSettingsService:
                     "Use one of the registered backends or register a custom backend first."
                 ),
             )
-        updated = _build_updated_config(self.config, proxy_updates=payload)
+        updated = _build_updated_config(self.config, proxy_updates=updates)
         result = await self._apply_updated_config(
             updated,
-            changed_fields=set(payload),
+            changed_fields=set(updates),
         )
         stores = get_runtime_stores(self.state)
         return {
@@ -171,13 +167,16 @@ class AdminControlPlaneSettingsService:
             "control_plane": self._control_summary(),
         }
 
-    async def update_gigachat_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def update_gigachat_settings(
+        self,
+        payload: GigaChatSettingsUpdate,
+    ) -> dict[str, Any]:
         """Persist and apply GigaChat settings."""
-        self.validate_section_payload("gigachat", payload)
-        updated = _build_updated_config(self.config, gigachat_updates=payload)
+        updates = payload.to_updates()
+        updated = _build_updated_config(self.config, gigachat_updates=updates)
         result = await self._apply_updated_config(
             updated,
-            changed_fields=set(payload),
+            changed_fields=set(updates),
         )
         return {
             "section": "gigachat",
@@ -185,10 +184,15 @@ class AdminControlPlaneSettingsService:
             **result,
         }
 
-    async def test_gigachat_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def test_gigachat_settings(
+        self,
+        payload: GigaChatSettingsUpdate,
+    ) -> dict[str, Any]:
         """Run a non-persistent upstream connectivity check with candidate settings."""
-        self.validate_section_payload("gigachat", payload)
-        updated = _build_updated_config(self.config, gigachat_updates=payload)
+        updated = _build_updated_config(
+            self.config,
+            gigachat_updates=payload.to_updates(),
+        )
         logger = get_logger_from_state(self.state)
         gigachat_factory = self._resolve_gigachat_factory()
         if gigachat_factory is None:
@@ -233,13 +237,16 @@ class AdminControlPlaneSettingsService:
             "control_plane": self._control_summary(),
         }
 
-    async def update_security_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def update_security_settings(
+        self,
+        payload: SecuritySettingsUpdate,
+    ) -> dict[str, Any]:
         """Persist and optionally apply security settings."""
-        self.validate_section_payload("security", payload)
-        updated = _build_updated_config(self.config, proxy_updates=payload)
+        updates = payload.to_updates()
+        updated = _build_updated_config(self.config, proxy_updates=updates)
         result = await self._apply_updated_config(
             updated,
-            changed_fields=set(payload),
+            changed_fields=set(updates),
         )
         return {
             "section": "security",
