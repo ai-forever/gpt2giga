@@ -298,7 +298,7 @@ class AttachmentProcessor:
         if not host:
             self._raise_disallowed_url("missing hostname")
 
-        normalized_host = host.strip().lower()
+        normalized_host = str(host).strip().lower()
         if normalized_host in {"localhost"}:
             self._raise_disallowed_url("hostname is localhost")
 
@@ -410,6 +410,11 @@ class AttachmentProcessor:
                     break
                 else:
                     self._raise_disallowed_url("too many redirects")
+
+                if response is None or stream_cm is None:
+                    self._raise_disallowed_url("failed to download remote file")
+                assert response is not None
+                assert stream_cm is not None
 
                 try:
                     content_type = self._extract_main_content_type(

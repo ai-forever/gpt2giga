@@ -75,7 +75,7 @@ async def _serve_console(request: Request) -> Response:
 def _register_console_route(path: str) -> None:
     @admin_router.get(path, response_class=HTMLResponse)
     @exceptions_handler
-    async def _render_console(request: Request) -> HTMLResponse:
+    async def _render_console(request: Request) -> Response:
         """Serve the multi-page operator console shell."""
         return await _serve_console(request)
 
