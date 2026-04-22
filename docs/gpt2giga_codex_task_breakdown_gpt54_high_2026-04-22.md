@@ -18,7 +18,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-001 — done
 - [x] RLS-002 — done
 - [x] RLS-003 — done
-- [ ] RLS-004
+- [x] RLS-004 — done
 - [ ] RLS-005
 - [ ] RLS-006
 - [ ] RLS-007
@@ -168,8 +168,8 @@ Do not leave parallel implementations behind unless a compatibility shim is clea
 
 **Why this matters**
 
-The local repository already presents itself as `1.0.0rc3`, while the top changelog entries lag behind.
-This is exactly the kind of release hygiene drift that weakens trust.
+Release-facing metadata needs to stay coherent across package manifests and changelogs.
+This task existed because the repository briefly presented itself as `1.0.0rc3`, while the top changelog entries still lagged behind.
 
 **Likely files**
 
@@ -190,6 +190,10 @@ If the project cuts `1.0.0`, make all release-facing metadata reflect it.
 - package versions and changelog headers match
 - English and Russian changelogs agree on the top version
 - no stale `rc2` references remain where `rc3` or final `1.0.0` should be shown
+
+**Status**
+
+Completed in the current repository state: `pyproject.toml`, `packages/gpt2giga-ui/pyproject.toml`, `CHANGELOG.md`, and `CHANGELOG_en.md` are aligned on `1.0.0rc3`.
 
 **Out of scope**
 
