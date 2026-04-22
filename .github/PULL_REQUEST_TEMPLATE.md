@@ -131,3 +131,4 @@ curl -X POST http://localhost:8090/v1/chat/completions \
 
 - [ ] Changelog updated (if applicable)
 - [ ] Version bump considered (if applicable)
+- [ ] Release gate reviewed for version/docs/assets drift when applicable (see [docs/release-checklist.md](../docs/release-checklist.md))

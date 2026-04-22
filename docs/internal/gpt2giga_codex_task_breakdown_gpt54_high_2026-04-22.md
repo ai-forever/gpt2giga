@@ -31,6 +31,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-014 — done
 - [x] RLS-015 — done
 - [x] RLS-016 — done
+- [x] RLS-017 — done
 - [x] RLS-018 — done
 
 ---
@@ -684,6 +685,16 @@ Create a checklist covering:
 
 - checklist is short, real, and usable
 - it matches the repository’s actual release mechanics
+
+**Status**
+
+Completed in the current repository state: `docs/release-checklist.md` now
+captures the actual 1.0 release gate across version/changelog sync, canonical
+docs sanity, Python quality/build commands, admin frontend test/build/asset
+sync, Docker smoke expectations, and publish-path checks drawn from the current
+CI and publish workflows. The checklist is linked from `docs/README.md`, and
+`.github/PULL_REQUEST_TEMPLATE.md` now includes a lightweight reminder to
+review it for release-facing changes.
 
 ---
 
