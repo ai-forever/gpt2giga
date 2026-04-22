@@ -30,6 +30,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-013 — done
 - [x] RLS-014 — done
 - [x] RLS-015 — done
+- [x] RLS-016 — done
 
 ---
 
@@ -639,6 +640,15 @@ Keep startup behavior identical.
 - fewer long imperative blocks
 - no startup behavior regression
 - app construction remains easy to trace
+
+**Status**
+
+Completed in the current repository state: `app/factory.py` now resolves
+create-app mode/UI flags and provider/shared route registration through smaller
+helpers, while `app/wiring.py` separates provider helper assembly, feature
+service binding, and runtime resource reopening into focused functions. Targeted
+app creation/lifespan regressions stay green, and direct unit coverage now
+locks down runtime wiring initialization.
 
 ---
 

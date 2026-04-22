@@ -1,9 +1,12 @@
 """FastAPI application factory and HTTP wiring."""
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 import os
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
+from fastapi.params import Depends as DependsMarker
 from starlette.datastructures import Headers
 from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse, RedirectResponse
@@ -39,6 +42,16 @@ from gpt2giga.core.config.control_plane import (
 from gpt2giga.providers import iter_enabled_provider_descriptors
 
 _ADMIN_ASSETS_CACHE_CONTROL = "public, max-age=300"
+
+
+@dataclass(frozen=True, slots=True)
+class _AppCreationFlags:
+    """Derived create_app flags that drive security and UI wiring."""
+
+    is_prod_mode: bool
+    auth_required: bool
+    bootstrap_required: bool
+    admin_ui_enabled: bool
 
 
 class AdminStaticFiles(StaticFiles):
@@ -201,11 +214,9 @@ def _register_routes(
     app: FastAPI,
     *,
     auth_required: bool,
-    is_prod_mode: bool,
     ui_enabled: bool,
 ) -> None:
     """Mount all API routers with the current auth policy."""
-    config = app.state.config
     api_dependencies = (
         [Depends(build_api_key_verifier(allow_scoped_keys=False))]
         if auth_required
@@ -215,46 +226,106 @@ def _register_routes(
         [Depends(build_admin_access_verifier())] if auth_required else []
     )
 
+    _register_provider_routes(app, auth_required=auth_required)
+    _register_shared_routes(
+        app,
+        api_dependencies=api_dependencies,
+        admin_dependencies=admin_dependencies,
+        ui_enabled=ui_enabled,
+    )
+
+
+def _register_provider_routes(app: FastAPI, *, auth_required: bool) -> None:
+    """Register provider-owned transport routers with their auth policy."""
+    config = app.state.config
     for descriptor in iter_enabled_provider_descriptors(
         config.proxy_settings.enabled_providers
     ):
         for mount in descriptor.mounts:
-            auth_dependency = build_api_key_verifier(
-                provider_name=descriptor.name,
-                gemini_style=mount.auth_policy == "gemini",
-                allow_scoped_keys=True,
+            provider_dependencies = _build_provider_dependencies(
+                descriptor_name=descriptor.name,
+                auth_policy=mount.auth_policy,
+                auth_required=auth_required,
             )
-            governance_dependency = build_governance_verifier(
-                provider_name=descriptor.name,
-                gemini_style=mount.auth_policy == "gemini",
+            _include_provider_router(
+                app,
+                router=mount.router_factory(),
+                prefix=mount.prefix,
+                tags=mount.tags,
+                dependencies=provider_dependencies,
             )
-            provider_dependencies = []
-            if auth_required:
-                provider_dependencies.append(Depends(auth_dependency))
-            provider_dependencies.append(Depends(governance_dependency))
-            router = mount.router_factory()
-            if mount.prefix and mount.tags:
-                app.include_router(
-                    router,
-                    prefix=mount.prefix,
-                    tags=list(mount.tags),
-                    dependencies=provider_dependencies,
-                )
-            elif mount.prefix:
-                app.include_router(
-                    router,
-                    prefix=mount.prefix,
-                    dependencies=provider_dependencies,
-                )
-            elif mount.tags:
-                app.include_router(
-                    router,
-                    tags=list(mount.tags),
-                    dependencies=provider_dependencies,
-                )
-            else:
-                app.include_router(router, dependencies=provider_dependencies)
 
+
+def _build_provider_dependencies(
+    *,
+    descriptor_name: str,
+    auth_policy: str | None,
+    auth_required: bool,
+) -> list[DependsMarker]:
+    """Build the ordered dependency stack for a provider mount."""
+    gemini_style = auth_policy == "gemini"
+    dependencies: list[DependsMarker] = []
+    if auth_required:
+        dependencies.append(
+            Depends(
+                build_api_key_verifier(
+                    provider_name=descriptor_name,
+                    gemini_style=gemini_style,
+                    allow_scoped_keys=True,
+                )
+            )
+        )
+    dependencies.append(
+        Depends(
+            build_governance_verifier(
+                provider_name=descriptor_name,
+                gemini_style=gemini_style,
+            )
+        )
+    )
+    return dependencies
+
+
+def _include_provider_router(
+    app: FastAPI,
+    *,
+    router,
+    prefix: str | None,
+    tags: tuple[str, ...] | list[str] | None,
+    dependencies: Sequence[DependsMarker],
+) -> None:
+    """Include a provider router without repeating optional prefix/tag branches."""
+    if prefix and tags:
+        app.include_router(
+            router,
+            prefix=prefix,
+            tags=list(tags),
+            dependencies=dependencies,
+        )
+    elif prefix:
+        app.include_router(
+            router,
+            prefix=prefix,
+            dependencies=dependencies,
+        )
+    elif tags:
+        app.include_router(
+            router,
+            tags=list(tags),
+            dependencies=dependencies,
+        )
+    else:
+        app.include_router(router, dependencies=dependencies)
+
+
+def _register_shared_routes(
+    app: FastAPI,
+    *,
+    api_dependencies: Sequence[DependsMarker],
+    admin_dependencies: Sequence[DependsMarker],
+    ui_enabled: bool,
+) -> None:
+    """Register non-provider routers that share the global auth policy."""
     app.include_router(system_router)
     app.include_router(batches_validation_router, dependencies=api_dependencies)
     app.include_router(
@@ -270,6 +341,68 @@ def _register_routes(
         app.include_router(admin_router, dependencies=admin_dependencies)
 
 
+def _resolve_app_creation_flags(config) -> _AppCreationFlags:
+    """Resolve the mode-derived flags that control create_app wiring."""
+    is_prod_mode = config.proxy_settings.mode == "PROD"
+    return _AppCreationFlags(
+        is_prod_mode=is_prod_mode,
+        auth_required=config.proxy_settings.enable_api_key_auth or is_prod_mode,
+        bootstrap_required=requires_admin_bootstrap(config),
+        admin_ui_enabled=is_admin_ui_enabled(config),
+    )
+
+
+def _validate_app_creation_flags(
+    config,
+    *,
+    auth_required: bool,
+    bootstrap_required: bool,
+) -> None:
+    """Validate API-key/bootstrap requirements before app creation."""
+    if auth_required and not config.proxy_settings.api_key and not bootstrap_required:
+        raise RuntimeError(
+            "API key must be configured when auth is enabled or MODE=PROD "
+            "(set GPT2GIGA_API_KEY / --proxy.api-key)."
+        )
+
+
+def _build_fastapi_app(
+    config,
+    *,
+    is_prod_mode: bool,
+    app_version_getter,
+) -> FastAPI:
+    """Construct the FastAPI app object before runtime state wiring."""
+    return FastAPI(
+        lifespan=lifespan,
+        title="Gpt2Giga converter proxy",
+        version=app_version_getter(),
+        openapi_tags=build_openapi_tags(config.proxy_settings.enabled_providers),
+        redirect_slashes=False,
+        docs_url=None if is_prod_mode else "/docs",
+        redoc_url=None if is_prod_mode else "/redoc",
+        openapi_url=None if is_prod_mode else "/openapi.json",
+    )
+
+
+def _initialize_app_state(
+    app: FastAPI,
+    *,
+    config,
+    config_loader,
+    logger_factory,
+    admin_ui_enabled: bool,
+    admin_ui_resources,
+) -> None:
+    """Initialize app.state fields consumed by lifespan and admin routes."""
+    ensure_runtime_dependencies(app.state, config=config)
+    app.state.config_loader = config_loader
+    app.state.admin_ui_enabled = admin_ui_enabled
+    app.state.admin_ui_installed = admin_ui_resources is not None
+    if logger_factory is not None:
+        app.state.logger_factory = logger_factory
+
+
 def create_app(
     config=None,
     *,
@@ -281,41 +414,35 @@ def create_app(
     if config is None:
         config = config_loader()
 
-    is_prod_mode = config.proxy_settings.mode == "PROD"
-    auth_required = config.proxy_settings.enable_api_key_auth or is_prod_mode
-    bootstrap_required = requires_admin_bootstrap(config)
+    flags = _resolve_app_creation_flags(config)
     admin_ui_resources = get_admin_ui_resources()
-    admin_ui_enabled = is_admin_ui_enabled(config)
 
-    if auth_required and not config.proxy_settings.api_key and not bootstrap_required:
-        raise RuntimeError(
-            "API key must be configured when auth is enabled or MODE=PROD "
-            "(set GPT2GIGA_API_KEY / --proxy.api-key)."
-        )
-    if bootstrap_required:
+    _validate_app_creation_flags(
+        config,
+        auth_required=flags.auth_required,
+        bootstrap_required=flags.bootstrap_required,
+    )
+    if flags.bootstrap_required:
         load_bootstrap_token(create=True)
 
-    app = FastAPI(
-        lifespan=lifespan,
-        title="Gpt2Giga converter proxy",
-        version=app_version_getter(),
-        openapi_tags=build_openapi_tags(config.proxy_settings.enabled_providers),
-        redirect_slashes=False,
-        docs_url=None if is_prod_mode else "/docs",
-        redoc_url=None if is_prod_mode else "/redoc",
-        openapi_url=None if is_prod_mode else "/openapi.json",
+    app = _build_fastapi_app(
+        config,
+        is_prod_mode=flags.is_prod_mode,
+        app_version_getter=app_version_getter,
     )
 
-    ensure_runtime_dependencies(app.state, config=config)
-    app.state.config_loader = config_loader
-    app.state.admin_ui_enabled = admin_ui_enabled
-    app.state.admin_ui_installed = admin_ui_resources is not None
-    if logger_factory is not None:
-        app.state.logger_factory = logger_factory
+    _initialize_app_state(
+        app,
+        config=config,
+        config_loader=config_loader,
+        logger_factory=logger_factory,
+        admin_ui_enabled=flags.admin_ui_enabled,
+        admin_ui_resources=admin_ui_resources,
+    )
 
     admin_static_dir = (
         admin_ui_resources.static_dir
-        if admin_ui_enabled and admin_ui_resources is not None
+        if flags.admin_ui_enabled and admin_ui_resources is not None
         else None
     )
     _mount_admin_assets(app, assets_dir=admin_static_dir)
@@ -330,13 +457,12 @@ def create_app(
     _register_root_redirect(
         app,
         config=config,
-        is_prod_mode=is_prod_mode,
-        ui_enabled=admin_ui_enabled,
+        is_prod_mode=flags.is_prod_mode,
+        ui_enabled=flags.admin_ui_enabled,
     )
     _register_routes(
         app,
-        auth_required=auth_required,
-        is_prod_mode=is_prod_mode,
-        ui_enabled=admin_ui_enabled,
+        auth_required=flags.auth_required,
+        ui_enabled=flags.admin_ui_enabled,
     )
     return app
