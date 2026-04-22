@@ -24,6 +24,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-007 — done
 - [x] RLS-008 — done
 - [x] RLS-009 — done
+- [x] RLS-010 — done
 
 ---
 
@@ -415,6 +416,13 @@ Keep the public service entrypoints unchanged.
 
 - smaller helpers with direct tests
 - no public behavior regression
+
+**Status**
+
+Completed in the current repository state: creation-specific pure helpers now
+live in `features/files_batches/creation.py`, the service delegates provider
+metadata/fallback-model preparation there, and the extracted helper module has
+direct unit coverage.
 - main service becomes easier to scan
 
 **Out of scope**
