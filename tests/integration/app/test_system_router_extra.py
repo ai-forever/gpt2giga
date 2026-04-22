@@ -516,6 +516,7 @@ def test_admin_runtime_endpoint():
     assert payload["state"]["stores"]["governance_counters"] == 0
     assert payload["governance_enabled"] is False
     assert payload["governance_limits_configured"] == 0
+    assert payload["trusted_proxy_headers_enabled"] is False
 
 
 def test_admin_runtime_endpoint_exposes_configured_gigachat_model():
@@ -555,6 +556,7 @@ def test_admin_config_exposes_grouped_safe_summary():
                 gigachat_responses_api_mode="v2",
                 runtime_store_backend="memory",
                 enable_telemetry=True,
+                trusted_proxy_cidrs=["10.0.0.0/24"],
             )
         )
     )
@@ -573,6 +575,8 @@ def test_admin_config_exposes_grouped_safe_summary():
     assert payload["summary"]["providers"]["governance_enabled"] is False
     assert payload["summary"]["limits"]["max_request_body_bytes"] > 0
     assert payload["summary"]["logging"]["log_filename"] == "gpt2giga.log"
+    assert payload["summary"]["logging"]["trusted_proxy_headers_enabled"] is True
+    assert payload["trusted_proxy_headers_enabled"] is True
 
 
 def test_admin_runtime_reflects_disabled_telemetry():

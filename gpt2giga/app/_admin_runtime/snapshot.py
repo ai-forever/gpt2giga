@@ -137,6 +137,7 @@ class AdminRuntimeSnapshotService:
             "log_max_size": proxy.log_max_size,
             "log_redact_sensitive": proxy.log_redact_sensitive,
             "logs_ip_allowlist_enabled": bool(proxy.logs_ip_allowlist),
+            "trusted_proxy_headers_enabled": bool(proxy.trusted_proxy_cidrs),
             "cors_allow_origins": list(proxy.cors_allow_origins),
             "cors_allow_methods": list(proxy.cors_allow_methods),
             "cors_allow_headers": list(proxy.cors_allow_headers),
@@ -177,6 +178,7 @@ class AdminRuntimeSnapshotService:
             "pass_token": proxy.pass_token,
             "enable_reasoning": proxy.enable_reasoning,
             "logs_ip_allowlist_enabled": bool(proxy.logs_ip_allowlist),
+            "trusted_proxy_headers_enabled": bool(proxy.trusted_proxy_cidrs),
             "log_redact_sensitive": proxy.log_redact_sensitive,
             "admin_enabled": True,
             "admin_ui_enabled": ui_enabled,
@@ -367,6 +369,7 @@ class AdminRuntimeSnapshotService:
                 "log_max_size": proxy.log_max_size,
                 "log_redact_sensitive": proxy.log_redact_sensitive,
                 "logs_ip_allowlist_enabled": bool(proxy.logs_ip_allowlist),
+                "trusted_proxy_headers_enabled": bool(proxy.trusted_proxy_cidrs),
             },
         }
 

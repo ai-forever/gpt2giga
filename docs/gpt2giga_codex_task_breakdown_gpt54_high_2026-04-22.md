@@ -17,7 +17,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 
 - [x] RLS-001 — done
 - [x] RLS-002 — done
-- [ ] RLS-003
+- [x] RLS-003 — done
 - [ ] RLS-004
 - [ ] RLS-005
 - [ ] RLS-006

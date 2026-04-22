@@ -509,6 +509,33 @@ def test_prod_bootstrap_allows_remote_setup_with_bootstrap_token(tmp_path, monke
     )
 
 
+def test_prod_bootstrap_claim_uses_trusted_proxy_client_ip(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                mode="PROD",
+                trusted_proxy_cidrs=["127.0.0.0/8"],
+            )
+        )
+    )
+    client = TestClient(app, client=("127.0.0.1", 50000))
+    token = get_control_plane_bootstrap_token_file().read_text(encoding="utf-8").strip()
+
+    claimed = client.post(
+        "/admin/api/setup/claim",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-Forwarded-For": "10.0.0.5, 172.16.0.1",
+        },
+        json={"operator_label": "Trusted proxy bootstrap"},
+    )
+
+    assert claimed.status_code == 200
+    assert claimed.json()["control_plane"]["claim"]["claimed_from"] == "10.0.0.5"
+
+
 def test_prod_mode_keeps_metrics_route_but_requires_api_key(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
 

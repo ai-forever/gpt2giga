@@ -8,6 +8,7 @@ from starlette.requests import Request
 
 from gpt2giga.app.runtime_backends import list_runtime_backend_descriptors
 from gpt2giga.core.config.settings import GigaChatCLI, ProxyConfig, ProxySettings
+from gpt2giga.core.http import resolve_client_ip
 
 _APPLICATION_FIELDS = {
     "mode",
@@ -72,6 +73,7 @@ _SECURITY_FIELDS = {
     "cors_allow_methods",
     "cors_allow_headers",
     "logs_ip_allowlist",
+    "trusted_proxy_cidrs",
 }
 _RESTART_REQUIRED_FIELDS = {
     "mode",
@@ -143,13 +145,23 @@ def _mask_secret(value: object) -> str | None:
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP from X-Forwarded-For or request.client."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return ""
+    """Resolve the request client IP with the shared proxy-trust policy."""
+    trusted_proxy_cidrs = getattr(
+        getattr(request.app.state, "config", None),
+        "proxy_settings",
+        None,
+    )
+    return (
+        resolve_client_ip(
+            request,
+            trusted_proxy_cidrs=getattr(
+                trusted_proxy_cidrs,
+                "trusted_proxy_cidrs",
+                (),
+            ),
+        )
+        or ""
+    )
 
 
 def _build_application_settings(proxy: ProxySettings) -> dict[str, Any]:
@@ -291,6 +303,7 @@ def _build_security_settings(proxy: ProxySettings) -> dict[str, Any]:
         "cors_allow_methods": list(proxy.cors_allow_methods),
         "cors_allow_headers": list(proxy.cors_allow_headers),
         "logs_ip_allowlist": list(proxy.logs_ip_allowlist),
+        "trusted_proxy_cidrs": list(proxy.trusted_proxy_cidrs),
     }
 
 

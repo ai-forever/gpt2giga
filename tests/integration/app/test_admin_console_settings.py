@@ -229,6 +229,7 @@ def test_security_settings_update_is_persisted(tmp_path, monkeypatch):
         "/admin/api/settings/security",
         json={
             "logs_ip_allowlist": ["127.0.0.1", "10.0.0.8"],
+            "trusted_proxy_cidrs": ["10.0.0.0/24"],
             "scoped_api_keys": [
                 {
                     "name": "sdk-openai",
@@ -254,6 +255,7 @@ def test_security_settings_update_is_persisted(tmp_path, monkeypatch):
     payload = response.json()
     assert payload["section"] == "security"
     assert payload["values"]["logs_ip_allowlist"] == ["127.0.0.1", "10.0.0.8"]
+    assert payload["values"]["trusted_proxy_cidrs"] == ["10.0.0.0/24"]
     assert payload["values"]["scoped_api_keys_configured"] == 1
     assert payload["values"]["governance_limits"][0]["name"] == "openai-chat-limit"
 
@@ -261,6 +263,7 @@ def test_security_settings_update_is_persisted(tmp_path, monkeypatch):
     assert get_response.status_code == 200
     values = get_response.json()["values"]
     assert values["logs_ip_allowlist"] == ["127.0.0.1", "10.0.0.8"]
+    assert values["trusted_proxy_cidrs"] == ["10.0.0.0/24"]
     assert values["scoped_api_keys_configured"] == 1
     assert values["governance_limits"][0]["providers"] == ["openai"]
 

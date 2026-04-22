@@ -100,3 +100,4 @@ class SecuritySettingsUpdate(_AdminSettingsDTO):
     cors_allow_methods: list[str] | None = None
     cors_allow_headers: list[str] | None = None
     logs_ip_allowlist: list[str] | None = None
+    trusted_proxy_cidrs: list[str] | None = None
