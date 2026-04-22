@@ -1,4 +1,4 @@
-"""Compatibility facade for runtime backend contracts and implementations."""
+"""Public runtime backend contracts and implementations."""
 
 from gpt2giga.app._runtime_backends import (
     ConfigurableRuntimeStateBackend,
@@ -16,6 +16,8 @@ from gpt2giga.app._runtime_backends import (
     SqliteMapping,
     SqliteRuntimeStateBackend,
     create_runtime_backend,
+    get_runtime_backend_descriptor,
+    list_runtime_backend_descriptors,
     provision_runtime_resources,
     register_runtime_backend,
 )
@@ -36,6 +38,8 @@ __all__ = [
     "SqliteMapping",
     "SqliteRuntimeStateBackend",
     "create_runtime_backend",
+    "get_runtime_backend_descriptor",
+    "list_runtime_backend_descriptors",
     "provision_runtime_resources",
     "register_runtime_backend",
 ]

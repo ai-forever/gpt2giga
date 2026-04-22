@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, cast
 
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -258,7 +258,10 @@ def get_responses_service_from_state(state: Any) -> Any:
     response_processor = get_response_processor_from_state(state)
     config = getattr(state, "config", None)
     proxy_settings = getattr(config, "proxy_settings", None)
-    backend_mode = getattr(proxy_settings, "responses_backend_mode", "v1")
+    raw_backend_mode = getattr(proxy_settings, "responses_backend_mode", "v1")
+    backend_mode: ResponsesBackendMode = "v1"
+    if raw_backend_mode in {"v1", "v2"}:
+        backend_mode = cast(ResponsesBackendMode, raw_backend_mode)
     service = ResponsesService(
         request_preparer,
         response_processor,

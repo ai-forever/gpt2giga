@@ -48,8 +48,8 @@ async def test_get_embeddings_service_from_state_builds_default_mapper_from_conf
     service = get_embeddings_service_from_state(state)
     prepared = await service.prepare_request({"model": "gpt-x", "input": "hello"})
 
-    assert state.embeddings_service is service
-    assert state.embeddings_mapper is service.mapper
+    assert state.services.embeddings is service
+    assert state.providers.embeddings_mapper is service.mapper
     assert prepared == {
         "input": ["hello"],
         "model": state.config.proxy_settings.embeddings,

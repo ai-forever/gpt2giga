@@ -1,5 +1,7 @@
 """Runtime service wiring for the FastAPI application."""
 
+from typing import cast
+
 from fastapi import FastAPI
 
 from gpt2giga.app.dependencies import (
@@ -10,15 +12,22 @@ from gpt2giga.app.dependencies import (
     get_runtime_providers,
     get_runtime_services,
     get_runtime_stores,
-    sync_runtime_aliases,
+    RuntimeRequestTransformer,
+    RuntimeResponseProcessor,
 )
 from gpt2giga.features.batches import BatchesService
+from gpt2giga.features.chat.contracts import ChatProviderMapper
 from gpt2giga.features.chat import ChatService
+from gpt2giga.features.embeddings.contracts import EmbeddingsProviderMapper
 from gpt2giga.features.embeddings import EmbeddingsService
 from gpt2giga.features.files import FilesService
 from gpt2giga.features.files_batches import FilesBatchesService
 from gpt2giga.features.models import ModelsService
 from gpt2giga.features.responses import ResponsesService
+from gpt2giga.features.responses.contracts import (
+    ResponsesRequestPreparer,
+    ResponsesResultProcessor,
+)
 from gpt2giga.providers.gigachat import (
     AttachmentProcessor,
     GigaChatChatMapper,
@@ -51,24 +60,30 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
         max_text_file_size_bytes=config.proxy_settings.max_text_file_size_bytes,
     )
     providers.attachment_processor = attachment_processor
-    providers.request_transformer = RequestTransformer(
-        config,
-        logger,
-        attachment_processor,
+    providers.request_transformer = cast(
+        RuntimeRequestTransformer,
+        RequestTransformer(
+            config,
+            logger,
+            attachment_processor,
+        ),
     )
-    providers.response_processor = ResponseProcessor(
-        logger,
-        mode=config.proxy_settings.mode,
+    providers.response_processor = cast(
+        RuntimeResponseProcessor,
+        ResponseProcessor(
+            logger,
+            mode=config.proxy_settings.mode,
+        ),
     )
     providers.chat_mapper = GigaChatChatMapper(
         request_transformer=providers.request_transformer,
         response_processor=providers.response_processor,
         backend_mode=chat_backend_mode,
     )
-    services.chat = ChatService(providers.chat_mapper)
+    services.chat = ChatService(cast(ChatProviderMapper, providers.chat_mapper))
     providers.embeddings_mapper = GigaChatEmbeddingsMapper()
     services.embeddings = EmbeddingsService(
-        providers.embeddings_mapper,
+        cast(EmbeddingsProviderMapper, providers.embeddings_mapper),
         embeddings_model=config.proxy_settings.embeddings,
     )
     providers.models_mapper = GigaChatModelsMapper()
@@ -84,11 +99,10 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
     )
     services.files_batches = FilesBatchesService()
     services.responses = ResponsesService(
-        providers.request_transformer,
-        providers.response_processor,
+        cast(ResponsesRequestPreparer, providers.request_transformer),
+        cast(ResponsesResultProcessor, providers.response_processor),
         backend_mode=responses_backend_mode,
     )
-    sync_runtime_aliases(app.state)
 
 
 async def close_runtime_services(app: FastAPI, *, logger) -> None:
@@ -100,7 +114,6 @@ async def close_runtime_services(app: FastAPI, *, logger) -> None:
     if attachment_processor is not None:
         await attachment_processor.close()
         providers.attachment_processor = None
-        app.state.attachment_processor = None
 
     stores = get_runtime_stores(app.state)
     if stores.backend is not None:

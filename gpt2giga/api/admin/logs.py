@@ -1,4 +1,4 @@
-"""Admin log endpoints and legacy compatibility shims."""
+"""Admin log endpoints for the operator console."""
 
 from __future__ import annotations
 
@@ -9,49 +9,19 @@ import anyio
 from fastapi import APIRouter, Query
 from sse_starlette import EventSourceResponse
 from starlette.requests import Request
-from starlette.responses import PlainTextResponse, RedirectResponse
-from starlette.status import HTTP_403_FORBIDDEN, HTTP_307_TEMPORARY_REDIRECT
+from starlette.responses import PlainTextResponse
 
+from gpt2giga.api.admin.access import get_client_ip as get_client_ip
+from gpt2giga.api.admin.access import verify_admin_ip_allowlist
 from gpt2giga.app.dependencies import get_config_from_state, get_logger_from_state
 from gpt2giga.core.errors import exceptions_handler
 
 admin_logs_api_router = APIRouter(tags=["Admin"])
-legacy_logs_router = APIRouter(include_in_schema=False)
 
-
-def get_client_ip(request: Request) -> str:
-    """Extract client IP from X-Forwarded-For or request.client."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return ""
-
-
-def verify_logs_ip_allowlist(request: Request) -> None:
-    """Deny access if client IP is not in the configured allowlist."""
-    config = get_config_from_state(request.app.state)
-    allowlist = getattr(config.proxy_settings, "logs_ip_allowlist", None)
-    if not allowlist:
-        return
-
-    client_ip = get_client_ip(request)
-    if client_ip not in allowlist:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
-            detail="Access denied: IP not in logs allowlist",
-        )
-
-
-def _legacy_headers(alternate_path: str = "/admin?tab=logs") -> dict[str, str]:
-    """Expose a soft-deprecation hint for legacy log endpoints."""
-    return {
-        "Deprecation": "true",
-        "Link": f'<{alternate_path}>; rel="alternate"',
-    }
+__all__ = (
+    "admin_logs_api_router",
+    "get_client_ip",
+)
 
 
 def _read_last_lines(filename: str, lines: int) -> str | None:
@@ -87,10 +57,9 @@ async def _get_logs_response(
     request: Request,
     *,
     lines: int,
-    headers: dict[str, str] | None = None,
 ) -> PlainTextResponse:
     """Return the last N lines from the configured log file."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     filename = get_config_from_state(request.app.state).proxy_settings.log_filename
 
     try:
@@ -99,9 +68,8 @@ async def _get_logs_response(
             return PlainTextResponse(
                 "Log file not found.",
                 status_code=404,
-                headers=headers,
             )
-        return PlainTextResponse(content, headers=headers)
+        return PlainTextResponse(content)
     except Exception as exc:  # pragma: no cover - exercised in tests
         logger = get_logger_from_state(request.app.state)
         if logger is not None:
@@ -109,17 +77,14 @@ async def _get_logs_response(
         return PlainTextResponse(
             f"Error: {str(exc)}",
             status_code=500,
-            headers=headers,
         )
 
 
 async def _stream_logs_response(
     request: Request,
-    *,
-    headers: dict[str, str] | None = None,
 ) -> EventSourceResponse:
     """Stream live logs using Server-Sent Events."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
 
     async def log_generator():
         filename = get_config_from_state(request.app.state).proxy_settings.log_filename
@@ -151,7 +116,7 @@ async def _stream_logs_response(
             except OSError:
                 await asyncio.sleep(0.5)
 
-    return EventSourceResponse(log_generator(), headers=headers)
+    return EventSourceResponse(log_generator())
 
 
 @admin_logs_api_router.get(
@@ -169,33 +134,3 @@ async def get_admin_logs(request: Request, lines: int = Query(100, ge=1, le=5000
 async def stream_admin_logs(request: Request):
     """Stream live logs for admin tooling."""
     return await _stream_logs_response(request)
-
-
-@legacy_logs_router.get(
-    "/logs",
-    response_class=PlainTextResponse,
-    deprecated=True,
-)
-@exceptions_handler
-async def get_legacy_logs(request: Request, lines: int = Query(100, ge=1, le=5000)):
-    """Keep the legacy raw logs endpoint for a transition period."""
-    return await _get_logs_response(request, lines=lines, headers=_legacy_headers())
-
-
-@legacy_logs_router.get("/logs/stream", deprecated=True)
-@exceptions_handler
-async def stream_legacy_logs(request: Request):
-    """Keep the legacy log SSE endpoint for a transition period."""
-    return await _stream_logs_response(request, headers=_legacy_headers())
-
-
-@legacy_logs_router.get("/logs/html", deprecated=True)
-@exceptions_handler
-async def redirect_legacy_logs_html(request: Request):
-    """Redirect the legacy standalone log viewer into the admin UI."""
-    verify_logs_ip_allowlist(request)
-    return RedirectResponse(
-        url="/admin?tab=logs",
-        status_code=HTTP_307_TEMPORARY_REDIRECT,
-        headers=_legacy_headers(),
-    )

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from gpt2giga.app.dependencies import get_runtime_providers
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.features.batches.transforms import BATCH_CHAT_V2_FALLBACK_WARNING
 from gpt2giga.providers.gigachat import ResponseProcessor
@@ -187,9 +188,10 @@ class FakeRequestTransformer:
 def make_app(*, config=None):
     app = FastAPI()
     app.include_router(router)
-    app.state.gigachat_client = FakeGigaChat()
-    app.state.response_processor = ResponseProcessor(logger=logger)
-    app.state.request_transformer = FakeRequestTransformer()
+    providers = get_runtime_providers(app.state)
+    providers.gigachat_client = FakeGigaChat()
+    providers.response_processor = ResponseProcessor(logger=logger)
+    providers.request_transformer = FakeRequestTransformer()
     app.state.config = config or ProxyConfig()
     return app
 
@@ -226,7 +228,7 @@ def test_files_endpoints_roundtrip():
 
 def test_files_endpoint_infers_json_content_type_for_jsonl_uploads():
     app = make_app()
-    giga_client = app.state.gigachat_client
+    giga_client = app.state.providers.gigachat_client
     client = TestClient(app)
 
     response = client.post(
@@ -247,7 +249,7 @@ def test_files_endpoint_infers_json_content_type_for_jsonl_uploads():
 
 def test_batches_endpoints_translate_openai_flow():
     app = make_app()
-    giga_client = app.state.gigachat_client
+    giga_client = app.state.providers.gigachat_client
     client = TestClient(app)
 
     input_line = {
@@ -404,7 +406,7 @@ def test_batches_endpoints_force_v1_chat_batches_when_global_mode_is_v2():
     app = make_app(
         config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
     )
-    giga_client = app.state.gigachat_client
+    giga_client = app.state.providers.gigachat_client
     client = TestClient(app)
 
     input_line = {
@@ -448,7 +450,7 @@ def test_batches_endpoints_translate_embeddings_flow():
     app = make_app(
         config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
     )
-    giga_client = app.state.gigachat_client
+    giga_client = app.state.providers.gigachat_client
     client = TestClient(app)
 
     input_line = {

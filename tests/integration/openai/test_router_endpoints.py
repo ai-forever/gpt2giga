@@ -5,9 +5,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.providers.gigachat import ResponseProcessor
 from gpt2giga.api.openai import router
+from gpt2giga.app.dependencies import get_runtime_providers
+from gpt2giga.core.config.settings import ProxyConfig
 
 
 def _get_model(data):
@@ -336,9 +337,10 @@ class FakeRequestTransformer:
 def make_app(monkeypatch=None, *, config=None):
     app = FastAPI()
     app.include_router(router)
-    app.state.gigachat_client = FakeGigachat()
-    app.state.response_processor = ResponseProcessor(logger=logger)
-    app.state.request_transformer = FakeRequestTransformer()
+    providers = get_runtime_providers(app.state)
+    providers.gigachat_client = FakeGigachat()
+    providers.response_processor = ResponseProcessor(logger=logger)
+    providers.request_transformer = FakeRequestTransformer()
     app.state.config = config or ProxyConfig()
     if monkeypatch:
 
@@ -369,7 +371,7 @@ def test_responses_non_stream():
     assert body["status"] == "completed"
     assert body["conversation"] == {"id": "thread-1"}
     assert "store" not in body
-    assert app.state.gigachat_client.last_chat_v2["storage"] == {}
+    assert app.state.providers.gigachat_client.last_chat_v2["storage"] == {}
 
 
 def test_responses_non_stream_v1_mode_uses_legacy_backend_path():
@@ -385,8 +387,8 @@ def test_responses_non_stream_v1_mode_uses_legacy_backend_path():
     assert body["status"] == "completed"
     assert body["output"][0]["content"][0]["text"] == "ok"
     assert body.get("conversation") is None
-    assert app.state.gigachat_client.last_responses_method == "v1"
-    assert app.state.request_transformer.last_mode == "v1"
+    assert app.state.providers.gigachat_client.last_responses_method == "v1"
+    assert app.state.providers.request_transformer.last_mode == "v1"
 
 
 def test_responses_non_stream_can_override_base_mode():
@@ -408,8 +410,8 @@ def test_responses_non_stream_can_override_base_mode():
     body = resp.json()
     assert body["status"] == "completed"
     assert body["conversation"] == {"id": "thread-1"}
-    assert app.state.gigachat_client.last_responses_method == "v2"
-    assert app.state.request_transformer.last_mode == "v2"
+    assert app.state.providers.gigachat_client.last_responses_method == "v2"
+    assert app.state.providers.request_transformer.last_mode == "v2"
 
 
 def test_responses_non_stream_preserves_reasoning_config():
@@ -493,7 +495,7 @@ def test_responses_non_stream_store_false_disables_gigachat_storage():
     assert resp.status_code == 200
     body = resp.json()
     assert body.get("conversation") is None
-    assert app.state.gigachat_client.last_chat_v2.get("storage") is None
+    assert app.state.providers.gigachat_client.last_chat_v2.get("storage") is None
 
 
 def test_responses_non_stream_image_generation_maps_file_to_base64():
@@ -581,8 +583,8 @@ def test_responses_stream_v1_mode_returns_sse_events():
     assert "event: response.created" in body
     assert "event: response.output_text.delta" in body
     assert "event: response.completed" in body
-    assert app.state.gigachat_client.last_responses_method == "v1"
-    assert app.state.request_transformer.last_mode == "v1"
+    assert app.state.providers.gigachat_client.last_responses_method == "v1"
+    assert app.state.providers.request_transformer.last_mode == "v1"
 
 
 def test_embeddings_with_token_ids(monkeypatch):

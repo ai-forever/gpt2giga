@@ -78,7 +78,8 @@ def _update_usage_mapping(
     """Apply a normalized request event to an aggregated usage mapping."""
     current = store.get(key) if hasattr(store, "get") else None
     record = dict(current) if isinstance(current, Mapping) else {}
-    usage = event.get("token_usage") or {}
+    raw_usage = event.get("token_usage")
+    usage: Mapping[str, Any] = raw_usage if isinstance(raw_usage, Mapping) else {}
     prompt_tokens = _safe_int(usage.get("prompt_tokens"))
     completion_tokens = _safe_int(usage.get("completion_tokens"))
     total_tokens = _safe_int(usage.get("total_tokens"))

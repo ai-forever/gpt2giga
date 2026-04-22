@@ -9,7 +9,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse, RedirectResponse
 from starlette.staticfiles import NotModifiedResponse, StaticFiles
 
-from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
+from gpt2giga.api.admin import admin_api_router, admin_router
 from gpt2giga.api.admin.access import (
     ADMIN_AUTH_COOKIE_NAME,
     build_admin_access_verifier,
@@ -232,17 +232,28 @@ def _register_routes(
             if auth_required:
                 provider_dependencies.append(Depends(auth_dependency))
             provider_dependencies.append(Depends(governance_dependency))
-            include_kwargs = {
-                "dependencies": provider_dependencies,
-            }
-            if mount.prefix:
-                include_kwargs["prefix"] = mount.prefix
-            if mount.tags:
-                include_kwargs["tags"] = list(mount.tags)
-            app.include_router(
-                mount.router_factory(),
-                **include_kwargs,
-            )
+            router = mount.router_factory()
+            if mount.prefix and mount.tags:
+                app.include_router(
+                    router,
+                    prefix=mount.prefix,
+                    tags=list(mount.tags),
+                    dependencies=provider_dependencies,
+                )
+            elif mount.prefix:
+                app.include_router(
+                    router,
+                    prefix=mount.prefix,
+                    dependencies=provider_dependencies,
+                )
+            elif mount.tags:
+                app.include_router(
+                    router,
+                    tags=list(mount.tags),
+                    dependencies=provider_dependencies,
+                )
+            else:
+                app.include_router(router, dependencies=provider_dependencies)
 
     app.include_router(system_router)
     app.include_router(batches_validation_router, dependencies=api_dependencies)
@@ -257,9 +268,6 @@ def _register_routes(
     app.include_router(admin_api_router, dependencies=admin_dependencies)
     if ui_enabled:
         app.include_router(admin_router, dependencies=admin_dependencies)
-
-    if not is_prod_mode:
-        app.include_router(legacy_logs_router, dependencies=api_dependencies)
 
 
 def create_app(
@@ -305,10 +313,12 @@ def create_app(
     if logger_factory is not None:
         app.state.logger_factory = logger_factory
 
-    _mount_admin_assets(
-        app,
-        assets_dir=admin_ui_resources.static_dir if admin_ui_enabled else None,
+    admin_static_dir = (
+        admin_ui_resources.static_dir
+        if admin_ui_enabled and admin_ui_resources is not None
+        else None
     )
+    _mount_admin_assets(app, assets_dir=admin_static_dir)
     _register_favicon_route(
         app,
         favicon_path=admin_ui_resources.favicon_ico_path

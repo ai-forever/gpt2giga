@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import gpt2giga.app.observability as observability_facade
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
@@ -34,9 +33,11 @@ from gpt2giga.app._observability.recording import (
     annotate_request_audit_request_payload as internal_annotate_request_audit_request_payload,
 )
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.app.dependencies import get_runtime_providers
 from gpt2giga.app.observability import (
     annotate_request_audit_from_payload,
     annotate_request_audit_request_payload,
+    filter_request_events,
     get_request_audit_metadata,
     set_request_audit_error,
     set_request_audit_model,
@@ -62,29 +63,20 @@ def test_path_norm_redirect():
     assert resp.history == []
 
 
-def test_observability_facade_reexports_internal_implementation():
+def test_observability_public_imports_resolve_to_internal_modules():
     assert (
-        observability_facade.annotate_request_audit_from_payload
+        annotate_request_audit_from_payload
         is internal_annotate_request_audit_from_payload
     )
     assert (
-        observability_facade.annotate_request_audit_request_payload
+        annotate_request_audit_request_payload
         is internal_annotate_request_audit_request_payload
     )
-    assert observability_facade.filter_request_events is internal_filter_request_events
-    assert (
-        observability_facade.get_request_audit_metadata
-        is internal_get_request_audit_metadata
-    )
-    assert (
-        observability_facade.set_request_audit_error is internal_set_request_audit_error
-    )
-    assert (
-        observability_facade.set_request_audit_model is internal_set_request_audit_model
-    )
-    assert (
-        observability_facade.set_request_audit_usage is internal_set_request_audit_usage
-    )
+    assert filter_request_events is internal_filter_request_events
+    assert get_request_audit_metadata is internal_get_request_audit_metadata
+    assert set_request_audit_error is internal_set_request_audit_error
+    assert set_request_audit_model is internal_set_request_audit_model
+    assert set_request_audit_usage is internal_set_request_audit_usage
 
 
 def test_path_norm_preserves_query_params():
@@ -220,7 +212,7 @@ def test_pass_token_middleware(monkeypatch):
     monkeypatch.setattr("gpt2giga.providers.gigachat.auth.GigaChat", FakeGigaChat)
 
     # Base (app-scoped) GigaChat client
-    test_app.state.gigachat_client = FakeGigaChat()
+    get_runtime_providers(test_app.state).gigachat_client = FakeGigaChat()
 
     # No connection pool for this test (legacy behavior fallback)
     test_app.state.gigachat_pool = None

@@ -24,18 +24,24 @@ class GigaChatModelsMapper:
         """Convert a provider model object into an internal descriptor."""
         payload = _model_payload(model_obj)
         model_id = _extract_model_id(model_obj, payload)
-        object_type = _first_string(
-            payload.get("object"),
-            payload.get("object_"),
-            getattr(model_obj, "object_", None),
-            getattr(model_obj, "object", None),
-            default="model",
+        object_type = (
+            _first_string(
+                payload.get("object"),
+                payload.get("object_"),
+                getattr(model_obj, "object_", None),
+                getattr(model_obj, "object", None),
+                default="model",
+            )
+            or "model"
         )
         default_owner = "gpt2giga" if kind == "embeddings" else "gigachat"
-        owned_by = _first_string(
-            payload.get("owned_by"),
-            getattr(model_obj, "owned_by", None),
-            default=default_owner,
+        owned_by = (
+            _first_string(
+                payload.get("owned_by"),
+                getattr(model_obj, "owned_by", None),
+                default=default_owner,
+            )
+            or default_owner
         )
         return {
             "id": model_id,

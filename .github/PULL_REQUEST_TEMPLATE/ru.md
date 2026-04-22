@@ -92,9 +92,10 @@ curl -X POST http://localhost:8090/v1/chat/completions \
 - [ ] Код соответствует style guide проекта
 - [ ] Я выполнил(а) self-review своего кода
 - [ ] Я добавил(а) комментарии к коду, особенно в сложно понимаемых местах
-- [ ] Мои изменения не добавляют новых предупреждений линтера (`make lint`)
-- [ ] Проверка типов проходит (`make mypy`)
-- [ ] Все тесты проходят (`make test`)
+- [ ] Ruff lint проходит (`uv run ruff check .`)
+- [ ] Ruff format check проходит (`uv run ruff format --check .`)
+- [ ] Все тесты проходят (`uv run pytest tests/ --cov=. --cov-fail-under=80`)
+- [ ] Сборка пакета проходит (`uv build`)
 
 ### Документация
 
@@ -112,7 +113,6 @@ curl -X POST http://localhost:8090/v1/chat/completions \
 ### Совместимость
 
 - [ ] Изменения совместимы с Python 3.10-3.14
-- [ ] Не используется синтаксис `type[...]` (используйте `Type[...]` для Python 3.8)
 - [ ] Async/sync-варианты работают корректно (если применимо)
 
 ### Коммиты

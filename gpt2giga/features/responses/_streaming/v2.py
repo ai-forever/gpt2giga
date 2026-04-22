@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator
-from typing import Any, Optional
-
-from gigachat import GigaChat
+from collections.abc import AsyncGenerator, MutableMapping
+from typing import Any, Optional, cast
 from gigachat.models import Chat, ChatV2
 from starlette.requests import Request
 
@@ -31,6 +29,7 @@ from gpt2giga.features.responses._streaming.v1 import stream_responses_generator
 from gpt2giga.features.responses.store import get_response_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 from gpt2giga.providers.gigachat.streaming import (
+    GigaChatResponsesStreamProcessor,
     ResponsesFunctionCallUpdate,
     ResponsesTextUpdate,
     ResponsesToolUpdate,
@@ -43,9 +42,9 @@ async def stream_responses_generator(
     request: Request,
     chat_messages: ChatV2 | Chat | Any,
     response_id: str,
-    giga_client: Optional[GigaChat] = None,
+    giga_client: Any = None,
     request_data: Optional[dict[str, Any]] = None,
-    response_store: Optional[dict[Any, Any]] = None,
+    response_store: MutableMapping[str, Any] | None = None,
     response_processor: Any = None,
     api_mode: str = "v2",
 ) -> AsyncGenerator[str, None]:
@@ -55,6 +54,7 @@ async def stream_responses_generator(
     processor = response_processor or get_response_processor_from_state(
         request.app.state
     )
+    stream_processor = cast(GigaChatResponsesStreamProcessor, processor)
     if request_data is not None:
         set_request_audit_model(request, request_data.get("model"))
     response_store = (
@@ -73,10 +73,11 @@ async def stream_responses_generator(
             yield line
         return
 
+    typed_response_store = cast(dict[Any, Any], response_store)
     state = ResponsesV2StreamState(
         response_id=response_id,
         request_data=request_data,
-        response_store=response_store,
+        response_store=typed_response_store,
     )
     emitter = ResponsesStreamEventSequencer(format_responses_stream_event)
 
@@ -99,7 +100,7 @@ async def stream_responses_generator(
             iter_responses_stream_chunks(
                 giga_client,
                 chat_messages,
-                response_processor=processor,
+                response_processor=stream_processor,
                 response_id=response_id,
             ),
             logger=logger,
@@ -140,9 +141,11 @@ async def stream_responses_generator(
         for event in state.finalize(processor, emitter=emitter):
             yield event
 
-        response_status, _ = processor._build_response_status(state.finish_reason)
-        final_response = state.build_current_response(processor, response_status)
-        processor.store_response_metadata(response_store, final_response)
+        response_status, _ = stream_processor._build_response_status(
+            state.finish_reason
+        )
+        final_response = state.build_current_response(stream_processor, response_status)
+        stream_processor.store_response_metadata(typed_response_store, final_response)
         if response_status == "incomplete":
             yield emitter.emit("response.incomplete", {"response": final_response})
         else:

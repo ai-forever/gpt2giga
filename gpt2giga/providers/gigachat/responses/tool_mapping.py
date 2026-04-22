@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from gigachat.models import ChatV2Tool, ChatV2ToolConfig
 
+from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
 from gpt2giga.providers.gigachat.tool_mapping import (
     convert_tool_to_giga_functions,
     map_tool_name_to_gigachat,
@@ -22,7 +23,7 @@ _RESPONSE_BUILTIN_TOOL_ALIASES = {
 }
 
 
-class ResponsesV2ToolMappingMixin:
+class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
     """Normalize external Responses API tools into GigaChat v2 tool payloads."""
 
     @staticmethod

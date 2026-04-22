@@ -35,15 +35,15 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `app/admin_ui.py` | Optional admin UI detection and `/admin` setup-path helpers |
 | `app/admin_runtime.py` | Domain services that build admin runtime/config/capability/usage payloads |
 | `app/governance.py` | Governance presets and request-policy wiring helpers |
-| `app/_observability/` | Internal request-audit implementation | `app/observability.py` remains the stable facade/re-export path |
-| `app/_telemetry/` | Internal telemetry sink, registry, and OTLP/Prometheus implementation | `app/telemetry.py` remains the stable facade/re-export path |
-| `app/_runtime_backends/` | Internal runtime store/feed backend implementation | `app/runtime_backends.py` remains the stable facade/re-export path |
+| `app/_observability/` | Internal request-audit implementation; public runtime imports stay in `app/observability.py` |
+| `app/_telemetry/` | Internal telemetry sink, registry, and OTLP/Prometheus implementation; public imports stay in `app/telemetry.py` |
+| `app/_runtime_backends/` | Internal runtime store/feed backend implementation; public imports stay in `app/runtime_backends.py` |
 | `app/lifespan.py` | Startup/shutdown orchestration and runtime service lifecycle |
 | `app/wiring.py` | App-scoped runtime wiring for typed `app.state.services/stores/providers` |
 | `app/run.py` | Runtime entrypoint that loads config, logs startup, and runs Uvicorn |
 | `app/cli.py` | Config loading and env-path handling |
 | `app/dependencies.py` | Typed runtime containers and accessors for config, services, stores, and providers |
-| `core/config/_control_plane/` | Internal control-plane persistence/bootstrap implementation | `core/config/control_plane.py` remains the stable facade/re-export path |
+| `core/config/_control_plane/` | Internal control-plane persistence/bootstrap implementation; public imports stay in `core/config/control_plane.py` |
 | `core/config/settings.py` | Primary `ProxySettings`, `GigaChatCLI`, and `ProxyConfig` implementation |
 | `core/config/security.py` | Consolidated security posture model and limits |
 | `core/logging/setup.py` | Logger setup, redaction, UTF-8 sanitization, and RQUID context |
@@ -97,13 +97,13 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/admin/access.py` | Admin bootstrap-token and scoped access verification helpers |
 | `api/admin/runtime.py` | Thin HTTP layer for `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities`, recent events, and usage endpoints |
 | `api/admin/settings.py` | Thin HTTP layer for `/admin/api/setup`, `/admin/api/settings/*`, revisions, and `/admin/api/keys*` |
-| `api/admin/logs.py` | `/admin/api/logs`, `/admin/api/logs/stream`, legacy `/logs*` compatibility shims |
+| `api/admin/logs.py` | `/admin/api/logs` and `/admin/api/logs/stream` |
 | `api/admin/files_batches.py` | `/admin/api/files-batches/*` inventory, validation, and create/retrieve helpers |
 | `api/admin/ui.py` | `/admin` operator UI |
 | `api/system/metrics.py` | `/metrics` exposure for observability integrations |
 | `frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `../packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` |
 | `../packages/gpt2giga-ui/` | Optional UI distribution | Runtime source of truth for the compiled admin shell/assets used by `gpt2giga[ui]` |
-| `providers/registry.py` | Provider capability registry used by translation and compatibility flows |
+| `providers/registry.py` | Provider capability registry used by translation and provider routing |
 | `providers/openai/`, `providers/anthropic/`, `providers/gemini/` | Provider adapter/capability packages used by translation and normalization |
 | `providers/template_provider/` | Scaffold/example provider implementation kept in-tree with compat tests |
 
@@ -129,13 +129,13 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/translate.py` | `/translate` |
 | `api/admin/ui.py` | `/admin` |
 | `api/admin/runtime.py` | `/admin/api/*` runtime/operator endpoints |
-| `api/admin/logs.py` | `/admin/api/logs*` and legacy `/logs*` compatibility routes |
+| `api/admin/logs.py` | `/admin/api/logs*` log retrieval and SSE routes |
 | `api/admin/files_batches.py` | `/admin/api/files-batches/*` inventory, file, batch, and validation routes |
 
 - OpenAI and Anthropic routers are mounted both at root and `/v1`.
 - Gemini routes are mounted under `/v1beta`.
 - System routes are root-only.
-- Admin and legacy log routes are disabled in `PROD`.
+- Admin log routes are disabled in `PROD`.
 
 ## Provider And Transport Layout
 
@@ -169,10 +169,8 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `providers/gigachat/request_mapping_base.py` | Shared request parameter, schema, and validation helpers |
 | `providers/gigachat/chat_request_mapper.py` | Message role/content normalization and attachment handling |
 | `providers/gigachat/responses/` | Structured internal Responses pipeline helpers (`backend_request.py`, `input_normalizer.py`, `model_options.py`, `output_items.py`, `request_mapper.py`, `response_mapper.py`, `result_builder.py`, `threading.py`, `tool_mapping.py`) |
-| `providers/gigachat/responses_request_mapper.py` | Compatibility wrapper exposing the public Responses request-mapper mixin |
 | `providers/gigachat/response_mapper.py` | Public `ResponseProcessor` implementation for chat completions |
 | `providers/gigachat/response_mapping_common.py` | Shared response status, usage, reasoning, and serialization helpers |
-| `providers/gigachat/responses_response_mapper.py` | Compatibility wrapper exposing the public Responses response-mapper mixin |
 | `providers/gigachat/streaming.py` | Provider-owned stream iteration, GigaChat error wrapping, and chunk parsing |
 | `providers/gigachat/attachments.py` | Image/audio/text attachment handling, upload, and cleanup |
 | `providers/gigachat/tool_mapping.py` | Tool/function conversion and reserved-name remapping |
@@ -186,7 +184,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/gemini/response.py` | OpenAI/GigaChat result → Gemini response/error |
 | `api/gemini/streaming.py` | Gemini SSE/data-only translation |
 | `providers/registry.py` | Runtime provider lookup and adapter registry |
-| `providers/template_provider/*` | Template provider transport/presenter skeleton kept in sync with compat tests |
+| `providers/template_provider/*` | Template provider transport/presenter skeleton kept in sync with provider scaffold tests |
 
 ### Provider Execution Cheat Sheet
 
@@ -195,7 +193,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Responses flow:
   `api/openai/responses.py` -> `features/responses/service.py` -> `RequestTransformer.prepare_response(...)` or `prepare_response_v2(...)` -> GigaChat `achat` or `achat_v2` -> `ResponseProcessor.process_response_api(...)` or `process_response_api_v2(...)`
 - `app/wiring.py` is the place that injects `chat_backend_mode` and `responses_backend_mode` into the mapper/service layer; routers should not branch on backend mode.
-- `providers/gigachat/responses/` is the internal source of truth for native Responses v2 helper modules. Top-level `responses_*` modules remain compatibility wrappers for old imports.
+- `providers/gigachat/responses/` is the internal source of truth for native Responses v2 helper modules; import those structured helpers directly.
 
 ## Shared Utilities
 
@@ -205,7 +203,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - `core/app_meta.py`: app version, port checks, and CLI secret warnings
 - `providers/gigachat/tool_mapping.py`: tool/function conversion helpers
 - `providers/gigachat/message_utils.py`: provider-facing role/message normalization helpers
-- `api/admin/logs.py`: admin/logs IP allowlist checks and legacy `/logs*` redirects
+- `api/admin/logs.py`: admin log API endpoints and IP allowlist checks
 
 ## Patterns & Conventions
 
@@ -226,11 +224,11 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
 - Decorate router handlers with `@exceptions_handler`.
 - Use `app/dependencies.py` accessors plus typed `app.state.services`, `app.state.stores`, and `app.state.providers` instead of scattering new runtime fields across flat `app.state.*`.
-- Keep `gpt2giga.app.runtime_backends` as the stable import facade when splitting runtime storage internals; move implementation into `app/_runtime_backends/`.
-- Keep `gpt2giga.core.config.control_plane` as the stable import facade when splitting control-plane persistence internals; move implementation into `core/config/_control_plane/`.
-- When splitting oversized runtime modules, prefer underscore-prefixed internal packages such as `app/_observability/` and `app/_telemetry/`, while keeping the old top-level module as the stable import facade.
+- Keep `gpt2giga.app.runtime_backends` as the public import module when splitting runtime storage internals; move implementation into `app/_runtime_backends/`.
+- Keep `gpt2giga.core.config.control_plane` as the public import module when splitting control-plane persistence internals; move implementation into `core/config/_control_plane/`.
+- When splitting oversized runtime modules, prefer underscore-prefixed internal packages such as `app/_observability/` and `app/_telemetry/`, while keeping documented top-level import modules stable.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
-- For internal reads, prefer grouped views such as `proxy_settings.security`, `proxy_settings.runtime_store`, and `proxy_settings.observability`; flat proxy fields remain the env/control-plane compatibility layer.
+- For internal reads, prefer grouped views such as `proxy_settings.security`, `proxy_settings.runtime_store`, and `proxy_settings.observability`; avoid introducing new flat proxy fields.
 - Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
 
@@ -276,7 +274,7 @@ rg -n "translate|provider_adapters|template_provider|registry" gpt2giga
 
 ## Common Gotchas
 
-- Files and batch metadata are stored in-memory via `app.state.stores`; flat store aliases on `app.state.*` are compatibility shims.
+- Files and batch metadata are stored in-memory via `app.state.stores`.
 - Template-provider scaffolding under `providers/template_provider/` is intentionally in-tree and should stay aligned with `tests/compat/template_provider/`.
 - `MODE=PROD` implicitly requires an API key and disables docs/log routes.
 - `PathNormalizationMiddleware` supports both root and `/v1` style paths; endpoint changes should preserve that behavior unless intentionally breaking it.

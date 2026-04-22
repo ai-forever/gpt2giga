@@ -12,7 +12,6 @@ from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 CONTROL_PLANE_VERSION = 1
 CONTROL_PLANE_DIR_ENV = "GPT2GIGA_CONTROL_PLANE_DIR"
-_DISABLE_PERSIST_ENV_NAMES = ("GPT2GIGA_DISABLE_PERSIST", "DISABLE_PERSIST")
 _CONTROL_FILE_NAME = "control-plane.json"
 _CONTROL_KEY_FILE_NAME = "control-plane.key"
 _BOOTSTRAP_TOKEN_FILE_NAME = "bootstrap-token"
@@ -40,10 +39,9 @@ def is_control_plane_persistence_enabled(
     if proxy_settings is not None:
         return not bool(getattr(proxy_settings, "disable_persist", False))
 
-    for env_name in _DISABLE_PERSIST_ENV_NAMES:
-        raw_flag = _env_flag_enabled(env_name)
-        if raw_flag is not None:
-            return not raw_flag
+    raw_flag = _env_flag_enabled("GPT2GIGA_DISABLE_PERSIST")
+    if raw_flag is not None:
+        return not raw_flag
     return True
 
 

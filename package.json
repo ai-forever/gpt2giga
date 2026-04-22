@@ -2,9 +2,15 @@
   "name": "gpt2giga",
   "private": true,
   "scripts": {
-    "build:admin": "tsc -p tsconfig.json"
+    "build:admin": "tsc -p tsconfig.json",
+    "test:admin": "tsx --test frontend-tests/admin/**/*.test.ts",
+    "sync:admin": "npm run test:admin && npm run build:admin && git status --short -- gpt2giga/frontend/admin packages/gpt2giga-ui/src/gpt2giga_ui/static/admin",
+    "verify:admin-assets": "node scripts/check_admin_assets_sync.mjs",
+    "check:admin": "npm run sync:admin && npm run verify:admin-assets"
   },
   "devDependencies": {
+    "jsdom": "^29.0.2",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   }
 }

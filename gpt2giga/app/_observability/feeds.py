@@ -15,9 +15,6 @@ _OPERATOR_NOISE_PATHS = {
     "/admin",
     "/docs",
     "/favicon.ico",
-    "/logs",
-    "/logs/html",
-    "/logs/stream",
     "/openapi.json",
     "/redoc",
     "/robots.txt",
@@ -103,7 +100,7 @@ def query_request_events(
     error_type: str | None = None,
     exclude_noise: bool = False,
 ) -> list[RequestAuditEvent]:
-    """Query recent request events with a graceful fallback for legacy feeds."""
+    """Query recent request events using feed-native query support when available."""
     filters = {
         key: value
         for key, value in {

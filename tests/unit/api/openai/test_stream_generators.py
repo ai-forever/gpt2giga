@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -21,15 +22,10 @@ from gpt2giga.core.http.sse import (
     format_chat_stream_done,
     format_responses_stream_event,
 )
+from gpt2giga.app.dependencies import RuntimeProviders
 from gpt2giga.features.chat.stream import stream_chat_completion_generator
-from gpt2giga.features.responses._streaming import (
-    ResponsesStreamEventSequencer as internal_responses_stream_event_sequencer,
-)
-from gpt2giga.features.responses._streaming import (
-    stream_responses_generator as internal_stream_responses_generator,
-)
 from gpt2giga.features.responses.stream import (
-    ResponsesStreamEventSequencer as public_responses_stream_event_sequencer,
+    ResponsesStreamEventSequencer,
 )
 from gpt2giga.features.responses.stream import (
     stream_responses_generator,
@@ -195,8 +191,11 @@ class FakeClientCancelled:
 
 class FakeAppState:
     def __init__(self, client, logger_=None):
-        self.gigachat_client = client
-        self.response_processor = ResponseProcessor(logger=logger or logger_)
+        response_processor = ResponseProcessor(logger=logger or logger_)
+        self.providers = RuntimeProviders(
+            gigachat_client=client,
+            response_processor=response_processor,
+        )
         self.rquid = "rquid-1"
         self.logger = logger_
 
@@ -229,11 +228,15 @@ def test_openai_streaming_facade_reexports_core_sse_helpers():
     assert transport_format_responses_stream_event is format_responses_stream_event
 
 
-def test_responses_streaming_facade_reexports_internal_impl():
-    assert public_responses_stream_event_sequencer is (
-        internal_responses_stream_event_sequencer
+def test_responses_streaming_public_exports_resolve_to_internal_modules():
+    assert (
+        ResponsesStreamEventSequencer.__module__
+        == "gpt2giga.features.responses._streaming.events"
     )
-    assert stream_responses_generator is internal_stream_responses_generator
+    assert (
+        stream_responses_generator.__module__
+        == "gpt2giga.features.responses._streaming.v2"
+    )
 
 
 @pytest.mark.asyncio
@@ -380,6 +383,64 @@ async def test_stream_chat_completion_generator_success_with_disconnect():
         lines.append(line)
     assert len(lines) == 2
     assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_generator_large_chunk_sequence_stays_within_regression_budget():
+    class BulkClient:
+        def astream(self, chat):
+            del chat
+
+            async def gen():
+                for index in range(1_500):
+                    yield make_chunk(
+                        {
+                            "choices": [{"delta": {"content": f"chunk-{index}"}}],
+                            "usage": None,
+                            "model": "giga",
+                        }
+                    )
+
+            return gen()
+
+    class BulkRequest:
+        def __init__(self):
+            response_processor = ResponseProcessor(logger=MagicMock())
+            self.app = SimpleNamespace(
+                state=SimpleNamespace(
+                    logger=MagicMock(),
+                    providers=RuntimeProviders(
+                        gigachat_client=BulkClient(),
+                        response_processor=response_processor,
+                    ),
+                )
+            )
+            self.state = SimpleNamespace()
+
+        async def is_disconnected(self):
+            return False
+
+    req = BulkRequest()
+    started_at = time.perf_counter()
+    line_count = 0
+    last_line = ""
+    async for line in stream_chat_completion_generator(
+        req,
+        "gpt-test",
+        {"messages": []},
+        response_id="bulk-1",
+        giga_client=req.app.state.providers.gigachat_client,
+        mapper=GigaChatChatMapper(
+            response_processor=req.app.state.providers.response_processor
+        ),
+    ):
+        line_count += 1
+        last_line = line
+    elapsed = time.perf_counter() - started_at
+
+    assert line_count == 1_501
+    assert last_line == format_chat_stream_done()
+    assert elapsed < 1.5
 
 
 @pytest.mark.asyncio

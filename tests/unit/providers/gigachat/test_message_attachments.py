@@ -48,7 +48,6 @@ class DummyGigaClient:
 @pytest.mark.asyncio
 async def test_transform_messages_with_images_and_limit_two_per_message():
     cfg = ProxyConfig()
-    cfg.proxy_settings.enable_images = True
     ap = DummyAttachmentProc()
     rt = RequestTransformer(cfg, logger=logger, attachment_processor=ap)
 
@@ -67,7 +66,6 @@ async def test_transform_messages_with_images_and_limit_two_per_message():
 @pytest.mark.asyncio
 async def test_transform_messages_total_attachments_limit_ten():
     cfg = ProxyConfig()
-    cfg.proxy_settings.enable_images = True
     ap = DummyAttachmentProc()
     rt = RequestTransformer(cfg, logger=logger, attachment_processor=ap)
 
@@ -84,7 +82,6 @@ async def test_transform_messages_total_attachments_limit_ten():
 @pytest.mark.asyncio
 async def test_transform_messages_audio_image_total_size_limit():
     cfg = ProxyConfig()
-    cfg.proxy_settings.enable_images = True
     cfg.proxy_settings.max_audio_image_total_size_bytes = 10
     ap = DummyAttachmentProc()
     rt = RequestTransformer(cfg, logger=logger, attachment_processor=ap)
@@ -103,7 +100,6 @@ async def test_transform_messages_audio_image_total_size_limit():
 @pytest.mark.asyncio
 async def test_transform_messages_raises_413_on_attachment_oversize():
     cfg = ProxyConfig()
-    cfg.proxy_settings.enable_images = True
     processor = AttachmentProcessor(logger=logger, max_image_file_size_bytes=3)
     rt = RequestTransformer(cfg, logger=logger, attachment_processor=processor)
 

@@ -4,8 +4,9 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.api.openai import router as openai_router
+from gpt2giga.app.dependencies import get_runtime_providers
+from gpt2giga.core.config.settings import ProxyConfig
 
 
 class FakeClient:
@@ -16,7 +17,7 @@ class FakeClient:
 def make_app(monkeypatch=None):
     app = FastAPI()
     app.include_router(openai_router)
-    app.state.gigachat_client = FakeClient()
+    get_runtime_providers(app.state).gigachat_client = FakeClient()
     app.state.config = ProxyConfig()
     if monkeypatch:
 

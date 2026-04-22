@@ -414,16 +414,16 @@ class ResponsesV2StreamState:
                 continue
 
             if meta.kind == "function_call":
-                state = self.function_states[meta.key]
-                state.item["status"] = final_item_status
+                function_state = self.function_states[meta.key]
+                function_state.item["status"] = final_item_status
                 events.append(
                     emitter.emit(
                         "response.function_call_arguments.done",
                         {
-                            "item_id": state.item_id,
-                            "output_index": state.output_index,
-                            "name": state.name,
-                            "arguments": state.arguments,
+                            "item_id": function_state.item_id,
+                            "output_index": function_state.output_index,
+                            "name": function_state.name,
+                            "arguments": function_state.arguments,
                         },
                     )
                 )
@@ -431,25 +431,25 @@ class ResponsesV2StreamState:
                     emitter.emit(
                         "response.output_item.done",
                         {
-                            "output_index": state.output_index,
-                            "item": state.item,
+                            "output_index": function_state.output_index,
+                            "item": function_state.item,
                         },
                     )
                 )
                 continue
 
-            state = self.tool_states[meta.key]
-            item = state.item
+            tool_state = self.tool_states[meta.key]
+            item = tool_state.item
             if item.get("status") not in {"completed", "failed"}:
                 item["status"] = (
                     "completed" if response_status == "completed" else final_item_status
                 )
-            events.extend(self.emit_tool_progress(state, emitter=emitter))
+            events.extend(self.emit_tool_progress(tool_state, emitter=emitter))
             events.append(
                 emitter.emit(
                     "response.output_item.done",
                     {
-                        "output_index": state.output_index,
+                        "output_index": tool_state.output_index,
                         "item": item,
                     },
                 )

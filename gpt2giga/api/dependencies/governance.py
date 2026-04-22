@@ -7,7 +7,11 @@ from starlette.requests import Request
 
 from gpt2giga.api.dependencies.auth import resolve_endpoint_id, resolve_requested_model
 from gpt2giga.api.gemini.request import GeminiAPIError
-from gpt2giga.app.governance import GovernanceContext, reserve_governance_request_window
+from gpt2giga.app.governance import (
+    GovernanceContext,
+    _coerce_int_value,
+    reserve_governance_request_window,
+)
 
 
 def build_governance_verifier(
@@ -28,7 +32,7 @@ def build_governance_verifier(
         exceeded = reserve_governance_request_window(request.app.state, context)
         if exceeded:
             first = exceeded[0]
-            retry_after_seconds = int(first["retry_after_seconds"])
+            retry_after_seconds = _coerce_int_value(first.get("retry_after_seconds"), 1)
             message = (
                 f"Request governance limit exceeded for {first['scope']} "
                 f"`{first['subject']}` on {first['dimension']}: "

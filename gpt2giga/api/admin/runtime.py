@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 from starlette.requests import Request
 
-from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.api.admin.access import verify_admin_ip_allowlist
 from gpt2giga.api.system.metrics import build_metrics_response
 from gpt2giga.app.admin_runtime import AdminRuntimeSnapshotService, AdminUsageReporter
 from gpt2giga.app.dependencies import get_runtime_observability
@@ -18,7 +18,7 @@ admin_runtime_api_router = APIRouter(tags=["Admin"])
 @exceptions_handler
 async def get_admin_version(request: Request):
     """Return application version metadata for admin tooling."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminRuntimeSnapshotService(request).build_version_payload()
 
 
@@ -26,7 +26,7 @@ async def get_admin_version(request: Request):
 @exceptions_handler
 async def get_admin_config(request: Request):
     """Return a sanitized config summary for admin tooling."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminRuntimeSnapshotService(request).build_config_payload()
 
 
@@ -34,7 +34,7 @@ async def get_admin_config(request: Request):
 @exceptions_handler
 async def get_admin_runtime(request: Request):
     """Return effective runtime status for the admin layer."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminRuntimeSnapshotService(request).build_runtime_payload()
 
 
@@ -42,7 +42,7 @@ async def get_admin_runtime(request: Request):
 @exceptions_handler
 async def get_admin_routes(request: Request):
     """Return mounted routes so operators can inspect active surface area."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminRuntimeSnapshotService(request).build_routes_payload()
 
 
@@ -50,7 +50,7 @@ async def get_admin_routes(request: Request):
 @exceptions_handler
 async def get_admin_capabilities(request: Request):
     """Return enabled provider groups and operator capabilities."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminRuntimeSnapshotService(request).build_capabilities_payload()
 
 
@@ -58,7 +58,7 @@ async def get_admin_capabilities(request: Request):
 @exceptions_handler
 async def get_admin_metrics(request: Request):
     """Expose Prometheus metrics through the admin surface."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     get_runtime_observability(request.app.state)
     return build_metrics_response(request)
 
@@ -78,7 +78,7 @@ async def get_admin_recent_requests(
     error_type: str | None = Query(default=None),
 ):
     """Return recent structured request events for the admin UI."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminRuntimeSnapshotService(request).build_recent_events_payload(
         kind="requests",
         limit=limit,
@@ -108,7 +108,7 @@ async def get_admin_recent_errors(
     error_type: str | None = Query(default=None),
 ):
     """Return recent structured error events for the admin UI."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminRuntimeSnapshotService(request).build_recent_events_payload(
         kind="errors",
         limit=limit,
@@ -133,7 +133,7 @@ async def get_admin_usage_by_key(
     source: str | None = Query(default=None),
 ):
     """Return aggregated usage counters grouped by authenticated API key."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminUsageReporter(request).build_payload(
         kind="keys",
         limit=limit,
@@ -153,7 +153,7 @@ async def get_admin_usage_by_provider(
     api_key_name: str | None = Query(default=None),
 ):
     """Return aggregated usage counters grouped by external provider."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminUsageReporter(request).build_payload(
         kind="providers",
         limit=limit,

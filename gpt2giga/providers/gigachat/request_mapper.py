@@ -118,7 +118,7 @@ class RequestTransformer(
                     continue
                 content = message.get("content")
                 if isinstance(content, list):
-                    contents = []
+                    contents: list[dict[str, Any]] = []
                     append = contents.append
                     for content_part in content:
                         ctype = content_part.get("type")
@@ -141,8 +141,14 @@ class RequestTransformer(
     @staticmethod
     def mock_completion(message: dict) -> dict:
         """Create a mock assistant function-call message."""
-        arguments = json.loads(message.get("arguments"))
-        name = map_tool_name_to_gigachat(message.get("name"))
+        raw_arguments = message.get("arguments")
+        if isinstance(raw_arguments, (str, bytes, bytearray)):
+            arguments = json.loads(raw_arguments)
+        else:
+            arguments = raw_arguments or {}
+
+        raw_name = message.get("name")
+        name = map_tool_name_to_gigachat(raw_name) if isinstance(raw_name, str) else ""
         return Messages(
             role=MessagesRole.ASSISTANT,
             function_call=FunctionCall(name=name, arguments=arguments),
@@ -183,7 +189,7 @@ class RequestTransformer(
         return sanitize_for_utf8(transformed_data)
 
     async def prepare_chat_completion(
-        self, data: dict, giga_client: Optional[GigaChat] = None
+        self, data: Any, giga_client: Any = None
     ) -> Dict[str, Any]:
         """Prepare a Chat Completions payload."""
         transformed_data = self.transform_chat_parameters(to_backend_payload(data))
@@ -245,15 +251,13 @@ class RequestTransformer(
 
         return request_data
 
-    async def prepare_chat_completion_v2(
-        self, data: dict, giga_client: Optional[GigaChat] = None
-    ):
+    async def prepare_chat_completion_v2(self, data: Any, giga_client: Any = None):
         """Prepare a native GigaChat v2 payload for chat-like endpoints."""
         request_data = self._build_chat_v2_request_data(to_backend_payload(data))
         return await self.prepare_response_v2(request_data, giga_client)
 
     async def prepare_response(
-        self, data: dict, giga_client: Optional[GigaChat] = None
+        self, data: Any, giga_client: Any = None
     ) -> Dict[str, Any]:
         """Prepare a legacy Responses API payload."""
         transformed_data = self.transform_responses_parameters(to_backend_payload(data))

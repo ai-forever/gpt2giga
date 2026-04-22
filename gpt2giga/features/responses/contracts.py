@@ -7,12 +7,9 @@ from typing import (
     AsyncIterator,
     Literal,
     MutableMapping,
-    Optional,
     Protocol,
     TypeAlias,
 )
-
-from gigachat import GigaChat
 
 from gpt2giga.core.contracts import NormalizedResponsesRequest
 
@@ -48,15 +45,15 @@ class ResponsesRequestPreparer(Protocol):
     async def prepare_response(
         self,
         data: ResponsesRequestData,
-        giga_client: Optional[GigaChat] = None,
+        giga_client: Any = None,
     ) -> PreparedResponsesRequest:
         """Map the feature request into a legacy provider payload."""
 
     async def prepare_response_v2(
         self,
         data: ResponsesRequestData,
-        giga_client: Optional[GigaChat] = None,
-        response_store: Optional[ResponsesMetadataStore] = None,
+        giga_client: Any = None,
+        response_store: ResponsesMetadataStore | None = None,
     ) -> PreparedResponsesRequest:
         """Map the feature request into a provider-specific payload."""
 
@@ -79,6 +76,6 @@ class ResponsesResultProcessor(Protocol):
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        response_store: Optional[ResponsesMetadataStore] = None,
+        response_store: ResponsesMetadataStore | None = None,
     ) -> ResponsesResponseData:
         """Map a provider response into the external Responses API contract."""

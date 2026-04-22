@@ -10,6 +10,7 @@ from gpt2giga.providers.contracts import (
     FilesProviderAdapter,
     ModelsProviderAdapter,
     ResponsesProviderAdapter,
+    TokenCountProviderAdapter,
 )
 
 
@@ -51,6 +52,21 @@ def test_gemini_provider_descriptor_uses_gemini_auth_policy():
         "/upload/v1beta",
     }
     assert all(mount.auth_policy == "gemini" for mount in descriptor.mounts)
+
+
+def test_token_count_protocol_is_exposed_only_on_supported_chat_adapters():
+    assert isinstance(
+        get_provider_descriptor("anthropic").adapters.chat,
+        TokenCountProviderAdapter,
+    )
+    assert isinstance(
+        get_provider_descriptor("gemini").adapters.chat,
+        TokenCountProviderAdapter,
+    )
+    assert not isinstance(
+        get_provider_descriptor("openai").adapters.chat,
+        TokenCountProviderAdapter,
+    )
 
 
 def test_iter_enabled_provider_descriptors_filters_registry():

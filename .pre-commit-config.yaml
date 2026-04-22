@@ -32,3 +32,8 @@ repos:
         language: system
         types_or: [python, pyi]
         args: [--config, pyproject.toml]
+      - id: mypy
+        name: mypy
+        entry: uv run mypy gpt2giga/
+        language: system
+        pass_filenames: false

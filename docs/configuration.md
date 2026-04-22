@@ -41,7 +41,7 @@ GIGACHAT_MODEL=GigaChat-2-Max
 
 - `/docs`, `/redoc`, `/openapi.json`;
 - `/admin` и `/admin/api/*`;
-- legacy `/logs*`.
+- `/admin/api/logs` и `/admin/api/logs/stream`.
 
 ### Минимальный production
 
@@ -60,7 +60,7 @@ GIGACHAT_VERIFY_SSL_CERTS=True
 
 - `/docs`, `/redoc`, `/openapi.json`;
 - `/admin*`;
-- `/logs*`.
+- `/admin/api/logs*`.
 
 ### Docker / Compose
 
@@ -135,7 +135,7 @@ docker compose -f deploy/compose/base.yaml --profile DEV up -d
 |---|---|
 | `GPT2GIGA_SCOPED_API_KEYS` | Scoped API keys с ограничениями по provider, endpoint и model |
 | `GPT2GIGA_GOVERNANCE_LIMITS` | Fixed-window лимиты по запросам и токенам |
-| `GPT2GIGA_LOGS_IP_ALLOWLIST` | Allowlist для `/logs*` и `/admin*` в `DEV` |
+| `GPT2GIGA_LOGS_IP_ALLOWLIST` | Allowlist для admin surface в `DEV`; имя переменной сохранено для обратной совместимости конфигурации |
 
 ## Runtime switches
 
@@ -303,7 +303,7 @@ gpt2giga \
 |---|---|---|
 | `/docs`, `/redoc`, `/openapi.json` | Да | Нет |
 | `/admin` и `/admin/api/*` | Да | Нет |
-| legacy `/logs*` | Да | Нет |
+| `/admin/api/logs*` | Да | Нет |
 | `/metrics` | Да | Да |
 | Provider routes | Да | Да |
 

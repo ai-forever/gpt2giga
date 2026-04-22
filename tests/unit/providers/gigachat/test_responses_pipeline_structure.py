@@ -27,40 +27,35 @@ from gpt2giga.providers.gigachat.responses.threading import (
 from gpt2giga.providers.gigachat.responses.tool_mapping import (
     ResponsesV2ToolMappingMixin as StructuredResponsesV2ToolMappingMixin,
 )
-from gpt2giga.providers.gigachat.responses_backend_request import (
-    ResponsesV2BackendRequestMixin,
-)
-from gpt2giga.providers.gigachat.responses_input_normalizer import (
-    ResponsesV2InputNormalizerMixin,
-)
-from gpt2giga.providers.gigachat.responses_options import ResponsesV2ModelOptionsMixin
-from gpt2giga.providers.gigachat.responses_output_items import ResponsesOutputItemsMixin
-from gpt2giga.providers.gigachat.responses_request_mapper import (
-    RequestTransformerResponsesV2Mixin,
-)
-from gpt2giga.providers.gigachat.responses_response_mapper import (
-    ResponseProcessorResponsesMixin,
-)
-from gpt2giga.providers.gigachat.responses_result_builder import (
-    ResponsesResultBuilderMixin,
-)
-from gpt2giga.providers.gigachat.responses_threading import ResponsesV2ThreadingMixin
-from gpt2giga.providers.gigachat.responses_tool_mapping import (
-    ResponsesV2ToolMappingMixin,
-)
 
 
-def test_legacy_responses_import_paths_reexport_structured_pipeline() -> None:
-    """Keep the old Responses helper imports aligned with the new package layout."""
-    assert ResponsesV2BackendRequestMixin is StructuredResponsesV2BackendRequestMixin
-    assert ResponsesV2InputNormalizerMixin is StructuredResponsesV2InputNormalizerMixin
-    assert ResponsesV2ModelOptionsMixin is StructuredResponsesV2ModelOptionsMixin
-    assert ResponsesV2ThreadingMixin is StructuredResponsesV2ThreadingMixin
-    assert ResponsesV2ToolMappingMixin is StructuredResponsesV2ToolMappingMixin
+def test_structured_responses_pipeline_exports_expected_mixins() -> None:
+    """Keep the structured Responses helper package layout explicit."""
     assert (
-        RequestTransformerResponsesV2Mixin
-        is StructuredRequestTransformerResponsesV2Mixin
+        StructuredResponsesV2BackendRequestMixin.__name__
+        == "ResponsesV2BackendRequestMixin"
     )
-    assert ResponsesOutputItemsMixin is StructuredResponsesOutputItemsMixin
-    assert ResponsesResultBuilderMixin is StructuredResponsesResultBuilderMixin
-    assert ResponseProcessorResponsesMixin is StructuredResponseProcessorResponsesMixin
+    assert (
+        StructuredResponsesV2InputNormalizerMixin.__name__
+        == "ResponsesV2InputNormalizerMixin"
+    )
+    assert (
+        StructuredResponsesV2ModelOptionsMixin.__name__
+        == "ResponsesV2ModelOptionsMixin"
+    )
+    assert StructuredResponsesV2ThreadingMixin.__name__ == "ResponsesV2ThreadingMixin"
+    assert (
+        StructuredResponsesV2ToolMappingMixin.__name__ == "ResponsesV2ToolMappingMixin"
+    )
+    assert (
+        StructuredRequestTransformerResponsesV2Mixin.__name__
+        == "RequestTransformerResponsesV2Mixin"
+    )
+    assert StructuredResponsesOutputItemsMixin.__name__ == "ResponsesOutputItemsMixin"
+    assert (
+        StructuredResponsesResultBuilderMixin.__name__ == "ResponsesResultBuilderMixin"
+    )
+    assert (
+        StructuredResponseProcessorResponsesMixin.__name__
+        == "ResponseProcessorResponsesMixin"
+    )

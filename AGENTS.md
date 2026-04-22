@@ -55,7 +55,7 @@ uv run pre-commit install
 | `gpt2giga/` | Main application package | Routers, protocol transforms, config, middleware |
 | `gpt2giga/frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` |
 | `packages/gpt2giga-ui/` | Optional UI distribution | Runtime source of truth for the `/admin` HTML shell and static assets used by `gpt2giga[ui]` |
-| `tests/` | Test suite | Organized into `unit/`, `integration/`, `smoke/`, and `compat/`, with legacy mirror directories still checked in |
+| `tests/` | Test suite | Organized into `unit/`, `integration/`, `smoke/`, and `compat/` |
 | `examples/` | Runnable SDK examples | OpenAI, Anthropic, Gemini, Agents SDK, batch validation, and provider-translation examples |
 | `docs/` | Project documentation | Integration guides currently live in `docs/integrations/` |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge, mitmproxy SSE helper, and maintainer-only internal utilities |
@@ -77,17 +77,17 @@ uv run pre-commit install
 - Provider-to-provider chat request translation lives in `gpt2giga/api/translate.py`, with serializer helpers under `gpt2giga/api/anthropic/request_adapter.py`, `gpt2giga/api/gemini/request_adapter.py`, and `gpt2giga/providers/*/capabilities.py`.
 - Batch-input validation entrypoints live in `gpt2giga/api/batch_validation.py` and `gpt2giga/features/batches/validation.py`.
 - GigaChat client/auth helpers and provider-specific request/response mappers live in `gpt2giga/providers/gigachat/`.
-- Provider capability registries and compatibility scaffolding live under `gpt2giga/providers/`, including `registry.py`, `openai/`, `anthropic/`, `gemini/`, and `template_provider/`.
+- Provider capability registries and provider scaffolding live under `gpt2giga/providers/`, including `registry.py`, `openai/`, `anthropic/`, `gemini/`, and `template_provider/`.
 - Simple provider mappings for embeddings and model discovery live in `gpt2giga/providers/gigachat/embeddings_mapper.py` and `gpt2giga/providers/gigachat/models_mapper.py`.
-- Request transformation is split across `gpt2giga/providers/gigachat/request_mapper.py`, `request_mapping_base.py`, `chat_request_mapper.py`, and the structured Responses helpers in `gpt2giga/providers/gigachat/responses/`; top-level `responses_*` modules remain compatibility wrappers.
-- Response transformation is split across `gpt2giga/providers/gigachat/response_mapper.py`, `response_mapping_common.py`, and the structured Responses helpers in `gpt2giga/providers/gigachat/responses/`; top-level `responses_*` modules remain compatibility entrypoints.
+- Request transformation is split across `gpt2giga/providers/gigachat/request_mapper.py`, `request_mapping_base.py`, `chat_request_mapper.py`, and the structured Responses helpers in `gpt2giga/providers/gigachat/responses/`.
+- Response transformation is split across `gpt2giga/providers/gigachat/response_mapper.py`, `response_mapping_common.py`, and the structured Responses helpers in `gpt2giga/providers/gigachat/responses/`.
 - GigaChat stream iteration and chunk normalization live in `gpt2giga/providers/gigachat/streaming.py`.
 - Anthropic- and Gemini-specific request/response/stream translation helpers live next to those routers under `gpt2giga/api/anthropic/` and `gpt2giga/api/gemini/`.
 - OpenAI SSE formatting helpers live in `gpt2giga/api/openai/streaming.py`, while feature-owned stream orchestration lives in `gpt2giga/features/chat/stream.py` and `gpt2giga/features/responses/stream.py`.
 - Shared request parsing, schema normalization, app metadata, and exception handling live under `gpt2giga/core/`.
-- Typed runtime dependencies live in `gpt2giga/app/dependencies.py`, with `app.state` organized around `config`, `logger`, `services`, `stores`, and `providers`; flat `app.state.*` aliases remain compatibility shims.
-- Runtime store/feed backend internals live in `gpt2giga/app/_runtime_backends/`, while `gpt2giga/app/runtime_backends.py` remains the stable facade/import path.
-- Control-plane persistence internals live in `gpt2giga/core/config/_control_plane/`, while `gpt2giga/core/config/control_plane.py` remains the stable facade/import path.
+- Typed runtime dependencies live in `gpt2giga/app/dependencies.py`, with `app.state` organized around `config`, `logger`, `services`, `stores`, and `providers`.
+- Runtime store/feed backend internals live in `gpt2giga/app/_runtime_backends/`, while `gpt2giga/app/runtime_backends.py` remains the public import path.
+- Control-plane persistence internals live in `gpt2giga/core/config/_control_plane/`, while `gpt2giga/core/config/control_plane.py` remains the public import path.
 - Request/app-scoped metadata stores for files, batches, and responses live in feature-owned store modules under `gpt2giga/features/*/store.py`.
 - OpenAPI schema builders live next to provider routers in `gpt2giga/api/*/openapi.py`, with shared helpers in `gpt2giga/api/_openapi.py`.
 - Runtime admin shell/assets are loaded from `packages/gpt2giga-ui/src/gpt2giga_ui/`; in a source checkout `gpt2giga/app/admin_ui.py` prefers that repo-local package copy over an installed wheel.

@@ -144,10 +144,10 @@ class OtlpHttpTraceSink(ObservabilitySink):
 
         payload = self._payload_builder(
             event,
-            resource_attributes=self._resource_attributes,
-            scope_name=_OTLP_SCOPE_NAME,
-            scope_version=_OTLP_SCOPE_VERSION,
-            attribute_enricher=self._attribute_enricher,
+            self._resource_attributes,
+            _OTLP_SCOPE_NAME,
+            _OTLP_SCOPE_VERSION,
+            self._attribute_enricher,
         )
         task = loop.create_task(self._post_payload(payload))
         self._pending_tasks.add(task)
@@ -190,7 +190,6 @@ class OtlpHttpTraceSink(ObservabilitySink):
 
 def _build_otlp_traces_payload(
     event: Mapping[str, Any],
-    *,
     resource_attributes: Mapping[str, Any],
     scope_name: str,
     scope_version: str,
@@ -257,7 +256,6 @@ def _build_otlp_traces_payload(
 
 def _build_otlp_traces_protobuf_payload(
     event: Mapping[str, Any],
-    *,
     resource_attributes: Mapping[str, Any],
     scope_name: str,
     scope_version: str,
@@ -277,12 +275,14 @@ def _build_otlp_traces_protobuf_payload(
         span_id=secrets.token_bytes(8),
         flags=1,
         name=_build_span_name(event),
-        kind=2,
+        kind=Span.SpanKind.Value("SPAN_KIND_SERVER"),
         start_time_unix_nano=_datetime_to_unix_nanos(started_at),
         end_time_unix_nano=end_time_unix_nano,
         attributes=_serialize_otel_attributes_protobuf(span_attributes),
         status=Status(
-            code=2 if _is_error_event(event) else 1,
+            code=Status.StatusCode.Value(
+                "STATUS_CODE_ERROR" if _is_error_event(event) else "STATUS_CODE_OK"
+            ),
             message=error_type if _is_error_event(event) else "",
         ),
     )

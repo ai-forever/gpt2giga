@@ -29,7 +29,6 @@ def mock_attachment_processor():
 @pytest.fixture
 def request_transformer(mock_logger, mock_attachment_processor):
     config = ProxyConfig()
-    config.proxy_settings.enable_images = True
     return RequestTransformer(config, mock_logger, mock_attachment_processor)
 
 

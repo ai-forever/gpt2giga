@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import FastAPI, Request
 from gigachat import GigaChat
 
-from gpt2giga.app.dependencies import get_runtime_providers, sync_runtime_aliases
+from gpt2giga.app.dependencies import get_runtime_providers
 
 
 def get_gigachat_client(request: Request) -> Any:
@@ -32,7 +32,6 @@ def create_app_gigachat_client(app: FastAPI, *, settings) -> Any:
     gigachat_client = gigachat_factory(**settings.model_dump())
     providers = get_runtime_providers(app.state)
     providers.gigachat_client = gigachat_client
-    sync_runtime_aliases(app.state)
     return gigachat_client
 
 
@@ -50,4 +49,3 @@ async def close_app_gigachat_client(app: FastAPI, *, logger) -> None:
         logger.warning(f"Error closing GigaChat client: {exc}")
     finally:
         providers.gigachat_client = None
-        app.state.gigachat_client = None

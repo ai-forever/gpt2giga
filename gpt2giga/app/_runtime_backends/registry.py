@@ -16,6 +16,22 @@ def register_runtime_backend(descriptor: RuntimeBackendDescriptor) -> None:
     _RUNTIME_BACKENDS[descriptor.name] = descriptor
 
 
+def get_runtime_backend_descriptor(name: str) -> RuntimeBackendDescriptor | None:
+    """Return a registered backend descriptor by name."""
+    return _RUNTIME_BACKENDS.get(name)
+
+
+def list_runtime_backend_descriptors() -> list[RuntimeBackendDescriptor]:
+    """Return registered backend descriptors sorted by name."""
+    return [
+        descriptor
+        for _name, descriptor in sorted(
+            _RUNTIME_BACKENDS.items(),
+            key=lambda item: item[0],
+        )
+    ]
+
+
 def create_runtime_backend(
     name: str,
     *,

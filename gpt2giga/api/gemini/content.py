@@ -43,6 +43,7 @@ from gpt2giga.features.chat.service import get_chat_service_from_state
 from gpt2giga.features.embeddings import get_embeddings_service_from_state
 from gpt2giga.providers.gemini import gemini_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.token_counting import count_input_tokens
 
 router = APIRouter()
 
@@ -167,14 +168,17 @@ async def count_tokens(model: str, request: Request):
             message="`generateContentRequest` must be an object when provided.",
         )
 
-    texts = gemini_provider_adapters.chat.build_count_tokens_texts(count_payload)
-    if not texts:
-        return {"totalTokens": 0}
-
     giga_client = get_gigachat_client(request)
-    token_counts = await giga_client.atokens_count(texts, model=normalized_model)
-    total_tokens = sum(token_count.tokens for token_count in token_counts)
-    return {"totalTokens": total_tokens}
+    chat_adapter = gemini_provider_adapters.chat
+    assert chat_adapter is not None
+    return {
+        "totalTokens": await count_input_tokens(
+            chat_adapter,
+            count_payload,
+            giga_client=giga_client,
+            model=normalized_model,
+        )
+    }
 
 
 @router.post(

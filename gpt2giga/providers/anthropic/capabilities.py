@@ -10,7 +10,11 @@ from gpt2giga.api.anthropic.request_adapter import (
     build_token_count_texts,
 )
 from gpt2giga.core.contracts import to_backend_payload
-from gpt2giga.providers.contracts import ProviderAdapterBundle
+from gpt2giga.providers._shared_adapters import TokenCountingChatAdapter
+from gpt2giga.providers.contracts import (
+    ProviderAdapterBundle,
+    TokenCountProviderAdapter,
+)
 from gpt2giga.providers.descriptors import ProviderDescriptor, ProviderMountSpec
 
 
@@ -25,22 +29,6 @@ class AnthropicBatchCreatePayload:
     completion_window: str
     rows: list[dict[str, Any]]
     stored_requests: list[dict[str, Any]]
-
-
-@dataclass(frozen=True, slots=True)
-class AnthropicChatAdapter:
-    """Anthropic messages request adapter."""
-
-    def build_normalized_request(
-        self,
-        payload: dict[str, Any],
-        *,
-        logger: Any = None,
-    ):
-        return build_normalized_chat_request(payload, logger=logger)
-
-    def build_token_count_texts(self, payload: dict[str, Any]) -> list[str]:
-        return build_token_count_texts(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,8 +101,23 @@ class AnthropicBatchesAdapter:
         )
 
 
-anthropic_provider_adapters = ProviderAdapterBundle(
-    chat=AnthropicChatAdapter(),
+@dataclass(frozen=True, slots=True)
+class AnthropicProviderAdapterBundle(ProviderAdapterBundle):
+    """Anthropic adapter bundle with non-optional capability types."""
+
+    chat: TokenCountProviderAdapter
+    responses: None = None
+    embeddings: None = None
+    models: None = None
+    files: None = None
+    batches: AnthropicBatchesAdapter = AnthropicBatchesAdapter()
+
+
+anthropic_provider_adapters = AnthropicProviderAdapterBundle(
+    chat=TokenCountingChatAdapter(
+        build_normalized_chat_request,
+        build_token_count_texts,
+    ),
     batches=AnthropicBatchesAdapter(),
 )
 

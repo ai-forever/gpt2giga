@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.app.dependencies import get_runtime_providers
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.providers.gigachat import ResponseProcessor
 from gpt2giga.api.openai import router
@@ -84,10 +85,15 @@ class FakeRequestTransformer:
 def make_app(*, observability: bool = False):
     app = FastAPI()
     app.include_router(router)
-    app.state.gigachat_client = FakeGigachat()
-    app.state.response_processor = ResponseProcessor()
-    app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    providers = get_runtime_providers(app.state)
+    providers.gigachat_client = FakeGigachat()
+    providers.response_processor = ResponseProcessor()
+    providers.request_transformer = FakeRequestTransformer()
+    app.state.config = (
+        ProxyConfig.model_validate({"proxy": {"enable_telemetry": False}})
+        if observability
+        else ProxyConfig()
+    )
     if observability:
         ensure_runtime_dependencies(app.state, config=app.state.config)
         app.add_middleware(ObservabilityMiddleware)

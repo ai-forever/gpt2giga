@@ -97,7 +97,7 @@ async def test_get_models_service_from_state_supports_normalized_embeddings_id()
         allow_embeddings_model=True,
     )
 
-    assert state.models_service is service
-    assert state.models_mapper is not None
+    assert state.services.models is service
+    assert state.providers.models_mapper is not None
     assert descriptor["kind"] == "embeddings"
     assert descriptor["id"] == f"models/{state.config.proxy_settings.embeddings}"

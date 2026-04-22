@@ -15,6 +15,7 @@ export class AdminApp {
     gatewayKeyInput = this.requireElement("gateway-key-input");
     modeChip = this.requireElement("mode-chip");
     backendChip = this.requireElement("backend-chip");
+    runtimeStoreChip = this.requireElement("runtime-store-chip");
     persistedChip = this.requireElement("persisted-chip");
     versionChip = this.requireElement("version-chip");
     authDisclosure = document.getElementById("auth-disclosure");
@@ -191,6 +192,7 @@ export class AdminApp {
             const persistence = describePersistenceStatus(setup);
             this.modeChip.textContent = String(runtime.mode ?? "n/a");
             this.backendChip.textContent = String(runtime.gigachat_api_mode ?? "n/a");
+            this.runtimeStoreChip.textContent = String(runtime.runtime_store_backend ?? "n/a");
             this.persistedChip.textContent = persistence.chip;
             this.versionChip.textContent = String(runtime.app_version ?? "n/a");
             if (!setup.gigachat_ready) {
@@ -209,6 +211,7 @@ export class AdminApp {
             this.pushAlert(`Failed to load global admin status. ${toErrorMessage(error)}`, "danger");
             this.modeChip.textContent = "error";
             this.backendChip.textContent = "error";
+            this.runtimeStoreChip.textContent = "error";
             this.persistedChip.textContent = "error";
             this.versionChip.textContent = "error";
         }

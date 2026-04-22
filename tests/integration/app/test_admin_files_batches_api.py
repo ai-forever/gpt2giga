@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -238,15 +239,15 @@ def make_app():
         app.state,
         config=ProxyConfig(proxy=ProxySettings(logs_ip_allowlist=["testclient"])),
     )
-    app.state.gigachat_client = FakeGigaChat()
-    app.state.request_transformer = FakeRequestTransformer()
-    app.state.files_service = FilesService()
-    app.state.batches_service = BatchesService(
+    app.state.providers.gigachat_client = FakeGigaChat()
+    app.state.providers.request_transformer = FakeRequestTransformer()
+    app.state.services.files = FilesService()
+    app.state.services.batches = BatchesService(
         FakeRequestTransformer(),
         embeddings_model="EmbeddingsGigaR",
     )
-    app.state.files_batches_service = FilesBatchesService()
-    app.state.file_metadata_store = {
+    app.state.services.files_batches = FilesBatchesService()
+    app.state.stores.files = {
         "file-anthropic-output-1": {"batch_id": "batch-anthropic-1"},
         "file-gemini-1": {
             "display_name": "Gemini Upload",
@@ -255,7 +256,7 @@ def make_app():
         },
         "file-gemini-output-1": {"batch_id": "batch-gemini-1"},
     }
-    app.state.batch_metadata_store = {
+    app.state.stores.batches = {
         "batch-openai-1": {
             "endpoint": "/v1/chat/completions",
             "input_file_id": "file-openai-1",
@@ -325,6 +326,54 @@ def test_admin_files_batches_inventory_filters_by_api_format():
     assert [item["id"] for item in body["batches"]] == ["batch-gemini-1"]
 
 
+def test_admin_files_batches_inventory_large_dataset_stays_within_regression_budget():
+    app = make_app()
+    for index in range(900):
+        file_id = f"file-large-output-{index}"
+        batch_id = f"batch-large-{index}"
+        app.state.providers.gigachat_client.files[file_id] = {
+            "content": b'{"response":{"body":{"choices":[]}}}\n',
+            "object": FakeUploadedFile(
+                id=file_id,
+                object="file",
+                bytes=34,
+                created_at=2_000 + index,
+                filename=f"{file_id}.jsonl",
+                purpose="general",
+            ),
+        }
+        app.state.providers.gigachat_client.batches[batch_id] = FakeBatch(
+            id=batch_id,
+            method="chat_completions",
+            request_counts=FakeRequestCounts(total=1, completed=1, failed=0),
+            status="completed",
+            output_file_id=file_id,
+            created_at=3_000 + index,
+            updated_at=3_001 + index,
+        )
+        app.state.stores.batches[batch_id] = {
+            "endpoint": "/v1/chat/completions",
+            "input_file_id": f"file-input-{index}",
+            "output_file_id": file_id,
+            "model": "gpt-test",
+        }
+
+    client = TestClient(app)
+
+    started_at = time.perf_counter()
+    response = client.get("/admin/api/files-batches/inventory")
+    elapsed = time.perf_counter() - started_at
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["counts"]["files"] == 904
+    assert body["counts"]["batches"] == 903
+    assert body["counts"]["output_ready"] == 903
+    assert body["files"][0]["id"] == "file-large-output-899"
+    assert body["batches"][0]["id"] == "batch-large-899"
+    assert elapsed < 2.5
+
+
 def test_admin_files_batches_detail_endpoints_return_normalized_records():
     client = TestClient(make_app())
 
@@ -365,7 +414,7 @@ def test_admin_files_batches_content_endpoints_proxy_canonical_artifacts():
 
 def test_admin_files_batches_file_content_supports_preview_bytes():
     app = make_app()
-    app.state.gigachat_client.files["file-gemini-1"]["content"] = (
+    app.state.providers.gigachat_client.files["file-gemini-1"]["content"] = (
         b"line-1\nline-2\nline-3\nline-4\n"
     )
     client = TestClient(app)
@@ -384,7 +433,7 @@ def test_admin_files_batches_file_content_supports_preview_bytes():
 
 def test_admin_files_batches_batch_output_supports_preview_bytes():
     app = make_app()
-    app.state.gigachat_client.files["file-gemini-output-1"]["content"] = (
+    app.state.providers.gigachat_client.files["file-gemini-output-1"]["content"] = (
         json.dumps(
             {
                 "response": {
@@ -425,9 +474,22 @@ def test_admin_files_batches_batch_output_supports_preview_bytes():
     assert response.content.count(b"\n") == 1
 
 
+def test_admin_files_batches_batch_output_accepts_enum_style_completed_status():
+    app = make_app()
+    app.state.providers.gigachat_client.batches[
+        "batch-gemini-1"
+    ].status = "BatchState.BATCH_STATE_COMPLETED"
+    client = TestClient(app)
+
+    response = client.get("/admin/api/files-batches/batches/batch-gemini-1/output")
+
+    assert response.status_code == 200
+    assert b'"response"' in response.content
+
+
 def test_admin_files_batches_batch_output_infers_anthropic_format_from_input_file():
     app = make_app()
-    app.state.gigachat_client.files["file-anthropic-input-1"] = {
+    app.state.providers.gigachat_client.files["file-anthropic-input-1"] = {
         "content": (
             b'{"custom_id":"anthropic-batch-1","params":{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hello anthropic"}]}}\n'
         ),
@@ -440,7 +502,7 @@ def test_admin_files_batches_batch_output_infers_anthropic_format_from_input_fil
             purpose="general",
         ),
     }
-    app.state.batch_metadata_store["batch-anthropic-1"] = {
+    app.state.stores.batches["batch-anthropic-1"] = {
         "endpoint": "/v1/chat/completions",
         "input_file_id": "file-anthropic-input-1",
         "output_file_id": "file-anthropic-output-1",
@@ -590,7 +652,7 @@ def test_admin_files_batches_create_gemini_file_returns_normalized_record():
 
 def test_admin_files_batches_create_anthropic_batch_from_staged_file():
     app = make_app()
-    app.state.gigachat_client.files["file-anthropic-input-1"] = {
+    app.state.providers.gigachat_client.files["file-anthropic-input-1"] = {
         "content": (
             b'{"custom_id":"anthropic-1","params":{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hello anthropic"}]}}\n'
         ),
@@ -691,7 +753,7 @@ def test_admin_files_batches_create_anthropic_batch_from_inline_requests_with_fa
 
 def test_admin_files_batches_create_gemini_batch_from_staged_file():
     app = make_app()
-    app.state.gigachat_client.files["file-gemini-input-1"] = {
+    app.state.providers.gigachat_client.files["file-gemini-input-1"] = {
         "content": (
             b'{"key":"row-1","request":{"contents":[{"role":"user","parts":[{"text":"hello gemini"}]}],"model":"models/gemini-test"},"metadata":{"requestLabel":"row-1"}}\n'
         ),
@@ -725,7 +787,7 @@ def test_admin_files_batches_create_gemini_batch_from_staged_file():
 
 def test_admin_files_batches_create_gemini_batch_from_doc_style_file_with_model():
     app = make_app()
-    app.state.gigachat_client.files["file-gemini-input-keyed-1"] = {
+    app.state.providers.gigachat_client.files["file-gemini-input-keyed-1"] = {
         "content": (
             b'{"key":"doc-row-1","request":{"contents":[{"role":"user","parts":[{"text":"hello keyed gemini"}]}]}}\n'
         ),
@@ -813,7 +875,7 @@ def test_admin_files_batches_create_openai_batch_returns_field_error_detail():
 
 def test_admin_files_batches_create_rejects_invalid_staged_input_with_validation_report():
     app = make_app()
-    app.state.gigachat_client.files["file-openai-invalid-create-1"] = {
+    app.state.providers.gigachat_client.files["file-openai-invalid-create-1"] = {
         "content": (
             b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":[]}}\n'
             b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":"bad"}}\n'
@@ -886,7 +948,7 @@ def test_admin_files_batches_create_rejects_invalid_inline_input_with_validation
 
 def test_admin_files_batches_validate_staged_file_returns_diagnostic_report():
     app = make_app()
-    app.state.gigachat_client.files["file-openai-invalid-1"] = {
+    app.state.providers.gigachat_client.files["file-openai-invalid-1"] = {
         "content": (
             b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":[]}}\n'
             b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":"bad"}}\n'
@@ -945,7 +1007,9 @@ def test_admin_files_batches_validate_reuses_cached_staged_file_bytes():
     )
 
     assert second_response.status_code == 200
-    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+    assert app.state.providers.gigachat_client.file_content_requests == [
+        "file-openai-1"
+    ]
 
 
 def test_admin_files_batches_create_uses_one_staged_file_read_for_validate_and_create():
@@ -961,7 +1025,9 @@ def test_admin_files_batches_create_uses_one_staged_file_read_for_validate_and_c
     )
 
     assert response.status_code == 200
-    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+    assert app.state.providers.gigachat_client.file_content_requests == [
+        "file-openai-1"
+    ]
 
 
 def test_admin_files_batches_create_reuses_cached_validation_after_validate():
@@ -986,7 +1052,9 @@ def test_admin_files_batches_create_reuses_cached_validation_after_validate():
     )
 
     assert create_response.status_code == 200
-    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+    assert app.state.providers.gigachat_client.file_content_requests == [
+        "file-openai-1"
+    ]
 
 
 def test_admin_files_batches_validate_inline_gemini_rows_returns_warnings_only():

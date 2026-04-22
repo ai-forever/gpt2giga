@@ -255,8 +255,10 @@ def build_normalized_chat_request(
         if logger is not None:
             logger.debug(f"Functions count: {len(options['functions'])}")
 
-    if tool_choice_type == "tool":
-        options["function_call"] = {"name": tool_choice.get("name")}
+    if tool_choice_type == "tool" and isinstance(tool_choice, dict):
+        tool_name = tool_choice.get("name")
+        if isinstance(tool_name, str) and tool_name:
+            options["function_call"] = {"name": tool_name}
 
     return NormalizedChatRequest(
         model=str(request_payload.get("model", "unknown")),
@@ -457,9 +459,9 @@ def _user_message_to_anthropic_blocks(
             continue
         part_type = part.get("type")
         if part_type == "text":
-            text = part.get("text")
-            if isinstance(text, str) and text:
-                blocks.append({"type": "text", "text": text})
+            part_text: Any = part.get("text")
+            if isinstance(part_text, str) and part_text:
+                blocks.append({"type": "text", "text": part_text})
             continue
         if part_type == "image_url":
             image_url = part.get("image_url")

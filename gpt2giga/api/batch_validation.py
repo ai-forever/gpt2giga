@@ -193,10 +193,10 @@ def _build_validation_cache_key(
     file_id: str,
     api_format: str | NormalizedArtifactFormat,
     fallback_model: str | None,
-) -> tuple[str, str, str]:
+) -> str:
     if isinstance(api_format, NormalizedArtifactFormat):
         normalized_api_format = api_format.value
     else:
         normalized_api_format = str(api_format or "").strip().lower() or "openai"
     normalized_model = _normalize_optional_string(fallback_model) or ""
-    return (file_id, normalized_api_format, normalized_model)
+    return "::".join((file_id, normalized_api_format, normalized_model))

@@ -3,8 +3,9 @@ from fastapi.testclient import TestClient
 from loguru import logger
 
 from gpt2giga.api.middleware.observability import ObservabilityMiddleware
-from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
+from gpt2giga.app.dependencies import get_runtime_providers
+from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.providers.gigachat import ResponseProcessor
 from gpt2giga.api.openai import router
 
@@ -126,11 +127,17 @@ class FakeRequestTransformer:
 def make_app(*, config=None, observability: bool = False):
     app = FastAPI()
     app.include_router(router)
-    app.state.gigachat_client = FakeGigachat()
-    app.state.response_processor = ResponseProcessor(logger=logger)
-    app.state.request_transformer = FakeRequestTransformer()
+    providers = get_runtime_providers(app.state)
+    providers.gigachat_client = FakeGigachat()
+    providers.response_processor = ResponseProcessor(logger=logger)
+    providers.request_transformer = FakeRequestTransformer()
     app.state.config = config or ProxyConfig.model_validate(
-        {"proxy": {"gigachat_api_mode": "v1"}}
+        {
+            "proxy": {
+                "gigachat_api_mode": "v1",
+                "enable_telemetry": False if observability else True,
+            }
+        }
     )
     if observability:
         ensure_runtime_dependencies(app.state, config=app.state.config)
@@ -178,15 +185,15 @@ def test_chat_completions_non_stream_v2_mode():
     body = resp.json()
     assert body["object"] == "chat.completion"
     assert body["choices"][0]["message"]["content"] == "ok-v2"
-    assert app.state.gigachat_client.last_method == "v2"
-    assert app.state.request_transformer.last_mode == "v2"
+    assert app.state.providers.gigachat_client.last_method == "v2"
+    assert app.state.providers.request_transformer.last_mode == "v2"
 
 
 def test_chat_completions_non_stream_v2_mode_preserves_tool_calls():
     app = make_app(
         config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v2"}})
     )
-    app.state.gigachat_client._response_v2 = {
+    app.state.providers.gigachat_client._response_v2 = {
         "choices": [
             {
                 "message": {
@@ -222,8 +229,8 @@ def test_chat_completions_non_stream_v2_mode_preserves_tool_calls():
     assert body["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == (
         "get_weather"
     )
-    assert app.state.gigachat_client.last_method == "v2"
-    assert app.state.request_transformer.last_mode == "v2"
+    assert app.state.providers.gigachat_client.last_method == "v2"
+    assert app.state.providers.request_transformer.last_mode == "v2"
 
 
 def test_chat_completions_non_stream_records_audit_metadata():

@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 from starlette.requests import Request
 
-from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.api.admin.access import verify_admin_ip_allowlist
 from gpt2giga.api.batch_validation import (
     cache_batch_input_bytes,
     resolve_batch_input_bytes,
@@ -71,7 +71,7 @@ async def get_files_batches_inventory(
     purpose: str | None = Query(default=None),
 ):
     """Return a normalized mixed-provider files and batches inventory."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     app_state = request.app.state
     service = get_files_batches_service_from_state(app_state)
     giga_client = get_gigachat_client(request)
@@ -94,7 +94,7 @@ async def get_files_batches_inventory(
 @exceptions_handler
 async def get_files_batches_file(file_id: str, request: Request):
     """Return one normalized file artifact for admin inspection."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     app_state = request.app.state
     service = get_files_batches_service_from_state(app_state)
     try:
@@ -119,7 +119,7 @@ async def get_files_batches_file(file_id: str, request: Request):
 @exceptions_handler
 async def create_files_batches_file(request: Request):
     """Create a normalized staged file through the admin API."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     multipart = await read_request_multipart(request)
     form = multipart.get("form") or {}
     upload = (multipart.get("files") or {}).get("file")
@@ -157,7 +157,7 @@ async def create_files_batches_batch(
     request: Request,
 ):
     """Create a normalized batch artifact through the admin API."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     input_bytes = None
     if payload.input_file_id and not payload.requests:
         input_bytes = await resolve_batch_input_bytes(
@@ -209,7 +209,7 @@ async def validate_files_batches_batch(
     request: Request,
 ):
     """Validate staged or inline batch input and return a diagnostic report."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     input_bytes = None
     if payload.input_content_base64:
         input_bytes = base64.b64decode(payload.input_content_base64)
@@ -236,7 +236,7 @@ async def get_files_batches_file_content(
     preview_bytes: int | None = Query(default=None, ge=1, le=1_048_576),
 ):
     """Return canonical file content for admin preview/download."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     app_state = request.app.state
     giga_client = get_gigachat_client(request)
     files_service = get_files_service_from_state(app_state)
@@ -292,7 +292,7 @@ async def get_files_batches_file_content(
 @exceptions_handler
 async def get_files_batches_batch(batch_id: str, request: Request):
     """Return one normalized batch artifact for admin inspection."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     app_state = request.app.state
     service = get_files_batches_service_from_state(app_state)
     record = await service.retrieve_batch(
@@ -317,7 +317,7 @@ async def get_files_batches_batch_output(
     preview_bytes: int | None = Query(default=None, ge=1, le=1_048_576),
 ):
     """Return canonical batch output for admin preview/download."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     batch_record = await _require_batch_record(
         batch_id,
         request=request,
@@ -366,10 +366,10 @@ async def _load_batch_output_content(
     batch_record,
     *,
     request: Request,
-    giga_client: object,
-    files_service: object,
-    batch_store: object,
-    file_store: object,
+    giga_client: Any,
+    files_service: Any,
+    batch_store: Any,
+    file_store: Any,
 ) -> tuple[bytes, str]:
     output_file_id = batch_record.output_file_id
     if not output_file_id:
@@ -379,8 +379,7 @@ async def _load_batch_output_content(
         )
 
     raw_metadata = dict(batch_record.raw.get("metadata") or {})
-    raw_batch = dict(batch_record.raw.get("batch") or {})
-    status = str(raw_batch.get("status") or batch_record.status or "").strip().lower()
+    status = str(batch_record.status or "").strip().lower()
     output_api_format = await _resolve_batch_output_api_format(
         batch_record,
         raw_metadata=raw_metadata,
@@ -424,8 +423,8 @@ async def _resolve_batch_output_api_format(
     batch_record,
     *,
     raw_metadata: dict[str, Any],
-    giga_client: object,
-    file_store: object,
+    giga_client: Any,
+    file_store: Any,
 ) -> str:
     """Resolve the batch output format, falling back to the original input rows."""
     inferred_format = _infer_batch_api_format_from_rows(raw_metadata.get("requests"))
@@ -480,8 +479,8 @@ def _get_response_processor_or_none(state: object):
 def _resolve_output_batch_id(
     file_id: str,
     *,
-    file_store: object,
-    batch_store: object,
+    file_store: Any,
+    batch_store: Any,
 ) -> str | None:
     stored_file = file_store.get(file_id, {}) if file_store is not None else {}
     stored_batch_id = str(stored_file.get("batch_id") or "").strip()

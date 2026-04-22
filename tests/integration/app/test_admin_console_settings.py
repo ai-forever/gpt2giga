@@ -183,6 +183,101 @@ def test_gigachat_settings_null_secret_clears_existing_secret(tmp_path, monkeypa
     assert clear_payload["values"]["credentials_configured"] is False
 
 
+def test_application_settings_update_is_persisted(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    response = client.put(
+        "/admin/api/settings/application",
+        json={
+            "runtime_store_backend": "memory",
+            "runtime_store_namespace": "tenant-a",
+            "gigachat_responses_api_mode": "v2",
+            "enable_reasoning": True,
+            "recent_requests_max_items": 321,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["section"] == "application"
+    assert payload["values"]["runtime_store_backend"] == "memory"
+    assert payload["values"]["runtime_store_active_backend"] == "memory"
+    assert payload["values"]["runtime_store_namespace"] == "tenant-a"
+    assert payload["values"]["gigachat_responses_api_mode"] == "v2"
+    assert payload["values"]["enable_reasoning"] is True
+    assert payload["values"]["recent_requests_max_items"] == 321
+
+    get_response = client.get("/admin/api/settings/application")
+    assert get_response.status_code == 200
+    values = get_response.json()["values"]
+    assert values["runtime_store_namespace"] == "tenant-a"
+    assert values["gigachat_responses_api_mode"] == "v2"
+    assert values["enable_reasoning"] is True
+
+
+def test_security_settings_update_is_persisted(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    response = client.put(
+        "/admin/api/settings/security",
+        json={
+            "logs_ip_allowlist": ["127.0.0.1", "10.0.0.8"],
+            "scoped_api_keys": [
+                {
+                    "name": "sdk-openai",
+                    "key": "sdk-openai-secret",
+                    "providers": ["openai"],
+                    "endpoints": ["chat/completions"],
+                }
+            ],
+            "governance_limits": [
+                {
+                    "name": "openai-chat-limit",
+                    "scope": "provider",
+                    "providers": ["openai"],
+                    "endpoints": ["chat/completions"],
+                    "window_seconds": 60,
+                    "max_requests": 10,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["section"] == "security"
+    assert payload["values"]["logs_ip_allowlist"] == ["127.0.0.1", "10.0.0.8"]
+    assert payload["values"]["scoped_api_keys_configured"] == 1
+    assert payload["values"]["governance_limits"][0]["name"] == "openai-chat-limit"
+
+    get_response = client.get(
+        "/admin/api/settings/security",
+        headers={"x-forwarded-for": "127.0.0.1"},
+    )
+    assert get_response.status_code == 200
+    values = get_response.json()["values"]
+    assert values["logs_ip_allowlist"] == ["127.0.0.1", "10.0.0.8"]
+    assert values["scoped_api_keys_configured"] == 1
+    assert values["governance_limits"][0]["providers"] == ["openai"]
+
+
+def test_gigachat_settings_update_rejects_unknown_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    response = client.put(
+        "/admin/api/settings/gigachat",
+        json={"model": "GigaChat-Max", "unexpected_field": True},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail[0]["type"] == "extra_forbidden"
+    assert detail[0]["loc"] == ["body", "unexpected_field"]
+
+
 def test_observability_settings_endpoint_returns_grouped_sink_cards():
     client = TestClient(
         make_app(

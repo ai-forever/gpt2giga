@@ -20,7 +20,6 @@ from starlette.status import (
     HTTP_503_SERVICE_UNAVAILABLE,
 )
 
-from gpt2giga.api.admin.logs import get_client_ip
 from gpt2giga.api.dependencies.auth import (
     resolve_provided_api_key,
     verify_provided_api_key,
@@ -55,6 +54,16 @@ _BOOTSTRAP_ADMIN_API_ROUTES = {
 }
 
 
+def get_client_ip(request: Request) -> str:
+    """Extract client IP from X-Forwarded-For or request.client."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return ""
+
+
 def _route_path(request: Request) -> str:
     """Return the resolved route path format when available."""
     scope = getattr(request, "scope", {})
@@ -74,6 +83,21 @@ def _is_localhost_request(request: Request) -> bool:
         return ipaddress.ip_address(client_ip).is_loopback
     except ValueError:
         return False
+
+
+def verify_admin_ip_allowlist(request: Request) -> None:
+    """Deny admin access if the client IP is not in the configured allowlist."""
+    config = get_config_from_state(request.app.state)
+    allowlist = getattr(config.proxy_settings, "logs_ip_allowlist", None)
+    if not allowlist:
+        return
+
+    client_ip = get_client_ip(request)
+    if client_ip not in allowlist:
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN,
+            detail="Access denied: IP not in admin allowlist",
+        )
 
 
 def _is_bootstrap_route(request: Request) -> bool:

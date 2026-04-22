@@ -98,8 +98,8 @@ async def translate_payload(request: Request):
         target=translation.target,
         request=request,
     )
-    response = TranslationResponse(
-        **{
+    response = TranslationResponse.model_validate(
+        {
             "from": translation.source,
             "to": translation.target,
             "kind": translation.kind,
@@ -170,6 +170,18 @@ async def _serialize_chat_request(
     payload = await transformer.prepare_chat_completion(
         request_data.to_backend_payload()
     )
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "message": "Request transformer returned an invalid payload shape.",
+                    "type": "server_error",
+                    "param": None,
+                    "code": "invalid_translation_payload",
+                }
+            },
+        )
     return payload, []
 
 

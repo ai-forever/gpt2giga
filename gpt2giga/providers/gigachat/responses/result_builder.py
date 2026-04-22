@@ -3,8 +3,18 @@
 import time
 from typing import Any, Dict, Optional
 
+from gpt2giga.providers.gigachat.response_mapping_common import (
+    ResponseProcessorCommonMixin,
+)
+from gpt2giga.providers.gigachat.responses.output_items import (
+    ResponsesOutputItemsMixin,
+)
 
-class ResponsesResultBuilderMixin:
+
+class ResponsesResultBuilderMixin(
+    ResponsesOutputItemsMixin,
+    ResponseProcessorCommonMixin,
+):
     """Assemble top-level Responses API payloads."""
 
     @classmethod

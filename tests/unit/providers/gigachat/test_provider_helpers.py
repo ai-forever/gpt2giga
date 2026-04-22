@@ -7,6 +7,13 @@ from gpt2giga.providers.gigachat.auth import (
 )
 from gpt2giga.providers.gigachat.tool_mapping import convert_tool_to_giga_functions
 from gigachat.models import Function
+from pydantic import SecretStr
+
+
+def _reveal_secret(value):
+    if isinstance(value, SecretStr):
+        return value.get_secret_value()
+    return value
 
 
 def test_pass_token_giga_user():
@@ -18,7 +25,7 @@ def test_pass_token_giga_user():
     token = "giga-user-u1:p1"
     res = pass_token_to_gigachat(giga, token)
     assert res._settings.user == "u1"
-    assert res._settings.password == "p1"
+    assert _reveal_secret(res._settings.password) == "p1"
     assert res._settings.credentials is None
 
 
@@ -34,7 +41,7 @@ def test_pass_token_giga_cred():
     )
     token = "giga-cred-abcd-efgh"
     res = pass_token_to_gigachat(giga, token)
-    assert res._settings.credentials == "abcd-efgh"
+    assert _reveal_secret(res._settings.credentials) == "abcd-efgh"
     assert res._settings.scope == "GIGACHAT_API_PERS"
 
 
@@ -46,7 +53,7 @@ def test_pass_token_giga_cred_with_scope():
     )
     token = "giga-cred-abcd-efgh:MY_SCOPE"
     res = pass_token_to_gigachat(giga, token)
-    assert res._settings.credentials == "abcd-efgh"
+    assert _reveal_secret(res._settings.credentials) == "abcd-efgh"
     assert res._settings.scope == "MY_SCOPE"
 
 

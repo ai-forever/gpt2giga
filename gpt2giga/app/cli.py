@@ -44,5 +44,5 @@ def load_config() -> ProxyConfig:
 
     requested_env = args.env_path if args.env_path else f"{os.getcwd()}/.env"
     with _temporary_dotenv(requested_env):
-        config = ProxyConfig()
+        config = ProxyConfig(env_path=requested_env)
     return apply_control_plane_overrides(config)

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 
 from gpt2giga.api.batches_validation import router
+from gpt2giga.app.dependencies import get_runtime_providers
 from gpt2giga.core.config.settings import ProxyConfig
 
 
@@ -17,9 +18,10 @@ def make_app():
     app = FastAPI()
     app.include_router(router)
     app.state.config = ProxyConfig()
-    app.state.gigachat_client = SimpleNamespace()
+    providers = get_runtime_providers(app.state)
+    providers.gigachat_client = SimpleNamespace()
     app.state.logger = logger
-    app.state.request_transformer = FakeRequestTransformer()
+    providers.request_transformer = FakeRequestTransformer()
     return app
 
 

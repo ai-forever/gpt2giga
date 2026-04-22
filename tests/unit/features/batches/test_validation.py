@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from gpt2giga.core.contracts import NormalizedArtifactFormat
@@ -100,6 +102,20 @@ def test_validate_batch_input_rows_marks_empty_payload_invalid():
     assert report.issues[0].code == "empty_rows"
 
 
+def test_validate_batch_input_bytes_marks_empty_file_invalid():
+    report = validate_batch_input_bytes(b"\n\n", api_format="openai")
+
+    assert report.valid is False
+    assert report.summary.total_rows == 0
+    assert report.summary.error_count == 1
+    assert report.summary.warning_count == 2
+    assert [issue.code for issue in report.issues] == [
+        "blank_line",
+        "blank_line",
+        "empty_file",
+    ]
+
+
 def test_validate_batch_input_rows_reports_gigachat_row_limit():
     report = validate_batch_input_rows(
         [
@@ -163,6 +179,55 @@ async def test_batch_input_validator_openai_collects_errors_and_warnings():
     assert "duplicate_identifier" in codes
     assert "invalid_field" in codes
     assert "missing_field" in codes
+
+
+@pytest.mark.asyncio
+async def test_batch_input_validator_validate_bytes_preserves_original_line_numbers():
+    validator = BatchInputValidator(
+        request_transformer=FakeValidationTransformer(),
+        default_model="GigaChat-2-Max",
+    )
+
+    report = await validator.validate_bytes(
+        (
+            b"\n"
+            b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":[]}}\n'
+            b'{"custom_id":"dup","url":"/v1/chat/completions","body":{"messages":[]}}\n'
+        ),
+        api_format="openai",
+    )
+
+    issues_by_code = {(issue.code, issue.line) for issue in report.issues}
+    assert report.valid is False
+    assert ("blank_line", 1) in issues_by_code
+    assert ("duplicate_identifier", 3) in issues_by_code
+
+
+@pytest.mark.asyncio
+async def test_batch_input_validator_large_payload_stays_within_regression_budget():
+    validator = BatchInputValidator(
+        request_transformer=FakeValidationTransformer(),
+        default_model="GigaChat-2-Max",
+    )
+    content = b"".join(
+        (
+            (
+                '{"custom_id":"row-%d","url":"/v1/chat/completions","body":'
+                '{"model":"gpt-test","messages":[{"role":"user","content":"hello"}]}}\n'
+            )
+            % index
+        ).encode("utf-8")
+        for index in range(1_500)
+    )
+
+    started_at = time.perf_counter()
+    report = await validator.validate_bytes(content, api_format="openai")
+    elapsed = time.perf_counter() - started_at
+
+    assert report.valid is False
+    assert report.summary.total_rows == 1_500
+    assert any(issue.code == "row_limit_exceeded" for issue in report.issues)
+    assert elapsed < 1.5
 
 
 @pytest.mark.asyncio

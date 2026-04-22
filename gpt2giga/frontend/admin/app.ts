@@ -38,6 +38,7 @@ export class AdminApp {
   readonly gatewayKeyInput = this.requireElement<HTMLInputElement>("gateway-key-input");
   private readonly modeChip = this.requireElement<HTMLElement>("mode-chip");
   private readonly backendChip = this.requireElement<HTMLElement>("backend-chip");
+  private readonly runtimeStoreChip = this.requireElement<HTMLElement>("runtime-store-chip");
   private readonly persistedChip = this.requireElement<HTMLElement>("persisted-chip");
   private readonly versionChip = this.requireElement<HTMLElement>("version-chip");
   private readonly authDisclosure = document.getElementById("auth-disclosure") as HTMLDetailsElement | null;
@@ -250,6 +251,7 @@ export class AdminApp {
       const persistence = describePersistenceStatus(setup);
       this.modeChip.textContent = String(runtime.mode ?? "n/a");
       this.backendChip.textContent = String(runtime.gigachat_api_mode ?? "n/a");
+      this.runtimeStoreChip.textContent = String(runtime.runtime_store_backend ?? "n/a");
       this.persistedChip.textContent = persistence.chip;
       this.versionChip.textContent = String(runtime.app_version ?? "n/a");
 
@@ -277,6 +279,7 @@ export class AdminApp {
       this.pushAlert(`Failed to load global admin status. ${toErrorMessage(error)}`, "danger");
       this.modeChip.textContent = "error";
       this.backendChip.textContent = "error";
+      this.runtimeStoreChip.textContent = "error";
       this.persistedChip.textContent = "error";
       this.versionChip.textContent = "error";
     }

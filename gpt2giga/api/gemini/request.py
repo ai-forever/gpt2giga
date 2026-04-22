@@ -87,7 +87,7 @@ async def read_gemini_request_json(request: Request) -> dict:
 def _lowercase_schema_types(value: Any) -> Any:
     """Normalize JSON Schema `type` values to lowercase strings."""
     if isinstance(value, dict):
-        normalized = {}
+        normalized: dict[str, Any] = {}
         for key, item in value.items():
             if key == "type":
                 if isinstance(item, str):

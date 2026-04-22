@@ -5,6 +5,10 @@ from starlette.requests import Request
 
 from gpt2giga.api.admin import admin_api_router
 from gpt2giga.api.system import system_router
+from gpt2giga.app._admin_settings.models import (
+    ApplicationSettingsUpdate,
+    GigaChatSettingsUpdate,
+)
 from gpt2giga.app.admin_settings import (
     AdminControlPlaneSettingsService,
     AdminKeyManagementService,
@@ -62,6 +66,22 @@ async def test_admin_control_plane_settings_service_updates_observability(
     assert sink_by_id["otlp"]["settings"]["service_name"] == "gpt2giga-dev"
 
 
+def test_admin_control_plane_settings_service_builds_runtime_store_catalog():
+    request = _build_request()
+
+    payload = AdminControlPlaneSettingsService(request).build_application_payload()
+
+    catalog = {
+        item["name"]: item for item in payload["values"]["runtime_store_catalog"]
+    }
+    assert catalog["memory"]["registered"] is True
+    assert catalog["sqlite"]["registered"] is True
+    assert catalog["redis"]["registered"] is False
+    assert catalog["postgres"]["registered"] is False
+    assert catalog["s3"]["registered"] is False
+    assert payload["values"]["runtime_store_active_backend"] == "memory"
+
+
 @pytest.mark.asyncio
 async def test_admin_control_plane_settings_service_builds_masked_revision_diffs(
     tmp_path, monkeypatch
@@ -107,14 +127,14 @@ async def test_admin_control_plane_settings_service_tests_gigachat_factory():
     request.app.state.providers.gigachat_factory = FakeGigaChat
 
     payload = await AdminControlPlaneSettingsService(request).test_gigachat_settings(
-        {
-            "user": "service-account",
-            "password": "super-secret-password",
-            "credentials": "gigachat-secret",
-            "scope": "GIGACHAT_API_PERS",
-            "ca_bundle_file": "/certs/company-root.pem",
-            "verify_ssl_certs": True,
-        }
+        GigaChatSettingsUpdate(
+            user="service-account",
+            password="super-secret-password",
+            credentials="gigachat-secret",
+            scope="GIGACHAT_API_PERS",
+            ca_bundle_file="/certs/company-root.pem",
+            verify_ssl_certs=True,
+        )
     )
 
     assert payload["ok"] is True
@@ -162,8 +182,24 @@ async def test_admin_control_plane_settings_service_rejects_mutations_when_persi
 
     with pytest.raises(HTTPException) as exc_info:
         await AdminControlPlaneSettingsService(request).update_gigachat_settings(
-            {"model": "GigaChat-Max"}
+            GigaChatSettingsUpdate(model="GigaChat-Max")
         )
 
     assert exc_info.value.status_code == 409
     assert "Control-plane persistence is disabled" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_admin_control_plane_settings_service_rejects_unregistered_runtime_store_backend(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    request = _build_request()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await AdminControlPlaneSettingsService(request).update_application_settings(
+            ApplicationSettingsUpdate(runtime_store_backend="redis")
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "is not added in this build" in str(exc_info.value.detail)

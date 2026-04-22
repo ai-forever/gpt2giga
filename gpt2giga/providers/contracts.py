@@ -27,6 +27,14 @@ class ChatProviderAdapter(Protocol):
 
 
 @runtime_checkable
+class TokenCountProviderAdapter(ChatProviderAdapter, Protocol):
+    """Extend a chat adapter with provider-specific token-count extraction."""
+
+    def build_token_count_texts(self, payload: dict[str, Any]) -> list[str]:
+        """Extract text fragments for upstream token counting."""
+
+
+@runtime_checkable
 class ResponsesProviderAdapter(Protocol):
     """Translate provider Responses payloads into the canonical contract."""
 

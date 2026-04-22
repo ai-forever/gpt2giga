@@ -2,6 +2,8 @@
 
 Этот документ заменяет устаревшую ссылку на `ARCHITECTURE_v2.md` и описывает текущую структуру проекта на уровне, достаточном для feature-работы и рефакторинга.
 
+Если нужен не только текущий flow, но и rationale спорных решений, откройте [design-notes.md](./design-notes.md): там отдельно зафиксированы причины frameworkless admin UI, committed compiled assets и текущей границы между feature-layer и provider mapping.
+
 ## Ключевая идея
 
 `gpt2giga` принимает OpenAI-, Anthropic- и Gemini-совместимые HTTP-запросы, нормализует их через feature-слой и отправляет в GigaChat API. Runtime собирается в FastAPI-приложение, а операторский control plane живет в `/admin` и связанных `/admin/api/*` endpoint-ах.
@@ -27,12 +29,10 @@
   - `gpt2giga/providers/gigachat/request_mapping_base.py`
   - `gpt2giga/providers/gigachat/chat_request_mapper.py`
   - `gpt2giga/providers/gigachat/responses/`
-  - `gpt2giga/providers/gigachat/responses_request_mapper.py` как compatibility entrypoint
 - Общая response-нормализация сосредоточена в:
   - `gpt2giga/providers/gigachat/response_mapper.py`
   - `gpt2giga/providers/gigachat/response_mapping_common.py`
   - `gpt2giga/providers/gigachat/responses/`
-  - `gpt2giga/providers/gigachat/responses_response_mapper.py` как compatibility entrypoint
 - Streaming для GigaChat и OpenAI-compatible SSE разделен между:
   - `gpt2giga/providers/gigachat/streaming.py`
   - `gpt2giga/features/chat/stream.py`
@@ -113,7 +113,7 @@ api/openai/responses.py
 - Практическое правило для contributors:
   - router и provider transport adapter не должны выбирать `achat` против `achat_v2`;
   - единственный internal source of truth для native Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`;
-  - top-level модули `responses_*` сохранены как compatibility re-export layer для старых import path-ов.
+  - новые imports должны идти напрямую в structured helper-модули под `responses/`.
 
 ### Models, embeddings, files, batches
 
@@ -135,9 +135,9 @@ api/openai/responses.py
   - `providers`
   - `observability`
 - `gpt2giga/app/wiring.py` инициализирует GigaChat client, request/response mapper-ы и feature-сервисы.
-- Внутренняя реализация request-audit observability теперь лежит в `gpt2giga/app/_observability/`, а `gpt2giga/app/observability.py` остаётся совместимым facade/re-export слоем.
-- Внутренняя реализация telemetry sink-ов и registry теперь лежит в `gpt2giga/app/_telemetry/`, а `gpt2giga/app/telemetry.py` остаётся совместимым facade/re-export слоем.
-- Внутренняя реализация runtime store/feed backends теперь лежит в `gpt2giga/app/_runtime_backends/`, а `gpt2giga/app/runtime_backends.py` остаётся совместимым facade/re-export слоем.
+- Внутренняя реализация request-audit observability лежит в `gpt2giga/app/_observability/`; публичный import path для runtime-кода и тестов остаётся `gpt2giga/app/observability.py`.
+- Внутренняя реализация telemetry sink-ов и registry лежит в `gpt2giga/app/_telemetry/`; публичный import path остаётся `gpt2giga/app/telemetry.py`.
+- Внутренняя реализация runtime store/feed backends лежит в `gpt2giga/app/_runtime_backends/`; публичный import path остаётся `gpt2giga/app/runtime_backends.py`.
 - Runtime store backend и observability backend также провиженятся через typed container-ы, чтобы route-модули не собирали инфраструктуру вручную.
 
 ### Control plane
@@ -147,7 +147,7 @@ api/openai/responses.py
 - `gpt2giga/api/admin/settings.py` делегирует setup/settings/revisions/key-management flow в `gpt2giga/app/admin_settings.py`.
 - `gpt2giga/api/admin/runtime.py` делегирует runtime/config/capabilities/usage payload building в `gpt2giga/app/admin_runtime.py`.
 - Настройки и live mutation flow проходят через `gpt2giga/app/admin_settings.py` и `gpt2giga/core/config/control_plane.py`.
-- Внутренняя реализация control-plane persistence, bootstrap, revisions и payload/status helpers теперь лежит в `gpt2giga/core/config/_control_plane/`, а `gpt2giga/core/config/control_plane.py` остаётся совместимым facade/re-export слоем.
+- Внутренняя реализация control-plane persistence, bootstrap, revisions и payload/status helpers лежит в `gpt2giga/core/config/_control_plane/`; публичный import path остаётся `gpt2giga/core/config/control_plane.py`.
 - Когда изменение безопасно для live-reload, `reload_runtime_services()` пересобирает runtime без полного рестарта процесса.
 - Runtime snapshot service читает текущее состояние из `app.state.config`, runtime stores и observability state.
 
@@ -163,14 +163,17 @@ api/openai/responses.py
 ### Как собирать
 
 ```bash
-npm install
-npm run build:admin
+npm ci
+npm run sync:admin
+npm run check:admin
 ```
 
 - TypeScript-конфиг в `tsconfig.json` использует:
   - `rootDir = gpt2giga/frontend`
   - `outDir = packages/gpt2giga-ui/src/gpt2giga_ui/static`
 - Это означает, что `gpt2giga/frontend/admin/**/*.ts` компилируется в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/**/*.js`.
+- `npm run sync:admin` прогоняет тесты, пересобирает output и показывает только relevant source/output diff для коммита.
+- `npm run check:admin` повторяет CI-путь и дополнительно падает, если generated admin assets остались несинхронными после rebuild.
 
 ### Нужно ли коммитить compiled admin assets
 
@@ -189,6 +192,8 @@ npm run build:admin
 1. Меняете `gpt2giga/frontend/admin/*`.
 2. Запускаете `npm run build:admin`.
 3. Коммитите и исходники, и обновленный output в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
+
+`CI` повторяет этот шаг и падает, если после `npm run build:admin` в git diff остаются изменения под `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
 
 ## Куда смотреть дальше
 

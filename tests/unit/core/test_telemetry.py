@@ -2,30 +2,24 @@ from types import SimpleNamespace
 
 import pytest
 
-import gpt2giga.app.telemetry as telemetry_facade
 from gpt2giga.app._telemetry.contracts import ObservabilitySink
 from gpt2giga.app._telemetry.hub import ObservabilityHub
 from gpt2giga.app._telemetry.langfuse import (
-    _build_langfuse_attributes as _internal_build_langfuse_attributes,
+    _build_langfuse_attributes,
 )
 from gpt2giga.app._telemetry.otlp import (
-    _build_otlp_traces_payload as _internal_build_otlp_traces_payload,
+    _build_otlp_traces_payload,
 )
 from gpt2giga.app._telemetry.otlp import (
-    _build_otlp_traces_protobuf_payload as _internal_build_otlp_traces_protobuf_payload,
+    _build_otlp_traces_protobuf_payload,
 )
 from gpt2giga.app._telemetry.phoenix import (
-    _build_phoenix_attributes as _internal_build_phoenix_attributes,
+    _build_phoenix_attributes,
 )
 from gpt2giga.app._telemetry.prometheus import (
-    PrometheusMetricsSink as InternalPrometheusMetricsSink,
-)
-from gpt2giga.app.telemetry import (
     PrometheusMetricsSink,
-    _build_langfuse_attributes,
-    _build_phoenix_attributes,
-    _build_otlp_traces_payload,
-    _build_otlp_traces_protobuf_payload,
+)
+from gpt2giga.app._telemetry.registry import (
     create_observability_hub,
 )
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
@@ -65,16 +59,15 @@ def test_prometheus_metrics_sink_renders_request_error_and_stream_metrics():
     ) in rendered
 
 
-def test_telemetry_facade_reexports_internal_implementation():
-    assert telemetry_facade.ObservabilitySink is ObservabilitySink
-    assert telemetry_facade.ObservabilityHub is ObservabilityHub
-    assert telemetry_facade.PrometheusMetricsSink is InternalPrometheusMetricsSink
-    assert _build_langfuse_attributes is _internal_build_langfuse_attributes
-    assert _build_phoenix_attributes is _internal_build_phoenix_attributes
-    assert _build_otlp_traces_payload is _internal_build_otlp_traces_payload
+def test_telemetry_exports_come_from_internal_package():
+    assert ObservabilitySink.__module__ == "gpt2giga.app._telemetry.contracts"
+    assert ObservabilityHub.__module__ == "gpt2giga.app._telemetry.hub"
+    assert PrometheusMetricsSink.__module__ == "gpt2giga.app._telemetry.prometheus"
+    assert _build_langfuse_attributes.__module__ == "gpt2giga.app._telemetry.langfuse"
+    assert _build_phoenix_attributes.__module__ == "gpt2giga.app._telemetry.phoenix"
+    assert _build_otlp_traces_payload.__module__ == "gpt2giga.app._telemetry.otlp"
     assert (
-        _build_otlp_traces_protobuf_payload
-        is _internal_build_otlp_traces_protobuf_payload
+        _build_otlp_traces_protobuf_payload.__module__ == "gpt2giga.app._telemetry.otlp"
     )
 
 

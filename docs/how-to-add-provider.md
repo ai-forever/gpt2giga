@@ -2,6 +2,8 @@
 
 Этот гайд описывает полный workflow добавления нового внешнего совместимого API provider-а в `gpt2giga` без обхода существующей архитектуры.
 
+Если нужен короткий rationale именно по границе feature-layer и provider mapping, сначала посмотрите [design-notes.md](./design-notes.md#3-%D0%B3%D1%80%D0%B0%D0%BD%D0%B8%D1%86%D0%B0-feature-vs-provider-mapping).
+
 Под provider-ом в этом документе понимается не backend GigaChat, а внешний API surface, который должен выглядеть как другой продукт или SDK: OpenAI, Anthropic, Gemini или новый совместимый контракт.
 
 Базовый scaffold лежит в [gpt2giga/providers/template_provider/README.md](../gpt2giga/providers/template_provider/README.md).
@@ -94,7 +96,7 @@ api/<provider>/*
   - когда собирать native `ChatV2`;
   - как использовать `previous_response_id` и response store для continuation flow.
 - Internal source of truth для Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`.
-- Плоские top-level модули вида `responses_request_mapper.py` и `responses_response_mapper.py` оставлены только как compatibility wrappers для старых import path-ов.
+- Новые импорты должны идти напрямую в structured helper-модули внутри `gpt2giga/providers/gigachat/responses/`.
 
 ## Где проходит граница ответственности
 

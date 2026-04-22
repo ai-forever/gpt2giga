@@ -9,6 +9,7 @@ import anyio
 import tiktoken
 
 from gpt2giga.core.contracts import to_backend_payload
+from gpt2giga.features.embeddings.contracts import EmbeddingsRequestData
 
 
 class GigaChatEmbeddingsMapper:
@@ -16,7 +17,7 @@ class GigaChatEmbeddingsMapper:
 
     async def prepare_request(
         self,
-        data: dict[str, Any],
+        data: EmbeddingsRequestData,
         *,
         embeddings_model: str,
     ) -> dict[str, Any]:

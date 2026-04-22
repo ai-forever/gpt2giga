@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Body, Query
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 
-from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.api.admin.access import verify_admin_ip_allowlist
 from gpt2giga.app.admin_settings import (
     AdminControlPlaneSettingsService,
     AdminKeyManagementService,
+    ApplicationSettingsUpdate,
+    ClaimInstanceRequest,
+    GigaChatSettingsUpdate,
+    SecuritySettingsUpdate,
 )
 from gpt2giga.core.config.observability import ObservabilitySettingsUpdate
 from gpt2giga.core.errors import exceptions_handler
@@ -41,17 +43,11 @@ class ScopedKeyRotateRequest(BaseModel):
     key: str | None = Field(default=None, min_length=1)
 
 
-class ClaimInstanceRequest(BaseModel):
-    """Capture optional operator context for the first-run claim step."""
-
-    operator_label: str | None = Field(default=None, min_length=1)
-
-
 @admin_settings_api_router.get("/admin/api/setup")
 @exceptions_handler
 async def get_admin_setup_status(request: Request):
     """Return first-run and persisted-config status for the console."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminControlPlaneSettingsService(request).build_setup_status_payload()
 
 
@@ -62,7 +58,7 @@ async def claim_admin_setup_instance(
     payload: ClaimInstanceRequest | None = Body(default=None),
 ):
     """Record the operator claim for the current bootstrap session."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminControlPlaneSettingsService(request).claim_setup_instance(
         payload.operator_label if payload else None
     )
@@ -72,7 +68,7 @@ async def claim_admin_setup_instance(
 @exceptions_handler
 async def get_application_settings(request: Request):
     """Return UI-facing application settings."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminControlPlaneSettingsService(request).build_application_payload()
 
 
@@ -80,10 +76,10 @@ async def get_application_settings(request: Request):
 @exceptions_handler
 async def update_application_settings(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: ApplicationSettingsUpdate,
 ):
     """Persist and optionally apply application settings."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminControlPlaneSettingsService(request).update_application_settings(
         payload
     )
@@ -93,7 +89,7 @@ async def update_application_settings(
 @exceptions_handler
 async def get_observability_settings(request: Request):
     """Return UI-facing grouped observability settings."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminControlPlaneSettingsService(request).build_observability_payload()
 
 
@@ -104,7 +100,7 @@ async def update_observability_settings(
     payload: ObservabilitySettingsUpdate,
 ):
     """Persist and apply grouped observability settings."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminControlPlaneSettingsService(
         request
     ).update_observability_settings(payload)
@@ -114,7 +110,7 @@ async def update_observability_settings(
 @exceptions_handler
 async def get_gigachat_settings(request: Request):
     """Return UI-facing GigaChat settings with masked secrets."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminControlPlaneSettingsService(request).build_gigachat_payload()
 
 
@@ -122,10 +118,10 @@ async def get_gigachat_settings(request: Request):
 @exceptions_handler
 async def update_gigachat_settings(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: GigaChatSettingsUpdate,
 ):
     """Persist and apply GigaChat settings."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminControlPlaneSettingsService(request).update_gigachat_settings(
         payload
     )
@@ -135,10 +131,10 @@ async def update_gigachat_settings(
 @exceptions_handler
 async def test_gigachat_settings(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: GigaChatSettingsUpdate,
 ):
     """Test candidate GigaChat settings without persisting them."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminControlPlaneSettingsService(request).test_gigachat_settings(
         payload
     )
@@ -148,7 +144,7 @@ async def test_gigachat_settings(
 @exceptions_handler
 async def get_security_settings(request: Request):
     """Return UI-facing security settings."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminControlPlaneSettingsService(request).build_security_payload()
 
 
@@ -156,10 +152,10 @@ async def get_security_settings(request: Request):
 @exceptions_handler
 async def update_security_settings(
     request: Request,
-    payload: dict[str, Any] = Body(...),
+    payload: SecuritySettingsUpdate,
 ):
     """Persist and optionally apply security settings."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminControlPlaneSettingsService(request).update_security_settings(
         payload
     )
@@ -172,7 +168,7 @@ async def get_settings_revisions(
     limit: int = Query(default=6, ge=1, le=20),
 ):
     """Return recent control-plane revisions with safe diffs."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminControlPlaneSettingsService(request).build_revisions_payload(
         limit=limit
     )
@@ -185,7 +181,7 @@ async def rollback_settings_revision(
     revision_id: str,
 ):
     """Rollback runtime settings to a previous persisted revision."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminControlPlaneSettingsService(request).rollback_revision(
         revision_id
     )
@@ -195,7 +191,7 @@ async def rollback_settings_revision(
 @exceptions_handler
 async def get_admin_keys(request: Request):
     """Return global and scoped API-key metadata for the admin console."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return AdminKeyManagementService(request).build_payload()
 
 
@@ -206,7 +202,7 @@ async def rotate_global_key(
     payload: GlobalKeyRotateRequest,
 ):
     """Create or rotate the global API key."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminKeyManagementService(request).rotate_global_key(
         value=payload.value
     )
@@ -219,7 +215,7 @@ async def create_scoped_key(
     payload: ScopedKeyCreateRequest,
 ):
     """Create a scoped API key with provider/endpoint/model filters."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminKeyManagementService(request).create_scoped_key(
         name=payload.name,
         key=payload.key,
@@ -237,7 +233,7 @@ async def rotate_scoped_key(
     payload: ScopedKeyRotateRequest,
 ):
     """Rotate an existing scoped API key and return the new value once."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminKeyManagementService(request).rotate_scoped_key(
         name=name,
         key=payload.key,
@@ -248,5 +244,5 @@ async def rotate_scoped_key(
 @exceptions_handler
 async def delete_scoped_key(request: Request, name: str):
     """Delete a scoped API key by its UI-visible name."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return await AdminKeyManagementService(request).delete_scoped_key(name=name)

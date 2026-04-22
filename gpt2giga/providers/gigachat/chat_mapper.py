@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Optional
+from typing import Any
 
-from gigachat import GigaChat
+from gpt2giga.features.chat.contracts import ChatRequestData
 
 
 class GigaChatChatMapper:
@@ -54,8 +54,8 @@ class GigaChatChatMapper:
 
     async def prepare_request(
         self,
-        data: dict[str, Any],
-        giga_client: Optional[GigaChat] = None,
+        data: ChatRequestData,
+        giga_client: Any = None,
     ) -> dict[str, Any]:
         """Prepare a GigaChat chat request."""
         request_transformer = self._require_request_transformer()
@@ -73,7 +73,7 @@ class GigaChatChatMapper:
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        request_data: Optional[dict[str, Any]] = None,
+        request_data: Any = None,
     ) -> dict[str, Any]:
         """Convert a non-streaming GigaChat chat response."""
         response_processor = self._require_response_processor()
@@ -103,7 +103,7 @@ class GigaChatChatMapper:
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        request_data: Optional[dict[str, Any]] = None,
+        request_data: Any = None,
     ) -> dict[str, Any]:
         """Convert a streaming GigaChat chat chunk."""
         response_processor = self._require_response_processor()

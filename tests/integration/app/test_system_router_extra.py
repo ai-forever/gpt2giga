@@ -2,7 +2,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
+from gpt2giga.api.admin import admin_api_router, admin_router
 from gpt2giga.api.system import system_router
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.factory import create_app
@@ -21,7 +21,6 @@ def make_app(logs_ip_allowlist=None, config=None):
     app.include_router(system_router)
     app.include_router(admin_api_router)
     app.include_router(admin_router)
-    app.include_router(legacy_logs_router)
     config = config or ProxyConfig(proxy=ProxySettings())
     if logs_ip_allowlist is not None:
         config.proxy_settings.logs_ip_allowlist = logs_ip_allowlist
@@ -29,20 +28,19 @@ def make_app(logs_ip_allowlist=None, config=None):
     return app
 
 
-def test_logs_ok_reads_last_lines(temp_log_file):
+def test_admin_logs_ok_reads_last_lines(temp_log_file):
     app = make_app()
     app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
-    # по умолчанию log_filename = gpt2giga.log, файл присутствует в репо
-    resp = client.get("/logs", params={"lines": 1})
+    resp = client.get("/admin/api/logs", params={"lines": 1})
     assert resp.status_code == 200
 
 
-def test_logs_not_found():
+def test_admin_logs_not_found():
     app = make_app()
     app.state.config.proxy_settings.log_filename = "__no_such_file__.log"
     client = TestClient(app)
-    resp = client.get("/logs")
+    resp = client.get("/admin/api/logs")
     assert resp.status_code == 404
     assert "Log file not found" in resp.text
 
@@ -77,16 +75,7 @@ def test_admin_ui_ok():
     assert 'id="page-context"' not in resp.text
 
 
-def test_legacy_logs_html_redirects_to_admin():
-    app = make_app()
-    client = TestClient(app)
-    resp = client.get("/logs/html", follow_redirects=False)
-    assert resp.status_code == 307
-    assert resp.headers["location"] == "/admin?tab=logs"
-    assert resp.headers["deprecation"] == "true"
-
-
-def test_logs_read_exception(temp_log_file, monkeypatch):
+def test_admin_logs_read_exception(temp_log_file, monkeypatch):
     app = make_app()
     app.state.config.proxy_settings.log_filename = temp_log_file
 
@@ -102,12 +91,12 @@ def test_logs_read_exception(temp_log_file, monkeypatch):
     app.state.logger = MagicMock()
 
     client = TestClient(app)
-    resp = client.get("/logs")
+    resp = client.get("/admin/api/logs")
     assert resp.status_code == 500
     assert "Error: Disk error" in resp.text
 
 
-def test_logs_stream_init_error(temp_log_file, monkeypatch):
+def test_admin_logs_stream_init_error(temp_log_file, monkeypatch):
     app = make_app()
     app.state.config.proxy_settings.log_filename = temp_log_file
 
@@ -121,7 +110,7 @@ def test_logs_stream_init_error(temp_log_file, monkeypatch):
     monkeypatch.setattr("builtins.open", broken_open)
 
     client = TestClient(app)
-    with client.stream("GET", "/logs/stream") as r:
+    with client.stream("GET", "/admin/api/logs/stream") as r:
         found_error = False
         for line in r.iter_lines():
             if not line:
@@ -136,35 +125,35 @@ def test_logs_stream_init_error(temp_log_file, monkeypatch):
 # --- IP allowlist tests ---
 
 
-def test_logs_ip_allowlist_empty_allows_all(temp_log_file):
+def test_admin_logs_ip_allowlist_empty_allows_all(temp_log_file):
     """Empty allowlist means no restriction."""
     app = make_app(logs_ip_allowlist=[])
     app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
-    resp = client.get("/logs", params={"lines": 1})
+    resp = client.get("/admin/api/logs", params={"lines": 1})
     assert resp.status_code == 200
 
 
-def test_logs_ip_allowlist_blocks_unknown_ip(temp_log_file):
+def test_admin_logs_ip_allowlist_blocks_unknown_ip(temp_log_file):
     """If allowlist is set and client IP is not in it, access is denied."""
     app = make_app(logs_ip_allowlist=["192.168.1.100"])
     app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
-    resp = client.get("/logs", params={"lines": 1})
+    resp = client.get("/admin/api/logs", params={"lines": 1})
     assert resp.status_code == 403
-    assert "IP not in logs allowlist" in resp.json()["detail"]
+    assert "IP not in admin allowlist" in resp.json()["detail"]
 
 
-def test_logs_ip_allowlist_allows_matching_ip(temp_log_file):
+def test_admin_logs_ip_allowlist_allows_matching_ip(temp_log_file):
     """If client IP matches the allowlist, access is granted."""
     app = make_app(logs_ip_allowlist=["testclient", "127.0.0.1"])
     app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
-    resp = client.get("/logs", params={"lines": 1})
+    resp = client.get("/admin/api/logs", params={"lines": 1})
     assert resp.status_code == 200
 
 
-def test_logs_html_ip_allowlist_blocks():
+def test_admin_ui_ip_allowlist_blocks():
     """IP allowlist also applies to /admin."""
     app = make_app(logs_ip_allowlist=["192.168.1.100"])
     client = TestClient(app)
@@ -172,22 +161,22 @@ def test_logs_html_ip_allowlist_blocks():
     assert resp.status_code == 403
 
 
-def test_logs_stream_ip_allowlist_blocks(temp_log_file):
-    """IP allowlist also applies to /logs/stream."""
+def test_admin_logs_stream_ip_allowlist_blocks(temp_log_file):
+    """IP allowlist also applies to the admin log stream."""
     app = make_app(logs_ip_allowlist=["192.168.1.100"])
     app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
-    resp = client.get("/logs/stream")
+    resp = client.get("/admin/api/logs/stream")
     assert resp.status_code == 403
 
 
-def test_logs_ip_allowlist_xforwardedfor(temp_log_file):
+def test_admin_logs_ip_allowlist_xforwardedfor(temp_log_file):
     """X-Forwarded-For header is used for IP detection."""
     app = make_app(logs_ip_allowlist=["10.0.0.5"])
     app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
     resp = client.get(
-        "/logs",
+        "/admin/api/logs",
         params={"lines": 1},
         headers={"X-Forwarded-For": "10.0.0.5, 172.16.0.1"},
     )
@@ -243,16 +232,24 @@ def test_favicon_route_serves_packaged_icon():
 def test_admin_ui_assets_include_observability_presets():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 
-    response = client.get("/admin/assets/admin/pages/control-plane-sections.js")
+    sections_response = client.get(
+        "/admin/assets/admin/pages/control-plane-sections.js"
+    )
+    types_response = client.get("/admin/assets/admin/pages/control-plane/types.js")
+    observability_response = client.get(
+        "/admin/assets/admin/pages/control-plane/observability.js"
+    )
 
-    assert response.status_code == 200
-    assert "Local Prometheus" in response.text
-    assert "Local OTLP collector" in response.text
-    assert "Local Langfuse" in response.text
-    assert "Local Phoenix" in response.text
-    assert "deploy/compose/observability-otlp.yaml" in response.text
-    assert 'pathForPage("settings-observability")' in response.text
-    assert "settings?section=observability" not in response.text
+    assert sections_response.status_code == 200
+    assert types_response.status_code == 200
+    assert observability_response.status_code == 200
+    assert "Local Prometheus" in types_response.text
+    assert "Local OTLP collector" in types_response.text
+    assert "Local Langfuse" in types_response.text
+    assert "Local Phoenix" in types_response.text
+    assert "deploy/compose/observability-otlp.yaml" in types_response.text
+    assert 'pathForPage("settings-observability")' in observability_response.text
+    assert "settings?section=observability" not in observability_response.text
 
 
 def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
@@ -408,6 +405,12 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     files_batches_bindings_asset = client.get(
         "/admin/assets/admin/pages/files-batches/bindings.js"
     )
+    files_batches_batch_composer_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/bindings/batch-composer.js"
+    )
+    files_batches_helpers_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/bindings/helpers.js"
+    )
     files_batches_serializers_asset = client.get(
         "/admin/assets/admin/pages/files-batches/serializers.js"
     )
@@ -429,21 +432,28 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert "Operator guides" in files_batches_asset.text
     assert "optional when using inline requests" in files_batches_asset.text
     assert files_batches_bindings_asset.status_code == 200
+    assert files_batches_batch_composer_asset.status_code == 200
+    assert files_batches_helpers_asset.status_code == 200
     assert 'app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash"' in (
-        files_batches_bindings_asset.text
+        files_batches_batch_composer_asset.text
     )
-    assert "const fallbackModel =" in files_batches_bindings_asset.text
-    assert "model: fallbackModel" in files_batches_bindings_asset.text
-    assert "readConfiguredFallbackModel()" in files_batches_bindings_asset.text
-    assert 'normalizedModel.startsWith("models/")' in files_batches_bindings_asset.text
-    assert 'requestLabel: "row-1"' in files_batches_bindings_asset.text
+    assert "const fallbackModel =" in files_batches_batch_composer_asset.text
+    assert "model: fallbackModel" in files_batches_batch_composer_asset.text
+    assert "readConfiguredFallbackModel()" in files_batches_batch_composer_asset.text
+    assert 'normalized.startsWith("models/")' in files_batches_helpers_asset.text
+    assert 'requestLabel: "row-1"' in files_batches_helpers_asset.text
     assert 'elements.batchEndpoint?.addEventListener("change"' in (
-        files_batches_bindings_asset.text
+        files_batches_batch_composer_asset.text
     )
-    assert "const showModel = true" in files_batches_bindings_asset.text
+    assert "elements.batchModelField.hidden = false" in (
+        files_batches_batch_composer_asset.text
+    )
+    assert "elements.batchModel.required = false" in (
+        files_batches_batch_composer_asset.text
+    )
     assert (
         'elements.batchModel?.addEventListener("input"'
-        in files_batches_bindings_asset.text
+        in files_batches_batch_composer_asset.text
     )
     assert files_batches_serializers_asset.status_code == 200
     assert "Open batch composer" in files_batches_serializers_asset.text

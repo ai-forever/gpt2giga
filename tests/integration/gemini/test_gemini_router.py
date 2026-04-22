@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from gpt2giga.api.gemini import router
 from gpt2giga.api.gemini.files import upload_router
+from gpt2giga.app.dependencies import get_runtime_providers
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.providers.gigachat import ResponseProcessor
@@ -376,9 +377,10 @@ def make_app():
     app = FastAPI()
     app.include_router(upload_router, prefix="/upload/v1beta")
     app.include_router(router)
-    app.state.gigachat_client = FakeGigaChat()
-    app.state.request_transformer = FakeRequestTransformer()
-    app.state.response_processor = ResponseProcessor()
+    providers = get_runtime_providers(app.state)
+    providers.gigachat_client = FakeGigaChat()
+    providers.request_transformer = FakeRequestTransformer()
+    providers.response_processor = ResponseProcessor()
     app.state.config = ProxyConfig.model_validate(
         {"proxy": {"gigachat_api_mode": "v1"}}
     )
@@ -403,7 +405,7 @@ def test_generate_content_text():
     body = response.json()
     assert body["candidates"][0]["content"]["parts"][0]["text"] == "Hello!"
     assert body["usageMetadata"]["totalTokenCount"] == 15
-    assert app.state.request_transformer.last_data["messages"] == [
+    assert app.state.providers.request_transformer.last_data["messages"] == [
         {"role": "user", "content": "Hello"}
     ]
 
@@ -423,8 +425,8 @@ def test_generate_content_v2_mode_uses_chat_v2_backend():
     assert response.status_code == 200
     body = response.json()
     assert body["candidates"][0]["content"]["parts"][0]["text"] == "Hello from v2!"
-    assert app.state.gigachat_client.last_method == "v2"
-    assert app.state.request_transformer.last_mode == "v2"
+    assert app.state.providers.gigachat_client.last_method == "v2"
+    assert app.state.providers.request_transformer.last_mode == "v2"
 
 
 def test_generate_content_v2_mode_preserves_function_calls():
@@ -432,7 +434,7 @@ def test_generate_content_v2_mode_preserves_function_calls():
     app.state.config = ProxyConfig.model_validate(
         {"proxy": {"gigachat_api_mode": "v2"}}
     )
-    app.state.gigachat_client._response_v2 = {
+    app.state.providers.gigachat_client._response_v2 = {
         "choices": [
             {
                 "message": {
@@ -486,13 +488,13 @@ def test_generate_content_v2_mode_preserves_function_calls():
     assert body["candidates"][0]["content"]["parts"][0]["functionCall"]["name"] == (
         "get_weather"
     )
-    assert app.state.gigachat_client.last_method == "v2"
-    assert app.state.request_transformer.last_mode == "v2"
+    assert app.state.providers.gigachat_client.last_method == "v2"
+    assert app.state.providers.request_transformer.last_mode == "v2"
 
 
 def test_generate_content_with_function_call_and_tools():
     app = make_app()
-    app.state.gigachat_client._response = {
+    app.state.providers.gigachat_client._response = {
         "choices": [
             {
                 "message": {
@@ -547,13 +549,13 @@ def test_generate_content_with_function_call_and_tools():
     part = body["candidates"][0]["content"]["parts"][0]["functionCall"]
     assert part["name"] == "get_weather"
     assert part["args"] == {"city": "Moscow"}
-    assert app.state.request_transformer.last_data["function_call"] == {
+    assert app.state.providers.request_transformer.last_data["function_call"] == {
         "name": "get_weather"
     }
     assert (
-        app.state.request_transformer.last_data["tools"][0]["function"]["parameters"][
-            "type"
-        ]
+        app.state.providers.request_transformer.last_data["tools"][0]["function"][
+            "parameters"
+        ]["type"]
         == "object"
     )
 
@@ -589,15 +591,15 @@ def test_generate_content_preserves_parameters_json_schema():
     )
 
     assert response.status_code == 200
-    tool_parameters = app.state.request_transformer.last_data["tools"][0]["function"][
-        "parameters"
-    ]
+    tool_parameters = app.state.providers.request_transformer.last_data["tools"][0][
+        "function"
+    ]["parameters"]
     assert tool_parameters["properties"]["path"]["type"] == "string"
     assert tool_parameters["properties"]["start_line"]["type"] == "integer"
 
-    function_parameters = app.state.request_transformer.last_data["functions"][
-        0
-    ].parameters
+    function_parameters = app.state.providers.request_transformer.last_data[
+        "functions"
+    ][0].parameters
     params = (
         function_parameters.model_dump()
         if hasattr(function_parameters, "model_dump")
@@ -610,7 +612,7 @@ def test_generate_content_preserves_parameters_json_schema():
 
 def test_generate_content_structured_output_returns_json_text():
     app = make_app()
-    app.state.gigachat_client._response = {
+    app.state.providers.gigachat_client._response = {
         "choices": [
             {
                 "message": {
@@ -649,9 +651,9 @@ def test_generate_content_structured_output_returns_json_text():
     assert response.status_code == 200
     part = response.json()["candidates"][0]["content"]["parts"][0]
     assert part["text"] == '{"answer": "ok"}'
-    assert app.state.request_transformer.last_data["response_format"]["type"] == (
-        "json_schema"
-    )
+    assert app.state.providers.request_transformer.last_data["response_format"][
+        "type"
+    ] == ("json_schema")
 
 
 def test_stream_generate_content_returns_sse():
@@ -684,8 +686,8 @@ def test_stream_generate_content_v2_mode_uses_chat_v2_backend():
     assert response.status_code == 200
     assert '"text": "Hel"' in response.text
     assert '"finishReason": "STOP"' in response.text
-    assert app.state.gigachat_client.last_method == "v2"
-    assert app.state.request_transformer.last_mode == "v2"
+    assert app.state.providers.gigachat_client.last_method == "v2"
+    assert app.state.providers.request_transformer.last_mode == "v2"
 
 
 def test_count_tokens_with_generate_content_request_and_tools():
@@ -719,10 +721,12 @@ def test_count_tokens_with_generate_content_request_and_tools():
     assert response.status_code == 200
     assert response.json()["totalTokens"] > 0
     assert any(
-        "Be brief" in text for text in app.state.gigachat_client.last_token_texts
+        "Be brief" in text
+        for text in app.state.providers.gigachat_client.last_token_texts
     )
     assert any(
-        "get_weather" in text for text in app.state.gigachat_client.last_token_texts
+        "get_weather" in text
+        for text in app.state.providers.gigachat_client.last_token_texts
     )
 
 
@@ -793,9 +797,12 @@ def test_batch_embed_contents():
 
     assert response.status_code == 200
     assert response.json()["embeddings"][0]["values"] == [0.0, 0.5]
-    assert app.state.gigachat_client.last_embedding_texts == ["hello", "world"]
+    assert app.state.providers.gigachat_client.last_embedding_texts == [
+        "hello",
+        "world",
+    ]
     assert (
-        app.state.gigachat_client.last_embedding_model
+        app.state.providers.gigachat_client.last_embedding_model
         == app.state.config.proxy_settings.embeddings
     )
 
@@ -889,7 +896,9 @@ def test_files_routes_roundtrip_and_generate_content_supports_file_data():
     assert prompt_response.json()["candidates"][0]["content"]["parts"][0]["text"] == (
         "Hello!"
     )
-    assert app.state.request_transformer.last_data["messages"][0]["content"] == [
+    assert app.state.providers.request_transformer.last_data["messages"][0][
+        "content"
+    ] == [
         {"type": "text", "text": "Summarize"},
         {
             "type": "file",
@@ -939,7 +948,7 @@ def test_resumable_file_upload_flow():
 
 def test_batch_generate_content_routes_and_download_results():
     app = make_app()
-    giga_client = app.state.gigachat_client
+    giga_client = app.state.providers.gigachat_client
     client = TestClient(app)
 
     create_response = client.post(
@@ -1003,7 +1012,7 @@ def test_batch_generate_content_routes_and_download_results():
 
 def test_batch_generate_content_supports_doc_style_file_input_and_keyed_output():
     app = make_app()
-    giga_client = app.state.gigachat_client
+    giga_client = app.state.providers.gigachat_client
     giga_client.files["file-input-1"] = {
         "content": (
             b'{"key":"request-1","request":{"contents":[{"role":"user","parts":[{"text":"Hello from file batch"}]}]}}\n'

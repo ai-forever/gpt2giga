@@ -6,7 +6,9 @@ on:
     paths:
       - 'gpt2giga/**'
       - 'packages/gpt2giga-ui/**'
+      - 'frontend-tests/**'
       - 'tests/**'
+      - 'scripts/generate_badge.py'
       - 'package.json'
       - 'package-lock.json'
       - 'pyproject.toml'
@@ -19,13 +21,24 @@ on:
     paths:
       - 'gpt2giga/**'
       - 'packages/gpt2giga-ui/**'
+      - 'frontend-tests/**'
       - 'tests/**'
+      - 'scripts/generate_badge.py'
       - 'package.json'
       - 'package-lock.json'
       - 'pyproject.toml'
       - 'tsconfig.json'
       - 'uv.lock'
       - '.github/workflows/ci.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEFAULT_PYTHON_VERSION: "3.13"
+  COVERAGE_PYTHON_VERSION: "3.13"
 
 jobs:
   admin-build:
@@ -46,13 +59,60 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Run admin frontend unit tests
+        run: npm run test:admin
+
       - name: Build admin frontend
         run: npm run build:admin
+
+      - name: Verify committed admin assets are up to date
+        run: npm run verify:admin-assets
+
+  quality:
+    name: Python quality checks
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install uv and set Python
+        uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ env.DEFAULT_PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --all-extras --dev --frozen
+
+      - name: Lint with Ruff
+        run: uv run ruff check .
+
+      - name: Check formatting with Ruff
+        run: uv run ruff format --check .
+
+      - name: Build Python distributions
+        run: |
+          rm -rf dist
+          uv build
+          (cd packages/gpt2giga-ui && uv build --out-dir ../../dist)
+
+      - name: Verify build artifacts exist
+        run: |
+          ls dist/gpt2giga-*.whl
+          ls dist/gpt2giga-*.tar.gz
+          ls dist/gpt2giga_ui-*.whl
+          ls dist/gpt2giga_ui-*.tar.gz
 
   test:
     name: Test on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    needs:
+      - admin-build
+      - quality
     strategy:
       fail-fast: false
       matrix:
@@ -62,20 +122,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Install uv
+      - name: Install uv and set Python ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@v4
         with:
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
       - name: Install dependencies
-        run: uv sync --all-extras --dev
-
-      - name: Lint with Ruff
-        run: uv run ruff check .
+        run: uv sync --all-extras --dev --frozen
 
       - name: Run tests with coverage
         run: |
@@ -107,18 +162,24 @@ jobs:
       - name: Download coverage artifact from one Python version
         uses: actions/download-artifact@v4
         with:
-          name: coverage-3.12
+          name: coverage-${{ env.COVERAGE_PYTHON_VERSION }}
           path: .
 
-      - name: Install uv
+      - name: Install uv and set Python
         uses: astral-sh/setup-uv@v4
-
-      - name: Set up Python
-        run: uv python install 3.12
+        with:
+          python-version: ${{ env.COVERAGE_PYTHON_VERSION }}
 
       - name: Generate badge
         run: |
-          COVERAGE=$(jq '.totals.percent_covered' coverage.json)
+          COVERAGE=$(uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          coverage = json.loads(Path("coverage.json").read_text(encoding="utf-8"))
+          print(coverage["totals"]["percent_covered"])
+          PY
+          )
           echo "COVERAGE=$COVERAGE" >> "$GITHUB_ENV"
           uv run python scripts/generate_badge.py "$COVERAGE" badges/coverage.svg
 

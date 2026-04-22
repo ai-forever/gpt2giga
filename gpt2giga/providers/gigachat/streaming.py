@@ -81,6 +81,19 @@ class GigaChatResponsesStreamProcessor(Protocol):
     ) -> Optional[dict[str, Any]]:
         """Build a Responses API builtin tool output item."""
 
+    def _build_response_status(
+        self,
+        finish_reason: Optional[str],
+    ) -> tuple[str, Optional[dict[str, str]]]:
+        """Map a backend finish reason to the Responses API status."""
+
+    def store_response_metadata(
+        self,
+        response_store: Optional[dict[str, Any]],
+        response: dict[str, Any],
+    ) -> None:
+        """Persist response metadata needed for follow-up requests."""
+
 
 @dataclass(slots=True)
 class ResponsesTextUpdate:

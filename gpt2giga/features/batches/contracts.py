@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, MutableMapping, Protocol, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Any, MutableMapping, Protocol, TypeAlias, TypedDict
+
+if TYPE_CHECKING:
+    from gpt2giga.features.files.contracts import FileMetadata
 
 BatchCreateData: TypeAlias = dict[str, Any]
 BatchRowData: TypeAlias = dict[str, Any]
 BatchResponseData: TypeAlias = dict[str, Any]
 BatchesMetadataStore: TypeAlias = MutableMapping[str, "BatchMetadata"]
-FilesMetadataStore: TypeAlias = MutableMapping[str, dict[str, Any]]
+FilesMetadataStore: TypeAlias = MutableMapping[str, "FileMetadata"]
 
 
 class BatchMetadata(TypedDict, total=False):

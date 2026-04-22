@@ -2,19 +2,92 @@ openai:
   - changed-files:
       - any-glob-to-any-file:
           - 'gpt2giga/api/openai/**'
+          - 'gpt2giga/api/litellm/**'
           - 'examples/openai/**'
           - 'examples/agents/**'
+          - 'tests/integration/openai/**'
+          - 'tests/unit/api/openai/**'
+          - 'tests/compat/fixtures/openai_chat.json'
 
 anthropic:
   - changed-files:
       - any-glob-to-any-file:
           - 'gpt2giga/api/anthropic/**'
           - 'examples/anthropic/**'
+          - 'tests/integration/anthropic/**'
+          - 'tests/unit/api/anthropic/**'
+          - 'tests/compat/fixtures/anthropic_messages.json'
 
-protocol:
+gemini:
   - changed-files:
       - any-glob-to-any-file:
-          - 'gpt2giga/protocol/**'
+          - 'gpt2giga/api/gemini/**'
+          - 'examples/gemini/**'
+          - 'tests/integration/gemini/**'
+          - 'tests/unit/api/gemini/**'
+          - 'tests/compat/fixtures/gemini_generate_content.json'
+
+translate:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/api/translate.py'
+          - 'gpt2giga/providers/_shared_adapters.py'
+          - 'examples/translate/**'
+          - 'docs/compatibility-facades.md'
+
+admin:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/api/admin/**'
+          - 'gpt2giga/app/admin_runtime.py'
+          - 'gpt2giga/app/admin_settings.py'
+          - 'gpt2giga/app/admin_ui.py'
+          - 'gpt2giga/app/_admin_runtime/**'
+          - 'gpt2giga/app/_admin_settings/**'
+          - 'gpt2giga/features/files_batches/**'
+          - 'tests/integration/app/test_admin*'
+          - 'tests/unit/api/test_admin*'
+          - 'tests/unit/app/test_admin*'
+          - 'frontend-tests/admin/**'
+
+frontend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/frontend/admin/**'
+          - 'packages/gpt2giga-ui/**'
+          - 'frontend-tests/admin/**'
+          - 'package.json'
+          - 'package-lock.json'
+          - 'tsconfig.json'
+
+features:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/api/batch_validation.py'
+          - 'gpt2giga/api/batches_validation.py'
+          - 'gpt2giga/features/**'
+          - 'tests/unit/features/**'
+
+providers:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/providers/**'
+          - 'tests/unit/providers/**'
+          - 'tests/compat/template_provider/**'
+          - 'tests/compat/test_provider_chat_golden.py'
+
+runtime:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'gpt2giga/__init__.py'
+          - 'gpt2giga/app/**'
+          - 'gpt2giga/core/**'
+          - 'gpt2giga/api/_openapi.py'
+          - 'gpt2giga/api/dependencies/**'
+          - 'gpt2giga/api/middleware/**'
+          - 'gpt2giga/api/system/**'
+          - 'gpt2giga/api/tags.py'
+          - '.env.example'
 
 docker:
   - changed-files:
@@ -22,8 +95,8 @@ docker:
           - 'Dockerfile'
           - 'Dockerfile.mitmproxy'
           - '.dockerignore'
-          - 'deploy/compose/**'
-          - 'deploy/traefik/**'
+          - 'Makefile'
+          - 'deploy/**'
 
 ci:
   - changed-files:
@@ -33,23 +106,43 @@ ci:
           - '.github/labeler.yml'
           - '.github/release-drafter.yml'
           - '.github/AGENTS.md'
+          - 'scripts/generate_badge.py'
 
 docs:
   - changed-files:
       - any-glob-to-any-file:
+          - 'AGENTS.md'
           - 'README.md'
+          - 'CHANGELOG.md'
+          - 'CHANGELOG_en.md'
           - 'docs/**'
+          - 'deploy/README.md'
           - 'examples/**/*.md'
           - '.github/PULL_REQUEST_TEMPLATE.md'
+          - '.github/PULL_REQUEST_TEMPLATE/**'
           - '.github/ISSUE_TEMPLATE/**'
+
+examples:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'examples/**/*.py'
+          - 'examples/**/*.jsonl'
+          - 'examples/__init__.py'
+          - 'examples/AGENTS.md'
+          - 'examples/README.md'
 
 tests:
   - changed-files:
       - any-glob-to-any-file:
           - 'tests/**'
+          - 'frontend-tests/**'
+          - 'pytest.ini'
 
 dependencies:
   - changed-files:
       - any-glob-to-any-file:
           - 'pyproject.toml'
+          - 'packages/gpt2giga-ui/pyproject.toml'
           - 'uv.lock'
+          - 'package.json'
+          - 'package-lock.json'

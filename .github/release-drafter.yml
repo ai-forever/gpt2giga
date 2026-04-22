@@ -10,24 +10,37 @@ categories:
   - title: Anthropic compatibility
     labels:
       - anthropic
-  - title: Protocol and translation
+  - title: Gemini compatibility
     labels:
-      - protocol
+      - gemini
+  - title: Translation and provider adapters
+    labels:
+      - translate
+      - providers
+  - title: Admin console and UI
+    labels:
+      - admin
+      - frontend
+  - title: Shared features and runtime
+    labels:
+      - features
+      - runtime
   - title: Docker and deployment
     labels:
       - docker
+  - title: Documentation and examples
+    labels:
+      - docs
+      - examples
+  - title: Tests and quality
+    labels:
+      - tests
   - title: CI and automation
     labels:
       - ci
-  - title: Tests
-    labels:
-      - tests
   - title: Dependency updates
     labels:
       - dependencies
-  - title: Documentation
-    labels:
-      - docs
 
 change-template: "- $TITLE (#$NUMBER) @$AUTHOR"
 change-title-escapes: '\<*_&'

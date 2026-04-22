@@ -190,4 +190,4 @@ def test_get_files_service_from_state_reuses_existing_service():
     second = get_files_service_from_state(state)
 
     assert first is second
-    assert state.files_service is first
+    assert state.services.files is first

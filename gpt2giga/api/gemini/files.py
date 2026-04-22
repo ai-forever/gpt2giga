@@ -7,6 +7,7 @@ import hashlib
 import json
 import mimetypes
 import uuid
+from collections.abc import Mapping, MutableMapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,6 +29,7 @@ from gpt2giga.features.batches.store import (
     get_batch_store,
 )
 from gpt2giga.features.files import get_files_service_from_state
+from gpt2giga.features.files.contracts import FileMetadata
 from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
 
@@ -58,7 +60,7 @@ def _build_file_resource(
     file_obj: dict[str, Any],
     *,
     request: Request,
-    metadata: dict[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata = metadata or {}
     file_id = file_obj.get("id", "")
@@ -107,7 +109,7 @@ def _infer_internal_purpose(filename: str, mime_type: str) -> str:
 
 
 def _store_uploaded_file_metadata(
-    file_store: dict[str, dict[str, Any]],
+    file_store: MutableMapping[str, FileMetadata],
     *,
     file_id: str,
     filename: str,
@@ -129,7 +131,7 @@ def _store_uploaded_file_metadata(
     )
 
 
-def _get_upload_store(state: Any) -> dict[str, dict[str, Any]]:
+def _get_upload_store(state: Any) -> MutableMapping[str, dict[str, Any]]:
     return get_runtime_stores(state).gemini_uploads
 
 
@@ -271,7 +273,7 @@ async def download_file(file_id: str, request: Request):
         file_response = await giga_client.aget_file_content(file_id=normalized_file_id)
         content = build_gemini_batch_output_file(
             file_response.content,
-            batch_metadata=batch_metadata,
+            batch_metadata=dict(batch_metadata),
         )
         return Response(content=content, media_type="application/json")
 

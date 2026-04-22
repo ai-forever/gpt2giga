@@ -17,17 +17,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Install uv
+      - name: Install uv and set Python 3.13
         uses: astral-sh/setup-uv@v4
         with:
+          python-version: "3.13"
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
-      - name: Set up Python 3.13
-        run: uv python install 3.13
-
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --all-extras --dev --frozen
 
       - name: Audit dependencies
         uses: pypa/gh-action-pip-audit@v1.1.0

@@ -294,10 +294,6 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
             label: "Reasoning",
             value: runtime.enable_reasoning ? "enabled" : "disabled",
           },
-          {
-            label: "Images",
-            value: runtime.enable_images ? "enabled" : "disabled",
-          },
         ],
         "Runtime posture metadata is unavailable.",
       ),
@@ -495,7 +491,6 @@ function buildConfigHighlightItems(
         features.pass_model ? "pass_model" : "",
         features.pass_token ? "pass_token" : "",
         features.enable_reasoning ? "reasoning" : "",
-        features.enable_images ? "images" : "",
       ]),
       note: "Main protocol and runtime toggles.",
     },

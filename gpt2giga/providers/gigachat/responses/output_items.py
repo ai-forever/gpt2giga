@@ -2,14 +2,17 @@
 
 import json
 import uuid
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal, Optional, cast
 
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
+from gpt2giga.providers.gigachat.response_mapping_common import (
+    ResponseProcessorCommonMixin,
+)
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
-class ResponsesOutputItemsMixin:
+class ResponsesOutputItemsMixin(ResponseProcessorCommonMixin):
     """Build Responses API output items from normalized GigaChat payloads."""
 
     @staticmethod
@@ -84,7 +87,7 @@ class ResponsesOutputItemsMixin:
         status: str,
         logprobs: Optional[list[Dict[str, Any]]] = None,
     ) -> dict:
-        part = {
+        part: dict[str, Any] = {
             "type": "output_text",
             "text": text,
             "annotations": [],
@@ -107,7 +110,7 @@ class ResponsesOutputItemsMixin:
         call_id: str,
         name: str,
         arguments: Any,
-        status: str,
+        status: Literal["in_progress", "completed", "incomplete"],
     ) -> dict:
         return ResponseFunctionToolCall(
             arguments=cls._stringify_json(arguments),
@@ -159,7 +162,7 @@ class ResponsesOutputItemsMixin:
                 for file_desc in related_files
                 if isinstance(file_desc, dict) and isinstance(file_desc.get("id"), str)
             ]
-            result = {
+            result: dict[str, Any] = {
                 "id": item_id,
                 "type": "code_interpreter_call",
                 "status": status,
@@ -235,7 +238,10 @@ class ResponsesOutputItemsMixin:
         response_status: str,
     ) -> list[dict]:
         output: list[dict] = []
-        item_status = cls._build_output_item_status(response_status)
+        item_status = cast(
+            Literal["in_progress", "completed", "incomplete"],
+            cls._build_output_item_status(response_status),
+        )
         additional_data = data.get("additional_data")
 
         for message_index, message in enumerate(data.get("messages") or []):
@@ -381,7 +387,7 @@ class ResponsesOutputItemsMixin:
         giga_resp,
         sequence_number: int = 0,
         response_id: Optional[str] = None,
-    ) -> dict:
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         giga_dict = self._safe_model_dump(giga_resp)
         response_id = str(uuid.uuid4()) if response_id is None else response_id
         for choice in giga_dict["choices"]:

@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
 from gpt2giga.api.openai import router
+from gpt2giga.app.dependencies import get_runtime_providers
 
 
 def make_app():
@@ -28,7 +29,7 @@ def make_app():
         async def aget_model(self, model: str):
             return Model(id=model, object="model", owned_by="m1")
 
-    app.state.gigachat_client = FakeClient()
+    get_runtime_providers(app.state).gigachat_client = FakeClient()
     return app
 
 

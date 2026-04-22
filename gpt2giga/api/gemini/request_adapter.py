@@ -541,9 +541,9 @@ def _message_content_to_gemini_parts(content: Any) -> list[dict[str, Any]]:
             continue
         part_type = part.get("type")
         if part_type == "text":
-            text = part.get("text")
-            if isinstance(text, str) and text:
-                parts.append({"text": text})
+            part_text: Any = part.get("text")
+            if isinstance(part_text, str) and part_text:
+                parts.append({"text": part_text})
             continue
         if part_type == "image_url":
             image_url = part.get("image_url")
