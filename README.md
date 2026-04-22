@@ -167,6 +167,7 @@ uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 
 ```bash
 npm install
+npm run test:admin
 npm run build:admin
 ```
 

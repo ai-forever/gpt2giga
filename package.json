@@ -2,9 +2,11 @@
   "name": "gpt2giga",
   "private": true,
   "scripts": {
-    "build:admin": "tsc -p tsconfig.json"
+    "build:admin": "tsc -p tsconfig.json",
+    "test:admin": "tsx --test frontend-tests/admin/**/*.test.ts"
   },
   "devDependencies": {
+    "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   }
 }

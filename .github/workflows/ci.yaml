@@ -46,6 +46,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Run admin frontend unit tests
+        run: npm run test:admin
+
       - name: Build admin frontend
         run: npm run build:admin
 
