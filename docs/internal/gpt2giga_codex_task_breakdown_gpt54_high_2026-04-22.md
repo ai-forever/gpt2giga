@@ -19,7 +19,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-002 — done
 - [x] RLS-003 — done
 - [x] RLS-004 — done
-- [ ] RLS-005
+- [x] RLS-005 — done
 - [ ] RLS-006
 - [ ] RLS-007
 
@@ -230,6 +230,10 @@ Choose one clean outcome:
 - the public docs index is clearly canonical
 - stale internal docs are not presented as normal operator documentation
 - any user-facing docs links stop pointing at internal planning notes unless explicitly marked internal
+
+**Status**
+
+Completed in the tracked repository state: the task breakdown now lives under `docs/internal/`, and `docs/README.md` explicitly defines the canonical user-facing docs surface separately from internal working notes.
 
 **Out of scope**
 
