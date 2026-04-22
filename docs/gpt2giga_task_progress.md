@@ -42,3 +42,10 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 - Summary: added a minimal admin frontend unit-test baseline with `tsx` + `node:test`, covering traffic URL/filter helpers, files-batches serializers/summaries, and settings diff/runtime-impact helpers; wired the new `npm run test:admin` step into CI and contributor docs
 - Checks: `npm run test:admin`; `npm run build:admin`
 - Notes: tests live under `frontend-tests/admin/` so they stay outside the compiled admin asset tree and do not affect `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`
+
+## 2026-04-22 — S2 — done
+
+- Commit: `123237d`
+- Summary: split the `files-batches` page binder into focused `upload`, `batch-composer`, `inventory`, `filters`, and shared-helper modules while keeping the public `bindFilesBatchesPage()` entrypoint stable; added helper tests for the extracted batch-format and validation logic and regenerated compiled admin assets
+- Checks: `npm run test:admin`; `npm run build:admin`
+- Notes: the root `gpt2giga/frontend/admin/pages/files-batches/bindings.ts` now acts as a thin orchestrator (310 lines instead of 2641), which makes future inventory/preview/composer changes easier to isolate
