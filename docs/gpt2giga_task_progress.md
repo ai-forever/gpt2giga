@@ -147,3 +147,10 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 - Summary: added an explicit `docs/design-notes.md` document that explains the current rationale for the frameworkless admin UI, committed compiled admin assets, and the feature-vs-provider boundary; linked it from the docs index, architecture guide, and provider-extension guide so contributors see those tradeoffs in the normal navigation flow
 - Checks: `git diff --check -- docs/design-notes.md docs/README.md docs/architecture.md docs/how-to-add-provider.md`; commit hooks (`trim trailing whitespace`, `detect hardcoded secrets`, `mypy`)
 - Notes: this slice intentionally records current decisions and revisit triggers without introducing a heavier ADR directory/process; the three source brief files in `docs/` remain untracked and were left untouched
+
+## 2026-04-22 — S18 — done
+
+- Commit: `8eac9f6`
+- Summary: added explicit admin packaging workflow commands in `package.json` (`sync:admin`, `verify:admin-assets`, `check:admin`), moved the stale-generated-assets check into a reusable Node script under `scripts/`, switched CI to that shared verifier, and updated contributor-facing docs to describe the same source/build/output sync path
+- Checks: `npm run check:admin`; `git diff --check -- package.json README.md docs/architecture.md docs/design-notes.md .github/workflows/ci.yaml scripts/check_admin_assets_sync.mjs`; commit hooks (`trim trailing whitespace`, `detect hardcoded secrets`, `mypy`)
+- Notes: `sync:admin` intentionally prints a narrow `git status` for admin source/output paths so contributors can see exactly what must be committed together, while `verify:admin-assets` remains CI-safe and non-interactive
