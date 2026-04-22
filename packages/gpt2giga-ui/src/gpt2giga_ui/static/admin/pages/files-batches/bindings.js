@@ -259,11 +259,11 @@ export function bindFilesBatchesPage(options) {
     };
     const findBatchByOutputFileId = (fileId) => data.batches.find((entry) => String(entry.output_file_id ?? "") === fileId) ?? null;
     const resolveContentPathForFile = (fileId, source, relatedBatch) => {
-        const batchOutputPath = ((relatedBatch &&
+        const batchOutputPath = (relatedBatch &&
             String(relatedBatch.output_file_id ?? "") === fileId
             ? relatedBatch.output_path
             : null) ||
-            findBatchByOutputFileId(fileId)?.output_path);
+            findBatchByOutputFileId(fileId)?.output_path;
         return batchOutputPath?.trim() || source?.content_path?.trim() || undefined;
     };
     const resolveDownloadPathForFile = (fileId, source) => findBatchByOutputFileId(fileId)?.output_path?.trim() ||
