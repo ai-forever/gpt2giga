@@ -3,7 +3,7 @@
 ## Project Snapshot
 
 - **Repo type:** Single Python package with examples, docs, CI workflows, and deployment assets
-- **What:** FastAPI proxy that translates OpenAI and Anthropic-compatible requests into GigaChat API calls
+- **What:** FastAPI proxy and translation toolkit that adapts OpenAI-, Anthropic-, and Gemini-compatible traffic into GigaChat API calls
 - **Stack:** Python 3.10–3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE, Docker
 - **Tooling:** `uv`, Ruff, pytest, Docker, GitHub Actions
 - **Hierarchy:** Subfolders with their own `AGENTS.md` override this file
@@ -55,10 +55,10 @@ uv run pre-commit install
 | `gpt2giga/` | Main application package | Routers, protocol transforms, config, middleware |
 | `gpt2giga/frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` |
 | `packages/gpt2giga-ui/` | Optional UI distribution | Runtime source of truth for the `/admin` HTML shell and static assets used by `gpt2giga[ui]` |
-| `tests/` | Test suite | Organized into `unit/`, `integration/`, and `smoke/` to mirror layers and external APIs |
-| `examples/` | Runnable SDK examples | OpenAI chat/responses/files/batches, Anthropic, embeddings, agents |
+| `tests/` | Test suite | Organized into `unit/`, `integration/`, `smoke/`, and `compat/`, with legacy mirror directories still checked in |
+| `examples/` | Runnable SDK examples | OpenAI, Anthropic, Gemini, Agents SDK, batch validation, and provider-translation examples |
 | `docs/` | Project documentation | Integration guides currently live in `docs/integrations/` |
-| `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
+| `scripts/` | Small maintenance/debug scripts | Coverage badge, mitmproxy SSE helper, and maintainer-only internal utilities |
 | `deploy/` | Deployment assets | Compose stacks in `deploy/compose/` + Traefik config in `deploy/traefik/` |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
 | `badges/` | Generated assets | Coverage badge written by CI |
@@ -69,10 +69,15 @@ uv run pre-commit install
 
 - OpenAI-compatible endpoints live in `gpt2giga/api/openai/`.
 - Anthropic-compatible endpoints live in `gpt2giga/api/anthropic/`.
+- Gemini-compatible endpoints live in `gpt2giga/api/gemini/`.
 - LiteLLM-compatible model-info endpoints live in `gpt2giga/api/litellm/`.
 - Capability-level orchestration for chat, responses, embeddings, model discovery, files, and batches lives in `gpt2giga/features/`.
+- Mixed admin inventory/create flows for files and batches live in `gpt2giga/api/admin/files_batches.py` and `gpt2giga/features/files_batches/`.
 - Admin control-plane HTTP endpoints live in `gpt2giga/api/admin/`, while payload/mutation services live in `gpt2giga/app/admin_runtime.py` and `gpt2giga/app/admin_settings.py`.
+- Provider-to-provider chat request translation lives in `gpt2giga/api/translate.py`, with serializer helpers under `gpt2giga/api/anthropic/request_adapter.py`, `gpt2giga/api/gemini/request_adapter.py`, and `gpt2giga/providers/*/capabilities.py`.
+- Batch-input validation entrypoints live in `gpt2giga/api/batch_validation.py` and `gpt2giga/features/batches/validation.py`.
 - GigaChat client/auth helpers and provider-specific request/response mappers live in `gpt2giga/providers/gigachat/`.
+- Provider capability registries and compatibility scaffolding live under `gpt2giga/providers/`, including `registry.py`, `openai/`, `anthropic/`, `gemini/`, and `template_provider/`.
 - Simple provider mappings for embeddings and model discovery live in `gpt2giga/providers/gigachat/embeddings_mapper.py` and `gpt2giga/providers/gigachat/models_mapper.py`.
 - Request transformation is split across `gpt2giga/providers/gigachat/request_mapper.py`, `request_mapping_base.py`, `chat_request_mapper.py`, and the structured Responses helpers in `gpt2giga/providers/gigachat/responses/`; top-level `responses_*` modules remain compatibility wrappers.
 - Response transformation is split across `gpt2giga/providers/gigachat/response_mapper.py`, `response_mapping_common.py`, and the structured Responses helpers in `gpt2giga/providers/gigachat/responses/`; top-level `responses_*` modules remain compatibility entrypoints.
@@ -109,8 +114,11 @@ rg -n "gigachat_client|pass_token|GigaChat" gpt2giga/providers/gigachat
 # Find request/response mapper internals
 rg --files gpt2giga/providers/gigachat gpt2giga/api/anthropic gpt2giga/api/gemini
 
+# Find translation and provider-registry code
+rg -n "translate|provider_adapters|template_provider|registry" gpt2giga
+
 # Find tests for a feature
-rg -n "batch|file|anthropic|responses" tests
+rg -n "batch|file|anthropic|gemini|translate|responses|compat" tests
 
 # Find workflow usage of scripts
 rg -n "scripts/" .github/workflows

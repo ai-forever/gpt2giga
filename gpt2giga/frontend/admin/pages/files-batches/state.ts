@@ -31,6 +31,8 @@ export interface FilePreview {
   textFallback: string;
   byteLength: number;
   lineCount: number;
+  sampled?: boolean;
+  sampledByteLength?: number;
   formatLabel: string;
   formatNote: string;
   contentKind?: string;

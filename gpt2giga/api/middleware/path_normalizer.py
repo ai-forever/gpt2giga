@@ -41,6 +41,16 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
         if not segments:
             return None
 
+        deduped = list(segments)
+        while (
+            len(deduped) > 1
+            and deduped[0] in self.valid_roots
+            and deduped[1] == deduped[0]
+        ):
+            deduped.pop(0)
+        if deduped != segments:
+            return "/" + "/".join(deduped)
+
         for index, segment in enumerate(segments):
             if segment not in self.valid_roots:
                 continue

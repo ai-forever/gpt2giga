@@ -21,6 +21,7 @@
 | Новый OpenAI Responses API | [openai/responses/README.md](./openai/responses/README.md) | `responses.create`, multi-turn, structured output |
 | Работа с файлами | [openai/files/README.md](./openai/files/README.md) | Upload, list, read, delete |
 | Batch-обработка | [openai/batches/README.md](./openai/batches/README.md) | OpenAI Batches API |
+| Standalone batch validation | [batch_validation/README.md](./batch_validation/README.md) | `/batches/validate` для OpenAI, Anthropic и Gemini |
 | Embeddings | [openai/embeddings/README.md](./openai/embeddings/README.md) | Векторизация через proxy |
 | Список моделей | [openai/models/README.md](./openai/models/README.md) | OpenAI-compatible Models API |
 | Anthropic Messages API | [anthropic/messages/README.md](./anthropic/messages/README.md) | Messages, streaming, multi-turn, tools, vision |
@@ -45,6 +46,9 @@ uv run python examples/openai/files/files.py
 uv run python examples/openai/batches/batches.py
 uv run python examples/openai/embeddings/embeddings.py
 uv run python examples/openai/models/models.py
+uv run python examples/batch_validation/openai_validate.py
+uv run python examples/batch_validation/anthropic_validate.py
+uv run python examples/batch_validation/gemini_validate.py
 ```
 
 ### Anthropic-compatible
@@ -90,4 +94,5 @@ WEATHER_API_KEY=... uv run python examples/agents/weather_agent.py
 - Anthropic examples теперь разложены по capability-папкам: `messages/`, `count_tokens/`, `batches/`.
 - Gemini examples теперь разложены по capability-папкам: `content/`, `count_tokens/`, `files/`, `batches/`, `embeddings/`.
 - `weather_agent.py` требует `WEATHER_API_KEY`.
+- Для standalone batch validation examples используется прямой `httpx.post(...)` к `/batches/validate`.
 - Некоторые agent-style клиенты могут отправлять probe-запросы вроде `GET /responses` или `Upgrade: websocket`; это не мешает обычным `POST /responses`.

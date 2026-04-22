@@ -16,7 +16,9 @@ uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 uv run pytest tests/integration/app/test_api_server.py
 uv run pytest tests/integration/openai/test_router_batches.py
 uv run pytest tests/integration/anthropic/test_anthropic_router.py
-uv run pytest tests/unit/providers/gigachat/test_protocol_compat.py
+uv run pytest tests/integration/gemini/test_gemini_router.py
+uv run pytest tests/compat/test_provider_chat_golden.py
+uv run pytest tests/unit/providers/test_registry.py
 
 # Marker-based runs
 uv run pytest -m unit
@@ -29,14 +31,21 @@ uv run pytest -m integration
 |---|---|
 | `tests/unit/core/` | Config, logging, CLI parsing, and other core runtime helpers |
 | `tests/unit/api/` | Shared API dependencies, middleware, exception handling |
+| `tests/unit/api/anthropic/` | Anthropic transport translation helpers and payload shaping |
+| `tests/unit/api/gemini/` | Gemini transport translation helpers and payload shaping |
 | `tests/unit/api/openai/` | OpenAI transport helpers such as streaming and batch-format mapping |
+| `tests/unit/app/` | Admin runtime/settings/UI, lifecycle wiring, telemetry, and runtime-state helpers |
 | `tests/unit/features/` | Capability services and store/accessor behavior for chat, responses, files, batches, embeddings, models |
-| `tests/unit/providers/gigachat/` | GigaChat request/response mapping, attachments, tool/schema helpers, compatibility facades |
+| `tests/unit/features/files_batches/` | Mixed admin inventory/create flows across files and batches |
+| `tests/unit/providers/gigachat/` | GigaChat request/response mapping, attachments, tool/schema helpers, and compatibility facades |
+| `tests/unit/providers/test_registry.py` | Provider registry behavior and capability lookup |
 | `tests/integration/app/` | App factory, lifespan, and system-route wiring |
 | `tests/integration/openai/` | OpenAI-compatible endpoint behavior |
 | `tests/integration/anthropic/` | Anthropic-compatible endpoint behavior |
 | `tests/integration/gemini/` | Gemini-compatible endpoint behavior |
 | `tests/smoke/` | App-boot and Starlette baseline smoke suites |
+| `tests/compat/` | Golden-request/provider-template compatibility suites and fixtures |
+| `tests/test_*/` | Legacy mirrored test directories still kept for compatibility and broader coverage |
 
 ## Patterns & Conventions
 
@@ -45,6 +54,7 @@ uv run pytest -m integration
 - Mock all upstream GigaChat interactions; tests should stay hermetic.
 - Build small `FastAPI()` apps in router tests and mount only the routers under test.
 - Reuse existing dummy-client and mocked-response patterns instead of introducing live API calls.
+- If you change provider normalization or the template provider scaffold, update `tests/compat/` fixtures or template-provider tests in the same slice.
 
 ## Example Patterns
 
@@ -102,6 +112,8 @@ Defined in `pytest.ini`:
 - `integration`
 - `slow`
 
+`tests/compat/` and the legacy mirrored `tests/test_*` directories do not have dedicated markers; run them by path.
+
 ## Quick Find Commands
 
 ```bash
@@ -109,10 +121,10 @@ Defined in `pytest.ini`:
 rg -n "@pytest.mark.asyncio|async def test_" tests
 
 # Find integration tests for a route family
-rg -n "batches|anthropic|responses|embeddings" tests/integration
+rg -n "batches|anthropic|gemini|responses|embeddings|translate" tests/integration tests/compat
 
 # Find provider-mapper tests
-rg -n "RequestTransformer|ResponseProcessor|AttachmentProcessor" tests/unit/providers/gigachat
+rg -n "RequestTransformer|ResponseProcessor|AttachmentProcessor|provider_adapters|template_provider" tests/unit/providers tests/compat
 
 # Find mock usage
 rg -n "mocker|MagicMock|AsyncMock|patch" tests
@@ -122,6 +134,7 @@ rg -n "mocker|MagicMock|AsyncMock|patch" tests
 
 - Async auto-mode is enabled in `pytest.ini`, but explicit `@pytest.mark.asyncio` is still preferred for clarity.
 - `tests/conftest.py` auto-applies `unit` to `tests/unit/**` and `integration` to both `tests/integration/**` and `tests/smoke/**`.
+- `tests/compat/` is intentionally path-driven rather than marker-driven.
 - Coverage excludes `tests/`, `scripts/`, `docs/`, and `examples/`.
 - Batch and file behavior rely on in-memory stores in app state; tests should initialize or mock that state explicitly when needed.
 

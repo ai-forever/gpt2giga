@@ -133,6 +133,34 @@ def test_batch_validation_route_validates_gemini_rows():
     }
 
 
+def test_batch_validation_route_reports_gigachat_row_limit():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/batches/validate",
+        json={
+            "api_format": "openai",
+            "requests": [
+                {
+                    "custom_id": f"row-{index}",
+                    "url": "/v1/chat/completions",
+                    "body": {"messages": []},
+                }
+                for index in range(101)
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is False
+    assert body["summary"]["total_rows"] == 101
+    assert body["summary"]["error_count"] == 1
+    assert body["issues"][0]["severity"] == "error"
+    assert body["issues"][0]["code"] == "row_limit_exceeded"
+    assert "does not support more than 100 batch rows" in body["issues"][0]["message"]
+
+
 def test_batch_validation_route_requires_file_or_requests():
     client = TestClient(make_app())
 
@@ -144,7 +172,7 @@ def test_batch_validation_route_requires_file_or_requests():
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "`input_file_id` or `requests` is required for validation."
+        == "`input_file_id`, `input_content_base64`, or `requests` is required for validation."
     )
 
 

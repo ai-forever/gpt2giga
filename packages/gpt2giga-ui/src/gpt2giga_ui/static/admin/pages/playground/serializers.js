@@ -1,5 +1,5 @@
 import { asRecord } from "../../utils.js";
-import { createEmptyTokenUsage, DEFAULT_OUTPUT, getPlaygroundFields, } from "./state.js";
+import { createEmptyTokenUsage, DEFAULT_OUTPUT, getPlaygroundFields, resolvePlaygroundModel, } from "./state.js";
 export function applyPreset(form, preset) {
     const fields = getPlaygroundFields(form);
     fields.surface.value = preset.surface;
@@ -8,11 +8,11 @@ export function applyPreset(form, preset) {
     fields.user_prompt.value = preset.userPrompt;
     fields.stream.value = String(preset.stream);
 }
-export function buildRequest(form) {
+export function buildRequest(form, configuredModel) {
     const fields = getPlaygroundFields(form);
     return buildRequestFromState({
         surface: fields.surface.value,
-        model: fields.model.value.trim() || "GigaChat",
+        model: fields.model.value.trim() || resolvePlaygroundModel(configuredModel),
         systemPrompt: fields.system_prompt.value.trim(),
         userPrompt: fields.user_prompt.value.trim(),
         stream: fields.stream.value === "true",

@@ -40,6 +40,7 @@ export interface FilesBatchesPageElements {
   batchForm: HTMLFormElement | null;
   batchInput: HTMLInputElement | null;
   batchHint: HTMLElement | null;
+  batchInlineRequestsExampleButton: HTMLButtonElement | null;
   batchInlineRequests: HTMLTextAreaElement | null;
   batchInlineRequestsField: HTMLElement | null;
   batchModel: HTMLInputElement | null;
@@ -62,6 +63,9 @@ export interface FilesBatchesPageElements {
   uploadDisplayName: HTMLInputElement | null;
   uploadDisplayNameField: HTMLElement | null;
   uploadForm: HTMLFormElement | null;
+  uploadPurpose: HTMLSelectElement | null;
+  uploadValidateButton: HTMLButtonElement | null;
+  uploadValidationNode: HTMLElement | null;
   workflowNode: HTMLElement;
 }
 
@@ -330,7 +334,7 @@ function renderFilesPage(
                 </label>
                 <label class="field">
                   <span>Purpose</span>
-                  <select name="purpose">
+                  <select id="upload-purpose" name="purpose">
                     ${renderStaticSelectOptions("batch", ["batch", "assistants", "user_data"])}
                   </select>
                 </label>
@@ -347,6 +351,35 @@ function renderFilesPage(
             })}
             <div class="form-actions">
               <button class="button" type="submit">Upload file</button>
+              <button
+                class="button button--secondary"
+                id="upload-validate-button"
+                type="button"
+              >
+                Validate
+              </button>
+            </div>
+            <div class="surface batch-validation" id="upload-validation-report">
+              <div class="batch-validation__header">
+                <div>
+                  <h4>Batch validation</h4>
+                  <p class="muted">Validate the selected file before creating a batch.</p>
+                </div>
+                <div class="batch-validation__meta">
+                  ${pill("Not validated")}
+                </div>
+              </div>
+              <div class="batch-validation__summary">
+                ${renderDefinitionList(
+                  [
+                    { label: "Status", value: "No report yet" },
+                    { label: "Purpose", value: "Choose batch" },
+                    { label: "Selected file", value: "No file chosen" },
+                    { label: "Result", value: "Validation reads the selected local file" },
+                  ],
+                  "No validation report yet.",
+                )}
+              </div>
             </div>
           </form>
         </div>
@@ -483,7 +516,14 @@ function renderBatchesPage(
                   </select>
                 </label>
                 <label class="field"><span>Input file id</span><input id="batch-input-file-id" name="input_file_id" placeholder="file-... (optional when using inline requests)" /></label>
-                <label class="field" id="batch-inline-requests-field"><span>Inline requests (JSON array)</span><textarea id="batch-inline-requests" name="requests" placeholder='[{"custom_id":"openai-row-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hello openai"}]}}]'></textarea></label>
+                <label class="field" id="batch-inline-requests-field">
+                  <span class="field__header">
+                    <span>Inline requests (JSON array)</span>
+                    <button class="button button--secondary button--inline" id="batch-inline-requests-example" type="button">Use example</button>
+                  </span>
+                  <textarea id="batch-inline-requests" name="requests" placeholder='[{"custom_id":"openai-row-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"hello openai"}]}}]'></textarea>
+                  <p class="field-note">Leave this empty to use <code>input_file_id</code>. Use the example button only when you want inline requests to be the active source.</p>
+                </label>
                 <label class="field" id="batch-model-field" hidden><span>Fallback model (optional)</span><input id="batch-model" name="model" placeholder="gemini-2.5-flash" /></label>
                 <label class="field" id="batch-display-name-field" hidden><span>Display name</span><input id="batch-display-name" name="display_name" placeholder="nightly-gemini-import" /></label>
                 <label class="field"><span>Metadata (optional JSON object)</span><textarea name="metadata" placeholder='{"label":"nightly-import"}'></textarea></label>
@@ -822,6 +862,9 @@ export function resolveFilesBatchesElements(
     batchForm: pageContent.querySelector<HTMLFormElement>("#batch-create-form"),
     batchInput: pageContent.querySelector<HTMLInputElement>("#batch-input-file-id"),
     batchHint: pageContent.querySelector<HTMLElement>("#batch-format-hint"),
+    batchInlineRequestsExampleButton: pageContent.querySelector<HTMLButtonElement>(
+      "#batch-inline-requests-example",
+    ),
     batchInlineRequests: pageContent.querySelector<HTMLTextAreaElement>(
       "#batch-inline-requests",
     ),
@@ -854,6 +897,13 @@ export function resolveFilesBatchesElements(
       "#upload-display-name-field",
     ),
     uploadForm: pageContent.querySelector<HTMLFormElement>("#files-upload-form"),
+    uploadPurpose: pageContent.querySelector<HTMLSelectElement>("#upload-purpose"),
+    uploadValidateButton: pageContent.querySelector<HTMLButtonElement>(
+      "#upload-validate-button",
+    ),
+    uploadValidationNode: pageContent.querySelector<HTMLElement>(
+      "#upload-validation-report",
+    ),
     workflowNode,
   };
 }

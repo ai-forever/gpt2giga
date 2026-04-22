@@ -111,11 +111,14 @@ export function renderStatLines(items, emptyMessage = "Nothing to show.") {
   `;
 }
 export function renderSecretField(options) {
+    const fieldMarkup = options.masked
+        ? `<input name="${escapeHtml(options.name)}" type="password" placeholder="${escapeHtml(options.placeholder)}" autocomplete="new-password" />`
+        : `<textarea name="${escapeHtml(options.name)}" placeholder="${escapeHtml(options.placeholder)}"></textarea>`;
     return `
     <div class="stack">
       <label class="field">
         <span>${escapeHtml(options.label)}</span>
-        <textarea name="${escapeHtml(options.name)}" placeholder="${escapeHtml(options.placeholder)}"></textarea>
+        ${fieldMarkup}
       </label>
       <p class="field-note">
         Stored: <strong>${escapeHtml(options.preview || "not configured")}</strong>. Blank keeps it; paste to replace.

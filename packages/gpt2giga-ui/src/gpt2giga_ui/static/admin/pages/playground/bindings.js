@@ -1,12 +1,13 @@
 import { abortPlaygroundRequest, disposePlaygroundRequestState, executePlaygroundRequest, } from "./api.js";
 import { applyPreset, buildRequest } from "./serializers.js";
-import { createIdleRunState, createPlaygroundPageState, getPlaygroundFields, PLAYGROUND_PRESETS, } from "./state.js";
+import { createIdleRunState, createPlaygroundPageState, getPlaygroundFields, } from "./state.js";
 import { updatePlaygroundRequestPreview, updatePlaygroundRunPanels, } from "./view.js";
 export function bindPlaygroundPage(options) {
-    const { app, elements, setup, token } = options;
+    const { app, elements, presets, setup, token } = options;
     const state = createPlaygroundPageState();
+    const configuredModel = app.runtime?.gigachat_model;
     const refreshAll = () => {
-        const request = buildRequest(elements.form);
+        const request = buildRequest(elements.form, configuredModel);
         updatePlaygroundRequestPreview({
             elements,
             gatewayKey: elements.gatewayKeyInput?.value.trim() ?? "",
@@ -22,7 +23,7 @@ export function bindPlaygroundPage(options) {
         updatePlaygroundRunPanels({ elements, state });
     };
     const startRequest = async () => {
-        const request = buildRequest(elements.form);
+        const request = buildRequest(elements.form, configuredModel);
         const fields = getPlaygroundFields(elements.form);
         if (!fields.model.value.trim()) {
             fields.model.setCustomValidity("Model is required.");
@@ -46,7 +47,7 @@ export function bindPlaygroundPage(options) {
     const syncPresetButtons = () => {
         const fields = getPlaygroundFields(elements.form);
         elements.presetButtons.forEach((button) => {
-            const preset = PLAYGROUND_PRESETS.find((item) => item.id === button.dataset.preset);
+            const preset = presets.find((item) => item.id === button.dataset.preset);
             const selected = preset !== undefined &&
                 preset.surface === fields.surface.value &&
                 preset.model === fields.model.value.trim() &&
@@ -72,7 +73,7 @@ export function bindPlaygroundPage(options) {
     elements.gatewayKeyInput?.addEventListener("input", refreshAll);
     elements.presetButtons.forEach((button) => {
         button.addEventListener("click", () => {
-            const preset = PLAYGROUND_PRESETS.find((item) => item.id === button.dataset.preset);
+            const preset = presets.find((item) => item.id === button.dataset.preset);
             if (!preset) {
                 return;
             }

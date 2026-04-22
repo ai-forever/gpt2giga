@@ -28,6 +28,8 @@ from gpt2giga.features.files_batches.normalizers import (
     normalize_gemini_file,
     normalize_openai_batch,
     normalize_openai_file,
+    resolve_anthropic_batch_endpoint,
+    resolve_gemini_batch_endpoint,
 )
 from gpt2giga.providers.anthropic import anthropic_provider_adapters
 
@@ -85,6 +87,7 @@ class FilesBatchesService:
         *,
         api_format: str,
         input_file_id: str | None = None,
+        input_bytes: bytes | None = None,
         endpoint: str | None = None,
         metadata: dict[str, Any] | None = None,
         display_name: str | None = None,
@@ -101,6 +104,7 @@ class FilesBatchesService:
         if normalized_api_format is NormalizedArtifactFormat.ANTHROPIC:
             record = await self._create_anthropic_batch(
                 input_file_id=input_file_id,
+                input_bytes=input_bytes,
                 metadata=metadata,
                 display_name=display_name,
                 model=model,
@@ -114,6 +118,7 @@ class FilesBatchesService:
         elif normalized_api_format is NormalizedArtifactFormat.GEMINI:
             record = await self._create_gemini_batch(
                 input_file_id=input_file_id,
+                input_bytes=input_bytes,
                 metadata=metadata,
                 display_name=display_name,
                 model=model,
@@ -127,6 +132,7 @@ class FilesBatchesService:
         else:
             record = await self._create_openai_batch(
                 input_file_id=input_file_id,
+                input_bytes=input_bytes,
                 endpoint=endpoint,
                 metadata=metadata,
                 model=model,
@@ -288,6 +294,7 @@ class FilesBatchesService:
         self,
         *,
         input_file_id: str | None,
+        input_bytes: bytes | None,
         endpoint: str | None,
         metadata: dict[str, Any] | None,
         model: str | None,
@@ -326,10 +333,12 @@ class FilesBatchesService:
             field_name="input_file_id",
             message="`input_file_id` or `requests` is required for OpenAI batches.",
         )
-        content = await _load_file_bytes(
-            giga_client,
-            file_id=resolved_input_file_id,
-        )
+        content = input_bytes
+        if content is None:
+            content = await _load_file_bytes(
+                giga_client,
+                file_id=resolved_input_file_id,
+            )
         return await batches_service.create_batch_from_content(
             content,
             endpoint=normalized_endpoint,
@@ -347,6 +356,7 @@ class FilesBatchesService:
         self,
         *,
         input_file_id: str | None,
+        input_bytes: bytes | None,
         metadata: dict[str, Any] | None,
         display_name: str | None,
         model: str | None,
@@ -372,12 +382,13 @@ class FilesBatchesService:
                     "`input_file_id` or `requests` is required for Anthropic batches."
                 ),
             )
-            requests_payload = parse_jsonl(
-                await _load_file_bytes(
+            content = input_bytes
+            if content is None:
+                content = await _load_file_bytes(
                     giga_client,
                     file_id=resolved_input_file_id,
                 )
-            )
+            requests_payload = parse_jsonl(content)
         batch_payload = anthropic_provider_adapters.batches.build_create_payload(
             {
                 "completion_window": "24h",
@@ -387,6 +398,7 @@ class FilesBatchesService:
         )
         stored_metadata: dict[str, Any] = {
             "api_format": "anthropic_messages",
+            "provider_endpoint": resolve_anthropic_batch_endpoint(),
             "requests": batch_payload.stored_requests,
         }
         if resolved_input_file_id:
@@ -411,6 +423,7 @@ class FilesBatchesService:
         self,
         *,
         input_file_id: str | None,
+        input_bytes: bytes | None,
         metadata: dict[str, Any] | None,
         display_name: str | None,
         model: str | None,
@@ -427,6 +440,7 @@ class FilesBatchesService:
         ) = await _resolve_gemini_requests_payload(
             giga_client,
             input_file_id=input_file_id,
+            input_bytes=input_bytes,
             requests=requests,
         )
         resolved_model = _resolve_gemini_model(
@@ -445,9 +459,13 @@ class FilesBatchesService:
                 input_file_id=resolved_input_file_id,
             ),
             "model": resolved_model,
+            "provider_model": resolved_model,
             "priority": 0,
             "requests": stored_requests,
         }
+        stored_metadata["provider_endpoint"] = resolve_gemini_batch_endpoint(
+            stored_metadata
+        )
         if metadata:
             stored_metadata["metadata"] = dict(metadata)
         if resolved_input_file_id:
@@ -756,6 +774,7 @@ async def _resolve_gemini_requests_payload(
     giga_client: Any,
     *,
     input_file_id: str | None,
+    input_bytes: bytes | None,
     requests: list[dict[str, Any]] | None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     if requests:
@@ -765,15 +784,13 @@ async def _resolve_gemini_requests_payload(
         field_name="input_file_id",
         message=("`input_file_id` or `requests` is required for Gemini batches."),
     )
-    return (
-        parse_jsonl(
-            await _load_file_bytes(
-                giga_client,
-                file_id=resolved_input_file_id,
-            )
-        ),
-        resolved_input_file_id,
-    )
+    content = input_bytes
+    if content is None:
+        content = await _load_file_bytes(
+            giga_client,
+            file_id=resolved_input_file_id,
+        )
+    return (parse_jsonl(content), resolved_input_file_id)
 
 
 def _resolve_gemini_model(

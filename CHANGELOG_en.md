@@ -5,6 +5,30 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0rc2] - 2026-04-22
+
+### Added
+- **Standalone batch validation examples**: added the `examples/batch_validation/` directory with runnable OpenAI-, Anthropic-, and Gemini-style examples for `POST /batches/validate`
+- **Bounded admin previews**: added support for size-limited admin content/output previews so large files and batch outputs can be opened safely in the UI
+
+### Changed
+- **Product version**: bumped the package version from `1.0.0rc1` to `1.0.0rc2`
+- **Admin files/batches preview flow**: moved file and batch-output preview/download handling onto canonical normalized endpoints for more consistent behavior across inventory and detail views
+- **Batch validation documentation**: clarified examples, limits, and usage notes for the standalone validation endpoint
+
+### Fixed
+- **Batch validation limits**: standalone validation now rejects payloads larger than `100` rows instead of attempting oversized inline batch validation
+- **Path normalization**: fixed standalone batch validation route normalization, including `POST /batches/validate` and `POST /v1/batches/validate`
+- **Upload-less validation**: batch uploads can now be validated without requiring a staged file before the check runs
+- **Admin batch creation performance**: sped up server-side validation and creation flows for files/batches in the admin console
+- **Batch revalidation flow**: restored rerunning validation for batch inputs from the admin UI
+- **Provider batch routing in the admin UI**: fixed provider-specific batch endpoint selection during batch creation and inspection
+- **Batch output preview formatting**: admin preview no longer breaks the original batch output format and now works correctly with normalized output endpoints
+- **Inline examples vs input files**: inline batch examples no longer overwrite an explicitly selected input file in the admin composer
+- **Traffic inspector handoff**: opening related batch/file previews once again reveals the traffic inspector for the selected request
+- **Playground model selection**: playground now uses the configured GigaChat model again instead of falling back incorrectly
+- **Secrets masking**: hardened GigaChat secret masking in setup/settings flows so stored secrets do not leak into UI previews
+
 ## [1.0.0rc1] - 2026-04-21
 
 ### Added

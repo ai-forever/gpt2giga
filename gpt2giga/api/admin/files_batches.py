@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -10,6 +11,8 @@ from starlette.requests import Request
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
 from gpt2giga.api.batch_validation import (
+    cache_batch_input_bytes,
+    resolve_batch_input_bytes,
     validate_batch_input_request,
     run_batch_input_validation,
 )
@@ -24,6 +27,7 @@ from gpt2giga.core.http.form_body import read_request_multipart
 from gpt2giga.features.batches import (
     get_batches_service_from_state,
 )
+from gpt2giga.features.batches.transforms import parse_jsonl
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.files import get_files_service_from_state
 from gpt2giga.features.files.store import get_file_store
@@ -50,6 +54,7 @@ class AdminBatchValidateRequest(BaseModel):
 
     api_format: str = "openai"
     input_file_id: str | None = None
+    input_content_base64: str | None = None
     model: str | None = None
     requests: list[dict[str, Any]] | None = None
 
@@ -126,7 +131,7 @@ async def create_files_batches_file(request: Request):
     purpose = str(form.get("purpose") or "batch").strip() or "batch"
     api_format = str(form.get("api_format") or "openai").strip() or "openai"
     display_name = str(form.get("display_name") or "").strip() or None
-    return await service.create_file(
+    created = await service.create_file(
         api_format=api_format,
         purpose=purpose,
         upload=upload,
@@ -135,6 +140,14 @@ async def create_files_batches_file(request: Request):
         files_service=get_files_service_from_state(app_state),
         file_store=get_file_store(request),
     )
+    created_file_id = str(created.id or "").strip()
+    if created_file_id and purpose == "batch":
+        cache_batch_input_bytes(
+            request,
+            file_id=created_file_id,
+            content=upload["content"],
+        )
+    return created
 
 
 @admin_files_batches_api_router.post("/admin/api/files-batches/batches")
@@ -145,10 +158,17 @@ async def create_files_batches_batch(
 ):
     """Create a normalized batch artifact through the admin API."""
     verify_logs_ip_allowlist(request)
+    input_bytes = None
+    if payload.input_file_id and not payload.requests:
+        input_bytes = await resolve_batch_input_bytes(
+            request,
+            file_id=payload.input_file_id,
+        )
     validation_report = await run_batch_input_validation(
         request=request,
         api_format=payload.api_format,
         input_file_id=payload.input_file_id,
+        input_bytes=input_bytes,
         fallback_model=payload.model,
         requests=payload.requests,
     )
@@ -169,6 +189,7 @@ async def create_files_batches_batch(
         api_format=payload.api_format,
         endpoint=payload.endpoint,
         input_file_id=payload.input_file_id,
+        input_bytes=input_bytes,
         metadata=payload.metadata,
         display_name=payload.display_name,
         model=payload.model,
@@ -189,10 +210,19 @@ async def validate_files_batches_batch(
 ):
     """Validate staged or inline batch input and return a diagnostic report."""
     verify_logs_ip_allowlist(request)
+    input_bytes = None
+    if payload.input_content_base64:
+        input_bytes = base64.b64decode(payload.input_content_base64)
+    elif payload.input_file_id and not payload.requests:
+        input_bytes = await resolve_batch_input_bytes(
+            request,
+            file_id=payload.input_file_id,
+        )
     return await validate_batch_input_request(
         request=request,
         api_format=payload.api_format,
         input_file_id=payload.input_file_id,
+        input_bytes=input_bytes,
         fallback_model=payload.model,
         requests=payload.requests,
     )
@@ -200,7 +230,11 @@ async def validate_files_batches_batch(
 
 @admin_files_batches_api_router.get("/admin/api/files-batches/files/{file_id}/content")
 @exceptions_handler
-async def get_files_batches_file_content(file_id: str, request: Request):
+async def get_files_batches_file_content(
+    file_id: str,
+    request: Request,
+    preview_bytes: int | None = Query(default=None, ge=1, le=1_048_576),
+):
     """Return canonical file content for admin preview/download."""
     verify_logs_ip_allowlist(request)
     app_state = request.app.state
@@ -231,7 +265,11 @@ async def get_files_batches_file_content(file_id: str, request: Request):
                 batch_store=batch_store,
                 file_store=file_store,
             )
-            return Response(content=content, media_type=media_type)
+            return _build_content_response(
+                content,
+                media_type=media_type,
+                preview_bytes=preview_bytes,
+            )
 
     content = await files_service.get_file_content(
         file_id,
@@ -243,7 +281,11 @@ async def get_files_batches_file_content(file_id: str, request: Request):
     media_type = (file_store.get(file_id) or {}).get(
         "mime_type", "application/octet-stream"
     )
-    return Response(content=content, media_type=media_type)
+    return _build_content_response(
+        content,
+        media_type=media_type,
+        preview_bytes=preview_bytes,
+    )
 
 
 @admin_files_batches_api_router.get("/admin/api/files-batches/batches/{batch_id}")
@@ -269,7 +311,11 @@ async def get_files_batches_batch(batch_id: str, request: Request):
     "/admin/api/files-batches/batches/{batch_id}/output"
 )
 @exceptions_handler
-async def get_files_batches_batch_output(batch_id: str, request: Request):
+async def get_files_batches_batch_output(
+    batch_id: str,
+    request: Request,
+    preview_bytes: int | None = Query(default=None, ge=1, le=1_048_576),
+):
     """Return canonical batch output for admin preview/download."""
     verify_logs_ip_allowlist(request)
     batch_record = await _require_batch_record(
@@ -287,7 +333,11 @@ async def get_files_batches_batch_output(batch_id: str, request: Request):
         batch_store=get_batch_store(request),
         file_store=get_file_store(request),
     )
-    return Response(content=content, media_type=media_type)
+    return _build_content_response(
+        content,
+        media_type=media_type,
+        preview_bytes=preview_bytes,
+    )
 
 
 async def _require_batch_record(
@@ -331,8 +381,14 @@ async def _load_batch_output_content(
     raw_metadata = dict(batch_record.raw.get("metadata") or {})
     raw_batch = dict(batch_record.raw.get("batch") or {})
     status = str(raw_batch.get("status") or batch_record.status or "").strip().lower()
+    output_api_format = await _resolve_batch_output_api_format(
+        batch_record,
+        raw_metadata=raw_metadata,
+        giga_client=giga_client,
+        file_store=file_store,
+    )
 
-    if batch_record.api_format.value == "openai":
+    if output_api_format == "openai":
         content = await files_service.get_file_content(
             output_file_id,
             giga_client=giga_client,
@@ -349,7 +405,7 @@ async def _load_batch_output_content(
         )
 
     file_response = await giga_client.aget_file_content(file_id=output_file_id)
-    if batch_record.api_format.value == "anthropic":
+    if output_api_format == "anthropic":
         return (
             _build_anthropic_batch_results(file_response.content, raw_metadata),
             "application/binary",
@@ -362,6 +418,58 @@ async def _load_batch_output_content(
         ),
         "application/json",
     )
+
+
+async def _resolve_batch_output_api_format(
+    batch_record,
+    *,
+    raw_metadata: dict[str, Any],
+    giga_client: object,
+    file_store: object,
+) -> str:
+    """Resolve the batch output format, falling back to the original input rows."""
+    inferred_format = _infer_batch_api_format_from_rows(raw_metadata.get("requests"))
+    if inferred_format is not None:
+        return inferred_format
+
+    input_file_id = str(raw_metadata.get("input_file_id") or "").strip()
+    if not input_file_id and file_store is not None and batch_record.output_file_id:
+        stored_output_metadata = dict(file_store.get(batch_record.output_file_id, {}))
+        input_file_id = str(
+            stored_output_metadata.get("batch_input_file_id") or ""
+        ).strip()
+
+    if input_file_id:
+        try:
+            input_file_response = await giga_client.aget_file_content(
+                file_id=input_file_id
+            )
+            input_rows = parse_jsonl(base64.b64decode(input_file_response.content))
+        except Exception:
+            input_rows = []
+        inferred_format = _infer_batch_api_format_from_rows(input_rows)
+        if inferred_format is not None:
+            return inferred_format
+
+    return batch_record.api_format.value
+
+
+def _infer_batch_api_format_from_rows(rows: Any) -> str | None:
+    """Infer a batch row format from stored request rows or staged input content."""
+    if not isinstance(rows, list):
+        return None
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if "params" in row:
+            return "anthropic"
+        if "request" in row:
+            return "gemini"
+        if "body" in row or "url" in row or "method" in row:
+            return "openai"
+
+    return None
 
 
 def _get_response_processor_or_none(state: object):
@@ -385,3 +493,49 @@ def _resolve_output_batch_id(
         if metadata.get("output_file_id") == file_id:
             return str(batch_id)
     return None
+
+
+def _build_content_response(
+    content: bytes,
+    *,
+    media_type: str,
+    preview_bytes: int | None,
+) -> Response:
+    preview_content, preview_headers = _limit_preview_content(
+        content,
+        media_type=media_type,
+        preview_bytes=preview_bytes,
+    )
+    return Response(
+        content=preview_content,
+        media_type=media_type,
+        headers=preview_headers,
+    )
+
+
+def _limit_preview_content(
+    content: bytes,
+    *,
+    media_type: str,
+    preview_bytes: int | None,
+) -> tuple[bytes, dict[str, str]]:
+    if preview_bytes is None or preview_bytes <= 0:
+        return content, {}
+    if media_type.startswith("image/") or len(content) <= preview_bytes:
+        return content, {
+            "X-Admin-Preview-Truncated": "false",
+            "X-Admin-Preview-Bytes": str(len(content)),
+            "X-Admin-Preview-Total-Bytes": str(len(content)),
+        }
+
+    preview_content = content[:preview_bytes]
+    last_newline = preview_content.rfind(b"\n")
+    if last_newline > 0:
+        preview_content = preview_content[: last_newline + 1]
+    if not preview_content:
+        preview_content = content[:preview_bytes]
+    return preview_content, {
+        "X-Admin-Preview-Truncated": "true",
+        "X-Admin-Preview-Bytes": str(len(preview_content)),
+        "X-Admin-Preview-Total-Bytes": str(len(content)),
+    }

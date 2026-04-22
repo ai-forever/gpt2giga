@@ -38,6 +38,7 @@ export interface TrafficPageElements {
   detailSummaryNode: HTMLElement;
   detailNode: HTMLPreElement;
   filtersForm: HTMLFormElement;
+  inspectorNode: HTMLElement;
   resetButton: HTMLButtonElement;
   summaryNode: HTMLElement;
 }
@@ -817,7 +818,7 @@ function renderTrafficInspector(options: {
   summaryIntro: string;
 }): string {
   return `
-    <div class="stack">
+    <div class="stack traffic-inspector" id="traffic-selection-inspector" tabindex="-1">
       ${options.summaryIntro ? `<p class="muted">${escapeHtml(options.summaryIntro)}</p>` : ""}
       ${renderFormSection({
         title: "Current posture",
@@ -1034,6 +1035,7 @@ export function resolveTrafficElements(pageContent: HTMLElement): TrafficPageEle
   const detailSummaryNode = pageContent.querySelector<HTMLElement>("#traffic-detail-summary");
   const detailNode = pageContent.querySelector<HTMLPreElement>("#traffic-detail");
   const filtersForm = pageContent.querySelector<HTMLFormElement>("#traffic-filters-form");
+  const inspectorNode = pageContent.querySelector<HTMLElement>("#traffic-selection-inspector");
   const summaryNode = pageContent.querySelector<HTMLElement>("#traffic-selection-summary");
   const actionNode = pageContent.querySelector<HTMLElement>("#traffic-selection-actions");
   const resetButton = document.getElementById("reset-traffic-filters") as HTMLButtonElement | null;
@@ -1043,6 +1045,7 @@ export function resolveTrafficElements(pageContent: HTMLElement): TrafficPageEle
     !detailSummaryNode ||
     !detailNode ||
     !filtersForm ||
+    !inspectorNode ||
     !summaryNode ||
     !actionNode ||
     !resetButton
@@ -1056,6 +1059,7 @@ export function resolveTrafficElements(pageContent: HTMLElement): TrafficPageEle
     detailSummaryNode,
     detailNode,
     filtersForm,
+    inspectorNode,
     resetButton,
     summaryNode,
   };

@@ -50,6 +50,7 @@ class FakeGigaChat:
     def __init__(self):
         self.next_batch_index = 4
         self.next_file_index = 4
+        self.file_content_requests: list[str] = []
         self.files = {
             "file-openai-1": {
                 "content": (
@@ -163,6 +164,7 @@ class FakeGigaChat:
         return self.files[file]["object"]
 
     async def aget_file_content(self, file_id):
+        self.file_content_requests.append(file_id)
         return FakeFileContent(
             content=base64.b64encode(self.files[file_id]["content"]).decode("utf-8")
         )
@@ -295,6 +297,9 @@ def test_admin_files_batches_inventory_returns_mixed_formats():
         "anthropic",
         "gemini",
     }
+    batch_endpoints = {item["api_format"]: item["endpoint"] for item in body["batches"]}
+    assert batch_endpoints["anthropic"] == "/v1/messages"
+    assert batch_endpoints["gemini"] == "/v1beta/models/gemini-test:generateContent"
     assert body["counts"] == {
         "files": 4,
         "batches": 3,
@@ -332,6 +337,7 @@ def test_admin_files_batches_detail_endpoints_return_normalized_records():
         == "/admin/api/files-batches/files/file-gemini-1/content"
     )
     assert batch_response.status_code == 200
+    assert batch_response.json()["endpoint"] == "/v1/messages"
     assert (
         batch_response.json()["output_path"]
         == "/admin/api/files-batches/batches/batch-anthropic-1/output"
@@ -355,6 +361,104 @@ def test_admin_files_batches_content_endpoints_proxy_canonical_artifacts():
     assert b'"type": "succeeded"' in anthropic_output_response.content
     assert batch_output_response.status_code == 200
     assert b'"response"' in batch_output_response.content
+
+
+def test_admin_files_batches_file_content_supports_preview_bytes():
+    app = make_app()
+    app.state.gigachat_client.files["file-gemini-1"]["content"] = (
+        b"line-1\nline-2\nline-3\nline-4\n"
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/admin/api/files-batches/files/file-gemini-1/content",
+        params={"preview_bytes": 15},
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"line-1\nline-2\n"
+    assert response.headers["x-admin-preview-truncated"] == "true"
+    assert response.headers["x-admin-preview-bytes"] == str(len(response.content))
+    assert response.headers["x-admin-preview-total-bytes"] == "28"
+
+
+def test_admin_files_batches_batch_output_supports_preview_bytes():
+    app = make_app()
+    app.state.gigachat_client.files["file-gemini-output-1"]["content"] = (
+        json.dumps(
+            {
+                "response": {
+                    "body": {
+                        "candidates": [
+                            {"content": {"parts": [{"text": "first result"}]}}
+                        ]
+                    }
+                }
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "response": {
+                    "body": {
+                        "candidates": [
+                            {"content": {"parts": [{"text": "second result"}]}}
+                        ]
+                    }
+                }
+            }
+        )
+        + "\n"
+    ).encode("utf-8")
+    client = TestClient(app)
+
+    response = client.get(
+        "/admin/api/files-batches/batches/batch-gemini-1/output",
+        params={"preview_bytes": 120},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-admin-preview-truncated"] == "true"
+    assert int(response.headers["x-admin-preview-bytes"]) == len(response.content)
+    assert int(response.headers["x-admin-preview-total-bytes"]) > len(response.content)
+    assert response.content.endswith(b"\n")
+    assert response.content.count(b"\n") == 1
+
+
+def test_admin_files_batches_batch_output_infers_anthropic_format_from_input_file():
+    app = make_app()
+    app.state.gigachat_client.files["file-anthropic-input-1"] = {
+        "content": (
+            b'{"custom_id":"anthropic-batch-1","params":{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hello anthropic"}]}}\n'
+        ),
+        "object": FakeUploadedFile(
+            id="file-anthropic-input-1",
+            object="file",
+            bytes=137,
+            created_at=114,
+            filename="anthropic-input.jsonl",
+            purpose="general",
+        ),
+    }
+    app.state.batch_metadata_store["batch-anthropic-1"] = {
+        "endpoint": "/v1/chat/completions",
+        "input_file_id": "file-anthropic-input-1",
+        "output_file_id": "file-anthropic-output-1",
+        "requests": [],
+    }
+    client = TestClient(app)
+
+    response = client.get("/admin/api/files-batches/batches/batch-anthropic-1/output")
+
+    assert response.status_code == 200
+    lines = [
+        json.loads(line)
+        for line in response.content.decode("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert lines[0]["custom_id"] == "req-1"
+    assert lines[0]["result"]["type"] == "succeeded"
+    assert "message" in lines[0]["result"]
 
 
 def test_admin_files_batches_create_openai_batch_returns_normalized_record():
@@ -512,6 +616,7 @@ def test_admin_files_batches_create_anthropic_batch_from_staged_file():
     assert response.status_code == 200
     body = response.json()
     assert body["api_format"] == "anthropic"
+    assert body["endpoint"] == "/v1/messages"
     assert body["input_file_id"] == "file-anthropic-input-1"
     assert body["output_kind"] == "results"
 
@@ -546,6 +651,7 @@ def test_admin_files_batches_create_anthropic_batch_from_inline_requests():
     body = response.json()
     assert body["api_format"] == "anthropic"
     assert body["display_name"] == "Anthropic Inline Batch"
+    assert body["endpoint"] == "/v1/messages"
     assert body["input_file_id"] is None
     assert body["output_kind"] == "results"
 
@@ -578,6 +684,7 @@ def test_admin_files_batches_create_anthropic_batch_from_inline_requests_with_fa
     assert response.status_code == 200
     body = response.json()
     assert body["api_format"] == "anthropic"
+    assert body["endpoint"] == "/v1/messages"
     assert body["input_file_id"] is None
     assert body["output_kind"] == "results"
 
@@ -612,6 +719,7 @@ def test_admin_files_batches_create_gemini_batch_from_staged_file():
     body = response.json()
     assert body["api_format"] == "gemini"
     assert body["display_name"] == "Gemini Admin Batch"
+    assert body["endpoint"] == "/v1beta/models/gemini-test:generateContent"
     assert body["model"] == "gemini-test"
 
 
@@ -649,6 +757,7 @@ def test_admin_files_batches_create_gemini_batch_from_doc_style_file_with_model(
     body = response.json()
     assert body["api_format"] == "gemini"
     assert body["display_name"] == "Gemini Keyed Batch"
+    assert body["endpoint"] == "/v1beta/models/gemini-2.5-flash:generateContent"
     assert body["model"] == "gemini-2.5-flash"
 
 
@@ -681,6 +790,7 @@ def test_admin_files_batches_create_gemini_batch_from_inline_requests():
     body = response.json()
     assert body["api_format"] == "gemini"
     assert body["display_name"] == "Gemini Inline Batch"
+    assert body["endpoint"] == "/v1beta/models/gemini-inline:generateContent"
     assert body["model"] == "gemini-inline"
     assert body["input_file_id"] is None
 
@@ -813,6 +923,72 @@ def test_admin_files_batches_validate_staged_file_returns_diagnostic_report():
     }
 
 
+def test_admin_files_batches_validate_reuses_cached_staged_file_bytes():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert response.status_code == 200
+    second_response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert second_response.status_code == 200
+    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+
+
+def test_admin_files_batches_create_uses_one_staged_file_read_for_validate_and_create():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+
+
+def test_admin_files_batches_create_reuses_cached_validation_after_validate():
+    app = make_app()
+    client = TestClient(app)
+
+    validate_response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert validate_response.status_code == 200
+    create_response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+
+
 def test_admin_files_batches_validate_inline_gemini_rows_returns_warnings_only():
     client = TestClient(make_app())
 
@@ -851,6 +1027,34 @@ def test_admin_files_batches_validate_inline_gemini_rows_returns_warnings_only()
     }
 
 
+def test_admin_files_batches_validate_reports_gigachat_row_limit():
+    client = TestClient(make_app())
+
+    response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "requests": [
+                {
+                    "custom_id": f"row-{index}",
+                    "url": "/v1/chat/completions",
+                    "body": {"messages": []},
+                }
+                for index in range(101)
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is False
+    assert body["summary"]["total_rows"] == 101
+    assert body["summary"]["error_count"] == 1
+    assert body["issues"][0]["severity"] == "error"
+    assert body["issues"][0]["code"] == "row_limit_exceeded"
+    assert "does not support more than 100 batch rows" in body["issues"][0]["message"]
+
+
 def test_admin_files_batches_validate_requires_file_or_requests():
     client = TestClient(make_app())
 
@@ -862,5 +1066,5 @@ def test_admin_files_batches_validate_requires_file_or_requests():
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "`input_file_id` or `requests` is required for validation."
+        == "`input_file_id`, `input_content_base64`, or `requests` is required for validation."
     )

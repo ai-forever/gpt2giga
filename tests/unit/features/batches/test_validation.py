@@ -100,6 +100,26 @@ def test_validate_batch_input_rows_marks_empty_payload_invalid():
     assert report.issues[0].code == "empty_rows"
 
 
+def test_validate_batch_input_rows_reports_gigachat_row_limit():
+    report = validate_batch_input_rows(
+        [
+            {
+                "custom_id": f"row-{index}",
+                "url": "/v1/chat/completions",
+                "body": {},
+            }
+            for index in range(101)
+        ],
+        api_format="openai",
+    )
+
+    assert report.valid is False
+    assert report.summary.total_rows == 101
+    assert report.summary.error_count == 1
+    assert report.issues[0].code == "row_limit_exceeded"
+    assert report.issues[0].severity is BatchValidationSeverity.ERROR
+
+
 class FakeValidationTransformer:
     async def prepare_chat_completion(self, data, giga_client=None):
         if data.get("messages") == "explode":

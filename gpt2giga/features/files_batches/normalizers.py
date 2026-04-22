@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from gpt2giga.api.gemini.request import normalize_model_name
 from gpt2giga.core.contracts import (
     NormalizedArtifactFormat,
     NormalizedBatchRecord,
@@ -13,6 +14,8 @@ from gpt2giga.core.contracts import (
 )
 
 _FAILED_BATCH_STATUSES = {"failed", "cancelled", "expired"}
+_ANTHROPIC_BATCH_ENDPOINT = "/v1/messages"
+_GEMINI_BATCH_ENDPOINT_TEMPLATE = "/v1beta/models/{model}:generateContent"
 
 
 def normalize_openai_file(file_obj: dict[str, Any]) -> NormalizedFileRecord:
@@ -68,7 +71,7 @@ def normalize_anthropic_batch(
     return NormalizedBatchRecord(
         id=batch_id,
         api_format=NormalizedArtifactFormat.ANTHROPIC,
-        endpoint=_string_or_none(metadata.get("endpoint")) or "/v1/chat/completions",
+        endpoint=resolve_anthropic_batch_endpoint(metadata),
         status=_canonical_batch_status(getattr(batch, "status", None)),
         created_at=_int_or_none(getattr(batch, "created_at", None)),
         input_file_id=_string_or_none(metadata.get("input_file_id")),
@@ -182,7 +185,7 @@ def normalize_gemini_batch(
     return NormalizedBatchRecord(
         id=batch_id,
         api_format=NormalizedArtifactFormat.GEMINI,
-        endpoint=_string_or_none(metadata.get("endpoint")) or "/v1/chat/completions",
+        endpoint=resolve_gemini_batch_endpoint(metadata),
         status=_canonical_batch_status(getattr(batch, "status", None)),
         created_at=_int_or_none(getattr(batch, "created_at", None)),
         input_file_id=_string_or_none(metadata.get("input_file_id")),
@@ -258,6 +261,30 @@ def _admin_file_content_path(file_id: str | None) -> str | None:
     if normalized_file_id is None:
         return None
     return f"/admin/api/files-batches/files/{normalized_file_id}/content"
+
+
+def resolve_anthropic_batch_endpoint(metadata: dict[str, Any] | None = None) -> str:
+    """Return the provider-native endpoint label for Anthropic batches."""
+    metadata = dict(metadata or {})
+    preferred_endpoint = _string_or_none(metadata.get("provider_endpoint"))
+    if preferred_endpoint:
+        return preferred_endpoint
+    return _ANTHROPIC_BATCH_ENDPOINT
+
+
+def resolve_gemini_batch_endpoint(metadata: dict[str, Any] | None = None) -> str:
+    """Return the provider-native endpoint label for Gemini batches."""
+    metadata = dict(metadata or {})
+    preferred_endpoint = _string_or_none(metadata.get("provider_endpoint"))
+    if preferred_endpoint:
+        return preferred_endpoint
+    preferred_model = normalize_model_name(
+        _string_or_none(metadata.get("provider_model"))
+        or _string_or_none(metadata.get("model"))
+    )
+    if not preferred_model:
+        return _GEMINI_BATCH_ENDPOINT_TEMPLATE.format(model="{model}")
+    return _GEMINI_BATCH_ENDPOINT_TEMPLATE.format(model=preferred_model)
 
 
 def _admin_batch_output_path(batch_id: str | None) -> str | None:

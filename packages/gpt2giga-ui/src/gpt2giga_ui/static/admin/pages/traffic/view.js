@@ -562,7 +562,7 @@ function renderTrafficFilters(data, filters, variant) {
 }
 function renderTrafficInspector(options) {
     return `
-    <div class="stack">
+    <div class="stack traffic-inspector" id="traffic-selection-inspector" tabindex="-1">
       ${options.summaryIntro ? `<p class="muted">${escapeHtml(options.summaryIntro)}</p>` : ""}
       ${renderFormSection({
         title: "Current posture",
@@ -738,6 +738,7 @@ export function resolveTrafficElements(pageContent) {
     const detailSummaryNode = pageContent.querySelector("#traffic-detail-summary");
     const detailNode = pageContent.querySelector("#traffic-detail");
     const filtersForm = pageContent.querySelector("#traffic-filters-form");
+    const inspectorNode = pageContent.querySelector("#traffic-selection-inspector");
     const summaryNode = pageContent.querySelector("#traffic-selection-summary");
     const actionNode = pageContent.querySelector("#traffic-selection-actions");
     const resetButton = document.getElementById("reset-traffic-filters");
@@ -745,6 +746,7 @@ export function resolveTrafficElements(pageContent) {
         !detailSummaryNode ||
         !detailNode ||
         !filtersForm ||
+        !inspectorNode ||
         !summaryNode ||
         !actionNode ||
         !resetButton) {
@@ -756,6 +758,7 @@ export function resolveTrafficElements(pageContent) {
         detailSummaryNode,
         detailNode,
         filtersForm,
+        inspectorNode,
         resetButton,
         summaryNode,
     };

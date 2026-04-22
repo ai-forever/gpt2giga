@@ -66,6 +66,14 @@ _PROVIDER_CAPABILITY_DESCRIPTIONS = {
 }
 _STATIC_OPENAPI_TAGS = [
     {
+        "name": TAG_BATCHES,
+        "description": (
+            "Standalone batch validation endpoint for OpenAI, Anthropic, and Gemini "
+            "input payloads. It inspects staged files or inline request rows and "
+            "returns diagnostics without creating an upstream batch job."
+        ),
+    },
+    {
         "name": TAG_TRANSLATIONS,
         "description": (
             "Provider-to-provider request translation endpoints that convert one "

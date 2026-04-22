@@ -309,6 +309,14 @@ async def test_files_batches_service_lists_mixed_inventory_and_counts():
         NormalizedArtifactFormat.ANTHROPIC,
         NormalizedArtifactFormat.GEMINI,
     }
+    endpoints_by_format = {
+        record.api_format: record.endpoint for record in inventory.batches
+    }
+    assert endpoints_by_format[NormalizedArtifactFormat.ANTHROPIC] == "/v1/messages"
+    assert (
+        endpoints_by_format[NormalizedArtifactFormat.GEMINI]
+        == "/v1beta/models/gemini-test:generateContent"
+    )
     assert inventory.counts.files == 3
     assert inventory.counts.batches == 3
     assert inventory.counts.output_ready == 3
@@ -341,6 +349,7 @@ async def test_files_batches_service_filters_by_api_format():
 
     assert [record.id for record in inventory.files] == ["file-gemini-1"]
     assert [record.id for record in inventory.batches] == ["batch-gemini-1"]
+    assert inventory.batches[0].endpoint == "/v1beta/models/gemini-test:generateContent"
 
 
 @pytest.mark.asyncio
@@ -372,6 +381,7 @@ async def test_files_batches_service_retrieves_provider_specific_records():
     assert file_record.api_format is NormalizedArtifactFormat.GEMINI
     assert batch_record is not None
     assert batch_record.api_format is NormalizedArtifactFormat.GEMINI
+    assert batch_record.endpoint == "/v1beta/models/gemini-test:generateContent"
 
 
 @pytest.mark.asyncio
@@ -543,6 +553,7 @@ async def test_files_batches_service_creates_anthropic_batch_from_staged_file():
     )
 
     assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
+    assert record.endpoint == "/v1/messages"
     assert record.input_file_id == "file-anthropic-1"
     assert batches_service.last_create_from_rows is not None
     assert (
@@ -583,6 +594,7 @@ async def test_files_batches_service_creates_anthropic_batch_from_inline_request
     )
 
     assert record.api_format is NormalizedArtifactFormat.ANTHROPIC
+    assert record.endpoint == "/v1/messages"
     assert record.input_file_id is None
     assert record.display_name == "Anthropic Inline Import"
     assert batches_service.last_create_from_rows is not None
@@ -644,6 +656,7 @@ async def test_files_batches_service_creates_gemini_batch_from_staged_file():
     )
 
     assert record.api_format is NormalizedArtifactFormat.GEMINI
+    assert record.endpoint == "/v1beta/models/gemini-test:generateContent"
     assert record.model == "gemini-test"
     assert record.display_name == "Gemini Import"
     assert batches_service.last_create_from_rows is not None
@@ -684,6 +697,7 @@ async def test_files_batches_service_creates_gemini_batch_from_doc_style_file_wi
     )
 
     assert record.api_format is NormalizedArtifactFormat.GEMINI
+    assert record.endpoint == "/v1beta/models/gemini-2.5-flash:generateContent"
     assert record.model == "gemini-2.5-flash"
     assert record.display_name == "Gemini Keyed Import"
     assert batches_service.last_create_from_rows is not None
@@ -732,6 +746,7 @@ async def test_files_batches_service_creates_gemini_batch_from_inline_requests()
     )
 
     assert record.api_format is NormalizedArtifactFormat.GEMINI
+    assert record.endpoint == "/v1beta/models/gemini-inline:generateContent"
     assert record.model == "gemini-inline"
     assert record.display_name == "Gemini Inline Import"
     assert record.input_file_id is None

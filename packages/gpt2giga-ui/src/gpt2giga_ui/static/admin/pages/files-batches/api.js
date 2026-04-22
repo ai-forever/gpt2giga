@@ -59,11 +59,23 @@ export async function fetchFileMetadata(app, fileId) {
 export async function fetchBatchMetadata(app, batchId) {
     return app.api.json(`/admin/api/files-batches/batches/${encodeURIComponent(batchId)}`, {}, true);
 }
-export async function fetchFileContent(app, fileId, contentPath) {
+export async function fetchFileContent(app, fileId, contentPath, previewBytes) {
     const normalizedContentPath = contentPath?.trim();
-    const response = await app.api.raw(normalizedContentPath ||
-        `/v1/files/${encodeURIComponent(fileId)}/content`, {}, true);
-    return new Uint8Array(await response.arrayBuffer());
+    const requestUrl = new URL(normalizedContentPath ||
+        `/v1/files/${encodeURIComponent(fileId)}/content`, window.location.origin);
+    if (previewBytes && Number.isFinite(previewBytes) && previewBytes > 0) {
+        requestUrl.searchParams.set("preview_bytes", String(Math.trunc(previewBytes)));
+    }
+    const response = await app.api.raw(`${requestUrl.pathname}${requestUrl.search}`, {}, true);
+    const mimeType = response.headers.get("content-type");
+    const totalBytesHeader = response.headers.get("x-admin-preview-total-bytes");
+    const truncatedHeader = response.headers.get("x-admin-preview-truncated");
+    return {
+        bytes: new Uint8Array(await response.arrayBuffer()),
+        mimeType: mimeType?.split(";", 1)[0]?.trim() || null,
+        totalBytes: totalBytesHeader ? Number(totalBytesHeader) : null,
+        truncated: truncatedHeader === "true",
+    };
 }
 export async function uploadFile(app, payload) {
     const body = new FormData();
@@ -95,6 +107,7 @@ export async function validateBatchInput(app, payload) {
         json: {
             api_format: payload.apiFormat,
             input_file_id: payload.inputFileId,
+            input_content_base64: payload.inputContentBase64,
             model: payload.model,
             requests: payload.requests,
         },

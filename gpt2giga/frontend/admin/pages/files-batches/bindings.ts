@@ -9,6 +9,7 @@ import {
   safeJsonParse,
 } from "../../utils.js";
 import {
+  clearFilesBatchesPageDataCache,
   createBatch,
   deleteFile,
   fetchBatchMetadata,
@@ -30,6 +31,7 @@ import {
   getLatestOutputBatch,
   getLinkedBatchesForFile,
   humanizeBatchLifecycle,
+  inferDownloadMimeType,
   isBatchValidationCandidate,
   readFilesBatchesRouteState,
   renderInspectorActions,
@@ -62,6 +64,15 @@ interface BindFilesBatchesPageOptions {
   page: FilesBatchesPage;
 }
 
+const OPENAI_BATCH_ENDPOINT_OPTIONS = [
+  "/v1/chat/completions",
+  "/v1/responses",
+  "/v1/embeddings",
+] as const;
+const ANTHROPIC_BATCH_ENDPOINT = "/v1/messages";
+const GEMINI_BATCH_ENDPOINT_TEMPLATE = "/v1beta/models/{model}:generateContent";
+const BATCH_PREVIEW_BYTES = 256 * 1024;
+
 export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void {
   const { app, data, elements, filters, inventory, page } = options;
 
@@ -76,6 +87,11 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   let validationMessage: string | null = null;
   let validationRefreshTimer: number | null = null;
   let validationRunId = 0;
+  let uploadValidationReport: BatchValidationReport | null = null;
+  let uploadValidationMessage: string | null = null;
+  let uploadValidationInFlight = false;
+  let uploadValidationSignature: string | null = null;
+  let uploadValidationValidatedAt: number | null = null;
 
   const cacheFileRecord = (payload: FileRecord): FileRecord => {
     const fileId = String(payload.id ?? "");
@@ -150,6 +166,167 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     setDefinitionBlock(elements.workflowNode, items, "No workflow state reported.");
   };
 
+  const updateUploadValidateAvailability = (): void => {
+    if (!elements.uploadValidateButton) {
+      return;
+    }
+    const isBatchPurpose = elements.uploadPurpose?.value === "batch";
+    elements.uploadValidateButton.disabled = !isBatchPurpose;
+    elements.uploadValidateButton.title = isBatchPurpose
+      ? "Validate the selected file as batch input without uploading it."
+      : "Validation is available only when purpose is batch.";
+  };
+
+  const readUploadSelectedFile = (): File | null =>
+    elements.uploadForm
+      ?.querySelector<HTMLInputElement>('input[name="file"]')
+      ?.files?.[0] ?? null;
+
+  const buildUploadValidationSignature = (): string | null => {
+    const selectedFile = readUploadSelectedFile();
+    if (!selectedFile) {
+      return null;
+    }
+    return JSON.stringify({
+      apiFormat: readUploadApiFormat(),
+      purpose: elements.uploadPurpose?.value ?? "",
+      name: selectedFile.name,
+      size: selectedFile.size,
+      lastModified: selectedFile.lastModified,
+    });
+  };
+
+  const resetUploadValidation = (): void => {
+    uploadValidationReport = null;
+    uploadValidationMessage = null;
+    uploadValidationSignature = null;
+    uploadValidationValidatedAt = null;
+  };
+
+  const encodeBytesToBase64 = (bytes: Uint8Array): string => {
+    let binary = "";
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+      const chunk = bytes.subarray(index, index + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  };
+
+  const updateUploadValidationSurface = (): void => {
+    if (!elements.uploadValidationNode) {
+      return;
+    }
+
+    const purpose = elements.uploadPurpose?.value ?? "";
+    const selectedFile = readUploadSelectedFile();
+    const selectedFileLabel = selectedFile?.name ?? "No file chosen";
+    const isBatchPurpose = purpose === "batch";
+    const statusLabel = uploadValidationInFlight
+      ? "Validating"
+      : uploadValidationReport
+        ? uploadValidationReport.valid
+          ? "Batch valid"
+          : "Batch invalid"
+        : isBatchPurpose
+          ? "Not validated"
+          : "Unavailable";
+    const statusTone =
+      uploadValidationInFlight
+        ? "default"
+        : uploadValidationReport
+          ? uploadValidationReport.valid
+            ? "good"
+            : "warn"
+          : isBatchPurpose
+            ? "default"
+            : "warn";
+    const metaPills = [pill(statusLabel, statusTone)];
+
+    if (uploadValidationReport) {
+      metaPills.push(
+        pill(`${formatNumber(uploadValidationReport.summary.total_rows)} rows`),
+      );
+      metaPills.push(
+        pill(`${formatNumber(uploadValidationReport.summary.error_count)} errors`),
+      );
+      metaPills.push(
+        pill(`${formatNumber(uploadValidationReport.summary.warning_count)} warnings`),
+      );
+    }
+
+    let statusBanner = "";
+    if (!isBatchPurpose) {
+      statusBanner = banner(
+        "Select purpose `batch` to validate the chosen file as batch input.",
+        "warn",
+      );
+    } else if (uploadValidationMessage) {
+      statusBanner = banner(uploadValidationMessage, "danger");
+    } else if (uploadValidationInFlight) {
+      statusBanner = banner("Validating the selected file without uploading it.", "info");
+    } else if (uploadValidationReport?.valid) {
+      statusBanner = banner("Batch valid.", "info");
+    } else if (uploadValidationReport) {
+      statusBanner = banner("Batch invalid.", "danger");
+    } else {
+      statusBanner = banner(
+        "Choose a file and run Validate to check whether the batch is valid.",
+        "info",
+      );
+    }
+
+    const summaryItems: DefinitionItem[] = [
+      { label: "Status", value: statusLabel },
+      { label: "Purpose", value: purpose || "n/a" },
+      { label: "Selected file", value: selectedFileLabel },
+      {
+        label: "Result",
+        value: uploadValidationReport
+          ? uploadValidationReport.valid
+            ? "Batch valid"
+            : "Batch invalid"
+          : isBatchPurpose
+            ? "Awaiting validation"
+            : "Validation disabled",
+        note: uploadValidationValidatedAt
+          ? `Validated at ${formatTimestamp(uploadValidationValidatedAt)}.`
+          : "Validation reads the selected local file without staging it.",
+      },
+    ];
+
+    elements.uploadValidationNode.innerHTML = `
+      <div class="batch-validation__header">
+        <div>
+          <h4>Batch validation</h4>
+          <p class="muted">Validate the selected file before creating a batch.</p>
+        </div>
+        <div class="batch-validation__meta">
+          ${metaPills.join("")}
+        </div>
+      </div>
+      ${statusBanner}
+      <div class="batch-validation__summary">
+        ${renderDefinitionList(summaryItems, "No validation report yet.")}
+      </div>
+      <div class="batch-validation__issues">
+        <div class="surface__header">
+          <h4>Issues</h4>
+          <span class="muted">${
+            uploadValidationReport
+              ? `${formatNumber(uploadValidationReport.issues.length)} reported`
+              : "No issues to show yet."
+          }</span>
+        </div>
+        ${
+          uploadValidationReport
+            ? renderValidationIssueRows(uploadValidationReport.issues)
+            : '<p class="muted">Validation details appear here after you run Validate.</p>'
+        }
+      </div>
+    `;
+  };
+
   const setDetailSurface = (
     title: string,
     items: DefinitionItem[],
@@ -209,6 +386,34 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     delete selection.handoffRequestId;
     delete selection.handoffRequestCount;
   };
+
+  const findBatchByOutputFileId = (fileId: string): BatchRecord | null =>
+    data.batches.find(
+      (entry) => String(entry.output_file_id ?? "") === fileId,
+    ) ?? null;
+
+  const resolveContentPathForFile = (
+    fileId: string,
+    source: FileRecord | undefined,
+    relatedBatch?: BatchRecord | null,
+  ): string | undefined => {
+    const batchOutputPath =
+      (relatedBatch &&
+      String(relatedBatch.output_file_id ?? "") === fileId
+        ? relatedBatch.output_path
+        : null) ||
+      findBatchByOutputFileId(fileId)?.output_path;
+    return batchOutputPath?.trim() || source?.content_path?.trim() || undefined;
+  };
+
+  const resolveDownloadPathForFile = (
+    fileId: string,
+    source: FileRecord | undefined,
+  ): string | undefined =>
+    findBatchByOutputFileId(fileId)?.output_path?.trim() ||
+    source?.download_path?.trim() ||
+    source?.content_path?.trim() ||
+    undefined;
 
   const replaceStateForPage = (
     targetPage: FilesBatchesPage,
@@ -288,8 +493,85 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     return "OpenAI batches accept either a staged JSONL file in OpenAI batch input format or an inline JSON array shaped like `[{custom_id, method, url, body}]`. Provide a fallback model when rows omit `body.model`.";
   };
 
-  const readBatchEndpoint = (): string =>
-    elements.batchEndpoint?.value.trim() || "/v1/chat/completions";
+  const normalizeGeminiBatchModel = (value: string | null | undefined): string => {
+    let normalized = value?.trim() ?? "";
+    if (!normalized) {
+      return "";
+    }
+
+    try {
+      const parsed = new URL(normalized);
+      normalized = parsed.pathname.trim();
+    } catch {
+      // Keep non-URL forms untouched.
+    }
+
+    normalized = normalized.replace(/^\/+|\/+$/g, "");
+    if (normalized.includes("/models/")) {
+      normalized = normalized.split("/models/").at(-1) ?? normalized;
+    } else if (normalized.startsWith("models/")) {
+      normalized = normalized.slice("models/".length);
+    }
+    if (normalized.includes(":")) {
+      normalized = normalized.split(":", 1)[0] ?? normalized;
+    }
+    return normalized.trim();
+  };
+
+  const resolveGeminiBatchEndpoint = (): string => {
+    const normalizedModel = normalizeGeminiBatchModel(
+      elements.batchModel?.value.trim() || readConfiguredFallbackModel(),
+    );
+    return GEMINI_BATCH_ENDPOINT_TEMPLATE.replace(
+      "{model}",
+      normalizedModel || "{model}",
+    );
+  };
+
+  const resolveBatchEndpoint = (
+    apiFormat: ArtifactApiFormat = readBatchApiFormat(),
+  ): string => {
+    if (apiFormat === "anthropic") {
+      return ANTHROPIC_BATCH_ENDPOINT;
+    }
+    if (apiFormat === "gemini") {
+      return resolveGeminiBatchEndpoint();
+    }
+    const selectedEndpoint = elements.batchEndpoint?.value.trim() ?? "";
+    return OPENAI_BATCH_ENDPOINT_OPTIONS.includes(
+      selectedEndpoint as (typeof OPENAI_BATCH_ENDPOINT_OPTIONS)[number],
+    )
+      ? selectedEndpoint
+      : "/v1/chat/completions";
+  };
+
+  const syncBatchEndpointControl = (
+    apiFormat: ArtifactApiFormat,
+  ): void => {
+    if (!elements.batchEndpoint) {
+      return;
+    }
+
+    if (apiFormat === "openai") {
+      const selectedEndpoint = resolveBatchEndpoint("openai");
+      elements.batchEndpoint.replaceChildren(
+        ...OPENAI_BATCH_ENDPOINT_OPTIONS.map(
+          (value) => new Option(value, value, value === selectedEndpoint, value === selectedEndpoint),
+        ),
+      );
+      elements.batchEndpoint.disabled = false;
+      elements.batchEndpoint.value = selectedEndpoint;
+      return;
+    }
+
+    const providerEndpoint = resolveBatchEndpoint(apiFormat);
+    elements.batchEndpoint.replaceChildren(
+      new Option(providerEndpoint, providerEndpoint, true, true),
+    );
+    elements.batchEndpoint.disabled = true;
+  };
+
+  const readBatchEndpoint = (): string => resolveBatchEndpoint();
 
   const readConfiguredFallbackModel = (): string =>
     app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash";
@@ -342,8 +624,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     error?: string;
   } => {
     const apiFormat = readBatchApiFormat();
-    const endpoint =
-      apiFormat === "openai" ? readBatchEndpoint() : "/v1/chat/completions";
+    const endpoint = readBatchEndpoint();
     const inputFileId = elements.batchInput?.value.trim() ?? "";
     const fallbackModel = elements.batchModel?.value.trim() || undefined;
     const inlinePayload = readInlineRequestsPayload();
@@ -1097,8 +1378,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     const currentValue = elements.batchInlineRequests.value.trim();
     if (
       options?.forceValue ||
-      !currentValue ||
-      currentValue === lastInlineRequestsTemplate
+      (currentValue && currentValue === lastInlineRequestsTemplate)
     ) {
       elements.batchInlineRequests.value = nextTemplate;
     }
@@ -1115,13 +1395,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     if (elements.batchApiFormat) {
       elements.batchApiFormat.value = apiFormat;
     }
-    if (elements.batchEndpoint) {
-      const openaiMode = apiFormat === "openai";
-      elements.batchEndpoint.disabled = !openaiMode;
-      if (!openaiMode) {
-        elements.batchEndpoint.value = "/v1/chat/completions";
-      }
-    }
+    syncBatchEndpointControl(apiFormat);
     if (elements.batchInput) {
       elements.batchInput.required = false;
     }
@@ -1322,12 +1596,18 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           : []),
       ],
       action: async () => {
-        const bytes = await fetchFileContent(
+        const previewBytes = resolvePreviewBytes(source, options);
+        const { bytes, totalBytes } = await fetchFileContent(
           app,
           fileId,
-          source?.content_path ?? undefined,
+          resolveContentPathForFile(fileId, source, options?.relatedBatch),
+          previewBytes,
         );
-        const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
+        const preview = buildFilePreview(bytes, String(source?.filename ?? fileId), {
+          previewByteLimit: BATCH_PREVIEW_BYTES,
+          previewTextCharLimit: 100_000,
+          totalByteLength: totalBytes ?? undefined,
+        });
         if (preview.handoffRequestId && options?.relatedBatch) {
           selection = {
             kind: "batch",
@@ -1400,16 +1680,17 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       ],
       action: async () => {
         const source = inventory.fileLookup.get(fileId);
-        const bytes = await fetchFileContent(
+        const { bytes, mimeType } = await fetchFileContent(
           app,
           fileId,
-          source?.download_path ?? source?.content_path ?? undefined,
+          resolveDownloadPathForFile(fileId, source),
         );
-        const mimeType = buildFilePreview(bytes, filename).mimeType;
         const blobBytes = new Uint8Array(bytes.byteLength);
         blobBytes.set(bytes);
         const objectUrl = URL.createObjectURL(
-          new Blob([blobBytes], { type: mimeType }),
+          new Blob([blobBytes], {
+            type: inferDownloadMimeType(filename, mimeType, bytes),
+          }),
         );
         const link = document.createElement("a");
         link.href = objectUrl;
@@ -1426,6 +1707,27 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     const source = inventory.fileLookup.get(fileId);
     const filename = String(source?.filename ?? "").trim();
     return filename || `file-${fileId}.bin`;
+  };
+
+  const resolvePreviewBytes = (
+    source: FileRecord | undefined,
+    options?: {
+      relatedBatch?: BatchRecord | null;
+    },
+  ): number | undefined => {
+    if (options?.relatedBatch) {
+      return BATCH_PREVIEW_BYTES;
+    }
+    const filename = String(source?.filename ?? "").trim().toLowerCase();
+    if (
+      filename.endsWith(".jsonl") ||
+      filename.endsWith(".json") ||
+      filename.endsWith(".txt") ||
+      filename.endsWith(".log")
+    ) {
+      return BATCH_PREVIEW_BYTES;
+    }
+    return undefined;
   };
 
   const inspectFile = async (
@@ -1573,6 +1875,8 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   updateInspectorActions();
   resetContentSurface();
   syncUploadComposerFormat(readUploadApiFormat());
+  updateUploadValidateAvailability();
+  updateUploadValidationSurface();
   updateBatchValidationSurface();
   updateBatchCreateAvailability();
   setDetailSurface(
@@ -1661,18 +1965,129 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           file: upload,
           displayName: fields.display_name?.value,
         });
+        const validatedThisSelection =
+          fields.purpose.value === "batch" &&
+          uploadValidationReport !== null &&
+          uploadValidationSignature !== null &&
+          uploadValidationSignature === buildUploadValidationSignature();
+        const latestUploadValidationReport = uploadValidationReport;
+        const mergedResponse = validatedThisSelection
+          && latestUploadValidationReport
+          ? {
+              ...response,
+              validation: buildStoredFileValidationSnapshot(
+                latestUploadValidationReport,
+                uploadValidationValidatedAt,
+              ),
+            }
+          : response;
+        cacheFileRecord(mergedResponse);
         app.queueAlert(`Uploaded file ${String(response.id ?? "")}.`, "info");
         replaceStateForPage(page, {
           selectedFileId: String(response.id ?? ""),
         });
         await app.render(page);
-        return response;
+        return mergedResponse;
       },
     });
   });
 
   elements.uploadApiFormat?.addEventListener("change", () => {
     syncUploadComposerFormat(readUploadApiFormat());
+    resetUploadValidation();
+    updateUploadValidationSurface();
+  });
+  elements.uploadPurpose?.addEventListener("change", () => {
+    resetUploadValidation();
+    updateUploadValidateAvailability();
+    updateUploadValidationSurface();
+  });
+  elements.uploadForm
+    ?.querySelector<HTMLInputElement>('input[name="file"]')
+    ?.addEventListener("change", () => {
+      resetUploadValidation();
+      updateUploadValidationSurface();
+    });
+  elements.uploadValidateButton?.addEventListener("click", async () => {
+    const form = elements.uploadForm;
+    if (!form) {
+      return;
+    }
+    const fields = form.elements as typeof form.elements & {
+      api_format: HTMLSelectElement;
+      display_name?: HTMLInputElement;
+      purpose: HTMLSelectElement;
+      file: HTMLInputElement;
+    };
+    const upload = fields.file.files?.[0];
+    const apiFormat = readUploadApiFormat();
+    if (fields.purpose.value !== "batch") {
+      uploadValidationMessage = "Validation is available only when purpose is batch.";
+      updateUploadValidateAvailability();
+      updateUploadValidationSurface();
+      app.pushAlert(uploadValidationMessage, "warn");
+      return;
+    }
+    if (!upload) {
+      uploadValidationMessage = "Choose a file before validation.";
+      updateUploadValidationSurface();
+      app.pushAlert(uploadValidationMessage, "warn");
+      return;
+    }
+
+    uploadValidationMessage = null;
+    uploadValidationReport = null;
+    uploadValidationSignature = buildUploadValidationSignature();
+    uploadValidationValidatedAt = null;
+    uploadValidationInFlight = true;
+    updateUploadValidateAvailability();
+    updateUploadValidationSurface();
+
+    try {
+      const inputContentBase64 = encodeBytesToBase64(
+        new Uint8Array(await upload.arrayBuffer()),
+      );
+      const report = await withBusyState({
+        root: form,
+        button: elements.uploadValidateButton,
+        pendingLabel: "Validating…",
+        action: async () =>
+          validateBatchInput(app, {
+            apiFormat,
+            inputContentBase64,
+          }),
+      });
+      uploadValidationReport = report;
+      uploadValidationValidatedAt = Math.floor(Date.now() / 1000);
+      updateUploadValidationSurface();
+      setWorkflowSummary([
+        { label: "Workflow state", value: "Batch validated" },
+        { label: "API format", value: formatApiFormatLabel(report.api_format) },
+        {
+          label: "Result",
+          value: report.valid ? "Batch valid" : "Batch invalid",
+          note: `${formatNumber(report.summary.error_count)} errors · ${formatNumber(report.summary.warning_count)} warnings`,
+        },
+        {
+          label: "Validated file",
+          value: upload.name,
+          note: "The selected local file was validated without staging it.",
+        },
+      ]);
+      app.pushAlert(
+        report.valid ? "Batch valid." : "Batch invalid.",
+        report.valid ? "info" : "warn",
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      uploadValidationMessage = extractErrorReason(message);
+      updateUploadValidationSurface();
+      app.pushAlert(uploadValidationMessage, "danger");
+    } finally {
+      uploadValidationInFlight = false;
+      updateUploadValidateAvailability();
+      updateUploadValidationSurface();
+    }
   });
 
   elements.batchForm?.addEventListener("submit", async (event) => {
@@ -1762,10 +2177,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         },
         {
           label: "Endpoint",
-          value:
-            apiFormat === "openai"
-              ? fields.endpoint.value
-              : "/v1/chat/completions",
+          value: readBatchEndpoint(),
         },
       ],
       successSummary: (response) => [
@@ -1781,10 +2193,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       action: async () => {
         const response = await createBatch(app, {
           apiFormat,
-          endpoint:
-            apiFormat === "openai"
-              ? fields.endpoint.value
-              : "/v1/chat/completions",
+          endpoint: readBatchEndpoint(),
           inputFileId,
           metadata,
           displayName: fields.display_name.value.trim() || undefined,
@@ -1800,6 +2209,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           composeInputFileId: inputFileId,
           selectedBatchId: String(response.id ?? ""),
         });
+        clearFilesBatchesPageDataCache();
         await app.render(page);
         return response;
       },
@@ -2148,7 +2558,6 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   elements.batchApiFormat?.addEventListener("change", () => {
     syncBatchComposerFormat(readBatchApiFormat(), {
       inputFileId: elements.batchInput?.value.trim() ?? "",
-      forceInlineTemplate: true,
     });
     invalidateBatchValidation({ auto: true });
   });
@@ -2163,13 +2572,31 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
   });
 
   elements.batchModel?.addEventListener("input", () => {
+    if (readBatchApiFormat() === "gemini") {
+      syncBatchEndpointControl("gemini");
+    }
     syncBatchInlineRequestsTemplate();
+    invalidateBatchValidation();
   });
   elements.batchModel?.addEventListener("change", () => {
+    if (readBatchApiFormat() === "gemini") {
+      syncBatchEndpointControl("gemini");
+    }
     invalidateBatchValidation({ auto: true });
+  });
+  elements.batchInput?.addEventListener("input", () => {
+    invalidateBatchValidation();
   });
   elements.batchInput?.addEventListener("change", () => {
     invalidateBatchValidation({ auto: true });
+  });
+  elements.batchInlineRequestsExampleButton?.addEventListener("click", () => {
+    syncBatchInlineRequestsTemplate({ forceValue: true });
+    elements.batchInlineRequests?.focus();
+    invalidateBatchValidation({ auto: true });
+  });
+  elements.batchInlineRequests?.addEventListener("input", () => {
+    invalidateBatchValidation();
   });
   elements.batchInlineRequests?.addEventListener("change", () => {
     invalidateBatchValidation({ auto: true });

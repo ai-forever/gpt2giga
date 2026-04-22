@@ -1,6 +1,7 @@
 import { renderDefinitionList } from "../../templates.js";
 import { buildTrafficEventSelectionSummary, buildTrafficUrl, buildUsageSelectionSummary, indexEventsByRequestId, normalizeOptionalText, renderTrafficSelectionActions, seedTrafficSelection, } from "./serializers.js";
 import { DEFAULT_LIMIT } from "./state.js";
+const INSPECTOR_HIGHLIGHT_CLASS = "traffic-inspector--active";
 export function bindTrafficPage(options) {
     const { app, data, elements, filters, page } = options;
     const requestLookup = indexEventsByRequestId(data.requestEvents);
@@ -11,6 +12,7 @@ export function bindTrafficPage(options) {
         key: data.keyEntries,
         provider: data.providerEntries,
     };
+    let inspectorHighlightTimer = null;
     const setSelectionSummary = (items) => {
         elements.summaryNode.innerHTML = renderDefinitionList(items, "Select a request, error, or usage row.");
     };
@@ -22,7 +24,26 @@ export function bindTrafficPage(options) {
         elements.detailNode.textContent = JSON.stringify(payload, null, 2);
         elements.detailDisclosure.open = open;
     };
-    const selectTrafficEvent = (kind, item) => {
+    const revealSelectionInspector = () => {
+        const rect = elements.inspectorNode.getBoundingClientRect();
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        const inspectorOutsideViewport = rect.top < 96 || rect.bottom > viewportHeight - 32;
+        if (inspectorOutsideViewport) {
+            elements.inspectorNode.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        elements.inspectorNode.focus({ preventScroll: true });
+        elements.inspectorNode.classList.remove(INSPECTOR_HIGHLIGHT_CLASS);
+        void elements.inspectorNode.offsetWidth;
+        elements.inspectorNode.classList.add(INSPECTOR_HIGHLIGHT_CLASS);
+        if (inspectorHighlightTimer !== null) {
+            window.clearTimeout(inspectorHighlightTimer);
+        }
+        inspectorHighlightTimer = window.setTimeout(() => {
+            elements.inspectorNode.classList.remove(INSPECTOR_HIGHLIGHT_CLASS);
+            inspectorHighlightTimer = null;
+        }, 1400);
+    };
+    const selectTrafficEvent = (kind, item, revealInspector = true) => {
         const requestId = normalizeOptionalText(item.request_id);
         const counterpartKind = kind === "request" ? "error" : "request";
         const counterpartRows = counterpartKind === "error" ? data.errorEvents : data.requestEvents;
@@ -45,8 +66,11 @@ export function bindTrafficPage(options) {
             counterpart_event: counterpart,
             active_filters: filters,
         });
+        if (revealInspector) {
+            revealSelectionInspector();
+        }
     };
-    const selectUsageRow = (kind, item) => {
+    const selectUsageRow = (kind, item, revealInspector = true) => {
         setSelectionSummary(buildUsageSelectionSummary(kind, item, filters));
         setSelectionActions({ requestId: null, counterpartKind: null, counterpartIndex: null });
         setDetailState(kind === "key" ? "Selected usage-by-key snapshot" : "Selected usage-by-provider snapshot", {
@@ -54,7 +78,17 @@ export function bindTrafficPage(options) {
             usage_summary: data.providerSummary,
             active_filters: filters,
         });
+        if (revealInspector) {
+            revealSelectionInspector();
+        }
     };
+    app.registerCleanup(() => {
+        if (inspectorHighlightTimer !== null) {
+            window.clearTimeout(inspectorHighlightTimer);
+            inspectorHighlightTimer = null;
+        }
+        elements.inspectorNode.classList.remove(INSPECTOR_HIGHLIGHT_CLASS);
+    });
     setDetailState("Current scope snapshot", {
         active_filters: filters,
         usage_summary: data.providerSummary,
@@ -138,5 +172,7 @@ export function bindTrafficPage(options) {
             selectUsageRow(kind, item);
         });
     });
-    seedTrafficSelection(filters, requestLookup, errorLookup, selectTrafficEvent);
+    seedTrafficSelection(filters, requestLookup, errorLookup, (kind, item) => {
+        selectTrafficEvent(kind, item, false);
+    });
 }

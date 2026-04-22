@@ -535,6 +535,13 @@ summary:focus-visible {
   font-size: 13px;
 }
 
+.field__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .field > span:first-child {
   color: var(--muted);
 }
@@ -608,6 +615,14 @@ textarea {
   background: rgba(255, 255, 255, 0.94);
   border-color: rgba(15, 23, 42, 0.18);
   box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+}
+
+.button--inline {
+  min-height: 28px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
 }
 
 .button--ghost {
@@ -1171,6 +1186,20 @@ code {
 .details-disclosure summary + .field-note,
 .details-disclosure summary + .code-block {
   margin-top: 0;
+}
+
+.traffic-inspector {
+  outline: none;
+  scroll-margin-top: 120px;
+  border-radius: 24px;
+  transition:
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.traffic-inspector--active {
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.06), rgba(255, 255, 255, 0));
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
 }
 
 .rail-disclosure summary {

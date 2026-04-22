@@ -10,7 +10,10 @@
 
 | Path | Purpose |
 |---|---|
+| `docs/integrations/README.md` | Index of integration guides |
 | `docs/integrations/aider/README.md` | Aider setup |
+| `docs/integrations/aider/.env.example` | Aider-specific env example |
+| `docs/integrations/aider/.aider.model.metadata.json` | Aider model metadata checked in with the guide |
 | `docs/integrations/claude-code/README.md` | Claude Code setup |
 | `docs/integrations/codex/README.md` | OpenAI Codex setup |
 | `docs/integrations/cursor/README.md` | Cursor setup |
@@ -52,7 +55,7 @@ rg -n "server|proxy_pass|location" docs/integrations/nginx
 
 ## Common Gotchas
 
-- There are no checked-in `.env.example` files under `docs/integrations/`; keep secrets guidance pointed at the repo-root `.env.example`.
+- The only checked-in integration-local env template today is `docs/integrations/aider/.env.example`; keep any new integration-local env examples clearly scoped and secret-free.
 - `gpt2giga` supports both root and `/v1` mounted API routes for OpenAI and Anthropic-compatible endpoints; docs should only require `/v1` when the client tooling needs it.
 - This folder should not become a dumping ground for ad hoc experiments; keep runnable examples in `examples/`.
 

@@ -29,6 +29,8 @@ interface BindTrafficPageOptions {
   page: TrafficPage;
 }
 
+const INSPECTOR_HIGHLIGHT_CLASS = "traffic-inspector--active";
+
 export function bindTrafficPage(options: BindTrafficPageOptions): void {
   const { app, data, elements, filters, page } = options;
   const requestLookup = indexEventsByRequestId(data.requestEvents);
@@ -39,6 +41,7 @@ export function bindTrafficPage(options: BindTrafficPageOptions): void {
     key: data.keyEntries,
     provider: data.providerEntries,
   };
+  let inspectorHighlightTimer: number | null = null;
 
   const setSelectionSummary = (items: { label: string; value: string; note?: string }[]): void => {
     elements.summaryNode.innerHTML = renderDefinitionList(items, "Select a request, error, or usage row.");
@@ -54,7 +57,35 @@ export function bindTrafficPage(options: BindTrafficPageOptions): void {
     elements.detailDisclosure.open = open;
   };
 
-  const selectTrafficEvent = (kind: "request" | "error", item: TrafficEvent): void => {
+  const revealSelectionInspector = (): void => {
+    const rect = elements.inspectorNode.getBoundingClientRect();
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const inspectorOutsideViewport = rect.top < 96 || rect.bottom > viewportHeight - 32;
+
+    if (inspectorOutsideViewport) {
+      elements.inspectorNode.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    elements.inspectorNode.focus({ preventScroll: true });
+    elements.inspectorNode.classList.remove(INSPECTOR_HIGHLIGHT_CLASS);
+    void elements.inspectorNode.offsetWidth;
+    elements.inspectorNode.classList.add(INSPECTOR_HIGHLIGHT_CLASS);
+
+    if (inspectorHighlightTimer !== null) {
+      window.clearTimeout(inspectorHighlightTimer);
+    }
+
+    inspectorHighlightTimer = window.setTimeout(() => {
+      elements.inspectorNode.classList.remove(INSPECTOR_HIGHLIGHT_CLASS);
+      inspectorHighlightTimer = null;
+    }, 1400);
+  };
+
+  const selectTrafficEvent = (
+    kind: "request" | "error",
+    item: TrafficEvent,
+    revealInspector = true,
+  ): void => {
     const requestId = normalizeOptionalText(item.request_id);
     const counterpartKind = kind === "request" ? "error" : "request";
     const counterpartRows = counterpartKind === "error" ? data.errorEvents : data.requestEvents;
@@ -82,9 +113,13 @@ export function bindTrafficPage(options: BindTrafficPageOptions): void {
         active_filters: filters,
       },
     );
+
+    if (revealInspector) {
+      revealSelectionInspector();
+    }
   };
 
-  const selectUsageRow = (kind: "key" | "provider", item: UsageEntry): void => {
+  const selectUsageRow = (kind: "key" | "provider", item: UsageEntry, revealInspector = true): void => {
     setSelectionSummary(buildUsageSelectionSummary(kind, item, filters));
     setSelectionActions({ requestId: null, counterpartKind: null, counterpartIndex: null });
     setDetailState(
@@ -95,7 +130,19 @@ export function bindTrafficPage(options: BindTrafficPageOptions): void {
         active_filters: filters,
       },
     );
+
+    if (revealInspector) {
+      revealSelectionInspector();
+    }
   };
+
+  app.registerCleanup(() => {
+    if (inspectorHighlightTimer !== null) {
+      window.clearTimeout(inspectorHighlightTimer);
+      inspectorHighlightTimer = null;
+    }
+    elements.inspectorNode.classList.remove(INSPECTOR_HIGHLIGHT_CLASS);
+  });
 
   setDetailState(
     "Current scope snapshot",
@@ -205,5 +252,7 @@ export function bindTrafficPage(options: BindTrafficPageOptions): void {
     });
   });
 
-  seedTrafficSelection(filters, requestLookup, errorLookup, selectTrafficEvent);
+  seedTrafficSelection(filters, requestLookup, errorLookup, (kind, item) => {
+    selectTrafficEvent(kind, item, false);
+  });
 }

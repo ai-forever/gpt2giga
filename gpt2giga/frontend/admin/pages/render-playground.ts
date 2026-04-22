@@ -3,8 +3,8 @@ import type { SetupPayload } from "../types.js";
 import { bindPlaygroundPage } from "./playground/bindings.js";
 import { buildRequestFromPreset } from "./playground/serializers.js";
 import {
-  DEFAULT_PLAYGROUND_PRESET,
-  PLAYGROUND_PRESETS,
+  DEFAULT_PLAYGROUND_PRESET_ID,
+  buildPlaygroundPresets,
   type PlaygroundPreset,
 } from "./playground/state.js";
 import {
@@ -19,11 +19,12 @@ export async function renderPlayground(app: AdminApp, token: number): Promise<vo
     return;
   }
 
-  const initialPreset = resolveInitialPlaygroundPreset(window.location);
+  const presets = buildPlaygroundPresets(app.runtime?.gigachat_model);
+  const initialPreset = resolveInitialPlaygroundPreset(window.location, presets);
   const initialRequest = buildRequestFromPreset(initialPreset);
 
   app.setHeroActions(renderPlaygroundHeroActions());
-  app.setContent(renderPlaygroundPage(setup, initialPreset, initialRequest));
+  app.setContent(renderPlaygroundPage(setup, presets, initialPreset, initialRequest));
 
   const elements = resolvePlaygroundElements(app.pageContent);
   if (!elements) {
@@ -33,16 +34,26 @@ export async function renderPlayground(app: AdminApp, token: number): Promise<vo
   bindPlaygroundPage({
     app,
     elements,
+    presets,
     setup,
     token,
   });
 }
 
-function resolveInitialPlaygroundPreset(location: Location): PlaygroundPreset {
+function resolveInitialPlaygroundPreset(
+  location: Location,
+  presets: PlaygroundPreset[],
+): PlaygroundPreset {
   const presetId = new URLSearchParams(location.search).get("preset")?.trim();
   if (!presetId) {
-    return DEFAULT_PLAYGROUND_PRESET;
+    return (
+      presets.find((preset) => preset.id === DEFAULT_PLAYGROUND_PRESET_ID) ?? presets[0]!
+    );
   }
 
-  return PLAYGROUND_PRESETS.find((preset) => preset.id === presetId) ?? DEFAULT_PLAYGROUND_PRESET;
+  return (
+    presets.find((preset) => preset.id === presetId) ??
+    presets.find((preset) => preset.id === DEFAULT_PLAYGROUND_PRESET_ID) ??
+    presets[0]!
+  );
 }
