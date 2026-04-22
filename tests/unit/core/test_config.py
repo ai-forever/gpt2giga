@@ -310,6 +310,7 @@ def test_proxy_settings_security_grouped_view():
         cors_allow_methods=["GET", "POST"],
         cors_allow_headers=["authorization"],
         logs_ip_allowlist=["127.0.0.1"],
+        trusted_proxy_cidrs=["10.0.0.0/24"],
         max_request_body_bytes=123,
         max_audio_file_size_bytes=456,
         max_image_file_size_bytes=789,
@@ -322,6 +323,7 @@ def test_proxy_settings_security_grouped_view():
     assert s.security.governance_limits_configured == 1
     assert s.security.cors_allow_origins == ["https://example.test"]
     assert s.security.logs_ip_allowlist == ["127.0.0.1"]
+    assert s.security.trusted_proxy_cidrs == ["10.0.0.0/24"]
     assert s.security.max_request_body_bytes == 123
     assert s.security.max_audio_file_size_bytes == 456
     assert s.security.max_image_file_size_bytes == 789

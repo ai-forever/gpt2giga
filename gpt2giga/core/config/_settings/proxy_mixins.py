@@ -1,5 +1,6 @@
 """Domain mixins used to assemble ``ProxySettings``."""
 
+import ipaddress
 import warnings
 from functools import cached_property
 from typing import Annotated, Any, Literal
@@ -21,6 +22,7 @@ from gpt2giga.core.config._settings.common import (
     normalize_lowercase_string,
     normalize_observability_sinks,
     normalize_optional_string,
+    normalize_optional_string_list,
     normalize_required_string,
     normalize_string_map,
     normalize_uppercase_string,
@@ -389,6 +391,13 @@ class SecurityProxySettingsMixin:
         default_factory=list,
         description="IP-адреса, которым разрешён доступ к admin surface в DEV (пусто = без ограничений)",
     )
+    trusted_proxy_cidrs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Список доверенных reverse-proxy IP/CIDR, от которых разрешено "
+            "учитывать X-Forwarded-For. Пусто = forwarded headers игнорируются."
+        ),
+    )
     enable_api_key_auth: bool = Field(
         default=False,
         description="Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ)",
@@ -433,6 +442,22 @@ class SecurityProxySettingsMixin:
             error_message="governance_limits must be a JSON array of rule descriptors",
         )
 
+    @field_validator("trusted_proxy_cidrs", mode="before")
+    @classmethod
+    def normalize_trusted_proxy_cidrs(cls, value):
+        """Normalize trusted proxy CIDRs from ENV/CLI friendly forms."""
+        return normalize_optional_string_list(value) or []
+
+    @field_validator("trusted_proxy_cidrs")
+    @classmethod
+    def validate_trusted_proxy_cidrs(cls, value: list[str]) -> list[str]:
+        """Validate trusted proxy CIDR entries eagerly."""
+        normalized: list[str] = []
+        for entry in value:
+            ipaddress.ip_network(entry, strict=False)
+            normalized.append(entry)
+        return normalized
+
     @model_validator(mode="after")
     def validate_prod_security(self):
         """Emit warnings when PROD mode keeps insecure defaults."""
@@ -473,6 +498,7 @@ class SecurityProxySettingsMixin:
             cors_allow_methods=self.cors_allow_methods,
             cors_allow_headers=self.cors_allow_headers,
             logs_ip_allowlist=self.logs_ip_allowlist,
+            trusted_proxy_cidrs=self.trusted_proxy_cidrs,
             log_redact_sensitive=self.log_redact_sensitive,
             max_request_body_bytes=self.max_request_body_bytes,
             max_audio_file_size_bytes=self.max_audio_file_size_bytes,

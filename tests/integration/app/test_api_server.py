@@ -477,30 +477,21 @@ def test_prod_bootstrap_allows_remote_setup_with_bootstrap_token(tmp_path, monke
     monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
 
     app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD")))
-    client = TestClient(app)
+    client = TestClient(app, client=("10.0.0.5", 50000))
     token = get_control_plane_bootstrap_token_file().read_text(encoding="utf-8").strip()
 
-    denied = client.get(
-        "/admin/api/setup",
-        headers={"X-Forwarded-For": "10.0.0.5"},
-    )
+    denied = client.get("/admin/api/setup")
     assert denied.status_code == 401
 
     allowed = client.get(
         "/admin/api/setup",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "X-Forwarded-For": "10.0.0.5",
-        },
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert allowed.status_code == 200
 
     claimed = client.post(
         "/admin/api/setup/claim",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "X-Forwarded-For": "10.0.0.5",
-        },
+        headers={"Authorization": f"Bearer {token}"},
         json={"operator_label": "Remote bootstrap"},
     )
     assert claimed.status_code == 200
@@ -509,10 +500,7 @@ def test_prod_bootstrap_allows_remote_setup_with_bootstrap_token(tmp_path, monke
 
     blocked_route = client.get(
         "/admin/api/capabilities",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "X-Forwarded-For": "10.0.0.5",
-        },
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert blocked_route.status_code == 403
     assert (
@@ -789,6 +777,49 @@ def test_admin_recent_requests_endpoint_collects_runtime_events(monkeypatch):
     payload = response.json()
     assert payload["kind"] == "requests"
     assert any(event["endpoint"] == "/health" for event in payload["events"])
+
+
+def test_admin_recent_requests_ignore_untrusted_x_forwarded_for(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    with TestClient(
+        create_app(config=_default_config()),
+        client=("127.0.0.1", 50000),
+    ) as client:
+        assert (
+            client.get("/health", headers={"X-Forwarded-For": "10.0.0.5"}).status_code
+            == 200
+        )
+        response = client.get("/admin/api/requests/recent")
+
+    assert response.status_code == 200
+    health_event = next(
+        event for event in response.json()["events"] if event["endpoint"] == "/health"
+    )
+    assert health_event["client_ip"] == "127.0.0.1"
+
+
+def test_admin_recent_requests_honor_trusted_x_forwarded_for(monkeypatch):
+    monkeypatch.setattr("gpt2giga.providers.gigachat.client.GigaChat", _FakeGigaChat)
+
+    cfg = ProxyConfig(
+        proxy=ProxySettings(trusted_proxy_cidrs=["127.0.0.0/8"]),
+    )
+    with TestClient(create_app(config=cfg), client=("127.0.0.1", 50000)) as client:
+        assert (
+            client.get(
+                "/health",
+                headers={"X-Forwarded-For": "10.0.0.5, 172.16.0.1"},
+            ).status_code
+            == 200
+        )
+        response = client.get("/admin/api/requests/recent")
+
+    assert response.status_code == 200
+    health_event = next(
+        event for event in response.json()["events"] if event["endpoint"] == "/health"
+    )
+    assert health_event["client_ip"] == "10.0.0.5"
 
 
 def test_admin_recent_errors_endpoint_collects_404_events(monkeypatch):

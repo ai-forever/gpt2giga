@@ -26,7 +26,7 @@ def make_app(config=None):
 
 
 def test_console_routes_are_available():
-    client = TestClient(make_app())
+    client = TestClient(make_app(), client=("127.0.0.1", 50000))
 
     response = client.get("/admin/setup")
     assert response.status_code == 200
@@ -223,7 +223,7 @@ def test_application_settings_update_is_persisted(tmp_path, monkeypatch):
 
 def test_security_settings_update_is_persisted(tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
-    client = TestClient(make_app())
+    client = TestClient(make_app(), client=("127.0.0.1", 50000))
 
     response = client.put(
         "/admin/api/settings/security",
@@ -257,10 +257,7 @@ def test_security_settings_update_is_persisted(tmp_path, monkeypatch):
     assert payload["values"]["scoped_api_keys_configured"] == 1
     assert payload["values"]["governance_limits"][0]["name"] == "openai-chat-limit"
 
-    get_response = client.get(
-        "/admin/api/settings/security",
-        headers={"x-forwarded-for": "127.0.0.1"},
-    )
+    get_response = client.get("/admin/api/settings/security")
     assert get_response.status_code == 200
     values = get_response.json()["values"]
     assert values["logs_ip_allowlist"] == ["127.0.0.1", "10.0.0.8"]

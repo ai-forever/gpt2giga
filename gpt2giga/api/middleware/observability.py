@@ -10,12 +10,14 @@ from fastapi.routing import APIRoute
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from gpt2giga.api.tags import resolve_tag_provider
+from gpt2giga.app.dependencies import get_config_from_state
 from gpt2giga.app.observability import (
     RequestAuditEvent,
     get_request_audit_metadata,
     record_request_event,
     set_request_audit_error,
 )
+from gpt2giga.core.http import resolve_client_ip
 
 _IGNORED_PREFIXES = (
     "/admin",
@@ -194,9 +196,9 @@ def _resolve_provider(route: object) -> str | None:
 
 
 def _get_client_ip(request: Request) -> str | None:
-    """Resolve the request client IP with proxy awareness."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", 1)[0].strip()
-    client = request.client
-    return None if client is None else client.host
+    """Resolve the request client IP with the shared proxy-trust policy."""
+    config = get_config_from_state(request.app.state)
+    return resolve_client_ip(
+        request,
+        trusted_proxy_cidrs=config.proxy_settings.trusted_proxy_cidrs,
+    )

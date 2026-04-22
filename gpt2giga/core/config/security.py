@@ -39,6 +39,7 @@ class SecuritySettings(BaseModel):
     cors_allow_headers: list[str] = Field(default_factory=lambda: ["*"])
 
     logs_ip_allowlist: list[str] = Field(default_factory=list)
+    trusted_proxy_cidrs: list[str] = Field(default_factory=list)
     log_redact_sensitive: bool = Field(default=True)
 
     max_request_body_bytes: int = Field(
@@ -81,6 +82,7 @@ class SecuritySettings(BaseModel):
             "has_wildcard_cors": self.has_wildcard_cors,
             "log_redact_sensitive": self.log_redact_sensitive,
             "logs_ip_allowlist": self.logs_ip_allowlist,
+            "trusted_proxy_cidrs": self.trusted_proxy_cidrs,
             "max_request_body_bytes": self.max_request_body_bytes,
             "max_audio_file_size_bytes": self.max_audio_file_size_bytes,
             "max_image_file_size_bytes": self.max_image_file_size_bytes,

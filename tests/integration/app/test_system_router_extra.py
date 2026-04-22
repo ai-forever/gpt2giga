@@ -170,11 +170,31 @@ def test_admin_logs_stream_ip_allowlist_blocks(temp_log_file):
     assert resp.status_code == 403
 
 
-def test_admin_logs_ip_allowlist_xforwardedfor(temp_log_file):
-    """X-Forwarded-For header is used for IP detection."""
+def test_admin_logs_ip_allowlist_ignores_untrusted_xforwardedfor(temp_log_file):
+    """Direct clients cannot spoof the admin allowlist via X-Forwarded-For."""
     app = make_app(logs_ip_allowlist=["10.0.0.5"])
     app.state.config.proxy_settings.log_filename = temp_log_file
     client = TestClient(app)
+    resp = client.get(
+        "/admin/api/logs",
+        params={"lines": 1},
+        headers={"X-Forwarded-For": "10.0.0.5, 172.16.0.1"},
+    )
+    assert resp.status_code == 403
+
+
+def test_admin_logs_ip_allowlist_honors_trusted_xforwardedfor(temp_log_file):
+    """Trusted proxies may supply X-Forwarded-For for admin IP checks."""
+    app = make_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                logs_ip_allowlist=["10.0.0.5"],
+                trusted_proxy_cidrs=["127.0.0.0/8"],
+            )
+        )
+    )
+    app.state.config.proxy_settings.log_filename = temp_log_file
+    client = TestClient(app, client=("127.0.0.1", 50000))
     resp = client.get(
         "/admin/api/logs",
         params={"lines": 1},

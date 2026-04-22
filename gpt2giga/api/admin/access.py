@@ -30,6 +30,7 @@ from gpt2giga.core.config.control_plane import (
     load_bootstrap_token,
     requires_admin_bootstrap,
 )
+from gpt2giga.core.http import resolve_client_ip
 
 _admin_api_key_header = APIKeyHeader(name="x-api-key", auto_error=False)
 _admin_api_key_query = APIKeyQuery(
@@ -55,13 +56,15 @@ _BOOTSTRAP_ADMIN_API_ROUTES = {
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract client IP from X-Forwarded-For or request.client."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return ""
+    """Resolve the request client IP using the configured proxy-trust policy."""
+    config = get_config_from_state(request.app.state)
+    return (
+        resolve_client_ip(
+            request,
+            trusted_proxy_cidrs=config.proxy_settings.trusted_proxy_cidrs,
+        )
+        or ""
+    )
 
 
 def _route_path(request: Request) -> str:

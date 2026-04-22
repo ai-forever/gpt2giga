@@ -113,6 +113,7 @@ docker compose -f deploy/compose/base.yaml --profile DEV up -d
 | `GPT2GIGA_ENABLE_REASONING` | По умолчанию добавляет `reasoning_effort="high"` для GigaChat, если клиент не указал его явно |
 | `GPT2GIGA_CORS_ALLOW_ORIGINS` | CORS origins в JSON-массиве |
 | `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | Глобальный лимит размера request body |
+| `GPT2GIGA_TRUSTED_PROXY_CIDRS` | Reverse proxy IP/CIDR, от которых можно доверять `X-Forwarded-For` |
 
 ### GigaChat backend
 
@@ -136,6 +137,18 @@ docker compose -f deploy/compose/base.yaml --profile DEV up -d
 | `GPT2GIGA_SCOPED_API_KEYS` | Scoped API keys с ограничениями по provider, endpoint и model |
 | `GPT2GIGA_GOVERNANCE_LIMITS` | Fixed-window лимиты по запросам и токенам |
 | `GPT2GIGA_LOGS_IP_ALLOWLIST` | Allowlist для admin surface в `DEV`; имя переменной сохранено для обратной совместимости конфигурации |
+
+## Trusted proxy и `X-Forwarded-For`
+
+По умолчанию `gpt2giga` не доверяет `X-Forwarded-For` и использует прямой peer IP от ASGI-сервера. Это означает, что прямой клиент не может подменить admin allowlist или observability-поля, просто прислав этот header.
+
+Если proxy стоит за Nginx, Traefik или другим reverse proxy и вам нужно видеть исходный клиентский IP, явно перечислите доверенные proxy IP/CIDR:
+
+```dotenv
+GPT2GIGA_TRUSTED_PROXY_CIDRS=["10.0.0.0/24","127.0.0.1/32"]
+```
+
+После этого `X-Forwarded-For` учитывается только для запросов, пришедших от одного из этих доверенных proxy. Для прямых клиентов header по-прежнему игнорируется.
 
 ## Runtime switches
 
