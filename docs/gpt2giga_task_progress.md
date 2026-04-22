@@ -98,3 +98,10 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 - Summary: expanded architecture guardrails with dependency-direction tests that keep admin route modules on public app-service facades and keep structured admin page folders routing/query-string logic inside shared `state`/`serializers` helpers
 - Checks: `uv run ruff check tests/unit/core/test_architecture_guardrails.py`; `uv run ruff format tests/unit/core/test_architecture_guardrails.py`; `uv run pytest tests/unit/core/test_architecture_guardrails.py`
 - Notes: the new guardrails intentionally focus on rules the current tree can enforce today without large router/provider rewrites, while still catching regressions in the recent admin/runtime/frontend refactors
+
+## 2026-04-22 — S11 — done
+
+- Commit: `83bc2eb`
+- Summary: renamed the admin IP allowlist guard to `verify_admin_ip_allowlist()` in the shared access helpers, switched admin UI/settings/runtime/files-batches routes to the clearer name, and kept `gpt2giga.api.admin.logs.verify_logs_ip_allowlist()` as a compatibility wrapper while adding focused regression coverage for the new helper and legacy alias
+- Checks: `uv run ruff check gpt2giga/api/admin/access.py gpt2giga/api/admin/logs.py gpt2giga/api/admin/settings.py gpt2giga/api/admin/runtime.py gpt2giga/api/admin/ui.py gpt2giga/api/admin/files_batches.py tests/unit/api/test_admin_access.py tests/integration/app/test_system_router_extra.py`; `uv run ruff format --check gpt2giga/api/admin/access.py gpt2giga/api/admin/logs.py gpt2giga/api/admin/settings.py gpt2giga/api/admin/runtime.py gpt2giga/api/admin/ui.py gpt2giga/api/admin/files_batches.py tests/unit/api/test_admin_access.py tests/integration/app/test_system_router_extra.py`; `uv run pytest tests/unit/api/test_admin_access.py tests/integration/app/test_system_router_extra.py tests/integration/app/test_admin_console_settings.py tests/integration/app/test_admin_files_batches_api.py`
+- Notes: the config field remains `logs_ip_allowlist` for env/control-plane compatibility, but the shared route guard and 403 detail now describe the broader admin surface instead of implying logs-only protection
