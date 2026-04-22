@@ -1,7 +1,7 @@
 import { withBusyState } from "../../forms.js";
 import { banner, pill, renderDefinitionList } from "../../templates.js";
 import { escapeHtml, formatBytes, formatNumber, formatTimestamp, safeJsonParse, } from "../../utils.js";
-import { createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, syncFilesBatchesPageDataCache, uploadFile, validateBatchInput, } from "./api.js";
+import { clearFilesBatchesPageDataCache, createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, syncFilesBatchesPageDataCache, uploadFile, validateBatchInput, } from "./api.js";
 import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, describeFileValidationSnapshot, extractErrorReason, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, isBatchValidationCandidate, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
 import { INVALID_JSON } from "./state.js";
 const OPENAI_BATCH_ENDPOINT_OPTIONS = [
@@ -257,6 +257,19 @@ export function bindFilesBatchesPage(options) {
         delete selection.handoffRequestId;
         delete selection.handoffRequestCount;
     };
+    const findBatchByOutputFileId = (fileId) => data.batches.find((entry) => String(entry.output_file_id ?? "") === fileId) ?? null;
+    const resolveContentPathForFile = (fileId, source, relatedBatch) => {
+        const batchOutputPath = ((relatedBatch &&
+            String(relatedBatch.output_file_id ?? "") === fileId
+            ? relatedBatch.output_path
+            : null) ||
+            findBatchByOutputFileId(fileId)?.output_path);
+        return batchOutputPath?.trim() || source?.content_path?.trim() || undefined;
+    };
+    const resolveDownloadPathForFile = (fileId, source) => findBatchByOutputFileId(fileId)?.output_path?.trim() ||
+        source?.download_path?.trim() ||
+        source?.content_path?.trim() ||
+        undefined;
     const replaceStateForPage = (targetPage, routeState) => {
         window.history.replaceState({}, "", buildFilesBatchesUrl(scopeFilesBatchesFilters(targetPage, filters), routeState, targetPage));
     };
@@ -1167,7 +1180,7 @@ export function bindFilesBatchesPage(options) {
                     : []),
             ],
             action: async () => {
-                const bytes = await fetchFileContent(app, fileId, source?.content_path ?? undefined);
+                const bytes = await fetchFileContent(app, fileId, resolveContentPathForFile(fileId, source, options?.relatedBatch));
                 const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
                 if (preview.handoffRequestId && options?.relatedBatch) {
                     selection = {
@@ -1232,7 +1245,7 @@ export function bindFilesBatchesPage(options) {
             ],
             action: async () => {
                 const source = inventory.fileLookup.get(fileId);
-                const bytes = await fetchFileContent(app, fileId, source?.download_path ?? source?.content_path ?? undefined);
+                const bytes = await fetchFileContent(app, fileId, resolveDownloadPathForFile(fileId, source));
                 const mimeType = buildFilePreview(bytes, filename).mimeType;
                 const blobBytes = new Uint8Array(bytes.byteLength);
                 blobBytes.set(bytes);
@@ -1643,6 +1656,7 @@ export function bindFilesBatchesPage(options) {
                     composeInputFileId: inputFileId,
                     selectedBatchId: String(response.id ?? ""),
                 });
+                clearFilesBatchesPageDataCache();
                 await app.render(page);
                 return response;
             },

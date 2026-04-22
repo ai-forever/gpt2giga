@@ -9,6 +9,7 @@ import {
   safeJsonParse,
 } from "../../utils.js";
 import {
+  clearFilesBatchesPageDataCache,
   createBatch,
   deleteFile,
   fetchBatchMetadata,
@@ -383,6 +384,34 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     delete selection.handoffRequestId;
     delete selection.handoffRequestCount;
   };
+
+  const findBatchByOutputFileId = (fileId: string): BatchRecord | null =>
+    data.batches.find(
+      (entry) => String(entry.output_file_id ?? "") === fileId,
+    ) ?? null;
+
+  const resolveContentPathForFile = (
+    fileId: string,
+    source: FileRecord | undefined,
+    relatedBatch?: BatchRecord | null,
+  ): string | undefined => {
+    const batchOutputPath =
+      (relatedBatch &&
+      String(relatedBatch.output_file_id ?? "") === fileId
+        ? relatedBatch.output_path
+        : null) ||
+      findBatchByOutputFileId(fileId)?.output_path;
+    return batchOutputPath?.trim() || source?.content_path?.trim() || undefined;
+  };
+
+  const resolveDownloadPathForFile = (
+    fileId: string,
+    source: FileRecord | undefined,
+  ): string | undefined =>
+    findBatchByOutputFileId(fileId)?.output_path?.trim() ||
+    source?.download_path?.trim() ||
+    source?.content_path?.trim() ||
+    undefined;
 
   const replaceStateForPage = (
     targetPage: FilesBatchesPage,
@@ -1568,7 +1597,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         const bytes = await fetchFileContent(
           app,
           fileId,
-          source?.content_path ?? undefined,
+          resolveContentPathForFile(fileId, source, options?.relatedBatch),
         );
         const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
         if (preview.handoffRequestId && options?.relatedBatch) {
@@ -1646,7 +1675,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
         const bytes = await fetchFileContent(
           app,
           fileId,
-          source?.download_path ?? source?.content_path ?? undefined,
+          resolveDownloadPathForFile(fileId, source),
         );
         const mimeType = buildFilePreview(bytes, filename).mimeType;
         const blobBytes = new Uint8Array(bytes.byteLength);
@@ -2150,6 +2179,7 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           composeInputFileId: inputFileId,
           selectedBatchId: String(response.id ?? ""),
         });
+        clearFilesBatchesPageDataCache();
         await app.render(page);
         return response;
       },
