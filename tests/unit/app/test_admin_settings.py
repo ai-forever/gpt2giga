@@ -105,6 +105,66 @@ async def test_admin_control_plane_settings_service_builds_masked_revision_diffs
     assert security_diff["target"]["preview"] != "first-global-key"
 
 
+def test_admin_control_plane_settings_service_builds_masked_settings_payloads():
+    request = _build_request(
+        ProxyConfig(
+            proxy=ProxySettings(
+                enable_api_key_auth=True,
+                api_key="global-secret-key",
+                scoped_api_keys=[
+                    {
+                        "name": "sdk-openai",
+                        "key": "scoped-secret-key",
+                        "providers": ["openai"],
+                        "endpoints": ["chat/completions"],
+                    }
+                ],
+                governance_limits=[
+                    {
+                        "name": "openai-chat-limit",
+                        "scope": "provider",
+                        "providers": ["openai"],
+                        "endpoints": ["chat/completions"],
+                        "window_seconds": 60,
+                        "max_requests": 10,
+                    }
+                ],
+                logs_ip_allowlist=["127.0.0.1"],
+                trusted_proxy_cidrs=["10.0.0.0/24"],
+            ),
+            gigachat={
+                "credentials": "gigachat-secret",
+                "access_token": "gigachat-access-token",
+                "password": "gigachat-password",
+                "key_file_password": "key-file-password",
+                "scope": "GIGACHAT_API_PERS",
+                "model": "GigaChat-Max",
+            },
+        )
+    )
+    service = AdminControlPlaneSettingsService(request)
+
+    security_payload = service.build_security_payload()
+    gigachat_payload = service.build_gigachat_payload()
+
+    assert security_payload["values"]["global_api_key_configured"] is True
+    assert security_payload["values"]["global_api_key_preview"] != "global-secret-key"
+    assert security_payload["values"]["scoped_api_keys_configured"] == 1
+    assert security_payload["values"]["governance_limits"][0]["name"] == (
+        "openai-chat-limit"
+    )
+    assert security_payload["values"]["trusted_proxy_cidrs"] == ["10.0.0.0/24"]
+
+    assert gigachat_payload["values"]["credentials_configured"] is True
+    assert gigachat_payload["values"]["credentials_preview"] != "gigachat-secret"
+    assert gigachat_payload["values"]["access_token_configured"] is True
+    assert gigachat_payload["values"]["access_token_preview"] != "gigachat-access-token"
+    assert gigachat_payload["values"]["password_configured"] is True
+    assert gigachat_payload["values"]["password_preview"] != "gigachat-password"
+    assert gigachat_payload["values"]["key_file_password_configured"] is True
+    assert "key_file_password" not in gigachat_payload["values"]
+
+
 @pytest.mark.asyncio
 async def test_admin_control_plane_settings_service_tests_gigachat_factory():
     request = _build_request()

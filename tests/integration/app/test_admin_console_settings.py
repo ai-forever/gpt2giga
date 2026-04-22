@@ -624,6 +624,132 @@ def test_settings_revisions_endpoint_and_rollback(tmp_path, monkeypatch):
     assert proxy_overrides["api_key"] == "first-global-key"
 
 
+def test_gigachat_settings_rollback_restores_secret_for_follow_up_partial_apply(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    first_response = client.put(
+        "/admin/api/settings/gigachat",
+        json={
+            "credentials": "first-gigachat-secret",
+            "password": "first-gigachat-password",
+            "scope": "GIGACHAT_API_PERS",
+            "model": "GigaChat-Max",
+            "user": "service-account",
+        },
+    )
+    assert first_response.status_code == 200
+
+    second_response = client.put(
+        "/admin/api/settings/gigachat",
+        json={
+            "credentials": "second-gigachat-secret",
+            "password": "second-gigachat-password",
+            "model": "GigaChat-Pro",
+        },
+    )
+    assert second_response.status_code == 200
+
+    revisions_response = client.get("/admin/api/settings/revisions?limit=5")
+    assert revisions_response.status_code == 200
+    revisions_payload = revisions_response.json()
+    first_revision = revisions_payload["revisions"][1]
+    assert first_revision["changed_fields"] == [
+        "credentials",
+        "model",
+        "password",
+        "scope",
+        "user",
+    ]
+
+    rollback_response = client.post(
+        f"/admin/api/settings/revisions/{first_revision['revision_id']}/rollback"
+    )
+    assert rollback_response.status_code == 200
+    rollback_payload = rollback_response.json()
+    assert rollback_payload["rolled_back_revision_id"] == first_revision["revision_id"]
+    assert (
+        rollback_payload["values"]["gigachat"]["credentials_preview"]
+        != "first-gigachat-secret"
+    )
+    assert (
+        rollback_payload["values"]["gigachat"]["password_preview"]
+        != "first-gigachat-password"
+    )
+
+    apply_response = client.put(
+        "/admin/api/settings/gigachat",
+        json={"model": "GigaChat-Ultra"},
+    )
+    assert apply_response.status_code == 200
+    apply_payload = apply_response.json()
+    assert apply_payload["values"]["model"] == "GigaChat-Ultra"
+    assert apply_payload["values"]["credentials_configured"] is True
+    assert apply_payload["values"]["password_configured"] is True
+    assert apply_payload["values"]["credentials_preview"] != "first-gigachat-secret"
+
+    _, gigachat_overrides = load_control_plane_overrides()
+    assert gigachat_overrides["credentials"] == "first-gigachat-secret"
+    assert gigachat_overrides["password"] == "first-gigachat-password"
+    assert gigachat_overrides["model"] == "GigaChat-Ultra"
+
+
+def test_settings_revisions_snapshots_keep_secret_previews_masked(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    client = TestClient(make_app())
+
+    gigachat_response = client.put(
+        "/admin/api/settings/gigachat",
+        json={
+            "credentials": "gigachat-secret-value",
+            "password": "gigachat-password-value",
+            "scope": "GIGACHAT_API_PERS",
+            "model": "GigaChat-Max",
+        },
+    )
+    assert gigachat_response.status_code == 200
+
+    security_response = client.put(
+        "/admin/api/settings/security",
+        json={
+            "api_key": "global-admin-secret",
+            "scoped_api_keys": [
+                {
+                    "name": "sdk-openai",
+                    "key": "sdk-openai-secret",
+                    "providers": ["openai"],
+                    "endpoints": ["chat/completions"],
+                }
+            ],
+        },
+    )
+    assert security_response.status_code == 200
+
+    revisions_response = client.get("/admin/api/settings/revisions?limit=5")
+    assert revisions_response.status_code == 200
+    revisions = revisions_response.json()["revisions"]
+    security_revision = revisions[0]
+    gigachat_revision = revisions[1]
+
+    assert (
+        security_revision["snapshot"]["security"]["global_api_key_preview"]
+        != "global-admin-secret"
+    )
+    assert security_revision["snapshot"]["security"]["scoped_api_keys_configured"] == 1
+    assert (
+        gigachat_revision["snapshot"]["gigachat"]["credentials_preview"]
+        != "gigachat-secret-value"
+    )
+    assert (
+        gigachat_revision["snapshot"]["gigachat"]["password_preview"]
+        != "gigachat-password-value"
+    )
+
+
 def test_settings_revisions_endpoint_ignores_legacy_unknown_fields(
     tmp_path, monkeypatch
 ):

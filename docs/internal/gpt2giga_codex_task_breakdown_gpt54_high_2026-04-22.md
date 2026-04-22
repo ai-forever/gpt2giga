@@ -22,6 +22,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-005 — done
 - [x] RLS-006 — done
 - [x] RLS-007 — done
+- [x] RLS-008 — done
 
 ---
 
@@ -338,6 +339,13 @@ Add focused tests around:
 - tests are behavior-oriented, not snapshot noise
 - critical settings flows are covered by regression tests
 - secret fields do not leak in admin previews or responses
+
+**Status**
+
+Completed in the current repository state: admin settings coverage now includes
+rollback followed by partial re-apply, masked secret previews in revision
+snapshots and rollback payloads, and focused unit coverage for safe
+security/GigaChat settings serialization.
 
 ---
 
