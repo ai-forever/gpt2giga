@@ -208,7 +208,8 @@ export function validateJsonObjectField(field, value, { invalidMessage, nonObjec
 export function bindReplaceableFieldBehavior(options) {
     const field = options.form.elements.namedItem(options.fieldName);
     const clearToggle = options.form.elements.namedItem(options.clearFieldName);
-    if (!((field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) || !(clearToggle instanceof HTMLInputElement)) {
+    if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) ||
+        !(clearToggle instanceof HTMLInputElement)) {
         return () => null;
     }
     const note = field.closest(".stack")?.querySelector(".field-note");
