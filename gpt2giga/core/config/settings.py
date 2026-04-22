@@ -3,7 +3,7 @@
 import json
 import warnings
 from functools import cached_property
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
 from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
@@ -26,7 +26,7 @@ GovernanceLimitScope = Literal["api_key", "provider"]
 _ALL_ENABLED_PROVIDERS: tuple[ProviderName, ...] = ("openai", "anthropic", "gemini")
 
 
-def _normalize_provider_allowlist(value):
+def _normalize_provider_allowlist(value: Any) -> Any:
     """Normalize provider allowlists from ENV/CLI friendly forms."""
     if value is None or value == "":
         return None
@@ -52,7 +52,7 @@ def _normalize_provider_allowlist(value):
     return value
 
 
-def _normalize_optional_string_list(value):
+def _normalize_optional_string_list(value: Any) -> Any:
     """Normalize endpoint/model allowlists from ENV/CLI friendly forms."""
     if value is None or value == "":
         return None
@@ -79,7 +79,7 @@ def _normalize_optional_string_list(value):
     return value
 
 
-def _normalize_string_map(value):
+def _normalize_string_map(value: Any) -> Any:
     """Normalize string maps from ENV/CLI friendly forms."""
     if value is None or value == "":
         return {}
@@ -547,7 +547,7 @@ class ProxySettings(BaseSettings):
 
     @field_validator("enabled_providers", mode="before")
     @classmethod
-    def normalize_enabled_providers(cls, value):
+    def normalize_enabled_providers(cls, value: Any) -> Any:
         """Normalize enabled providers from ENV/CLI friendly forms."""
         if value is None or value == "":
             return list(_ALL_ENABLED_PROVIDERS)
@@ -578,7 +578,7 @@ class ProxySettings(BaseSettings):
         mode="before",
     )
     @classmethod
-    def normalize_gigachat_api_mode(cls, value):
+    def normalize_gigachat_api_mode(cls, value: Any) -> Any:
         """Normalize backend mode from ENV/CLI friendly forms."""
         if isinstance(value, str):
             normalized = value.strip().lower()
@@ -587,7 +587,7 @@ class ProxySettings(BaseSettings):
 
     @field_validator("runtime_store_backend", mode="before")
     @classmethod
-    def normalize_runtime_store_backend(cls, value):
+    def normalize_runtime_store_backend(cls, value: Any) -> Any:
         """Normalize runtime store backend names from ENV/CLI friendly forms."""
         if isinstance(value, str):
             return value.strip().lower()
@@ -595,7 +595,7 @@ class ProxySettings(BaseSettings):
 
     @field_validator("runtime_store_namespace", mode="before")
     @classmethod
-    def normalize_runtime_store_namespace(cls, value):
+    def normalize_runtime_store_namespace(cls, value: Any) -> Any:
         """Normalize runtime store namespaces from ENV/CLI friendly forms."""
         if isinstance(value, str):
             return value.strip()
@@ -603,7 +603,7 @@ class ProxySettings(BaseSettings):
 
     @field_validator("runtime_store_dsn", mode="before")
     @classmethod
-    def normalize_runtime_store_dsn(cls, value):
+    def normalize_runtime_store_dsn(cls, value: Any) -> Any:
         """Normalize runtime store DSN values from ENV/CLI friendly forms."""
         if isinstance(value, str):
             normalized = value.strip()
@@ -612,7 +612,7 @@ class ProxySettings(BaseSettings):
 
     @field_validator("observability_sinks", mode="before")
     @classmethod
-    def normalize_observability_sinks(cls, value):
+    def normalize_observability_sinks(cls, value: Any) -> Any:
         """Normalize observability sink selection from ENV/CLI friendly forms."""
         if value is None:
             return ["prometheus"]
