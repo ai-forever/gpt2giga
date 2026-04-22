@@ -12,7 +12,6 @@
 | Проверить поддержку route и API surface | [api-compatibility.md](./api-compatibility.md) |
 | Подключить IDE, CLI-агента или reverse proxy | [integrations/README.md](./integrations/README.md) |
 | Разобраться в архитектуре | [architecture.md](./architecture.md) |
-| Понять lifecycle compatibility facades и shim-слоёв | [compatibility-facades.md](./compatibility-facades.md) |
 | Добавить новый внешний provider | [how-to-add-provider.md](./how-to-add-provider.md) |
 | Посмотреть runnable-примеры SDK | [../examples/README.md](../examples/README.md) |
 
@@ -23,7 +22,6 @@
 | [configuration.md](./configuration.md) | Локальный запуск, Docker, `.env`, API-key auth, pass-token, HTTPS, режимы `DEV`/`PROD` |
 | [operator-guide.md](./operator-guide.md) | Provider gating, backend `v1`/`v2`, `/admin`, `/metrics`, Compose-сценарии |
 | [architecture.md](./architecture.md) | Текущий request flow, provider mapping, runtime/control plane и lifecycle admin UI |
-| [compatibility-facades.md](./compatibility-facades.md) | Политика для stable facades, migration wrappers и legacy shim-слоёв |
 | [api-compatibility.md](./api-compatibility.md) | Полная матрица OpenAI-, Anthropic- и Gemini-совместимых route |
 | [integrations/README.md](./integrations/README.md) | Индекс интеграций для IDE, coding agents, reverse proxy и совместимых клиентов |
 | [how-to-add-provider.md](./how-to-add-provider.md) | Workflow добавления нового внешнего provider-а |

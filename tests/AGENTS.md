@@ -37,7 +37,7 @@ uv run pytest -m integration
 | `tests/unit/app/` | Admin runtime/settings/UI, lifecycle wiring, telemetry, and runtime-state helpers |
 | `tests/unit/features/` | Capability services and store/accessor behavior for chat, responses, files, batches, embeddings, models |
 | `tests/unit/features/files_batches/` | Mixed admin inventory/create flows across files and batches |
-| `tests/unit/providers/gigachat/` | GigaChat request/response mapping, attachments, tool/schema helpers, and compatibility facades |
+| `tests/unit/providers/gigachat/` | GigaChat request/response mapping, attachments, and tool/schema helpers |
 | `tests/unit/providers/test_registry.py` | Provider registry behavior and capability lookup |
 | `tests/integration/app/` | App factory, lifespan, and system-route wiring |
 | `tests/integration/openai/` | OpenAI-compatible endpoint behavior |
@@ -45,7 +45,6 @@ uv run pytest -m integration
 | `tests/integration/gemini/` | Gemini-compatible endpoint behavior |
 | `tests/smoke/` | App-boot and Starlette baseline smoke suites |
 | `tests/compat/` | Golden-request/provider-template compatibility suites and fixtures |
-| `tests/test_*/` | Legacy mirrored test directories still kept for compatibility and broader coverage |
 
 ## Patterns & Conventions
 
@@ -112,7 +111,7 @@ Defined in `pytest.ini`:
 - `integration`
 - `slow`
 
-`tests/compat/` and the legacy mirrored `tests/test_*` directories do not have dedicated markers; run them by path.
+`tests/compat/` does not have a dedicated marker; run it by path.
 
 ## Quick Find Commands
 

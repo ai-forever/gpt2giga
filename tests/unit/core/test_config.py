@@ -65,20 +65,8 @@ def test_proxy_settings_disable_ui_supports_prefixed_env(monkeypatch):
     assert s.disable_ui is True
 
 
-def test_proxy_settings_disable_ui_supports_legacy_env(monkeypatch):
-    monkeypatch.setenv("DISABLE_UI", "true")
-    s = ProxySettings()
-    assert s.disable_ui is True
-
-
 def test_proxy_settings_disable_persist_supports_prefixed_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_DISABLE_PERSIST", "true")
-    s = ProxySettings()
-    assert s.disable_persist is True
-
-
-def test_proxy_settings_disable_persist_supports_legacy_env(monkeypatch):
-    monkeypatch.setenv("DISABLE_PERSIST", "true")
     s = ProxySettings()
     assert s.disable_persist is True
 

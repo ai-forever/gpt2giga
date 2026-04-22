@@ -171,31 +171,6 @@ async def test_chat_service_create_completion_uses_mapper_contract():
 
 
 @pytest.mark.asyncio
-async def test_get_chat_service_from_state_builds_from_legacy_runtime_services():
-    transformer = LegacyRequestTransformer()
-    response_processor = LegacyResponseProcessor()
-    state = SimpleNamespace(
-        request_transformer=transformer,
-        response_processor=response_processor,
-    )
-    giga_client = FakeClient()
-    data = {"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]}
-
-    service = get_chat_service_from_state(state)
-    result = await service.create_completion(
-        data,
-        giga_client=giga_client,
-        response_id="resp-legacy",
-    )
-
-    assert state.chat_service is service
-    assert state.chat_mapper is service.mapper
-    assert transformer.calls == [(data, giga_client)]
-    assert result["id"] == "resp-legacy"
-    assert result["payload"] == {"messages": data["messages"], "model": "gpt-x"}
-
-
-@pytest.mark.asyncio
 async def test_get_chat_service_from_state_builds_from_typed_runtime_dependencies():
     transformer = LegacyRequestTransformer()
     response_processor = LegacyResponseProcessor()
@@ -213,13 +188,14 @@ async def test_get_chat_service_from_state_builds_from_typed_runtime_dependencie
     result = await service.create_completion(
         data,
         giga_client=giga_client,
-        response_id="resp-typed",
+        response_id="resp-legacy",
     )
 
     assert state.services.chat is service
     assert state.providers.chat_mapper is service.mapper
     assert transformer.calls == [(data, giga_client)]
-    assert result["id"] == "resp-typed"
+    assert result["id"] == "resp-legacy"
+    assert result["payload"] == {"messages": data["messages"], "model": "gpt-x"}
 
 
 @pytest.mark.asyncio

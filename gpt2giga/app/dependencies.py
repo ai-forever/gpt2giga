@@ -6,13 +6,14 @@ from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
 
-from gpt2giga.app.runtime_backends import (
+from gpt2giga.app._runtime_backends import (
     EventFeed,
     RuntimeStateBackend,
     create_runtime_backend,
     provision_runtime_resources,
 )
-from gpt2giga.app.telemetry import ObservabilityHub, create_observability_hub
+from gpt2giga.app._telemetry.hub import ObservabilityHub
+from gpt2giga.app._telemetry.registry import create_observability_hub
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.features.batches.contracts import BatchMetadata
 from gpt2giga.features.files.contracts import FileMetadata
@@ -220,35 +221,6 @@ def _as_runtime_state(state: object) -> MutableRuntimeState:
     return cast(MutableRuntimeState, state)
 
 
-_SERVICE_ALIASES = {
-    "chat": "chat_service",
-    "responses": "responses_service",
-    "embeddings": "embeddings_service",
-    "models": "models_service",
-    "files": "files_service",
-    "batches": "batches_service",
-    "files_batches": "files_batches_service",
-}
-
-_STORE_ALIASES = {
-    "files": "file_metadata_store",
-    "batches": "batch_metadata_store",
-    "responses": "response_metadata_store",
-}
-
-_PROVIDER_ALIASES = {
-    "gigachat_client": "gigachat_client",
-    "gigachat_factory": "gigachat_factory",
-    "gigachat_factory_getter": "gigachat_factory_getter",
-    "attachment_processor": "attachment_processor",
-    "request_transformer": "request_transformer",
-    "response_processor": "response_processor",
-    "chat_mapper": "chat_mapper",
-    "embeddings_mapper": "embeddings_mapper",
-    "models_mapper": "models_mapper",
-}
-
-
 def ensure_runtime_dependencies(
     state: object,
     *,
@@ -266,7 +238,6 @@ def ensure_runtime_dependencies(
     configure_runtime_stores(state, config=config, logger=logger)
     get_runtime_providers(state)
     configure_runtime_observability(state, config=config, logger=logger)
-    sync_runtime_aliases(state)
 
 
 def get_runtime_services(state: object) -> RuntimeServices:
@@ -276,7 +247,6 @@ def get_runtime_services(state: object) -> RuntimeServices:
     if not isinstance(services, RuntimeServices):
         services = RuntimeServices()
         runtime_state.services = services
-    _merge_runtime_aliases(state, services, _SERVICE_ALIASES, skip_none=True)
     return services
 
 
@@ -287,7 +257,6 @@ def get_runtime_stores(state: object) -> RuntimeStores:
     if not isinstance(stores, RuntimeStores):
         stores = RuntimeStores()
         runtime_state.stores = stores
-    _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)
     if (
         stores.backend is None
         or stores.recent_requests is None
@@ -323,7 +292,6 @@ def configure_runtime_stores(
     )
     current_backend = stores.backend
     if current_backend is not None and current_backend.name == backend_name:
-        _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)
         return stores
 
     backend = create_runtime_backend(backend_name, config=config, logger=logger)
@@ -337,7 +305,6 @@ def configure_runtime_stores(
     stores.governance_counters = resources["governance_counters"]
     stores.recent_requests = resources["recent_requests"]
     stores.recent_errors = resources["recent_errors"]
-    _merge_runtime_aliases(state, stores, _STORE_ALIASES, skip_none=False)
     return stores
 
 
@@ -348,7 +315,6 @@ def get_runtime_providers(state: object) -> RuntimeProviders:
     if not isinstance(providers, RuntimeProviders):
         providers = RuntimeProviders()
         runtime_state.providers = providers
-    _merge_runtime_aliases(state, providers, _PROVIDER_ALIASES, skip_none=True)
     return providers
 
 
@@ -426,7 +392,6 @@ def set_runtime_service(state: object, name: str, value: object) -> object:
     """Store a feature service in the typed runtime container."""
     services = get_runtime_services(state)
     setattr(services, name, value)
-    sync_runtime_aliases(state)
     return value
 
 
@@ -434,30 +399,7 @@ def set_runtime_provider(state: object, name: str, value: object) -> object:
     """Store a provider helper in the typed runtime container."""
     providers = get_runtime_providers(state)
     setattr(providers, name, value)
-    sync_runtime_aliases(state)
     return value
-
-
-def sync_runtime_aliases(state: object) -> None:
-    """Mirror typed runtime containers onto legacy flat state aliases."""
-    _sync_runtime_aliases(
-        state,
-        get_runtime_services(state),
-        _SERVICE_ALIASES,
-        skip_none=True,
-    )
-    _sync_runtime_aliases(
-        state,
-        get_runtime_stores(state),
-        _STORE_ALIASES,
-        skip_none=False,
-    )
-    _sync_runtime_aliases(
-        state,
-        get_runtime_providers(state),
-        _PROVIDER_ALIASES,
-        skip_none=True,
-    )
 
 
 def get_config_from_state(state: object) -> ProxyConfig:
@@ -487,36 +429,3 @@ def get_response_processor_from_state(state: object) -> RuntimeResponseProcessor
     if processor is None:
         raise RuntimeError("Response processor is not configured.")
     return processor
-
-
-def _merge_runtime_aliases(
-    state: object,
-    container: object,
-    aliases: dict[str, str],
-    *,
-    skip_none: bool,
-) -> None:
-    for field_name, alias_name in aliases.items():
-        if hasattr(state, alias_name):
-            legacy_value = getattr(state, alias_name)
-            if not skip_none or legacy_value is not None:
-                setattr(container, field_name, legacy_value)
-
-        value = getattr(container, field_name)
-        if skip_none and value is None:
-            continue
-        setattr(state, alias_name, value)
-
-
-def _sync_runtime_aliases(
-    state: object,
-    container: object,
-    aliases: dict[str, str],
-    *,
-    skip_none: bool,
-) -> None:
-    for field_name, alias_name in aliases.items():
-        value = getattr(container, field_name)
-        if skip_none and value is None:
-            continue
-        setattr(state, alias_name, value)

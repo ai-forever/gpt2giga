@@ -18,6 +18,7 @@ from gpt2giga.api.anthropic.response import (
     _map_stop_reason,
 )
 from gpt2giga.api.anthropic import router
+from gpt2giga.app.dependencies import get_runtime_providers
 from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.providers.gigachat import ResponseProcessor
@@ -628,9 +629,10 @@ class FakeRequestTransformer:
 def make_app(gigachat=None, *, config=None):
     app = FastAPI()
     app.include_router(router)
-    app.state.gigachat_client = gigachat or FakeGigachat()
-    app.state.response_processor = ResponseProcessor(logger=logger)
-    app.state.request_transformer = FakeRequestTransformer()
+    providers = get_runtime_providers(app.state)
+    providers.gigachat_client = gigachat or FakeGigachat()
+    providers.response_processor = ResponseProcessor(logger=logger)
+    providers.request_transformer = FakeRequestTransformer()
     app.state.config = config or ProxyConfig.model_validate(
         {"proxy": {"gigachat_api_mode": "v1"}}
     )
@@ -731,8 +733,8 @@ def test_messages_v2_mode_preserves_tool_use_blocks():
     assert body["stop_reason"] == "tool_use"
     assert body["content"][0]["type"] == "tool_use"
     assert body["content"][0]["name"] == "get_weather"
-    assert app.state.gigachat_client.last_method == "v2"
-    assert app.state.request_transformer.last_mode == "v2"
+    assert app.state.providers.gigachat_client.last_method == "v2"
+    assert app.state.providers.request_transformer.last_mode == "v2"
 
 
 class TestConvertAnthropicMessagesToOpenai:
@@ -1316,8 +1318,8 @@ class TestMessagesEndpoint:
         resp = client.post("/messages", json=payload)
 
         assert resp.status_code == 200
-        assert app.state.gigachat_client.last_method == "v2"
-        assert app.state.request_transformer.last_mode == "v2"
+        assert app.state.providers.gigachat_client.last_method == "v2"
+        assert app.state.providers.request_transformer.last_mode == "v2"
 
     def test_non_stream_with_stop_sequences(self):
         app = make_app()
@@ -1598,8 +1600,8 @@ class TestMessagesEndpoint:
 
         assert resp.status_code == 200
         assert "content_block_delta" in resp.text
-        assert app.state.gigachat_client.last_method == "v2"
-        assert app.state.request_transformer.last_mode == "v2"
+        assert app.state.providers.gigachat_client.last_method == "v2"
+        assert app.state.providers.request_transformer.last_mode == "v2"
 
 
 class TestConvertAssistantTextOnly:
@@ -1827,7 +1829,7 @@ class TestCountTokensEndpoint:
 class TestMessageBatchesEndpoint:
     def test_batch_lifecycle_and_results(self):
         app = make_app(FakeGigachatBatches())
-        giga_client = app.state.gigachat_client
+        giga_client = app.state.providers.gigachat_client
         client = TestClient(app)
 
         payload = {

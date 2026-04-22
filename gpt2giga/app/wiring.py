@@ -12,7 +12,6 @@ from gpt2giga.app.dependencies import (
     get_runtime_providers,
     get_runtime_services,
     get_runtime_stores,
-    sync_runtime_aliases,
     RuntimeRequestTransformer,
     RuntimeResponseProcessor,
 )
@@ -104,7 +103,6 @@ def wire_runtime_services(app: FastAPI, *, config, logger) -> None:
         cast(ResponsesResultProcessor, providers.response_processor),
         backend_mode=responses_backend_mode,
     )
-    sync_runtime_aliases(app.state)
 
 
 async def close_runtime_services(app: FastAPI, *, logger) -> None:
@@ -116,7 +114,6 @@ async def close_runtime_services(app: FastAPI, *, logger) -> None:
     if attachment_processor is not None:
         await attachment_processor.close()
         providers.attachment_processor = None
-        app.state.attachment_processor = None
 
     stores = get_runtime_stores(app.state)
     if stores.backend is not None:

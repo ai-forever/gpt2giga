@@ -78,7 +78,7 @@ def make_app(monkeypatch):
 
 
 def install_fake_transformer(app):
-    app.state.request_transformer = FakeRequestTransformer()
+    app.state.providers.request_transformer = FakeRequestTransformer()
 
 
 def test_ci_smoke_health(monkeypatch):

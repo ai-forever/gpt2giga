@@ -19,8 +19,6 @@ from .paths import (
     write_json,
 )
 from .revisions import (
-    MAX_CONTROL_PLANE_REVISIONS,
-    list_control_plane_revisions,
     new_revision_id,
     write_control_plane_revision,
 )
@@ -99,8 +97,6 @@ def _split_section_fields(field_names: set[str]) -> tuple[set[str], set[str]]:
 
 def _load_managed_fields_from_payload(
     payload: dict[str, Any],
-    *,
-    infer_legacy: bool,
 ) -> tuple[set[str], set[str]]:
     """Return the proxy/GigaChat fields that should override runtime env."""
     managed = payload.get("managed")
@@ -116,25 +112,7 @@ def _load_managed_fields_from_payload(
         if proxy_fields or gigachat_fields:
             return proxy_fields, gigachat_fields
 
-    if not infer_legacy:
-        return set(), set()
-
-    legacy_fields = set(payload.get("change", {}).get("changed_fields") or [])
-    for revision in list_control_plane_revisions(limit=MAX_CONTROL_PLANE_REVISIONS):
-        legacy_fields.update(revision.get("change", {}).get("changed_fields") or [])
-
-    secrets_section = payload.get("secrets") or {}
-    legacy_fields.update(
-        field
-        for field, token in (secrets_section.get("proxy") or {}).items()
-        if token and field in _PROXY_SECRET_FIELDS
-    )
-    legacy_fields.update(
-        field
-        for field, token in (secrets_section.get("gigachat") or {}).items()
-        if token and field in _GIGACHAT_SECRET_FIELDS
-    )
-    return _split_section_fields(legacy_fields)
+    return set(), set()
 
 
 def load_control_plane_overrides_from_payload(
@@ -191,8 +169,7 @@ def apply_control_plane_overrides(config: ProxyConfig) -> ProxyConfig:
 
     payload = load_control_plane_payload(config=config)
     proxy_managed_fields, gigachat_managed_fields = _load_managed_fields_from_payload(
-        payload,
-        infer_legacy=True,
+        payload
     )
     proxy_overrides, gigachat_overrides = load_control_plane_overrides_from_payload(
         payload
@@ -251,8 +228,7 @@ def _build_control_plane_payload(
         else {}
     )
     managed_proxy_fields, managed_gigachat_fields = _load_managed_fields_from_payload(
-        previous_payload,
-        infer_legacy=True,
+        previous_payload
     )
     if changed_fields is None:
         managed_proxy_fields = set(_PROXY_FIELDS)

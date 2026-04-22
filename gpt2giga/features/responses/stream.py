@@ -1,4 +1,4 @@
-"""Public compatibility facade for Responses streaming."""
+"""Public Responses streaming helpers."""
 
 from gpt2giga.features.responses._streaming import (
     ResponsesStreamEventSequencer,

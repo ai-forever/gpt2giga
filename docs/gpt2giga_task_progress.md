@@ -137,6 +137,6 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 ## 2026-04-22 — S16 — done
 
 - Commit: `45e5cf0`
-- Summary: documented a repository-wide lifecycle policy for compatibility facades, migration-only wrappers, and legacy HTTP/API shims in `docs/compatibility-facades.md`; linked the policy from docs navigation, architecture notes, and contributor guidance so future refactors can classify wrappers consistently
+- Summary: documented a temporary repository-wide lifecycle policy for compatibility facades, migration-only wrappers, and legacy HTTP/API shims; that standalone document was later retired after the remaining transitional layers were removed and the guidance was folded back into the main docs/AGENTS notes
 - Checks: `git diff --check`; commit hooks (`trim trailing whitespace`, `detect hardcoded secrets`, `mypy`)
-- Notes: the policy explicitly marks underscore-backed facade modules such as `gpt2giga.app.runtime_backends` and `gpt2giga.core.config.control_plane` as stable public contracts, while keeping top-level `providers/gigachat/responses_*` modules on a migration-only path instead of treating them as permanent surface
+- Notes: at the time, the policy distinguished public underscore-backed import modules such as `gpt2giga.app.runtime_backends` and `gpt2giga.core.config.control_plane` from temporary wrapper paths such as the old top-level `providers/gigachat/responses_*` modules

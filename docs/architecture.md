@@ -112,7 +112,6 @@ api/openai/responses.py
   - router и provider transport adapter не должны выбирать `achat` против `achat_v2`;
   - единственный internal source of truth для native Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`;
   - новые imports должны идти напрямую в structured helper-модули под `responses/`.
-- Lifecycle policy для permanent facade-модулей, migration wrapper-ов и legacy shim-ов описан в [compatibility-facades.md](./compatibility-facades.md).
 
 ### Models, embeddings, files, batches
 
@@ -134,11 +133,10 @@ api/openai/responses.py
   - `providers`
   - `observability`
 - `gpt2giga/app/wiring.py` инициализирует GigaChat client, request/response mapper-ы и feature-сервисы.
-- Внутренняя реализация request-audit observability теперь лежит в `gpt2giga/app/_observability/`, а `gpt2giga/app/observability.py` остаётся совместимым facade/re-export слоем.
-- Внутренняя реализация telemetry sink-ов и registry теперь лежит в `gpt2giga/app/_telemetry/`, а `gpt2giga/app/telemetry.py` остаётся совместимым facade/re-export слоем.
-- Внутренняя реализация runtime store/feed backends теперь лежит в `gpt2giga/app/_runtime_backends/`, а `gpt2giga/app/runtime_backends.py` остаётся совместимым facade/re-export слоем.
+- Внутренняя реализация request-audit observability лежит в `gpt2giga/app/_observability/`; публичный import path для runtime-кода и тестов остаётся `gpt2giga/app/observability.py`.
+- Внутренняя реализация telemetry sink-ов и registry лежит в `gpt2giga/app/_telemetry/`; публичный import path остаётся `gpt2giga/app/telemetry.py`.
+- Внутренняя реализация runtime store/feed backends лежит в `gpt2giga/app/_runtime_backends/`; публичный import path остаётся `gpt2giga/app/runtime_backends.py`.
 - Runtime store backend и observability backend также провиженятся через typed container-ы, чтобы route-модули не собирали инфраструктуру вручную.
-- Для таких facade/re-export слоёв используйте policy из [compatibility-facades.md](./compatibility-facades.md), а не ad hoc решения "оставить или удалить позже".
 
 ### Control plane
 
@@ -147,7 +145,7 @@ api/openai/responses.py
 - `gpt2giga/api/admin/settings.py` делегирует setup/settings/revisions/key-management flow в `gpt2giga/app/admin_settings.py`.
 - `gpt2giga/api/admin/runtime.py` делегирует runtime/config/capabilities/usage payload building в `gpt2giga/app/admin_runtime.py`.
 - Настройки и live mutation flow проходят через `gpt2giga/app/admin_settings.py` и `gpt2giga/core/config/control_plane.py`.
-- Внутренняя реализация control-plane persistence, bootstrap, revisions и payload/status helpers теперь лежит в `gpt2giga/core/config/_control_plane/`, а `gpt2giga/core/config/control_plane.py` остаётся совместимым facade/re-export слоем.
+- Внутренняя реализация control-plane persistence, bootstrap, revisions и payload/status helpers лежит в `gpt2giga/core/config/_control_plane/`; публичный import path остаётся `gpt2giga/core/config/control_plane.py`.
 - Когда изменение безопасно для live-reload, `reload_runtime_services()` пересобирает runtime без полного рестарта процесса.
 - Runtime snapshot service читает текущее состояние из `app.state.config`, runtime stores и observability state.
 

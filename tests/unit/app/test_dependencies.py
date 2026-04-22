@@ -70,23 +70,21 @@ class _FakeResponseProcessor:
         return {"id": response_id}
 
 
-def test_get_runtime_services_merges_legacy_aliases_into_typed_container():
-    legacy_chat_service = object()
-    state = SimpleNamespace(chat_service=legacy_chat_service)
+def test_get_runtime_services_initializes_typed_container():
+    state = SimpleNamespace()
 
     services = get_runtime_services(state)
 
-    assert services.chat is legacy_chat_service
+    assert services.chat is None
     assert state.services is services
 
 
-def test_get_runtime_providers_merges_legacy_aliases_into_typed_container():
-    legacy_transformer = _FakeTransformer()
-    state = SimpleNamespace(request_transformer=legacy_transformer)
+def test_get_runtime_providers_initializes_typed_container():
+    state = SimpleNamespace()
 
     providers = get_runtime_providers(state)
 
-    assert providers.request_transformer is legacy_transformer
+    assert providers.request_transformer is None
     assert state.providers is providers
 
 

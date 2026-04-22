@@ -10,6 +10,7 @@ from gpt2giga.features.batches.service import (
     get_batches_service_from_state,
 )
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.app.dependencies import RuntimeProviders
 from gpt2giga.features.batches.transforms import BATCH_CHAT_V2_FALLBACK_WARNING
 
 
@@ -363,12 +364,12 @@ async def test_batches_service_create_batch_adds_v2_fallback_warning():
 
 def test_get_batches_service_from_state_builds_service_from_config():
     state = SimpleNamespace(
-        request_transformer=FakeRequestTransformer(),
+        providers=RuntimeProviders(request_transformer=FakeRequestTransformer()),
         config=ProxyConfig.model_validate({"proxy": {"gigachat_api_mode": "v1"}}),
     )
 
     service = get_batches_service_from_state(state)
 
-    assert state.batches_service is service
+    assert state.services.batches is service
     assert service.embeddings_model == state.config.proxy_settings.embeddings
     assert service.gigachat_api_mode == "v1"

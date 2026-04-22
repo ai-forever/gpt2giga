@@ -1,4 +1,4 @@
-"""OpenAI-compatible SSE helper facade."""
+"""OpenAI-compatible SSE helper exports."""
 
 from gpt2giga.core.http.sse import (
     format_chat_stream_chunk,

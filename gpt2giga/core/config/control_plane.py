@@ -1,4 +1,4 @@
-"""Compatibility facade for control-plane configuration helpers."""
+"""Public control-plane configuration helpers."""
 
 from gpt2giga.core.config._control_plane import (
     CONTROL_PLANE_DIR_ENV,

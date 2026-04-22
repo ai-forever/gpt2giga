@@ -28,7 +28,7 @@ from gpt2giga.core.config.control_plane import (
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
-def test_control_plane_facade_reexports_internal_helpers():
+def test_control_plane_public_imports_reexport_internal_helpers():
     assert claim_admin_instance is internal_claim_admin_instance
     assert get_control_plane_file is internal_get_control_plane_file
     assert persist_control_plane_config is internal_persist_control_plane_config
@@ -191,12 +191,12 @@ def test_load_control_plane_revision_payload_returns_saved_snapshot(
     )
 
 
-def test_apply_control_plane_overrides_legacy_payload_keeps_runtime_gigachat_env(
+def test_apply_control_plane_overrides_ignores_unmanaged_payload_fields(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
 
-    legacy_payload = {
+    payload = {
         "version": 1,
         "proxy": {
             "mode": "DEV",
@@ -239,12 +239,16 @@ def test_apply_control_plane_overrides_legacy_payload_keeps_runtime_gigachat_env
     }
 
     get_control_plane_file().write_text(
-        json.dumps(legacy_payload, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
 
     runtime = ProxyConfig(
-        proxy=ProxySettings(mode="DEV"),
+        proxy=ProxySettings(
+            mode="DEV",
+            observability_sinks=["phoenix"],
+            enable_telemetry=False,
+        ),
         gigachat={
             "credentials": "runtime-creds",
             "model": "GigaChat-2-Max",
@@ -256,7 +260,8 @@ def test_apply_control_plane_overrides_legacy_payload_keeps_runtime_gigachat_env
     assert merged.gigachat_settings.credentials.get_secret_value() == "runtime-creds"
     assert merged.gigachat_settings.model == "GigaChat-2-Max"
     assert merged.gigachat_settings.verify_ssl_certs is False
-    assert merged.proxy_settings.observability_sinks == ["prometheus"]
+    assert merged.proxy_settings.observability_sinks == ["phoenix"]
+    assert merged.proxy_settings.enable_telemetry is False
 
 
 def test_persist_control_plane_config_keeps_managed_gigachat_fields_across_saves(

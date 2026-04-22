@@ -1,4 +1,4 @@
-"""Compatibility facade for runtime backend contracts and implementations."""
+"""Public runtime backend contracts and implementations."""
 
 from gpt2giga.app._runtime_backends import (
     ConfigurableRuntimeStateBackend,
