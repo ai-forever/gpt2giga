@@ -35,3 +35,10 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 - Summary: added a CI guard that fails when committed admin assets under `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` are stale after `npm run build:admin`; documented the contributor expectation in `README.md` and `docs/architecture.md`
 - Checks: `npm ci`; `npm run build:admin`
 - Notes: targeted verification confirmed the build leaves `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` clean on the happy path
+
+## 2026-04-22 — S4 — done
+
+- Commit: `acafcf8`
+- Summary: added a minimal admin frontend unit-test baseline with `tsx` + `node:test`, covering traffic URL/filter helpers, files-batches serializers/summaries, and settings diff/runtime-impact helpers; wired the new `npm run test:admin` step into CI and contributor docs
+- Checks: `npm run test:admin`; `npm run build:admin`
+- Notes: tests live under `frontend-tests/admin/` so they stay outside the compiled admin asset tree and do not affect `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`
