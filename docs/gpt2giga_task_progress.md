@@ -49,3 +49,10 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 - Summary: split the `files-batches` page binder into focused `upload`, `batch-composer`, `inventory`, `filters`, and shared-helper modules while keeping the public `bindFilesBatchesPage()` entrypoint stable; added helper tests for the extracted batch-format and validation logic and regenerated compiled admin assets
 - Checks: `npm run test:admin`; `npm run build:admin`
 - Notes: the root `gpt2giga/frontend/admin/pages/files-batches/bindings.ts` now acts as a thin orchestrator (310 lines instead of 2641), which makes future inventory/preview/composer changes easier to isolate
+
+## 2026-04-22 — S3 — done
+
+- Commit: `b8094a5`
+- Summary: split the admin settings/setup hotspots into dedicated `settings/*`, `setup/*`, and `control-plane/*` modules so the old `render-settings.ts`, `render-setup.ts`, and `control-plane-sections.ts` files now act as thin facades; added pure-helper coverage for settings/setup state resolution and observability handoff summaries, and regenerated compiled admin assets
+- Checks: `npm run test:admin`; `npm run build:admin`
+- Notes: `render-settings.ts` is now 83 lines, `render-setup.ts` is 78 lines, and `control-plane-sections.ts` is a re-export shim while the extracted modules keep route contracts and form ids stable
