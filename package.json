@@ -6,6 +6,7 @@
     "test:admin": "tsx --test frontend-tests/admin/**/*.test.ts"
   },
   "devDependencies": {
+    "jsdom": "^29.0.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   }
