@@ -1,12 +1,16 @@
 export {
+  renderApplicationSection,
+  renderSecuritySection,
+} from "./application.js";
+export {
   bindGigachatSecretFields,
+  renderGigachatSection,
+} from "./gigachat.js";
+export {
   bindObservabilityPresetButtons,
   bindObservabilitySecretFields,
   buildSetupObservabilityHandoffState,
   describeOtlpHeaderPreview,
-  renderApplicationSection,
-  renderGigachatSection,
   renderObservabilitySection,
-  renderSecuritySection,
   renderSetupObservabilityHandoff,
-} from "./control-plane/index.js";
+} from "./observability.js";
