@@ -13,21 +13,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      - name: Install uv and set Python 3.13
+        uses: astral-sh/setup-uv@v4
         with:
           python-version: "3.13"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Validate release tag matches package version
         shell: bash
         run: |
           set -euo pipefail
           TAG_VERSION="${GITHUB_REF_NAME#v}"
-          PKG_VERSION="$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]["version"])')"
-          UI_PKG_VERSION="$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("packages/gpt2giga-ui/pyproject.toml").read_text("utf-8"))["project"]["version"])')"
+          PKG_VERSION="$(uv run python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]["version"])')"
+          UI_PKG_VERSION="$(uv run python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("packages/gpt2giga-ui/pyproject.toml").read_text("utf-8"))["project"]["version"])')"
           echo "Release tag: ${GITHUB_REF_NAME} (version=${TAG_VERSION})"
           echo "pyproject.toml version: ${PKG_VERSION}"
           echo "packages/gpt2giga-ui/pyproject.toml version: ${UI_PKG_VERSION}"
