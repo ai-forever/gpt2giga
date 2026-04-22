@@ -243,16 +243,24 @@ def test_favicon_route_serves_packaged_icon():
 def test_admin_ui_assets_include_observability_presets():
     client = TestClient(create_app(config=ProxyConfig(proxy=ProxySettings())))
 
-    response = client.get("/admin/assets/admin/pages/control-plane-sections.js")
+    sections_response = client.get(
+        "/admin/assets/admin/pages/control-plane-sections.js"
+    )
+    types_response = client.get("/admin/assets/admin/pages/control-plane/types.js")
+    observability_response = client.get(
+        "/admin/assets/admin/pages/control-plane/observability.js"
+    )
 
-    assert response.status_code == 200
-    assert "Local Prometheus" in response.text
-    assert "Local OTLP collector" in response.text
-    assert "Local Langfuse" in response.text
-    assert "Local Phoenix" in response.text
-    assert "deploy/compose/observability-otlp.yaml" in response.text
-    assert 'pathForPage("settings-observability")' in response.text
-    assert "settings?section=observability" not in response.text
+    assert sections_response.status_code == 200
+    assert types_response.status_code == 200
+    assert observability_response.status_code == 200
+    assert "Local Prometheus" in types_response.text
+    assert "Local OTLP collector" in types_response.text
+    assert "Local Langfuse" in types_response.text
+    assert "Local Phoenix" in types_response.text
+    assert "deploy/compose/observability-otlp.yaml" in types_response.text
+    assert 'pathForPage("settings-observability")' in observability_response.text
+    assert "settings?section=observability" not in observability_response.text
 
 
 def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
@@ -408,6 +416,12 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     files_batches_bindings_asset = client.get(
         "/admin/assets/admin/pages/files-batches/bindings.js"
     )
+    files_batches_batch_composer_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/bindings/batch-composer.js"
+    )
+    files_batches_helpers_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/bindings/helpers.js"
+    )
     files_batches_serializers_asset = client.get(
         "/admin/assets/admin/pages/files-batches/serializers.js"
     )
@@ -429,21 +443,28 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert "Operator guides" in files_batches_asset.text
     assert "optional when using inline requests" in files_batches_asset.text
     assert files_batches_bindings_asset.status_code == 200
+    assert files_batches_batch_composer_asset.status_code == 200
+    assert files_batches_helpers_asset.status_code == 200
     assert 'app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash"' in (
-        files_batches_bindings_asset.text
+        files_batches_batch_composer_asset.text
     )
-    assert "const fallbackModel =" in files_batches_bindings_asset.text
-    assert "model: fallbackModel" in files_batches_bindings_asset.text
-    assert "readConfiguredFallbackModel()" in files_batches_bindings_asset.text
-    assert 'normalizedModel.startsWith("models/")' in files_batches_bindings_asset.text
-    assert 'requestLabel: "row-1"' in files_batches_bindings_asset.text
+    assert "const fallbackModel =" in files_batches_batch_composer_asset.text
+    assert "model: fallbackModel" in files_batches_batch_composer_asset.text
+    assert "readConfiguredFallbackModel()" in files_batches_batch_composer_asset.text
+    assert 'normalized.startsWith("models/")' in files_batches_helpers_asset.text
+    assert 'requestLabel: "row-1"' in files_batches_helpers_asset.text
     assert 'elements.batchEndpoint?.addEventListener("change"' in (
-        files_batches_bindings_asset.text
+        files_batches_batch_composer_asset.text
     )
-    assert "const showModel = true" in files_batches_bindings_asset.text
+    assert "elements.batchModelField.hidden = false" in (
+        files_batches_batch_composer_asset.text
+    )
+    assert "elements.batchModel.required = false" in (
+        files_batches_batch_composer_asset.text
+    )
     assert (
         'elements.batchModel?.addEventListener("input"'
-        in files_batches_bindings_asset.text
+        in files_batches_batch_composer_asset.text
     )
     assert files_batches_serializers_asset.status_code == 200
     assert "Open batch composer" in files_batches_serializers_asset.text
