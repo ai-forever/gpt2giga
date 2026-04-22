@@ -171,6 +171,7 @@ npm run build:admin
 ```
 
 Эта сборка пишет JavaScript-модули сразу в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, то есть в тот optional package, который runtime монтирует на `/admin/assets/admin/*`.
+CI повторно запускает эту сборку и валит PR, если generated-файлы в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` не были закоммичены.
 
 PR-шаблоны находятся в [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) и [`.github/PULL_REQUEST_TEMPLATE/ru.md`](./.github/PULL_REQUEST_TEMPLATE/ru.md).
 

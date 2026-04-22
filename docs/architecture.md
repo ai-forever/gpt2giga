@@ -190,6 +190,8 @@ npm run build:admin
 2. Запускаете `npm run build:admin`.
 3. Коммитите и исходники, и обновленный output в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
 
+`CI` повторяет этот шаг и падает, если после `npm run build:admin` в git diff остаются изменения под `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`.
+
 ## Куда смотреть дальше
 
 - Общая документация: [README.md](../README.md)
