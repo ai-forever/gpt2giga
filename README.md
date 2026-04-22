@@ -106,6 +106,7 @@ make compose-base-dev-d
 | Если вам нужно | Документ |
 |---|---|
 | Понять структуру документации | [docs/README.md](./docs/README.md) |
+| Обновиться с `0.1.x` на релизную линию `1.0` | [docs/upgrade-0.x-to-1.0.md](./docs/upgrade-0.x-to-1.0.md) |
 | Настроить `.env`, CLI-флаги, HTTPS и auth | [docs/configuration.md](./docs/configuration.md) |
 | Поднять сервис в `DEV`/`PROD`, включить providers, telemetry и admin | [docs/operator-guide.md](./docs/operator-guide.md) |
 | Посмотреть поддержку API по провайдерам | [docs/api-compatibility.md](./docs/api-compatibility.md) |

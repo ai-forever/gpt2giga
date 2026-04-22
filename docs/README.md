@@ -14,6 +14,7 @@
 | Быстро понять проект и запустить локально | [../README.md](../README.md) |
 | Настроить `.env`, CLI-флаги, auth и HTTPS | [configuration.md](./configuration.md) |
 | Выбрать runtime switches и режим эксплуатации | [operator-guide.md](./operator-guide.md) |
+| Обновиться с ветки `0.1.x` на релизную линию `1.0` | [upgrade-0.x-to-1.0.md](./upgrade-0.x-to-1.0.md) |
 | Проверить поддержку route и API surface | [api-compatibility.md](./api-compatibility.md) |
 | Подключить IDE, CLI-агента или reverse proxy | [integrations/README.md](./integrations/README.md) |
 | Разобраться в архитектуре | [architecture.md](./architecture.md) |
@@ -27,6 +28,7 @@
 |---|---|
 | [configuration.md](./configuration.md) | Локальный запуск, Docker, `.env`, API-key auth, pass-token, HTTPS, режимы `DEV`/`PROD` |
 | [operator-guide.md](./operator-guide.md) | Provider gating, backend `v1`/`v2`, `/admin`, `/metrics`, Compose-сценарии |
+| [upgrade-0.x-to-1.0.md](./upgrade-0.x-to-1.0.md) | Пошаговый upgrade checklist для операторов, которые переходят с `0.1.x` на `1.0` |
 | [architecture.md](./architecture.md) | Текущий request flow, provider mapping, runtime/control plane и lifecycle admin UI |
 | [design-notes.md](./design-notes.md) | Почему проект держится за frameworkless admin UI, committed compiled assets и feature/provider boundary |
 | [api-compatibility.md](./api-compatibility.md) | Полная матрица OpenAI-, Anthropic- и Gemini-совместимых route |

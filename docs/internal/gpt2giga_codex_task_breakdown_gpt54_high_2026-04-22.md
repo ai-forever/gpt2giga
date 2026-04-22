@@ -20,7 +20,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-003 — done
 - [x] RLS-004 — done
 - [x] RLS-005 — done
-- [ ] RLS-006
+- [x] RLS-006 — done
 - [ ] RLS-007
 
 ---
@@ -271,6 +271,10 @@ Write an upgrade guide that explains:
 - guide is linked from a canonical docs entry point
 - guide is specific, not generic prose
 - operators can follow it without reading internal design notes
+
+**Status**
+
+Completed in the tracked repository state: `docs/upgrade-0.x-to-1.0.md` provides an operator-oriented migration path, and the guide is linked from `docs/README.md`, `README.md`, and `docs/operator-guide.md`.
 
 ---
 
