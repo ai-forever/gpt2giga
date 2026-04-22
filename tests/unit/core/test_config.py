@@ -1,5 +1,6 @@
 import pytest
 
+from gpt2giga.core.config import settings as settings_module
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
@@ -300,6 +301,46 @@ def test_proxy_settings_invalid_port(monkeypatch):
         ProxySettings()
 
 
+def test_proxy_settings_security_grouped_view():
+    s = ProxySettings(
+        mode="PROD",
+        enable_api_key_auth=True,
+        api_key="global-secret",
+        scoped_api_keys=[
+            {"name": "sdk", "key": "scoped-secret", "providers": ["openai"]}
+        ],
+        governance_limits=[
+            {
+                "name": "burst",
+                "scope": "provider",
+                "providers": ["openai"],
+                "window_seconds": 60,
+                "max_requests": 3,
+            }
+        ],
+        cors_allow_origins=["https://example.test"],
+        cors_allow_methods=["GET", "POST"],
+        cors_allow_headers=["authorization"],
+        logs_ip_allowlist=["127.0.0.1"],
+        max_request_body_bytes=123,
+        max_audio_file_size_bytes=456,
+        max_image_file_size_bytes=789,
+        max_text_file_size_bytes=321,
+        max_audio_image_total_size_bytes=654,
+    )
+    assert s.security.enable_api_key_auth is True
+    assert s.security.api_key == "global-secret"
+    assert s.security.scoped_api_keys_configured == 1
+    assert s.security.governance_limits_configured == 1
+    assert s.security.cors_allow_origins == ["https://example.test"]
+    assert s.security.logs_ip_allowlist == ["127.0.0.1"]
+    assert s.security.max_request_body_bytes == 123
+    assert s.security.max_audio_file_size_bytes == 456
+    assert s.security.max_image_file_size_bytes == 789
+    assert s.security.max_text_file_size_bytes == 321
+    assert s.security.max_audio_image_total_size_bytes == 654
+
+
 def test_api_key_hidden_from_repr():
     """api_key value must not appear in ProxySettings repr (visible in logs)."""
     s = ProxySettings(api_key="super-secret-key-12345")
@@ -325,3 +366,26 @@ def test_scoped_api_key_hidden_from_repr():
     )
     text = repr(s)
     assert "scoped-secret" not in text
+
+
+def test_settings_module_reexports_access_control_models():
+    scoped = settings_module.ScopedAPIKeySettings.model_validate(
+        {
+            "name": "sdk",
+            "key": "secret",
+            "providers": ["openai"],
+            "endpoints": ["chat/completions"],
+        }
+    )
+    limit = settings_module.GovernanceLimitSettings.model_validate(
+        {
+            "scope": "provider",
+            "providers": ["gemini"],
+            "window_seconds": 60,
+            "max_requests": 5,
+        }
+    )
+    assert scoped.providers == ["openai"]
+    assert scoped.endpoints == ["chat/completions"]
+    assert limit.scope == "provider"
+    assert limit.providers == ["gemini"]
