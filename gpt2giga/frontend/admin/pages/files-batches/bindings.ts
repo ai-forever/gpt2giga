@@ -31,6 +31,7 @@ import {
   getLatestOutputBatch,
   getLinkedBatchesForFile,
   humanizeBatchLifecycle,
+  inferDownloadMimeType,
   isBatchValidationCandidate,
   readFilesBatchesRouteState,
   renderInspectorActions,
@@ -70,6 +71,7 @@ const OPENAI_BATCH_ENDPOINT_OPTIONS = [
 ] as const;
 const ANTHROPIC_BATCH_ENDPOINT = "/v1/messages";
 const GEMINI_BATCH_ENDPOINT_TEMPLATE = "/v1beta/models/{model}:generateContent";
+const BATCH_PREVIEW_BYTES = 256 * 1024;
 
 export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void {
   const { app, data, elements, filters, inventory, page } = options;
@@ -1594,12 +1596,18 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
           : []),
       ],
       action: async () => {
-        const bytes = await fetchFileContent(
+        const previewBytes = resolvePreviewBytes(source, options);
+        const { bytes, totalBytes } = await fetchFileContent(
           app,
           fileId,
           resolveContentPathForFile(fileId, source, options?.relatedBatch),
+          previewBytes,
         );
-        const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
+        const preview = buildFilePreview(bytes, String(source?.filename ?? fileId), {
+          previewByteLimit: BATCH_PREVIEW_BYTES,
+          previewTextCharLimit: 100_000,
+          totalByteLength: totalBytes ?? undefined,
+        });
         if (preview.handoffRequestId && options?.relatedBatch) {
           selection = {
             kind: "batch",
@@ -1672,16 +1680,17 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
       ],
       action: async () => {
         const source = inventory.fileLookup.get(fileId);
-        const bytes = await fetchFileContent(
+        const { bytes, mimeType } = await fetchFileContent(
           app,
           fileId,
           resolveDownloadPathForFile(fileId, source),
         );
-        const mimeType = buildFilePreview(bytes, filename).mimeType;
         const blobBytes = new Uint8Array(bytes.byteLength);
         blobBytes.set(bytes);
         const objectUrl = URL.createObjectURL(
-          new Blob([blobBytes], { type: mimeType }),
+          new Blob([blobBytes], {
+            type: inferDownloadMimeType(filename, mimeType, bytes),
+          }),
         );
         const link = document.createElement("a");
         link.href = objectUrl;
@@ -1698,6 +1707,27 @@ export function bindFilesBatchesPage(options: BindFilesBatchesPageOptions): void
     const source = inventory.fileLookup.get(fileId);
     const filename = String(source?.filename ?? "").trim();
     return filename || `file-${fileId}.bin`;
+  };
+
+  const resolvePreviewBytes = (
+    source: FileRecord | undefined,
+    options?: {
+      relatedBatch?: BatchRecord | null;
+    },
+  ): number | undefined => {
+    if (options?.relatedBatch) {
+      return BATCH_PREVIEW_BYTES;
+    }
+    const filename = String(source?.filename ?? "").trim().toLowerCase();
+    if (
+      filename.endsWith(".jsonl") ||
+      filename.endsWith(".json") ||
+      filename.endsWith(".txt") ||
+      filename.endsWith(".log")
+    ) {
+      return BATCH_PREVIEW_BYTES;
+    }
+    return undefined;
   };
 
   const inspectFile = async (

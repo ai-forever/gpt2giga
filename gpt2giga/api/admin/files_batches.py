@@ -230,7 +230,11 @@ async def validate_files_batches_batch(
 
 @admin_files_batches_api_router.get("/admin/api/files-batches/files/{file_id}/content")
 @exceptions_handler
-async def get_files_batches_file_content(file_id: str, request: Request):
+async def get_files_batches_file_content(
+    file_id: str,
+    request: Request,
+    preview_bytes: int | None = Query(default=None, ge=1, le=1_048_576),
+):
     """Return canonical file content for admin preview/download."""
     verify_logs_ip_allowlist(request)
     app_state = request.app.state
@@ -261,7 +265,11 @@ async def get_files_batches_file_content(file_id: str, request: Request):
                 batch_store=batch_store,
                 file_store=file_store,
             )
-            return Response(content=content, media_type=media_type)
+            return _build_content_response(
+                content,
+                media_type=media_type,
+                preview_bytes=preview_bytes,
+            )
 
     content = await files_service.get_file_content(
         file_id,
@@ -273,7 +281,11 @@ async def get_files_batches_file_content(file_id: str, request: Request):
     media_type = (file_store.get(file_id) or {}).get(
         "mime_type", "application/octet-stream"
     )
-    return Response(content=content, media_type=media_type)
+    return _build_content_response(
+        content,
+        media_type=media_type,
+        preview_bytes=preview_bytes,
+    )
 
 
 @admin_files_batches_api_router.get("/admin/api/files-batches/batches/{batch_id}")
@@ -299,7 +311,11 @@ async def get_files_batches_batch(batch_id: str, request: Request):
     "/admin/api/files-batches/batches/{batch_id}/output"
 )
 @exceptions_handler
-async def get_files_batches_batch_output(batch_id: str, request: Request):
+async def get_files_batches_batch_output(
+    batch_id: str,
+    request: Request,
+    preview_bytes: int | None = Query(default=None, ge=1, le=1_048_576),
+):
     """Return canonical batch output for admin preview/download."""
     verify_logs_ip_allowlist(request)
     batch_record = await _require_batch_record(
@@ -317,7 +333,11 @@ async def get_files_batches_batch_output(batch_id: str, request: Request):
         batch_store=get_batch_store(request),
         file_store=get_file_store(request),
     )
-    return Response(content=content, media_type=media_type)
+    return _build_content_response(
+        content,
+        media_type=media_type,
+        preview_bytes=preview_bytes,
+    )
 
 
 async def _require_batch_record(
@@ -473,3 +493,49 @@ def _resolve_output_batch_id(
         if metadata.get("output_file_id") == file_id:
             return str(batch_id)
     return None
+
+
+def _build_content_response(
+    content: bytes,
+    *,
+    media_type: str,
+    preview_bytes: int | None,
+) -> Response:
+    preview_content, preview_headers = _limit_preview_content(
+        content,
+        media_type=media_type,
+        preview_bytes=preview_bytes,
+    )
+    return Response(
+        content=preview_content,
+        media_type=media_type,
+        headers=preview_headers,
+    )
+
+
+def _limit_preview_content(
+    content: bytes,
+    *,
+    media_type: str,
+    preview_bytes: int | None,
+) -> tuple[bytes, dict[str, str]]:
+    if preview_bytes is None or preview_bytes <= 0:
+        return content, {}
+    if media_type.startswith("image/") or len(content) <= preview_bytes:
+        return content, {
+            "X-Admin-Preview-Truncated": "false",
+            "X-Admin-Preview-Bytes": str(len(content)),
+            "X-Admin-Preview-Total-Bytes": str(len(content)),
+        }
+
+    preview_content = content[:preview_bytes]
+    last_newline = preview_content.rfind(b"\n")
+    if last_newline > 0:
+        preview_content = preview_content[: last_newline + 1]
+    if not preview_content:
+        preview_content = content[:preview_bytes]
+    return preview_content, {
+        "X-Admin-Preview-Truncated": "true",
+        "X-Admin-Preview-Bytes": str(len(preview_content)),
+        "X-Admin-Preview-Total-Bytes": str(len(content)),
+    }

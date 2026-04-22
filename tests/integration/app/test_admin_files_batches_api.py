@@ -363,6 +363,68 @@ def test_admin_files_batches_content_endpoints_proxy_canonical_artifacts():
     assert b'"response"' in batch_output_response.content
 
 
+def test_admin_files_batches_file_content_supports_preview_bytes():
+    app = make_app()
+    app.state.gigachat_client.files["file-gemini-1"]["content"] = (
+        b"line-1\nline-2\nline-3\nline-4\n"
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/admin/api/files-batches/files/file-gemini-1/content",
+        params={"preview_bytes": 15},
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"line-1\nline-2\n"
+    assert response.headers["x-admin-preview-truncated"] == "true"
+    assert response.headers["x-admin-preview-bytes"] == str(len(response.content))
+    assert response.headers["x-admin-preview-total-bytes"] == "28"
+
+
+def test_admin_files_batches_batch_output_supports_preview_bytes():
+    app = make_app()
+    app.state.gigachat_client.files["file-gemini-output-1"]["content"] = (
+        json.dumps(
+            {
+                "response": {
+                    "body": {
+                        "candidates": [
+                            {"content": {"parts": [{"text": "first result"}]}}
+                        ]
+                    }
+                }
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "response": {
+                    "body": {
+                        "candidates": [
+                            {"content": {"parts": [{"text": "second result"}]}}
+                        ]
+                    }
+                }
+            }
+        )
+        + "\n"
+    ).encode("utf-8")
+    client = TestClient(app)
+
+    response = client.get(
+        "/admin/api/files-batches/batches/batch-gemini-1/output",
+        params={"preview_bytes": 120},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["x-admin-preview-truncated"] == "true"
+    assert int(response.headers["x-admin-preview-bytes"]) == len(response.content)
+    assert int(response.headers["x-admin-preview-total-bytes"]) > len(response.content)
+    assert response.content.endswith(b"\n")
+    assert response.content.count(b"\n") == 1
+
+
 def test_admin_files_batches_batch_output_infers_anthropic_format_from_input_file():
     app = make_app()
     app.state.gigachat_client.files["file-anthropic-input-1"] = {

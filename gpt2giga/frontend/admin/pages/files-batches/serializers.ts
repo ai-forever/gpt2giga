@@ -3,6 +3,7 @@ import type { PageId } from "../../types.js";
 import {
   escapeHtml,
   formatBytes,
+  formatNumber,
   formatTimestamp,
   safeJsonParse,
   setQueryParamIfPresent,
@@ -22,6 +23,9 @@ import type {
   InspectorSelection,
 } from "./state.js";
 import { DEFAULT_FILE_SORT, INVALID_JSON } from "./state.js";
+
+const DEFAULT_PREVIEW_BYTE_LIMIT = 256 * 1024;
+const DEFAULT_PREVIEW_TEXT_CHAR_LIMIT = 100_000;
 
 export function buildFilesBatchesInventory(
   data: FilesBatchesPageData,
@@ -201,11 +205,15 @@ export function buildContentPreviewSummary(
       value:
         preview.kind === "image"
           ? formatBytes(preview.byteLength)
-          : `${preview.lineCount} line${preview.lineCount === 1 ? "" : "s"}`,
+          : preview.sampled
+            ? `${preview.lineCount} sampled line${preview.lineCount === 1 ? "" : "s"}`
+            : `${preview.lineCount} line${preview.lineCount === 1 ? "" : "s"}`,
       note:
         preview.kind === "image"
           ? preview.dimensionsNote ?? "Rendered as image preview."
-          : formatBytes(preview.byteLength),
+          : preview.sampled
+            ? `Preview limited to first ${formatBytes(preview.sampledByteLength ?? preview.byteLength)} of ${formatBytes(preview.byteLength)}.`
+            : formatBytes(preview.byteLength),
     },
   ];
 
@@ -457,22 +465,49 @@ export function summarizePreviewOutcome(preview: FilePreview): string {
       : "",
     preview.kind === "image"
       ? formatBytes(preview.byteLength)
-      : `${preview.lineCount} line${preview.lineCount === 1 ? "" : "s"}`,
+      : preview.sampled
+        ? `${preview.lineCount} sampled line${preview.lineCount === 1 ? "" : "s"}`
+        : `${preview.lineCount} line${preview.lineCount === 1 ? "" : "s"}`,
   ]
     .filter(Boolean)
     .join(" · ");
 }
 
-export function buildFilePreview(bytes: Uint8Array, filename: string): FilePreview {
+export function buildFilePreview(
+  bytes: Uint8Array,
+  filename: string,
+  options?: {
+    previewByteLimit?: number;
+    previewTextCharLimit?: number;
+    totalByteLength?: number;
+  },
+): FilePreview {
+  const totalByteLength = Math.max(
+    bytes.length,
+    Number(options?.totalByteLength ?? bytes.length),
+  );
+  const previewByteLimit = Math.max(
+    1,
+    Number(options?.previewByteLimit ?? DEFAULT_PREVIEW_BYTE_LIMIT),
+  );
+  const previewTextCharLimit = Math.max(
+    1,
+    Number(options?.previewTextCharLimit ?? DEFAULT_PREVIEW_TEXT_CHAR_LIMIT),
+  );
+  const sampledBytes =
+    bytes.length > previewByteLimit ? bytes.slice(0, previewByteLimit) : bytes;
+  const sampled = sampledBytes.length < totalByteLength;
   const imageMimeType = detectImageMimeType(bytes, filename);
   if (imageMimeType) {
     return {
       kind: "image",
       filename,
       mimeType: imageMimeType,
-      textFallback: `Binary image preview loaded for ${filename}.\nMIME type: ${imageMimeType}\nSize: ${formatBytes(bytes.length)}`,
-      byteLength: bytes.length,
+      textFallback: `Binary image preview loaded for ${filename}.\nMIME type: ${imageMimeType}\nSize: ${formatBytes(totalByteLength)}`,
+      byteLength: totalByteLength,
       lineCount: 0,
+      sampled,
+      sampledByteLength: sampledBytes.length,
       formatLabel: "image",
       formatNote: imageMimeType,
       contentKind: "Image asset",
@@ -484,14 +519,18 @@ export function buildFilePreview(bytes: Uint8Array, filename: string): FilePrevi
     };
   }
 
-  const decoded = decodeBytesAsText(bytes);
+  const decoded = decodeBytesAsText(sampledBytes);
   if (decoded.isText) {
-    const analysis = analyzeContentText(decoded.text);
+    const analysis = analyzeContentText(decoded.text, {
+        sampled,
+        sampledByteLength: sampledBytes.length,
+        textCharLimit: previewTextCharLimit,
+        totalByteLength,
+      });
     return {
       kind: "text",
       filename,
       mimeType: inferTextMimeType(filename, decoded.text),
-      textFallback: decoded.text,
       ...analysis,
     };
   }
@@ -499,18 +538,63 @@ export function buildFilePreview(bytes: Uint8Array, filename: string): FilePrevi
   return {
     kind: "binary",
     filename,
-    mimeType: "application/octet-stream",
-    textFallback: renderBinaryPreview(bytes),
-    byteLength: bytes.length,
+    mimeType: inferDownloadMimeType(filename, null, bytes),
+    textFallback: renderBinaryPreview(sampledBytes, {
+      sampled,
+      totalByteLength,
+    }),
+    byteLength: totalByteLength,
     lineCount: 1,
+    sampled,
+    sampledByteLength: sampledBytes.length,
     formatLabel: "binary",
-    formatNote: "Non-text payload",
+    formatNote: sampled ? "Non-text payload · sampled preview" : "Non-text payload",
     contentKind: "Binary asset",
     contentKindNote: "Rendered as a short byte preview instead of lossy text decoding.",
     sampleLabel: "Magic bytes",
-    sampleValue: renderHexPrefix(bytes),
+    sampleValue: renderHexPrefix(sampledBytes),
     sampleNote: filename,
   };
+}
+
+export function inferDownloadMimeType(
+  filename: string,
+  responseMimeType?: string | null,
+  bytes?: Uint8Array,
+): string {
+  const normalizedResponseMimeType = responseMimeType?.trim().toLowerCase() ?? "";
+  if (
+    normalizedResponseMimeType &&
+    normalizedResponseMimeType !== "application/octet-stream" &&
+    normalizedResponseMimeType !== "application/binary"
+  ) {
+    return normalizedResponseMimeType;
+  }
+
+  const imageMimeType = bytes ? detectImageMimeType(bytes, filename) : null;
+  if (imageMimeType) {
+    return imageMimeType;
+  }
+
+  const lowerFilename = filename.toLowerCase();
+  if (lowerFilename.endsWith(".jsonl")) {
+    return "application/jsonl";
+  }
+  if (lowerFilename.endsWith(".json")) {
+    return "application/json";
+  }
+  if (lowerFilename.endsWith(".svg")) {
+    return "image/svg+xml";
+  }
+  if (
+    lowerFilename.endsWith(".txt") ||
+    lowerFilename.endsWith(".log") ||
+    lowerFilename.endsWith(".md")
+  ) {
+    return "text/plain";
+  }
+
+  return normalizedResponseMimeType || "application/octet-stream";
 }
 
 export function getLinkedBatchesForFile(
@@ -803,16 +887,35 @@ function describeFileSort(sort: FileSort): string {
 
 function analyzeContentText(
   text: string,
+  options?: {
+    sampled?: boolean;
+    sampledByteLength?: number;
+    textCharLimit?: number;
+    totalByteLength?: number;
+  },
 ): Omit<
   FilePreview,
-  "kind" | "filename" | "mimeType" | "textFallback" | "dimensionsNote"
+  "kind" | "filename" | "mimeType" | "dimensionsNote"
 > {
-  const lines = text ? text.split(/\r?\n/).length : 0;
-  const nonEmptyLines = text
+  const textCharLimit = Math.max(
+    1,
+    Number(options?.textCharLimit ?? DEFAULT_PREVIEW_TEXT_CHAR_LIMIT),
+  );
+  const sampled = Boolean(options?.sampled);
+  const sampledByteLength = Number(options?.sampledByteLength ?? text.length);
+  const totalByteLength = Math.max(
+    sampledByteLength,
+    Number(options?.totalByteLength ?? sampledByteLength),
+  );
+  const truncatedText = text.length > textCharLimit ? text.slice(0, textCharLimit) : text;
+  const textWasTrimmed = truncatedText.length < text.length;
+  const sampledPreview = sampled || textWasTrimmed;
+  const lines = truncatedText ? truncatedText.split(/\r?\n/).length : 0;
+  const nonEmptyLines = truncatedText
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const trimmed = text.trim();
+  const trimmed = truncatedText.trim();
   const json = trimmed ? safeJsonParse(trimmed, INVALID_JSON) : INVALID_JSON;
   let formatLabel = "text";
   let formatNote = lines <= 1 ? "single payload" : "plain text or JSON fragments";
@@ -892,11 +995,23 @@ function analyzeContentText(
     }
   }
 
+  if (sampledPreview) {
+    formatNote = `${formatNote} · sampled preview`;
+  }
+
+  const textFallback =
+    sampledPreview
+      ? `${truncatedText}\n\n[preview truncated to first ${formatBytes(sampledByteLength)}${textWasTrimmed ? ` / ${formatNumber(textCharLimit)} chars shown` : ""}]`
+      : truncatedText;
+
   return {
+    textFallback,
     formatLabel,
     formatNote,
     lineCount: lines,
-    byteLength: new TextEncoder().encode(text).length,
+    byteLength: totalByteLength,
+    sampled: sampledPreview,
+    sampledByteLength,
     contentKind,
     contentKindNote,
     sampleLabel,
@@ -1022,10 +1137,17 @@ function inferTextMimeType(filename: string, text: string): string {
   return "text/plain";
 }
 
-function renderBinaryPreview(bytes: Uint8Array): string {
+function renderBinaryPreview(
+  bytes: Uint8Array,
+  options?: {
+    sampled?: boolean;
+    totalByteLength?: number;
+  },
+): string {
   return [
-    "Binary file preview",
-    `Size: ${formatBytes(bytes.length)}`,
+    options?.sampled ? "Binary file preview (sampled)" : "Binary file preview",
+    `Size: ${formatBytes(options?.totalByteLength ?? bytes.length)}`,
+    options?.sampled ? `Preview sample: ${formatBytes(bytes.length)}` : "",
     `Magic bytes: ${renderHexPrefix(bytes)}`,
     "Raw text preview is suppressed to avoid mojibake.",
   ].join("\n");

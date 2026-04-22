@@ -2,7 +2,7 @@ import { withBusyState } from "../../forms.js";
 import { banner, pill, renderDefinitionList } from "../../templates.js";
 import { escapeHtml, formatBytes, formatNumber, formatTimestamp, safeJsonParse, } from "../../utils.js";
 import { clearFilesBatchesPageDataCache, createBatch, deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, syncFilesBatchesPageDataCache, uploadFile, validateBatchInput, } from "./api.js";
-import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, describeFileValidationSnapshot, extractErrorReason, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, isBatchValidationCandidate, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
+import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, buildFilesBatchesUrl, describeFileValidationSnapshot, extractErrorReason, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, inferDownloadMimeType, isBatchValidationCandidate, readFilesBatchesRouteState, renderInspectorActions, scopeFilesBatchesFilters, summarizeBatchRequestCounts, summarizePreviewOutcome, } from "./serializers.js";
 import { INVALID_JSON } from "./state.js";
 const OPENAI_BATCH_ENDPOINT_OPTIONS = [
     "/v1/chat/completions",
@@ -11,6 +11,7 @@ const OPENAI_BATCH_ENDPOINT_OPTIONS = [
 ];
 const ANTHROPIC_BATCH_ENDPOINT = "/v1/messages";
 const GEMINI_BATCH_ENDPOINT_TEMPLATE = "/v1beta/models/{model}:generateContent";
+const BATCH_PREVIEW_BYTES = 256 * 1024;
 export function bindFilesBatchesPage(options) {
     const { app, data, elements, filters, inventory, page } = options;
     let selection = { kind: "idle" };
@@ -1180,8 +1181,13 @@ export function bindFilesBatchesPage(options) {
                     : []),
             ],
             action: async () => {
-                const bytes = await fetchFileContent(app, fileId, resolveContentPathForFile(fileId, source, options?.relatedBatch));
-                const preview = buildFilePreview(bytes, String(source?.filename ?? fileId));
+                const previewBytes = resolvePreviewBytes(source, options);
+                const { bytes, totalBytes } = await fetchFileContent(app, fileId, resolveContentPathForFile(fileId, source, options?.relatedBatch), previewBytes);
+                const preview = buildFilePreview(bytes, String(source?.filename ?? fileId), {
+                    previewByteLimit: BATCH_PREVIEW_BYTES,
+                    previewTextCharLimit: 100_000,
+                    totalByteLength: totalBytes ?? undefined,
+                });
                 if (preview.handoffRequestId && options?.relatedBatch) {
                     selection = {
                         kind: "batch",
@@ -1245,11 +1251,12 @@ export function bindFilesBatchesPage(options) {
             ],
             action: async () => {
                 const source = inventory.fileLookup.get(fileId);
-                const bytes = await fetchFileContent(app, fileId, resolveDownloadPathForFile(fileId, source));
-                const mimeType = buildFilePreview(bytes, filename).mimeType;
+                const { bytes, mimeType } = await fetchFileContent(app, fileId, resolveDownloadPathForFile(fileId, source));
                 const blobBytes = new Uint8Array(bytes.byteLength);
                 blobBytes.set(bytes);
-                const objectUrl = URL.createObjectURL(new Blob([blobBytes], { type: mimeType }));
+                const objectUrl = URL.createObjectURL(new Blob([blobBytes], {
+                    type: inferDownloadMimeType(filename, mimeType, bytes),
+                }));
                 const link = document.createElement("a");
                 link.href = objectUrl;
                 link.download = filename;
@@ -1264,6 +1271,19 @@ export function bindFilesBatchesPage(options) {
         const source = inventory.fileLookup.get(fileId);
         const filename = String(source?.filename ?? "").trim();
         return filename || `file-${fileId}.bin`;
+    };
+    const resolvePreviewBytes = (source, options) => {
+        if (options?.relatedBatch) {
+            return BATCH_PREVIEW_BYTES;
+        }
+        const filename = String(source?.filename ?? "").trim().toLowerCase();
+        if (filename.endsWith(".jsonl") ||
+            filename.endsWith(".json") ||
+            filename.endsWith(".txt") ||
+            filename.endsWith(".log")) {
+            return BATCH_PREVIEW_BYTES;
+        }
+        return undefined;
     };
     const inspectFile = async (fileId, button) => {
         const shouldRefreshPage = button !== null;

@@ -128,15 +128,36 @@ export async function fetchFileContent(
   app: AdminApp,
   fileId: string,
   contentPath?: string | null,
-): Promise<Uint8Array> {
+  previewBytes?: number,
+): Promise<{
+  bytes: Uint8Array;
+  mimeType: string | null;
+  totalBytes: number | null;
+  truncated: boolean;
+}> {
   const normalizedContentPath = contentPath?.trim();
-  const response = await app.api.raw(
+  const requestUrl = new URL(
     normalizedContentPath ||
       `/v1/files/${encodeURIComponent(fileId)}/content`,
+    window.location.origin,
+  );
+  if (previewBytes && Number.isFinite(previewBytes) && previewBytes > 0) {
+    requestUrl.searchParams.set("preview_bytes", String(Math.trunc(previewBytes)));
+  }
+  const response = await app.api.raw(
+    `${requestUrl.pathname}${requestUrl.search}`,
     {},
     true,
   );
-  return new Uint8Array(await response.arrayBuffer());
+  const mimeType = response.headers.get("content-type");
+  const totalBytesHeader = response.headers.get("x-admin-preview-total-bytes");
+  const truncatedHeader = response.headers.get("x-admin-preview-truncated");
+  return {
+    bytes: new Uint8Array(await response.arrayBuffer()),
+    mimeType: mimeType?.split(";", 1)[0]?.trim() || null,
+    totalBytes: totalBytesHeader ? Number(totalBytesHeader) : null,
+    truncated: truncatedHeader === "true",
+  };
 }
 
 export async function uploadFile(
