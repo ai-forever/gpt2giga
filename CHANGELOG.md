@@ -5,6 +5,29 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [1.0.0rc2] - 2026-04-22
+### Добавлено
+- **Примеры standalone batch validation**: добавлен каталог `examples/batch_validation/` с отдельными runnable-примерами для OpenAI-, Anthropic- и Gemini-форматов через `POST /batches/validate`
+- **Ограничиваемые admin previews**: для admin content/output preview добавлена поддержка ограниченного размера ответа, чтобы большие файлы и batch outputs можно было безопасно открывать в UI
+
+### Изменено
+- **Версия продукта**: версия пакета поднята с `1.0.0rc1` до `1.0.0rc2`
+- **Admin files/batches preview flow**: preview и download для файлов и batch output переведены на canonical normalized endpoints с более согласованным поведением между inventory и detail views
+- **Документация batch validation**: уточнены примеры, ограничения и нюансы standalone validation endpoint-а
+
+### Исправлено
+- **Batch validation limits**: standalone validation теперь отклоняет payload-ы больше `100` строк вместо попытки прогонять слишком крупные inline batch inputs
+- **Path normalization**: исправлена нормализация путей для standalone batch validation routes, включая `POST /batches/validate` и `POST /v1/batches/validate`
+- **Upload-less validation**: batch uploads теперь можно валидировать без обязательного staging файла перед проверкой
+- **Admin batch creation performance**: ускорены server-side validation и creation flows для files/batches в admin console
+- **Batch revalidation flow**: восстановлен повторный запуск validation для batch inputs из admin UI
+- **Provider batch routing в admin UI**: исправлен выбор provider-specific batch endpoints при создании и просмотре batch jobs
+- **Batch output preview formatting**: admin preview больше не ломает исходный формат batch output и корректно работает с normalized output endpoints
+- **Inline examples vs input files**: встроенные batch-примеры больше не затирают явно выбранный input file в admin composer
+- **Traffic inspector handoff**: при открытии связанных batch/file preview снова корректно раскрывается traffic inspector для выбранного request-а
+- **Playground model selection**: playground снова использует реально настроенную модель GigaChat вместо некорректного fallback-а
+- **Secrets masking**: в setup/settings flow усилено маскирование GigaChat secret values, чтобы сохранённые секреты не утекали в UI preview
+
 ## [1.0.0rc1] - 2026-04-21
 ### Добавлено
 - **Gemini API surface**: добавлены Gemini-совместимые маршруты и модули `content`, `models`, `files`, `batches`, `request`, `response`, `streaming` и `openapi` в `gpt2giga/api/gemini/`
