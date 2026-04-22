@@ -71,13 +71,11 @@ GPT2GIGA_GIGACHAT_API_MODE=v2
 `DEV`:
 
 - доступны `/admin` и `/admin/api/*`;
-- доступны legacy `/logs*`;
 - доступны `/docs`, `/redoc`, `/openapi.json`.
 
 `PROD`:
 
 - `/admin*` отключены;
-- `/logs*` отключены;
 - `/docs`, `/redoc`, `/openapi.json` отключены;
 - нужен `GPT2GIGA_API_KEY`;
 - CORS policy ужесточается автоматически.
@@ -337,7 +335,7 @@ docker compose -f deploy/compose/base.yaml --profile PROD up -d
 | Batch job или output file ведут себя странно | `/admin/files-batches` | Сначала inspector/workflow summary, потом `Traffic` или `Logs` |
 | Непонятно, это config/runtime проблема или live request проблема | `/admin/system` | Оттуда переходите в `/admin/providers` или `/admin/traffic` |
 
-## Admin и legacy logs
+## Admin и logs
 
 В `DEV` доступны:
 
@@ -352,17 +350,9 @@ docker compose -f deploy/compose/base.yaml --profile PROD up -d
 - `/admin/api/logs`
 - `/admin/api/logs/stream`
 
-Legacy endpoints:
-
-- `/logs`
-- `/logs/stream`
-- `/logs/html`
-
-`/logs/html` больше не является отдельным UI и работает как deprecated redirect на `/admin?tab=logs`.
-
 Если включен `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, admin endpoints требуют тот же API key, что и provider routes.
 
-Если задан `GPT2GIGA_LOGS_IP_ALLOWLIST`, он применяется и к `/admin*`, и к `/logs*`.
+Если задан `GPT2GIGA_LOGS_IP_ALLOWLIST`, он применяется ко всему admin surface, включая `/admin/api/logs*`.
 
 ## Metrics и observability
 

@@ -5,7 +5,6 @@ from gpt2giga.api.admin.access import (
     get_client_ip,
     verify_admin_ip_allowlist,
 )
-from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
@@ -60,12 +59,3 @@ def test_verify_admin_ip_allowlist_blocks_unknown_client():
         assert exc.detail == "Access denied: IP not in admin allowlist"
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("Expected HTTPException")
-
-
-def test_verify_logs_ip_allowlist_keeps_legacy_alias(mocker):
-    request = _build_request()
-    verify = mocker.patch("gpt2giga.api.admin.logs.verify_admin_ip_allowlist")
-
-    verify_logs_ip_allowlist(request)
-
-    verify.assert_called_once_with(request)

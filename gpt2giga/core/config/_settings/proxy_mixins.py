@@ -399,7 +399,7 @@ class SecurityProxySettingsMixin:
     )
     logs_ip_allowlist: list[str] = Field(
         default_factory=list,
-        description="IP-адреса, которым разрешён доступ к /logs* (пусто = без ограничений)",
+        description="IP-адреса, которым разрешён доступ к admin surface в DEV (пусто = без ограничений)",
     )
     enable_api_key_auth: bool = Field(
         default=False,

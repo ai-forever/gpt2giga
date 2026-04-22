@@ -27,12 +27,10 @@
   - `gpt2giga/providers/gigachat/request_mapping_base.py`
   - `gpt2giga/providers/gigachat/chat_request_mapper.py`
   - `gpt2giga/providers/gigachat/responses/`
-  - `gpt2giga/providers/gigachat/responses_request_mapper.py` как compatibility entrypoint
 - Общая response-нормализация сосредоточена в:
   - `gpt2giga/providers/gigachat/response_mapper.py`
   - `gpt2giga/providers/gigachat/response_mapping_common.py`
   - `gpt2giga/providers/gigachat/responses/`
-  - `gpt2giga/providers/gigachat/responses_response_mapper.py` как compatibility entrypoint
 - Streaming для GigaChat и OpenAI-compatible SSE разделен между:
   - `gpt2giga/providers/gigachat/streaming.py`
   - `gpt2giga/features/chat/stream.py`
@@ -113,7 +111,7 @@ api/openai/responses.py
 - Практическое правило для contributors:
   - router и provider transport adapter не должны выбирать `achat` против `achat_v2`;
   - единственный internal source of truth для native Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`;
-  - top-level модули `responses_*` сохранены как compatibility re-export layer для старых import path-ов.
+  - новые imports должны идти напрямую в structured helper-модули под `responses/`.
 - Lifecycle policy для permanent facade-модулей, migration wrapper-ов и legacy shim-ов описан в [compatibility-facades.md](./compatibility-facades.md).
 
 ### Models, embeddings, files, batches

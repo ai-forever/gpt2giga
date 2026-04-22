@@ -45,19 +45,12 @@
 
 Эти wrapper-ы сохраняются не как долгосрочный API surface, а только чтобы не ломать старые import path-ы мгновенно.
 
-Сейчас к этой группе относятся плоские top-level structured Responses wrappers в `gpt2giga/providers/gigachat/`:
+Сейчас в дереве репозитория нет активных migration-only import wrapper-ов.
 
-- `responses_backend_request.py`
-- `responses_input_normalizer.py`
-- `responses_options.py`
-- `responses_output_items.py`
-- `responses_request_mapper.py`
-- `responses_response_mapper.py`
-- `responses_result_builder.py`
-- `responses_threading.py`
-- `responses_tool_mapping.py`
+Исторический пример:
 
-Их canonical replacement path находится внутри `gpt2giga.providers.gigachat.responses.*`.
+- плоские top-level structured Responses wrapper-ы вида `responses_request_mapper.py`
+- были удалены после перевода first-party import-ов на `gpt2giga.providers.gigachat.responses.*`
 
 Правила для migration wrappers:
 
@@ -76,10 +69,12 @@
 
 Эта группа относится не к Python import path-ам, а к старым route/alias поверх текущего admin/API surface.
 
-Текущие примеры:
+Сейчас в дереве репозитория нет активных legacy HTTP/API shim-ов.
 
-- `gpt2giga.api.admin.logs.legacy_logs_router` для `/logs`, `/logs/stream`, `/logs/html`
-- `gpt2giga.api.admin.logs.verify_logs_ip_allowlist()` как backward-compatible alias к `verify_admin_ip_allowlist()`
+Исторический пример:
+
+- `/logs`, `/logs/stream`, `/logs/html`
+- alias `gpt2giga.api.admin.logs.verify_logs_ip_allowlist()`
 
 Правила для legacy HTTP/API shims:
 

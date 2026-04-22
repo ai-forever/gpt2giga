@@ -97,7 +97,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/admin/access.py` | Admin bootstrap-token and scoped access verification helpers |
 | `api/admin/runtime.py` | Thin HTTP layer for `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities`, recent events, and usage endpoints |
 | `api/admin/settings.py` | Thin HTTP layer for `/admin/api/setup`, `/admin/api/settings/*`, revisions, and `/admin/api/keys*` |
-| `api/admin/logs.py` | `/admin/api/logs`, `/admin/api/logs/stream`, legacy `/logs*` compatibility shims |
+| `api/admin/logs.py` | `/admin/api/logs` and `/admin/api/logs/stream` |
 | `api/admin/files_batches.py` | `/admin/api/files-batches/*` inventory, validation, and create/retrieve helpers |
 | `api/admin/ui.py` | `/admin` operator UI |
 | `api/system/metrics.py` | `/metrics` exposure for observability integrations |
@@ -129,7 +129,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/translate.py` | `/translate` |
 | `api/admin/ui.py` | `/admin` |
 | `api/admin/runtime.py` | `/admin/api/*` runtime/operator endpoints |
-| `api/admin/logs.py` | `/admin/api/logs*` and legacy `/logs*` compatibility routes |
+| `api/admin/logs.py` | `/admin/api/logs*` log retrieval and SSE routes |
 | `api/admin/files_batches.py` | `/admin/api/files-batches/*` inventory, file, batch, and validation routes |
 
 - OpenAI and Anthropic routers are mounted both at root and `/v1`.
@@ -169,10 +169,8 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `providers/gigachat/request_mapping_base.py` | Shared request parameter, schema, and validation helpers |
 | `providers/gigachat/chat_request_mapper.py` | Message role/content normalization and attachment handling |
 | `providers/gigachat/responses/` | Structured internal Responses pipeline helpers (`backend_request.py`, `input_normalizer.py`, `model_options.py`, `output_items.py`, `request_mapper.py`, `response_mapper.py`, `result_builder.py`, `threading.py`, `tool_mapping.py`) |
-| `providers/gigachat/responses_request_mapper.py` | Compatibility wrapper exposing the public Responses request-mapper mixin |
 | `providers/gigachat/response_mapper.py` | Public `ResponseProcessor` implementation for chat completions |
 | `providers/gigachat/response_mapping_common.py` | Shared response status, usage, reasoning, and serialization helpers |
-| `providers/gigachat/responses_response_mapper.py` | Compatibility wrapper exposing the public Responses response-mapper mixin |
 | `providers/gigachat/streaming.py` | Provider-owned stream iteration, GigaChat error wrapping, and chunk parsing |
 | `providers/gigachat/attachments.py` | Image/audio/text attachment handling, upload, and cleanup |
 | `providers/gigachat/tool_mapping.py` | Tool/function conversion and reserved-name remapping |
@@ -195,7 +193,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Responses flow:
   `api/openai/responses.py` -> `features/responses/service.py` -> `RequestTransformer.prepare_response(...)` or `prepare_response_v2(...)` -> GigaChat `achat` or `achat_v2` -> `ResponseProcessor.process_response_api(...)` or `process_response_api_v2(...)`
 - `app/wiring.py` is the place that injects `chat_backend_mode` and `responses_backend_mode` into the mapper/service layer; routers should not branch on backend mode.
-- `providers/gigachat/responses/` is the internal source of truth for native Responses v2 helper modules. Top-level `responses_*` modules remain compatibility wrappers for old imports.
+- `providers/gigachat/responses/` is the internal source of truth for native Responses v2 helper modules; import those structured helpers directly.
 
 ## Shared Utilities
 
@@ -205,7 +203,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - `core/app_meta.py`: app version, port checks, and CLI secret warnings
 - `providers/gigachat/tool_mapping.py`: tool/function conversion helpers
 - `providers/gigachat/message_utils.py`: provider-facing role/message normalization helpers
-- `api/admin/logs.py`: admin/logs IP allowlist checks and legacy `/logs*` redirects
+- `api/admin/logs.py`: admin log API endpoints and IP allowlist checks
 
 ## Patterns & Conventions
 

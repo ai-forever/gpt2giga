@@ -244,11 +244,7 @@ class AdminRuntimeSnapshotService:
                     metrics_enabled=metrics_enabled,
                     ui_enabled=ui_enabled,
                 ),
-                "legacy_routes": (
-                    ["/logs", "/logs/stream", "/logs/html"]
-                    if self.proxy.mode != "PROD"
-                    else []
-                ),
+                "legacy_routes": [],
             },
         }
 

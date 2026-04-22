@@ -94,7 +94,7 @@ api/<provider>/*
   - когда собирать native `ChatV2`;
   - как использовать `previous_response_id` и response store для continuation flow.
 - Internal source of truth для Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`.
-- Плоские top-level модули вида `responses_request_mapper.py` и `responses_response_mapper.py` оставлены только как compatibility wrappers для старых import path-ов.
+- Новые импорты должны идти напрямую в structured helper-модули внутри `gpt2giga/providers/gigachat/responses/`.
 
 ## Где проходит граница ответственности
 

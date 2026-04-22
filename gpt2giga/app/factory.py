@@ -9,7 +9,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse, RedirectResponse
 from starlette.staticfiles import NotModifiedResponse, StaticFiles
 
-from gpt2giga.api.admin import admin_api_router, admin_router, legacy_logs_router
+from gpt2giga.api.admin import admin_api_router, admin_router
 from gpt2giga.api.admin.access import (
     ADMIN_AUTH_COOKIE_NAME,
     build_admin_access_verifier,
@@ -268,9 +268,6 @@ def _register_routes(
     app.include_router(admin_api_router, dependencies=admin_dependencies)
     if ui_enabled:
         app.include_router(admin_router, dependencies=admin_dependencies)
-
-    if not is_prod_mode:
-        app.include_router(legacy_logs_router, dependencies=api_dependencies)
 
 
 def create_app(

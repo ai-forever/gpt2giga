@@ -472,10 +472,6 @@ def test_prod_mode_keeps_admin_routes_protected_and_disables_legacy_logs_routes(
     assert capabilities.json()["admin"]["enabled"] is True
     assert capabilities.json()["admin"]["legacy_routes"] == []
 
-    assert client.get("/logs").status_code == 404
-    assert client.get("/logs/stream").status_code == 404
-    assert client.get("/logs/html").status_code == 404
-
 
 def test_prod_bootstrap_allows_remote_setup_with_bootstrap_token(tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
@@ -569,9 +565,6 @@ def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypa
     assert client.get("/admin").status_code == 401
     assert client.get("/admin/api/runtime").status_code == 401
     assert client.get("/admin/api/logs").status_code == 401
-    assert client.get("/logs").status_code == 401
-    assert client.get("/logs/stream").status_code == 401
-    assert client.get("/logs/html").status_code == 401
 
 
 def test_scoped_api_key_allows_matching_provider_route(monkeypatch):
