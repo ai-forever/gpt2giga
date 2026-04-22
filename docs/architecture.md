@@ -114,6 +114,7 @@ api/openai/responses.py
   - router и provider transport adapter не должны выбирать `achat` против `achat_v2`;
   - единственный internal source of truth для native Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`;
   - top-level модули `responses_*` сохранены как compatibility re-export layer для старых import path-ов.
+- Lifecycle policy для permanent facade-модулей, migration wrapper-ов и legacy shim-ов описан в [compatibility-facades.md](./compatibility-facades.md).
 
 ### Models, embeddings, files, batches
 
@@ -139,6 +140,7 @@ api/openai/responses.py
 - Внутренняя реализация telemetry sink-ов и registry теперь лежит в `gpt2giga/app/_telemetry/`, а `gpt2giga/app/telemetry.py` остаётся совместимым facade/re-export слоем.
 - Внутренняя реализация runtime store/feed backends теперь лежит в `gpt2giga/app/_runtime_backends/`, а `gpt2giga/app/runtime_backends.py` остаётся совместимым facade/re-export слоем.
 - Runtime store backend и observability backend также провиженятся через typed container-ы, чтобы route-модули не собирали инфраструктуру вручную.
+- Для таких facade/re-export слоёв используйте policy из [compatibility-facades.md](./compatibility-facades.md), а не ad hoc решения "оставить или удалить позже".
 
 ### Control plane
 

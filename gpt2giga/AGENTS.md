@@ -229,6 +229,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Keep `gpt2giga.app.runtime_backends` as the stable import facade when splitting runtime storage internals; move implementation into `app/_runtime_backends/`.
 - Keep `gpt2giga.core.config.control_plane` as the stable import facade when splitting control-plane persistence internals; move implementation into `core/config/_control_plane/`.
 - When splitting oversized runtime modules, prefer underscore-prefixed internal packages such as `app/_observability/` and `app/_telemetry/`, while keeping the old top-level module as the stable import facade.
+- Follow `docs/compatibility-facades.md` when deciding whether a wrapper is a permanent facade, a migration-only import shim, or removable legacy surface.
 - New config belongs in `core/config/settings.py` with a `Field(...)` description.
 - For internal reads, prefer grouped views such as `proxy_settings.security`, `proxy_settings.runtime_store`, and `proxy_settings.observability`; flat proxy fields remain the env/control-plane compatibility layer.
 - Middleware order matters; revalidate behavior if changing `app/factory.py`.
