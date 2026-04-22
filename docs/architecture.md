@@ -2,6 +2,8 @@
 
 Этот документ заменяет устаревшую ссылку на `ARCHITECTURE_v2.md` и описывает текущую структуру проекта на уровне, достаточном для feature-работы и рефакторинга.
 
+Если нужен не только текущий flow, но и rationale спорных решений, откройте [design-notes.md](./design-notes.md): там отдельно зафиксированы причины frameworkless admin UI, committed compiled assets и текущей границы между feature-layer и provider mapping.
+
 ## Ключевая идея
 
 `gpt2giga` принимает OpenAI-, Anthropic- и Gemini-совместимые HTTP-запросы, нормализует их через feature-слой и отправляет в GigaChat API. Runtime собирается в FastAPI-приложение, а операторский control plane живет в `/admin` и связанных `/admin/api/*` endpoint-ах.
