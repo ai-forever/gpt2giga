@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -380,6 +381,59 @@ async def test_stream_chat_completion_generator_success_with_disconnect():
         lines.append(line)
     assert len(lines) == 2
     assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_generator_large_chunk_sequence_stays_within_regression_budget():
+    class BulkClient:
+        def astream(self, chat):
+            del chat
+
+            async def gen():
+                for index in range(1_500):
+                    yield make_chunk(
+                        {
+                            "choices": [{"delta": {"content": f"chunk-{index}"}}],
+                            "usage": None,
+                            "model": "giga",
+                        }
+                    )
+
+            return gen()
+
+    class BulkRequest:
+        def __init__(self):
+            self.app = SimpleNamespace(
+                state=SimpleNamespace(
+                    gigachat_client=BulkClient(),
+                    logger=MagicMock(),
+                    response_processor=ResponseProcessor(logger=MagicMock()),
+                )
+            )
+            self.state = SimpleNamespace()
+
+        async def is_disconnected(self):
+            return False
+
+    req = BulkRequest()
+    started_at = time.perf_counter()
+    line_count = 0
+    last_line = ""
+    async for line in stream_chat_completion_generator(
+        req,
+        "gpt-test",
+        {"messages": []},
+        response_id="bulk-1",
+        giga_client=req.app.state.gigachat_client,
+        mapper=GigaChatChatMapper(response_processor=req.app.state.response_processor),
+    ):
+        line_count += 1
+        last_line = line
+    elapsed = time.perf_counter() - started_at
+
+    assert line_count == 1_501
+    assert last_line == format_chat_stream_done()
+    assert elapsed < 1.5
 
 
 @pytest.mark.asyncio

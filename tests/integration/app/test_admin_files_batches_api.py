@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -323,6 +324,54 @@ def test_admin_files_batches_inventory_filters_by_api_format():
         "file-gemini-1",
     ]
     assert [item["id"] for item in body["batches"]] == ["batch-gemini-1"]
+
+
+def test_admin_files_batches_inventory_large_dataset_stays_within_regression_budget():
+    app = make_app()
+    for index in range(900):
+        file_id = f"file-large-output-{index}"
+        batch_id = f"batch-large-{index}"
+        app.state.gigachat_client.files[file_id] = {
+            "content": b'{"response":{"body":{"choices":[]}}}\n',
+            "object": FakeUploadedFile(
+                id=file_id,
+                object="file",
+                bytes=34,
+                created_at=2_000 + index,
+                filename=f"{file_id}.jsonl",
+                purpose="general",
+            ),
+        }
+        app.state.gigachat_client.batches[batch_id] = FakeBatch(
+            id=batch_id,
+            method="chat_completions",
+            request_counts=FakeRequestCounts(total=1, completed=1, failed=0),
+            status="completed",
+            output_file_id=file_id,
+            created_at=3_000 + index,
+            updated_at=3_001 + index,
+        )
+        app.state.batch_metadata_store[batch_id] = {
+            "endpoint": "/v1/chat/completions",
+            "input_file_id": f"file-input-{index}",
+            "output_file_id": file_id,
+            "model": "gpt-test",
+        }
+
+    client = TestClient(app)
+
+    started_at = time.perf_counter()
+    response = client.get("/admin/api/files-batches/inventory")
+    elapsed = time.perf_counter() - started_at
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["counts"]["files"] == 904
+    assert body["counts"]["batches"] == 903
+    assert body["counts"]["output_ready"] == 903
+    assert body["files"][0]["id"] == "file-large-output-899"
+    assert body["batches"][0]["id"] == "batch-large-899"
+    assert elapsed < 2.5
 
 
 def test_admin_files_batches_detail_endpoints_return_normalized_records():

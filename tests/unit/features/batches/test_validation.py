@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from gpt2giga.core.contracts import NormalizedArtifactFormat
@@ -199,6 +201,33 @@ async def test_batch_input_validator_validate_bytes_preserves_original_line_numb
     assert report.valid is False
     assert ("blank_line", 1) in issues_by_code
     assert ("duplicate_identifier", 3) in issues_by_code
+
+
+@pytest.mark.asyncio
+async def test_batch_input_validator_large_payload_stays_within_regression_budget():
+    validator = BatchInputValidator(
+        request_transformer=FakeValidationTransformer(),
+        default_model="GigaChat-2-Max",
+    )
+    content = b"".join(
+        (
+            (
+                '{"custom_id":"row-%d","url":"/v1/chat/completions","body":'
+                '{"model":"gpt-test","messages":[{"role":"user","content":"hello"}]}}\n'
+            )
+            % index
+        ).encode("utf-8")
+        for index in range(1_500)
+    )
+
+    started_at = time.perf_counter()
+    report = await validator.validate_bytes(content, api_format="openai")
+    elapsed = time.perf_counter() - started_at
+
+    assert report.valid is False
+    assert report.summary.total_rows == 1_500
+    assert any(issue.code == "row_limit_exceeded" for issue in report.issues)
+    assert elapsed < 1.5
 
 
 @pytest.mark.asyncio
