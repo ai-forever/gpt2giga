@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
+from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
 from gpt2giga.api.batches_validation import router
 from gpt2giga.app.dependencies import get_runtime_providers
 from gpt2giga.core.config.settings import ProxyConfig
@@ -23,6 +24,20 @@ def make_app():
     app.state.logger = logger
     providers.request_transformer = FakeRequestTransformer()
     return app
+
+
+def test_batch_validation_route_rejects_oversized_chunked_request_body():
+    app = make_app()
+    app.add_middleware(RequestValidationMiddleware, max_body_bytes=16)
+    client = TestClient(app)
+
+    response = client.post(
+        "/batches/validate",
+        content=iter([b'{"requests":[', b'{"body":"0123456789"}', b"]}"]),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "request_entity_too_large"
 
 
 def test_batch_validation_route_validates_openai_rows():

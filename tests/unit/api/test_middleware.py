@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
 from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_CHAT, provider_tag
 from gpt2giga.app._observability.context import (
     get_request_audit_metadata as internal_get_request_audit_metadata,
@@ -190,6 +191,54 @@ def test_path_norm_keeps_upload_v1beta_prefix():
 
     assert resp.status_code == 200
     assert resp.json() == {"ok": True}
+
+
+def test_request_validation_rejects_oversized_content_length():
+    test_app = FastAPI()
+    test_app.add_middleware(RequestValidationMiddleware, max_body_bytes=5)
+
+    @test_app.post("/echo")
+    async def echo(request: Request):
+        return {"size": len(await request.body())}
+
+    client = TestClient(test_app)
+    response = client.post("/echo", content=b"abcdef")
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "request_entity_too_large"
+
+
+def test_request_validation_rejects_oversized_chunked_body_without_content_length():
+    test_app = FastAPI()
+    test_app.add_middleware(RequestValidationMiddleware, max_body_bytes=5)
+    called = {"value": False}
+
+    @test_app.post("/echo")
+    async def echo(request: Request):
+        called["value"] = True
+        return {"size": len(await request.body())}
+
+    client = TestClient(test_app)
+    response = client.post("/echo", content=iter([b"abc", b"def"]))
+
+    assert response.status_code == 413
+    assert response.json()["error"]["code"] == "request_entity_too_large"
+    assert called["value"] is False
+
+
+def test_request_validation_replays_chunked_body_within_limit():
+    test_app = FastAPI()
+    test_app.add_middleware(RequestValidationMiddleware, max_body_bytes=5)
+
+    @test_app.post("/echo")
+    async def echo(request: Request):
+        return {"size": len(await request.body())}
+
+    client = TestClient(test_app)
+    response = client.post("/echo", content=iter([b"ab", b"cde"]))
+
+    assert response.status_code == 200
+    assert response.json() == {"size": 5}
 
 
 def test_pass_token_middleware(monkeypatch):
