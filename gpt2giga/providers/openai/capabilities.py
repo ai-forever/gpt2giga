@@ -60,7 +60,7 @@ class OpenAIModelsAdapter:
     def serialize_model(self, model: ModelDescriptor) -> OpenAIModel:
         return OpenAIModel(
             id=model["id"],
-            object=model["object"],
+            object="model",
             owned_by=model["owned_by"],
             created=int(time.time()),
         )
@@ -105,7 +105,19 @@ class OpenAIBatchesAdapter:
         return dict(payload)
 
 
-openai_provider_adapters = ProviderAdapterBundle(
+@dataclass(frozen=True, slots=True)
+class OpenAIProviderAdapterBundle(ProviderAdapterBundle):
+    """OpenAI adapter bundle with required capabilities."""
+
+    chat: OpenAIChatAdapter
+    responses: OpenAIResponsesAdapter
+    embeddings: OpenAIEmbeddingsAdapter
+    models: OpenAIModelsAdapter
+    files: OpenAIFilesAdapter
+    batches: OpenAIBatchesAdapter
+
+
+openai_provider_adapters = OpenAIProviderAdapterBundle(
     chat=OpenAIChatAdapter(),
     responses=OpenAIResponsesAdapter(),
     embeddings=OpenAIEmbeddingsAdapter(),

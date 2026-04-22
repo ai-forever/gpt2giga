@@ -2,8 +2,10 @@
 
 from typing import Any, Dict, List, Optional
 
+from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
 
-class ResponsesV2HistoryRepairMixin:
+
+class ResponsesV2HistoryRepairMixin(RequestTransformerBaseMixin):
     """Repair client-supplied Responses history before message assembly."""
 
     def _extract_response_v2_function_call(

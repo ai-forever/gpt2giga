@@ -5,8 +5,6 @@ import time
 import uuid
 from typing import Any, Dict, Optional
 
-from gigachat.models import ChatCompletion, ChatCompletionChunk
-
 from gpt2giga.providers.gigachat.response_mapping_common import (
     ResponseProcessorCommonMixin,
 )
@@ -32,7 +30,7 @@ class ResponseProcessor(
 
     def process_response(
         self,
-        giga_resp: ChatCompletion,
+        giga_resp: Any,
         gpt_model: str,
         response_id: str,
         request_data: Optional[Dict] = None,
@@ -220,7 +218,7 @@ class ResponseProcessor(
 
     def process_stream_chunk(
         self,
-        giga_resp: ChatCompletionChunk,
+        giga_resp: Any,
         gpt_model: str,
         response_id: str,
         request_data: Optional[Dict] = None,

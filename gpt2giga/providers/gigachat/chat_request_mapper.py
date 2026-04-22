@@ -8,10 +8,11 @@ from gigachat import GigaChat
 from gpt2giga.core.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.providers.gigachat.content_utils import ensure_json_object_str
 from gpt2giga.providers.gigachat.message_utils import ensure_system_first
+from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_to_gigachat
 
 
-class RequestTransformerMessagesMixin:
+class RequestTransformerMessagesMixin(RequestTransformerBaseMixin):
     """Helpers for message and attachment normalization."""
 
     @staticmethod
@@ -200,6 +201,8 @@ class RequestTransformerMessagesMixin:
             *,
             filename: Optional[str] = None,
         ) -> None:
+            if processor is None:
+                return
             if giga_client is None:
                 self.logger.warning("giga_client not provided for file upload")
                 return

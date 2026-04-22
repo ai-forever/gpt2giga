@@ -6,10 +6,11 @@ from typing import Any, Dict, List, Optional
 from gigachat import GigaChat
 
 from gpt2giga.core.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
+from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_to_gigachat
 
 
-class ResponsesV2ContentPartsMixin:
+class ResponsesV2ContentPartsMixin(RequestTransformerBaseMixin):
     """Normalize Responses API content parts into GigaChat message payloads."""
 
     async def _upload_response_file_part(

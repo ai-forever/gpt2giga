@@ -5,9 +5,10 @@ from typing import Any, Dict, Optional
 from gigachat.models import ChatV2ModelOptions, ChatV2Reasoning, ChatV2ResponseFormat
 
 from gpt2giga.core.schema.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
 
 
-class ResponsesV2ModelOptionsMixin:
+class ResponsesV2ModelOptionsMixin(RequestTransformerBaseMixin):
     """Build GigaChat v2 model options for Responses API requests."""
 
     def _build_response_v2_model_options(

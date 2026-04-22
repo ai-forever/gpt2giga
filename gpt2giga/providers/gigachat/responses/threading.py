@@ -2,8 +2,10 @@
 
 from typing import Any, Dict, Optional
 
+from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
 
-class ResponsesV2ThreadingMixin:
+
+class ResponsesV2ThreadingMixin(RequestTransformerBaseMixin):
     """Resolve Responses API thread identifiers."""
 
     def _resolve_response_storage(

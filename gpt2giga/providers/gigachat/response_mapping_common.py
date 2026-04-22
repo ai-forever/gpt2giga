@@ -7,6 +7,9 @@ from typing import Any, Dict, Iterable, Optional
 class ResponseProcessorCommonMixin:
     """Common helpers shared across chat and Responses API processors."""
 
+    logger: Any
+    _mode: str
+
     @property
     def _is_prod_mode(self) -> bool:
         return self._mode == "PROD"

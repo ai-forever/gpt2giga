@@ -7,9 +7,28 @@ from gigachat.models import ChatV2, ChatV2Storage, ChatV2Tool, ChatV2UserInfo
 
 from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.core.logging.setup import sanitize_for_utf8
+from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
+from gpt2giga.providers.gigachat.responses.input_normalizer import (
+    ResponsesV2InputNormalizerMixin,
+)
+from gpt2giga.providers.gigachat.responses.model_options import (
+    ResponsesV2ModelOptionsMixin,
+)
+from gpt2giga.providers.gigachat.responses.threading import (
+    ResponsesV2ThreadingMixin,
+)
+from gpt2giga.providers.gigachat.responses.tool_mapping import (
+    ResponsesV2ToolMappingMixin,
+)
 
 
-class ResponsesV2BackendRequestMixin:
+class ResponsesV2BackendRequestMixin(
+    ResponsesV2ModelOptionsMixin,
+    ResponsesV2InputNormalizerMixin,
+    ResponsesV2ThreadingMixin,
+    ResponsesV2ToolMappingMixin,
+    RequestTransformerBaseMixin,
+):
     """Build the final GigaChat v2 request payload for Responses API calls."""
 
     async def prepare_response_v2(

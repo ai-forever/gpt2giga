@@ -118,7 +118,7 @@ class RequestTransformer(
                     continue
                 content = message.get("content")
                 if isinstance(content, list):
-                    contents = []
+                    contents: list[dict[str, Any]] = []
                     append = contents.append
                     for content_part in content:
                         ctype = content_part.get("type")
@@ -141,8 +141,14 @@ class RequestTransformer(
     @staticmethod
     def mock_completion(message: dict) -> dict:
         """Create a mock assistant function-call message."""
-        arguments = json.loads(message.get("arguments"))
-        name = map_tool_name_to_gigachat(message.get("name"))
+        raw_arguments = message.get("arguments")
+        if isinstance(raw_arguments, (str, bytes, bytearray)):
+            arguments = json.loads(raw_arguments)
+        else:
+            arguments = raw_arguments or {}
+
+        raw_name = message.get("name")
+        name = map_tool_name_to_gigachat(raw_name) if isinstance(raw_name, str) else ""
         return Messages(
             role=MessagesRole.ASSISTANT,
             function_call=FunctionCall(name=name, arguments=arguments),

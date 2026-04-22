@@ -56,7 +56,10 @@ def _timestamp_to_rfc3339(timestamp: int | None) -> str | None:
 
 
 def _batch_state(batch: Any) -> str:
-    return _BATCH_STATE_MAP.get(getattr(batch, "status", None), "BATCH_STATE_RUNNING")
+    status = getattr(batch, "status", None)
+    if not isinstance(status, str):
+        return "BATCH_STATE_RUNNING"
+    return _BATCH_STATE_MAP.get(status, "BATCH_STATE_RUNNING")
 
 
 def _batch_stats(batch: Any, metadata: dict[str, Any]) -> dict[str, str]:
@@ -293,7 +296,7 @@ def _build_batch_rows(
                 "body": to_backend_payload(normalized_request),
             }
         )
-        stored_item = {"request": request_payload}
+        stored_item: dict[str, Any] = {"request": request_payload}
         request_key = request_item.get("key")
         if isinstance(request_key, str) and request_key.strip():
             stored_item["key"] = request_key.strip()

@@ -5,7 +5,9 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
+from gpt2giga.core.config.settings import ProxyConfig
 from gpt2giga.core.schema.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.providers.gigachat.attachments import AttachmentProcessor
 from gpt2giga.providers.gigachat.message_utils import (
     limit_attachments,
     map_role,
@@ -16,6 +18,10 @@ from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_to_gigachat
 
 class RequestTransformerBaseMixin:
     """Common request transformation helpers."""
+
+    config: ProxyConfig
+    logger: Any
+    attachment_processor: Optional[AttachmentProcessor]
 
     def _map_role(self, role: str, is_first: bool) -> str:
         """Map a role to a valid GigaChat role."""

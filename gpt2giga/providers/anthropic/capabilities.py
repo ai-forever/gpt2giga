@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from gpt2giga.api.anthropic.request_adapter import (
@@ -113,7 +113,19 @@ class AnthropicBatchesAdapter:
         )
 
 
-anthropic_provider_adapters = ProviderAdapterBundle(
+@dataclass(frozen=True, slots=True)
+class AnthropicProviderAdapterBundle(ProviderAdapterBundle):
+    """Anthropic adapter bundle with required capabilities."""
+
+    chat: AnthropicChatAdapter = field(default_factory=AnthropicChatAdapter)
+    responses: None = None
+    embeddings: None = None
+    models: None = None
+    files: None = None
+    batches: AnthropicBatchesAdapter = field(default_factory=AnthropicBatchesAdapter)
+
+
+anthropic_provider_adapters = AnthropicProviderAdapterBundle(
     chat=AnthropicChatAdapter(),
     batches=AnthropicBatchesAdapter(),
 )

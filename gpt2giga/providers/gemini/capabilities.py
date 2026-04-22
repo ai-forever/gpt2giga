@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from gpt2giga.api.gemini.request import normalize_model_name
@@ -80,7 +80,19 @@ class GeminiModelsAdapter:
         )
 
 
-gemini_provider_adapters = ProviderAdapterBundle(
+@dataclass(frozen=True, slots=True)
+class GeminiProviderAdapterBundle(ProviderAdapterBundle):
+    """Gemini adapter bundle with required capabilities."""
+
+    chat: GeminiChatAdapter = field(default_factory=GeminiChatAdapter)
+    responses: None = None
+    embeddings: GeminiEmbeddingsAdapter = field(default_factory=GeminiEmbeddingsAdapter)
+    models: GeminiModelsAdapter = field(default_factory=GeminiModelsAdapter)
+    files: None = None
+    batches: None = None
+
+
+gemini_provider_adapters = GeminiProviderAdapterBundle(
     chat=GeminiChatAdapter(),
     embeddings=GeminiEmbeddingsAdapter(),
     models=GeminiModelsAdapter(),

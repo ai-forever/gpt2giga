@@ -4,10 +4,21 @@ from typing import Any, Dict, List, Optional
 
 from gigachat import GigaChat
 
+from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
+from gpt2giga.providers.gigachat.responses.input_content import (
+    ResponsesV2ContentPartsMixin,
+)
+from gpt2giga.providers.gigachat.responses.input_history import (
+    ResponsesV2HistoryRepairMixin,
+)
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_to_gigachat
 
 
-class ResponsesV2MessageBuilderMixin:
+class ResponsesV2MessageBuilderMixin(
+    ResponsesV2HistoryRepairMixin,
+    ResponsesV2ContentPartsMixin,
+    RequestTransformerBaseMixin,
+):
     """Assemble GigaChat v2 messages from normalized Responses input items."""
 
     @staticmethod
@@ -16,14 +27,14 @@ class ResponsesV2MessageBuilderMixin:
         summary = item.get("summary")
         if isinstance(summary, list):
             reasoning_chunks.extend(
-                part.get("text")
+                part["text"]
                 for part in summary
                 if isinstance(part, dict) and isinstance(part.get("text"), str)
             )
         content = item.get("content")
         if isinstance(content, list):
             reasoning_chunks.extend(
-                part.get("text")
+                part["text"]
                 for part in content
                 if isinstance(part, dict) and isinstance(part.get("text"), str)
             )
