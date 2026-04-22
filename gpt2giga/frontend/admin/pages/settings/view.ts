@@ -81,6 +81,13 @@ function renderSettingsHub(state: SettingsPageState): string {
           `Providers: ${asArray<string>(state.applicationValues.enabled_providers).join(", ") || "none"}`,
         ),
         pill(`Store: ${String(state.applicationValues.runtime_store_backend ?? "n/a")}`),
+        pill(
+          `Active: ${String(state.applicationValues.runtime_store_active_backend ?? "n/a")}`,
+          state.applicationValues.runtime_store_active_backend ===
+            state.applicationValues.runtime_store_backend
+            ? "good"
+            : "warn",
+        ),
       ],
     })}
     ${renderSettingsEntryCard({

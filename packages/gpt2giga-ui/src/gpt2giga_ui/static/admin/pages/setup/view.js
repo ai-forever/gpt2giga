@@ -39,6 +39,7 @@ function renderSetupHub(state) {
         <div class="stack">
           <div class="stat-line"><strong>Runtime mode</strong><span class="muted">${escapeHtml(state.runtime.mode ?? "n/a")}</span></div>
           <div class="stat-line"><strong>Store backend</strong><span class="muted">${escapeHtml(state.runtime.runtime_store_backend ?? "n/a")}</span></div>
+          <div class="stat-line"><strong>Active store</strong><span class="muted">${escapeHtml(state.applicationValues.runtime_store_active_backend ?? state.runtime.runtime_store_backend ?? "n/a")}</span></div>
           <div class="stat-line"><strong>Control-plane file</strong><span class="muted">${escapeHtml(state.setup.path ?? "n/a")}</span></div>
           <div class="stat-line"><strong>Encryption key file</strong><span class="muted">${escapeHtml(state.setup.key_path ?? "n/a")}</span></div>
           ${state.warnings.length

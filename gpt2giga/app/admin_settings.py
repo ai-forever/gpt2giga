@@ -15,6 +15,7 @@ from gpt2giga.app.dependencies import (
     get_runtime_providers,
     get_runtime_stores,
 )
+from gpt2giga.app.runtime_backends import list_runtime_backend_descriptors
 from gpt2giga.app.wiring import reload_runtime_services
 from gpt2giga.core.config.control_plane import (
     build_proxy_config_from_control_plane_payload,
@@ -130,6 +131,22 @@ _SECRET_FIELDS = {
     "key_file_password",
 }
 
+_RUNTIME_STORE_BACKEND_LABELS = {
+    "memory": "Memory",
+    "sqlite": "SQLite",
+    "redis": "Redis",
+    "postgres": "Postgres",
+    "s3": "S3",
+}
+_RUNTIME_STORE_BACKEND_DESCRIPTIONS = {
+    "memory": "Process-local dictionaries and recent-event buffers.",
+    "sqlite": "SQLite-backed runtime stores and recent-event feeds.",
+    "redis": "Redis-backed runtime stores and recent-event feeds.",
+    "postgres": "Postgres-backed runtime stores and recent-event feeds.",
+    "s3": "Object-storage-backed runtime snapshots and feeds.",
+}
+_RUNTIME_STORE_BACKEND_ORDER = ("memory", "sqlite", "redis", "postgres", "s3")
+
 
 def _mask_secret(value: str | None) -> str | None:
     """Return a short masked preview for a secret string."""
@@ -188,6 +205,63 @@ def _build_application_settings(proxy: ProxySettings) -> dict[str, Any]:
         "log_max_size": proxy.log_max_size,
         "log_redact_sensitive": proxy.log_redact_sensitive,
     }
+
+
+def _build_runtime_store_catalog(
+    *,
+    configured_backend: str,
+    active_backend: str | None,
+) -> list[dict[str, Any]]:
+    """Build a UI-facing runtime store catalog with configured and active state."""
+    registered = {
+        descriptor.name: descriptor for descriptor in list_runtime_backend_descriptors()
+    }
+    ordered_names = list(_RUNTIME_STORE_BACKEND_ORDER)
+    ordered_names.extend(
+        name for name in sorted(registered) if name not in _RUNTIME_STORE_BACKEND_ORDER
+    )
+
+    catalog: list[dict[str, Any]] = []
+    for name in ordered_names:
+        descriptor = registered.get(name)
+        catalog.append(
+            {
+                "name": name,
+                "label": _RUNTIME_STORE_BACKEND_LABELS.get(name, name),
+                "description": (
+                    descriptor.description
+                    if descriptor is not None
+                    else _RUNTIME_STORE_BACKEND_DESCRIPTIONS.get(
+                        name,
+                        "Custom runtime store backend.",
+                    )
+                ),
+                "registered": descriptor is not None,
+                "configured": name == configured_backend,
+                "active": name == active_backend,
+            }
+        )
+    return catalog
+
+
+def _build_application_settings_payload(
+    proxy: ProxySettings,
+    *,
+    active_backend: str | None,
+) -> dict[str, Any]:
+    """Build application settings plus runtime store catalog state."""
+    payload = _build_application_settings(proxy)
+    payload["runtime_store_active_backend"] = active_backend
+    payload["runtime_store_catalog"] = _build_runtime_store_catalog(
+        configured_backend=str(payload.get("runtime_store_backend") or ""),
+        active_backend=active_backend,
+    )
+    payload["runtime_store_registered_backends"] = [
+        item["name"]
+        for item in payload["runtime_store_catalog"]
+        if item.get("registered")
+    ]
+    return payload
 
 
 def _build_gigachat_settings(gigachat: GigaChatCLI) -> dict[str, Any]:
@@ -402,9 +476,15 @@ class AdminControlPlaneSettingsService:
 
     def build_application_payload(self) -> dict[str, Any]:
         """Return UI-facing application settings."""
+        stores = get_runtime_stores(self.state)
         return {
             "section": "application",
-            "values": _build_application_settings(self.config.proxy_settings),
+            "values": _build_application_settings_payload(
+                self.config.proxy_settings,
+                active_backend=(
+                    stores.backend.name if stores.backend is not None else None
+                ),
+            ),
             "control_plane": self._control_summary(),
         }
 
@@ -413,14 +493,32 @@ class AdminControlPlaneSettingsService:
     ) -> dict[str, Any]:
         """Persist and optionally apply application settings."""
         self.validate_section_payload("application", payload)
+        requested_backend = str(payload.get("runtime_store_backend") or "").strip()
+        if requested_backend and requested_backend not in {
+            descriptor.name for descriptor in list_runtime_backend_descriptors()
+        }:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Runtime store backend "
+                    f"`{requested_backend}` is not added in this build. "
+                    "Use one of the registered backends or register a custom backend first."
+                ),
+            )
         updated = _build_updated_config(self.config, proxy_updates=payload)
         result = await self._apply_updated_config(
             updated,
             changed_fields=set(payload),
         )
+        stores = get_runtime_stores(self.state)
         return {
             "section": "application",
-            "values": _build_application_settings(updated.proxy_settings),
+            "values": _build_application_settings_payload(
+                updated.proxy_settings,
+                active_backend=(
+                    stores.backend.name if stores.backend is not None else None
+                ),
+            ),
             **result,
         }
 
@@ -607,8 +705,14 @@ class AdminControlPlaneSettingsService:
 
     def _build_settings_snapshot(self, config: ProxyConfig) -> dict[str, Any]:
         """Build the safe, UI-facing snapshot of all settings sections."""
+        stores = get_runtime_stores(self.state)
         return {
-            "application": _build_application_settings(config.proxy_settings),
+            "application": _build_application_settings_payload(
+                config.proxy_settings,
+                active_backend=(
+                    stores.backend.name if stores.backend is not None else None
+                ),
+            ),
             "observability": ObservabilitySettings.from_proxy_settings(
                 config.proxy_settings
             ).to_safe_payload(),

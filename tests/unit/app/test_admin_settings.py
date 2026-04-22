@@ -62,6 +62,22 @@ async def test_admin_control_plane_settings_service_updates_observability(
     assert sink_by_id["otlp"]["settings"]["service_name"] == "gpt2giga-dev"
 
 
+def test_admin_control_plane_settings_service_builds_runtime_store_catalog():
+    request = _build_request()
+
+    payload = AdminControlPlaneSettingsService(request).build_application_payload()
+
+    catalog = {
+        item["name"]: item for item in payload["values"]["runtime_store_catalog"]
+    }
+    assert catalog["memory"]["registered"] is True
+    assert catalog["sqlite"]["registered"] is True
+    assert catalog["redis"]["registered"] is False
+    assert catalog["postgres"]["registered"] is False
+    assert catalog["s3"]["registered"] is False
+    assert payload["values"]["runtime_store_active_backend"] == "memory"
+
+
 @pytest.mark.asyncio
 async def test_admin_control_plane_settings_service_builds_masked_revision_diffs(
     tmp_path, monkeypatch
@@ -167,3 +183,19 @@ async def test_admin_control_plane_settings_service_rejects_mutations_when_persi
 
     assert exc_info.value.status_code == 409
     assert "Control-plane persistence is disabled" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_admin_control_plane_settings_service_rejects_unregistered_runtime_store_backend(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    request = _build_request()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await AdminControlPlaneSettingsService(request).update_application_settings(
+            {"runtime_store_backend": "redis"}
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "is not added in this build" in str(exc_info.value.detail)

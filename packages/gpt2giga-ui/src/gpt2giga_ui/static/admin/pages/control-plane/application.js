@@ -1,5 +1,5 @@
-import { banner, renderBooleanSelectOptions, renderFormSection, renderSelectOption, renderStaticSelectOptions, } from "../../templates.js";
-import { csv, escapeHtml } from "../../utils.js";
+import { banner, pill, renderBooleanSelectOptions, renderFormSection, renderSelectOption, renderStaticSelectOptions, } from "../../templates.js";
+import { asArray, asRecord, csv, escapeHtml } from "../../utils.js";
 import { LOG_LEVELS, } from "./types.js";
 export function renderApplicationSection(options) {
     return `
@@ -88,24 +88,13 @@ export function renderSecuritySection(options) {
 }
 function renderSetupApplicationFields(values) {
     return `
+    ${renderRuntimeStoreSection(values)}
     <div class="dual-grid">
       <label class="field">
         <span>Enabled providers</span>
         <input name="enabled_providers" value="${escapeHtml(csv(values.enabled_providers))}" />
       </label>
       <label class="field"><span>Mode handoff</span><input value="Use full settings for observability and advanced routing." disabled /></label>
-    </div>
-    <div class="dual-grid">
-      <label class="field">
-        <span>Runtime store backend</span>
-        <select name="runtime_store_backend">
-          ${renderStaticSelectOptions(String(values.runtime_store_backend ?? ""), ["memory", "sqlite"])}
-        </select>
-      </label>
-      <label class="field">
-        <span>Runtime namespace</span>
-        <input name="runtime_store_namespace" value="${escapeHtml(values.runtime_store_namespace ?? "")}" />
-      </label>
     </div>
     <div class="triple-grid">
       <label class="field">
@@ -125,6 +114,7 @@ function renderSetupApplicationFields(values) {
 }
 function renderSettingsApplicationFields(values) {
     return `
+    ${renderRuntimeStoreSection(values)}
     <div class="dual-grid">
       <label class="field"><span>Enabled providers</span><input name="enabled_providers" value="${escapeHtml(csv(values.enabled_providers))}" /></label>
       <label class="field"><span>Embeddings model</span><input name="embeddings" value="${escapeHtml(values.embeddings ?? "")}" /></label>
@@ -158,4 +148,78 @@ function renderSettingsApplicationFields(values) {
       </label>
     </div>
   `;
+}
+function renderRuntimeStoreSection(values) {
+    const configuredBackend = String(values.runtime_store_backend ?? "n/a");
+    const activeBackend = String(values.runtime_store_active_backend ?? "n/a");
+    const dsnConfigured = Boolean(values.runtime_store_dsn_configured);
+    const catalog = getRuntimeStoreCatalog(values);
+    const registeredNames = catalog
+        .filter((item) => item.registered)
+        .map((item) => item.name);
+    return `
+    <div class="stack">
+      <div class="toolbar">
+        ${pill(`Configured: ${configuredBackend}`)}
+        ${pill(`Active: ${activeBackend}`, activeBackend !== "n/a" && activeBackend === configuredBackend ? "good" : "warn")}
+        ${pill(`Added: ${registeredNames.join(", ") || "none"}`)}
+        ${pill(`DSN: ${dsnConfigured ? "configured" : "not configured"}`, dsnConfigured ? "good" : "warn")}
+      </div>
+      <div class="dual-grid">
+        <label class="field">
+          <span>Runtime store backend</span>
+          <select name="runtime_store_backend">
+            ${renderRuntimeStoreSelectOptions(catalog, configuredBackend)}
+          </select>
+        </label>
+        <label class="field">
+          <span>Runtime namespace</span>
+          <input name="runtime_store_namespace" value="${escapeHtml(values.runtime_store_namespace ?? "")}" />
+        </label>
+      </div>
+      <div class="stack">
+        ${catalog
+        .map((item) => `
+              <div class="stat-line">
+                <strong>${escapeHtml(item.label)}</strong>
+                <span class="muted">${escapeHtml(buildRuntimeStoreLine(item))}</span>
+              </div>
+            `)
+        .join("")}
+      </div>
+    </div>
+  `;
+}
+function getRuntimeStoreCatalog(values) {
+    return asArray(values.runtime_store_catalog)
+        .map((item) => asRecord(item))
+        .map((item) => ({
+        active: Boolean(item.active),
+        configured: Boolean(item.configured),
+        description: String(item.description ?? ""),
+        label: String(item.label ?? item.name ?? "unknown"),
+        name: String(item.name ?? ""),
+        registered: Boolean(item.registered),
+    }))
+        .filter((item) => item.name);
+}
+function renderRuntimeStoreSelectOptions(catalog, selected) {
+    return catalog
+        .map((item) => {
+        const labelSuffix = item.registered
+            ? item.active
+                ? " (added, active)"
+                : " (added)"
+            : " (not added)";
+        return `<option value="${escapeHtml(item.name)}" ${selected === item.name ? "selected" : ""} ${item.registered ? "" : "disabled"}>${escapeHtml(`${item.label}${labelSuffix}`)}</option>`;
+    })
+        .join("");
+}
+function buildRuntimeStoreLine(item) {
+    const statusParts = [
+        item.registered ? "added" : "not added",
+        item.configured ? "configured" : null,
+        item.active ? "active" : null,
+    ].filter(Boolean);
+    return `${statusParts.join(", ")}. ${item.description}`;
 }
