@@ -11,6 +11,8 @@ from starlette.requests import Request
 
 from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
 from gpt2giga.api.batch_validation import (
+    cache_batch_input_bytes,
+    resolve_batch_input_bytes,
     validate_batch_input_request,
     run_batch_input_validation,
 )
@@ -128,7 +130,7 @@ async def create_files_batches_file(request: Request):
     purpose = str(form.get("purpose") or "batch").strip() or "batch"
     api_format = str(form.get("api_format") or "openai").strip() or "openai"
     display_name = str(form.get("display_name") or "").strip() or None
-    return await service.create_file(
+    created = await service.create_file(
         api_format=api_format,
         purpose=purpose,
         upload=upload,
@@ -137,6 +139,14 @@ async def create_files_batches_file(request: Request):
         files_service=get_files_service_from_state(app_state),
         file_store=get_file_store(request),
     )
+    created_file_id = str(created.id or "").strip()
+    if created_file_id and purpose == "batch":
+        cache_batch_input_bytes(
+            request,
+            file_id=created_file_id,
+            content=upload["content"],
+        )
+    return created
 
 
 @admin_files_batches_api_router.post("/admin/api/files-batches/batches")
@@ -147,11 +157,17 @@ async def create_files_batches_batch(
 ):
     """Create a normalized batch artifact through the admin API."""
     verify_logs_ip_allowlist(request)
+    input_bytes = None
+    if payload.input_file_id and not payload.requests:
+        input_bytes = await resolve_batch_input_bytes(
+            request,
+            file_id=payload.input_file_id,
+        )
     validation_report = await run_batch_input_validation(
         request=request,
         api_format=payload.api_format,
         input_file_id=payload.input_file_id,
-        input_bytes=None,
+        input_bytes=input_bytes,
         fallback_model=payload.model,
         requests=payload.requests,
     )
@@ -172,6 +188,7 @@ async def create_files_batches_batch(
         api_format=payload.api_format,
         endpoint=payload.endpoint,
         input_file_id=payload.input_file_id,
+        input_bytes=input_bytes,
         metadata=payload.metadata,
         display_name=payload.display_name,
         model=payload.model,
@@ -192,11 +209,14 @@ async def validate_files_batches_batch(
 ):
     """Validate staged or inline batch input and return a diagnostic report."""
     verify_logs_ip_allowlist(request)
-    input_bytes = (
-        base64.b64decode(payload.input_content_base64)
-        if payload.input_content_base64
-        else None
-    )
+    input_bytes = None
+    if payload.input_content_base64:
+        input_bytes = base64.b64decode(payload.input_content_base64)
+    elif payload.input_file_id and not payload.requests:
+        input_bytes = await resolve_batch_input_bytes(
+            request,
+            file_id=payload.input_file_id,
+        )
     return await validate_batch_input_request(
         request=request,
         api_format=payload.api_format,

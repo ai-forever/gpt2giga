@@ -35,6 +35,8 @@ class RuntimeStores:
     backend: RuntimeStateBackend | None = None
     files: Any = field(default_factory=dict)
     batches: Any = field(default_factory=dict)
+    batch_input_bytes: Any = field(default_factory=dict)
+    batch_validation_reports: Any = field(default_factory=dict)
     gemini_uploads: Any = field(default_factory=dict)
     responses: Any = field(default_factory=dict)
     usage_by_api_key: Any = field(default_factory=dict)

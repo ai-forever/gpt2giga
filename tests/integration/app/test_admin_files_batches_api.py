@@ -50,6 +50,7 @@ class FakeGigaChat:
     def __init__(self):
         self.next_batch_index = 4
         self.next_file_index = 4
+        self.file_content_requests: list[str] = []
         self.files = {
             "file-openai-1": {
                 "content": (
@@ -163,6 +164,7 @@ class FakeGigaChat:
         return self.files[file]["object"]
 
     async def aget_file_content(self, file_id):
+        self.file_content_requests.append(file_id)
         return FakeFileContent(
             content=base64.b64encode(self.files[file_id]["content"]).decode("utf-8")
         )
@@ -823,6 +825,72 @@ def test_admin_files_batches_validate_staged_file_returns_diagnostic_report():
     }
 
 
+def test_admin_files_batches_validate_reuses_cached_staged_file_bytes():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert response.status_code == 200
+    second_response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert second_response.status_code == 200
+    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+
+
+def test_admin_files_batches_create_uses_one_staged_file_read_for_validate_and_create():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert response.status_code == 200
+    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+
+
+def test_admin_files_batches_create_reuses_cached_validation_after_validate():
+    app = make_app()
+    client = TestClient(app)
+
+    validate_response = client.post(
+        "/admin/api/files-batches/batches/validate",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert validate_response.status_code == 200
+    create_response = client.post(
+        "/admin/api/files-batches/batches",
+        json={
+            "api_format": "openai",
+            "input_file_id": "file-openai-1",
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert app.state.gigachat_client.file_content_requests == ["file-openai-1"]
+
+
 def test_admin_files_batches_validate_inline_gemini_rows_returns_warnings_only():
     client = TestClient(make_app())
 
@@ -900,5 +968,5 @@ def test_admin_files_batches_validate_requires_file_or_requests():
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "`input_file_id` or `requests` is required for validation."
+        == "`input_file_id`, `input_content_base64`, or `requests` is required for validation."
     )

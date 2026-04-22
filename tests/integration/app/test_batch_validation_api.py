@@ -172,7 +172,7 @@ def test_batch_validation_route_requires_file_or_requests():
     assert response.status_code == 400
     assert (
         response.json()["detail"]
-        == "`input_file_id` or `requests` is required for validation."
+        == "`input_file_id`, `input_content_base64`, or `requests` is required for validation."
     )
 
 
