@@ -26,6 +26,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-009 — done
 - [x] RLS-010 — done
 - [x] RLS-011 — done
+- [x] RLS-012 — done
 
 ---
 
@@ -491,6 +492,15 @@ A thin facade re-export is acceptable.
 - serialization helpers are separated by concern
 - asset build output is refreshed and committed
 - no UI behavior regressions
+
+**Status**
+
+Completed in the current repository state: the files/batches serializer surface is
+now split into focused `serializers-filters.ts`, `serializers-inventory.ts`, and
+`serializers-preview.ts` helper modules, while `serializers.ts` remains a thin
+facade that preserves existing imports. Frontend coverage now exercises the
+extracted inventory and preview helpers directly, and the committed admin assets
+have been rebuilt in sync.
 
 ---
 
