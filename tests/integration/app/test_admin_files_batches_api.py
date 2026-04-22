@@ -363,6 +363,42 @@ def test_admin_files_batches_content_endpoints_proxy_canonical_artifacts():
     assert b'"response"' in batch_output_response.content
 
 
+def test_admin_files_batches_batch_output_infers_anthropic_format_from_input_file():
+    app = make_app()
+    app.state.gigachat_client.files["file-anthropic-input-1"] = {
+        "content": (
+            b'{"custom_id":"anthropic-batch-1","params":{"model":"claude-test","max_tokens":64,"messages":[{"role":"user","content":"hello anthropic"}]}}\n'
+        ),
+        "object": FakeUploadedFile(
+            id="file-anthropic-input-1",
+            object="file",
+            bytes=137,
+            created_at=114,
+            filename="anthropic-input.jsonl",
+            purpose="general",
+        ),
+    }
+    app.state.batch_metadata_store["batch-anthropic-1"] = {
+        "endpoint": "/v1/chat/completions",
+        "input_file_id": "file-anthropic-input-1",
+        "output_file_id": "file-anthropic-output-1",
+        "requests": [],
+    }
+    client = TestClient(app)
+
+    response = client.get("/admin/api/files-batches/batches/batch-anthropic-1/output")
+
+    assert response.status_code == 200
+    lines = [
+        json.loads(line)
+        for line in response.content.decode("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert lines[0]["custom_id"] == "req-1"
+    assert lines[0]["result"]["type"] == "succeeded"
+    assert "message" in lines[0]["result"]
+
+
 def test_admin_files_batches_create_openai_batch_returns_normalized_record():
     client = TestClient(make_app())
 

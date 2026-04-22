@@ -27,6 +27,7 @@ from gpt2giga.core.http.form_body import read_request_multipart
 from gpt2giga.features.batches import (
     get_batches_service_from_state,
 )
+from gpt2giga.features.batches.transforms import parse_jsonl
 from gpt2giga.features.batches.store import get_batch_store
 from gpt2giga.features.files import get_files_service_from_state
 from gpt2giga.features.files.store import get_file_store
@@ -360,8 +361,14 @@ async def _load_batch_output_content(
     raw_metadata = dict(batch_record.raw.get("metadata") or {})
     raw_batch = dict(batch_record.raw.get("batch") or {})
     status = str(raw_batch.get("status") or batch_record.status or "").strip().lower()
+    output_api_format = await _resolve_batch_output_api_format(
+        batch_record,
+        raw_metadata=raw_metadata,
+        giga_client=giga_client,
+        file_store=file_store,
+    )
 
-    if batch_record.api_format.value == "openai":
+    if output_api_format == "openai":
         content = await files_service.get_file_content(
             output_file_id,
             giga_client=giga_client,
@@ -378,7 +385,7 @@ async def _load_batch_output_content(
         )
 
     file_response = await giga_client.aget_file_content(file_id=output_file_id)
-    if batch_record.api_format.value == "anthropic":
+    if output_api_format == "anthropic":
         return (
             _build_anthropic_batch_results(file_response.content, raw_metadata),
             "application/binary",
@@ -391,6 +398,58 @@ async def _load_batch_output_content(
         ),
         "application/json",
     )
+
+
+async def _resolve_batch_output_api_format(
+    batch_record,
+    *,
+    raw_metadata: dict[str, Any],
+    giga_client: object,
+    file_store: object,
+) -> str:
+    """Resolve the batch output format, falling back to the original input rows."""
+    inferred_format = _infer_batch_api_format_from_rows(raw_metadata.get("requests"))
+    if inferred_format is not None:
+        return inferred_format
+
+    input_file_id = str(raw_metadata.get("input_file_id") or "").strip()
+    if not input_file_id and file_store is not None and batch_record.output_file_id:
+        stored_output_metadata = dict(file_store.get(batch_record.output_file_id, {}))
+        input_file_id = str(
+            stored_output_metadata.get("batch_input_file_id") or ""
+        ).strip()
+
+    if input_file_id:
+        try:
+            input_file_response = await giga_client.aget_file_content(
+                file_id=input_file_id
+            )
+            input_rows = parse_jsonl(base64.b64decode(input_file_response.content))
+        except Exception:
+            input_rows = []
+        inferred_format = _infer_batch_api_format_from_rows(input_rows)
+        if inferred_format is not None:
+            return inferred_format
+
+    return batch_record.api_format.value
+
+
+def _infer_batch_api_format_from_rows(rows: Any) -> str | None:
+    """Infer a batch row format from stored request rows or staged input content."""
+    if not isinstance(rows, list):
+        return None
+
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if "params" in row:
+            return "anthropic"
+        if "request" in row:
+            return "gemini"
+        if "body" in row or "url" in row or "method" in row:
+            return "openai"
+
+    return None
 
 
 def _get_response_processor_or_none(state: object):
