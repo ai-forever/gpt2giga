@@ -25,6 +25,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-008 — done
 - [x] RLS-009 — done
 - [x] RLS-010 — done
+- [x] RLS-011 — done
 
 ---
 
@@ -453,6 +454,15 @@ Leave route names, payload shapes, and route registration behavior intact.
 - router is thinner
 - extracted logic has tests where practical
 - route contracts remain stable
+
+**Status**
+
+Completed in the current repository state: route-scoped parsing, preview
+response shaping, staged/inline batch-input resolution, and batch-output
+loading helpers now live in `api/admin/files_batches_helpers.py`. The router
+delegates through the shared helper context, direct helper coverage lives in
+`tests/unit/api/test_admin_files_batches_helpers.py`, and the existing admin
+files/batches integration suite stays green.
 
 ---
 
