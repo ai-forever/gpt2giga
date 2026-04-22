@@ -52,7 +52,6 @@ class ApplicationSettingsUpdate(_AdminSettingsDTO):
     pass_model: bool | None = None
     pass_token: bool | None = None
     enable_reasoning: bool | None = None
-    enable_images: bool | None = None
     max_request_body_bytes: int | None = None
     max_audio_file_size_bytes: int | None = None
     max_image_file_size_bytes: int | None = None

@@ -4,7 +4,7 @@ import warnings
 from functools import cached_property
 from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, Field, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import NoDecode
 
 from gpt2giga.core.config._settings.access_control import (
@@ -57,20 +57,12 @@ class ServerProxySettingsMixin:
     )
     disable_ui: bool = Field(
         default=False,
-        validation_alias=AliasChoices(
-            "disable_ui", "GPT2GIGA_DISABLE_UI", "DISABLE_UI"
-        ),
         description=(
             "Отключить HTML admin UI даже если установлен optional пакет gpt2giga-ui."
         ),
     )
     disable_persist: bool = Field(
         default=False,
-        validation_alias=AliasChoices(
-            "disable_persist",
-            "GPT2GIGA_DISABLE_PERSIST",
-            "DISABLE_PERSIST",
-        ),
         description=(
             "Отключить control-plane persistence. При True runtime-config читается "
             "только из .env/ENV, а admin save/rollback/key-rotation mutations недоступны."
@@ -140,10 +132,6 @@ class ProviderProxySettingsMixin:
         default="EmbeddingsGigaR",
         description="Модель для эмбеддингов",
     )
-    enable_images: bool = Field(
-        default=True,
-        description="Включить загрузку изображений",
-    )
     enable_reasoning: bool = Field(
         default=False,
         description=(
@@ -180,7 +168,7 @@ class ProviderProxySettingsMixin:
 
 
 class RuntimeStoreProxySettingsMixin:
-    """Runtime-store configuration that stays flat for ENV compatibility."""
+    """Runtime-store configuration for stateful runtime resources."""
 
     runtime_store_backend: str = Field(
         default="memory",

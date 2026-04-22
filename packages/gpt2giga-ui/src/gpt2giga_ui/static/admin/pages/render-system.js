@@ -224,10 +224,6 @@ export async function renderSystem(app, token) {
             label: "Reasoning",
             value: runtime.enable_reasoning ? "enabled" : "disabled",
         },
-        {
-            label: "Images",
-            value: runtime.enable_images ? "enabled" : "disabled",
-        },
     ], "Runtime posture metadata is unavailable."), "panel panel--span-4")}
     ${card("Config highlights", renderDefinitionList(buildConfigHighlightItems(configSummary, runtime, setup, storeState), "No config highlights were reported."), "panel panel--span-4")}
     ${card("Staged diagnostics and export", `
@@ -371,7 +367,6 @@ function buildConfigHighlightItems(configSummary, runtime, setup, storeState) {
                 features.pass_model ? "pass_model" : "",
                 features.pass_token ? "pass_token" : "",
                 features.enable_reasoning ? "reasoning" : "",
-                features.enable_images ? "images" : "",
             ]),
             note: "Main protocol and runtime toggles.",
         },

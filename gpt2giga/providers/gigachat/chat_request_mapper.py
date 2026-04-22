@@ -189,7 +189,6 @@ class RequestTransformerMessagesMixin(RequestTransformerBaseMixin):
         max_attachments = 2
 
         processor = self.attachment_processor
-        enable_images = getattr(self.config.proxy_settings, "enable_images", False)
         max_audio_image_total = getattr(
             self.config.proxy_settings,
             "max_audio_image_total_size_bytes",
@@ -240,7 +239,6 @@ class RequestTransformerMessagesMixin(RequestTransformerBaseMixin):
             if (
                 ctype == "image_url"
                 and processor is not None
-                and enable_images
                 and content_part.get("image_url")
                 and len(attachments) < max_attachments
             ):

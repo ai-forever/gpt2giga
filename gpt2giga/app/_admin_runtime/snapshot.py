@@ -132,7 +132,6 @@ class AdminRuntimeSnapshotService:
             "pass_model": proxy.pass_model,
             "pass_token": proxy.pass_token,
             "enable_reasoning": proxy.enable_reasoning,
-            "enable_images": proxy.enable_images,
             "log_level": proxy.log_level,
             "log_filename": proxy.log_filename,
             "log_max_size": proxy.log_max_size,
@@ -177,7 +176,6 @@ class AdminRuntimeSnapshotService:
             "pass_model": proxy.pass_model,
             "pass_token": proxy.pass_token,
             "enable_reasoning": proxy.enable_reasoning,
-            "enable_images": proxy.enable_images,
             "logs_ip_allowlist_enabled": bool(proxy.logs_ip_allowlist),
             "log_redact_sensitive": proxy.log_redact_sensitive,
             "admin_enabled": True,
@@ -353,7 +351,6 @@ class AdminRuntimeSnapshotService:
                 "pass_model": proxy.pass_model,
                 "pass_token": proxy.pass_token,
                 "enable_reasoning": proxy.enable_reasoning,
-                "enable_images": proxy.enable_images,
             },
             "limits": {
                 "max_request_body_bytes": proxy.max_request_body_bytes,
