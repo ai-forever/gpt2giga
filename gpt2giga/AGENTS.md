@@ -22,6 +22,10 @@ Client SDK -> middleware -> router -> feature service -> provider mapper -> Giga
 GigaChat SDK -> provider mapper -> feature service -> router -> client-compatible response
 ```
 
+- OpenAI, Anthropic, and Gemini transport layers normalize into shared feature services.
+- Admin HTTP routes stay thin; admin runtime/settings logic belongs in `app/`.
+- Provider-to-provider payload translation lives in `api/translate.py` and provider adapter packages.
+
 ## Key Modules
 
 | Path | Role |
@@ -30,6 +34,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `app/admin_settings.py` | Domain services for admin setup, settings, revisions, and API-key management |
 | `app/admin_ui.py` | Optional admin UI detection and `/admin` setup-path helpers |
 | `app/admin_runtime.py` | Domain services that build admin runtime/config/capability/usage payloads |
+| `app/governance.py` | Governance presets and request-policy wiring helpers |
 | `app/_observability/` | Internal request-audit implementation | `app/observability.py` remains the stable facade/re-export path |
 | `app/_telemetry/` | Internal telemetry sink, registry, and OTLP/Prometheus implementation | `app/telemetry.py` remains the stable facade/re-export path |
 | `app/_runtime_backends/` | Internal runtime store/feed backend implementation | `app/runtime_backends.py` remains the stable facade/re-export path |
@@ -71,25 +76,36 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `core/http/json_body.py` | Shared JSON request parsing helpers |
 | `core/http/form_body.py` | Shared multipart/form-data parsing helpers |
 | `core/schema/json_schema.py` | JSON Schema normalization and `$ref` resolution |
-| `app/factory.py` | FastAPI app factory, router mounting, and middleware wiring hooks |
 | `api/dependencies/auth.py` | API-key verification dependencies |
+| `api/dependencies/governance.py` | Shared governance dependency resolution |
 | `api/middleware/*` | HTTP middleware for auth-adjacent request processing |
 | `features/batches/transforms.py` | Batch target mapping plus JSONL input/output transformation helpers |
+| `features/batches/validation.py` | Batch-input validation reports and provider-specific diagnostics |
+| `features/files_batches/service.py` | Admin mixed inventory/retrieve/create flows for files and batches |
+| `features/files_batches/normalizers.py` | Admin-facing normalization for mixed file/batch inventory |
 | `api/anthropic/request.py` | Anthropic request translation into the shared OpenAI-style intermediary |
 | `api/anthropic/response.py` | Anthropic response/error shaping |
 | `api/anthropic/streaming.py` | Anthropic SSE event translation |
 | `api/gemini/request.py` | Gemini request parsing and translation into the shared intermediary |
 | `api/gemini/response.py` | Gemini response/error shaping |
 | `api/gemini/streaming.py` | Gemini SSE/data-only translation |
+| `api/batch_validation.py` | HTTP helpers for staged/inline batch validation and cached batch input bytes |
+| `api/translate.py` | Provider-to-provider payload translation endpoint |
 | `api/` | HTTP transport adapters: provider endpoints, middleware, dependencies, system routes, and admin routes |
 | `api/*/openapi.py` | Provider-specific OpenAPI schema fragments colocated with routers |
 | `api/_openapi.py` | Shared OpenAPI request-body helper |
+| `api/admin/access.py` | Admin bootstrap-token and scoped access verification helpers |
 | `api/admin/runtime.py` | Thin HTTP layer for `/admin/api/version`, `/admin/api/config`, `/admin/api/runtime`, `/admin/api/routes`, `/admin/api/capabilities`, recent events, and usage endpoints |
 | `api/admin/settings.py` | Thin HTTP layer for `/admin/api/setup`, `/admin/api/settings/*`, revisions, and `/admin/api/keys*` |
 | `api/admin/logs.py` | `/admin/api/logs`, `/admin/api/logs/stream`, legacy `/logs*` compatibility shims |
+| `api/admin/files_batches.py` | `/admin/api/files-batches/*` inventory, validation, and create/retrieve helpers |
 | `api/admin/ui.py` | `/admin` operator UI |
+| `api/system/metrics.py` | `/metrics` exposure for observability integrations |
 | `frontend/admin/` | Admin console TypeScript source | Browser modules compiled into `../packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` |
 | `../packages/gpt2giga-ui/` | Optional UI distribution | Runtime source of truth for the compiled admin shell/assets used by `gpt2giga[ui]` |
+| `providers/registry.py` | Provider capability registry used by translation and compatibility flows |
+| `providers/openai/`, `providers/anthropic/`, `providers/gemini/` | Provider adapter/capability packages used by translation and normalization |
+| `providers/template_provider/` | Scaffold/example provider implementation kept in-tree with compat tests |
 
 ## API Layout
 
@@ -103,12 +119,18 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/openai/batches.py` | `/batches` |
 | `api/anthropic/messages.py` | `/messages` and `/messages/count_tokens` |
 | `api/anthropic/batches.py` | `/messages/batches` |
-| `api/gemini/content.py` | `/v1beta/models/*:generateContent`, `countTokens`, embeddings |
+| `api/gemini/content.py` | `/v1beta/models/*:generateContent`, `streamGenerateContent`, and `countTokens` |
+| `api/gemini/files.py` | `/v1beta/files` and file content/download helpers |
+| `api/gemini/batches.py` | `/v1beta/batches` and batch result helpers |
 | `api/gemini/models.py` | `/v1beta/models` and `/v1beta/models/{model}` |
 | `api/system/health.py` | `/health`, `/ping` |
+| `api/system/metrics.py` | `/metrics` |
+| `api/batch_validation.py` | `/batches/validate`-style validation helpers for admin/system usage |
+| `api/translate.py` | `/translate` |
 | `api/admin/ui.py` | `/admin` |
 | `api/admin/runtime.py` | `/admin/api/*` runtime/operator endpoints |
 | `api/admin/logs.py` | `/admin/api/logs*` and legacy `/logs*` compatibility routes |
+| `api/admin/files_batches.py` | `/admin/api/files-batches/*` inventory, file, batch, and validation routes |
 
 - OpenAI and Anthropic routers are mounted both at root and `/v1`.
 - Gemini routes are mounted under `/v1beta`.
@@ -127,11 +149,14 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `features/files/contracts.py` | Internal files feature contracts and upstream/store protocols |
 | `features/files/service.py` | Files service entrypoint used by OpenAI file routes |
 | `features/files/store.py` | Files metadata-store accessors over app state |
+| `features/files_batches/contracts.py` | Mixed admin files/batches inventory contracts |
+| `features/files_batches/service.py` | Mixed admin files/batches orchestration |
 | `features/models/contracts.py` | Internal model-discovery contracts and normalized model descriptors |
 | `features/models/service.py` | Model-discovery service entrypoint used by OpenAI, Gemini, and LiteLLM routes |
 | `features/batches/contracts.py` | Internal batches feature contracts and upstream/store protocols |
 | `features/batches/service.py` | Batch service entrypoint used by OpenAI and Anthropic batch routes |
 | `features/batches/store.py` | Batches metadata-store accessors over app state |
+| `features/batches/validation.py` | Provider-aware validation for staged and inline batch inputs |
 | `features/responses/contracts.py` | Internal Responses API contracts and upstream protocols |
 | `features/responses/service.py` | Responses API service entrypoint used by OpenAI responses routes |
 | `features/responses/stream.py` | Responses API stream orchestration over provider-normalized chunk updates |
@@ -143,7 +168,7 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `providers/gigachat/request_mapper.py` | Public `RequestTransformer` implementation for chat/responses request mapping |
 | `providers/gigachat/request_mapping_base.py` | Shared request parameter, schema, and validation helpers |
 | `providers/gigachat/chat_request_mapper.py` | Message role/content normalization and attachment handling |
-| `providers/gigachat/responses/` | Structured internal Responses pipeline helpers for request normalization, tools, threading, and output shaping |
+| `providers/gigachat/responses/` | Structured internal Responses pipeline helpers (`backend_request.py`, `input_normalizer.py`, `model_options.py`, `output_items.py`, `request_mapper.py`, `response_mapper.py`, `result_builder.py`, `threading.py`, `tool_mapping.py`) |
 | `providers/gigachat/responses_request_mapper.py` | Compatibility wrapper exposing the public Responses request-mapper mixin |
 | `providers/gigachat/response_mapper.py` | Public `ResponseProcessor` implementation for chat completions |
 | `providers/gigachat/response_mapping_common.py` | Shared response status, usage, reasoning, and serialization helpers |
@@ -160,6 +185,8 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 | `api/gemini/request.py` | Gemini request → OpenAI-style intermediary |
 | `api/gemini/response.py` | OpenAI/GigaChat result → Gemini response/error |
 | `api/gemini/streaming.py` | Gemini SSE/data-only translation |
+| `providers/registry.py` | Runtime provider lookup and adapter registry |
+| `providers/template_provider/*` | Template provider transport/presenter skeleton kept in sync with compat tests |
 
 ### Provider Execution Cheat Sheet
 
@@ -186,11 +213,14 @@ GigaChat SDK -> provider mapper -> feature service -> router -> client-compatibl
 - Keep chat-completions orchestration in `features/chat/service.py`; `api/openai/chat.py` should stay thin.
 - Keep files orchestration in `features/files/service.py`; `api/openai/files.py` should stay thin.
 - Keep batch orchestration in `features/batches/service.py`; `api/openai/batches.py` and `api/anthropic/batches.py` should stay thin.
+- Keep batch validation logic in `features/batches/validation.py` and request caching helpers in `api/batch_validation.py`.
 - Keep embeddings orchestration in `features/embeddings/service.py`; `api/openai/embeddings.py` and Gemini embedding routes should stay thin.
 - Keep model-discovery orchestration in `features/models/service.py`; `api/openai/models.py`, `api/gemini/models.py`, and `api/litellm/models.py` should stay thin.
 - Keep Responses API orchestration in `features/responses/service.py`; `api/openai/responses.py` should stay thin.
+- Keep admin mixed inventory flows in `features/files_batches/service.py`; `api/admin/files_batches.py` should stay thin.
 - Keep OpenAI SSE formatting in `api/openai/streaming.py`; keep GigaChat stream iteration and chunk parsing in `providers/gigachat/streaming.py`.
 - Keep GigaChat SDK lifecycle/auth logic in `providers/gigachat/`, not in shared utility buckets or route modules.
+- Keep provider-to-provider translation wiring in `api/translate.py` plus `providers/*/capabilities.py`; do not reimplement provider serializers ad hoc in routes or examples.
 - Keep `RequestTransformer`, `ResponseProcessor`, and `AttachmentProcessor` imported from `providers/gigachat/`; add new GigaChat mapping logic there instead of reintroducing legacy wrapper layers.
 - Use `prepare_chat_completion`, `prepare_response`, and `prepare_response_v2` for request shaping; do not reintroduce `send_to_gigachat*` aliases.
 - Starlette `1.x` is the runtime baseline. Use `lifespan`, FastAPI router decorators, and `add_middleware`; do not introduce removed Starlette decorator/event-hook APIs such as `on_event()`, `add_event_handler()`, raw `@app.middleware()`, or raw `@app.route()`.
@@ -232,18 +262,22 @@ rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/providers/gigachat g
 rg --files gpt2giga/providers/gigachat gpt2giga/api/anthropic gpt2giga/api/gemini
 
 # Find batch/file state usage
-rg -n "get_batch_store|get_file_store|batch_metadata_store|file_metadata_store" gpt2giga
+rg -n "get_batch_store|get_file_store|get_files_batches_service_from_state|batch_metadata_store|file_metadata_store" gpt2giga
 
 # Find GigaChat provider lifecycle/auth helpers
 rg -n "create_app_gigachat_client|close_app_gigachat_client|create_gigachat_client_for_request|pass_token_to_gigachat" gpt2giga/providers/gigachat
 
 # Find OpenAPI schema helpers
 rg -n "openapi_extra|_request_body_oneof" gpt2giga/api
+
+# Find translation and provider-registry code
+rg -n "translate|provider_adapters|template_provider|registry" gpt2giga
 ```
 
 ## Common Gotchas
 
 - Files and batch metadata are stored in-memory via `app.state.stores`; flat store aliases on `app.state.*` are compatibility shims.
+- Template-provider scaffolding under `providers/template_provider/` is intentionally in-tree and should stay aligned with `tests/compat/template_provider/`.
 - `MODE=PROD` implicitly requires an API key and disables docs/log routes.
 - `PathNormalizationMiddleware` supports both root and `/v1` style paths; endpoint changes should preserve that behavior unless intentionally breaking it.
 - `PassTokenMiddleware` only applies when `proxy.pass_token` is enabled.
