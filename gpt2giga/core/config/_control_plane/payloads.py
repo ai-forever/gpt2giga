@@ -115,6 +115,15 @@ def _load_managed_fields_from_payload(
     return set(), set()
 
 
+def _filter_known_override_fields(
+    values: dict[str, Any],
+    *,
+    allowed_fields: set[str],
+) -> dict[str, Any]:
+    """Drop persisted override fields that no longer exist on the settings model."""
+    return {key: value for key, value in values.items() if key in allowed_fields}
+
+
 def load_control_plane_overrides_from_payload(
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -134,7 +143,10 @@ def load_control_plane_overrides_from_payload(
             secret_fields=_GIGACHAT_SECRET_FIELDS,
         )
     )
-    return proxy, gigachat
+    return (
+        _filter_known_override_fields(proxy, allowed_fields=_PROXY_FIELDS),
+        _filter_known_override_fields(gigachat, allowed_fields=_GIGACHAT_FIELDS),
+    )
 
 
 def load_control_plane_overrides() -> tuple[dict[str, Any], dict[str, Any]]:

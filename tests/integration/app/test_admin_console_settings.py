@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -5,6 +7,9 @@ from gpt2giga.api.admin import admin_api_router, admin_router
 from gpt2giga.api.system import system_router
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.core.config.control_plane import load_control_plane_overrides
+from gpt2giga.core.config._control_plane.paths import (
+    ensure_control_plane_revisions_dir,
+)
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
 
 
@@ -617,3 +622,44 @@ def test_settings_revisions_endpoint_and_rollback(tmp_path, monkeypatch):
 
     proxy_overrides, _ = load_control_plane_overrides()
     assert proxy_overrides["api_key"] == "first-global-key"
+
+
+def test_settings_revisions_endpoint_ignores_legacy_unknown_fields(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
+    revisions_dir = ensure_control_plane_revisions_dir()
+    revision_id = "20260422T120000000000Z-legacy"
+    (revisions_dir / f"{revision_id}.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "revision_id": revision_id,
+                "updated_at": "2026-04-22T12:00:00Z",
+                "proxy": {
+                    "mode": "DEV",
+                    "enable_reasoning": True,
+                    "enable_images": True,
+                },
+                "gigachat": {},
+                "secrets": {"proxy": {}, "gigachat": {}},
+                "managed": {"proxy": ["mode", "enable_reasoning"], "gigachat": []},
+                "change": {"changed_fields": ["enable_reasoning", "enable_images"]},
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    client = TestClient(make_app())
+
+    response = client.get("/admin/api/settings/revisions?limit=6")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["revisions"][0]["revision_id"] == revision_id
+    assert (
+        payload["revisions"][0]["snapshot"]["application"]["enable_reasoning"] is True
+    )

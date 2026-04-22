@@ -191,6 +191,30 @@ def test_load_control_plane_revision_payload_returns_saved_snapshot(
     )
 
 
+def test_build_proxy_config_from_control_plane_payload_ignores_legacy_unknown_fields():
+    payload = {
+        "proxy": {
+            "mode": "DEV",
+            "enable_reasoning": True,
+            "enable_images": True,
+        },
+        "gigachat": {
+            "model": "GigaChat-Max",
+            "unknown_gigachat_field": "ignored",
+        },
+        "secrets": {
+            "proxy": {},
+            "gigachat": {},
+        },
+    }
+
+    restored = build_proxy_config_from_control_plane_payload(payload)
+
+    assert restored.proxy_settings.mode == "DEV"
+    assert restored.proxy_settings.enable_reasoning is True
+    assert restored.gigachat_settings.model == "GigaChat-Max"
+
+
 def test_apply_control_plane_overrides_ignores_unmanaged_payload_fields(
     tmp_path, monkeypatch
 ):
