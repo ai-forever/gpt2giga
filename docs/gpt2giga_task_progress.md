@@ -133,3 +133,10 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 - Summary: added large-data regression coverage for batch validation, the admin files-batches inventory endpoint, and chat streaming so the suite now checks those hot paths against realistic higher-volume inputs with soft runtime budgets
 - Checks: `uv run pytest tests/unit/features/batches/test_validation.py -k regression_budget tests/integration/app/test_admin_files_batches_api.py -k regression_budget tests/unit/api/openai/test_stream_generators.py -k regression_budget`; `uv run ruff check tests/unit/features/batches/test_validation.py tests/integration/app/test_admin_files_batches_api.py tests/unit/api/openai/test_stream_generators.py`; `uv run ruff format --check tests/unit/features/batches/test_validation.py tests/integration/app/test_admin_files_batches_api.py tests/unit/api/openai/test_stream_generators.py`; `uv run pytest tests/unit/features/batches/test_validation.py tests/integration/app/test_admin_files_batches_api.py tests/unit/api/openai/test_stream_generators.py`
 - Notes: the budgets are intentionally generous and focus on catching obvious accidental quadratic work or serialization regressions rather than acting as brittle microbenchmarks
+
+## 2026-04-22 — S16 — done
+
+- Commit: `45e5cf0`
+- Summary: documented a repository-wide lifecycle policy for compatibility facades, migration-only wrappers, and legacy HTTP/API shims in `docs/compatibility-facades.md`; linked the policy from docs navigation, architecture notes, and contributor guidance so future refactors can classify wrappers consistently
+- Checks: `git diff --check`; commit hooks (`trim trailing whitespace`, `detect hardcoded secrets`, `mypy`)
+- Notes: the policy explicitly marks underscore-backed facade modules such as `gpt2giga.app.runtime_backends` and `gpt2giga.core.config.control_plane` as stable public contracts, while keeping top-level `providers/gigachat/responses_*` modules on a migration-only path instead of treating them as permanent surface
