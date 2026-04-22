@@ -19,6 +19,12 @@ export const ANTHROPIC_BATCH_ENDPOINT = "/v1/messages";
 export const GEMINI_BATCH_ENDPOINT_TEMPLATE = "/v1beta/models/{model}:generateContent";
 export const BATCH_PREVIEW_BYTES = 256 * 1024;
 
+export interface InlineRequestsPayload {
+  provided: boolean;
+  requests?: Array<Record<string, unknown>>;
+  error?: string;
+}
+
 export interface FilesBatchesBindingState {
   selection: InspectorSelection;
   previewObjectUrl: string | null;
@@ -121,11 +127,7 @@ export function normalizeGeminiBatchModel(
 
 export function readInlineRequestsPayload(
   rawValue: string,
-): {
-  provided: boolean;
-  requests?: Array<Record<string, unknown>>;
-  error?: string;
-} {
+): InlineRequestsPayload {
   const inlineRequestsText = rawValue.trim();
   if (!inlineRequestsText) {
     return { provided: false };

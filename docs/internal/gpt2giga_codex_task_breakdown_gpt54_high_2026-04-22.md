@@ -27,6 +27,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-010 — done
 - [x] RLS-011 — done
 - [x] RLS-012 — done
+- [x] RLS-013 — done
 
 ---
 
@@ -527,6 +528,15 @@ Avoid changing DOM ids and HTTP payload contracts.
 - bindings modules shrink meaningfully
 - extracted helpers are named by responsibility
 - admin assets stay in sync
+
+**Status**
+
+Completed in the current repository state: files/batches binding orchestration is
+now split further through `bindings/inventory-selection.ts` and
+`bindings/batch-composer-state.ts`, with `inventory.ts` and
+`batch-composer.ts` delegating selection-surface and composer-state derivation
+instead of inlining that logic. Frontend coverage now directly exercises the
+new helper modules, and the committed admin assets have been rebuilt in sync.
 
 ---
 

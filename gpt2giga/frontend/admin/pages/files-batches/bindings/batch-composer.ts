@@ -3,10 +3,7 @@ import { withBusyState } from "../../../forms.js";
 import { formatTimestamp, safeJsonParse } from "../../../utils.js";
 import type { FilesBatchesPageData } from "../api.js";
 import { clearFilesBatchesPageDataCache, createBatch, validateBatchInput } from "../api.js";
-import {
-  extractErrorReason,
-  isBatchValidationCandidate,
-} from "../serializers.js";
+import { extractErrorReason } from "../serializers.js";
 import type {
   ArtifactApiFormat,
   BatchRecord,
@@ -20,18 +17,24 @@ import type {
 import { INVALID_JSON } from "../state.js";
 import type { FilesBatchesPageElements } from "../view.js";
 import {
-  ANTHROPIC_BATCH_ENDPOINT,
   buildBatchInlineRequestsTemplate,
   buildBatchValidationMarkup,
   buildStoredFileValidationSnapshot,
   formatApiFormatLabel,
-  GEMINI_BATCH_ENDPOINT_TEMPLATE,
-  normalizeGeminiBatchModel,
   OPENAI_BATCH_ENDPOINT_OPTIONS,
   readInlineRequestsPayload,
   type FilesBatchesBindingState,
   type WorkflowActionRunner,
 } from "./helpers.js";
+import {
+  buildBatchValidationRequest,
+  getBatchFormatHint,
+  readBatchApiFormatValue,
+  readConfiguredFallbackModel,
+  resolveBatchEndpointValue,
+  resolveComposerDisplayName,
+  resolveDisplayedFileValidationSnapshot as resolveDisplayedFileValidationSnapshotState,
+} from "./batch-composer-state.js";
 
 interface RefreshCallbacks {
   refreshSelectedFileValidationSurface: () => void;
@@ -96,43 +99,21 @@ export function createBatchComposerBindings(
     setWorkflowSummary,
   } = deps;
 
-  const readBatchApiFormat = (): ArtifactApiFormat => {
-    const normalized = elements.batchApiFormat?.value.trim();
-    if (normalized === "anthropic" || normalized === "gemini") {
-      return normalized;
-    }
-    return "openai";
-  };
+  const readBatchApiFormat = (): ArtifactApiFormat =>
+    readBatchApiFormatValue(elements.batchApiFormat?.value);
 
-  const readConfiguredFallbackModel = (): string =>
-    app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash";
-
-  const resolveGeminiBatchEndpoint = (): string => {
-    const normalizedModel = normalizeGeminiBatchModel(
-      elements.batchModel?.value.trim() || readConfiguredFallbackModel(),
-    );
-    return GEMINI_BATCH_ENDPOINT_TEMPLATE.replace(
-      "{model}",
-      normalizedModel || "{model}",
-    );
-  };
+  const readRuntimeFallbackModel = (): string =>
+    readConfiguredFallbackModel(app.runtime?.gigachat_model);
 
   const resolveBatchEndpoint = (
     apiFormat: ArtifactApiFormat = readBatchApiFormat(),
-  ): string => {
-    if (apiFormat === "anthropic") {
-      return ANTHROPIC_BATCH_ENDPOINT;
-    }
-    if (apiFormat === "gemini") {
-      return resolveGeminiBatchEndpoint();
-    }
-    const selectedEndpoint = elements.batchEndpoint?.value.trim() ?? "";
-    return OPENAI_BATCH_ENDPOINT_OPTIONS.includes(
-      selectedEndpoint as (typeof OPENAI_BATCH_ENDPOINT_OPTIONS)[number],
-    )
-      ? selectedEndpoint
-      : "/v1/chat/completions";
-  };
+  ): string =>
+    resolveBatchEndpointValue({
+      apiFormat,
+      selectedEndpoint: elements.batchEndpoint?.value,
+      batchModel: elements.batchModel?.value,
+      fallbackModel: readRuntimeFallbackModel(),
+    });
 
   const syncBatchEndpointControl = (apiFormat: ArtifactApiFormat): void => {
     if (!elements.batchEndpoint) {
@@ -166,147 +147,38 @@ export function createBatchComposerBindings(
 
   const readBatchEndpoint = (): string => resolveBatchEndpoint();
 
-  const getBatchFormatHint = (apiFormat: ArtifactApiFormat): string => {
-    if (apiFormat === "anthropic") {
-      return "Anthropic batches accept either a staged JSONL file shaped like `{custom_id, params}` per line or an inline JSON array shaped like `[{custom_id, params}]`. Provide a fallback model when rows omit `params.model`.";
-    }
-    if (apiFormat === "gemini") {
-      return "Gemini batches accept either a staged JSONL file shaped like `{key, request}` per line or an inline JSON array shaped like `[{key?, request, metadata?}]`. Provide a fallback model when file rows omit `request.model`.";
-    }
-    return "OpenAI batches accept either a staged JSONL file in OpenAI batch input format or an inline JSON array shaped like `[{custom_id, method, url, body}]`. Provide a fallback model when rows omit `body.model`.";
-  };
-
   const readInlinePayload = (): {
     provided: boolean;
     requests?: Array<Record<string, unknown>>;
     error?: string;
   } => readInlineRequestsPayload(elements.batchInlineRequests?.value ?? "");
 
-  const buildBatchValidationRequest = (): {
-    apiFormat: ArtifactApiFormat;
-    endpoint: string;
-    inputFileId?: string;
-    model?: string;
-    requests?: Array<Record<string, unknown>>;
-    signature?: string;
-    sourceLabel: string;
-    sourceNote?: string;
-    error?: string;
-  } => {
-    const apiFormat = readBatchApiFormat();
-    const endpoint = readBatchEndpoint();
-    const inputFileId = elements.batchInput?.value.trim() ?? "";
-    const fallbackModel = elements.batchModel?.value.trim() || undefined;
-    const inlinePayload = readInlinePayload();
-    if (inlinePayload.error) {
-      return {
-        apiFormat,
-        endpoint,
-        sourceLabel: "Inline requests",
-        error: inlinePayload.error,
-      };
-    }
-
-    const inlineRequests = inlinePayload.requests;
-    if (inlineRequests && inlineRequests.length > 0) {
-      return {
-        apiFormat,
-        endpoint,
-        model: fallbackModel,
-        requests: inlineRequests,
-        signature: JSON.stringify({
-          apiFormat,
-          endpoint,
-          model: fallbackModel ?? "",
-          requests: inlineRequests,
-        }),
-        sourceLabel: `${inlineRequests.length} inline request${inlineRequests.length === 1 ? "" : "s"}`,
-        sourceNote: inputFileId
-          ? `Inline requests override staged file ${inputFileId} for validation and batch creation.`
-          : "Inline requests are the active batch source.",
-      };
-    }
-
-    if (inputFileId) {
-      return {
-        apiFormat,
-        endpoint,
-        inputFileId,
-        model: fallbackModel,
-        signature: JSON.stringify({
-          apiFormat,
-          endpoint,
-          inputFileId,
-          model: fallbackModel ?? "",
-        }),
-        sourceLabel: `Staged file ${inputFileId}`,
-        sourceNote: "Validation reads the staged JSONL file through the admin API.",
-      };
-    }
-
-    return {
-      apiFormat,
-      endpoint,
-      sourceLabel: "No active input",
-      error: `${formatApiFormatLabel(apiFormat)} batches need a staged input file id or inline requests before validation.`,
-    };
-  };
+  const buildCurrentBatchValidationRequest = () =>
+    buildBatchValidationRequest({
+      apiFormat: readBatchApiFormat(),
+      endpoint: readBatchEndpoint(),
+      inputFileId: elements.batchInput?.value,
+      fallbackModel: elements.batchModel?.value,
+      inlinePayload: readInlinePayload(),
+    });
 
   const resolveDisplayedFileValidationSnapshot = (
     fileId: string,
     source?: FileRecord,
-  ): FileValidationSnapshot | null => {
-    if (!isBatchValidationCandidate(source)) {
-      return source?.validation ?? null;
-    }
-
-    const currentRequest = buildBatchValidationRequest();
-    const activeInputFileId =
-      currentRequest.requests && currentRequest.requests.length > 0
-        ? undefined
-        : currentRequest.inputFileId;
-    const storedSnapshot = source?.validation ?? null;
-
-    if (activeInputFileId !== fileId) {
-      return storedSnapshot ?? { status: "not_validated" };
-    }
-
-    if (
-      state.validationReport &&
-      !state.validationDirty &&
-      state.validationSignature !== null &&
-      state.validationSignature === currentRequest.signature
-    ) {
-      return buildStoredFileValidationSnapshot(
-        state.validationReport,
-        state.validationValidatedAt,
-      );
-    }
-
-    if (state.validationDirty) {
-      if (storedSnapshot) {
-        return { ...storedSnapshot, status: "stale" };
-      }
-      if (state.validationReport) {
-        return {
-          ...buildStoredFileValidationSnapshot(
-            state.validationReport,
-            state.validationValidatedAt,
-          ),
-          status: "stale",
-        };
-      }
-    }
-
-    return storedSnapshot ?? { status: "not_validated" };
-  };
+  ): FileValidationSnapshot | null =>
+    resolveDisplayedFileValidationSnapshotState({
+      fileId,
+      source,
+      currentRequest: buildCurrentBatchValidationRequest(),
+      state,
+    });
 
   const updateBatchValidationSurface = (): void => {
     if (!elements.batchValidationNode) {
       return;
     }
 
-    const currentRequest = buildBatchValidationRequest();
+    const currentRequest = buildCurrentBatchValidationRequest();
     elements.batchValidationNode.innerHTML = buildBatchValidationMarkup({
       state,
       selectedFormatLabel: formatApiFormatLabel(readBatchApiFormat()),
@@ -378,7 +250,7 @@ export function createBatchComposerBindings(
     button: HTMLButtonElement | null,
     options?: { automatic?: boolean },
   ): Promise<void> => {
-    const requestPayload = buildBatchValidationRequest();
+    const requestPayload = buildCurrentBatchValidationRequest();
     if (!requestPayload.signature || requestPayload.error) {
       state.validationMessage =
         requestPayload.error ??
@@ -467,7 +339,7 @@ export function createBatchComposerBindings(
   const ensureFreshBatchValidation = async (
     button: HTMLButtonElement | null,
   ): Promise<boolean> => {
-    const currentRequest = buildBatchValidationRequest();
+    const currentRequest = buildCurrentBatchValidationRequest();
     if (currentRequest.error) {
       state.validationMessage = currentRequest.error;
       updateBatchValidationSurface();
@@ -485,7 +357,7 @@ export function createBatchComposerBindings(
       await runBatchValidation(button, { automatic: false });
     }
 
-    const latestRequest = buildBatchValidationRequest();
+    const latestRequest = buildCurrentBatchValidationRequest();
     const hasBlockingErrors =
       state.validationReport !== null &&
       !state.validationDirty &&
@@ -504,7 +376,7 @@ export function createBatchComposerBindings(
     const nextTemplate = buildBatchInlineRequestsTemplate({
       apiFormat: readBatchApiFormat(),
       fallbackModel:
-        elements.batchModel?.value.trim() || readConfiguredFallbackModel(),
+        elements.batchModel?.value.trim() || readRuntimeFallbackModel(),
       endpoint: readBatchEndpoint(),
     });
     elements.batchInlineRequests.placeholder = nextTemplate;
@@ -542,7 +414,7 @@ export function createBatchComposerBindings(
       elements.batchModelField.hidden = false;
       elements.batchModel.required = false;
       if (!elements.batchModel.value.trim()) {
-        elements.batchModel.value = readConfiguredFallbackModel();
+        elements.batchModel.value = readRuntimeFallbackModel();
       }
     }
     if (elements.batchDisplayNameField && elements.batchDisplayName) {
@@ -550,12 +422,13 @@ export function createBatchComposerBindings(
       elements.batchDisplayNameField.hidden = !showDisplayName;
       if (!showDisplayName) {
         elements.batchDisplayName.value = "";
-      } else if (!elements.batchDisplayName.value.trim()) {
-        const inputFileId =
-          options?.inputFileId?.trim() ?? elements.batchInput?.value.trim() ?? "";
-        elements.batchDisplayName.value = inputFileId
-          ? `gemini-${inputFileId}`
-          : "gemini-batch";
+      } else {
+        elements.batchDisplayName.value = resolveComposerDisplayName({
+          apiFormat,
+          currentValue: elements.batchDisplayName.value,
+          inputFileId:
+            options?.inputFileId?.trim() ?? elements.batchInput?.value.trim() ?? "",
+        });
       }
     }
     if (elements.batchHint) {

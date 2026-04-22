@@ -1,7 +1,8 @@
 import { withBusyState } from "../../../forms.js";
 import { deleteFile, fetchBatchMetadata, fetchFileContent, fetchFileMetadata, } from "../api.js";
-import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, describeFileValidationSnapshot, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, inferDownloadMimeType, summarizeBatchRequestCounts, summarizePreviewOutcome, renderInspectorActions, } from "../serializers.js";
+import { buildBatchActionHint, buildContentPreviewSummary, buildFilePreview, getLatestLinkedBatch, getLatestOutputBatch, getLinkedBatchesForFile, humanizeBatchLifecycle, inferDownloadMimeType, summarizeBatchRequestCounts, summarizePreviewOutcome, renderInspectorActions, } from "../serializers.js";
 import { BATCH_PREVIEW_BYTES, setDefinitionBlock, } from "./helpers.js";
+import { buildBatchOutputSelectionSurface, buildBatchSelectionSurface, buildFileSelectionSurface, resolveContentPathForFile, resolveDownloadFilename, resolveDownloadPathForFile, resolvePreviewBytes, } from "./inventory-selection.js";
 export function createInventoryBindings(deps) {
     const { app, data, elements, inventory, page, state, batchComposer, cacheFileRecord, cacheBatchRecord, removeFileRecord, setSummary, setWorkflowSummary, setDetailSurface, setContentSurface, resetContentSurface, clearMediaPreview, replaceStateForPage, navigateToPage, syncSelectionRouteState, runWorkflowAction, } = deps;
     const updateInspectorActions = () => {
@@ -11,94 +12,18 @@ export function createInventoryBindings(deps) {
         delete state.selection.handoffRequestId;
         delete state.selection.handoffRequestCount;
     };
-    const findBatchByOutputFileId = (fileId) => data.batches.find((entry) => String(entry.output_file_id ?? "") === fileId) ?? null;
-    const resolveContentPathForFile = (fileId, source, relatedBatch) => {
-        const batchOutputPath = (relatedBatch && String(relatedBatch.output_file_id ?? "") === fileId
-            ? relatedBatch.output_path
-            : null) || findBatchByOutputFileId(fileId)?.output_path;
-        return batchOutputPath?.trim() || source?.content_path?.trim() || undefined;
-    };
-    const resolveDownloadPathForFile = (fileId, source) => findBatchByOutputFileId(fileId)?.output_path?.trim() ||
-        source?.download_path?.trim() ||
-        source?.content_path?.trim() ||
-        undefined;
     const applyFileSelectionSurfaces = (fileId, source, mode, detailPayload) => {
-        const linkedBatches = getLinkedBatchesForFile(fileId, data.batches);
-        const readyOutputs = linkedBatches.filter((batch) => Boolean(String(batch.output_file_id ?? ""))).length;
         const validationSnapshot = batchComposer.resolveDisplayedFileValidationSnapshot(fileId, source);
-        const validationSummary = validationSnapshot
-            ? describeFileValidationSnapshot(validationSnapshot)
-            : null;
-        const validationItem = validationSummary
-            ? [
-                {
-                    label: "Validation",
-                    value: validationSummary.label,
-                    note: validationSummary.note,
-                },
-            ]
-            : [];
-        const lastValidationItem = validationSnapshot?.validated_at != null
-            ? [
-                {
-                    label: "Last validation",
-                    value: String(validationSnapshot.validated_at),
-                    note: validationSnapshot.status === "stale"
-                        ? "The stored report no longer matches the current composer input."
-                        : "Most recent staged-file validation snapshot.",
-                },
-            ]
-            : [];
-        if (mode === "composer") {
-            setSummary([
-                { label: "Selection", value: "Batch input ready" },
-                { label: "File id", value: fileId },
-                { label: "Purpose", value: String(source?.purpose ?? "batch") },
-                { label: "Filename", value: String(source?.filename ?? fileId) },
-                { label: "API format", value: String(source?.api_format ?? "openai") },
-                ...validationItem,
-                {
-                    label: "Next step",
-                    value: "Create batch",
-                    note: "The input field has been populated for the batch form.",
-                },
-            ]);
-            setDetailSurface("Composer handoff", [
-                { label: "Detail surface", value: "Composer handoff" },
-                { label: "Selected input", value: fileId },
-                { label: "Endpoint target", value: "Choose an endpoint in the batch form" },
-                ...validationItem,
-                ...lastValidationItem,
-            ], detailPayload, false);
-            return;
-        }
-        setSummary([
-            { label: "Selection", value: "File" },
-            { label: "File id", value: fileId },
-            { label: "Purpose", value: String(source?.purpose ?? "user_data") },
-            { label: "Filename", value: String(source?.filename ?? fileId) },
-            {
-                label: "Created",
-                value: String(source?.created_at ?? "n/a"),
-                note: String(source?.bytes ?? "n/a"),
-            },
-            ...validationItem,
-            {
-                label: "Batch linkage",
-                value: `${linkedBatches.length} linked batch${linkedBatches.length === 1 ? "" : "es"}`,
-                note: readyOutputs
-                    ? `${readyOutputs} output file${readyOutputs === 1 ? "" : "s"} ready`
-                    : "No completed output linked yet.",
-            },
-        ]);
-        setDetailSurface("Selection metadata snapshot", [
-            { label: "Detail surface", value: "File metadata" },
-            { label: "Linked batches", value: String(linkedBatches.length) },
-            { label: "Stored bytes", value: String(source?.bytes ?? "n/a") },
-            { label: "Status", value: String(source?.status ?? "processed") },
-            ...validationItem,
-            ...lastValidationItem,
-        ], detailPayload, true);
+        const surface = buildFileSelectionSurface({
+            fileId,
+            source,
+            mode,
+            detailPayload,
+            batches: data.batches,
+            validationSnapshot,
+        });
+        setSummary(surface.summary);
+        setDetailSurface(surface.detailTitle, surface.detailItems, surface.detailPayload, surface.detailOpen);
     };
     const refreshSelectedFileValidationSurface = () => {
         if (state.selection.kind !== "file" || !state.selection.fileId) {
@@ -190,8 +115,17 @@ export function createInventoryBindings(deps) {
                     : []),
             ],
             action: async () => {
-                const previewBytes = resolvePreviewBytes(source, options);
-                const { bytes, totalBytes } = await fetchFileContent(app, fileId, resolveContentPathForFile(fileId, source, options?.relatedBatch), previewBytes);
+                const previewBytes = resolvePreviewBytes({
+                    source,
+                    relatedBatch: options?.relatedBatch,
+                    previewByteLimit: BATCH_PREVIEW_BYTES,
+                });
+                const { bytes, totalBytes } = await fetchFileContent(app, fileId, resolveContentPathForFile({
+                    fileId,
+                    source,
+                    relatedBatch: options?.relatedBatch,
+                    batches: data.batches,
+                }), previewBytes);
                 const preview = buildFilePreview(bytes, String(source?.filename ?? fileId), {
                     previewByteLimit: BATCH_PREVIEW_BYTES,
                     previewTextCharLimit: 100_000,
@@ -259,7 +193,11 @@ export function createInventoryBindings(deps) {
             ],
             action: async () => {
                 const source = inventory.fileLookup.get(fileId);
-                const { bytes, mimeType } = await fetchFileContent(app, fileId, resolveDownloadPathForFile(fileId, source));
+                const { bytes, mimeType } = await fetchFileContent(app, fileId, resolveDownloadPathForFile({
+                    fileId,
+                    source,
+                    batches: data.batches,
+                }));
                 const blobBytes = new Uint8Array(bytes.byteLength);
                 blobBytes.set(bytes);
                 const objectUrl = URL.createObjectURL(new Blob([blobBytes], {
@@ -274,24 +212,6 @@ export function createInventoryBindings(deps) {
                 setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
             },
         });
-    };
-    const resolveDownloadFilename = (fileId) => {
-        const source = inventory.fileLookup.get(fileId);
-        const filename = String(source?.filename ?? "").trim();
-        return filename || `file-${fileId}.bin`;
-    };
-    const resolvePreviewBytes = (source, options) => {
-        if (options?.relatedBatch) {
-            return BATCH_PREVIEW_BYTES;
-        }
-        const filename = String(source?.filename ?? "").trim().toLowerCase();
-        if (filename.endsWith(".jsonl") ||
-            filename.endsWith(".json") ||
-            filename.endsWith(".txt") ||
-            filename.endsWith(".log")) {
-            return BATCH_PREVIEW_BYTES;
-        }
-        return undefined;
     };
     const inspectFile = async (fileId, button) => {
         const shouldRefreshPage = button !== null;
@@ -391,24 +311,13 @@ export function createInventoryBindings(deps) {
                 clearSelectionHandoff();
                 resetContentSurface();
                 syncSelectionRouteState();
-                setSummary([
-                    { label: "Selection", value: "Batch" },
-                    { label: "Batch id", value: batchId },
-                    { label: "Status", value: String(source.status ?? "unknown") },
-                    { label: "Endpoint", value: String(source.endpoint ?? "n/a") },
-                    {
-                        label: "Output file",
-                        value: outputFileId || "n/a",
-                        note: inputFileId || "no input file",
-                    },
-                ]);
-                setDetailSurface("Selection metadata snapshot", [
-                    { label: "Detail surface", value: "Batch metadata" },
-                    { label: "Lifecycle posture", value: humanizeBatchLifecycle(source.status) },
-                    { label: "Input file", value: inputFileId || "missing" },
-                    { label: "Output file", value: outputFileId || "not ready" },
-                    { label: "Requests", value: summarizeBatchRequestCounts(source.request_counts) },
-                ], JSON.stringify(payload, null, 2), true);
+                const surface = buildBatchSelectionSurface({
+                    batchId,
+                    source,
+                    detailPayload: JSON.stringify(payload, null, 2),
+                });
+                setSummary(surface.summary);
+                setDetailSurface(surface.detailTitle, surface.detailItems, surface.detailPayload, surface.detailOpen);
                 updateInspectorActions();
                 return payload;
             },
@@ -444,7 +353,7 @@ export function createInventoryBindings(deps) {
                 return;
             }
             if (action === "download-file" && state.selection.fileId) {
-                await downloadFileContent(state.selection.fileId, resolveDownloadFilename(state.selection.fileId), button);
+                await downloadFileContent(state.selection.fileId, resolveDownloadFilename(state.selection.fileId, inventory.fileLookup.get(state.selection.fileId)), button);
                 return;
             }
             if (action === "inspect-batch" && state.selection.batchId) {
@@ -504,24 +413,13 @@ export function createInventoryBindings(deps) {
                 };
                 clearSelectionHandoff();
                 syncSelectionRouteState();
-                setSummary([
-                    { label: "Selection", value: "Linked batch output" },
-                    { label: "Output file", value: outputFileId },
-                    { label: "Batch id", value: String(latestOutputBatch?.id ?? "unknown") },
-                    { label: "Endpoint", value: String(latestOutputBatch?.endpoint ?? "n/a") },
-                ]);
-                setDetailSurface("Selection metadata snapshot", [
-                    { label: "Detail surface", value: "Latest linked output" },
-                    { label: "Batch id", value: String(latestOutputBatch?.id ?? "unknown") },
-                    { label: "Output file", value: outputFileId },
-                    {
-                        label: "Requests",
-                        value: summarizeBatchRequestCounts(latestOutputBatch?.request_counts),
-                    },
-                ], JSON.stringify({
-                    latest_linked_batch: latestOutputBatch,
-                    output_file_id: outputFileId,
-                }, null, 2), true);
+                const surface = buildBatchOutputSelectionSurface({
+                    outputFileId,
+                    batch: latestOutputBatch,
+                    variant: "latest-linked-output",
+                });
+                setSummary(surface.summary);
+                setDetailSurface(surface.detailTitle, surface.detailItems, surface.detailPayload, surface.detailOpen);
                 updateInspectorActions();
                 await previewFileContent(outputFileId, button, {
                     label: "Latest linked output",
@@ -569,7 +467,8 @@ export function createInventoryBindings(deps) {
                 if (!fileId) {
                     return;
                 }
-                const filename = item.dataset.fileDownloadName?.trim() || resolveDownloadFilename(fileId);
+                const filename = item.dataset.fileDownloadName?.trim() ||
+                    resolveDownloadFilename(fileId, inventory.fileLookup.get(fileId));
                 await downloadFileContent(fileId, filename, item instanceof HTMLButtonElement ? item : null);
             });
         });
@@ -628,20 +527,13 @@ export function createInventoryBindings(deps) {
                 };
                 clearSelectionHandoff();
                 syncSelectionRouteState();
-                setSummary([
-                    { label: "Selection", value: "Batch output" },
-                    { label: "Output file", value: fileId },
-                    { label: "Batch id", value: String(batch?.id ?? "unknown") },
-                    { label: "Endpoint", value: String(batch?.endpoint ?? "n/a") },
-                ]);
-                setDetailSurface("Selection metadata snapshot", [
-                    { label: "Detail surface", value: "Batch output handoff" },
-                    { label: "Batch id", value: String(batch?.id ?? "unknown") },
-                    { label: "Output file", value: fileId },
-                ], JSON.stringify({
-                    batch_output_handoff: batch ?? null,
-                    output_file_id: fileId,
-                }, null, 2), true);
+                const surface = buildBatchOutputSelectionSurface({
+                    outputFileId: fileId,
+                    batch,
+                    variant: "batch-output",
+                });
+                setSummary(surface.summary);
+                setDetailSurface(surface.detailTitle, surface.detailItems, surface.detailPayload, surface.detailOpen);
                 updateInspectorActions();
                 await previewFileContent(fileId, item instanceof HTMLButtonElement ? item : null, {
                     label: "Batch output preview",
