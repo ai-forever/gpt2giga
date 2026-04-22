@@ -66,12 +66,7 @@ jobs:
         run: npm run build:admin
 
       - name: Verify committed admin assets are up to date
-        run: |
-          git diff --exit-code -- packages/gpt2giga-ui/src/gpt2giga_ui/static/admin || {
-            echo "Compiled admin assets are stale. Run 'npm run build:admin' and commit the updated files under packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/."
-            git status --short -- packages/gpt2giga-ui/src/gpt2giga_ui/static/admin
-            exit 1
-          }
+        run: npm run verify:admin-assets
 
   quality:
     name: Python quality checks

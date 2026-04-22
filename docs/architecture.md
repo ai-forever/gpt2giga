@@ -163,14 +163,17 @@ api/openai/responses.py
 ### Как собирать
 
 ```bash
-npm install
-npm run build:admin
+npm ci
+npm run sync:admin
+npm run check:admin
 ```
 
 - TypeScript-конфиг в `tsconfig.json` использует:
   - `rootDir = gpt2giga/frontend`
   - `outDir = packages/gpt2giga-ui/src/gpt2giga_ui/static`
 - Это означает, что `gpt2giga/frontend/admin/**/*.ts` компилируется в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/**/*.js`.
+- `npm run sync:admin` прогоняет тесты, пересобирает output и показывает только relevant source/output diff для коммита.
+- `npm run check:admin` повторяет CI-путь и дополнительно падает, если generated admin assets остались несинхронными после rebuild.
 
 ### Нужно ли коммитить compiled admin assets
 

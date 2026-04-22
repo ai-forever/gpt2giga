@@ -166,13 +166,14 @@ uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 Для изменений в admin UI:
 
 ```bash
-npm install
-npm run test:admin
-npm run build:admin
+npm ci
+npm run sync:admin
+npm run check:admin
 ```
 
-Эта сборка пишет JavaScript-модули сразу в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, то есть в тот optional package, который runtime монтирует на `/admin/assets/admin/*`.
-CI повторно запускает эту сборку и валит PR, если generated-файлы в `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` не были закоммичены.
+`npm run sync:admin` прогоняет frontend tests, пересобирает admin assets и показывает `git status` только для `gpt2giga/frontend/admin/` и `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/`, чтобы было видно, какие source/output файлы нужно коммитить вместе.
+
+`npm run check:admin` повторяет CI-friendly путь: тесты, сборка и явная проверка, что после rebuild под `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` не осталось незакоммиченного diff-а. Именно этот optional package runtime монтирует на `/admin/assets/admin/*`.
 
 PR-шаблоны находятся в [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md) и [`.github/PULL_REQUEST_TEMPLATE/ru.md`](./.github/PULL_REQUEST_TEMPLATE/ru.md).
 

@@ -58,10 +58,10 @@ Admin console продолжает развиваться как frameworkless T
 ### Что это означает для contributor-ов
 
 1. Меняете `gpt2giga/frontend/admin/*`.
-2. Запускаете `npm run build:admin`.
+2. Запускаете `npm run sync:admin`.
 3. Коммитите и TS source, и обновленный generated output.
 
-CI дополнительно проверяет, что после `npm run build:admin` под `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` не остается diff-а.
+`npm run check:admin` и `CI` дополнительно проверяют, что после rebuild под `packages/gpt2giga-ui/src/gpt2giga_ui/static/admin/` не остается diff-а.
 
 ### Когда пересматривать
 
