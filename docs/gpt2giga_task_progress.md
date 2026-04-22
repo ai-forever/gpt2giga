@@ -56,3 +56,10 @@ This file is the execution log for slices from `docs/gpt2giga_task_slices.md`.
 - Summary: split the admin settings/setup hotspots into dedicated `settings/*`, `setup/*`, and `control-plane/*` modules so the old `render-settings.ts`, `render-setup.ts`, and `control-plane-sections.ts` files now act as thin facades; added pure-helper coverage for settings/setup state resolution and observability handoff summaries, and regenerated compiled admin assets
 - Checks: `npm run test:admin`; `npm run build:admin`
 - Notes: `render-settings.ts` is now 83 lines, `render-setup.ts` is 78 lines, and `control-plane-sections.ts` is a re-export shim while the extracted modules keep route contracts and form ids stable
+
+## 2026-04-22 — S5 — done
+
+- Commit: `f20d37f`
+- Summary: split `gpt2giga/features/batches/validation.py` into focused internal modules for report helpers, JSONL parsing, structural format checks, and provider-specific validators while keeping `validation.py` as the stable public facade; added regression coverage for empty-file handling and `validate_bytes()` line-number preservation
+- Checks: `uv run ruff check gpt2giga/features/batches tests/unit/features/batches/test_validation.py`; `uv run ruff format --check gpt2giga/features/batches tests/unit/features/batches/test_validation.py`; `uv run pytest tests/unit/features/batches/test_validation.py`
+- Notes: the public facade now holds orchestration in 255 lines instead of a single 928-line implementation file, which makes future provider-rule changes easier to isolate without changing the import surface
