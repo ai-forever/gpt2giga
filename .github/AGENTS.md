@@ -34,8 +34,8 @@ uv build
 | `.github/workflows/pr-labeler.yaml` | Applies path-based labels to pull requests |
 | `.github/workflows/release-drafter.yaml` | Keeps the draft GitHub release notes up to date |
 | `.github/dependabot.yml` | Weekly Dependabot updates for GitHub Actions dependencies |
-| `.github/labeler.yml` | Path-to-label mapping used by the PR labeler workflow |
-| `.github/release-drafter.yml` | Release note categories and templates for Release Drafter |
+| `.github/labeler.yml` | Path-to-label mapping for provider surfaces, shared runtime/features, admin/UI, docs/examples, tests, and delivery assets |
+| `.github/release-drafter.yml` | Release note categories aligned with the PR labels above |
 | `.github/PULL_REQUEST_TEMPLATE.md` | PR checklist |
 | `.github/ISSUE_TEMPLATE/bug_report.md` | Bug report template |
 
@@ -48,6 +48,7 @@ uv build
 - `publish-pypi.yml` validates that the release tag matches `pyproject.toml` version; keep that contract intact.
 - CI and scheduled Python workflows should use `astral-sh/setup-uv` with `python-version` instead of relying on a separate `uv python install` step.
 - `actions/labeler` expects labels referenced in `.github/labeler.yml` to exist in the repository settings; this repo does not auto-create them.
+- Keep `.github/labeler.yml` and `.github/release-drafter.yml` in sync. The current label set is `openai`, `anthropic`, `gemini`, `translate`, `admin`, `frontend`, `features`, `providers`, `runtime`, `docker`, `ci`, `docs`, `examples`, `tests`, and `dependencies`.
 
 ## Quick Find Commands
 
