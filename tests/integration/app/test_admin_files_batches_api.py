@@ -425,6 +425,19 @@ def test_admin_files_batches_batch_output_supports_preview_bytes():
     assert response.content.count(b"\n") == 1
 
 
+def test_admin_files_batches_batch_output_accepts_enum_style_completed_status():
+    app = make_app()
+    app.state.gigachat_client.batches[
+        "batch-gemini-1"
+    ].status = "BatchState.BATCH_STATE_COMPLETED"
+    client = TestClient(app)
+
+    response = client.get("/admin/api/files-batches/batches/batch-gemini-1/output")
+
+    assert response.status_code == 200
+    assert b'"response"' in response.content
+
+
 def test_admin_files_batches_batch_output_infers_anthropic_format_from_input_file():
     app = make_app()
     app.state.gigachat_client.files["file-anthropic-input-1"] = {

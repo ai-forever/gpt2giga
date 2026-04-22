@@ -379,8 +379,7 @@ async def _load_batch_output_content(
         )
 
     raw_metadata = dict(batch_record.raw.get("metadata") or {})
-    raw_batch = dict(batch_record.raw.get("batch") or {})
-    status = str(raw_batch.get("status") or batch_record.status or "").strip().lower()
+    status = str(batch_record.status or "").strip().lower()
     output_api_format = await _resolve_batch_output_api_format(
         batch_record,
         raw_metadata=raw_metadata,
