@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga"
-version = "1.0.0rc2"
+version = "1.0.0rc3"
 description = "Утилита для проксирования OpenAI, Anthropic и Gemini запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
@@ -28,7 +28,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = [
-    "gpt2giga-ui==1.0.0rc2",
+    "gpt2giga-ui==1.0.0rc3",
 ]
 
 [project.scripts]
