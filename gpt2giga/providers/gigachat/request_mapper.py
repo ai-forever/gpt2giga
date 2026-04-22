@@ -189,7 +189,7 @@ class RequestTransformer(
         return sanitize_for_utf8(transformed_data)
 
     async def prepare_chat_completion(
-        self, data: dict, giga_client: Optional[GigaChat] = None
+        self, data: Any, giga_client: Any = None
     ) -> Dict[str, Any]:
         """Prepare a Chat Completions payload."""
         transformed_data = self.transform_chat_parameters(to_backend_payload(data))
@@ -251,15 +251,13 @@ class RequestTransformer(
 
         return request_data
 
-    async def prepare_chat_completion_v2(
-        self, data: dict, giga_client: Optional[GigaChat] = None
-    ):
+    async def prepare_chat_completion_v2(self, data: Any, giga_client: Any = None):
         """Prepare a native GigaChat v2 payload for chat-like endpoints."""
         request_data = self._build_chat_v2_request_data(to_backend_payload(data))
         return await self.prepare_response_v2(request_data, giga_client)
 
     async def prepare_response(
-        self, data: dict, giga_client: Optional[GigaChat] = None
+        self, data: Any, giga_client: Any = None
     ) -> Dict[str, Any]:
         """Prepare a legacy Responses API payload."""
         transformed_data = self.transform_responses_parameters(to_backend_payload(data))

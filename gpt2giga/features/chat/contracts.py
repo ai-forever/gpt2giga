@@ -6,13 +6,10 @@ from typing import (
     Any,
     AsyncIterator,
     Literal,
-    Optional,
     Protocol,
     TypeAlias,
     runtime_checkable,
 )
-
-from gigachat import GigaChat
 
 from gpt2giga.core.contracts import NormalizedChatRequest
 
@@ -47,7 +44,7 @@ class ChatProviderMapper(Protocol):
     async def prepare_request(
         self,
         data: ChatRequestData,
-        giga_client: Optional[GigaChat] = None,
+        giga_client: Any = None,
     ) -> PreparedChatRequest:
         """Map the feature request into a provider-specific payload."""
 
@@ -56,7 +53,7 @@ class ChatProviderMapper(Protocol):
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        request_data: Optional[ChatRequestData] = None,
+        request_data: Any = None,
     ) -> ChatResponseData:
         """Map a provider response into the external chat-completions contract."""
 
@@ -65,6 +62,6 @@ class ChatProviderMapper(Protocol):
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        request_data: Optional[ChatRequestData] = None,
+        request_data: Any = None,
     ) -> ChatStreamChunk:
         """Map a provider stream chunk into the external chat-completions contract."""

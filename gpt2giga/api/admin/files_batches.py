@@ -366,10 +366,10 @@ async def _load_batch_output_content(
     batch_record,
     *,
     request: Request,
-    giga_client: object,
-    files_service: object,
-    batch_store: object,
-    file_store: object,
+    giga_client: Any,
+    files_service: Any,
+    batch_store: Any,
+    file_store: Any,
 ) -> tuple[bytes, str]:
     output_file_id = batch_record.output_file_id
     if not output_file_id:
@@ -423,8 +423,8 @@ async def _resolve_batch_output_api_format(
     batch_record,
     *,
     raw_metadata: dict[str, Any],
-    giga_client: object,
-    file_store: object,
+    giga_client: Any,
+    file_store: Any,
 ) -> str:
     """Resolve the batch output format, falling back to the original input rows."""
     inferred_format = _infer_batch_api_format_from_rows(raw_metadata.get("requests"))
@@ -479,8 +479,8 @@ def _get_response_processor_or_none(state: object):
 def _resolve_output_batch_id(
     file_id: str,
     *,
-    file_store: object,
-    batch_store: object,
+    file_store: Any,
+    batch_store: Any,
 ) -> str | None:
     stored_file = file_store.get(file_id, {}) if file_store is not None else {}
     stored_batch_id = str(stored_file.get("batch_id") or "").strip()

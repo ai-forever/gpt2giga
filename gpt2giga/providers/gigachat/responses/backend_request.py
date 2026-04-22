@@ -1,8 +1,6 @@
 """Responses API v2 backend-request assembly helpers."""
 
 from typing import Any, Dict, List, Optional
-
-from gigachat import GigaChat
 from gigachat.models import ChatV2, ChatV2Storage, ChatV2Tool, ChatV2UserInfo
 
 from gpt2giga.core.contracts import to_backend_payload
@@ -33,8 +31,8 @@ class ResponsesV2BackendRequestMixin(
 
     async def prepare_response_v2(
         self,
-        data: dict,
-        giga_client: Optional[GigaChat] = None,
+        data: Any,
+        giga_client: Any = None,
         response_store: Optional[Dict[str, Any]] = None,
     ) -> ChatV2:
         """Prepare a native GigaChat v2 payload for the Responses API."""

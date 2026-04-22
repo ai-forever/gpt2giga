@@ -84,6 +84,34 @@ _ADMIN_API_ROUTES = (
 )
 
 
+def _coerce_int_metric(value: object) -> int:
+    """Safely coerce loosely-typed usage metrics into integers."""
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return 0
+        try:
+            return int(normalized)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _mapping_keys(value: object) -> list[str]:
+    """Return normalized string keys from a mapping-like value."""
+    if not isinstance(value, Mapping):
+        return []
+    return [str(key) for key in value.keys()]
+
+
 def _normalize_optional_text(value: str | None) -> str | None:
     """Normalize empty query-string values into ``None``."""
     if value is None:
@@ -110,8 +138,8 @@ def _sorted_usage_entries(entries: list[dict[str, object]]) -> list[dict[str, ob
     return sorted(
         entries,
         key=lambda entry: (
-            -int(entry.get("total_tokens", 0) or 0),
-            -int(entry.get("request_count", 0) or 0),
+            -_coerce_int_metric(entry.get("total_tokens")),
+            -_coerce_int_metric(entry.get("request_count")),
             str(entry.get("name") or entry.get("provider") or entry.get("kind") or ""),
         ),
     )
@@ -122,36 +150,20 @@ def _collect_usage_filter_options(
 ) -> dict[str, list[str]]:
     """Collect available filter values from aggregated usage entries."""
     models = sorted(
-        {
-            model
-            for entry in entries
-            for model in (
-                (entry.get("models") or {}).keys()
-                if isinstance(entry.get("models"), Mapping)
-                else []
-            )
-        }
+        {model for entry in entries for model in _mapping_keys(entry.get("models"))}
     )
     providers = sorted(
         {
             provider
             for entry in entries
-            for provider in (
-                (entry.get("providers") or {}).keys()
-                if isinstance(entry.get("providers"), Mapping)
-                else []
-            )
+            for provider in _mapping_keys(entry.get("providers"))
         }
     )
     api_keys = sorted(
         {
             api_key
             for entry in entries
-            for api_key in (
-                (entry.get("api_keys") or {}).keys()
-                if isinstance(entry.get("api_keys"), Mapping)
-                else []
-            )
+            for api_key in _mapping_keys(entry.get("api_keys"))
         }
     )
     sources = sorted(
@@ -173,20 +185,22 @@ def _usage_summary(entries: list[dict[str, object]]) -> dict[str, int]:
     """Build a compact total summary for aggregated usage entries."""
     return {
         "request_count": sum(
-            int(entry.get("request_count", 0) or 0) for entry in entries
+            _coerce_int_metric(entry.get("request_count")) for entry in entries
         ),
         "success_count": sum(
-            int(entry.get("success_count", 0) or 0) for entry in entries
+            _coerce_int_metric(entry.get("success_count")) for entry in entries
         ),
-        "error_count": sum(int(entry.get("error_count", 0) or 0) for entry in entries),
+        "error_count": sum(
+            _coerce_int_metric(entry.get("error_count")) for entry in entries
+        ),
         "prompt_tokens": sum(
-            int(entry.get("prompt_tokens", 0) or 0) for entry in entries
+            _coerce_int_metric(entry.get("prompt_tokens")) for entry in entries
         ),
         "completion_tokens": sum(
-            int(entry.get("completion_tokens", 0) or 0) for entry in entries
+            _coerce_int_metric(entry.get("completion_tokens")) for entry in entries
         ),
         "total_tokens": sum(
-            int(entry.get("total_tokens", 0) or 0) for entry in entries
+            _coerce_int_metric(entry.get("total_tokens")) for entry in entries
         ),
     }
 
@@ -571,7 +585,7 @@ class AdminRuntimeSnapshotService:
             "rows": rows,
         }
 
-    def _collect_state_status(self) -> dict[str, dict[str, bool | int | None]]:
+    def _collect_state_status(self) -> dict[str, dict[str, bool | int | str | None]]:
         """Return a coarse runtime snapshot of typed app-state containers."""
         services = get_runtime_services(self.request.app.state)
         providers = get_runtime_providers(self.request.app.state)

@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-def _mask_secret(value: str | None) -> str | None:
+class _SecretValue(Protocol):
+    def get_secret_value(self) -> str: ...
+
+
+def _mask_secret(value: object) -> str | None:
     """Return a short masked preview for a secret string."""
     if hasattr(value, "get_secret_value"):
-        value = value.get_secret_value()
+        value = cast(_SecretValue, value).get_secret_value()
+    if value is not None and not isinstance(value, str):
+        raise TypeError("secret preview expects a string-like value")
     if not value:
         return None
     if len(value) <= 8:

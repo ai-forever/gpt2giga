@@ -1,34 +1,35 @@
 """OpenAPI helpers for Gemini-compatible endpoints."""
 
-from typing import Any, Dict
+from typing import Any
 
 from gpt2giga.api._openapi import _request_body_oneof
 
 
-def gemini_generate_content_openapi_extra() -> Dict[str, Any]:
+def gemini_generate_content_openapi_extra() -> dict[str, Any]:
     """OpenAPI extras for Gemini generateContent."""
-    minimal_schema = {
+    minimal_properties: dict[str, Any] = {
+        "contents": {
+            "description": "Gemini content payload.",
+            "oneOf": [
+                {"type": "string"},
+                {"type": "array", "items": {"type": "object"}},
+                {"type": "object"},
+            ],
+        }
+    }
+    minimal_schema: dict[str, Any] = {
         "title": "GeminiGenerateContentMinimal",
         "type": "object",
         "required": ["contents"],
-        "properties": {
-            "contents": {
-                "description": "Gemini content payload.",
-                "oneOf": [
-                    {"type": "string"},
-                    {"type": "array", "items": {"type": "object"}},
-                    {"type": "object"},
-                ],
-            }
-        },
+        "properties": minimal_properties,
         "additionalProperties": True,
     }
-    full_schema = {
+    full_schema: dict[str, Any] = {
         "title": "GeminiGenerateContentFull",
         "type": "object",
         "required": ["contents"],
         "properties": {
-            **minimal_schema["properties"],
+            **minimal_properties,
             "systemInstruction": {"type": "object", "additionalProperties": True},
             "generationConfig": {"type": "object", "additionalProperties": True},
             "tools": {"type": "array", "items": {"type": "object"}},
@@ -58,25 +59,24 @@ def gemini_generate_content_openapi_extra() -> Dict[str, Any]:
     )
 
 
-def gemini_count_tokens_openapi_extra() -> Dict[str, Any]:
+def gemini_count_tokens_openapi_extra() -> dict[str, Any]:
     """OpenAPI extras for Gemini countTokens."""
-    minimal_schema = {
+    contents_schema: dict[str, Any] = {
+        "type": "array",
+        "items": {"type": "object", "additionalProperties": True},
+    }
+    minimal_schema: dict[str, Any] = {
         "title": "GeminiCountTokensMinimal",
         "type": "object",
         "required": ["contents"],
-        "properties": {
-            "contents": {
-                "type": "array",
-                "items": {"type": "object", "additionalProperties": True},
-            }
-        },
+        "properties": {"contents": contents_schema},
         "additionalProperties": True,
     }
-    full_schema = {
+    full_schema: dict[str, Any] = {
         "title": "GeminiCountTokensFull",
         "type": "object",
         "properties": {
-            "contents": minimal_schema["properties"]["contents"],
+            "contents": contents_schema,
             "generateContentRequest": {
                 "type": "object",
                 "additionalProperties": True,
@@ -100,26 +100,25 @@ def gemini_count_tokens_openapi_extra() -> Dict[str, Any]:
     )
 
 
-def gemini_batch_embed_contents_openapi_extra() -> Dict[str, Any]:
+def gemini_batch_embed_contents_openapi_extra() -> dict[str, Any]:
     """OpenAPI extras for Gemini batchEmbedContents."""
-    minimal_schema = {
+    requests_schema: dict[str, Any] = {
+        "type": "array",
+        "items": {"type": "object", "additionalProperties": True},
+    }
+    minimal_schema: dict[str, Any] = {
         "title": "GeminiBatchEmbedContentsMinimal",
         "type": "object",
         "required": ["requests"],
-        "properties": {
-            "requests": {
-                "type": "array",
-                "items": {"type": "object", "additionalProperties": True},
-            }
-        },
+        "properties": {"requests": requests_schema},
         "additionalProperties": True,
     }
-    full_schema = {
+    full_schema: dict[str, Any] = {
         "title": "GeminiBatchEmbedContentsFull",
         "type": "object",
         "required": ["requests"],
         "properties": {
-            "requests": minimal_schema["properties"]["requests"],
+            "requests": requests_schema,
             "outputDimensionality": {"type": "integer"},
             "taskType": {"type": "string"},
             "title": {"type": "string"},

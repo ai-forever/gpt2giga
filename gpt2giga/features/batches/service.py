@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException
 
@@ -156,7 +156,7 @@ class BatchesService:
             transformed_content,
             method=target.method,
         )
-        stored_metadata: BatchMetadata = dict(metadata or {})
+        stored_metadata = cast(BatchMetadata, dict(metadata or {}))
         stored_metadata["endpoint"] = target.endpoint
         stored_metadata["completion_window"] = completion_window
         stored_metadata["output_file_id"] = batch.output_file_id
@@ -352,7 +352,7 @@ class BatchesService:
         metadata = batch_store.get(batch_id)
         if metadata is None:
             return None
-        return dict(metadata)
+        return cast(BatchMetadata, dict(metadata))
 
     def _sync_batch_record(
         self,
@@ -362,7 +362,7 @@ class BatchesService:
         batch_store: BatchesMetadataStore | None,
         file_store: FilesMetadataStore | None,
     ) -> BatchRecord:
-        normalized_metadata: BatchMetadata = dict(metadata)
+        normalized_metadata = cast(BatchMetadata, dict(metadata))
         stored_output_metadata = (
             dict(file_store.get(batch.output_file_id, {}))
             if file_store is not None and batch.output_file_id
@@ -382,7 +382,10 @@ class BatchesService:
         if batch_store is not None:
             batch_store[batch.id_] = normalized_metadata
         if file_store is not None and batch.output_file_id:
-            output_metadata = dict(stored_output_metadata)
+            output_metadata = cast(
+                Any,
+                dict(stored_output_metadata),
+            )
             output_metadata["purpose"] = "batch_output"
             output_metadata["batch_id"] = batch.id_
             input_file_id = str(normalized_metadata.get("input_file_id") or "").strip()

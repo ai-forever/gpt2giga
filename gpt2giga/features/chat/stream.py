@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncGenerator, Optional
-
-from gigachat import GigaChat
+from typing import Any, AsyncGenerator
 from starlette.requests import Request
 
 from gpt2giga.app.dependencies import get_logger_from_state
@@ -31,7 +29,7 @@ async def stream_chat_completion_generator(
     model: str,
     chat_messages: Any,
     response_id: str,
-    giga_client: Optional[GigaChat] = None,
+    giga_client: Any = None,
     *,
     mapper: ChatProviderMapper,
     api_mode: str = "v1",

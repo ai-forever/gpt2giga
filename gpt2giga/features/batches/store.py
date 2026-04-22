@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import Request
 
 from gpt2giga.app.dependencies import get_runtime_stores
-from gpt2giga.features.batches.contracts import BatchesMetadataStore
+from gpt2giga.features.batches.contracts import BatchMetadata, BatchesMetadataStore
 
 
 def get_batch_store_from_state(state: Any) -> BatchesMetadataStore:
@@ -23,7 +23,7 @@ def get_batch_store(request: Request) -> BatchesMetadataStore:
 def find_batch_metadata_by_output_file_id(
     batch_store: BatchesMetadataStore,
     file_id: str,
-) -> dict | None:
+) -> BatchMetadata | None:
     """Return batch metadata for a known batch output file."""
     return next(
         (

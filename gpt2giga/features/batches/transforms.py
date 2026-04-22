@@ -1,5 +1,6 @@
 import base64
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -190,25 +191,42 @@ async def transform_batch_input_file(
     )
 
 
-def build_openai_batch_object(batch: Any, metadata: dict[str, Any]) -> dict[str, Any]:
+def build_openai_batch_object(
+    batch: Any,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
     """Build an OpenAI-compatible batch object."""
-    target = _BATCH_TARGETS.get(
-        metadata.get("endpoint"),
-        BatchTarget(
+    endpoint = metadata.get("endpoint")
+    if not isinstance(endpoint, str):
+        endpoint = None
+    target = (
+        _BATCH_TARGETS[endpoint]
+        if endpoint in _BATCH_TARGETS
+        else BatchTarget(
             endpoint="/v1/chat/completions",
             method="chat_completions",
             kind="chat",
-        ),
+        )
     )
-    status = _BATCH_STATUS_MAP.get(getattr(batch, "status", None), "in_progress")
+    raw_status = getattr(batch, "status", None)
+    status = (
+        _BATCH_STATUS_MAP.get(raw_status, "in_progress")
+        if isinstance(raw_status, str)
+        else "in_progress"
+    )
     created_at = getattr(batch, "created_at", None)
     updated_at = getattr(batch, "updated_at", None)
     request_counts = getattr(batch, "request_counts", None)
+    request_counts_payload = (
+        request_counts.model_dump()
+        if request_counts is not None and hasattr(request_counts, "model_dump")
+        else None
+    )
 
     return {
         "id": getattr(batch, "id_", ""),
         "object": "batch",
-        "endpoint": metadata.get("endpoint", target.endpoint),
+        "endpoint": endpoint or target.endpoint,
         "errors": None,
         "input_file_id": metadata.get("input_file_id", ""),
         "completion_window": metadata.get("completion_window", "24h"),
@@ -222,11 +240,7 @@ def build_openai_batch_object(batch: Any, metadata: dict[str, Any]) -> dict[str,
         "expires_at": None,
         "cancelling_at": None,
         "cancelled_at": None,
-        "request_counts": (
-            request_counts.model_dump()
-            if hasattr(request_counts, "model_dump")
-            else None
-        ),
+        "request_counts": request_counts_payload,
         "metadata": metadata.get("metadata"),
         "model": metadata.get("model"),
         "output_file_id": getattr(batch, "output_file_id", None),

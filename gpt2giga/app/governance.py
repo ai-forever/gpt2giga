@@ -98,14 +98,15 @@ def reserve_governance_request_window(
 
         if (
             matched.rule.max_requests is not None
-            and int(counter.get("request_count", 0) or 0) >= matched.rule.max_requests
+            and _coerce_int_value(counter.get("request_count"))
+            >= matched.rule.max_requests
         ):
             exceeded.append(
                 _build_limit_status(
                     matched,
                     dimension="requests",
                     window_ends_at=window_ends_at,
-                    current_value=int(counter.get("request_count", 0) or 0),
+                    current_value=_coerce_int_value(counter.get("request_count")),
                     limit_value=matched.rule.max_requests,
                     current_time=current_time,
                 )
@@ -114,7 +115,7 @@ def reserve_governance_request_window(
 
         if (
             matched.rule.max_total_tokens is not None
-            and int(counter.get("total_tokens", 0) or 0)
+            and _coerce_int_value(counter.get("total_tokens"))
             >= matched.rule.max_total_tokens
         ):
             exceeded.append(
@@ -122,7 +123,7 @@ def reserve_governance_request_window(
                     matched,
                     dimension="total_tokens",
                     window_ends_at=window_ends_at,
-                    current_value=int(counter.get("total_tokens", 0) or 0),
+                    current_value=_coerce_int_value(counter.get("total_tokens")),
                     limit_value=matched.rule.max_total_tokens,
                     current_time=current_time,
                 )
@@ -137,7 +138,7 @@ def reserve_governance_request_window(
     for matched, key, counter, window_started_at, window_ends_at in reservations:
         if matched.rule.max_requests is None:
             continue
-        counter["request_count"] = int(counter.get("request_count", 0) or 0) + 1
+        counter["request_count"] = _coerce_int_value(counter.get("request_count")) + 1
         counter["window_started_at"] = window_started_at
         counter["window_ends_at"] = window_ends_at
         counter["scope"] = matched.rule.scope
@@ -160,8 +161,9 @@ def record_governance_event(state: Any, event: Mapping[str, object]) -> None:
         model=_coerce_optional_text(event.get("model")),
         api_key_name=_coerce_optional_text(event.get("api_key_name")),
     )
-    token_usage = event.get("token_usage") or {}
-    total_tokens = int(token_usage.get("total_tokens", 0) or 0)
+    token_usage = event.get("token_usage")
+    token_usage_mapping = token_usage if isinstance(token_usage, Mapping) else {}
+    total_tokens = _coerce_int_value(token_usage_mapping.get("total_tokens"))
     if total_tokens <= 0:
         return
 
@@ -185,7 +187,7 @@ def record_governance_event(state: Any, event: Mapping[str, object]) -> None:
         counter["subject"] = matched.subject
         counter["rule_name"] = matched.rule.name or f"governance-{matched.index}"
         counter["total_tokens"] = (
-            int(counter.get("total_tokens", 0) or 0) + total_tokens
+            _coerce_int_value(counter.get("total_tokens")) + total_tokens
         )
         store[key] = counter
 
@@ -212,6 +214,27 @@ def _coerce_counter_record(value: object) -> dict[str, object]:
     return record
 
 
+def _coerce_int_value(value: object, default: int = 0) -> int:
+    """Safely coerce loosely-typed values into integers."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return default
+        try:
+            return int(normalized)
+        except ValueError:
+            return default
+    return default
+
+
 def _prune_expired_governance_counters(
     store: MutableMapping[str, Any],
     *,
@@ -227,7 +250,7 @@ def _prune_expired_governance_counters(
         if not isinstance(counter, Mapping):
             expired_keys.append(key)
             continue
-        if int(counter.get("window_ends_at", 0) or 0) <= now:
+        if _coerce_int_value(counter.get("window_ends_at")) <= now:
             expired_keys.append(key)
     for key in expired_keys:
         del store[key]

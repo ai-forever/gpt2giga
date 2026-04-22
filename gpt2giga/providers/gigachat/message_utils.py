@@ -60,25 +60,23 @@ def merge_consecutive_messages(messages: List[Dict]) -> List[Dict]:
 def collapse_user_messages(messages: List[Messages]) -> List[Messages]:
     """Collapse consecutive user messages into one."""
     collapsed_messages: List[Messages] = []
-    prev_user_message = None
+    prev_user_message: Messages | None = None
     content_parts: List[str] = []
 
     for message in messages:
         if message.role == "user" and prev_user_message is not None:
             content_parts.append(message.content)
         else:
-            if content_parts:
-                prev_user_message.content = "\n".join(
-                    [prev_user_message.content] + content_parts
-                )
+            if content_parts and prev_user_message is not None:
+                base_content = prev_user_message.content or ""
+                prev_user_message.content = "\n".join([base_content] + content_parts)
                 content_parts = []
             collapsed_messages.append(message)
             prev_user_message = message if message.role == "user" else None
 
     if content_parts and prev_user_message is not None:
-        prev_user_message.content = "\n".join(
-            [prev_user_message.content] + content_parts
-        )
+        base_content = prev_user_message.content or ""
+        prev_user_message.content = "\n".join([base_content] + content_parts)
 
     return collapsed_messages
 

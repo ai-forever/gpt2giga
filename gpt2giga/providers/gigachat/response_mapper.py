@@ -3,7 +3,7 @@
 import json
 import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from gpt2giga.providers.gigachat.response_mapping_common import (
     ResponseProcessorCommonMixin,
@@ -33,7 +33,7 @@ class ResponseProcessor(
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        request_data: Optional[Dict] = None,
+        request_data: Any = None,
     ) -> dict:
         """Process a non-streaming chat-completions response."""
         giga_dict = self._safe_model_dump(giga_resp)
@@ -206,7 +206,7 @@ class ResponseProcessor(
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        request_data: Optional[Dict] = None,
+        request_data: Any = None,
     ) -> dict:
         """Process a native v2 chat response into OpenAI chat-completions."""
         return self.process_response(
@@ -221,7 +221,7 @@ class ResponseProcessor(
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        request_data: Optional[Dict] = None,
+        request_data: Any = None,
     ) -> dict:
         """Process a streaming chat-completions chunk."""
         giga_dict = self._safe_model_dump(giga_resp)
@@ -268,7 +268,7 @@ class ResponseProcessor(
         giga_resp: Any,
         gpt_model: str,
         response_id: str,
-        request_data: Optional[Dict] = None,
+        request_data: Any = None,
     ) -> dict:
         """Process a native v2 chat stream chunk into OpenAI chat deltas."""
         return self.process_stream_chunk(
