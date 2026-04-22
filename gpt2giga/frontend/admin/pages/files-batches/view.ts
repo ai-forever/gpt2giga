@@ -1,5 +1,5 @@
 import { pathForPage } from "../../routes.js";
-import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
+import { CANONICAL_DOC_LINKS, OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
 import {
   card,
   kpi,
@@ -252,6 +252,11 @@ function renderFilesBatchesHub(
       renderGuideLinks(
         [
           {
+            label: "API compatibility matrix",
+            href: CANONICAL_DOC_LINKS.compatibility,
+            note: "Check which batch and file surfaces are stable or partial before chasing a provider-specific mismatch.",
+          },
+          {
             label: "Files and batches lifecycle",
             href: OPERATOR_GUIDE_LINKS.filesBatches,
             note: "Follow the staged operator path for uploads, queued jobs, output inspection, and downstream request handoff.",
@@ -269,7 +274,7 @@ function renderFilesBatchesHub(
         ],
         {
           compact: true,
-          collapsibleSummary: "Operator guides",
+          collapsibleSummary: "Canonical docs",
           intro: "Use the hub for counts and recent activity only.",
         },
       ),
@@ -458,7 +463,7 @@ function renderFilesPage(
         ],
         {
           compact: true,
-          collapsibleSummary: "Operator guides",
+          collapsibleSummary: "Canonical docs",
           intro: "File preview and metadata stay primary here.",
         },
       ),
@@ -630,7 +635,7 @@ function renderBatchesPage(
         ],
         {
           compact: true,
-          collapsibleSummary: "Operator guides",
+          collapsibleSummary: "Canonical docs",
           intro: "Batch creation and lifecycle stay primary here.",
         },
       ),

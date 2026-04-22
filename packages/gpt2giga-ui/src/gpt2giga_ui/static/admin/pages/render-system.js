@@ -1,4 +1,4 @@
-import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
+import { CANONICAL_DOC_LINKS, OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
 import { banner, card, kpi, pill, renderDefinitionList, renderGuideLinks, renderSetupSteps, renderStatLines, renderWorkflowCard, } from "../templates.js";
 import { asArray, asRecord, describeGigachatAuth, describePersistenceStatus, escapeHtml, formatNumber, humanizeField, } from "../utils.js";
@@ -171,9 +171,14 @@ export async function renderSystem(app, token) {
       `, "panel panel--span-8 panel--measure")}
     ${card("Guide and troubleshooting", renderGuideLinks([
         {
-            label: "Overview workflow guide",
-            href: OPERATOR_GUIDE_LINKS.overview,
-            note: "Step back when the current warning still lacks a clear owner.",
+            label: "Docs entry point",
+            href: CANONICAL_DOC_LINKS.index,
+            note: "Step back when the current warning still lacks a clear canonical doc owner.",
+        },
+        {
+            label: "Configuration guide",
+            href: CANONICAL_DOC_LINKS.configuration,
+            note: "Use this when the mismatch is about env, auth, or deployment posture.",
         },
         {
             label: "Provider surface diagnostics",
@@ -187,7 +192,7 @@ export async function renderSystem(app, token) {
         },
     ], {
         compact: true,
-        collapsibleSummary: "Operator guides",
+        collapsibleSummary: "Canonical docs",
         intro: "Open only after the summary stalls.",
     }), "panel panel--span-4 panel--aside")}
     ${card("Route coverage", renderDefinitionList(routeSummaries.map((group) => ({

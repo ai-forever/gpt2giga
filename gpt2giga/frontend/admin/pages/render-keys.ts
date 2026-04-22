@@ -289,7 +289,7 @@ export async function renderKeys(app: AdminApp, token: number): Promise<void> {
                 ],
                 {
                   compact: true,
-                  collapsibleSummary: "Operator guides",
+                  collapsibleSummary: "Canonical docs",
                 },
               ),
               "panel panel--span-4 panel--aside",

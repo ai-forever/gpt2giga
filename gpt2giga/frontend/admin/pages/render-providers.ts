@@ -1,5 +1,5 @@
 import type { AdminApp } from "../app.js";
-import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
+import { CANONICAL_DOC_LINKS, OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
 import {
   banner,
@@ -308,6 +308,11 @@ export async function renderProviders(app: AdminApp, token: number): Promise<voi
               renderGuideLinks(
                 [
                   {
+                    label: "API compatibility matrix",
+                    href: CANONICAL_DOC_LINKS.compatibility,
+                    note: "Check the stable, partial, and unsupported boundary before treating a route mismatch as a bug.",
+                  },
+                  {
                     label: "Provider surface diagnostics",
                     href: OPERATOR_GUIDE_LINKS.providers,
                     note: "Coverage, route checks, and Settings to Playground to Traffic handoff.",
@@ -325,7 +330,7 @@ export async function renderProviders(app: AdminApp, token: number): Promise<voi
                 ],
                 {
                   compact: true,
-                  collapsibleSummary: "Operator guides",
+                  collapsibleSummary: "Canonical docs",
                   intro: "Open only after coverage, smoke, or traffic still leave a mismatch.",
                 },
               ),

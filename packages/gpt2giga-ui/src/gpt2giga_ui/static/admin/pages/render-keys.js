@@ -224,7 +224,7 @@ export async function renderKeys(app, token) {
                     },
                 ], {
                     compact: true,
-                    collapsibleSummary: "Operator guides",
+                    collapsibleSummary: "Canonical docs",
                 }), "panel panel--span-4 panel--aside")}
             ${card("Current key snapshot", `
                 <details class="details-disclosure">

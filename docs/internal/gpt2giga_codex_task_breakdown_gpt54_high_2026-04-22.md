@@ -31,6 +31,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-014 — done
 - [x] RLS-015 — done
 - [x] RLS-016 — done
+- [x] RLS-018 — done
 
 ---
 
@@ -708,6 +709,17 @@ Update any admin docs links, “operator guides” references, or help-copy surf
 - admin links only surface canonical docs
 - copy still matches the shipped features
 - assets are synced
+
+**Status**
+
+Completed in the current repository state: admin docs links now route through
+an expanded canonical-docs helper that exposes the docs index, configuration
+guide, API compatibility matrix, upgrade guide, and operator-guide anchors
+without surfacing `docs/internal/`. The admin UI now labels these disclosures
+as `Canonical docs`, overview/providers/files-batches surfaces link directly to
+the most relevant canonical pages, and the committed admin assets plus
+integration/frontend checks are updated in sync with the extracted frontend
+module layout.
 
 ---
 

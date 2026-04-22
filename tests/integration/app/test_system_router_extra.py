@@ -291,8 +291,8 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     assert "Open requests" in traffic_asset.text
     assert "Open errors" in traffic_asset.text
     assert "Open usage" in traffic_asset.text
-    assert "Current scope snapshot" in traffic_asset.text
     assert "[data-traffic-action]" in traffic_bindings_asset.text
+    assert "Current scope snapshot" in traffic_bindings_asset.text
     assert "Selected request snapshot" in traffic_bindings_asset.text
     assert "Selected error snapshot" in traffic_bindings_asset.text
     assert "Selected usage-by-key snapshot" in traffic_bindings_asset.text
@@ -309,7 +309,7 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     assert 'id="logs-tail-context"' in logs_asset.text
     assert "Current scope snapshot" in logs_asset.text
     assert "Logs deep-dive guide" in logs_asset.text
-    assert "Operator guides" in logs_asset.text
+    assert "Canonical docs" in logs_asset.text
     assert "[data-log-action]" in logs_bindings_asset.text
     assert "[data-log-detail]" in logs_bindings_asset.text
     assert "Selected request snapshot" in logs_bindings_asset.text
@@ -317,6 +317,8 @@ def test_admin_ui_assets_include_observe_diagnose_handoff_copy():
     assert "Selected tail context snapshot" in logs_bindings_asset.text
 
     assert docs_links_asset.status_code == 200
+    assert "README.md" in docs_links_asset.text
+    assert "configuration.md" in docs_links_asset.text
     assert "operator-guide.md" in docs_links_asset.text
     assert "traffic-summary-to-request-scope" in docs_links_asset.text
     assert "logs-deep-dive-and-live-tail" in docs_links_asset.text
@@ -333,8 +335,8 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
     assert overview_asset.status_code == 200
     assert "Status and next actions" in overview_asset.text
     assert "Recent issues" in overview_asset.text
-    assert "Overview workflow guide" in overview_asset.text
-    assert "Operator guides" in overview_asset.text
+    assert "Docs entry point" in overview_asset.text
+    assert "Canonical docs" in overview_asset.text
     assert 'pathForPage("playground")' in overview_asset.text
     assert 'pathForPage("traffic")' in overview_asset.text
     assert 'pathForPage("logs")' in overview_asset.text
@@ -360,10 +362,12 @@ def test_admin_ui_assets_include_summary_first_system_and_provider_copy():
         "Open these only when a route-family mismatch remains." in providers_asset.text
     )
     assert "Provider surface diagnostics" in providers_asset.text
-    assert "Operator guides" in providers_asset.text
+    assert "API compatibility matrix" in providers_asset.text
+    assert "Canonical docs" in providers_asset.text
     assert "Current route-family snapshot" in providers_asset.text
     assert "Full provider surface matrix" in providers_asset.text
     assert docs_links_asset.status_code == 200
+    assert "api-compatibility.md" in docs_links_asset.text
     assert "provider-surface-diagnostics" in docs_links_asset.text
 
 
@@ -397,7 +401,7 @@ def test_admin_ui_assets_include_polished_keys_and_playground_copy():
     assert "Create scoped key" in keys_asset.text
     assert "Key inventory" in keys_asset.text
     assert "Open usage traffic" in keys_asset.text
-    assert "Operator guides" in keys_asset.text
+    assert "Canonical docs" in keys_asset.text
     assert 'id="rotate-global-key"' in keys_asset.text
     assert 'id="rotate-global-key-toolbar"' in keys_asset.text
     assert "data-rotate-global" in keys_asset.text
@@ -416,6 +420,7 @@ def test_admin_ui_assets_include_polished_keys_and_playground_copy():
     assert docs_links_asset.status_code == 200
     assert "troubleshooting-handoff-map" in docs_links_asset.text
     assert "rollout-backend-v2" in docs_links_asset.text
+    assert "upgrade-0.x-to-1.0.md" in docs_links_asset.text
 
 
 def test_admin_ui_assets_include_staged_files_batches_copy():
@@ -431,8 +436,20 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     files_batches_helpers_asset = client.get(
         "/admin/assets/admin/pages/files-batches/bindings/helpers.js"
     )
+    files_batches_batch_composer_state_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/bindings/batch-composer-state.js"
+    )
     files_batches_serializers_asset = client.get(
         "/admin/assets/admin/pages/files-batches/serializers.js"
+    )
+    files_batches_inventory_serializers_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/serializers-inventory.js"
+    )
+    files_batches_preview_serializers_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/serializers-preview.js"
+    )
+    files_batches_filters_serializers_asset = client.get(
+        "/admin/assets/admin/pages/files-batches/serializers-filters.js"
     )
     docs_links_asset = client.get("/admin/assets/admin/docs-links.js")
 
@@ -448,18 +465,22 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
     assert "Sort by" in files_batches_asset.text
     assert "Name (A-Z)" in files_batches_asset.text
     assert 'name="file_sort"' in files_batches_asset.text
+    assert "API compatibility matrix" in files_batches_asset.text
     assert "Files and batches lifecycle" in files_batches_asset.text
-    assert "Operator guides" in files_batches_asset.text
+    assert "Canonical docs" in files_batches_asset.text
     assert "optional when using inline requests" in files_batches_asset.text
     assert files_batches_bindings_asset.status_code == 200
     assert files_batches_batch_composer_asset.status_code == 200
     assert files_batches_helpers_asset.status_code == 200
-    assert 'app.runtime?.gigachat_model?.trim() || "gemini-2.5-flash"' in (
+    assert files_batches_batch_composer_state_asset.status_code == 200
+    assert "readConfiguredFallbackModel(app.runtime?.gigachat_model)" in (
         files_batches_batch_composer_asset.text
     )
-    assert "const fallbackModel =" in files_batches_batch_composer_asset.text
-    assert "model: fallbackModel" in files_batches_batch_composer_asset.text
-    assert "readConfiguredFallbackModel()" in files_batches_batch_composer_asset.text
+    assert 'runtimeModel?.trim() || "gemini-2.5-flash"' in (
+        files_batches_batch_composer_state_asset.text
+    )
+    assert "model: fallbackModel" in files_batches_helpers_asset.text
+    assert "readRuntimeFallbackModel()" in files_batches_batch_composer_asset.text
     assert 'normalized.startsWith("models/")' in files_batches_helpers_asset.text
     assert 'requestLabel: "row-1"' in files_batches_helpers_asset.text
     assert 'elements.batchEndpoint?.addEventListener("change"' in (
@@ -476,26 +497,22 @@ def test_admin_ui_assets_include_staged_files_batches_copy():
         in files_batches_batch_composer_asset.text
     )
     assert files_batches_serializers_asset.status_code == 200
-    assert "Open batch composer" in files_batches_serializers_asset.text
-    assert '"file_sort"' in files_batches_serializers_asset.text
+    assert files_batches_inventory_serializers_asset.status_code == 200
+    assert files_batches_preview_serializers_asset.status_code == 200
+    assert files_batches_filters_serializers_asset.status_code == 200
+    assert "Open batch composer" in files_batches_inventory_serializers_asset.text
+    assert '"file_sort"' in files_batches_filters_serializers_asset.text
     assert (
         "Preview one output first to unlock request-scoped Traffic and Logs handoff."
-        in (files_batches_serializers_asset.text)
+        in (files_batches_inventory_serializers_asset.text)
     )
     assert (
         'scopedLabel = (selection.handoffRequestCount ?? 0) > 1 ? "sample result" : "request"'
-        in files_batches_serializers_asset.text
+        in files_batches_inventory_serializers_asset.text
     )
-    assert (
-        "Open traffic for ${escapeHtml(scopedLabel)}"
-        in files_batches_serializers_asset.text
-    )
-    assert (
-        "Open logs for ${escapeHtml(scopedLabel)}"
-        in files_batches_serializers_asset.text
-    )
-    assert "Sample request scoped" in files_batches_serializers_asset.text
+    assert "Sample request scoped" in files_batches_preview_serializers_asset.text
     assert docs_links_asset.status_code == 200
+    assert "api-compatibility.md" in docs_links_asset.text
     assert "files-and-batches-lifecycle" in docs_links_asset.text
 
 

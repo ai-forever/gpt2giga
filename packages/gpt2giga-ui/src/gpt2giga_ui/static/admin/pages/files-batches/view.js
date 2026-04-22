@@ -1,5 +1,5 @@
 import { pathForPage } from "../../routes.js";
-import { OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
+import { CANONICAL_DOC_LINKS, OPERATOR_GUIDE_LINKS } from "../../docs-links.js";
 import { card, kpi, pill, renderDefinitionList, renderFilterSelectOptions, renderFormSection, renderGuideLinks, renderStaticSelectOptions, renderWorkflowCard, } from "../../templates.js";
 import { escapeHtml, formatBytes, formatTimestamp } from "../../utils.js";
 import { buildFilesBatchesUrl, buildIdleSelectionSummary, buildIdleWorkflowSummary, describeFileValidationSnapshot, getLatestLinkedBatch, isBatchValidationCandidate, renderBatchStatus, } from "./serializers.js";
@@ -142,6 +142,11 @@ function renderFilesBatchesHub(data, inventory) {
         : "<p>No batches are stored yet. Open the batches page when the first queued job is ready.</p>", "panel panel--span-6")}
     ${card("Guide and troubleshooting", renderGuideLinks([
         {
+            label: "API compatibility matrix",
+            href: CANONICAL_DOC_LINKS.compatibility,
+            note: "Check which batch and file surfaces are stable or partial before chasing a provider-specific mismatch.",
+        },
+        {
             label: "Files and batches lifecycle",
             href: OPERATOR_GUIDE_LINKS.filesBatches,
             note: "Follow the staged operator path for uploads, queued jobs, output inspection, and downstream request handoff.",
@@ -158,7 +163,7 @@ function renderFilesBatchesHub(data, inventory) {
         },
     ], {
         compact: true,
-        collapsibleSummary: "Operator guides",
+        collapsibleSummary: "Canonical docs",
         intro: "Use the hub for counts and recent activity only.",
     }), "panel panel--span-12")}
   `;
@@ -297,7 +302,7 @@ function renderFilesPage(data, inventory, filters) {
         },
     ], {
         compact: true,
-        collapsibleSummary: "Operator guides",
+        collapsibleSummary: "Canonical docs",
         intro: "File preview and metadata stay primary here.",
     }), "panel panel--span-4")}
   `;
@@ -431,7 +436,7 @@ function renderBatchesPage(data, inventory, filters) {
         },
     ], {
         compact: true,
-        collapsibleSummary: "Operator guides",
+        collapsibleSummary: "Canonical docs",
         intro: "Batch creation and lifecycle stay primary here.",
     }), "panel panel--span-4")}
   `;

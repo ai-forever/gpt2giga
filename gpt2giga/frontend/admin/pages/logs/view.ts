@@ -216,7 +216,7 @@ export function renderLogsPage(data: LogsPageData, filters: LogsFilters): string
               ],
               {
                 compact: true,
-                collapsibleSummary: "Operator guides",
+                collapsibleSummary: "Canonical docs",
                 intro: filters.requestId
                   ? "Open only if the pinned request still needs a cross-page handoff."
                   : "Open only if this scope still needs another surface.",

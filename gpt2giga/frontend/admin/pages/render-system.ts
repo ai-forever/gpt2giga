@@ -1,5 +1,5 @@
 import type { AdminApp } from "../app.js";
-import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
+import { CANONICAL_DOC_LINKS, OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
 import {
   banner,
@@ -227,9 +227,14 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
       renderGuideLinks(
         [
           {
-            label: "Overview workflow guide",
-            href: OPERATOR_GUIDE_LINKS.overview,
-            note: "Step back when the current warning still lacks a clear owner.",
+            label: "Docs entry point",
+            href: CANONICAL_DOC_LINKS.index,
+            note: "Step back when the current warning still lacks a clear canonical doc owner.",
+          },
+          {
+            label: "Configuration guide",
+            href: CANONICAL_DOC_LINKS.configuration,
+            note: "Use this when the mismatch is about env, auth, or deployment posture.",
           },
           {
             label: "Provider surface diagnostics",
@@ -244,7 +249,7 @@ export async function renderSystem(app: AdminApp, token: number): Promise<void> 
         ],
         {
           compact: true,
-          collapsibleSummary: "Operator guides",
+          collapsibleSummary: "Canonical docs",
           intro: "Open only after the summary stalls.",
         },
       ),

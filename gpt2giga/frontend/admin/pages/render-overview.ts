@@ -1,5 +1,5 @@
 import type { AdminApp } from "../app.js";
-import { OPERATOR_GUIDE_LINKS } from "../docs-links.js";
+import { CANONICAL_DOC_LINKS, OPERATOR_GUIDE_LINKS } from "../docs-links.js";
 import { pathForPage } from "../routes.js";
 import {
   banner,
@@ -352,29 +352,29 @@ export async function renderOverview(app: AdminApp, token: number): Promise<void
               "panel panel--span-4 panel--aside",
             )}
             ${card(
-              "Operator guides",
+              "Canonical docs",
               renderGuideLinks(
                 [
                   {
-                    label: "Overview workflow guide",
+                    label: "Docs entry point",
+                    href: CANONICAL_DOC_LINKS.index,
+                    note: "Start here when you need the canonical docs map instead of another admin surface.",
+                  },
+                  {
+                    label: "Operator guide overview",
                     href: OPERATOR_GUIDE_LINKS.overview,
-                    note: "Open only if the next surface is still unclear.",
+                    note: "Open only if runtime posture now needs deeper operator guidance.",
                   },
                   {
-                    label: "Traffic workflow guide",
-                    href: OPERATOR_GUIDE_LINKS.traffic,
-                    note: "Use this for broad request review instead of a request-pinned log dive.",
-                  },
-                  {
-                    label: "Troubleshooting handoff map",
-                    href: OPERATOR_GUIDE_LINKS.troubleshooting,
-                    note: "Use only when the dashboard and surface cards still leave handoff unclear.",
+                    label: "0.x to 1.0 upgrade guide",
+                    href: CANONICAL_DOC_LINKS.upgrade,
+                    note: "Use this when the instance still reflects pre-1.0 rollout assumptions.",
                   },
                 ],
                 {
-                  collapsibleSummary: "Operator guides",
+                  collapsibleSummary: "Canonical docs",
                   compact: true,
-                  intro: "Treat guides as secondary depth.",
+                  intro: "Use these when the summary still needs canonical product docs.",
                 },
               ),
               "panel panel--span-4 panel--aside",

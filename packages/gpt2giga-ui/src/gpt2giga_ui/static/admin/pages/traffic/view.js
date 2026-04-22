@@ -199,7 +199,7 @@ function renderTrafficOverviewPage(data, filters, requestPinned) {
             note: "Use when the current lane still does not point clearly at the next surface.",
         },
     ], {
-        collapsibleSummary: "Operator guides",
+        collapsibleSummary: "Canonical docs",
         compact: true,
     }), "panel panel--span-4 panel--aside")}
   `;
@@ -251,7 +251,7 @@ function renderTrafficRequestsPage(data, filters, requestPinned) {
             note: "Escalate only after one request row proves raw logs are next.",
         },
     ], {
-        collapsibleSummary: "Operator guides",
+        collapsibleSummary: "Canonical docs",
         compact: true,
     }), "panel panel--span-4 panel--aside")}
   `;
@@ -306,7 +306,7 @@ function renderTrafficErrorsPage(data, filters, requestPinned) {
             note: "Open this when the error row is isolated and only raw log evidence is missing.",
         },
     ], {
-        collapsibleSummary: "Operator guides",
+        collapsibleSummary: "Canonical docs",
         compact: true,
     }), "panel panel--span-4 panel--aside")}
   `;
@@ -391,7 +391,7 @@ function renderTrafficUsagePage(data, filters, requestPinned) {
             note: "Open once grouped usage pointed at the next request or provider surface.",
         },
     ], {
-        collapsibleSummary: "Operator guides",
+        collapsibleSummary: "Canonical docs",
         compact: true,
     })}
         </div>

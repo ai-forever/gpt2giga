@@ -314,7 +314,7 @@ function renderTrafficOverviewPage(
           },
         ],
         {
-          collapsibleSummary: "Operator guides",
+          collapsibleSummary: "Canonical docs",
           compact: true,
         },
       ),
@@ -399,7 +399,7 @@ function renderTrafficRequestsPage(
           },
         ],
         {
-          collapsibleSummary: "Operator guides",
+          collapsibleSummary: "Canonical docs",
           compact: true,
         },
       ),
@@ -487,7 +487,7 @@ function renderTrafficErrorsPage(
           },
         ],
         {
-          collapsibleSummary: "Operator guides",
+          collapsibleSummary: "Canonical docs",
           compact: true,
         },
       ),
@@ -604,7 +604,7 @@ function renderTrafficUsagePage(
               },
             ],
             {
-              collapsibleSummary: "Operator guides",
+              collapsibleSummary: "Canonical docs",
               compact: true,
             },
           )}
