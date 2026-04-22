@@ -152,7 +152,7 @@ def test_logs_ip_allowlist_blocks_unknown_ip(temp_log_file):
     client = TestClient(app)
     resp = client.get("/logs", params={"lines": 1})
     assert resp.status_code == 403
-    assert "IP not in logs allowlist" in resp.json()["detail"]
+    assert "IP not in admin allowlist" in resp.json()["detail"]
 
 
 def test_logs_ip_allowlist_allows_matching_ip(temp_log_file):

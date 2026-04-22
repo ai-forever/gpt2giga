@@ -10,40 +10,27 @@ from fastapi import APIRouter, Query
 from sse_starlette import EventSourceResponse
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, RedirectResponse
-from starlette.status import HTTP_403_FORBIDDEN, HTTP_307_TEMPORARY_REDIRECT
+from starlette.status import HTTP_307_TEMPORARY_REDIRECT
 
+from gpt2giga.api.admin.access import get_client_ip as get_client_ip
+from gpt2giga.api.admin.access import verify_admin_ip_allowlist
 from gpt2giga.app.dependencies import get_config_from_state, get_logger_from_state
 from gpt2giga.core.errors import exceptions_handler
 
 admin_logs_api_router = APIRouter(tags=["Admin"])
 legacy_logs_router = APIRouter(include_in_schema=False)
 
-
-def get_client_ip(request: Request) -> str:
-    """Extract client IP from X-Forwarded-For or request.client."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return ""
+__all__ = (
+    "admin_logs_api_router",
+    "legacy_logs_router",
+    "get_client_ip",
+    "verify_logs_ip_allowlist",
+)
 
 
 def verify_logs_ip_allowlist(request: Request) -> None:
-    """Deny access if client IP is not in the configured allowlist."""
-    config = get_config_from_state(request.app.state)
-    allowlist = getattr(config.proxy_settings, "logs_ip_allowlist", None)
-    if not allowlist:
-        return
-
-    client_ip = get_client_ip(request)
-    if client_ip not in allowlist:
-        from fastapi import HTTPException
-
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
-            detail="Access denied: IP not in logs allowlist",
-        )
+    """Backward-compatible alias for the admin IP allowlist check."""
+    verify_admin_ip_allowlist(request)
 
 
 def _legacy_headers(alternate_path: str = "/admin?tab=logs") -> dict[str, str]:
@@ -90,7 +77,7 @@ async def _get_logs_response(
     headers: dict[str, str] | None = None,
 ) -> PlainTextResponse:
     """Return the last N lines from the configured log file."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     filename = get_config_from_state(request.app.state).proxy_settings.log_filename
 
     try:
@@ -119,7 +106,7 @@ async def _stream_logs_response(
     headers: dict[str, str] | None = None,
 ) -> EventSourceResponse:
     """Stream live logs using Server-Sent Events."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
 
     async def log_generator():
         filename = get_config_from_state(request.app.state).proxy_settings.log_filename
@@ -193,7 +180,7 @@ async def stream_legacy_logs(request: Request):
 @exceptions_handler
 async def redirect_legacy_logs_html(request: Request):
     """Redirect the legacy standalone log viewer into the admin UI."""
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     return RedirectResponse(
         url="/admin?tab=logs",
         status_code=HTTP_307_TEMPORARY_REDIRECT,

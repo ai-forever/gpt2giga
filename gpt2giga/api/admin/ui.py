@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
-from gpt2giga.api.admin.logs import verify_logs_ip_allowlist
+from gpt2giga.api.admin.access import verify_admin_ip_allowlist
 from gpt2giga.app.admin_ui import (
     get_admin_setup_path,
     get_admin_ui_resources,
@@ -62,7 +62,7 @@ async def _get_console_html() -> str:
 
 
 async def _serve_console(request: Request) -> Response:
-    verify_logs_ip_allowlist(request)
+    verify_admin_ip_allowlist(request)
     config = get_config_from_state(request.app.state)
     if not is_admin_ui_enabled(config):
         raise HTTPException(status_code=404, detail="Admin UI is disabled.")
