@@ -15,55 +15,35 @@ from gpt2giga.api.openai.request_adapter import (
     build_normalized_responses_request,
 )
 from gpt2giga.features.models.contracts import ModelDescriptor
+from gpt2giga.providers._shared_adapters import (
+    DelegatingBatchesAdapter,
+    DelegatingChatAdapter,
+    DelegatingEmbeddingsAdapter,
+    DelegatingModelsAdapter,
+    DelegatingResponsesAdapter,
+)
 from gpt2giga.providers.contracts import ProviderAdapterBundle
 from gpt2giga.providers.descriptors import ProviderDescriptor, ProviderMountSpec
 
 
-@dataclass(frozen=True, slots=True)
-class OpenAIChatAdapter:
-    """OpenAI chat request adapter."""
-
-    def build_normalized_request(
-        self,
-        payload: dict[str, Any],
-        *,
-        logger: Any = None,
-    ):
-        return build_normalized_chat_request(payload, logger=logger)
+def _serialize_openai_model(model: ModelDescriptor) -> OpenAIModel:
+    """Build an OpenAI-compatible model payload."""
+    return OpenAIModel(
+        id=model["id"],
+        object="model",
+        owned_by=model["owned_by"],
+        created=int(time.time()),
+    )
 
 
-@dataclass(frozen=True, slots=True)
-class OpenAIResponsesAdapter:
-    """OpenAI Responses request adapter."""
-
-    def build_normalized_request(
-        self,
-        payload: dict[str, Any],
-        *,
-        logger: Any = None,
-    ):
-        return build_normalized_responses_request(payload, logger=logger)
-
-
-@dataclass(frozen=True, slots=True)
-class OpenAIEmbeddingsAdapter:
-    """OpenAI embeddings request adapter."""
-
-    def build_normalized_request(self, payload: dict[str, Any]):
-        return build_normalized_embeddings_request(payload)
-
-
-@dataclass(frozen=True, slots=True)
-class OpenAIModelsAdapter:
-    """OpenAI model presenter."""
-
-    def serialize_model(self, model: ModelDescriptor) -> OpenAIModel:
-        return OpenAIModel(
-            id=model["id"],
-            object="model",
-            owned_by=model["owned_by"],
-            created=int(time.time()),
-        )
+def _clone_batch_payload(
+    payload: dict[str, Any],
+    *,
+    logger: Any = None,
+) -> dict[str, Any]:
+    """Return a shallow copy of an OpenAI batch payload."""
+    del logger
+    return dict(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,37 +73,24 @@ class OpenAIFilesAdapter:
 
 
 @dataclass(frozen=True, slots=True)
-class OpenAIBatchesAdapter:
-    """OpenAI batches adapter."""
-
-    def build_create_payload(
-        self,
-        payload: dict[str, Any],
-        *,
-        logger: Any = None,
-    ) -> dict[str, Any]:
-        return dict(payload)
-
-
-@dataclass(frozen=True, slots=True)
 class OpenAIProviderAdapterBundle(ProviderAdapterBundle):
-    """OpenAI adapter bundle with required capabilities."""
+    """OpenAI adapter bundle with non-optional capability types."""
 
-    chat: OpenAIChatAdapter
-    responses: OpenAIResponsesAdapter
-    embeddings: OpenAIEmbeddingsAdapter
-    models: OpenAIModelsAdapter
+    chat: DelegatingChatAdapter
+    responses: DelegatingResponsesAdapter
+    embeddings: DelegatingEmbeddingsAdapter
+    models: DelegatingModelsAdapter
     files: OpenAIFilesAdapter
-    batches: OpenAIBatchesAdapter
+    batches: DelegatingBatchesAdapter
 
 
 openai_provider_adapters = OpenAIProviderAdapterBundle(
-    chat=OpenAIChatAdapter(),
-    responses=OpenAIResponsesAdapter(),
-    embeddings=OpenAIEmbeddingsAdapter(),
-    models=OpenAIModelsAdapter(),
+    chat=DelegatingChatAdapter(build_normalized_chat_request),
+    responses=DelegatingResponsesAdapter(build_normalized_responses_request),
+    embeddings=DelegatingEmbeddingsAdapter(build_normalized_embeddings_request),
+    models=DelegatingModelsAdapter(_serialize_openai_model),
     files=OpenAIFilesAdapter(),
-    batches=OpenAIBatchesAdapter(),
+    batches=DelegatingBatchesAdapter(_clone_batch_payload),
 )
 
 

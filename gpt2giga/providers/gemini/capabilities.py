@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from gpt2giga.api.gemini.request import normalize_model_name
@@ -14,24 +14,12 @@ from gpt2giga.api.gemini.request_adapter import (
 )
 from gpt2giga.api.gemini.response import build_gemini_model
 from gpt2giga.features.models.contracts import ModelDescriptor
-from gpt2giga.providers.contracts import ProviderAdapterBundle
+from gpt2giga.providers._shared_adapters import TokenCountingChatAdapter
+from gpt2giga.providers.contracts import (
+    ProviderAdapterBundle,
+    TokenCountProviderAdapter,
+)
 from gpt2giga.providers.descriptors import ProviderDescriptor, ProviderMountSpec
-
-
-@dataclass(frozen=True, slots=True)
-class GeminiChatAdapter:
-    """Gemini content-generation request adapter."""
-
-    def build_normalized_request(
-        self,
-        payload: dict[str, Any],
-        *,
-        logger: Any = None,
-    ):
-        return build_normalized_chat_request(payload, logger=logger)
-
-    def build_count_tokens_texts(self, payload: dict[str, Any]) -> list[str]:
-        return build_count_tokens_texts(payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,18 +70,21 @@ class GeminiModelsAdapter:
 
 @dataclass(frozen=True, slots=True)
 class GeminiProviderAdapterBundle(ProviderAdapterBundle):
-    """Gemini adapter bundle with required capabilities."""
+    """Gemini adapter bundle with non-optional capability types."""
 
-    chat: GeminiChatAdapter = field(default_factory=GeminiChatAdapter)
+    chat: TokenCountProviderAdapter
     responses: None = None
-    embeddings: GeminiEmbeddingsAdapter = field(default_factory=GeminiEmbeddingsAdapter)
-    models: GeminiModelsAdapter = field(default_factory=GeminiModelsAdapter)
+    embeddings: GeminiEmbeddingsAdapter = GeminiEmbeddingsAdapter()
+    models: GeminiModelsAdapter = GeminiModelsAdapter()
     files: None = None
     batches: None = None
 
 
 gemini_provider_adapters = GeminiProviderAdapterBundle(
-    chat=GeminiChatAdapter(),
+    chat=TokenCountingChatAdapter(
+        build_normalized_chat_request,
+        build_count_tokens_texts,
+    ),
     embeddings=GeminiEmbeddingsAdapter(),
     models=GeminiModelsAdapter(),
 )

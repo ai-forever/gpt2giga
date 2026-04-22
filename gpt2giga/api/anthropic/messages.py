@@ -29,6 +29,7 @@ from gpt2giga.core.logging.setup import rquid_context
 from gpt2giga.features.chat.service import get_chat_service_from_state
 from gpt2giga.providers.anthropic import anthropic_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.token_counting import count_input_tokens
 
 router = APIRouter()
 
@@ -45,14 +46,16 @@ async def count_tokens(request: Request):
     giga_client = get_gigachat_client(request)
     model = data.get("model", "unknown")
     set_request_audit_model(request, model)
-    texts = anthropic_provider_adapters.chat.build_token_count_texts(data)
-
-    if not texts:
-        return {"input_tokens": 0}
-
-    token_counts = await giga_client.atokens_count(texts, model=model)
-    total_tokens = sum(token_count.tokens for token_count in token_counts)
-    return {"input_tokens": total_tokens}
+    chat_adapter = anthropic_provider_adapters.chat
+    assert chat_adapter is not None
+    return {
+        "input_tokens": await count_input_tokens(
+            chat_adapter,
+            data,
+            giga_client=giga_client,
+            model=model,
+        )
+    }
 
 
 @router.post(
