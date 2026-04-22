@@ -29,6 +29,7 @@ Only bundle tasks when they are clearly the same subsystem and share the same ac
 - [x] RLS-012 — done
 - [x] RLS-013 — done
 - [x] RLS-014 — done
+- [x] RLS-015 — done
 
 ---
 
@@ -597,6 +598,15 @@ Keep external call sites stable wherever possible.
 - reduced file size and better responsibility separation
 - no regression in existing pages using shared forms helpers
 - assets rebuilt and committed
+
+**Status**
+
+Completed in the current repository state: shared admin form helpers now live in
+focused `forms-types.ts`, `forms-normalization.ts`, `forms-payloads.ts`, and
+`forms-diff.ts` modules, while `forms.ts` remains the stable facade for
+bindings, validators, and busy-state helpers. Frontend coverage now exercises
+the extracted normalization and payload helpers directly, and the committed
+admin assets have been rebuilt in sync.
 
 ---
 
