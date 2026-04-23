@@ -18,24 +18,42 @@ def normalize_usage_payload(
         return None
 
     if "prompt_tokens" in usage or "completion_tokens" in usage:
+        prompt_tokens = _safe_int(usage.get("prompt_tokens"))
+        completion_tokens = _safe_int(usage.get("completion_tokens"))
         return {
-            "prompt_tokens": _safe_int(usage.get("prompt_tokens")),
-            "completion_tokens": _safe_int(usage.get("completion_tokens")),
-            "total_tokens": _safe_int(usage.get("total_tokens")),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": _resolve_total_tokens(
+                usage.get("total_tokens"),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            ),
         }
 
     if "input_tokens" in usage or "output_tokens" in usage:
+        prompt_tokens = _safe_int(usage.get("input_tokens"))
+        completion_tokens = _safe_int(usage.get("output_tokens"))
         return {
-            "prompt_tokens": _safe_int(usage.get("input_tokens")),
-            "completion_tokens": _safe_int(usage.get("output_tokens")),
-            "total_tokens": _safe_int(usage.get("total_tokens")),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": _resolve_total_tokens(
+                usage.get("total_tokens"),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            ),
         }
 
     if "promptTokenCount" in usage or "candidatesTokenCount" in usage:
+        prompt_tokens = _safe_int(usage.get("promptTokenCount"))
+        completion_tokens = _safe_int(usage.get("candidatesTokenCount"))
         return {
-            "prompt_tokens": _safe_int(usage.get("promptTokenCount")),
-            "completion_tokens": _safe_int(usage.get("candidatesTokenCount")),
-            "total_tokens": _safe_int(usage.get("totalTokenCount")),
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": _resolve_total_tokens(
+                usage.get("totalTokenCount"),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            ),
         }
 
     return None
@@ -207,3 +225,14 @@ def _safe_int(value: Any) -> int:
         return int(value)
     except (TypeError, ValueError):
         return 0
+
+
+def _resolve_total_tokens(
+    total_tokens: Any,
+    *,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> int:
+    if total_tokens is not None:
+        return _safe_int(total_tokens)
+    return prompt_tokens + completion_tokens

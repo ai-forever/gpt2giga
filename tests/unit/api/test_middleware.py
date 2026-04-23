@@ -436,6 +436,25 @@ def test_observability_middleware_aggregates_usage_by_api_key_and_provider():
     assert provider_usage["endpoints"]["/chat/completions"]["request_count"] == 1
 
 
+def test_set_request_audit_usage_derives_total_tokens_from_anthropic_usage():
+    request = SimpleNamespace(state=SimpleNamespace())
+
+    usage = set_request_audit_usage(
+        request,
+        {
+            "input_tokens": 16,
+            "output_tokens": 21,
+        },
+    )
+
+    assert usage == {
+        "prompt_tokens": 16,
+        "completion_tokens": 21,
+        "total_tokens": 37,
+    }
+    assert get_request_audit_metadata(request)["token_usage"] == usage
+
+
 def test_request_audit_extracts_responses_system_reasoning_and_tool_calls():
     request = SimpleNamespace(state=SimpleNamespace())
 
