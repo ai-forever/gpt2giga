@@ -17,8 +17,11 @@ async def embeddings(request: Request):
     """Create embeddings."""
     data = await read_request_json(request)
     giga_client = get_gigachat_client(request)
+    proxy_settings = request.app.state.config.proxy_settings
     transformed = await transform_embedding_body(
-        data, request.app.state.config.proxy_settings.embeddings
+        data,
+        proxy_settings.embeddings,
+        pass_model=proxy_settings.pass_model,
     )
     return await giga_client.aembeddings(
         texts=transformed["input"], model=transformed["model"]

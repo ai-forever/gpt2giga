@@ -58,12 +58,14 @@ async def create_batch(request: Request):
 
     import base64
 
+    proxy_settings = request.app.state.config.proxy_settings
     transformed_content = await transform_batch_input_file(
         base64.b64decode(file_content.content),
         target=target,
         request_transformer=request.app.state.request_transformer,
         giga_client=giga_client,
-        embeddings_model=request.app.state.config.proxy_settings.embeddings,
+        embeddings_model=proxy_settings.embeddings,
+        pass_model=proxy_settings.pass_model,
     )
     batch = await giga_client.acreate_batch(
         transformed_content,

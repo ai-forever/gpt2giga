@@ -328,12 +328,14 @@ async def create_message_batch(request: Request):
         "\n".join(json.dumps(row, ensure_ascii=False) for row in openai_rows) + "\n"
     ).encode("utf-8")
     giga_client = get_gigachat_client(request)
+    proxy_settings = request.app.state.config.proxy_settings
     transformed_content = await transform_batch_input_file(
         raw_input,
         target=target,
         request_transformer=request.app.state.request_transformer,
         giga_client=giga_client,
-        embeddings_model=request.app.state.config.proxy_settings.embeddings,
+        embeddings_model=proxy_settings.embeddings,
+        pass_model=proxy_settings.pass_model,
     )
     batch = await giga_client.acreate_batch(
         transformed_content,
