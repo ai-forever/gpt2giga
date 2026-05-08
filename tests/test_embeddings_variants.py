@@ -54,7 +54,9 @@ def test_embeddings_uses_configured_model_by_default(monkeypatch):
     """Without pass_model the configured embeddings model is always used."""
     app = make_app(monkeypatch, pass_model=False)
     client = TestClient(app)
-    resp = client.post("/embeddings", json={"model": "text-embedding-ada-002", "input": "hello"})
+    resp = client.post(
+        "/embeddings", json={"model": "text-embedding-ada-002", "input": "hello"}
+    )
     assert resp.status_code == 200
     assert resp.json()["model"] == app.state.config.proxy_settings.embeddings
 
