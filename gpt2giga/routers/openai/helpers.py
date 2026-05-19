@@ -1,12 +1,12 @@
 """Shared helpers for OpenAI-compatible API routes."""
 
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import Request
 
 from gpt2giga.app_state import get_batch_store, get_gigachat_client
-from gpt2giga.common.tools import convert_tool_to_giga_functions
 from gpt2giga.protocol.batches import infer_openai_file_purpose
+from gpt2giga.common.tools import convert_tool_to_giga_functions
 
 
 def _paginate_items(
@@ -49,27 +49,6 @@ def populate_giga_functions(data: dict, logger) -> None:
     data["functions"] = convert_tool_to_giga_functions(data)
     if logger:
         logger.debug(f"Functions count: {len(data['functions'])}")
-
-
-def resolve_response_model(
-    requested_model: str, chat_messages: Any, config: Any
-) -> str:
-    """Resolve the model name that should be reported to OpenAI-compatible clients."""
-    payload_model = (
-        chat_messages.get("model")
-        if isinstance(chat_messages, dict)
-        else getattr(chat_messages, "model", None)
-    )
-    if payload_model:
-        return str(payload_model)
-
-    configured_model = getattr(
-        getattr(config, "gigachat_settings", None), "model", None
-    )
-    if configured_model:
-        return str(configured_model)
-
-    return requested_model
 
 
 async def _load_batch_output_content(request: Request, file_id: str) -> bytes:

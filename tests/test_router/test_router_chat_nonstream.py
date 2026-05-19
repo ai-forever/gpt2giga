@@ -1,5 +1,3 @@
-import json
-
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
@@ -35,14 +33,6 @@ class FakeGigachat:
             }
         )
 
-    def astream(self, chat):
-        async def gen():
-            yield MockResponse(
-                {"choices": [{"delta": {"content": "ok"}}], "usage": None}
-            )
-
-        return gen()
-
 
 class FakeRequestTransformer:
     async def prepare_chat_completion(self, data, giga_client=None):
@@ -50,14 +40,6 @@ class FakeRequestTransformer:
 
     async def prepare_response(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
-
-
-class FakeRequestTransformerWithoutModel:
-    async def prepare_chat_completion(self, data, giga_client=None):
-        return {}
-
-    async def prepare_response(self, data, giga_client=None):
-        return {}
 
 
 def make_app():
@@ -81,40 +63,6 @@ def test_chat_completions_non_stream_basic():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
-
-
-def test_chat_completions_reports_configured_model_when_model_not_passed():
-    app = make_app()
-    app.state.config = ProxyConfig(gigachat={"model": "GigaChat-2-Pro"})
-    app.state.request_transformer = FakeRequestTransformerWithoutModel()
-    client = TestClient(app)
-    payload = {
-        "model": "GigaChat-2-Max",
-        "messages": [{"role": "user", "content": "hi"}],
-    }
-    resp = client.post("/chat/completions", json=payload)
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["model"] == "GigaChat-2-Pro"
-
-
-def test_chat_completions_stream_reports_configured_model_when_model_not_passed():
-    app = make_app()
-    app.state.config = ProxyConfig(gigachat={"model": "GigaChat-2-Pro"})
-    app.state.request_transformer = FakeRequestTransformerWithoutModel()
-    client = TestClient(app)
-    payload = {
-        "model": "GigaChat-2-Max",
-        "messages": [{"role": "user", "content": "hi"}],
-        "stream": True,
-    }
-    with client.stream("POST", "/chat/completions", json=payload) as resp:
-        assert resp.status_code == 200
-        events = list(resp.iter_lines())
-
-    first_event = next(line for line in events if line.startswith("data: {"))
-    body = json.loads(first_event.removeprefix("data: "))
-    assert body["model"] == "GigaChat-2-Pro"
 
 
 def test_chat_completions_non_stream_response_api():

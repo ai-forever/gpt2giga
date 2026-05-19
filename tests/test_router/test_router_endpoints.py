@@ -82,14 +82,6 @@ class FakeRequestTransformer:
         return {"model": data.get("model", "giga")}
 
 
-class FakeRequestTransformerWithoutModel:
-    async def prepare_chat_completion(self, data, giga_client=None):
-        return {}
-
-    async def prepare_response(self, data, giga_client=None):
-        return {}
-
-
 def make_app(monkeypatch=None):
     app = FastAPI()
     app.include_router(router)
@@ -118,20 +110,6 @@ def test_responses_non_stream():
     body = resp.json()
     assert body["object"] == "response"
     assert body["status"] == "completed"
-
-
-def test_responses_reports_configured_model_when_model_not_passed():
-    app = make_app()
-    app.state.config = ProxyConfig(gigachat={"model": "GigaChat-2-Pro"})
-    app.state.request_transformer = FakeRequestTransformerWithoutModel()
-    client = TestClient(app)
-    resp = client.post(
-        "/responses",
-        json={"input": "hi", "model": "GigaChat-2-Max"},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["model"] == "GigaChat-2-Pro"
 
 
 def test_responses_non_stream_includes_reasoning_item():
