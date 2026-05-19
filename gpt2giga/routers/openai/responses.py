@@ -9,7 +9,10 @@ from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import stream_responses_generator
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import responses_openapi_extra
-from gpt2giga.routers.openai.helpers import populate_giga_functions
+from gpt2giga.routers.openai.helpers import (
+    populate_giga_functions,
+    resolve_response_model,
+)
 
 router = APIRouter(tags=["OpenAI"])
 
@@ -26,15 +29,21 @@ async def responses(request: Request):
 
     populate_giga_functions(data, getattr(state, "logger", None))
     chat_messages = await state.request_transformer.prepare_response(data, giga_client)
+    response_model = resolve_response_model(data["model"], chat_messages, state.config)
+    response_request_data = {**data, "model": response_model}
     if not stream:
         response = await giga_client.achat(chat_messages)
         return state.response_processor.process_response_api(
-            data, response, data["model"], current_rquid
+            response_request_data, response, response_model, current_rquid
         )
 
     return StreamingResponse(
         stream_responses_generator(
-            request, chat_messages, current_rquid, giga_client, request_data=data
+            request,
+            chat_messages,
+            current_rquid,
+            giga_client,
+            request_data=response_request_data,
         ),
         media_type="text/event-stream",
     )
