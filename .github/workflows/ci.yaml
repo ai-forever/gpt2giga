@@ -64,6 +64,7 @@ jobs:
     name: Generate coverage badge
     runs-on: ubuntu-latest
     needs: test
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     permissions:
       contents: write
