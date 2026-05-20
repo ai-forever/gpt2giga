@@ -5,6 +5,7 @@
 [![PyPI Downloads](https://img.shields.io/pypi/dm/gpt2giga?style=flat-square)](https://pypistats.org/packages/gpt2giga)
 [![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/gpt2giga?style=flat-square)](https://star-history.com/#ai-forever/gpt2giga)
 [![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
+[![Telegram](https://img.shields.io/badge/Telegram-chat-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/krakenalt)
 
 ![Coverage](./badges/coverage.svg)
 
@@ -54,20 +55,72 @@ sequenceDiagram
 
 С помощью gpt2giga вы можете:
 
-- использовать возможности моделей OpenAI и полностью заменить ChatGPT на GigaChat;
-- **использовать Anthropic SDK** — эндпоинт `/v1/messages` совместим с Anthropic Messages API, включая стриминг, tool use и extended thinking;
-- вызывать функции через API, включая передачу и выполнение функций с аргументами;
-- использовать структурированный вывод (Structured Outputs) для получения гарантированного JSON-ответа;
-- обрабатывать ответ модели в режиме потоковой генерации токенов с помощью параметра `stream=true`;
-- перенаправлять запросы на создание эмбеддингов (поддерживаются эндпоинты `/embeddings` и `/v1/embeddings`);
-- использовать OpenAI-совместимые Files API и Batches API (`/files`, `/batches`);
-- использовать Anthropic Message Batches API (`/v1/messages/batches`);
-- отдавать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
-- работать в асинхронном режиме с множеством потоков запросов от нескольких клиентов;
-- общение в openai-формате с файлом;
-- использовать эндпоинт `/responses` (OpenAI Responses API) для совместимости с новыми клиентами;
-- отображать подробные сведения о запросах и ответах при включенном логировании `DEBUG`, `INFO` ...;
-- задавать параметры работы как с помощью аргументов командной строки, так и с помощью переменных окружения (`.env`).
+- использовать OpenAI-совместимые и Anthropic-совместимые клиенты поверх GigaChat без переписывания основного клиентского кода;
+- работать через **OpenAI Chat Completions API** и **OpenAI Responses API**;
+- использовать **Anthropic Messages API**, включая стриминг, tool use и extended thinking;
+- вызывать функции и инструменты через API, включая передачу аргументов в OpenAI- и Anthropic-совместимом формате;
+- использовать structured outputs для получения JSON-ответов;
+- обрабатывать ответы модели в потоковом режиме с помощью `stream=true`;
+- создавать эмбеддинги через `/embeddings` и `/v1/embeddings`;
+- использовать подготовленные OpenAI-совместимые **Files API** и **Batches API** после включения соответствующих роутеров в следующем релизе;
+- использовать подготовленный **Anthropic Message Batches API** после включения соответствующего роутера в следующем релизе;
+- получать список моделей и информацию о конкретной модели через OpenAI-совместимый **Models API**;
+- использовать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
+- работать с несколькими клиентами и множеством запросов в асинхронном режиме;
+- настраивать прокси через `.env`, переменные окружения и аргументы командной строки;
+- включать логирование, HTTPS и API-key авторизацию для локальной разработки и production-сценариев.
+
+### Поддерживаемые API routes
+
+Ниже перечислены основные route-группы официальных OpenAI и Anthropic API и отмечено, что из этого поддерживается в gpt2giga. Все смонтированные маршруты в gpt2giga доступны как без префикса, так и с префиксом `/v1`, например `/chat/completions` и `/v1/chat/completions`.
+
+#### OpenAI API
+
+| Route / группа | Официальный OpenAI API | В gpt2giga | Что поддерживается |
+|---|---|---|---|
+| `POST /chat/completions` | Да | Да | Основной чатовый эндпоинт, включая `stream=true`, tools/function calling, structured outputs, работу с вложениями |
+| `GET /models` | Да | Да | Список доступных моделей GigaChat в OpenAI-совместимом виде |
+| `GET /models/{model}` | Да | Да | Информация по конкретной модели |
+| `POST /embeddings` | Да | Да | Создание эмбеддингов через модель из запроса или настроек прокси |
+| `POST /responses` | Да | Да | OpenAI Responses API для новых клиентов |
+| `POST /files` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /files` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `DELETE /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /files/{file_id}/content` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `POST /batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /batches/{batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET/POST /chat/completions` stored-completions routes | Да | Нет | Маршруты для хранения, выборки и обновления сохранённых chat completions не реализованы |
+| `POST /completions` | Да | Нет | Legacy Completions API не реализован |
+| `POST /images*` | Да | Нет | Генерация и редактирование изображений не реализованы |
+| `POST /audio*` | Да | Нет | Speech / transcription / translation не реализованы |
+| `POST /moderations` | Да | Нет | Moderations API не реализован |
+| `POST /uploads*` | Да | Нет | Uploads API не реализован |
+| `POST /fine_tuning*` | Да | Нет | Fine-tuning API не реализован |
+| `POST /assistants*`, `POST /threads*`, `POST /runs*` | Да | Нет | Assistants/Threads/Runs API не реализованы |
+| `POST /vector_stores*` | Да | Нет | Vector Stores API не реализован |
+| `Realtime API` | Да | Нет | Realtime/WebSocket API не реализован |
+
+#### Anthropic API
+
+| Route / группа | Официальный Anthropic API | В gpt2giga | Что поддерживается |
+|---|---|---|---|
+| `POST /messages` | Да | Да | Основной Messages API, включая стриминг |
+| `POST /messages/count_tokens` | Да | Да | Подсчёт токенов для Messages API |
+| `POST /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /messages/batches/{message_batch_id}/results` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `POST /messages/batches/{message_batch_id}/cancel` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `DELETE /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| Другие route Anthropic API | Частично | Нет | В проекте нет отдельной реализации дополнительных route вне Messages API и Message Batches API |
+
+### Коротко по покрытию
+
+- **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`; router-модули `files` и `batches` подготовлены, но временно не смонтированы.
+- **Anthropic:** поддерживается `Messages API` и `count_tokens`; router-модуль `Message Batches API` подготовлен, но временно не смонтирован.
+- **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic API, включая fine-tuning, images, audio, vector stores, assistants и realtime.
 
 ## Начало работы
 
@@ -106,7 +159,7 @@ sequenceDiagram
    ```sh
    PYTHON_VERSION=3.10
    docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
-   docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
+   docker pull ghcr.io/ai-forever/gpt2giga:py${PYTHON_VERSION}
    ```
 
    Доступные теги смотрите в реестрах: [Docker Hub](https://hub.docker.com/r/gigateam/gpt2giga) и [GHCR](https://github.com/ai-forever/gpt2giga/pkgs/container/gpt2giga).
@@ -115,11 +168,11 @@ sequenceDiagram
 
    - PROD:
      ```sh
-     docker compose -f compose/base.yaml --profile PROD up -d
+     docker compose --env-file .env -f compose/base.yaml --profile PROD up -d
      ```
    - DEV:
      ```sh
-     docker compose -f compose/base.yaml --profile DEV up -d
+     docker compose --env-file .env -f compose/base.yaml --profile DEV up -d
      ```
 
    > В профиле `PROD` порт по умолчанию пробрасывается только на `127.0.0.1` (см. `compose/base.yaml`). Для доступа извне используйте reverse proxy (nginx/Traefik/Caddy) или измените bind-адрес в `ports:`.
@@ -135,7 +188,7 @@ sequenceDiagram
 1. Запустите стек:
 
    ```sh
-   docker compose -f compose/traefik.yaml up -d
+   docker compose --env-file .env -f compose/traefik.yaml up -d
    ```
 
 > Важно: роутинг в Traefik в этой конфигурации завязан на HTTP `Host` (см. `traefik/rules.yml`). Если вы обращаетесь по IP (например, `127.0.0.1`), задайте `HOST=127.0.0.1` или отправляйте корректный заголовок `Host:`.
@@ -213,11 +266,12 @@ sequenceDiagram
 - `--proxy.use-https <true/false>` — использовать ли HTTPS. По умолчанию `False`;
 - `--proxy.https-key-file <PATH>` — Путь до key файла для https. По умолчанию `None`;
 - `--proxy.https-cert-file <PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `--proxy.pass-model <true/false>` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
+- `--proxy.pass-model <true/false>` — передавать в GigaChat API модель, которую указал клиент в поле `model` (для чата и эмбеддингов);
 - `--proxy.pass-token <true/false>` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
-- `--proxy.embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
+- `--proxy.embeddings <EMBED_MODEL>` — модель для создания эмбеддингов по умолчанию. Игнорируется при `--proxy.pass-model true`, если клиент указал `model` в запросе. По умолчанию `EmbeddingsGigaR`;
 - `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
+- `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
 - `--proxy.log-level` — уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`;
 - `--proxy.log-filename` — имя лог файла. По умолчанию `gpt2giga.log`;
 - `--proxy.log-max-size` — максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB);
@@ -282,11 +336,12 @@ gpt2giga \
 - `GPT2GIGA_USE_HTTPS="False"` — Использовать ли https. По умолчанию `False`;
 - `GPT2GIGA_HTTPS_KEY_FILE=<PATH>` — Путь до key файла для https. По умолчанию `None`;
 - `GPT2GIGA_HTTPS_CERT_FILE=<PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `GPT2GIGA_PASS_MODEL="False"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat;
+- `GPT2GIGA_PASS_MODEL="True"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat (для чата и эмбеддингов);
 - `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
-- `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов.
+- `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов по умолчанию. При `GPT2GIGA_PASS_MODEL=True` используется модель из запроса клиента (с fallback на это значение).
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
 - `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
+- `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
 - `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
 - `GPT2GIGA_LOG_FILENAME="gpt2giga.log"` — Имя лог файла. По умолчанию `gpt2giga.log`
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
@@ -295,6 +350,8 @@ gpt2giga \
 - `GPT2GIGA_CORS_ALLOW_ORIGINS='["*"]'` — список разрешенных Origin (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_HEADERS='["*"]'` — список разрешенных заголовков (JSON массив).
+
+> **Breaking change в 0.1.6:** `GPT2GIGA_PASS_MODEL` по умолчанию `True`. Если клиент отправляет OpenAI/Anthropic-имя модели, оно будет передано в GigaChat. Чтобы всегда использовать модель из `GIGACHAT_MODEL` / настроек прокси, задайте `GPT2GIGA_PASS_MODEL=False`.
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
