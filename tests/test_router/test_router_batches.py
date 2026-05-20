@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import ResponseProcessor
-from gpt2giga.routers.openai import router
+from gpt2giga.routers.openai import router as openai_router
+from gpt2giga.routers.openai.batches import router as batches_router
+from gpt2giga.routers.openai.files import router as files_router
 
 
 class FakeUploadedFile(BaseModel):
@@ -172,7 +174,7 @@ class FakeRequestTransformer:
 
 def make_app():
     app = FastAPI()
-    app.include_router(router)
+    app.include_router(openai_router)
     app.state.gigachat_client = FakeGigaChat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
@@ -180,8 +182,38 @@ def make_app():
     return app
 
 
-def test_files_endpoints_roundtrip():
+def make_app_with_files_and_batches():
     app = make_app()
+    app.include_router(files_router)
+    app.include_router(batches_router)
+    return app
+
+
+def test_files_and_batches_routes_are_disabled_in_openai_router():
+    client = TestClient(make_app())
+
+    assert client.post("/files").status_code == 404
+    assert client.get("/files").status_code == 404
+    assert client.get("/files/file-1").status_code == 404
+    assert client.delete("/files/file-1").status_code == 404
+    assert client.get("/files/file-1/content").status_code == 404
+    assert client.post("/batches").status_code == 404
+    assert client.get("/batches").status_code == 404
+    assert client.get("/batches/batch-1").status_code == 404
+
+
+def test_openapi_omits_files_and_batches_routes_from_openai_router():
+    paths = make_app().openapi()["paths"]
+
+    assert "/files" not in paths
+    assert "/files/{file_id}" not in paths
+    assert "/files/{file_id}/content" not in paths
+    assert "/batches" not in paths
+    assert "/batches/{batch_id}" not in paths
+
+
+def test_files_endpoints_roundtrip_when_router_is_mounted_directly():
+    app = make_app_with_files_and_batches()
     client = TestClient(app)
 
     response = client.post(
@@ -210,8 +242,8 @@ def test_files_endpoints_roundtrip():
     assert deleted.json() == {"id": file_id, "deleted": True, "object": "file"}
 
 
-def test_files_endpoint_infers_json_content_type_for_jsonl_uploads():
-    app = make_app()
+def test_files_endpoint_infers_json_content_type_for_jsonl_uploads_directly():
+    app = make_app_with_files_and_batches()
     giga_client = app.state.gigachat_client
     client = TestClient(app)
 
@@ -231,8 +263,8 @@ def test_files_endpoint_infers_json_content_type_for_jsonl_uploads():
     assert giga_client.last_uploaded_content_type == "application/json"
 
 
-def test_batches_endpoints_translate_openai_flow():
-    app = make_app()
+def test_batches_endpoints_translate_openai_flow_when_router_is_mounted_directly():
+    app = make_app_with_files_and_batches()
     giga_client = app.state.gigachat_client
     client = TestClient(app)
 
@@ -300,8 +332,8 @@ def test_batches_endpoints_translate_openai_flow():
     assert transformed_line["response"]["body"]["model"] == "gpt-x"
 
 
-def test_batches_create_defaults_completion_window_to_24h():
-    app = make_app()
+def test_batches_create_defaults_completion_window_to_24h_directly():
+    app = make_app_with_files_and_batches()
     client = TestClient(app)
 
     input_line = {
@@ -337,8 +369,8 @@ def test_batches_create_defaults_completion_window_to_24h():
     assert created.json()["completion_window"] == "24h"
 
 
-def test_openapi_includes_examples_for_files_and_batches():
-    app = make_app()
+def test_openapi_includes_examples_for_files_and_batches_when_mounted_directly():
+    app = make_app_with_files_and_batches()
 
     schema = app.openapi()
 

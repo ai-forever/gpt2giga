@@ -5,26 +5,44 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [0.1.6a1] - 2026-03-24
+## [0.1.6] - 2026-05-20
+### Breaking changes
+- **Model forwarding**: `GPT2GIGA_PASS_MODEL` / `--proxy.pass-model` теперь по умолчанию `True`. Модель из клиентского запроса прокидывается в GigaChat для Chat Completions, Responses API и Embeddings; если нужен прежний режим с моделью из настроек прокси, явно задайте `GPT2GIGA_PASS_MODEL=False`.
+
 ### Добавлено
-- **OpenAI Files API**: добавлены эндпоинты `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`
-- **OpenAI Batches API**: добавлены эндпоинты `/batches` и `/batches/{batch_id}` вместе с примером `examples/openai/batches.py`
-- **Anthropic Message Batches API**: добавлены эндпоинты `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}` и `/v1/messages/batches/{message_batch_id}/results`, а также пример `examples/anthropic/message_batches.py`
+- **OpenAI Files API**: добавлены router-модули для `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`; маршруты временно не монтируются в публичный OpenAI router до следующего релиза GigaChat SDK
+- **OpenAI Batches API**: добавлены router-модули для `/batches` и `/batches/{batch_id}` вместе с примером `examples/openai/batches.py`; маршруты временно не монтируются в публичный OpenAI router до следующего релиза GigaChat SDK
+- **Anthropic Message Batches API**: добавлены router-модули для `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}` и `/v1/messages/batches/{message_batch_id}/results`, а также пример `examples/anthropic/message_batches.py`; маршруты временно не монтируются в публичный Anthropic router до следующего релиза GigaChat SDK
 - **Новые интеграции**: добавлены инструкции для Qwen Code и Xcode
 - **CI и автоматизация**: добавлены `actionlint`, `CodeQL`, `dependency-review`, `docker-smoke`, `nightly-smoke`, `pr-labeler`, `release-drafter`, `stale-issues` и Dependabot-конфигурация
+- **Reasoning / think tags**: добавлено извлечение `<think>...</think>` в reasoning/thinking content для OpenAI Chat Completions, OpenAI Responses и Anthropic Messages, включая streaming
+- **Structured output mode**: добавлен режим `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` с вариантами `function_call` и `native`; нативный режим прокидывает JSON Schema в `response_format` GigaChat SDK 0.2.1+
+- **Anthropic structured output**: добавлена поддержка `output_config.format` и legacy `output_format` с `json_schema` для Anthropic Messages, streaming и Message Batches, включая новые runnable-примеры
+- **Embeddings dimensions**: добавлена проверка параметра `dimensions` для известных embedding-моделей
 
 ### Изменено
 - **Примеры**: OpenAI-примеры перенесены в `examples/openai/`, README и AGENTS выровнены под новую структуру
+- **Примеры моделей**: runnable-примеры обновлены на `GigaChat-2-Max`, а пример embeddings теперь показывает `dimensions`, `float` и `base64`
 - **OpenAPI**: схемы OpenAI и Anthropic вынесены в `gpt2giga/openapi_specs/`
 - **LiteLLM router**: обработчик `/model/info` вынесен в отдельный пакет `gpt2giga/routers/litellm/`
 - **Docker Compose**: структура compose-файлов выровнена под каталог `compose/` (`base.yaml`, `observability.yaml`, `nginx.yaml`, `observe-multiple.yaml`, `traefik.yaml`)
 - **GitHub templates**: добавлены русскоязычные шаблоны issue и pull request
+- **Model forwarding**: `GPT2GIGA_PASS_MODEL` теперь по умолчанию `True`; модель из запроса прокидывается в GigaChat для чата, Responses API и эмбеддингов, а `GPT2GIGA_EMBEDDINGS` используется как fallback для эмбеддингов
+- **Зависимости**: обновлены `gigachat`, `python-dotenv`, `aiohttp`, `pillow`, `pytest` и `uv.lock` после Dependabot/security bump
 
 ### Исправлено
-- **Path normalization**: исправлена нормализация путей для `/v1`, `files`, `batches`, `messages` и `model/info`
+- **Path normalization**: исправлена нормализация путей для `/v1`, повторного `/v1/v1`, `files`, `batches`, `messages` и `model/info`
 - **OpenAI payload mapping**: `extra_body` теперь корректно маппится в `additional_fields`
 - **Batches**: исправлены `completion_window` и обработка дат для Python 3.10
 - **Examples**: обновлены runnable-примеры OpenAI и Anthropic после реорганизации каталогов
+- **Docker Compose docs**: команды запуска теперь явно передают `--env-file .env`, чтобы `.env` из корня корректно применялся при `-f compose/*.yaml`
+- **Docker Hub tags**: теги `latest` и `<version>` теперь публикуются только из Python 3.13 job, а остальные matrix jobs публикуют только Python-специфичные теги
+- **Docs/examples links**: исправлены устаревшие пути после переноса OpenAI-примеров в `examples/openai/`
+- **Embeddings**: `encoding_format="base64"` теперь возвращает OpenAI-совместимые base64 float32 embeddings для прямого `/embeddings` и embeddings batches, а ответы нормализуются в OpenAI-совместимый envelope без GigaChat-специфичных полей
+- **Embeddings input validation**: OpenAI-совместимая валидация теперь отклоняет пустой или смешанный `input`, неподдерживаемый `encoding_format`, некорректный `model` и token id inputs без модели, которую можно декодировать через `tiktoken`
+- **Embeddings model routing**: `pass_model` теперь применяется к `/embeddings` и batch-запросам на `/v1/embeddings`
+- **Model/top_p mapping**: исправлена передача `model` по умолчанию и предотвращена неявная установка `top_p=0`, когда клиент не передавал `temperature`
+- **Unsupported Files/Batches routes**: временно отключены неподдерживаемые OpenAI Files/Batches и Anthropic Message Batches маршруты в default routers; они больше не попадают в OpenAPI-схему до появления поддержки в GigaChat SDK
 
 ## [0.1.5] - 2026-03-10
 ### Добавлено
@@ -231,7 +249,7 @@
 
 ---
 
-[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...HEAD
+[0.1.6]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4...v0.1.4.post1
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4

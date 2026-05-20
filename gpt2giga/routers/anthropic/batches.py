@@ -19,6 +19,7 @@ from gpt2giga.protocol.batches import (
 from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
+    _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import (
     _anthropic_http_exception,
@@ -223,10 +224,14 @@ def _build_anthropic_batch_results(
             ):
                 anthropic_message = message_payload
             else:
+                structured_output_fallback = batch_metadata.get(
+                    "structured_output_mode", "function_call"
+                ) == "function_call" and _is_anthropic_structured_output_request(params)
                 anthropic_message = _build_anthropic_response(
                     message_payload,
                     params.get("model", "unknown"),
                     request_id,
+                    is_structured_output=structured_output_fallback,
                 )
 
             anthropic_result = {
@@ -328,12 +333,14 @@ async def create_message_batch(request: Request):
         "\n".join(json.dumps(row, ensure_ascii=False) for row in openai_rows) + "\n"
     ).encode("utf-8")
     giga_client = get_gigachat_client(request)
+    proxy_settings = request.app.state.config.proxy_settings
     transformed_content = await transform_batch_input_file(
         raw_input,
         target=target,
         request_transformer=request.app.state.request_transformer,
         giga_client=giga_client,
-        embeddings_model=request.app.state.config.proxy_settings.embeddings,
+        embeddings_model=proxy_settings.embeddings,
+        pass_model=proxy_settings.pass_model,
     )
     batch = await giga_client.acreate_batch(
         transformed_content,
@@ -345,6 +352,7 @@ async def create_message_batch(request: Request):
         "completion_window": completion_window,
         "requests": stored_requests,
         "output_file_id": batch.output_file_id,
+        "structured_output_mode": proxy_settings.structured_output_mode,
     }
     get_batch_store(request)[batch.id_] = metadata
     if batch.output_file_id:

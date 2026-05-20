@@ -270,11 +270,12 @@ class RequestTransformer:
         if not self.config.proxy_settings.pass_model and gpt_model:
             del transformed["model"]
 
-        temperature = transformed.pop("temperature", 0)
-        if temperature == 0:
-            transformed["top_p"] = 0
-        elif temperature > 0:
-            transformed["temperature"] = temperature
+        temperature = transformed.pop("temperature", None)
+        if temperature is not None:
+            if temperature == 0:
+                transformed["top_p"] = 0
+            elif temperature > 0:
+                transformed["temperature"] = temperature
 
         max_tokens = transformed.pop("max_output_tokens", None)
         if max_tokens:
@@ -323,6 +324,41 @@ class RequestTransformer:
         transformed["functions"].append(function_def)
         transformed["function_call"] = {"name": schema_name}
 
+    @staticmethod
+    def _extract_json_schema_response_format(
+        response_format: Dict,
+    ) -> tuple[str, Dict, Optional[bool]]:
+        """Extract schema metadata from OpenAI chat/responses JSON schema formats."""
+        if "json_schema" in response_format:
+            json_schema = response_format.get("json_schema") or {}
+            schema_name = json_schema.get("name", "structured_output")
+            schema = json_schema.get("schema")
+            strict = json_schema.get("strict", response_format.get("strict"))
+            return schema_name, schema, strict
+
+        return (
+            response_format.get("name", "structured_output"),
+            response_format.get("schema"),
+            response_format.get("strict"),
+        )
+
+    @staticmethod
+    def _apply_json_schema_natively(
+        transformed: Dict, schema: Dict, strict: Optional[bool]
+    ) -> None:
+        """Applies JSON schema through GigaChat native response_format."""
+        response_format = {"type": "json_schema", "schema": schema}
+        if strict is not None:
+            response_format["strict"] = strict
+        transformed["response_format"] = response_format
+
+    def _structured_output_mode(self) -> str:
+        return getattr(
+            self.config.proxy_settings,
+            "structured_output_mode",
+            "function_call",
+        )
+
     def transform_chat_parameters(self, data: Dict) -> Dict:
         """Transforms chat parameters (Chat Completions API)."""
         transformed = self._transform_common_parameters(data)
@@ -330,10 +366,15 @@ class RequestTransformer:
         response_format: dict | None = transformed.pop("response_format", None)
         if response_format:
             if response_format.get("type") == "json_schema":
-                json_schema = response_format.get("json_schema", {})
-                schema_name = json_schema.get("name", "structured_output")
-                schema = json_schema.get("schema")
-                self._apply_json_schema_as_function(transformed, schema_name, schema)
+                schema_name, schema, strict = self._extract_json_schema_response_format(
+                    response_format
+                )
+                if self._structured_output_mode() == "native":
+                    self._apply_json_schema_natively(transformed, schema, strict)
+                else:
+                    self._apply_json_schema_as_function(
+                        transformed, schema_name, schema
+                    )
             else:
                 transformed["response_format"] = {
                     "type": response_format.get("type"),
@@ -350,14 +391,15 @@ class RequestTransformer:
         if response_format_responses:
             response_format = response_format_responses.get("format", {})
             if response_format.get("type") == "json_schema":
-                if "json_schema" in response_format:
-                    json_schema = response_format.get("json_schema", {})
-                    schema_name = json_schema.get("name", "structured_output")
-                    schema = json_schema.get("schema")
+                schema_name, schema, strict = self._extract_json_schema_response_format(
+                    response_format
+                )
+                if self._structured_output_mode() == "native":
+                    self._apply_json_schema_natively(transformed, schema, strict)
                 else:
-                    schema_name = response_format.get("name", "structured_output")
-                    schema = response_format.get("schema")
-                self._apply_json_schema_as_function(transformed, schema_name, schema)
+                    self._apply_json_schema_as_function(
+                        transformed, schema_name, schema
+                    )
             else:
                 transformed["response_format"] = response_format
 

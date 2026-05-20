@@ -216,8 +216,8 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
             "model": {
                 "type": "string",
                 "description": (
-                    "Optional. Used for token decoding when `input` is token ids. "
-                    "Embeddings model is selected from proxy settings."
+                    "OpenAI-compatible model id. Optional gpt2giga extension: "
+                    "falls back to the proxy embeddings model when omitted."
                 ),
             },
         },
@@ -232,8 +232,16 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
             **minimal_schema["properties"],
             "encoding_format": {
                 "type": "string",
-                "description": "OpenAI compatibility parameter (best effort).",
+                "description": "Embedding vector format.",
                 "enum": ["float", "base64"],
+            },
+            "dimensions": {
+                "type": "integer",
+                "description": (
+                    "Accepted when it matches the native GigaChat embedding model "
+                    "dimension: Embeddings/Embeddings-2=1024, "
+                    "GigaEmbeddings-3B-2025-09=2048, EmbeddingsGigaR=2560."
+                ),
             },
             "user": {"type": "string", "description": "End-user identifier."},
         },
@@ -243,14 +251,18 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
     description = (
         "**Required**: `input`.\n\n"
         "**Notes**:\n"
-        "- `model` is optional; embeddings model is configured on the proxy side.\n"
-        "- Token-id inputs (`List[int]` / `List[List[int]]`) require `model` for decoding."
+        "- `model` is accepted like OpenAI, but can be omitted as a gpt2giga "
+        "extension; the proxy then uses `GPT2GIGA_EMBEDDINGS`.\n"
+        "- Token-id inputs (`List[int]` / `List[List[int]]`) require a model "
+        "known to `tiktoken` for decoding.\n"
+        "- `dimensions` is a strict compatibility check: accepted only when it "
+        "matches the native dimension of the resolved GigaChat embedding model."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
         full_schema=full_schema,
         minimal_example={"input": "Hello world"},
-        full_example={"input": ["Hello", "world"], "model": "gpt-4o-mini"},
+        full_example={"input": ["Hello", "world"], "model": "EmbeddingsGigaR"},
         description=description,
     )
 

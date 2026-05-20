@@ -6,23 +6,65 @@ from typing import Dict, Literal, Optional
 from gigachat.models import ChatCompletion, ChatCompletionChunk
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
+from gpt2giga.common.reasoning import (
+    ReasoningContent,
+    ReasoningContentParser,
+    extract_reasoning_from_content,
+    merge_reasoning_text,
+)
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 
 
 class ResponseProcessor:
     """Обработчик ответов от GigaChat в формат OpenAI."""
 
-    def __init__(self, logger=None, mode: str = "DEV"):
+    def __init__(
+        self,
+        logger=None,
+        mode: str = "DEV",
+        structured_output_mode: str = "function_call",
+    ):
         if logger is None:
             from loguru import logger as default_logger
 
             logger = default_logger
         self.logger = logger
         self._mode = mode.upper() if isinstance(mode, str) else "DEV"
+        self._structured_output_mode = (
+            structured_output_mode.lower()
+            if isinstance(structured_output_mode, str)
+            else "function_call"
+        )
+        self._stream_reasoning_parsers: dict[str, ReasoningContentParser] = {}
 
     @property
     def _is_prod_mode(self) -> bool:
         return self._mode == "PROD"
+
+    def _uses_structured_output_function_call(self) -> bool:
+        return self._structured_output_mode == "function_call"
+
+    def _is_chat_structured_output_function_call(
+        self, request_data: Optional[Dict]
+    ) -> bool:
+        if not self._uses_structured_output_function_call():
+            return False
+        response_format = None
+        if isinstance(request_data, dict):
+            response_format = request_data.get("response_format")
+        return (
+            isinstance(response_format, dict)
+            and response_format.get("type") == "json_schema"
+        )
+
+    def _is_responses_structured_output_function_call(self, data: dict) -> bool:
+        if not self._uses_structured_output_function_call():
+            return False
+        text_param = data.get("text")
+        if not isinstance(text_param, dict):
+            return False
+        fmt = text_param.get("format")
+        return isinstance(fmt, dict) and fmt.get("type") == "json_schema"
 
     def process_response(
         self,
@@ -35,12 +77,9 @@ class ResponseProcessor:
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
-        is_structured_output = False
-        if (
+        is_structured_output = self._is_chat_structured_output_function_call(
             request_data
-            and request_data.get("response_format", {}).get("type") == "json_schema"
-        ):
-            is_structured_output = True
+        )
 
         for choice in giga_dict["choices"]:
             self._process_choice(
@@ -84,12 +123,8 @@ class ResponseProcessor:
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
-        is_structured_output = False
         text_param = data.get("text")
-        if text_param and isinstance(text_param, dict):
-            fmt = text_param.get("format")
-            if fmt and isinstance(fmt, dict) and fmt.get("type") == "json_schema":
-                is_structured_output = True
+        is_structured_output = self._is_responses_structured_output_function_call(data)
 
         for choice in giga_dict["choices"]:
             self._process_choice_responses(choice, response_id)
@@ -267,18 +302,16 @@ class ResponseProcessor:
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
-        is_structured_output = False
-        if (
+        is_structured_output = self._is_chat_structured_output_function_call(
             request_data
-            and request_data.get("response_format", {}).get("type") == "json_schema"
-        ):
-            is_structured_output = True
+        )
 
         for choice in giga_dict["choices"]:
             self._process_choice(
                 choice,
                 is_tool_call,
                 is_stream=True,
+                response_id=response_id,
                 is_structured_output=is_structured_output,
             )
 
@@ -302,6 +335,18 @@ class ResponseProcessor:
                 response_id=result.get("id"),
             ).debug("Processed stream chunk")
         return result
+
+    def flush_stream_reasoning(
+        self,
+        response_id: str,
+        *,
+        family: Literal["chat", "responses"] = "chat",
+    ) -> ReasoningContent:
+        """Flush and remove any parser state for a completed stream."""
+        parser = self._stream_reasoning_parsers.pop(f"{family}:{response_id}", None)
+        if parser is None:
+            return ReasoningContent(content="", reasoning_content="")
+        return parser.flush()
 
     def process_stream_chunk_response(
         self,
@@ -339,6 +384,7 @@ class ResponseProcessor:
         choice: Dict,
         is_tool_call: bool,
         is_stream: bool = False,
+        response_id: Optional[str] = None,
         is_structured_output: bool = False,
     ):
         """Обрабатывает отдельный choice."""
@@ -373,6 +419,64 @@ class ResponseProcessor:
             message["refusal"] = None
             if message.get("function_call") and not is_structured_output:
                 self._process_function_call(message, is_tool_call)
+            self._extract_reasoning_from_message(
+                message,
+                is_stream=is_stream,
+                parser_key=f"chat:{response_id}" if response_id else None,
+                finish_reason=choice.get("finish_reason"),
+            )
+
+    def _extract_reasoning_from_message(
+        self,
+        message: Dict,
+        *,
+        is_stream: bool,
+        parser_key: Optional[str] = None,
+        finish_reason: Optional[str] = None,
+    ):
+        content = message.get("content")
+        if not is_stream:
+            if not isinstance(content, str):
+                return
+
+            parsed = extract_reasoning_from_content(content)
+            message["content"] = parsed.content
+            message["reasoning_content"] = merge_reasoning_text(
+                message.get("reasoning_content"), parsed.reasoning_content
+            )
+            if message.get("reasoning_content") is None:
+                message.pop("reasoning_content", None)
+            return
+
+        if parser_key is None:
+            parser_key = f"anonymous:{id(message)}"
+        parser = self._stream_reasoning_parsers.setdefault(
+            parser_key, ReasoningContentParser()
+        )
+
+        parsed_content = None
+        parsed_reasoning = None
+        if isinstance(content, str):
+            parsed = parser.feed(content)
+            parsed_content = parsed.content
+            parsed_reasoning = parsed.reasoning_content
+            message["content"] = parsed_content
+
+        if finish_reason is not None:
+            parsed = parser.flush()
+            if parsed.content:
+                parsed_content = (parsed_content or "") + parsed.content
+            if parsed.reasoning_content:
+                parsed_reasoning = (parsed_reasoning or "") + parsed.reasoning_content
+            if parsed_content:
+                message["content"] = parsed_content
+            self._stream_reasoning_parsers.pop(parser_key, None)
+
+        message["reasoning_content"] = merge_reasoning_text(
+            message.get("reasoning_content"), parsed_reasoning
+        )
+        if message.get("reasoning_content") is None:
+            message.pop("reasoning_content", None)
 
     def _process_function_call(self, message: Dict, is_tool_call: bool):
         """Обрабатывает function call."""
@@ -414,6 +518,12 @@ class ResponseProcessor:
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
+            self._extract_reasoning_from_message(
+                message,
+                is_stream=is_stream,
+                parser_key=f"responses:{response_id}",
+                finish_reason=choice.get("finish_reason"),
+            )
 
             if message.get("role") == "assistant" and message.get("function_call"):
                 self._process_function_call_responses(message, response_id)

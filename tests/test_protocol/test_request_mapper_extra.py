@@ -1,6 +1,6 @@
 import pytest
 from gpt2giga.protocol import RequestTransformer
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from unittest.mock import MagicMock, AsyncMock
 from types import SimpleNamespace
 
@@ -25,7 +25,7 @@ def mock_attachment_processor():
 
 @pytest.fixture
 def request_transformer(mock_logger, mock_attachment_processor):
-    config = ProxyConfig()
+    config = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
     config.proxy_settings.enable_images = True
     return RequestTransformer(config, mock_logger, mock_attachment_processor)
 

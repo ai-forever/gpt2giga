@@ -17,7 +17,7 @@ class MathResponse(BaseModel):
 
 
 response = client.responses.parse(
-    model="gpt-4o",
+    model="GigaChat-2-Max",
     input=[
         {"role": "system", "content": "Ты - профессиональный математик"},
         {

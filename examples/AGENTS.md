@@ -13,12 +13,11 @@
 | `examples/openai/chat_completions/` | OpenAI Chat Completions examples |
 | `examples/openai/responses/` | OpenAI Responses API examples |
 | `examples/anthropic/` | Anthropic Messages API examples |
-| `examples/openai/files.py` | OpenAI Files API example |
-| `examples/openai/batches.py` | OpenAI Batches API example |
+| `examples/openai/files.py` | OpenAI Files API example; router prepared but not mounted in this release |
+| `examples/openai/batches.py` | OpenAI Batches API example; router prepared but not mounted in this release |
 | `examples/openai/embeddings.py` | Embeddings usage |
 | `examples/openai/models.py` | Model listing/retrieval |
 | `examples/openai_agents.py` | OpenAI Agents SDK example |
-| `examples/responses/parallel_tool_call.py` | Additional Responses API example |
 | `examples/README.md` | Example index |
 
 ### Notable Example Files
@@ -30,7 +29,7 @@
 - `responses/reasoning.py`: Responses API reasoning example
 - `responses/structured_output.py`: structured outputs
 - `anthropic/messages.py`: basic Messages API call
-- `anthropic/message_batches.py`: Anthropic Message Batches API
+- `anthropic/message_batches.py`: Anthropic Message Batches API; router prepared but not mounted in this release
 - `anthropic/messages_stream.py`: streaming Messages API
 - `anthropic/count_tokens.py`: token counting endpoint
 

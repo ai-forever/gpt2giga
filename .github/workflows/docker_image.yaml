@@ -22,7 +22,7 @@ jobs:
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     - name: Get version
       id: get_version
@@ -45,12 +45,12 @@ jobs:
         echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ matrix.python-version }}
 
     - name: Log in to Docker Hub
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ secrets.DOCKERHUB_LOGIN }}
@@ -60,7 +60,26 @@ jobs:
       uses: docker/setup-qemu-action@v3
 
     - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      uses: docker/setup-buildx-action@v4
+
+    - name: Prepare Docker tags
+      id: docker_tags
+      shell: bash
+      run: |
+        PYTHON_VERSION="${{ matrix.python-version }}"
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+
+        {
+          echo "tags<<EOF"
+          echo "${IMAGE_NAME}:python${PYTHON_VERSION}"
+          echo "${IMAGE_NAME}:python${PYTHON_VERSION}-${GITHUB_SHA}"
+          echo "${IMAGE_NAME}:${VERSION}-python${PYTHON_VERSION}"
+          if [ "${PYTHON_VERSION}" = "3.13" ]; then
+            echo "${IMAGE_NAME}:${VERSION}"
+            echo "${IMAGE_NAME}:latest"
+          fi
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
 
     - name: Build and push Docker image
       uses: docker/build-push-action@v5
@@ -71,11 +90,6 @@ jobs:
           PYTHON_VERSION=${{ matrix.python-version }}
         push: true
         platforms: linux/amd64,linux/arm64
-        tags: |
-          ${{ env.IMAGE_NAME }}:python${{ matrix.python-version }}
-          ${{ env.IMAGE_NAME }}:python${{ matrix.python-version }}-${{ github.sha }}
-          ${{ env.IMAGE_NAME }}:${{ steps.get_version.outputs.VERSION }}-python${{ matrix.python-version }}
-          ${{ env.IMAGE_NAME }}:${{ steps.get_version.outputs.VERSION }}
-          ${{ env.IMAGE_NAME }}:latest
+        tags: ${{ steps.docker_tags.outputs.tags }}
         labels: |
           org.opencontainers.image.source=https://github.com/${{ github.repository }}

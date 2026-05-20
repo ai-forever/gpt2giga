@@ -17,7 +17,7 @@ class MathResponse(BaseModel):
 
 
 response = client.chat.completions.parse(
-    model="gpt-4o",
+    model="GigaChat-3-Ultra",
     messages=[
         {"role": "system", "content": "Ты - профессиональный математик"},
         {

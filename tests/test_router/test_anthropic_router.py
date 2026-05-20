@@ -7,19 +7,24 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.anthropic.request import (
+    _build_openai_data_from_anthropic_request,
+    _convert_anthropic_output_format_to_openai_response_format,
     _convert_anthropic_messages_to_openai,
     _convert_anthropic_tools_to_openai,
     _extract_text_from_openai_messages,
+    _extract_structured_output_text,
     _extract_tool_definitions_text,
+    _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import (
     _build_anthropic_response,
     _map_stop_reason,
 )
 from gpt2giga.routers.anthropic import router
+from gpt2giga.routers.anthropic.batches import router as message_batches_router
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +144,50 @@ class FakeGigachatReasoning:
         return gen()
 
 
+class FakeGigachatThinkTags:
+    """Fake that embeds reasoning inside content think tags."""
+
+    async def achat(self, chat):
+        return MockResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "<think>847 + 468 - 294 = 1021.</think>Ответ: 1021.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 30,
+                    "total_tokens": 50,
+                },
+            }
+        )
+
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {"choices": [{"delta": {"content": "<think>847 + 468"}}]}
+            )
+            yield MockResponse(
+                {
+                    "choices": [
+                        {"delta": {"content": " - 294 = 1021.</think>Ответ: 1021."}}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 20,
+                        "completion_tokens": 10,
+                        "total_tokens": 30,
+                    },
+                }
+            )
+
+        return gen()
+
+
 class FakeGigachatFunctionCall:
     """Fake that returns a function call response."""
 
@@ -176,6 +225,60 @@ class FakeGigachatFunctionCall:
                                 "function_call": {
                                     "name": "get_weather",
                                     "arguments": {"location": "SF"},
+                                }
+                            }
+                        }
+                    ],
+                    "usage": None,
+                }
+            )
+
+        return gen()
+
+
+class FakeGigachatStructuredFunctionCall:
+    """Fake that returns a synthetic structured-output function call."""
+
+    async def achat(self, chat):
+        return MockResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "function_call": {
+                                "name": "structured_output",
+                                "arguments": {
+                                    "name": "John Smith",
+                                    "email": "john@example.com",
+                                },
+                            },
+                        },
+                        "finish_reason": "function_call",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 15,
+                    "completion_tokens": 8,
+                    "total_tokens": 23,
+                },
+            }
+        )
+
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "function_call": {
+                                    "name": "structured_output",
+                                    "arguments": {
+                                        "name": "John Smith",
+                                        "email": "john@example.com",
+                                    },
                                 }
                             }
                         }
@@ -350,8 +453,16 @@ def make_app(gigachat=None):
     app.state.gigachat_client = gigachat or FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(structured_output_mode="function_call")
+    )
     app.state.logger = logger
+    return app
+
+
+def make_app_with_message_batches(gigachat=None):
+    app = make_app(gigachat)
+    app.include_router(message_batches_router)
     return app
 
 
@@ -398,6 +509,93 @@ class TestConvertAnthropicToolsToOpenai:
         assert len(result) == 2
         assert result[0]["function"]["name"] == "a"
         assert result[1]["function"]["name"] == "b"
+
+
+class TestAnthropicStructuredOutputRequest:
+    def test_output_config_json_schema_maps_to_response_format(self):
+        schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+        data = {
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": "Extract name"}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "ContactInfo",
+                    "schema": schema,
+                    "strict": True,
+                }
+            },
+        }
+
+        response_format = _convert_anthropic_output_format_to_openai_response_format(
+            data
+        )
+
+        assert response_format == {
+            "type": "json_schema",
+            "schema": schema,
+            "name": "ContactInfo",
+            "strict": True,
+        }
+        assert _is_anthropic_structured_output_request(data) is True
+
+    def test_legacy_output_format_json_schema_maps_to_response_format(self):
+        data = {
+            "output_format": {
+                "type": "json_schema",
+                "schema": {"type": "object"},
+            }
+        }
+
+        response_format = _convert_anthropic_output_format_to_openai_response_format(
+            data
+        )
+
+        assert response_format == {
+            "type": "json_schema",
+            "schema": {"type": "object"},
+        }
+
+    def test_build_openai_data_includes_response_format(self):
+        data = {
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": "Extract name"}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": {"type": "object"},
+                }
+            },
+        }
+
+        result = _build_openai_data_from_anthropic_request(data, logger=None)
+
+        assert result["response_format"] == {
+            "type": "json_schema",
+            "schema": {"type": "object"},
+        }
+        assert "output_config" not in result
+
+    def test_extract_structured_output_text_for_token_counting(self):
+        data = {
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "ContactInfo",
+                    "schema": {"type": "object"},
+                }
+            }
+        }
+
+        texts = _extract_structured_output_text(data)
+
+        assert len(texts) == 1
+        assert "ContactInfo" in texts[0]
+        assert '"type": "object"' in texts[0]
 
 
 class TestConvertAnthropicMessagesToOpenai:
@@ -713,6 +911,33 @@ class TestBuildAnthropicResponse:
         assert result["content"][0]["name"] == "search"
         assert result["content"][0]["input"] == {"q": "test"}
 
+    def test_structured_output_function_call_response(self):
+        giga = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "function_call": {
+                            "name": "structured_output",
+                            "arguments": {"name": "John Smith"},
+                        },
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+        result = _build_anthropic_response(
+            giga,
+            "claude-test",
+            "rq456",
+            is_structured_output=True,
+        )
+        assert result["stop_reason"] == "end_turn"
+        assert result["content"][0]["type"] == "text"
+        assert json.loads(result["content"][0]["text"]) == {"name": "John Smith"}
+
     def test_function_call_unmaps_reserved_web_search(self):
         giga = {
             "choices": [
@@ -810,6 +1035,25 @@ class TestBuildAnthropicResponse:
         assert result["content"][1]["type"] == "text"
         assert result["content"][1]["text"] == "Answer: 42"
 
+    def test_text_response_extracts_think_tags(self):
+        giga = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "<think>Let me think... 6 * 7 = 42</think>Answer: 42",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15},
+        }
+        result = _build_anthropic_response(giga, "claude-test", "rq")
+        assert result["content"][0]["type"] == "thinking"
+        assert result["content"][0]["thinking"] == "Let me think... 6 * 7 = 42"
+        assert result["content"][1]["type"] == "text"
+        assert result["content"][1]["text"] == "Answer: 42"
+
     def test_no_reasoning_when_absent(self):
         giga = {
             "choices": [
@@ -885,6 +1129,38 @@ class TestMessagesEndpoint:
         assert body["stop_reason"] == "tool_use"
         assert body["content"][0]["type"] == "tool_use"
         assert body["content"][0]["name"] == "get_weather"
+
+    def test_non_stream_with_structured_output(self):
+        app = make_app(FakeGigachatStructuredFunctionCall())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "Extract contact info"}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "email": {"type": "string"},
+                        },
+                        "required": ["name", "email"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["stop_reason"] == "end_turn"
+        assert body["content"][0]["type"] == "text"
+        assert json.loads(body["content"][0]["text"]) == {
+            "name": "John Smith",
+            "email": "john@example.com",
+        }
 
     def test_non_stream_unmaps_reserved_web_search(self):
         app = make_app(FakeGigachatFunctionCallReservedWebSearch())
@@ -1053,6 +1329,61 @@ class TestMessagesEndpoint:
                 assert parsed["delta"]["stop_reason"] == "tool_use"
                 break
 
+    def test_stream_structured_output_function_call_as_text(self):
+        app = make_app(FakeGigachatStructuredFunctionCall())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Extract contact info"}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "email": {"type": "string"},
+                        },
+                        "required": ["name", "email"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+
+        data_lines = [
+            line.replace("data: ", "")
+            for line in resp.text.strip().split("\n")
+            if line.startswith("data: ")
+        ]
+        block_starts = [
+            json.loads(d)
+            for d in data_lines
+            if json.loads(d).get("type") == "content_block_start"
+        ]
+        deltas = [
+            json.loads(d)
+            for d in data_lines
+            if json.loads(d).get("type") == "content_block_delta"
+        ]
+        message_delta = next(
+            json.loads(d)
+            for d in data_lines
+            if json.loads(d).get("type") == "message_delta"
+        )
+
+        assert block_starts[0]["content_block"]["type"] == "text"
+        assert deltas[0]["delta"]["type"] == "text_delta"
+        assert json.loads(deltas[0]["delta"]["text"]) == {
+            "name": "John Smith",
+            "email": "john@example.com",
+        }
+        assert message_delta["delta"]["stop_reason"] == "end_turn"
+
     def test_stream_unmaps_reserved_web_search(self):
         app = make_app(FakeGigachatFunctionCallReservedWebSearch())
         client = TestClient(app)
@@ -1134,6 +1465,22 @@ class TestMessagesEndpoint:
         assert "1021" in body["content"][0]["thinking"]
         # Second block should be text
         assert body["content"][1]["type"] == "text"
+
+    def test_non_stream_extracts_think_tags(self):
+        app = make_app(FakeGigachatThinkTags())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 16000,
+            "messages": [{"role": "user", "content": "What is 6*7?"}],
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["content"][0]["type"] == "thinking"
+        assert "1021" in body["content"][0]["thinking"]
+        assert body["content"][1]["type"] == "text"
+        assert body["content"][1]["text"] == "Ответ: 1021."
 
     def test_thinking_budget_maps_to_reasoning_effort_high(self):
         app = make_app()
@@ -1217,6 +1564,40 @@ class TestMessagesEndpoint:
                 assert b["index"] == 0
             elif b["content_block"]["type"] == "text":
                 assert b["index"] == 1
+
+    def test_stream_extracts_think_tags(self):
+        app = make_app(FakeGigachatThinkTags())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 16000,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Solve a math problem."}],
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+
+        data_lines = [
+            line.replace("data: ", "")
+            for line in resp.text.strip().split("\n")
+            if line.startswith("data: ")
+        ]
+        deltas = [
+            json.loads(d)
+            for d in data_lines
+            if json.loads(d).get("type") == "content_block_delta"
+        ]
+        thinking_deltas = [
+            d["delta"]["thinking"]
+            for d in deltas
+            if d["delta"]["type"] == "thinking_delta"
+        ]
+        text_deltas = [
+            d["delta"]["text"] for d in deltas if d["delta"]["type"] == "text_delta"
+        ]
+
+        assert "".join(thinking_deltas) == "847 + 468 - 294 = 1021."
+        assert text_deltas == ["Ответ: 1021."]
 
 
 class TestConvertAssistantTextOnly:
@@ -1399,6 +1780,27 @@ class TestCountTokensEndpoint:
         # Should count both message tokens and tool definition tokens
         assert body["input_tokens"] > 0
 
+    def test_count_with_structured_output_schema(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "messages": [],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                    },
+                }
+            },
+        }
+        resp = client.post("/messages/count_tokens", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["input_tokens"] > 0
+
     def test_count_empty_messages(self):
         app = make_app()
         client = TestClient(app)
@@ -1442,8 +1844,26 @@ class TestCountTokensEndpoint:
 
 
 class TestMessageBatchesEndpoint:
-    def test_batch_lifecycle_and_results(self):
-        app = make_app(FakeGigachatBatches())
+    def test_message_batch_routes_are_disabled(self):
+        client = TestClient(make_app(FakeGigachatBatches()))
+
+        assert client.post("/messages/batches").status_code == 404
+        assert client.get("/messages/batches").status_code == 404
+        assert client.get("/messages/batches/batch-1").status_code == 404
+        assert client.post("/messages/batches/batch-1/cancel").status_code == 404
+        assert client.delete("/messages/batches/batch-1").status_code == 404
+        assert client.get("/messages/batches/batch-1/results").status_code == 404
+
+    def test_openapi_omits_message_batch_routes(self):
+        paths = make_app(FakeGigachatBatches()).openapi()["paths"]
+
+        assert "/messages/batches" not in paths
+        assert "/messages/batches/{message_batch_id}" not in paths
+        assert "/messages/batches/{message_batch_id}/cancel" not in paths
+        assert "/messages/batches/{message_batch_id}/results" not in paths
+
+    def test_batch_lifecycle_and_results_when_router_is_mounted_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         giga_client = app.state.gigachat_client
         client = TestClient(app)
 
@@ -1514,8 +1934,8 @@ class TestMessageBatchesEndpoint:
         assert lines[1]["result"]["error"]["type"] == "error"
         assert lines[1]["result"]["error"]["error"]["message"] == "Bad batch input"
 
-    def test_batch_create_rejects_streaming_requests(self):
-        app = make_app(FakeGigachatBatches())
+    def test_batch_create_rejects_streaming_requests_when_mounted_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
         payload = {
@@ -1536,8 +1956,8 @@ class TestMessageBatchesEndpoint:
         assert response.status_code == 400
         assert response.json()["error"]["type"] == "invalid_request_error"
 
-    def test_batch_create_accepts_24h_completion_window(self):
-        app = make_app(FakeGigachatBatches())
+    def test_batch_create_accepts_24h_completion_window_when_mounted_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
         payload = {
@@ -1559,8 +1979,8 @@ class TestMessageBatchesEndpoint:
         assert response.status_code == 200
         assert response.json()["type"] == "message_batch"
 
-    def test_batch_create_rejects_unsupported_completion_window(self):
-        app = make_app(FakeGigachatBatches())
+    def test_batch_create_rejects_unsupported_completion_window_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
         payload = {
@@ -1583,8 +2003,8 @@ class TestMessageBatchesEndpoint:
         assert response.json()["error"]["type"] == "invalid_request_error"
         assert "completion_window" in response.json()["error"]["message"]
 
-    def test_batch_cancel_and_delete_surface_not_implemented(self):
-        app = make_app(FakeGigachatBatches())
+    def test_batch_cancel_and_delete_surface_not_implemented_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
         client.post(
@@ -1611,8 +2031,8 @@ class TestMessageBatchesEndpoint:
         assert delete.status_code == 501
         assert delete.json()["error"]["type"] == "api_error"
 
-    def test_openapi_includes_examples_for_message_batches(self):
-        app = make_app(FakeGigachatBatches())
+    def test_openapi_includes_examples_for_message_batches_when_mounted_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
 
         schema = app.openapi()
         batch_examples = schema["paths"]["/messages/batches"]["post"]["requestBody"][
