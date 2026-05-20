@@ -11,6 +11,12 @@ import tiktoken
 from fastapi import HTTPException
 
 _VALID_ENCODING_FORMATS = {"float", "base64"}
+EMBEDDING_MODEL_DIMENSIONS = {
+    "Embeddings": 1024,
+    "Embeddings-2": 1024,
+    "GigaEmbeddings-3B-2025-09": 2048,
+    "EmbeddingsGigaR": 2560,
+}
 
 
 def _invalid_request(message: str, *, param: Optional[str] = None) -> None:
@@ -39,12 +45,6 @@ def validate_embedding_request(data: Dict[str, Any]) -> None:
             param="encoding_format",
         )
 
-    if "dimensions" in data:
-        _invalid_request(
-            "`dimensions` is not supported by the GigaChat embeddings endpoint.",
-            param="dimensions",
-        )
-
     model = data.get("model")
     if model is not None and (not isinstance(model, str) or not model.strip()):
         _invalid_request("`model` must be a non-empty string.", param="model")
@@ -61,6 +61,7 @@ async def transform_embedding_body(
     if isinstance(openai_model, str):
         openai_model = openai_model.strip()
     model = openai_model if pass_model and openai_model else embeddings_model
+    _validate_embedding_dimensions(data, model)
     normalized_inputs = await _normalize_embedding_inputs(
         data["input"], openai_model or model
     )
@@ -191,6 +192,34 @@ def _validate_embedding_input(inputs: Any) -> None:
         "`input` arrays must not mix strings, token ids, and token id arrays.",
         param="input",
     )
+
+
+def _validate_embedding_dimensions(data: Dict[str, Any], model: str) -> None:
+    if "dimensions" not in data:
+        return
+
+    dimensions = data["dimensions"]
+    if (
+        not isinstance(dimensions, int)
+        or isinstance(dimensions, bool)
+        or dimensions <= 0
+    ):
+        _invalid_request("`dimensions` must be a positive integer.", param="dimensions")
+
+    expected_dimensions = EMBEDDING_MODEL_DIMENSIONS.get(model)
+    if expected_dimensions is None:
+        known_models = ", ".join(sorted(EMBEDDING_MODEL_DIMENSIONS))
+        _invalid_request(
+            "`dimensions` is supported only for known embedding models: "
+            f"{known_models}.",
+            param="dimensions",
+        )
+
+    if dimensions != expected_dimensions:
+        _invalid_request(
+            f"`dimensions` must be {expected_dimensions} for model `{model}`.",
+            param="dimensions",
+        )
 
 
 async def _normalize_embedding_inputs(inputs: Any, model: Optional[str]) -> List[str]:
