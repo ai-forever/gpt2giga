@@ -38,5 +38,8 @@ async def get_model_info(request: Request, model: Optional[str] = None):
         return _model_info_entry(_extract_model_id(response))
     response = await giga_client.aget_models()
     return {
-        "data": [_model_info_entry(_extract_model_id(model_info)) for model_info in response.data]
+        "data": [
+            _model_info_entry(_extract_model_id(model_info))
+            for model_info in response.data
+        ]
     }

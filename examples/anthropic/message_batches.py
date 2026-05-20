@@ -12,7 +12,10 @@ batch = client.messages.batches.create(
                 "model": "GigaChat-2-Max",
                 "max_tokens": 128,
                 "messages": [
-                    {"role": "user", "content": "Say hello from Anthropic batch item one."}
+                    {
+                        "role": "user",
+                        "content": "Say hello from Anthropic batch item one.",
+                    }
                 ],
             },
         },
@@ -22,7 +25,10 @@ batch = client.messages.batches.create(
                 "model": "GigaChat-2-Max",
                 "max_tokens": 128,
                 "messages": [
-                    {"role": "user", "content": "Say hello from Anthropic batch item two."}
+                    {
+                        "role": "user",
+                        "content": "Say hello from Anthropic batch item two.",
+                    }
                 ],
             },
         },

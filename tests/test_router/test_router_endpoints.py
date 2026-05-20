@@ -137,6 +137,7 @@ def test_responses_non_stream_includes_reasoning_item():
 def test_embeddings_with_token_ids(monkeypatch):
     app = make_app(monkeypatch)
     client = TestClient(app)
+    app.state.config.proxy_settings.pass_model = False
     resp = client.post(
         "/embeddings",
         json={"model": "gpt-x", "input": [1, 2, 3]},
