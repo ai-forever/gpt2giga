@@ -1,6 +1,6 @@
 import warnings
 from functools import cached_property
-from typing import Optional, Literal
+from typing import Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
 from pydantic import Field, field_validator, model_validator
@@ -59,6 +59,13 @@ class ProxySettings(BaseSettings):
             "в payload к GigaChat, если клиент не указал reasoning_effort явно"
         ),
     )
+    structured_output_mode: Literal["function_call", "native"] = Field(
+        default="function_call",
+        description=(
+            "Режим structured output: function_call использует совместимый "
+            "function-calling fallback, native передает response_format в GigaChat"
+        ),
+    )
     max_request_body_bytes: int = Field(
         default=DEFAULT_MAX_REQUEST_BODY_BYTES,
         description="Глобальный лимит размера HTTP-тела запроса в байтах (до парсинга JSON)",
@@ -110,6 +117,13 @@ class ProxySettings(BaseSettings):
     def normalize_mode(cls, value):
         if isinstance(value, str):
             return value.strip().upper()
+        return value
+
+    @field_validator("structured_output_mode", mode="before")
+    @classmethod
+    def normalize_structured_output_mode(cls, value):
+        if isinstance(value, str):
+            return value.strip().lower()
         return value
 
     @model_validator(mode="after")

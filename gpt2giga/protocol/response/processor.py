@@ -18,18 +18,53 @@ from gpt2giga.common.tools import map_tool_name_from_gigachat
 class ResponseProcessor:
     """Обработчик ответов от GigaChat в формат OpenAI."""
 
-    def __init__(self, logger=None, mode: str = "DEV"):
+    def __init__(
+        self,
+        logger=None,
+        mode: str = "DEV",
+        structured_output_mode: str = "function_call",
+    ):
         if logger is None:
             from loguru import logger as default_logger
 
             logger = default_logger
         self.logger = logger
         self._mode = mode.upper() if isinstance(mode, str) else "DEV"
+        self._structured_output_mode = (
+            structured_output_mode.lower()
+            if isinstance(structured_output_mode, str)
+            else "function_call"
+        )
         self._stream_reasoning_parsers: dict[str, ReasoningContentParser] = {}
 
     @property
     def _is_prod_mode(self) -> bool:
         return self._mode == "PROD"
+
+    def _uses_structured_output_function_call(self) -> bool:
+        return self._structured_output_mode == "function_call"
+
+    def _is_chat_structured_output_function_call(
+        self, request_data: Optional[Dict]
+    ) -> bool:
+        if not self._uses_structured_output_function_call():
+            return False
+        response_format = None
+        if isinstance(request_data, dict):
+            response_format = request_data.get("response_format")
+        return (
+            isinstance(response_format, dict)
+            and response_format.get("type") == "json_schema"
+        )
+
+    def _is_responses_structured_output_function_call(self, data: dict) -> bool:
+        if not self._uses_structured_output_function_call():
+            return False
+        text_param = data.get("text")
+        if not isinstance(text_param, dict):
+            return False
+        fmt = text_param.get("format")
+        return isinstance(fmt, dict) and fmt.get("type") == "json_schema"
 
     def process_response(
         self,
@@ -42,12 +77,9 @@ class ResponseProcessor:
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
-        is_structured_output = False
-        if (
+        is_structured_output = self._is_chat_structured_output_function_call(
             request_data
-            and request_data.get("response_format", {}).get("type") == "json_schema"
-        ):
-            is_structured_output = True
+        )
 
         for choice in giga_dict["choices"]:
             self._process_choice(
@@ -91,12 +123,8 @@ class ResponseProcessor:
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
-        is_structured_output = False
         text_param = data.get("text")
-        if text_param and isinstance(text_param, dict):
-            fmt = text_param.get("format")
-            if fmt and isinstance(fmt, dict) and fmt.get("type") == "json_schema":
-                is_structured_output = True
+        is_structured_output = self._is_responses_structured_output_function_call(data)
 
         for choice in giga_dict["choices"]:
             self._process_choice_responses(choice, response_id)
@@ -274,12 +302,9 @@ class ResponseProcessor:
         giga_dict = giga_resp.model_dump()
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
-        is_structured_output = False
-        if (
+        is_structured_output = self._is_chat_structured_output_function_call(
             request_data
-            and request_data.get("response_format", {}).get("type") == "json_schema"
-        ):
-            is_structured_output = True
+        )
 
         for choice in giga_dict["choices"]:
             self._process_choice(

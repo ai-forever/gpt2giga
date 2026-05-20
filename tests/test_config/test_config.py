@@ -13,6 +13,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert isinstance(s.log_level, str)
     assert s.pass_model is True
     assert s.enable_reasoning is False
+    assert s.structured_output_mode == "function_call"
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024
@@ -41,6 +42,24 @@ def test_proxy_settings_bool_cast_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_USE_HTTPS", "true")
     s = ProxySettings()
     assert s.use_https is True
+
+
+def test_proxy_settings_structured_output_mode_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", "native")
+    s = ProxySettings()
+    assert s.structured_output_mode == "native"
+
+
+def test_proxy_settings_structured_output_mode_normalized(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", " NATIVE ")
+    s = ProxySettings()
+    assert s.structured_output_mode == "native"
+
+
+def test_proxy_settings_invalid_structured_output_mode(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", "unsupported")
+    with pytest.raises(Exception):
+        ProxySettings()
 
 
 def test_proxy_settings_invalid_port(monkeypatch):
