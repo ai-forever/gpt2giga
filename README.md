@@ -334,7 +334,7 @@ gpt2giga \
 - `GPT2GIGA_USE_HTTPS="False"` — Использовать ли https. По умолчанию `False`;
 - `GPT2GIGA_HTTPS_KEY_FILE=<PATH>` — Путь до key файла для https. По умолчанию `None`;
 - `GPT2GIGA_HTTPS_CERT_FILE=<PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `GPT2GIGA_PASS_MODEL="False"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat;
+- `GPT2GIGA_PASS_MODEL="True"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat;
 - `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов.
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
