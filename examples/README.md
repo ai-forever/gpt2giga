@@ -24,6 +24,9 @@ uv run python examples/openai/chat_completions/chat_completion.py
 # Files API
 uv run python examples/openai/files.py
 
+# Embeddings API
+uv run python examples/openai/embeddings.py
+
 # Batches API
 uv run python examples/openai/batches.py
 
