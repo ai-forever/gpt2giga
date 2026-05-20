@@ -1,15 +1,16 @@
 import base64
-import functools
 import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
-import anyio
-import tiktoken
 from fastapi import HTTPException
 
-from gpt2giga.protocol.embeddings import apply_embedding_encoding_format
+from gpt2giga.protocol.embeddings import (
+    apply_embedding_encoding_format,
+    normalize_embedding_response,
+    transform_embedding_body,
+)
 
 
 @dataclass(frozen=True)
@@ -114,25 +115,6 @@ def _resolve_batch_model(body: Dict[str, Any], giga_client: Any) -> Optional[str
         return configured_model
 
     return None
-
-
-async def transform_embedding_body(
-    data: Dict[str, Any], embeddings_model: str, *, pass_model: bool = False
-) -> Dict[str, Any]:
-    """Transform an OpenAI embeddings request into a GigaChat embeddings payload.
-
-    When ``pass_model`` is True the model name supplied by the client in the
-    request body is forwarded to GigaChat instead of the configured default.
-    This allows a single proxy instance to serve multiple embedding models.
-    """
-    inputs = data.get("input", [])
-    openai_model = data.get("model")
-    normalized_inputs = await _normalize_embedding_inputs(inputs, openai_model)
-    model = openai_model if pass_model and openai_model else embeddings_model
-    return {
-        "input": normalized_inputs,
-        "model": model,
-    }
 
 
 async def transform_batch_input_file(
@@ -287,8 +269,14 @@ async def transform_batch_output_file(
                     raw_body, response_processor, custom_id, original_body
                 )
             else:
+                transformed_body = normalize_embedding_response(
+                    raw_body,
+                    model=_resolve_embedding_batch_response_model(
+                        original_body, batch_metadata
+                    ),
+                )
                 transformed_body = apply_embedding_encoding_format(
-                    raw_body, original_body.get("encoding_format")
+                    transformed_body, original_body.get("encoding_format")
                 )
 
             transformed_row = {
@@ -304,6 +292,20 @@ async def transform_batch_output_file(
         result_lines.append(json.dumps(transformed_row, ensure_ascii=False))
 
     return ("\n".join(result_lines) + ("\n" if result_lines else "")).encode("utf-8")
+
+
+def _resolve_embedding_batch_response_model(
+    original_body: Dict[str, Any], batch_metadata: Dict[str, Any]
+) -> Optional[str]:
+    requested_model = original_body.get("model")
+    configured_model = batch_metadata.get("embeddings_model")
+    if batch_metadata.get("pass_model") and isinstance(requested_model, str):
+        return requested_model
+    if isinstance(configured_model, str) and configured_model:
+        return configured_model
+    if isinstance(requested_model, str) and requested_model:
+        return requested_model
+    return None
 
 
 def _transform_chat_batch_result(
@@ -397,26 +399,3 @@ def parse_jsonl(content: bytes) -> List[Dict[str, Any]]:
             raise _batch_line_error(line_number, "Each JSONL line must be an object.")
         rows.append(parsed)
     return rows
-
-
-async def _normalize_embedding_inputs(inputs: Any, model: Optional[str]) -> List[str]:
-    if isinstance(inputs, list):
-        new_inputs: List[str] = []
-        if inputs and isinstance(inputs[0], int):
-            encoder = await anyio.to_thread.run_sync(
-                functools.partial(tiktoken.encoding_for_model, model)
-            )
-            new_inputs = [encoder.decode(inputs)]
-        else:
-            encoder = None
-            for row in inputs:
-                if isinstance(row, list):
-                    if encoder is None:
-                        encoder = await anyio.to_thread.run_sync(
-                            functools.partial(tiktoken.encoding_for_model, model)
-                        )
-                    new_inputs.append(encoder.decode(row))
-                else:
-                    new_inputs.append(row)
-        return new_inputs
-    return [inputs]

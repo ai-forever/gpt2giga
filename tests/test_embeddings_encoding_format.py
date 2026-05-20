@@ -7,6 +7,8 @@ import struct
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gigachat.models.embeddings import Embeddings
+from openai import OpenAI
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.batches import transform_batch_output_file
@@ -17,17 +19,21 @@ class FakeClient:
     """Stand-in GigaChat client that always returns float arrays."""
 
     async def aembeddings(self, texts, model):
-        return {
-            "data": [
-                {
-                    "embedding": [0.0, 0.5, -0.5, 1.0],
-                    "index": 0,
-                    "object": "embedding",
-                }
-            ],
-            "model": model,
-            "object": "list",
-        }
+        return Embeddings.model_validate(
+            {
+                "x_headers": {"x-request-id": "secret-upstream-header"},
+                "data": [
+                    {
+                        "embedding": [0.0, 0.5, -0.5, 1.0],
+                        "usage": {"prompt_tokens": 4},
+                        "index": 0,
+                        "object": "embedding",
+                    }
+                ],
+                "model": model,
+                "object": "list",
+            }
+        )
 
 
 def _make_app() -> FastAPI:
@@ -46,6 +52,22 @@ def test_embeddings_default_encoding_returns_floats():
     embedding = resp.json()["data"][0]["embedding"]
     assert isinstance(embedding, list)
     assert embedding == [0.0, 0.5, -0.5, 1.0]
+
+
+def test_embeddings_response_uses_openai_envelope():
+    """GigaChat-specific fields are converted to the OpenAI response shape."""
+    client = TestClient(_make_app())
+    resp = client.post("/embeddings", json={"input": "hello"})
+    assert resp.status_code == 200
+
+    body = resp.json()
+    assert body["object"] == "list"
+    assert body["model"] == "EmbeddingsGigaR"
+    assert body["usage"] == {"prompt_tokens": 4, "total_tokens": 4}
+    assert "x_headers" not in body
+    assert "object_" not in body
+    assert body["data"][0]["object"] == "embedding"
+    assert "usage" not in body["data"][0]
 
 
 def test_embeddings_explicit_float_returns_floats():
@@ -77,10 +99,33 @@ def test_embeddings_base64_returns_base64_string():
     assert resp.status_code == 200
     embedding = resp.json()["data"][0]["embedding"]
     assert isinstance(embedding, str)
+    assert "object_" not in resp.json()
+    assert resp.json()["data"][0]["object"] == "embedding"
     raw = base64.b64decode(embedding)
     assert len(raw) == 4 * 4  # 4 floats × 4 bytes (float32)
     decoded = list(struct.unpack(f"<{len(raw) // 4}f", raw))
     assert decoded == [0.0, 0.5, -0.5, 1.0]
+
+
+def test_openai_python_sdk_default_encoding_roundtrips_base64():
+    """The OpenAI Python SDK sends base64 by default and decodes it client-side."""
+    test_client = TestClient(_make_app())
+    openai_client = OpenAI(
+        api_key="test",
+        base_url=str(test_client.base_url),
+        http_client=test_client,
+    )
+
+    response = openai_client.embeddings.create(
+        model="EmbeddingsGigaR",
+        input="hello",
+    )
+
+    assert response.object == "list"
+    assert response.data[0].object == "embedding"
+    assert response.data[0].embedding == [0.0, 0.5, -0.5, 1.0]
+    assert response.usage.prompt_tokens == 4
+    assert response.usage.total_tokens == 4
 
 
 @pytest.mark.asyncio
@@ -90,7 +135,11 @@ async def test_embedding_batch_output_honors_base64_encoding_format():
         "custom_id": "embed-1",
         "method": "POST",
         "url": "/v1/embeddings",
-        "body": {"input": "hello", "encoding_format": "base64"},
+        "body": {
+            "input": "hello",
+            "model": "EmbeddingsGigaR",
+            "encoding_format": "base64",
+        },
     }
     output_line = {
         "id": "embed-1",
@@ -100,10 +149,12 @@ async def test_embedding_batch_output_honors_base64_encoding_format():
                 "data": [
                     {
                         "embedding": [0.0, 0.5, -0.5, 1.0],
+                        "usage": {"prompt_tokens": 4},
                         "index": 0,
                         "object": "embedding",
                     }
                 ],
+                "model": "EmbeddingsGigaR",
                 "object": "list",
             },
         },
@@ -121,8 +172,13 @@ async def test_embedding_batch_output_honors_base64_encoding_format():
     )
 
     transformed_line = json.loads(result.decode("utf-8").strip())
-    embedding = transformed_line["response"]["body"]["data"][0]["embedding"]
+    body = transformed_line["response"]["body"]
+    embedding = body["data"][0]["embedding"]
     assert isinstance(embedding, str)
+    assert body["object"] == "list"
+    assert body["usage"] == {"prompt_tokens": 4, "total_tokens": 4}
+    assert body["data"][0]["object"] == "embedding"
+    assert "usage" not in body["data"][0]
     raw = base64.b64decode(embedding)
     assert len(raw) == 4 * 4
     assert list(struct.unpack(f"<{len(raw) // 4}f", raw)) == [0.0, 0.5, -0.5, 1.0]

@@ -1,6 +1,7 @@
 import sys
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -29,7 +30,7 @@ def make_app(monkeypatch=None, pass_model=False):
 
         fake_tk = SimpleNamespace(encoding_for_model=lambda m: FakeEnc())
         monkeypatch.setattr(
-            sys.modules["gpt2giga.protocol.batches"], "tiktoken", fake_tk
+            sys.modules["gpt2giga.protocol.embeddings"], "tiktoken", fake_tk
         )
     return app
 
@@ -78,3 +79,37 @@ def test_embeddings_pass_model_falls_back_to_configured(monkeypatch):
     resp = client.post("/embeddings", json={"input": "hello"})
     assert resp.status_code == 200
     assert resp.json()["model"] == app.state.config.proxy_settings.embeddings
+
+
+@pytest.mark.parametrize(
+    ("body", "param"),
+    [
+        ({}, "input"),
+        ({"input": ""}, "input"),
+        ({"input": None}, "input"),
+        ({"input": {"text": "hello"}}, "input"),
+        ({"input": ["hello", [1, 2, 3]]}, "input"),
+        ({"input": [1, "2"]}, "input"),
+        ({"input": [[1], ["2"]]}, "input"),
+        ({"input": "hello", "encoding_format": "json"}, "encoding_format"),
+        ({"input": "hello", "dimensions": 128}, "dimensions"),
+    ],
+)
+def test_embeddings_rejects_invalid_openai_requests(body, param):
+    app = make_app()
+    client = TestClient(app)
+    resp = client.post("/embeddings", json=body)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
+    assert resp.json()["detail"]["error"]["param"] == param
+
+
+def test_embeddings_rejects_token_ids_without_decodable_model():
+    app = make_app()
+    client = TestClient(app)
+    resp = client.post("/embeddings", json={"input": [1, 2, 3]})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
+    assert resp.json()["detail"]["error"]["param"] == "model"

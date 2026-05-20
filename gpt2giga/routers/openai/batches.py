@@ -78,6 +78,8 @@ async def create_batch(request: Request):
         "completion_window": completion_window,
         "metadata": data.get("metadata"),
         "output_file_id": batch.output_file_id,
+        "embeddings_model": proxy_settings.embeddings,
+        "pass_model": proxy_settings.pass_model,
     }
     get_batch_store(request)[batch.id_] = metadata
     if batch.output_file_id:
