@@ -24,6 +24,7 @@ from gpt2giga.protocol.anthropic.response import (
     _map_stop_reason,
 )
 from gpt2giga.routers.anthropic import router
+from gpt2giga.routers.anthropic.batches import router as message_batches_router
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +457,12 @@ def make_app(gigachat=None):
         proxy=ProxySettings(structured_output_mode="function_call")
     )
     app.state.logger = logger
+    return app
+
+
+def make_app_with_message_batches(gigachat=None):
+    app = make_app(gigachat)
+    app.include_router(message_batches_router)
     return app
 
 
@@ -1837,8 +1844,26 @@ class TestCountTokensEndpoint:
 
 
 class TestMessageBatchesEndpoint:
-    def test_batch_lifecycle_and_results(self):
-        app = make_app(FakeGigachatBatches())
+    def test_message_batch_routes_are_disabled(self):
+        client = TestClient(make_app(FakeGigachatBatches()))
+
+        assert client.post("/messages/batches").status_code == 404
+        assert client.get("/messages/batches").status_code == 404
+        assert client.get("/messages/batches/batch-1").status_code == 404
+        assert client.post("/messages/batches/batch-1/cancel").status_code == 404
+        assert client.delete("/messages/batches/batch-1").status_code == 404
+        assert client.get("/messages/batches/batch-1/results").status_code == 404
+
+    def test_openapi_omits_message_batch_routes(self):
+        paths = make_app(FakeGigachatBatches()).openapi()["paths"]
+
+        assert "/messages/batches" not in paths
+        assert "/messages/batches/{message_batch_id}" not in paths
+        assert "/messages/batches/{message_batch_id}/cancel" not in paths
+        assert "/messages/batches/{message_batch_id}/results" not in paths
+
+    def test_batch_lifecycle_and_results_when_router_is_mounted_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         giga_client = app.state.gigachat_client
         client = TestClient(app)
 
@@ -1909,8 +1934,8 @@ class TestMessageBatchesEndpoint:
         assert lines[1]["result"]["error"]["type"] == "error"
         assert lines[1]["result"]["error"]["error"]["message"] == "Bad batch input"
 
-    def test_batch_create_rejects_streaming_requests(self):
-        app = make_app(FakeGigachatBatches())
+    def test_batch_create_rejects_streaming_requests_when_mounted_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
         payload = {
@@ -1931,8 +1956,8 @@ class TestMessageBatchesEndpoint:
         assert response.status_code == 400
         assert response.json()["error"]["type"] == "invalid_request_error"
 
-    def test_batch_create_accepts_24h_completion_window(self):
-        app = make_app(FakeGigachatBatches())
+    def test_batch_create_accepts_24h_completion_window_when_mounted_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
         payload = {
@@ -1954,8 +1979,8 @@ class TestMessageBatchesEndpoint:
         assert response.status_code == 200
         assert response.json()["type"] == "message_batch"
 
-    def test_batch_create_rejects_unsupported_completion_window(self):
-        app = make_app(FakeGigachatBatches())
+    def test_batch_create_rejects_unsupported_completion_window_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
         payload = {
@@ -1978,8 +2003,8 @@ class TestMessageBatchesEndpoint:
         assert response.json()["error"]["type"] == "invalid_request_error"
         assert "completion_window" in response.json()["error"]["message"]
 
-    def test_batch_cancel_and_delete_surface_not_implemented(self):
-        app = make_app(FakeGigachatBatches())
+    def test_batch_cancel_and_delete_surface_not_implemented_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
         client = TestClient(app)
 
         client.post(
@@ -2006,8 +2031,8 @@ class TestMessageBatchesEndpoint:
         assert delete.status_code == 501
         assert delete.json()["error"]["type"] == "api_error"
 
-    def test_openapi_includes_examples_for_message_batches(self):
-        app = make_app(FakeGigachatBatches())
+    def test_openapi_includes_examples_for_message_batches_when_mounted_directly(self):
+        app = make_app_with_message_batches(FakeGigachatBatches())
 
         schema = app.openapi()
         batch_examples = schema["paths"]["/messages/batches"]["post"]["requestBody"][
