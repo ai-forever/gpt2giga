@@ -115,15 +115,21 @@ def _resolve_batch_model(body: Dict[str, Any], giga_client: Any) -> Optional[str
 
 
 async def transform_embedding_body(
-    data: Dict[str, Any], embeddings_model: str
+    data: Dict[str, Any], embeddings_model: str, *, pass_model: bool = False
 ) -> Dict[str, Any]:
-    """Transform an OpenAI embeddings request into a GigaChat embeddings payload."""
+    """Transform an OpenAI embeddings request into a GigaChat embeddings payload.
+
+    When ``pass_model`` is True the model name supplied by the client in the
+    request body is forwarded to GigaChat instead of the configured default.
+    This allows a single proxy instance to serve multiple embedding models.
+    """
     inputs = data.get("input", [])
     openai_model = data.get("model")
     normalized_inputs = await _normalize_embedding_inputs(inputs, openai_model)
+    model = openai_model if pass_model and openai_model else embeddings_model
     return {
         "input": normalized_inputs,
-        "model": embeddings_model,
+        "model": model,
     }
 
 
@@ -134,6 +140,7 @@ async def transform_batch_input_file(
     request_transformer: Any,
     giga_client: Any,
     embeddings_model: str,
+    pass_model: bool = False,
 ) -> bytes:
     """Transform OpenAI JSONL batch input into GigaChat `{id, request}` JSONL."""
     transformed_lines = []
@@ -173,7 +180,9 @@ async def transform_batch_input_file(
             if batch_model and "model" not in transformed_body:
                 transformed_body["model"] = batch_model
         else:
-            transformed_body = await transform_embedding_body(body, embeddings_model)
+            transformed_body = await transform_embedding_body(
+                body, embeddings_model, pass_model=pass_model
+            )
 
         custom_id = (
             row.get("custom_id") or row.get("id") or f"batch-request-{line_number}"

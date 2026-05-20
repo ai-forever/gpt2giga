@@ -265,9 +265,9 @@ sequenceDiagram
 - `--proxy.use-https <true/false>` — использовать ли HTTPS. По умолчанию `False`;
 - `--proxy.https-key-file <PATH>` — Путь до key файла для https. По умолчанию `None`;
 - `--proxy.https-cert-file <PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `--proxy.pass-model <true/false>` — передавать в GigaChat API модель, которую указал клиент в поле `model` в режиме чата;
+- `--proxy.pass-model <true/false>` — передавать в GigaChat API модель, которую указал клиент в поле `model` (для чата и эмбеддингов);
 - `--proxy.pass-token <true/false>` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
-- `--proxy.embeddings <EMBED_MODEL>` — модель, которая будет использоваться для создания эмбеддингов. По умолчанию `EmbeddingsGigaR`;
+- `--proxy.embeddings <EMBED_MODEL>` — модель для создания эмбеддингов по умолчанию. Игнорируется при `--proxy.pass-model true`, если клиент указал `model` в запросе. По умолчанию `EmbeddingsGigaR`;
 - `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `--proxy.log-level` — уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`;
@@ -334,9 +334,9 @@ gpt2giga \
 - `GPT2GIGA_USE_HTTPS="False"` — Использовать ли https. По умолчанию `False`;
 - `GPT2GIGA_HTTPS_KEY_FILE=<PATH>` — Путь до key файла для https. По умолчанию `None`;
 - `GPT2GIGA_HTTPS_CERT_FILE=<PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `GPT2GIGA_PASS_MODEL="True"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat;
+- `GPT2GIGA_PASS_MODEL="True"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat (для чата и эмбеддингов);
 - `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
-- `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов.
+- `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов по умолчанию. При `GPT2GIGA_PASS_MODEL=True` используется модель из запроса клиента (с fallback на это значение).
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
 - `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
