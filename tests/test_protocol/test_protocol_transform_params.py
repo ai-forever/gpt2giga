@@ -37,6 +37,20 @@ def test_transform_common_parameters_positive_temperature():
     assert "top_p" not in out
 
 
+def test_transform_common_parameters_without_temperature_does_not_add_top_p():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x"})
+    assert "top_p" not in out
+
+
+def test_transform_common_parameters_preserves_explicit_top_p_without_temperature():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x", "top_p": 0.9})
+    assert out.get("top_p") == 0.9
+
+
 def test_transform_common_parameters_pass_model_true():
     """Тест что model сохраняется при pass_model=True"""
     cfg = ProxyConfig(proxy=ProxySettings(pass_model=True))
