@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.6] - 2026-05-20
 
 ### Added
-- **OpenAI Files API**: added `/files`, `/files/{file_id}`, and `/files/{file_id}/content` endpoints plus the `examples/openai/files.py` example
-- **OpenAI Batches API**: added `/batches` and `/batches/{batch_id}` endpoints plus the `examples/openai/batches.py` example
-- **Anthropic Message Batches API**: added `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}`, and `/v1/messages/batches/{message_batch_id}/results` plus the `examples/anthropic/message_batches.py` example
+- **OpenAI Files API**: added router modules for `/files`, `/files/{file_id}`, and `/files/{file_id}/content` plus the `examples/openai/files.py` example; these routes are temporarily not mounted in the public OpenAI router until the next GigaChat SDK release
+- **OpenAI Batches API**: added router modules for `/batches` and `/batches/{batch_id}` plus the `examples/openai/batches.py` example; these routes are temporarily not mounted in the public OpenAI router until the next GigaChat SDK release
+- **Anthropic Message Batches API**: added router modules for `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}`, and `/v1/messages/batches/{message_batch_id}/results` plus the `examples/anthropic/message_batches.py` example; these routes are temporarily not mounted in the public Anthropic router until the next GigaChat SDK release
 - **New integrations**: added setup guides for Qwen Code and Xcode
 - **CI and automation**: added `actionlint`, `CodeQL`, `dependency-review`, `docker-smoke`, `nightly-smoke`, `pr-labeler`, `release-drafter`, `stale-issues`, and Dependabot configuration
 - **Reasoning / think tags**: added extraction of `<think>...</think>` into reasoning/thinking content for OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages, including streaming
@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Embeddings input validation**: OpenAI-compatible validation now rejects empty or mixed `input`, unsupported `encoding_format`, invalid `model`, and token id inputs without a model that can be decoded through `tiktoken`
 - **Embeddings model routing**: `pass_model` now applies to `/embeddings` and batch requests to `/v1/embeddings`
 - **Model/top_p mapping**: fixed default model forwarding and avoided implicitly setting `top_p=0` when the client did not send `temperature`
+- **Unsupported Files/Batches routes**: temporarily disabled unsupported OpenAI Files/Batches and Anthropic Message Batches routes in the default routers; they are no longer exposed in the OpenAPI schema until GigaChat SDK support lands
 
 ## [0.1.5] - 2026-03-10
 

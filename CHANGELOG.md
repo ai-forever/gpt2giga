@@ -7,9 +7,9 @@
 
 ## [0.1.6] - 2026-05-20
 ### Добавлено
-- **OpenAI Files API**: добавлены эндпоинты `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`
-- **OpenAI Batches API**: добавлены эндпоинты `/batches` и `/batches/{batch_id}` вместе с примером `examples/openai/batches.py`
-- **Anthropic Message Batches API**: добавлены эндпоинты `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}` и `/v1/messages/batches/{message_batch_id}/results`, а также пример `examples/anthropic/message_batches.py`
+- **OpenAI Files API**: добавлены router-модули для `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`; маршруты временно не монтируются в публичный OpenAI router до следующего релиза GigaChat SDK
+- **OpenAI Batches API**: добавлены router-модули для `/batches` и `/batches/{batch_id}` вместе с примером `examples/openai/batches.py`; маршруты временно не монтируются в публичный OpenAI router до следующего релиза GigaChat SDK
+- **Anthropic Message Batches API**: добавлены router-модули для `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}` и `/v1/messages/batches/{message_batch_id}/results`, а также пример `examples/anthropic/message_batches.py`; маршруты временно не монтируются в публичный Anthropic router до следующего релиза GigaChat SDK
 - **Новые интеграции**: добавлены инструкции для Qwen Code и Xcode
 - **CI и автоматизация**: добавлены `actionlint`, `CodeQL`, `dependency-review`, `docker-smoke`, `nightly-smoke`, `pr-labeler`, `release-drafter`, `stale-issues` и Dependabot-конфигурация
 - **Reasoning / think tags**: добавлено извлечение `<think>...</think>` в reasoning/thinking content для OpenAI Chat Completions, OpenAI Responses и Anthropic Messages, включая streaming
@@ -36,6 +36,7 @@
 - **Embeddings input validation**: OpenAI-совместимая валидация теперь отклоняет пустой или смешанный `input`, неподдерживаемый `encoding_format`, некорректный `model` и token id inputs без модели, которую можно декодировать через `tiktoken`
 - **Embeddings model routing**: `pass_model` теперь применяется к `/embeddings` и batch-запросам на `/v1/embeddings`
 - **Model/top_p mapping**: исправлена передача `model` по умолчанию и предотвращена неявная установка `top_p=0`, когда клиент не передавал `temperature`
+- **Unsupported Files/Batches routes**: временно отключены неподдерживаемые OpenAI Files/Batches и Anthropic Message Batches маршруты в default routers; они больше не попадают в OpenAPI-схему до появления поддержки в GigaChat SDK
 
 ## [0.1.5] - 2026-03-10
 ### Добавлено
