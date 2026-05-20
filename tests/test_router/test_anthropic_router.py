@@ -139,6 +139,50 @@ class FakeGigachatReasoning:
         return gen()
 
 
+class FakeGigachatThinkTags:
+    """Fake that embeds reasoning inside content think tags."""
+
+    async def achat(self, chat):
+        return MockResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "<think>847 + 468 - 294 = 1021.</think>Ответ: 1021.",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 20,
+                    "completion_tokens": 30,
+                    "total_tokens": 50,
+                },
+            }
+        )
+
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {"choices": [{"delta": {"content": "<think>847 + 468"}}]}
+            )
+            yield MockResponse(
+                {
+                    "choices": [
+                        {"delta": {"content": " - 294 = 1021.</think>Ответ: 1021."}}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 20,
+                        "completion_tokens": 10,
+                        "total_tokens": 30,
+                    },
+                }
+            )
+
+        return gen()
+
+
 class FakeGigachatFunctionCall:
     """Fake that returns a function call response."""
 
@@ -810,6 +854,25 @@ class TestBuildAnthropicResponse:
         assert result["content"][1]["type"] == "text"
         assert result["content"][1]["text"] == "Answer: 42"
 
+    def test_text_response_extracts_think_tags(self):
+        giga = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "<think>Let me think... 6 * 7 = 42</think>Answer: 42",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15},
+        }
+        result = _build_anthropic_response(giga, "claude-test", "rq")
+        assert result["content"][0]["type"] == "thinking"
+        assert result["content"][0]["thinking"] == "Let me think... 6 * 7 = 42"
+        assert result["content"][1]["type"] == "text"
+        assert result["content"][1]["text"] == "Answer: 42"
+
     def test_no_reasoning_when_absent(self):
         giga = {
             "choices": [
@@ -1135,6 +1198,22 @@ class TestMessagesEndpoint:
         # Second block should be text
         assert body["content"][1]["type"] == "text"
 
+    def test_non_stream_extracts_think_tags(self):
+        app = make_app(FakeGigachatThinkTags())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 16000,
+            "messages": [{"role": "user", "content": "What is 6*7?"}],
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["content"][0]["type"] == "thinking"
+        assert "1021" in body["content"][0]["thinking"]
+        assert body["content"][1]["type"] == "text"
+        assert body["content"][1]["text"] == "Ответ: 1021."
+
     def test_thinking_budget_maps_to_reasoning_effort_high(self):
         app = make_app()
         client = TestClient(app)
@@ -1217,6 +1296,40 @@ class TestMessagesEndpoint:
                 assert b["index"] == 0
             elif b["content_block"]["type"] == "text":
                 assert b["index"] == 1
+
+    def test_stream_extracts_think_tags(self):
+        app = make_app(FakeGigachatThinkTags())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 16000,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Solve a math problem."}],
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+
+        data_lines = [
+            line.replace("data: ", "")
+            for line in resp.text.strip().split("\n")
+            if line.startswith("data: ")
+        ]
+        deltas = [
+            json.loads(d)
+            for d in data_lines
+            if json.loads(d).get("type") == "content_block_delta"
+        ]
+        thinking_deltas = [
+            d["delta"]["thinking"]
+            for d in deltas
+            if d["delta"]["type"] == "thinking_delta"
+        ]
+        text_deltas = [
+            d["delta"]["text"] for d in deltas if d["delta"]["type"] == "text_delta"
+        ]
+
+        assert "".join(thinking_deltas) == "847 + 468 - 294 = 1021."
+        assert text_deltas == ["Ответ: 1021."]
 
 
 class TestConvertAssistantTextOnly:

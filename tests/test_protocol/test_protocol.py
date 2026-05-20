@@ -135,6 +135,61 @@ def test_response_processor_stream_chunk_handles_delta():
     assert out["object"] == "chat.completion.chunk"
 
 
+def test_response_processor_extracts_think_tags_non_stream():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "<think>use arithmetic</think>The answer is 42.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+    message = out["choices"][0]["message"]
+    assert message["content"] == "The answer is 42."
+    assert message["reasoning_content"] == "use arithmetic"
+
+
+def test_response_processor_extracts_split_think_tags_stream():
+    rp = ResponseProcessor(logger)
+    chunks = [
+        MockResponse({"choices": [{"delta": {"content": "A<th"}}], "usage": None}),
+        MockResponse(
+            {"choices": [{"delta": {"content": "ink>reason"}}], "usage": None}
+        ),
+        MockResponse(
+            {
+                "choices": [
+                    {
+                        "delta": {"content": "</think>B"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": None,
+            }
+        ),
+    ]
+
+    outputs = [
+        rp.process_stream_chunk(chunk, gpt_model="gpt-x", response_id="split-1")
+        for chunk in chunks
+    ]
+
+    assert outputs[0]["choices"][0]["delta"]["content"] == "A"
+    assert outputs[1]["choices"][0]["delta"]["content"] == ""
+    assert outputs[1]["choices"][0]["delta"]["reasoning_content"] == "reason"
+    assert outputs[2]["choices"][0]["delta"]["content"] == "B"
+    assert "reasoning_content" not in outputs[2]["choices"][0]["delta"]
+
+
 def test_response_processor_process_response_api_includes_reasoning_item():
     rp = ResponseProcessor(logger)
     giga_resp = MockResponse(
@@ -168,6 +223,33 @@ def test_response_processor_process_response_api_includes_reasoning_item():
     assert out["output"][0]["summary"][0]["text"] == "This is a simple geography fact."
     assert out["output"][1]["type"] == "message"
     assert out["output"][1]["content"][0]["text"] == "Paris"
+
+
+def test_response_processor_response_api_extracts_think_tags():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "<think>First, reason.</think>Final.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+    out = rp.process_response_api(
+        {"model": "gpt-x", "input": "hi"},
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="resp-think",
+    )
+    assert out["output"][0]["type"] == "reasoning"
+    assert out["output"][0]["summary"][0]["text"] == "First, reason."
+    assert out["output"][1]["content"][0]["text"] == "Final."
 
 
 def test_response_processor_tool_calls_include_index():

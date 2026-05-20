@@ -50,6 +50,27 @@ class FakeClient:
         return gen()
 
 
+class FakeClientThinkTags:
+    def astream(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [{"delta": {"content": "<think>plan"}}],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [{"delta": {"content": "</think>Answer"}}],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
 class FakeClientError:
     def astream(self, chat):
         async def gen():
@@ -360,6 +381,37 @@ async def test_stream_responses_generator_preserves_reasoning_config():
     event_type, data = parse_sse(lines[-1])
     assert event_type == "response.completed"
     assert data["response"]["reasoning"] == {"effort": "high", "summary": "auto"}
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_extracts_think_tags():
+    import json
+
+    req = FakeRequest(FakeClientThinkTags())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(req, chat, response_id="think123"):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    output_text_deltas = []
+    for line in lines:
+        event_type, data = parse_sse(line)
+        if event_type == "response.output_text.delta":
+            output_text_deltas.append(data["delta"])
+
+    assert output_text_deltas == ["Answer"]
+
+    event_type, data = parse_sse(lines[-1])
+    assert event_type == "response.completed"
+    assert data["response"]["output"][0]["type"] == "reasoning"
+    assert data["response"]["output"][0]["summary"][0]["text"] == "plan"
+    assert data["response"]["output"][1]["content"][0]["text"] == "Answer"
 
 
 class FakeClientFunctionCall:

@@ -6,6 +6,12 @@ from typing import Dict, Literal, Optional
 from gigachat.models import ChatCompletion, ChatCompletionChunk
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
+from gpt2giga.common.reasoning import (
+    ReasoningContent,
+    ReasoningContentParser,
+    extract_reasoning_from_content,
+    merge_reasoning_text,
+)
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 
 
@@ -19,6 +25,7 @@ class ResponseProcessor:
             logger = default_logger
         self.logger = logger
         self._mode = mode.upper() if isinstance(mode, str) else "DEV"
+        self._stream_reasoning_parsers: dict[str, ReasoningContentParser] = {}
 
     @property
     def _is_prod_mode(self) -> bool:
@@ -279,6 +286,7 @@ class ResponseProcessor:
                 choice,
                 is_tool_call,
                 is_stream=True,
+                response_id=response_id,
                 is_structured_output=is_structured_output,
             )
 
@@ -302,6 +310,18 @@ class ResponseProcessor:
                 response_id=result.get("id"),
             ).debug("Processed stream chunk")
         return result
+
+    def flush_stream_reasoning(
+        self,
+        response_id: str,
+        *,
+        family: Literal["chat", "responses"] = "chat",
+    ) -> ReasoningContent:
+        """Flush and remove any parser state for a completed stream."""
+        parser = self._stream_reasoning_parsers.pop(f"{family}:{response_id}", None)
+        if parser is None:
+            return ReasoningContent(content="", reasoning_content="")
+        return parser.flush()
 
     def process_stream_chunk_response(
         self,
@@ -339,6 +359,7 @@ class ResponseProcessor:
         choice: Dict,
         is_tool_call: bool,
         is_stream: bool = False,
+        response_id: Optional[str] = None,
         is_structured_output: bool = False,
     ):
         """Обрабатывает отдельный choice."""
@@ -373,6 +394,64 @@ class ResponseProcessor:
             message["refusal"] = None
             if message.get("function_call") and not is_structured_output:
                 self._process_function_call(message, is_tool_call)
+            self._extract_reasoning_from_message(
+                message,
+                is_stream=is_stream,
+                parser_key=f"chat:{response_id}" if response_id else None,
+                finish_reason=choice.get("finish_reason"),
+            )
+
+    def _extract_reasoning_from_message(
+        self,
+        message: Dict,
+        *,
+        is_stream: bool,
+        parser_key: Optional[str] = None,
+        finish_reason: Optional[str] = None,
+    ):
+        content = message.get("content")
+        if not is_stream:
+            if not isinstance(content, str):
+                return
+
+            parsed = extract_reasoning_from_content(content)
+            message["content"] = parsed.content
+            message["reasoning_content"] = merge_reasoning_text(
+                message.get("reasoning_content"), parsed.reasoning_content
+            )
+            if message.get("reasoning_content") is None:
+                message.pop("reasoning_content", None)
+            return
+
+        if parser_key is None:
+            parser_key = f"anonymous:{id(message)}"
+        parser = self._stream_reasoning_parsers.setdefault(
+            parser_key, ReasoningContentParser()
+        )
+
+        parsed_content = None
+        parsed_reasoning = None
+        if isinstance(content, str):
+            parsed = parser.feed(content)
+            parsed_content = parsed.content
+            parsed_reasoning = parsed.reasoning_content
+            message["content"] = parsed_content
+
+        if finish_reason is not None:
+            parsed = parser.flush()
+            if parsed.content:
+                parsed_content = (parsed_content or "") + parsed.content
+            if parsed.reasoning_content:
+                parsed_reasoning = (parsed_reasoning or "") + parsed.reasoning_content
+            if parsed_content:
+                message["content"] = parsed_content
+            self._stream_reasoning_parsers.pop(parser_key, None)
+
+        message["reasoning_content"] = merge_reasoning_text(
+            message.get("reasoning_content"), parsed_reasoning
+        )
+        if message.get("reasoning_content") is None:
+            message.pop("reasoning_content", None)
 
     def _process_function_call(self, message: Dict, is_tool_call: bool):
         """Обрабатывает function call."""
@@ -414,6 +493,12 @@ class ResponseProcessor:
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
+            self._extract_reasoning_from_message(
+                message,
+                is_stream=is_stream,
+                parser_key=f"responses:{response_id}",
+                finish_reason=choice.get("finish_reason"),
+            )
 
             if message.get("role") == "assistant" and message.get("function_call"):
                 self._process_function_call_responses(message, response_id)

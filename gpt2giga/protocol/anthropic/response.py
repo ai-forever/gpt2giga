@@ -6,6 +6,10 @@ from typing import Dict, List, Optional
 
 from fastapi.responses import JSONResponse
 
+from gpt2giga.common.reasoning import (
+    extract_reasoning_from_content,
+    merge_reasoning_text,
+)
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 
@@ -33,11 +37,15 @@ def _build_anthropic_response(
     usage = giga_dict.get("usage", {})
 
     content_blocks: List[Dict] = []
-    reasoning = message.get("reasoning_content")
+    text_content = message.get("content", "") or ""
+    parsed_content = extract_reasoning_from_content(text_content)
+    reasoning = merge_reasoning_text(
+        message.get("reasoning_content"), parsed_content.reasoning_content
+    )
     if reasoning:
         content_blocks.append({"type": "thinking", "thinking": reasoning})
 
-    text_content = message.get("content", "") or ""
+    text_content = parsed_content.content
     if text_content:
         content_blocks.append({"type": "text", "text": text_content})
 
