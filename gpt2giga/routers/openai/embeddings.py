@@ -6,8 +6,11 @@ from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.openapi_specs.openai import embeddings_openapi_extra
-from gpt2giga.protocol.batches import transform_embedding_body
-from gpt2giga.protocol.embeddings import apply_embedding_encoding_format
+from gpt2giga.protocol.embeddings import (
+    apply_embedding_encoding_format,
+    normalize_embedding_response,
+    transform_embedding_body,
+)
 
 router = APIRouter(tags=["OpenAI"])
 
@@ -27,4 +30,5 @@ async def embeddings(request: Request):
     response = await giga_client.aembeddings(
         texts=transformed["input"], model=transformed["model"]
     )
-    return apply_embedding_encoding_format(response, data.get("encoding_format"))
+    normalized = normalize_embedding_response(response, model=transformed["model"])
+    return apply_embedding_encoding_format(normalized, data.get("encoding_format"))

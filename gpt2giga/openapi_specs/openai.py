@@ -216,8 +216,8 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
             "model": {
                 "type": "string",
                 "description": (
-                    "Optional. Used for token decoding when `input` is token ids. "
-                    "Embeddings model is selected from proxy settings."
+                    "OpenAI-compatible model id. Optional gpt2giga extension: "
+                    "falls back to the proxy embeddings model when omitted."
                 ),
             },
         },
@@ -232,8 +232,15 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
             **minimal_schema["properties"],
             "encoding_format": {
                 "type": "string",
-                "description": "OpenAI compatibility parameter (best effort).",
+                "description": "Embedding vector format.",
                 "enum": ["float", "base64"],
+            },
+            "dimensions": {
+                "type": "integer",
+                "description": (
+                    "Accepted by OpenAI embedding models, but currently rejected "
+                    "by this proxy because GigaChat does not expose dimensions."
+                ),
             },
             "user": {"type": "string", "description": "End-user identifier."},
         },
@@ -243,8 +250,12 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
     description = (
         "**Required**: `input`.\n\n"
         "**Notes**:\n"
-        "- `model` is optional; embeddings model is configured on the proxy side.\n"
-        "- Token-id inputs (`List[int]` / `List[List[int]]`) require `model` for decoding."
+        "- `model` is accepted like OpenAI, but can be omitted as a gpt2giga "
+        "extension; the proxy then uses `GPT2GIGA_EMBEDDINGS`.\n"
+        "- Token-id inputs (`List[int]` / `List[List[int]]`) require a model "
+        "known to `tiktoken` for decoding.\n"
+        "- `dimensions` currently returns `400` because the GigaChat embeddings "
+        "endpoint does not expose dimensionality control."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
