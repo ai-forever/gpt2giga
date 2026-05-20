@@ -252,7 +252,6 @@ async def _stream_anthropic_generator(
                 {"type": "content_block_stop", "index": content_index},
             )
             content_index += 1
-            thinking_block_stopped = True
         if content_block_started:
             yield sse(
                 "content_block_stop",
