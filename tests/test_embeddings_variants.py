@@ -81,6 +81,37 @@ def test_embeddings_pass_model_falls_back_to_configured(monkeypatch):
     assert resp.json()["model"] == app.state.config.proxy_settings.embeddings
 
 
+def test_embeddings_accepts_matching_dimensions_for_configured_model():
+    app = make_app(pass_model=False)
+    client = TestClient(app)
+    app.state.config.proxy_settings.pass_model = False
+    resp = client.post("/embeddings", json={"input": "hello", "dimensions": 2560})
+
+    assert resp.status_code == 200
+    assert resp.json()["model"] == "EmbeddingsGigaR"
+
+
+@pytest.mark.parametrize(
+    ("model", "dimensions"),
+    [
+        ("Embeddings", 1024),
+        ("Embeddings-2", 1024),
+        ("GigaEmbeddings-3B-2025-09", 2048),
+        ("EmbeddingsGigaR", 2560),
+    ],
+)
+def test_embeddings_accepts_matching_dimensions_for_passed_model(model, dimensions):
+    app = make_app(pass_model=True)
+    client = TestClient(app)
+    resp = client.post(
+        "/embeddings",
+        json={"model": model, "input": "hello", "dimensions": dimensions},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["model"] == model
+
+
 @pytest.mark.parametrize(
     ("body", "param"),
     [
@@ -93,6 +124,12 @@ def test_embeddings_pass_model_falls_back_to_configured(monkeypatch):
         ({"input": [[1], ["2"]]}, "input"),
         ({"input": "hello", "encoding_format": "json"}, "encoding_format"),
         ({"input": "hello", "dimensions": 128}, "dimensions"),
+        ({"input": "hello", "dimensions": 0}, "dimensions"),
+        ({"input": "hello", "dimensions": "1024"}, "dimensions"),
+        (
+            {"input": "hello", "model": "UnknownEmbeddings", "dimensions": 1024},
+            "dimensions",
+        ),
     ],
 )
 def test_embeddings_rejects_invalid_openai_requests(body, param):

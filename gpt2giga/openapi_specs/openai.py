@@ -238,8 +238,9 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
             "dimensions": {
                 "type": "integer",
                 "description": (
-                    "Accepted by OpenAI embedding models, but currently rejected "
-                    "by this proxy because GigaChat does not expose dimensions."
+                    "Accepted when it matches the native GigaChat embedding model "
+                    "dimension: Embeddings/Embeddings-2=1024, "
+                    "GigaEmbeddings-3B-2025-09=2048, EmbeddingsGigaR=2560."
                 ),
             },
             "user": {"type": "string", "description": "End-user identifier."},
@@ -254,8 +255,8 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
         "extension; the proxy then uses `GPT2GIGA_EMBEDDINGS`.\n"
         "- Token-id inputs (`List[int]` / `List[List[int]]`) require a model "
         "known to `tiktoken` for decoding.\n"
-        "- `dimensions` currently returns `400` because the GigaChat embeddings "
-        "endpoint does not expose dimensionality control."
+        "- `dimensions` is a strict compatibility check: accepted only when it "
+        "matches the native dimension of the resolved GigaChat embedding model."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
