@@ -5,13 +5,14 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [0.1.6a1] - 2026-03-24
+## [0.1.6] - 2026-05-20
 ### Добавлено
 - **OpenAI Files API**: добавлены эндпоинты `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`
 - **OpenAI Batches API**: добавлены эндпоинты `/batches` и `/batches/{batch_id}` вместе с примером `examples/openai/batches.py`
 - **Anthropic Message Batches API**: добавлены эндпоинты `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}` и `/v1/messages/batches/{message_batch_id}/results`, а также пример `examples/anthropic/message_batches.py`
 - **Новые интеграции**: добавлены инструкции для Qwen Code и Xcode
 - **CI и автоматизация**: добавлены `actionlint`, `CodeQL`, `dependency-review`, `docker-smoke`, `nightly-smoke`, `pr-labeler`, `release-drafter`, `stale-issues` и Dependabot-конфигурация
+- **Reasoning / think tags**: добавлено извлечение `<think>...</think>` в reasoning/thinking content для OpenAI Chat Completions, OpenAI Responses и Anthropic Messages, включая streaming
 
 ### Изменено
 - **Примеры**: OpenAI-примеры перенесены в `examples/openai/`, README и AGENTS выровнены под новую структуру
@@ -19,12 +20,17 @@
 - **LiteLLM router**: обработчик `/model/info` вынесен в отдельный пакет `gpt2giga/routers/litellm/`
 - **Docker Compose**: структура compose-файлов выровнена под каталог `compose/` (`base.yaml`, `observability.yaml`, `nginx.yaml`, `observe-multiple.yaml`, `traefik.yaml`)
 - **GitHub templates**: добавлены русскоязычные шаблоны issue и pull request
+- **Model forwarding**: `GPT2GIGA_PASS_MODEL` теперь по умолчанию `True`; модель из запроса прокидывается в GigaChat для чата, Responses API и эмбеддингов, а `GPT2GIGA_EMBEDDINGS` используется как fallback для эмбеддингов
+- **Зависимости**: обновлены `python-dotenv`, `aiohttp`, `pillow`, `pytest` и `uv.lock` после Dependabot/security bump
 
 ### Исправлено
 - **Path normalization**: исправлена нормализация путей для `/v1`, `files`, `batches`, `messages` и `model/info`
 - **OpenAI payload mapping**: `extra_body` теперь корректно маппится в `additional_fields`
 - **Batches**: исправлены `completion_window` и обработка дат для Python 3.10
 - **Examples**: обновлены runnable-примеры OpenAI и Anthropic после реорганизации каталогов
+- **Embeddings**: `encoding_format="base64"` теперь возвращает OpenAI-совместимые base64 float32 embeddings для прямого `/embeddings` и embeddings batches
+- **Embeddings model routing**: `pass_model` теперь применяется к `/embeddings` и batch-запросам на `/v1/embeddings`
+- **Model/top_p mapping**: исправлена передача `model` по умолчанию и предотвращена неявная установка `top_p=0`, когда клиент не передавал `temperature`
 
 ## [0.1.5] - 2026-03-10
 ### Добавлено
@@ -231,7 +237,7 @@
 
 ---
 
-[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...HEAD
+[0.1.6]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4...v0.1.4.post1
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4

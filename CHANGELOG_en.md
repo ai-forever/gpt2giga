@@ -5,7 +5,7 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.6a1] - 2026-03-24
+## [0.1.6] - 2026-05-20
 
 ### Added
 - **OpenAI Files API**: added `/files`, `/files/{file_id}`, and `/files/{file_id}/content` endpoints plus the `examples/openai/files.py` example
@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Anthropic Message Batches API**: added `/v1/messages/batches`, `/v1/messages/batches/{message_batch_id}`, and `/v1/messages/batches/{message_batch_id}/results` plus the `examples/anthropic/message_batches.py` example
 - **New integrations**: added setup guides for Qwen Code and Xcode
 - **CI and automation**: added `actionlint`, `CodeQL`, `dependency-review`, `docker-smoke`, `nightly-smoke`, `pr-labeler`, `release-drafter`, `stale-issues`, and Dependabot configuration
+- **Reasoning / think tags**: added extraction of `<think>...</think>` into reasoning/thinking content for OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages, including streaming
 
 ### Changed
 - **Examples**: moved OpenAI examples under `examples/openai/` and aligned README/AGENTS docs with the new layout
@@ -20,12 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LiteLLM router**: moved `/model/info` handling into the dedicated `gpt2giga/routers/litellm/` package
 - **Docker Compose**: standardized compose files under `compose/` (`base.yaml`, `observability.yaml`, `nginx.yaml`, `observe-multiple.yaml`, `traefik.yaml`)
 - **GitHub templates**: added Russian-language issue and pull request templates
+- **Model forwarding**: `GPT2GIGA_PASS_MODEL` now defaults to `True`; request models are forwarded to GigaChat for chat, Responses API, and embeddings, while `GPT2GIGA_EMBEDDINGS` remains the embeddings fallback
+- **Dependencies**: updated `python-dotenv`, `aiohttp`, `pillow`, `pytest`, and `uv.lock` after the Dependabot/security bump
 
 ### Fixed
 - **Path normalization**: fixed normalization for `/v1`, `files`, `batches`, `messages`, and `model/info`
 - **OpenAI payload mapping**: `extra_body` now maps correctly to `additional_fields`
 - **Batches**: fixed `completion_window` handling and Python 3.10 datetime behavior
 - **Examples**: refreshed runnable OpenAI and Anthropic examples after the directory reorganization
+- **Embeddings**: `encoding_format="base64"` now returns OpenAI-compatible base64 float32 embeddings for direct `/embeddings` calls and embeddings batches
+- **Embeddings model routing**: `pass_model` now applies to `/embeddings` and batch requests to `/v1/embeddings`
+- **Model/top_p mapping**: fixed default model forwarding and avoided implicitly setting `top_p=0` when the client did not send `temperature`
 
 ## [0.1.5] - 2026-03-10
 
@@ -234,7 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...HEAD
+[0.1.6]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4...v0.1.4.post1
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4

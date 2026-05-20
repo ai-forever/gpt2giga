@@ -9,6 +9,8 @@ import anyio
 import tiktoken
 from fastapi import HTTPException
 
+from gpt2giga.protocol.embeddings import apply_embedding_encoding_format
+
 
 @dataclass(frozen=True)
 class BatchTarget:
@@ -285,7 +287,9 @@ async def transform_batch_output_file(
                     raw_body, response_processor, custom_id, original_body
                 )
             else:
-                transformed_body = raw_body
+                transformed_body = apply_embedding_encoding_format(
+                    raw_body, original_body.get("encoding_format")
+                )
 
             transformed_row = {
                 "id": row.get("id", custom_id),

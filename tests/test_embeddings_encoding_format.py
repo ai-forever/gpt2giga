@@ -1,12 +1,15 @@
 """Tests for OpenAI ``encoding_format`` handling on /v1/embeddings."""
 
 import base64
+import json
 import struct
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.models.config import ProxyConfig
+from gpt2giga.protocol.batches import transform_batch_output_file
 from gpt2giga.routers.openai import router as openai_router
 
 
@@ -78,3 +81,48 @@ def test_embeddings_base64_returns_base64_string():
     assert len(raw) == 4 * 4  # 4 floats × 4 bytes (float32)
     decoded = list(struct.unpack(f"<{len(raw) // 4}f", raw))
     assert decoded == [0.0, 0.5, -0.5, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_embedding_batch_output_honors_base64_encoding_format():
+    """Batch embeddings output mirrors direct endpoint base64 encoding."""
+    input_line = {
+        "custom_id": "embed-1",
+        "method": "POST",
+        "url": "/v1/embeddings",
+        "body": {"input": "hello", "encoding_format": "base64"},
+    }
+    output_line = {
+        "id": "embed-1",
+        "response": {
+            "status_code": 200,
+            "body": {
+                "data": [
+                    {
+                        "embedding": [0.0, 0.5, -0.5, 1.0],
+                        "index": 0,
+                        "object": "embedding",
+                    }
+                ],
+                "object": "list",
+            },
+        },
+    }
+
+    result = await transform_batch_output_file(
+        base64.b64encode((json.dumps(output_line) + "\n").encode("utf-8")).decode(
+            "ascii"
+        ),
+        batch_metadata={"endpoint": "/v1/embeddings"},
+        input_content_b64=base64.b64encode(
+            (json.dumps(input_line) + "\n").encode("utf-8")
+        ).decode("ascii"),
+        response_processor=object(),
+    )
+
+    transformed_line = json.loads(result.decode("utf-8").strip())
+    embedding = transformed_line["response"]["body"]["data"][0]["embedding"]
+    assert isinstance(embedding, str)
+    raw = base64.b64decode(embedding)
+    assert len(raw) == 4 * 4
+    assert list(struct.unpack(f"<{len(raw) // 4}f", raw)) == [0.0, 0.5, -0.5, 1.0]
