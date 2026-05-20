@@ -21,14 +21,8 @@
 # Chat Completions
 uv run python examples/openai/chat_completions/chat_completion.py
 
-# Files API
-uv run python examples/openai/files.py
-
 # Embeddings API
 uv run python examples/openai/embeddings.py
-
-# Batches API
-uv run python examples/openai/batches.py
 
 # Responses API
 uv run python examples/openai/responses/single_prompt.py
@@ -39,22 +33,21 @@ uv run python examples/anthropic/messages.py
 # Anthropic structured output
 uv run python examples/anthropic/structured_output.py
 
-# Anthropic Message Batches API
-uv run python examples/anthropic/message_batches.py
-
-# Additional Responses API example
-uv run python examples/responses/parallel_tool_call.py
+# Additional Responses API examples
+uv run python examples/openai/responses/function_calling.py
 ```
+
+Files API, OpenAI Batches API и Anthropic Message Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
 
 ## Дополнительно
 
 - `examples/openai/embeddings.py`: эмбеддинги (`/embeddings` или `/v1/embeddings`)
 - `examples/openai/models.py`: список моделей
-- `examples/openai/files.py`: OpenAI Files API
-- `examples/openai/batches.py`: OpenAI Batches API
+- `examples/openai/files.py`: OpenAI Files API (router подготовлен, но временно не смонтирован)
+- `examples/openai/batches.py`: OpenAI Batches API (router подготовлен, но временно не смонтирован)
 - `examples/anthropic/structured_output.py`: Anthropic Messages structured output
 - `examples/anthropic/structured_output_stream.py`: Anthropic streaming structured output
 - `examples/anthropic/structured_output_batches.py`: Anthropic Message Batches structured output
-- `examples/anthropic/message_batches.py`: Anthropic Message Batches API
-- `examples/responses/parallel_tool_call.py`: параллельные tool calls через Responses API
+- `examples/anthropic/message_batches.py`: Anthropic Message Batches API (router подготовлен, но временно не смонтирован)
+- `examples/openai/responses/function_calling.py`: function calling через Responses API
 - `examples/openai_agents.py`: интеграция с OpenAI Agents SDK (потребуются доп. зависимости, см. `examples/AGENTS.md`)

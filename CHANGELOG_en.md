@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.6] - 2026-05-20
 
+### Breaking Changes
+- **Model forwarding**: `GPT2GIGA_PASS_MODEL` / `--proxy.pass-model` now defaults to `True`. Client-provided models are forwarded to GigaChat for Chat Completions, Responses API, and Embeddings; set `GPT2GIGA_PASS_MODEL=False` explicitly to keep using the proxy-configured model.
+
 ### Added
 - **OpenAI Files API**: added router modules for `/files`, `/files/{file_id}`, and `/files/{file_id}/content` plus the `examples/openai/files.py` example; these routes are temporarily not mounted in the public OpenAI router until the next GigaChat SDK release
 - **OpenAI Batches API**: added router modules for `/batches` and `/batches/{batch_id}` plus the `examples/openai/batches.py` example; these routes are temporarily not mounted in the public OpenAI router until the next GigaChat SDK release
@@ -33,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **OpenAI payload mapping**: `extra_body` now maps correctly to `additional_fields`
 - **Batches**: fixed `completion_window` handling and Python 3.10 datetime behavior
 - **Examples**: refreshed runnable OpenAI and Anthropic examples after the directory reorganization
+- **Docker Compose docs**: startup commands now pass `--env-file .env` explicitly so the root `.env` is applied correctly with `-f compose/*.yaml`
+- **Docker Hub tags**: `latest` and `<version>` are now published only by the Python 3.13 job, while other matrix jobs publish Python-specific tags only
+- **Docs/examples links**: fixed stale paths after moving OpenAI examples under `examples/openai/`
 - **Embeddings**: `encoding_format="base64"` now returns OpenAI-compatible base64 float32 embeddings for direct `/embeddings` calls and embeddings batches, and responses are normalized to an OpenAI-compatible envelope without GigaChat-specific fields
 - **Embeddings input validation**: OpenAI-compatible validation now rejects empty or mixed `input`, unsupported `encoding_format`, invalid `model`, and token id inputs without a model that can be decoded through `tiktoken`
 - **Embeddings model routing**: `pass_model` now applies to `/embeddings` and batch requests to `/v1/embeddings`

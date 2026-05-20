@@ -62,8 +62,8 @@ sequenceDiagram
 - использовать structured outputs для получения JSON-ответов;
 - обрабатывать ответы модели в потоковом режиме с помощью `stream=true`;
 - создавать эмбеддинги через `/embeddings` и `/v1/embeddings`;
-- использовать OpenAI-совместимые **Files API** и **Batches API**;
-- использовать **Anthropic Message Batches API**;
+- использовать подготовленные OpenAI-совместимые **Files API** и **Batches API** после включения соответствующих роутеров в следующем релизе;
+- использовать подготовленный **Anthropic Message Batches API** после включения соответствующего роутера в следующем релизе;
 - получать список моделей и информацию о конкретной модели через OpenAI-совместимый **Models API**;
 - использовать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
 - работать с несколькими клиентами и множеством запросов в асинхронном режиме;
@@ -72,7 +72,7 @@ sequenceDiagram
 
 ### Поддерживаемые API routes
 
-Ниже перечислены основные route-группы официальных OpenAI и Anthropic API и отмечено, что из этого поддерживается в gpt2giga. Все перечисленные маршруты в gpt2giga доступны как без префикса, так и с префиксом `/v1`, например `/chat/completions` и `/v1/chat/completions`.
+Ниже перечислены основные route-группы официальных OpenAI и Anthropic API и отмечено, что из этого поддерживается в gpt2giga. Все смонтированные маршруты в gpt2giga доступны как без префикса, так и с префиксом `/v1`, например `/chat/completions` и `/v1/chat/completions`.
 
 #### OpenAI API
 
@@ -81,16 +81,16 @@ sequenceDiagram
 | `POST /chat/completions` | Да | Да | Основной чатовый эндпоинт, включая `stream=true`, tools/function calling, structured outputs, работу с вложениями |
 | `GET /models` | Да | Да | Список доступных моделей GigaChat в OpenAI-совместимом виде |
 | `GET /models/{model}` | Да | Да | Информация по конкретной модели |
-| `POST /embeddings` | Да | Да | Создание эмбеддингов через модель из настроек прокси |
+| `POST /embeddings` | Да | Да | Создание эмбеддингов через модель из запроса или настроек прокси |
 | `POST /responses` | Да | Да | OpenAI Responses API для новых клиентов |
-| `POST /files` | Да | Да | Загрузка файлов |
-| `GET /files` | Да | Да | Список файлов |
-| `GET /files/{file_id}` | Да | Да | Метаданные файла |
-| `DELETE /files/{file_id}` | Да | Да | Удаление файла |
-| `GET /files/{file_id}/content` | Да | Да | Получение содержимого файла |
-| `POST /batches` | Да | Да | Создание batch-задачи |
-| `GET /batches` | Да | Да | Список batch-задач |
-| `GET /batches/{batch_id}` | Да | Да | Получение batch-задачи |
+| `POST /files` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /files` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `DELETE /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /files/{file_id}/content` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `POST /batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /batches/{batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
 | `GET/POST /chat/completions` stored-completions routes | Да | Нет | Маршруты для хранения, выборки и обновления сохранённых chat completions не реализованы |
 | `POST /completions` | Да | Нет | Legacy Completions API не реализован |
 | `POST /images*` | Да | Нет | Генерация и редактирование изображений не реализованы |
@@ -108,18 +108,18 @@ sequenceDiagram
 |---|---|---|---|
 | `POST /messages` | Да | Да | Основной Messages API, включая стриминг |
 | `POST /messages/count_tokens` | Да | Да | Подсчёт токенов для Messages API |
-| `POST /messages/batches` | Да | Да | Создание message batch |
-| `GET /messages/batches` | Да | Да | Список message batches |
-| `GET /messages/batches/{message_batch_id}` | Да | Да | Получение message batch |
-| `GET /messages/batches/{message_batch_id}/results` | Да | Да | Получение результатов батча |
-| `POST /messages/batches/{message_batch_id}/cancel` | Да | Частично | Route есть, но сейчас возвращает `501`, так как backend GigaChat не поддерживает отмену batch |
-| `DELETE /messages/batches/{message_batch_id}` | Да | Частично | Route есть, но сейчас возвращает `501`, так как backend GigaChat не поддерживает удаление batch |
+| `POST /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `GET /messages/batches/{message_batch_id}/results` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `POST /messages/batches/{message_batch_id}/cancel` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `DELETE /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
 | Другие route Anthropic API | Частично | Нет | В проекте нет отдельной реализации дополнительных route вне Messages API и Message Batches API |
 
 ### Коротко по покрытию
 
-- **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`, `files`, `batches`.
-- **Anthropic:** поддерживается `Messages API`, `count_tokens` и `Message Batches API`.
+- **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`; router-модули `files` и `batches` подготовлены, но временно не смонтированы.
+- **Anthropic:** поддерживается `Messages API` и `count_tokens`; router-модуль `Message Batches API` подготовлен, но временно не смонтирован.
 - **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic API, включая fine-tuning, images, audio, vector stores, assistants и realtime.
 
 ## Начало работы
@@ -159,7 +159,7 @@ sequenceDiagram
    ```sh
    PYTHON_VERSION=3.10
    docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
-   docker pull ghcr.io/ai-forever/gpt2giga:${PYTHON_VERSION}
+   docker pull ghcr.io/ai-forever/gpt2giga:py${PYTHON_VERSION}
    ```
 
    Доступные теги смотрите в реестрах: [Docker Hub](https://hub.docker.com/r/gigateam/gpt2giga) и [GHCR](https://github.com/ai-forever/gpt2giga/pkgs/container/gpt2giga).
@@ -168,11 +168,11 @@ sequenceDiagram
 
    - PROD:
      ```sh
-     docker compose -f compose/base.yaml --profile PROD up -d
+     docker compose --env-file .env -f compose/base.yaml --profile PROD up -d
      ```
    - DEV:
      ```sh
-     docker compose -f compose/base.yaml --profile DEV up -d
+     docker compose --env-file .env -f compose/base.yaml --profile DEV up -d
      ```
 
    > В профиле `PROD` порт по умолчанию пробрасывается только на `127.0.0.1` (см. `compose/base.yaml`). Для доступа извне используйте reverse proxy (nginx/Traefik/Caddy) или измените bind-адрес в `ports:`.
@@ -188,7 +188,7 @@ sequenceDiagram
 1. Запустите стек:
 
    ```sh
-   docker compose -f compose/traefik.yaml up -d
+   docker compose --env-file .env -f compose/traefik.yaml up -d
    ```
 
 > Важно: роутинг в Traefik в этой конфигурации завязан на HTTP `Host` (см. `traefik/rules.yml`). Если вы обращаетесь по IP (например, `127.0.0.1`), задайте `HOST=127.0.0.1` или отправляйте корректный заголовок `Host:`.
@@ -350,6 +350,8 @@ gpt2giga \
 - `GPT2GIGA_CORS_ALLOW_ORIGINS='["*"]'` — список разрешенных Origin (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_HEADERS='["*"]'` — список разрешенных заголовков (JSON массив).
+
+> **Breaking change в 0.1.6:** `GPT2GIGA_PASS_MODEL` по умолчанию `True`. Если клиент отправляет OpenAI/Anthropic-имя модели, оно будет передано в GigaChat. Чтобы всегда использовать модель из `GIGACHAT_MODEL` / настроек прокси, задайте `GPT2GIGA_PASS_MODEL=False`.
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;

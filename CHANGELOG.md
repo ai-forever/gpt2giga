@@ -6,6 +6,9 @@
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
 ## [0.1.6] - 2026-05-20
+### Breaking changes
+- **Model forwarding**: `GPT2GIGA_PASS_MODEL` / `--proxy.pass-model` теперь по умолчанию `True`. Модель из клиентского запроса прокидывается в GigaChat для Chat Completions, Responses API и Embeddings; если нужен прежний режим с моделью из настроек прокси, явно задайте `GPT2GIGA_PASS_MODEL=False`.
+
 ### Добавлено
 - **OpenAI Files API**: добавлены router-модули для `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`; маршруты временно не монтируются в публичный OpenAI router до следующего релиза GigaChat SDK
 - **OpenAI Batches API**: добавлены router-модули для `/batches` и `/batches/{batch_id}` вместе с примером `examples/openai/batches.py`; маршруты временно не монтируются в публичный OpenAI router до следующего релиза GigaChat SDK
@@ -32,6 +35,9 @@
 - **OpenAI payload mapping**: `extra_body` теперь корректно маппится в `additional_fields`
 - **Batches**: исправлены `completion_window` и обработка дат для Python 3.10
 - **Examples**: обновлены runnable-примеры OpenAI и Anthropic после реорганизации каталогов
+- **Docker Compose docs**: команды запуска теперь явно передают `--env-file .env`, чтобы `.env` из корня корректно применялся при `-f compose/*.yaml`
+- **Docker Hub tags**: теги `latest` и `<version>` теперь публикуются только из Python 3.13 job, а остальные matrix jobs публикуют только Python-специфичные теги
+- **Docs/examples links**: исправлены устаревшие пути после переноса OpenAI-примеров в `examples/openai/`
 - **Embeddings**: `encoding_format="base64"` теперь возвращает OpenAI-совместимые base64 float32 embeddings для прямого `/embeddings` и embeddings batches, а ответы нормализуются в OpenAI-совместимый envelope без GigaChat-специфичных полей
 - **Embeddings input validation**: OpenAI-совместимая валидация теперь отклоняет пустой или смешанный `input`, неподдерживаемый `encoding_format`, некорректный `model` и token id inputs без модели, которую можно декодировать через `tiktoken`
 - **Embeddings model routing**: `pass_model` теперь применяется к `/embeddings` и batch-запросам на `/v1/embeddings`
