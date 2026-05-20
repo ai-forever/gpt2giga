@@ -20,6 +20,8 @@ async def _stream_anthropic_generator(
     chat_messages: Dict[str, Any],
     response_id: str,
     giga_client: GigaChat,
+    *,
+    is_structured_output: bool = False,
 ) -> AsyncGenerator[str, None]:
     """SSE generator producing Anthropic Messages streaming events."""
     logger = None
@@ -106,6 +108,43 @@ async def _stream_anthropic_generator(
                     content_index += 1
                     thinking_block_stopped = True
 
+                arguments = delta_function_call.get("arguments")
+                if is_structured_output:
+                    if arguments is None:
+                        continue
+
+                    arguments_str = (
+                        json.dumps(arguments, ensure_ascii=False)
+                        if isinstance(arguments, dict)
+                        else str(arguments)
+                    )
+                    if not arguments_str:
+                        continue
+
+                    if not content_block_started:
+                        yield sse(
+                            "content_block_start",
+                            {
+                                "type": "content_block_start",
+                                "index": content_index,
+                                "content_block": {"type": "text", "text": ""},
+                            },
+                        )
+                        content_block_started = True
+
+                    yield sse(
+                        "content_block_delta",
+                        {
+                            "type": "content_block_delta",
+                            "index": content_index,
+                            "delta": {
+                                "type": "text_delta",
+                                "text": arguments_str,
+                            },
+                        },
+                    )
+                    continue
+
                 if function_call_data is None:
                     tool_id = f"toolu_{uuid.uuid4().hex[:24]}"
                     function_call_data = {
@@ -135,7 +174,6 @@ async def _stream_anthropic_generator(
                         delta_function_call["name"]
                     )
 
-                arguments = delta_function_call.get("arguments")
                 if arguments is not None:
                     arguments_str = (
                         json.dumps(arguments, ensure_ascii=False)

@@ -58,7 +58,9 @@ async def lifespan(app: FastAPI):
         config, app.state.logger, attachment_processor
     )
     app.state.response_processor = ResponseProcessor(
-        app.state.logger, mode=config.proxy_settings.mode
+        app.state.logger,
+        mode=config.proxy_settings.mode,
+        structured_output_mode=config.proxy_settings.structured_output_mode,
     )
 
     logger.info("Application startup complete")

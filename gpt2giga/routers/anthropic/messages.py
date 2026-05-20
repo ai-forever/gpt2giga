@@ -17,7 +17,9 @@ from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
     _convert_anthropic_messages_to_openai,
     _extract_text_from_openai_messages,
+    _extract_structured_output_text,
     _extract_tool_definitions_text,
+    _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
 from gpt2giga.protocol.anthropic.streaming import _stream_anthropic_generator
@@ -42,6 +44,7 @@ async def count_tokens(request: Request):
 
     if "tools" in data and data["tools"]:
         texts.extend(_extract_tool_definitions_text(data["tools"]))
+    texts.extend(_extract_structured_output_text(data))
 
     if not texts:
         return {"input_tokens": 0}
@@ -66,15 +69,29 @@ async def messages(request: Request):
     chat_messages = await state.request_transformer.prepare_chat_completion(
         openai_data, giga_client
     )
+    structured_output_fallback = (
+        _is_anthropic_structured_output_request(data)
+        and state.config.proxy_settings.structured_output_mode == "function_call"
+    )
 
     if not stream:
         response = await giga_client.achat(chat_messages)
         giga_dict = response.model_dump()
-        return _build_anthropic_response(giga_dict, model, current_rquid)
+        return _build_anthropic_response(
+            giga_dict,
+            model,
+            current_rquid,
+            is_structured_output=structured_output_fallback,
+        )
 
     return StreamingResponse(
         _stream_anthropic_generator(
-            request, model, chat_messages, current_rquid, giga_client
+            request,
+            model,
+            chat_messages,
+            current_rquid,
+            giga_client,
+            is_structured_output=structured_output_fallback,
         ),
         media_type="text/event-stream",
     )

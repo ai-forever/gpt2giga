@@ -25,10 +25,21 @@ def _map_stop_reason(finish_reason: Optional[str]) -> str:
     return mapping.get(finish_reason or "stop", "end_turn")
 
 
+def _tool_call_arguments_to_text(tool_call: Dict) -> str:
+    """Extract function-call arguments as JSON text."""
+    function = tool_call.get("function", {})
+    arguments = function.get("arguments", {})
+    if isinstance(arguments, str):
+        return arguments
+    return json.dumps(arguments, ensure_ascii=False)
+
+
 def _build_anthropic_response(
     giga_dict: Dict,
     model: str,
     response_id: str,
+    *,
+    is_structured_output: bool = False,
 ) -> Dict:
     """Build Anthropic Messages API response from a GigaChat response."""
     choice = giga_dict["choices"][0]
@@ -46,14 +57,22 @@ def _build_anthropic_response(
         content_blocks.append({"type": "thinking", "thinking": reasoning})
 
     text_content = parsed_content.content
-    if text_content:
-        content_blocks.append({"type": "text", "text": text_content})
 
     tool_calls = list(message.get("tool_calls") or [])
     if message.get("function_call"):
         tool_calls.append({"function": message["function_call"]})
 
-    if tool_calls:
+    if is_structured_output and tool_calls:
+        content_blocks.append(
+            {
+                "type": "text",
+                "text": _tool_call_arguments_to_text(tool_calls[0]),
+            }
+        )
+        stop_reason = "end_turn"
+    elif tool_calls:
+        if text_content:
+            content_blocks.append({"type": "text", "text": text_content})
         for tool_call in tool_calls:
             function = tool_call.get("function", {})
             arguments = function.get("arguments", {})
@@ -75,6 +94,8 @@ def _build_anthropic_response(
             )
         stop_reason = "tool_use"
     else:
+        if text_content:
+            content_blocks.append({"type": "text", "text": text_content})
         if not content_blocks:
             content_blocks.append({"type": "text", "text": ""})
         stop_reason = _map_stop_reason(finish_reason)
