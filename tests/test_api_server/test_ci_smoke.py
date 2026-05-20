@@ -148,3 +148,23 @@ def test_ci_smoke_anthropic_messages(monkeypatch):
     assert body["type"] == "message"
     assert body["role"] == "assistant"
     assert body["content"][0]["text"] == "Hello!"
+
+
+def test_ci_smoke_anthropic_messages_duplicate_v1_prefix(monkeypatch):
+    app = make_app(monkeypatch)
+
+    with TestClient(app) as client:
+        install_fake_transformer(app)
+        response = client.post(
+            "/v1/v1/messages",
+            json={
+                "model": "claude-test",
+                "max_tokens": 64,
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "message"
+    assert body["role"] == "assistant"

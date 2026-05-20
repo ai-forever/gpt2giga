@@ -250,7 +250,7 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
         minimal_schema=minimal_schema,
         full_schema=full_schema,
         minimal_example={"input": "Hello world"},
-        full_example={"input": ["Hello", "world"], "model": "gpt-4o-mini"},
+        full_example={"input": ["Hello", "world"], "model": "EmbeddingsGigaR"},
         description=description,
     )
 

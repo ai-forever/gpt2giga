@@ -38,7 +38,7 @@ async def test_request_transformer_tools_to_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
     data = {
-        "model": "gpt-4o",
+        "model": "GigaChat-2-Max",
         "tools": [
             {
                 "type": "function",

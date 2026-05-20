@@ -12,7 +12,7 @@ class ResponseFormat(BaseModel):
 
 
 response = client.responses.parse(
-    model="gpt-4o-2024-08-06",
+    model="GigaChat-2-Max",
     input=[
         {"role": "system", "content": "Ты - профессиональный математик"},
         {
