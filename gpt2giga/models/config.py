@@ -29,7 +29,7 @@ class ProxySettings(BaseSettings):
         default=None, description="Путь до cert файла https"
     )
     pass_model: bool = Field(
-        default=False, description="Передавать модель из запроса в API"
+        default=True, description="Передавать модель из запроса в API"
     )
     pass_token: bool = Field(
         default=False, description="Передавать токен из запроса в API"

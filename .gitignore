@@ -180,3 +180,8 @@ cython_debug/
 .vscode
 .kilocode
 .opencode
+
+
+node_modules/
+docs/internal/
+scripts/internal/

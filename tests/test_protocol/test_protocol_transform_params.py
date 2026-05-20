@@ -8,9 +8,9 @@ def test_transform_chat_parameters_temperature_and_top_p():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"temperature": 0, "model": "gpt-x"})
-    # при temperature=0 должен быть top_p=0 и без model (pass_model False по умолчанию)
+    # при temperature=0 должен быть top_p=0, model сохраняется по умолчанию
     assert out.get("top_p") == 0
-    assert "model" not in out
+    assert out.get("model") == "gpt-x"
 
 
 def test_transform_chat_parameters_max_tokens_and_tools():
@@ -37,12 +37,34 @@ def test_transform_common_parameters_positive_temperature():
     assert "top_p" not in out
 
 
+def test_transform_common_parameters_without_temperature_does_not_add_top_p():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x"})
+    assert "top_p" not in out
+
+
+def test_transform_common_parameters_preserves_explicit_top_p_without_temperature():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x", "top_p": 0.9})
+    assert out.get("top_p") == 0.9
+
+
 def test_transform_common_parameters_pass_model_true():
     """Тест что model сохраняется при pass_model=True"""
     cfg = ProxyConfig(proxy=ProxySettings(pass_model=True))
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"model": "gpt-x"})
     assert out.get("model") == "gpt-x"
+
+
+def test_transform_common_parameters_pass_model_false():
+    """Тест что model удаляется при pass_model=False."""
+    cfg = ProxyConfig(proxy=ProxySettings(pass_model=False))
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x"})
+    assert "model" not in out
 
 
 def test_transform_chat_parameters_maps_extra_body_to_additional_fields():
@@ -101,7 +123,7 @@ def test_transform_responses_parameters_uses_common():
     out = rt.transform_responses_parameters(data)
     assert out.get("temperature") == 0.5
     assert out.get("max_tokens") == 256
-    assert "model" not in out
+    assert out.get("model") == "gpt-y"
     assert "functions" in out
 
 

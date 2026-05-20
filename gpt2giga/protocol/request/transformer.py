@@ -270,11 +270,12 @@ class RequestTransformer:
         if not self.config.proxy_settings.pass_model and gpt_model:
             del transformed["model"]
 
-        temperature = transformed.pop("temperature", 0)
-        if temperature == 0:
-            transformed["top_p"] = 0
-        elif temperature > 0:
-            transformed["temperature"] = temperature
+        temperature = transformed.pop("temperature", None)
+        if temperature is not None:
+            if temperature == 0:
+                transformed["top_p"] = 0
+            elif temperature > 0:
+                transformed["temperature"] = temperature
 
         max_tokens = transformed.pop("max_output_tokens", None)
         if max_tokens:
