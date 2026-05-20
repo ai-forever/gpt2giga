@@ -14,22 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New integrations**: added setup guides for Qwen Code and Xcode
 - **CI and automation**: added `actionlint`, `CodeQL`, `dependency-review`, `docker-smoke`, `nightly-smoke`, `pr-labeler`, `release-drafter`, `stale-issues`, and Dependabot configuration
 - **Reasoning / think tags**: added extraction of `<think>...</think>` into reasoning/thinking content for OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages, including streaming
+- **Structured output mode**: added `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` with `function_call` and `native` modes; native mode forwards JSON Schema through GigaChat SDK 0.2.1+ `response_format`
+- **Anthropic structured output**: added `output_config.format` and legacy `output_format` support with `json_schema` for Anthropic Messages, streaming, and Message Batches, including new runnable examples
+- **Embeddings dimensions**: added `dimensions` validation for known embedding models
 
 ### Changed
 - **Examples**: moved OpenAI examples under `examples/openai/` and aligned README/AGENTS docs with the new layout
+- **Example models**: updated runnable examples to `GigaChat-2-Max`; the embeddings example now demonstrates `dimensions`, `float`, and `base64`
 - **OpenAPI**: split OpenAI and Anthropic schema builders into `gpt2giga/openapi_specs/`
 - **LiteLLM router**: moved `/model/info` handling into the dedicated `gpt2giga/routers/litellm/` package
 - **Docker Compose**: standardized compose files under `compose/` (`base.yaml`, `observability.yaml`, `nginx.yaml`, `observe-multiple.yaml`, `traefik.yaml`)
 - **GitHub templates**: added Russian-language issue and pull request templates
 - **Model forwarding**: `GPT2GIGA_PASS_MODEL` now defaults to `True`; request models are forwarded to GigaChat for chat, Responses API, and embeddings, while `GPT2GIGA_EMBEDDINGS` remains the embeddings fallback
-- **Dependencies**: updated `python-dotenv`, `aiohttp`, `pillow`, `pytest`, and `uv.lock` after the Dependabot/security bump
+- **Dependencies**: updated `gigachat`, `python-dotenv`, `aiohttp`, `pillow`, `pytest`, and `uv.lock` after the Dependabot/security bump
 
 ### Fixed
-- **Path normalization**: fixed normalization for `/v1`, `files`, `batches`, `messages`, and `model/info`
+- **Path normalization**: fixed normalization for `/v1`, repeated `/v1/v1`, `files`, `batches`, `messages`, and `model/info`
 - **OpenAI payload mapping**: `extra_body` now maps correctly to `additional_fields`
 - **Batches**: fixed `completion_window` handling and Python 3.10 datetime behavior
 - **Examples**: refreshed runnable OpenAI and Anthropic examples after the directory reorganization
-- **Embeddings**: `encoding_format="base64"` now returns OpenAI-compatible base64 float32 embeddings for direct `/embeddings` calls and embeddings batches
+- **Embeddings**: `encoding_format="base64"` now returns OpenAI-compatible base64 float32 embeddings for direct `/embeddings` calls and embeddings batches, and responses are normalized to an OpenAI-compatible envelope without GigaChat-specific fields
+- **Embeddings input validation**: OpenAI-compatible validation now rejects empty or mixed `input`, unsupported `encoding_format`, invalid `model`, and token id inputs without a model that can be decoded through `tiktoken`
 - **Embeddings model routing**: `pass_model` now applies to `/embeddings` and batch requests to `/v1/embeddings`
 - **Model/top_p mapping**: fixed default model forwarding and avoided implicitly setting `top_p=0` when the client did not send `temperature`
 
