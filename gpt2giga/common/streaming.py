@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import traceback
 from typing import AsyncGenerator, Optional
 
@@ -10,6 +11,7 @@ from gigachat.models import Chat
 from starlette.requests import Request
 
 from gpt2giga.app_state import get_gigachat_client
+from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 
@@ -38,6 +40,34 @@ async def stream_chat_completion_generator(
                 chunk, model, response_id
             )
             yield f"data: {json.dumps(processed)}\n\n"
+
+        response_processor = request.app.state.response_processor
+        flush_stream_reasoning = getattr(
+            response_processor, "flush_stream_reasoning", None
+        )
+        if flush_stream_reasoning:
+            flushed_reasoning = flush_stream_reasoning(response_id, family="chat")
+            if flushed_reasoning.content or flushed_reasoning.reasoning_content:
+                delta = {"content": flushed_reasoning.content}
+                if flushed_reasoning.reasoning_content:
+                    delta["reasoning_content"] = flushed_reasoning.reasoning_content
+                processed = {
+                    "id": f"chatcmpl-{response_id}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": delta,
+                            "finish_reason": None,
+                            "logprobs": None,
+                        }
+                    ],
+                    "usage": None,
+                    "system_fingerprint": f"fp_{response_id}",
+                }
+                yield f"data: {json.dumps(processed)}\n\n"
 
         yield "data: [DONE]\n\n"
 
@@ -166,6 +196,8 @@ async def stream_responses_generator(
         sequence_number += 1
 
         full_text = ""
+        reasoning_text = ""
+        reasoning_parser = ReasoningContentParser()
         function_call_data = None  # {"name": ..., "arguments": ...}
         functions_state_id = None
         output_item_added = False
@@ -182,6 +214,13 @@ async def stream_responses_generator(
             delta = choice.get("delta", {})
             delta_content = delta.get("content", "")
             delta_function_call = delta.get("function_call")
+            delta_reasoning = delta.get("reasoning_content", "")
+            parsed_content = reasoning_parser.feed(delta_content)
+            delta_content = parsed_content.content
+            if parsed_content.reasoning_content:
+                reasoning_text += parsed_content.reasoning_content
+            if delta_reasoning:
+                reasoning_text += delta_reasoning
 
             if delta_function_call:
                 is_function_call = True
@@ -291,6 +330,12 @@ async def stream_responses_generator(
                     },
                 )
                 sequence_number += 1
+
+        flushed_reasoning = reasoning_parser.flush()
+        if flushed_reasoning.content:
+            full_text += flushed_reasoning.content
+        if flushed_reasoning.reasoning_content:
+            reasoning_text += flushed_reasoning.reasoning_content
 
         if is_function_call and function_call_data:
             yield sse_event(
@@ -431,7 +476,21 @@ async def stream_responses_generator(
             )
             sequence_number += 1
 
-            final_output = [
+            final_output = []
+            if reasoning_text:
+                final_output.append(
+                    {
+                        "id": f"rs_{response_id}",
+                        "type": "reasoning",
+                        "summary": [
+                            {
+                                "type": "summary_text",
+                                "text": reasoning_text,
+                            }
+                        ],
+                    }
+                )
+            final_output.append(
                 {
                     "id": msg_id,
                     "type": "message",
@@ -445,7 +504,7 @@ async def stream_responses_generator(
                         }
                     ],
                 }
-            ]
+            )
             yield sse_event(
                 "response.completed",
                 {
