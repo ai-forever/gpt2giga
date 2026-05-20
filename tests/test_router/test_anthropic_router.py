@@ -7,13 +7,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.anthropic.request import (
+    _build_openai_data_from_anthropic_request,
+    _convert_anthropic_output_format_to_openai_response_format,
     _convert_anthropic_messages_to_openai,
     _convert_anthropic_tools_to_openai,
     _extract_text_from_openai_messages,
+    _extract_structured_output_text,
     _extract_tool_definitions_text,
+    _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import (
     _build_anthropic_response,
@@ -231,6 +235,60 @@ class FakeGigachatFunctionCall:
         return gen()
 
 
+class FakeGigachatStructuredFunctionCall:
+    """Fake that returns a synthetic structured-output function call."""
+
+    async def achat(self, chat):
+        return MockResponse(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "function_call": {
+                                "name": "structured_output",
+                                "arguments": {
+                                    "name": "John Smith",
+                                    "email": "john@example.com",
+                                },
+                            },
+                        },
+                        "finish_reason": "function_call",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 15,
+                    "completion_tokens": 8,
+                    "total_tokens": 23,
+                },
+            }
+        )
+
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "function_call": {
+                                    "name": "structured_output",
+                                    "arguments": {
+                                        "name": "John Smith",
+                                        "email": "john@example.com",
+                                    },
+                                }
+                            }
+                        }
+                    ],
+                    "usage": None,
+                }
+            )
+
+        return gen()
+
+
 class FakeGigachatFunctionCallReservedWebSearch:
     """Fake that returns an aliased reserved tool name from GigaChat."""
 
@@ -394,7 +452,9 @@ def make_app(gigachat=None):
     app.state.gigachat_client = gigachat or FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(structured_output_mode="function_call")
+    )
     app.state.logger = logger
     return app
 
@@ -442,6 +502,93 @@ class TestConvertAnthropicToolsToOpenai:
         assert len(result) == 2
         assert result[0]["function"]["name"] == "a"
         assert result[1]["function"]["name"] == "b"
+
+
+class TestAnthropicStructuredOutputRequest:
+    def test_output_config_json_schema_maps_to_response_format(self):
+        schema = {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }
+        data = {
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": "Extract name"}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "ContactInfo",
+                    "schema": schema,
+                    "strict": True,
+                }
+            },
+        }
+
+        response_format = _convert_anthropic_output_format_to_openai_response_format(
+            data
+        )
+
+        assert response_format == {
+            "type": "json_schema",
+            "schema": schema,
+            "name": "ContactInfo",
+            "strict": True,
+        }
+        assert _is_anthropic_structured_output_request(data) is True
+
+    def test_legacy_output_format_json_schema_maps_to_response_format(self):
+        data = {
+            "output_format": {
+                "type": "json_schema",
+                "schema": {"type": "object"},
+            }
+        }
+
+        response_format = _convert_anthropic_output_format_to_openai_response_format(
+            data
+        )
+
+        assert response_format == {
+            "type": "json_schema",
+            "schema": {"type": "object"},
+        }
+
+    def test_build_openai_data_includes_response_format(self):
+        data = {
+            "model": "claude-test",
+            "messages": [{"role": "user", "content": "Extract name"}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": {"type": "object"},
+                }
+            },
+        }
+
+        result = _build_openai_data_from_anthropic_request(data, logger=None)
+
+        assert result["response_format"] == {
+            "type": "json_schema",
+            "schema": {"type": "object"},
+        }
+        assert "output_config" not in result
+
+    def test_extract_structured_output_text_for_token_counting(self):
+        data = {
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "ContactInfo",
+                    "schema": {"type": "object"},
+                }
+            }
+        }
+
+        texts = _extract_structured_output_text(data)
+
+        assert len(texts) == 1
+        assert "ContactInfo" in texts[0]
+        assert '"type": "object"' in texts[0]
 
 
 class TestConvertAnthropicMessagesToOpenai:
@@ -757,6 +904,33 @@ class TestBuildAnthropicResponse:
         assert result["content"][0]["name"] == "search"
         assert result["content"][0]["input"] == {"q": "test"}
 
+    def test_structured_output_function_call_response(self):
+        giga = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "",
+                        "function_call": {
+                            "name": "structured_output",
+                            "arguments": {"name": "John Smith"},
+                        },
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+        result = _build_anthropic_response(
+            giga,
+            "claude-test",
+            "rq456",
+            is_structured_output=True,
+        )
+        assert result["stop_reason"] == "end_turn"
+        assert result["content"][0]["type"] == "text"
+        assert json.loads(result["content"][0]["text"]) == {"name": "John Smith"}
+
     def test_function_call_unmaps_reserved_web_search(self):
         giga = {
             "choices": [
@@ -949,6 +1123,38 @@ class TestMessagesEndpoint:
         assert body["content"][0]["type"] == "tool_use"
         assert body["content"][0]["name"] == "get_weather"
 
+    def test_non_stream_with_structured_output(self):
+        app = make_app(FakeGigachatStructuredFunctionCall())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "Extract contact info"}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "email": {"type": "string"},
+                        },
+                        "required": ["name", "email"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["stop_reason"] == "end_turn"
+        assert body["content"][0]["type"] == "text"
+        assert json.loads(body["content"][0]["text"]) == {
+            "name": "John Smith",
+            "email": "john@example.com",
+        }
+
     def test_non_stream_unmaps_reserved_web_search(self):
         app = make_app(FakeGigachatFunctionCallReservedWebSearch())
         client = TestClient(app)
@@ -1115,6 +1321,61 @@ class TestMessagesEndpoint:
             if parsed.get("type") == "message_delta":
                 assert parsed["delta"]["stop_reason"] == "tool_use"
                 break
+
+    def test_stream_structured_output_function_call_as_text(self):
+        app = make_app(FakeGigachatStructuredFunctionCall())
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Extract contact info"}],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "email": {"type": "string"},
+                        },
+                        "required": ["name", "email"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+        }
+        resp = client.post("/messages", json=payload)
+        assert resp.status_code == 200
+
+        data_lines = [
+            line.replace("data: ", "")
+            for line in resp.text.strip().split("\n")
+            if line.startswith("data: ")
+        ]
+        block_starts = [
+            json.loads(d)
+            for d in data_lines
+            if json.loads(d).get("type") == "content_block_start"
+        ]
+        deltas = [
+            json.loads(d)
+            for d in data_lines
+            if json.loads(d).get("type") == "content_block_delta"
+        ]
+        message_delta = next(
+            json.loads(d)
+            for d in data_lines
+            if json.loads(d).get("type") == "message_delta"
+        )
+
+        assert block_starts[0]["content_block"]["type"] == "text"
+        assert deltas[0]["delta"]["type"] == "text_delta"
+        assert json.loads(deltas[0]["delta"]["text"]) == {
+            "name": "John Smith",
+            "email": "john@example.com",
+        }
+        assert message_delta["delta"]["stop_reason"] == "end_turn"
 
     def test_stream_unmaps_reserved_web_search(self):
         app = make_app(FakeGigachatFunctionCallReservedWebSearch())
@@ -1510,6 +1771,27 @@ class TestCountTokensEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         # Should count both message tokens and tool definition tokens
+        assert body["input_tokens"] > 0
+
+    def test_count_with_structured_output_schema(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "messages": [],
+            "output_config": {
+                "format": {
+                    "type": "json_schema",
+                    "schema": {
+                        "type": "object",
+                        "properties": {"name": {"type": "string"}},
+                    },
+                }
+            },
+        }
+        resp = client.post("/messages/count_tokens", json=payload)
+        assert resp.status_code == 200
+        body = resp.json()
         assert body["input_tokens"] > 0
 
     def test_count_empty_messages(self):

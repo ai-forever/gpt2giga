@@ -19,6 +19,7 @@ from gpt2giga.protocol.batches import (
 from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
+    _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import (
     _anthropic_http_exception,
@@ -223,10 +224,14 @@ def _build_anthropic_batch_results(
             ):
                 anthropic_message = message_payload
             else:
+                structured_output_fallback = batch_metadata.get(
+                    "structured_output_mode", "function_call"
+                ) == "function_call" and _is_anthropic_structured_output_request(params)
                 anthropic_message = _build_anthropic_response(
                     message_payload,
                     params.get("model", "unknown"),
                     request_id,
+                    is_structured_output=structured_output_fallback,
                 )
 
             anthropic_result = {
@@ -347,6 +352,7 @@ async def create_message_batch(request: Request):
         "completion_window": completion_window,
         "requests": stored_requests,
         "output_file_id": batch.output_file_id,
+        "structured_output_mode": proxy_settings.structured_output_mode,
     }
     get_batch_store(request)[batch.id_] = metadata
     if batch.output_file_id:

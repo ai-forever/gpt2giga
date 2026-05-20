@@ -169,7 +169,7 @@ def test_apply_json_schema_as_function():
 
 def test_transform_chat_parameters_json_schema_response_format():
     """Тест обработки response_format с json_schema"""
-    cfg = ProxyConfig()
+    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
     rt = RequestTransformer(cfg, logger=logger)
     data = {
         "response_format": {
@@ -232,7 +232,7 @@ def test_transform_chat_parameters_native_keeps_user_tools_as_functions():
 
 def test_transform_responses_parameters_text_json_schema():
     """Тест обработки text.format.json_schema в responses API"""
-    cfg = ProxyConfig()
+    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
     rt = RequestTransformer(cfg, logger=logger)
     data = {
         "text": {

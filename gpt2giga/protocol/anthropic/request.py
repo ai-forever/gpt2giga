@@ -8,6 +8,50 @@ from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.tools import convert_tool_to_giga_functions
 
 
+def _extract_anthropic_output_format(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Extract Anthropic structured output format from current or legacy fields."""
+    output_config = data.get("output_config")
+    if isinstance(output_config, dict):
+        output_format = output_config.get("format")
+        if isinstance(output_format, dict):
+            return output_format
+
+    output_format = data.get("output_format")
+    if isinstance(output_format, dict):
+        return output_format
+
+    return None
+
+
+def _convert_anthropic_output_format_to_openai_response_format(
+    data: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Convert Anthropic JSON output format to OpenAI response_format shape."""
+    output_format = _extract_anthropic_output_format(data)
+    if not output_format or output_format.get("type") != "json_schema":
+        return None
+
+    schema = output_format.get("schema")
+    if not isinstance(schema, dict):
+        schema = {}
+
+    response_format: Dict[str, Any] = {
+        "type": "json_schema",
+        "schema": schema,
+    }
+    if "name" in output_format:
+        response_format["name"] = output_format["name"]
+    if "strict" in output_format:
+        response_format["strict"] = output_format["strict"]
+
+    return response_format
+
+
+def _is_anthropic_structured_output_request(data: Dict[str, Any]) -> bool:
+    """Return true when request asks for Anthropic JSON structured output."""
+    return _convert_anthropic_output_format_to_openai_response_format(data) is not None
+
+
 def _convert_anthropic_tools_to_openai(tools: List[Dict]) -> List[Dict]:
     """Convert Anthropic tool definitions to OpenAI format."""
     openai_tools: List[Dict] = []
@@ -199,6 +243,10 @@ def _build_openai_data_from_anthropic_request(
     if "stop_sequences" in data:
         openai_data["stop"] = data["stop_sequences"]
 
+    response_format = _convert_anthropic_output_format_to_openai_response_format(data)
+    if response_format:
+        openai_data["response_format"] = response_format
+
     thinking = data.get("thinking")
     if thinking and isinstance(thinking, dict) and thinking.get("type") == "enabled":
         budget = thinking.get("budget_tokens", 10000)
@@ -269,3 +317,19 @@ def _extract_tool_definitions_text(tools: List[Dict]) -> List[str]:
         if parts:
             texts.append(" ".join(parts))
     return texts
+
+
+def _extract_structured_output_text(data: Dict[str, Any]) -> List[str]:
+    """Extract Anthropic structured output schema text for token counting."""
+    output_format = _extract_anthropic_output_format(data)
+    if not output_format or output_format.get("type") != "json_schema":
+        return []
+
+    parts = []
+    name = output_format.get("name")
+    if name:
+        parts.append(str(name))
+    schema = output_format.get("schema")
+    if schema:
+        parts.append(json.dumps(schema, ensure_ascii=False))
+    return [" ".join(parts)] if parts else []
