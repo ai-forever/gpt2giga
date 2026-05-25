@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from gpt2giga.app.dependencies import get_runtime_stores
 from gpt2giga.app.runtime_backends import EventFeed
 
 from .models import RequestAuditEvent
@@ -24,6 +23,8 @@ _OPERATOR_NOISE_PREFIXES = ("/admin/",)
 
 def get_recent_request_feed_from_state(state: Any) -> EventFeed:
     """Return the recent requests feed from app state."""
+    from gpt2giga.app.dependencies import get_runtime_stores
+
     feed = get_runtime_stores(state).recent_requests
     if feed is None:
         raise RuntimeError("Recent requests feed is not configured.")
@@ -32,6 +33,8 @@ def get_recent_request_feed_from_state(state: Any) -> EventFeed:
 
 def get_recent_error_feed_from_state(state: Any) -> EventFeed:
     """Return the recent errors feed from app state."""
+    from gpt2giga.app.dependencies import get_runtime_stores
+
     feed = get_runtime_stores(state).recent_errors
     if feed is None:
         raise RuntimeError("Recent errors feed is not configured.")

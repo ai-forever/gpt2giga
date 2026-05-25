@@ -8,7 +8,6 @@ from datetime import datetime
 from time import time
 from typing import Any
 
-from gpt2giga.app.dependencies import get_config_from_state, get_runtime_stores
 from gpt2giga.core.config.settings import GovernanceLimitSettings
 
 
@@ -45,6 +44,8 @@ def list_matched_governance_limits(
     context: GovernanceContext,
 ) -> list[MatchedGovernanceLimit]:
     """Return governance rules applicable to the current request/event context."""
+    from gpt2giga.app.dependencies import get_config_from_state
+
     config = get_config_from_state(state)
     proxy = config.proxy_settings
     matched: list[MatchedGovernanceLimit] = []
@@ -78,6 +79,8 @@ def reserve_governance_request_window(
     now: int | None = None,
 ) -> list[dict[str, object]]:
     """Reserve request-count slots for matching governance rules."""
+    from gpt2giga.app.dependencies import get_runtime_stores
+
     current_time = int(now if now is not None else time())
     store = get_runtime_stores(state).governance_counters
     reservations: list[
@@ -151,6 +154,8 @@ def reserve_governance_request_window(
 
 def record_governance_event(state: Any, event: Mapping[str, object]) -> None:
     """Update token-quota counters from a finalized request audit event."""
+    from gpt2giga.app.dependencies import get_runtime_stores
+
     provider = event.get("provider")
     if provider in (None, "admin", "system"):
         return

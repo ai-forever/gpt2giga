@@ -41,6 +41,7 @@ def load_bootstrap_token(
 
         os.chmod(token_file, 0o600)
     except OSError:
+        # Best-effort hardening; some filesystems do not support chmod.
         pass
     return token
 
@@ -50,6 +51,7 @@ def clear_bootstrap_token() -> None:
     try:
         get_control_plane_bootstrap_token_file().unlink(missing_ok=True)
     except OSError:
+        # Token cleanup is best-effort during bootstrap finalization.
         pass
 
 

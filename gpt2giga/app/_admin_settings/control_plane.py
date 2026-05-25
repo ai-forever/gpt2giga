@@ -38,7 +38,7 @@ from gpt2giga.app._admin_settings.models import (
     SecuritySettingsUpdate,
 )
 from gpt2giga.app._admin_settings.shared import (
-    _RESTART_REQUIRED_FIELDS,
+    RESTART_REQUIRED_FIELDS,
     _build_application_settings_payload,
     _build_gigachat_settings,
     _build_security_settings,
@@ -381,7 +381,7 @@ class AdminControlPlaneSettingsService:
         )
         ensure_runtime_dependencies(self.state, config=updated_config, logger=logger)
 
-        restart_required = bool(changed_fields & _RESTART_REQUIRED_FIELDS)
+        restart_required = bool(changed_fields & RESTART_REQUIRED_FIELDS)
         if not restart_required and logger is not None:
             await reload_runtime_services(
                 self.app,

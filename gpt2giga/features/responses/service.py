@@ -7,12 +7,6 @@ from typing import Any, AsyncGenerator, cast
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from gpt2giga.app.dependencies import (
-    get_response_processor_from_state,
-    get_request_transformer_from_state,
-    get_runtime_services,
-    set_runtime_service,
-)
 from gpt2giga.core.contracts import get_request_model, to_backend_payload
 from gpt2giga.features.responses.contracts import (
     PreparedResponsesRequest,
@@ -252,6 +246,13 @@ class ResponsesService:
 
 def get_responses_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped responses service, creating it lazily if needed."""
+    from gpt2giga.app.dependencies import (
+        get_response_processor_from_state,
+        get_request_transformer_from_state,
+        get_runtime_services,
+        set_runtime_service,
+    )
+
     services = get_runtime_services(state)
     service = services.responses
     if service is not None:

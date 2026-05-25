@@ -83,19 +83,19 @@ SENSITIVE_KEYS = frozenset(
     }
 )
 
-_KEYS_PATTERN = "|".join(re.escape(key) for key in SENSITIVE_KEYS)
+KEYS_PATTERN = "|".join(re.escape(key) for key in SENSITIVE_KEYS)
 
-_JSON_KV_RE = re.compile(
-    r"""(['"])({keys})\1\s*:\s*(['"])(.+?)\3""".format(keys=_KEYS_PATTERN),
+JSON_KV_RE = re.compile(
+    r"""(['"])({keys})\1\s*:\s*(['"])(.+?)\3""".format(keys=KEYS_PATTERN),
     re.IGNORECASE,
 )
-_KV_EQ_RE = re.compile(
-    r"\b({keys})=([^\s&,;]+)".format(keys=_KEYS_PATTERN),
+KV_EQ_RE = re.compile(
+    r"\b({keys})=([^\s&,;]+)".format(keys=KEYS_PATTERN),
     re.IGNORECASE,
 )
-_BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
+BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
 
-_SENSITIVE_CLI_ARGS = frozenset(
+SENSITIVE_CLI_ARGS = frozenset(
     {
         "--proxy.api-key",
         "--gigachat.credentials",
@@ -105,4 +105,4 @@ _SENSITIVE_CLI_ARGS = frozenset(
     }
 )
 
-_AUTH_KEYS = ("credentials", "user", "password", "access_token", "key_file_password")
+AUTH_KEYS = ("credentials", "user", "password", "access_token", "key_file_password")

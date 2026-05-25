@@ -52,5 +52,5 @@ async def test_exceptions_handler_sanitizes_surrogates_in_error_message():
 
     assert response.status_code == 500
     assert response.body == (
-        b'{"error":{"message":"broken \\\\udcd0 text","type":"server_error","param":null,"code":null}}'
+        b'{"error":{"message":"Internal server error","type":"server_error","param":null,"code":null}}'
     )

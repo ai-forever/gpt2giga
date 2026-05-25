@@ -8,12 +8,6 @@ from typing import Any, cast
 
 from fastapi import HTTPException
 
-from gpt2giga.app.dependencies import (
-    get_config_from_state,
-    get_request_transformer_from_state,
-    get_runtime_services,
-    set_runtime_service,
-)
 from gpt2giga.features.batches.contracts import (
     BatchCreateData,
     BatchMetadata,
@@ -413,6 +407,13 @@ class BatchesService:
 
 def get_batches_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped batches service, creating it lazily if needed."""
+    from gpt2giga.app.dependencies import (
+        get_config_from_state,
+        get_request_transformer_from_state,
+        get_runtime_services,
+        set_runtime_service,
+    )
+
     services = get_runtime_services(state)
     service = services.batches
     if service is not None:

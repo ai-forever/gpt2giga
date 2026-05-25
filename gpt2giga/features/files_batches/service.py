@@ -7,8 +7,6 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from gpt2giga.api.gemini.batches import _build_batch_rows
-from gpt2giga.app.dependencies import get_runtime_services, set_runtime_service
 from gpt2giga.core.contracts import (
     NormalizedArtifactFormat,
     NormalizedArtifactsInventory,
@@ -444,6 +442,8 @@ class FilesBatchesService:
             requests_payload,
             fallback_model=model,
         )
+        from gpt2giga.api.gemini.batches import _build_batch_rows
+
         rows, stored_requests = _build_batch_rows(
             requests_payload,
             model=resolved_model,
@@ -468,6 +468,8 @@ class FilesBatchesService:
 
 def get_files_batches_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped files/batches normalization service."""
+    from gpt2giga.app.dependencies import get_runtime_services, set_runtime_service
+
     services = get_runtime_services(state)
     service = services.files_batches
     if service is not None:
@@ -479,6 +481,8 @@ def get_files_batches_service_from_state(state: Any) -> Any:
 
 def get_inventory_dependencies(state: Any) -> tuple[Any, Any, Any]:
     """Resolve the inventory service plus its file and batch dependencies."""
+    from gpt2giga.app.dependencies import get_runtime_services
+
     services = get_runtime_services(state)
     return (
         get_files_batches_service_from_state(state),

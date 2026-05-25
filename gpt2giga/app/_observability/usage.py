@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from gpt2giga.app.dependencies import get_runtime_stores
-
 from .models import RequestAuditEvent, RequestAuditUsage
 
 
@@ -61,6 +59,8 @@ def normalize_usage_payload(
 
 def record_usage_accounting(state: Any, event: RequestAuditEvent) -> None:
     """Update aggregated usage counters for provider and API-key views."""
+    from gpt2giga.app.dependencies import get_runtime_stores
+
     provider = event.get("provider")
     if provider in (None, "admin", "system"):
         return

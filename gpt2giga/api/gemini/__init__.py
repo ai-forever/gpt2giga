@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+router: APIRouter
 _router: APIRouter | None = None
 
 

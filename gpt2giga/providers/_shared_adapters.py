@@ -21,13 +21,17 @@ class ChatRequestBuilder(Protocol):
         payload: dict[str, Any],
         *,
         logger: Any = None,
-    ) -> NormalizedChatRequest: ...
+    ) -> NormalizedChatRequest:
+        """Build a normalized chat request."""
+        raise NotImplementedError
 
 
 class TokenCountTextBuilder(Protocol):
     """Callable that extracts token-count texts from a provider payload."""
 
-    def __call__(self, payload: dict[str, Any]) -> list[str]: ...
+    def __call__(self, payload: dict[str, Any]) -> list[str]:
+        """Extract token-count texts from a provider payload."""
+        raise NotImplementedError
 
 
 class ResponsesRequestBuilder(Protocol):
@@ -38,19 +42,25 @@ class ResponsesRequestBuilder(Protocol):
         payload: dict[str, Any],
         *,
         logger: Any = None,
-    ) -> NormalizedResponsesRequest: ...
+    ) -> NormalizedResponsesRequest:
+        """Build a normalized Responses request."""
+        raise NotImplementedError
 
 
 class EmbeddingsRequestBuilder(Protocol):
     """Callable that builds a normalized embeddings request."""
 
-    def __call__(self, payload: dict[str, Any]) -> NormalizedEmbeddingsRequest: ...
+    def __call__(self, payload: dict[str, Any]) -> NormalizedEmbeddingsRequest:
+        """Build a normalized embeddings request."""
+        raise NotImplementedError
 
 
 class ModelSerializer(Protocol):
     """Callable that serializes a provider model payload."""
 
-    def __call__(self, model: ModelDescriptor) -> Any: ...
+    def __call__(self, model: ModelDescriptor) -> Any:
+        """Serialize a provider model payload."""
+        raise NotImplementedError
 
 
 class BatchPayloadBuilder(Protocol):
@@ -61,7 +71,9 @@ class BatchPayloadBuilder(Protocol):
         payload: dict[str, Any],
         *,
         logger: Any = None,
-    ) -> Any: ...
+    ) -> Any:
+        """Build a provider-specific batch payload."""
+        raise NotImplementedError
 
 
 @dataclass(frozen=True, slots=True)

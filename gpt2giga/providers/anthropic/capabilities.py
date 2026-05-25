@@ -21,6 +21,10 @@ from gpt2giga.providers.descriptors import ProviderDescriptor, ProviderMountSpec
 class AnthropicBatchValidationError(ValueError):
     """Raised when an Anthropic batch payload is invalid."""
 
+    def __init__(self, public_message: str) -> None:
+        super().__init__(public_message)
+        self.public_message = public_message
+
 
 @dataclass(frozen=True, slots=True)
 class AnthropicBatchCreatePayload:

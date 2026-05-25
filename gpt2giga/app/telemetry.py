@@ -16,8 +16,8 @@ from gpt2giga.app._telemetry.langfuse import (
     _build_langfuse_headers,
 )
 from gpt2giga.app._telemetry.otlp import (
+    OTLP_PROTOBUF_TRACES_CONTENT_TYPE,
     OtlpHttpTraceSink,
-    _OTLP_PROTOBUF_TRACES_CONTENT_TYPE,
     _OTLP_TRACES_CONTENT_TYPE,
     _build_default_resource_attributes,
     _build_otlp_headers,
@@ -51,9 +51,9 @@ __all__ = [
     "ObservabilitySinkDescriptor",
     "ObservabilitySinkFactory",
     "OtlpHttpTraceSink",
+    "OTLP_PROTOBUF_TRACES_CONTENT_TYPE",
     "PhoenixTraceSink",
     "PrometheusMetricsSink",
-    "_OTLP_PROTOBUF_TRACES_CONTENT_TYPE",
     "_OTLP_TRACES_CONTENT_TYPE",
     "_build_default_resource_attributes",
     "_build_langfuse_attributes",

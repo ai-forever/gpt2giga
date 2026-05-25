@@ -88,14 +88,14 @@ def gemini_exceptions_handler(func):
             return gemini_error_response(
                 status_code=status_code,
                 status=status,
-                message=str(exc),
+                message=_safe_gigachat_error_message(exc),
             )
         except Exception as exc:
             _annotate_request_error(request, type(exc).__name__)
             return gemini_error_response(
                 status_code=500,
                 status="INTERNAL",
-                message=str(exc),
+                message="Internal server error",
             )
 
     return wrapper
@@ -114,6 +114,26 @@ def _find_request_arg(args, kwargs) -> Request | None:
 def _annotate_request_error(request: Request | None, error_type: str) -> None:
     if request is not None:
         set_request_audit_error(request, error_type)
+
+
+def _safe_gigachat_error_message(exc: gigachat.exceptions.GigaChatException) -> str:
+    """Return a client-safe provider error message."""
+    content = getattr(exc, "content", None)
+    if isinstance(content, bytes):
+        content = content.decode("utf-8", errors="ignore")
+    if isinstance(content, str) and content:
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return sanitize_for_utf8(content)
+        if isinstance(payload, dict):
+            message = payload.get("message")
+            if message is None and isinstance(payload.get("error"), dict):
+                message = payload["error"].get("message")
+            if isinstance(message, str) and message:
+                return sanitize_for_utf8(message)
+        return sanitize_for_utf8(content)
+    return "Upstream GigaChat request failed"
 
 
 def _is_structured_output_request(request_data: Optional[dict[str, Any]]) -> bool:

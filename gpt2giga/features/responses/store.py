@@ -6,12 +6,13 @@ from typing import Any
 
 from fastapi import Request
 
-from gpt2giga.app.dependencies import get_runtime_stores
 from gpt2giga.features.responses.contracts import ResponsesMetadataStore
 
 
 def get_response_store_from_state(state: Any) -> ResponsesMetadataStore:
     """Return the responses metadata store from app state."""
+    from gpt2giga.app.dependencies import get_runtime_stores
+
     return get_runtime_stores(state).responses
 
 

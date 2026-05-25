@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
+from typing import Any, Protocol, TypeAlias, cast
 
 from gpt2giga.app._runtime_backends import (
     EventFeed,
@@ -15,27 +15,10 @@ from gpt2giga.app._runtime_backends import (
 from gpt2giga.app._telemetry.hub import ObservabilityHub
 from gpt2giga.app._telemetry.registry import create_observability_hub
 from gpt2giga.core.config.settings import ProxyConfig
-from gpt2giga.features.batches.contracts import BatchMetadata
-from gpt2giga.features.files.contracts import FileMetadata
-
-if TYPE_CHECKING:
-    from gpt2giga.features.batches.service import BatchesService
-    from gpt2giga.features.chat.service import ChatService
-    from gpt2giga.features.embeddings.service import EmbeddingsService
-    from gpt2giga.features.files.service import FilesService
-    from gpt2giga.features.files_batches.service import FilesBatchesService
-    from gpt2giga.features.models.service import ModelsService
-    from gpt2giga.features.responses.service import ResponsesService
-    from gpt2giga.providers.gigachat.attachments import AttachmentProcessor
-    from gpt2giga.providers.gigachat.chat_mapper import GigaChatChatMapper
-    from gpt2giga.providers.gigachat.embeddings_mapper import (
-        GigaChatEmbeddingsMapper,
-    )
-    from gpt2giga.providers.gigachat.models_mapper import GigaChatModelsMapper
 
 RuntimeStoreEntry: TypeAlias = dict[str, Any]
-RuntimeFilesMetadataStore: TypeAlias = MutableMapping[str, FileMetadata]
-RuntimeBatchesMetadataStore: TypeAlias = MutableMapping[str, BatchMetadata]
+RuntimeFilesMetadataStore: TypeAlias = MutableMapping[str, Any]
+RuntimeBatchesMetadataStore: TypeAlias = MutableMapping[str, Any]
 RuntimeResponsesMetadataStore: TypeAlias = MutableMapping[str, RuntimeStoreEntry]
 RuntimeBatchInputBytesStore: TypeAlias = MutableMapping[str, bytes]
 RuntimeValidationReportStore: TypeAlias = MutableMapping[str, RuntimeStoreEntry]
@@ -154,13 +137,13 @@ class RuntimeResponseProcessor(Protocol):
 class RuntimeServices:
     """App-scoped feature services."""
 
-    chat: ChatService | None = None
-    responses: ResponsesService | None = None
-    embeddings: EmbeddingsService | None = None
-    models: ModelsService | None = None
-    files: FilesService | None = None
-    batches: BatchesService | None = None
-    files_batches: FilesBatchesService | None = None
+    chat: Any | None = None
+    responses: Any | None = None
+    embeddings: Any | None = None
+    models: Any | None = None
+    files: Any | None = None
+    batches: Any | None = None
+    files_batches: Any | None = None
 
 
 @dataclass(slots=True)
@@ -188,12 +171,12 @@ class RuntimeProviders:
     gigachat_client: RuntimeGigaChatClient | None = None
     gigachat_factory: RuntimeGigaChatFactory | None = None
     gigachat_factory_getter: Callable[[], RuntimeGigaChatFactory] | None = None
-    attachment_processor: AttachmentProcessor | None = None
+    attachment_processor: Any | None = None
     request_transformer: RuntimeRequestTransformer | None = None
     response_processor: RuntimeResponseProcessor | None = None
-    chat_mapper: GigaChatChatMapper | None = None
-    embeddings_mapper: GigaChatEmbeddingsMapper | None = None
-    models_mapper: GigaChatModelsMapper | None = None
+    chat_mapper: Any | None = None
+    embeddings_mapper: Any | None = None
+    models_mapper: Any | None = None
 
 
 @dataclass(slots=True)

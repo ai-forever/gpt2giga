@@ -39,6 +39,7 @@ def load_fernet(*, create: bool) -> Fernet | None:
 
         os.chmod(key_file, 0o600)
     except OSError:
+        # Best-effort hardening; some filesystems do not support chmod.
         pass
     return Fernet(key)
 

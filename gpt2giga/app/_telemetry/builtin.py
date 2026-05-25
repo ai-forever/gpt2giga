@@ -13,7 +13,7 @@ from .langfuse import (
 )
 from .otlp import (
     OtlpHttpTraceSink,
-    _OTLP_PROTOBUF_TRACES_CONTENT_TYPE,
+    OTLP_PROTOBUF_TRACES_CONTENT_TYPE,
     _build_default_resource_attributes,
     _build_otlp_headers,
     _build_otlp_traces_protobuf_payload,
@@ -29,20 +29,25 @@ from .phoenix import (
 from .prometheus import PrometheusMetricsSink
 from .registry import register_observability_sink
 
-_BUILTINS_REGISTERED = False
+BUILTIN_SINKS_REGISTERED = False
+
+
+def _create_prometheus_sink(**_: Any) -> PrometheusMetricsSink:
+    """Create the built-in Prometheus metrics sink."""
+    return PrometheusMetricsSink()
 
 
 def register_builtin_sinks() -> None:
     """Register the built-in telemetry sinks once."""
-    global _BUILTINS_REGISTERED
-    if _BUILTINS_REGISTERED:
+    global BUILTIN_SINKS_REGISTERED
+    if BUILTIN_SINKS_REGISTERED:
         return
 
     register_observability_sink(
         ObservabilitySinkDescriptor(
             name="prometheus",
             description="Built-in Prometheus counters and latency histograms.",
-            factory=lambda **_: PrometheusMetricsSink(),
+            factory=_create_prometheus_sink,
         )
     )
     register_observability_sink(
@@ -116,12 +121,12 @@ def register_builtin_sinks() -> None:
                     5.0,
                 ),
                 attribute_enricher=_build_phoenix_attributes,
-                content_type=_OTLP_PROTOBUF_TRACES_CONTENT_TYPE,
+                content_type=OTLP_PROTOBUF_TRACES_CONTENT_TYPE,
                 payload_builder=_build_otlp_traces_protobuf_payload,
             ),
         )
     )
-    _BUILTINS_REGISTERED = True
+    BUILTIN_SINKS_REGISTERED = True
 
 
 def _otlp_runtime_setting(config: Any | None, name: str, default: Any) -> Any:

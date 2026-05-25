@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from gigachat import GigaChat
 
 from gpt2giga.app.dependencies import get_runtime_providers
-from gpt2giga.core.constants import _AUTH_KEYS
+from gpt2giga.core.constants import AUTH_KEYS
 
 
 class _SecretValue(Protocol):
@@ -17,7 +17,7 @@ class _SecretValue(Protocol):
 def dump_gigachat_settings(settings: Any) -> dict[str, Any]:
     """Dump settings into SDK-compatible constructor kwargs."""
     data = dict(settings.model_dump())
-    for key in _AUTH_KEYS:
+    for key in AUTH_KEYS:
         value = data.get(key)
         if hasattr(value, "get_secret_value"):
             data[key] = cast(_SecretValue, value).get_secret_value()

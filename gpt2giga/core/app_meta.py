@@ -4,13 +4,13 @@ import socket
 import sys
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 
-from gpt2giga.core.constants import _SENSITIVE_CLI_ARGS
+from gpt2giga.core.constants import SENSITIVE_CLI_ARGS
 from gpt2giga.core.logging.setup import rquid_context
 
 
 def warn_sensitive_cli_args() -> None:
     """Emit a warning when secret values are passed as CLI arguments."""
-    found = [arg for arg in sys.argv if arg.split("=")[0] in _SENSITIVE_CLI_ARGS]
+    found = [arg for arg in sys.argv if arg.split("=")[0] in SENSITIVE_CLI_ARGS]
     if found:
         from loguru import logger
 

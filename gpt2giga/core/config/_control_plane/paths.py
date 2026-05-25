@@ -99,6 +99,7 @@ def ensure_control_plane_dir() -> Path:
     try:
         os.chmod(directory, 0o700)
     except OSError:
+        # Best-effort hardening; some filesystems do not support chmod.
         pass
     return directory
 
@@ -110,6 +111,7 @@ def ensure_control_plane_revisions_dir() -> Path:
     try:
         os.chmod(directory, 0o700)
     except OSError:
+        # Best-effort hardening; some filesystems do not support chmod.
         pass
     return directory
 
@@ -132,4 +134,5 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     try:
         os.chmod(path, 0o600)
     except OSError:
+        # Best-effort hardening; some filesystems do not support chmod.
         pass

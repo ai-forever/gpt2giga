@@ -268,7 +268,7 @@ async def create_message_batch(request: Request):
         return _anthropic_http_exception(
             400,
             "invalid_request_error",
-            str(exc),
+            exc.public_message,
         )
 
     giga_client = get_gigachat_client(request)

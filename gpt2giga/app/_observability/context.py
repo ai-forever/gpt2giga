@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from .models import RequestAuditUsage
-from .usage import normalize_usage_payload
 
 
 def set_request_audit_model(request: Any, model: str | None) -> None:
@@ -19,6 +18,8 @@ def set_request_audit_usage(
     request: Any, usage: Mapping[str, Any] | None
 ) -> RequestAuditUsage | None:
     """Persist normalized token usage for the current request."""
+    from .usage import normalize_usage_payload
+
     normalized_usage = normalize_usage_payload(usage)
     if normalized_usage is not None:
         get_request_audit_context(request)["token_usage"] = normalized_usage

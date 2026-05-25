@@ -5,15 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from gpt2giga.app.dependencies import get_runtime_observability
-from gpt2giga.app.governance import record_governance_event
-
 from .context import (
     get_request_audit_context,
     set_request_audit_model,
     set_request_audit_usage,
 )
-from .feeds import get_recent_error_feed_from_state, get_recent_request_feed_from_state
 from .messages import (
     extract_available_tools,
     extract_input_observability,
@@ -25,11 +21,19 @@ from .messages import (
     extract_usage_from_payload,
 )
 from .models import RequestAuditEvent
-from .usage import record_usage_accounting
 
 
 def record_request_event(state: Any, event: RequestAuditEvent) -> None:
     """Append an audit event to recent requests and errors feeds."""
+    from gpt2giga.app.dependencies import get_runtime_observability
+    from gpt2giga.app.governance import record_governance_event
+
+    from .feeds import (
+        get_recent_error_feed_from_state,
+        get_recent_request_feed_from_state,
+    )
+    from .usage import record_usage_accounting
+
     get_recent_request_feed_from_state(state).append(event)
     if int(event["status_code"]) >= 400 or event.get("error_type") is not None:
         get_recent_error_feed_from_state(state).append(event)

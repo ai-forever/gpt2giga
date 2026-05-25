@@ -4,13 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from gpt2giga.app.dependencies import (
-    get_config_from_state,
-    get_runtime_providers,
-    get_runtime_services,
-    set_runtime_provider,
-    set_runtime_service,
-)
 from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.features.embeddings.contracts import (
     EmbeddingsProviderMapper,
@@ -18,7 +11,6 @@ from gpt2giga.features.embeddings.contracts import (
     EmbeddingsUpstreamClient,
     PreparedEmbeddingsRequest,
 )
-from gpt2giga.providers.gigachat.embeddings_mapper import GigaChatEmbeddingsMapper
 from gpt2giga.providers.gigachat.embeddings_mapper import (
     apply_embedding_encoding_format,
     normalize_embedding_response,
@@ -90,6 +82,15 @@ class EmbeddingsService:
 
 def get_embeddings_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped embeddings service, creating it lazily if needed."""
+    from gpt2giga.app.dependencies import (
+        get_config_from_state,
+        get_runtime_providers,
+        get_runtime_services,
+        set_runtime_provider,
+        set_runtime_service,
+    )
+    from gpt2giga.providers.gigachat.embeddings_mapper import GigaChatEmbeddingsMapper
+
     services = get_runtime_services(state)
     service = services.embeddings
     if service is not None:

@@ -22,7 +22,6 @@ from .revisions import (
     new_revision_id,
     write_control_plane_revision,
 )
-from .status import is_control_plane_setup_complete
 
 _PROXY_SECRET_FIELDS = {"api_key", "scoped_api_keys"}
 _GIGACHAT_SECRET_FIELDS = {
@@ -297,6 +296,8 @@ def persist_control_plane_config(
     path = get_control_plane_file()
     write_json(path, payload)
     write_control_plane_revision(payload)
+    from .status import is_control_plane_setup_complete
+
     if is_control_plane_setup_complete(config):
         clear_bootstrap_token()
     return path

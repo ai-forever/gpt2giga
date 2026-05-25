@@ -130,7 +130,7 @@ def exceptions_handler(func):
                 status_code=500,
                 content={
                     "error": {
-                        "message": safe_message,
+                        "message": "Internal server error",
                         "type": "server_error",
                         "param": None,
                         "code": None,

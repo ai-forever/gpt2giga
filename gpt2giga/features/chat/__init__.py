@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+ChatService: Any
+get_chat_service_from_state: Any
+
 _chat_service_exports: tuple[Any, Any] | None = None
 
 

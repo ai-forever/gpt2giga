@@ -33,7 +33,7 @@ from .encoding import (
 from .utils import _label_value, _log_warning, _resolve_package_version, _safe_int
 
 _OTLP_TRACES_CONTENT_TYPE = "application/json"
-_OTLP_PROTOBUF_TRACES_CONTENT_TYPE = "application/x-protobuf"
+OTLP_PROTOBUF_TRACES_CONTENT_TYPE = "application/x-protobuf"
 _OTLP_HTTP_OK_STATUSES = {200, 202}
 _OTLP_SCOPE_NAME = "gpt2giga.observability"
 _OTLP_SCOPE_VERSION = "1.0.0"

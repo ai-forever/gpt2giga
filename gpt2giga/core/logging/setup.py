@@ -7,16 +7,16 @@ from collections.abc import Mapping, Sequence
 
 from loguru import logger
 
-from gpt2giga.core.constants import _BEARER_RE, _JSON_KV_RE, _KV_EQ_RE
+from gpt2giga.core.constants import BEARER_RE, JSON_KV_RE, KV_EQ_RE
 
 rquid_context = contextvars.ContextVar("rquid", default="-")
 
 
 def redact_sensitive(message: str) -> str:
     """Replace values of sensitive keys in a log message with '***'."""
-    message = _JSON_KV_RE.sub(r"\1\2\1: \3***\3", message)
-    message = _KV_EQ_RE.sub(r"\1=***", message)
-    message = _BEARER_RE.sub(r"\1***", message)
+    message = JSON_KV_RE.sub(r"\1\2\1: \3***\3", message)
+    message = KV_EQ_RE.sub(r"\1=***", message)
+    message = BEARER_RE.sub(r"\1***", message)
     return message
 
 

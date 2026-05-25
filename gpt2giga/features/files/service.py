@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from gpt2giga.app.dependencies import get_runtime_services, set_runtime_service
 from gpt2giga.features.batches.store import find_batch_metadata_by_output_file_id
 from gpt2giga.features.files.contracts import (
     BatchResultProcessor,
@@ -151,6 +150,8 @@ class FilesService:
 
 def get_files_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped files service, creating it lazily if needed."""
+    from gpt2giga.app.dependencies import get_runtime_services, set_runtime_service
+
     services = get_runtime_services(state)
     service = services.files
     if service is not None:

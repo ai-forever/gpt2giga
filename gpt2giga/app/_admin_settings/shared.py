@@ -75,7 +75,7 @@ _SECURITY_FIELDS = {
     "logs_ip_allowlist",
     "trusted_proxy_cidrs",
 }
-_RESTART_REQUIRED_FIELDS = {
+RESTART_REQUIRED_FIELDS = {
     "mode",
     "host",
     "port",
@@ -128,7 +128,9 @@ _RUNTIME_STORE_BACKEND_ORDER = ("memory", "sqlite", "redis", "postgres", "s3")
 
 
 class _SecretValue(Protocol):
-    def get_secret_value(self) -> str: ...
+    def get_secret_value(self) -> str:
+        """Return the raw secret value."""
+        raise NotImplementedError
 
 
 def _mask_secret(value: object) -> str | None:

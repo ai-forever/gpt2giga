@@ -63,12 +63,11 @@ async def _stream_anthropic_generator(
         buffered_chunks = []
 
         try:
-            first_chunk = await anext(stream_iter)
+            buffered_chunks.append(await anext(stream_iter))
         except StopAsyncIteration:
-            first_chunk = None
+            pass
         else:
-            buffered_chunks.append(first_chunk)
-            initial_usage = first_chunk.model_dump().get("usage") or {}
+            initial_usage = buffered_chunks[0].model_dump().get("usage") or {}
             input_tokens = initial_usage.get("prompt_tokens", 0)
             output_tokens = initial_usage.get("completion_tokens", 0)
             set_request_audit_usage(

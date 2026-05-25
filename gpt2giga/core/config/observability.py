@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class _SecretValue(Protocol):
-    def get_secret_value(self) -> str: ...
+    def get_secret_value(self) -> str:
+        """Return the raw secret value."""
+        raise NotImplementedError
 
 
 def _mask_secret(value: object) -> str | None:

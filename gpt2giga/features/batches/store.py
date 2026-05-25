@@ -6,12 +6,13 @@ from typing import Any
 
 from fastapi import Request
 
-from gpt2giga.app.dependencies import get_runtime_stores
 from gpt2giga.features.batches.contracts import BatchMetadata, BatchesMetadataStore
 
 
 def get_batch_store_from_state(state: Any) -> BatchesMetadataStore:
     """Return the batches metadata store from app state."""
+    from gpt2giga.app.dependencies import get_runtime_stores
+
     return get_runtime_stores(state).batches
 
 

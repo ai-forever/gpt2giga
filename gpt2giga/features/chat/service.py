@@ -4,12 +4,6 @@ from __future__ import annotations
 
 from typing import Any, AsyncGenerator
 
-from gpt2giga.app.dependencies import (
-    get_runtime_providers,
-    get_runtime_services,
-    set_runtime_provider,
-    set_runtime_service,
-)
 from gpt2giga.core.contracts import get_request_model, to_backend_payload
 from gpt2giga.features.chat.contracts import (
     ChatBackendMode,
@@ -19,8 +13,6 @@ from gpt2giga.features.chat.contracts import (
     ChatUpstreamClient,
     PreparedChatRequest,
 )
-from gpt2giga.features.chat.stream import stream_chat_completion_generator
-from gpt2giga.providers.gigachat.chat_mapper import GigaChatChatMapper
 from gpt2giga.providers.gigachat.resource_api import create_primary_chat
 
 
@@ -110,6 +102,8 @@ class ChatService:
         response_id: str,
     ) -> AsyncGenerator[str, None]:
         """Execute a streaming chat completion."""
+        from gpt2giga.features.chat.stream import stream_chat_completion_generator
+
         prepared_request = await self.prepare_request(data, giga_client=giga_client)
         async for line in stream_chat_completion_generator(
             request,
@@ -125,6 +119,14 @@ class ChatService:
 
 def get_chat_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped chat service, creating it lazily if needed."""
+    from gpt2giga.app.dependencies import (
+        get_runtime_providers,
+        get_runtime_services,
+        set_runtime_provider,
+        set_runtime_service,
+    )
+    from gpt2giga.providers.gigachat.chat_mapper import GigaChatChatMapper
+
     services = get_runtime_services(state)
     service = services.chat
     if service is not None:

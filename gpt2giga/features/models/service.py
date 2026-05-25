@@ -4,20 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from gpt2giga.app.dependencies import (
-    get_config_from_state,
-    get_runtime_providers,
-    get_runtime_services,
-    set_runtime_provider,
-    set_runtime_service,
-)
 from gpt2giga.features.models.contracts import (
     ModelDescriptor,
     ModelListData,
     ModelsProviderMapper,
     ModelsUpstreamClient,
 )
-from gpt2giga.providers.gigachat.models_mapper import GigaChatModelsMapper
 from gpt2giga.providers.gigachat.resource_api import list_models, retrieve_model
 
 
@@ -72,6 +64,15 @@ class ModelsService:
 
 def get_models_service_from_state(state: Any) -> Any:
     """Resolve the app-scoped models service, creating it lazily if needed."""
+    from gpt2giga.app.dependencies import (
+        get_config_from_state,
+        get_runtime_providers,
+        get_runtime_services,
+        set_runtime_provider,
+        set_runtime_service,
+    )
+    from gpt2giga.providers.gigachat.models_mapper import GigaChatModelsMapper
+
     services = get_runtime_services(state)
     service = services.models
     if service is not None:
