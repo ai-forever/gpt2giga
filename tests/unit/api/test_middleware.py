@@ -5,12 +5,14 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi import Request
 from fastapi.responses import StreamingResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.testclient import TestClient
 
 from gpt2giga.api.middleware.observability import ObservabilityMiddleware
 from gpt2giga.api.middleware.pass_token import PassTokenMiddleware
 from gpt2giga.api.middleware.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.api.middleware.request_validation import RequestValidationMiddleware
+from gpt2giga.api.middleware.rquid_context import RquidMiddleware
 from gpt2giga.api.tags import PROVIDER_OPENAI, TAG_CHAT, provider_tag
 from gpt2giga.app._observability.context import (
     get_request_audit_metadata as internal_get_request_audit_metadata,
@@ -78,6 +80,16 @@ def test_observability_public_imports_resolve_to_internal_modules():
     assert set_request_audit_error is internal_set_request_audit_error
     assert set_request_audit_model is internal_set_request_audit_model
     assert set_request_audit_usage is internal_set_request_audit_usage
+
+
+def test_streaming_sensitive_middlewares_do_not_use_base_http_middleware():
+    for middleware in (
+        ObservabilityMiddleware,
+        PathNormalizationMiddleware,
+        PassTokenMiddleware,
+        RquidMiddleware,
+    ):
+        assert not issubclass(middleware, BaseHTTPMiddleware)
 
 
 def test_path_norm_preserves_query_params():

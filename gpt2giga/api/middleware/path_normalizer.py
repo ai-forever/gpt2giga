@@ -1,17 +1,16 @@
-from typing import Callable
+from __future__ import annotations
 
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
-class PathNormalizationMiddleware(BaseHTTPMiddleware):
+class PathNormalizationMiddleware:
     """
     Redirects any path that contains a known valid segment
     (like /v1/, /models/ etc. ) after some extra unnecessary prefixes.
     """
 
-    def __init__(self, app, valid_roots=None):
-        super().__init__(app)
+    def __init__(self, app: ASGIApp, valid_roots=None):
+        self.app = app
         # Valid entrypoints
         self.valid_roots = valid_roots or [
             "v1",
@@ -22,18 +21,22 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
             "responses",
         ]
 
-    async def dispatch(self, request: Request, call_next: Callable):
-        path = request.url.path
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = str(scope.get("path", ""))
         new_path = self._normalize_path(path)
         if new_path is not None:
             # IMPORTANT:
             # Do not redirect (307) here: some clients may re-issue the request
             # without the original body, which leads to JSONDecodeError in
             # downstream handlers. Instead, rewrite the ASGI scope path in-place.
-            request.scope["path"] = new_path
-            request.scope["raw_path"] = new_path.encode("utf-8")
+            scope["path"] = new_path
+            scope["raw_path"] = new_path.encode("utf-8")
 
-        return await call_next(request)
+        await self.app(scope, receive, send)
 
     def _normalize_path(self, path: str) -> str | None:
         """Rewrite paths to start at the first recognized API root segment."""
