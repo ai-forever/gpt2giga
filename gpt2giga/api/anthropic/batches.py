@@ -25,6 +25,7 @@ from gpt2giga.providers.anthropic import (
     anthropic_provider_adapters,
 )
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.gigachat.resource_api import retrieve_file_content
 
 router = APIRouter(tags=[provider_tag(TAG_BATCHES, PROVIDER_ANTHROPIC)])
 
@@ -409,6 +410,9 @@ async def get_message_batch_results(message_batch_id: str, request: Request):
             "Results are not available until message batch processing has ended.",
         )
 
-    file_response = await giga_client.aget_file_content(file_id=batch.output_file_id)
+    file_response = await retrieve_file_content(
+        giga_client,
+        file_id=batch.output_file_id,
+    )
     content = _build_anthropic_batch_results(file_response.content, metadata)
     return Response(content=content, media_type="application/binary")

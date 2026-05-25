@@ -11,11 +11,18 @@ PreparedEmbeddingsRequest: TypeAlias = dict[str, Any]
 
 
 @runtime_checkable
+class EmbeddingsResource(Protocol):
+    """GigaChat embeddings resource surface."""
+
+    async def create(self, texts: list[Any], model: str) -> Any:
+        """Create embeddings for normalized input texts."""
+
+
+@runtime_checkable
 class EmbeddingsUpstreamClient(Protocol):
     """Minimal upstream client surface required by the embeddings feature."""
 
-    async def aembeddings(self, texts: list[Any], model: str) -> Any:
-        """Create embeddings for normalized input texts."""
+    a_embeddings: EmbeddingsResource
 
 
 @runtime_checkable

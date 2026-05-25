@@ -98,7 +98,7 @@ Admin console продолжает развиваться как frameworkless T
 
 Нарушением границы обычно являются такие изменения:
 
-- router сам выбирает `achat` против `achat_v2`;
+- router сам выбирает `achat` против `achat.create`;
 - router или provider presenter напрямую строит native GigaChat payload;
 - provider package начинает зависеть от transport-format helpers чужого surface;
 - metadata stores для files, batches или responses начинают обслуживаться из transport layer вместо feature service.

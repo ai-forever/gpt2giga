@@ -78,8 +78,8 @@ disable-telemetry = true
 formatter-cmds = ["black $file"]
 
 [tool.uv.sources]
-gigachat = { path = "gigachat-0.2.2a1-py3-none-any.whl" }
 gpt2giga-ui = { path = "packages/gpt2giga-ui" }
+gigachat = { path = "gigachat-0.2.3a1-py3-none-any.whl" }
 [dependency-groups]
 dev = [
     "black (>=26.3.1,<27.0.0)",

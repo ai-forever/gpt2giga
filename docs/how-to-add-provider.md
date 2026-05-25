@@ -69,14 +69,14 @@ api/<provider>/*
 -> features/chat/service.py
 -> providers/gigachat/chat_mapper.py
 -> RequestTransformer.prepare_chat_completion(...) или prepare_chat_completion_v2(...)
--> GigaChat achat/astream или achat_v2/astream_v2
+-> GigaChat achat/astream или achat.create/achat.stream
 -> ResponseProcessor
 -> provider response/stream presenter
 ```
 
 - `features/chat/service.py` работает через `GigaChatChatMapper`, уже сконфигурированный в `gpt2giga/app/wiring.py`.
 - `chat_mapper.py` получает `backend_mode` из runtime wiring и сам решает, какой prepare/process path использовать.
-- `prepare_chat_completion_v2(...)` не должен вызываться из router напрямую. Он уже знает, как превратить chat-like payload в native `ChatV2` через structured helper-ы.
+- `prepare_chat_completion_v2(...)` не должен вызываться из router напрямую. Он уже знает, как превратить chat-like payload в primary-chat `ChatCompletionRequest` через structured helper-ы.
 
 ### Responses flow
 
@@ -85,7 +85,7 @@ api/<provider>/*
 -> build_normalized_request(...)
 -> features/responses/service.py
 -> RequestTransformer.prepare_response(...) или prepare_response_v2(...)
--> GigaChat achat или achat_v2
+-> GigaChat achat или achat.create
 -> ResponseProcessor.process_response_api(...) или process_response_api_v2(...)
 -> provider response/stream presenter
 ```
@@ -93,7 +93,7 @@ api/<provider>/*
 - `features/responses/service.py` получает `responses_backend_mode` тоже из `gpt2giga/app/wiring.py`.
 - Именно service-layer, а не router, решает:
   - когда вызывать legacy Responses path;
-  - когда собирать native `ChatV2`;
+  - когда собирать primary-chat `ChatCompletionRequest`;
   - как использовать `previous_response_id` и response store для continuation flow.
 - Internal source of truth для Responses v2 helper-ов теперь находится в `gpt2giga/providers/gigachat/responses/`.
 - Новые импорты должны идти напрямую в structured helper-модули внутри `gpt2giga/providers/gigachat/responses/`.
@@ -307,7 +307,7 @@ provider_adapters = ProviderAdapterBundle(
 
 В transport layer не нужно:
 
-- вручную выбирать `achat` против `achat_v2`;
+- вручную выбирать `achat` против `achat.create`;
 - вручную вызывать `prepare_chat_completion_v2(...)` или `prepare_response_v2(...)`;
 - собирать GigaChat request body напрямую;
 - создавать ad-hoc metadata storage;
@@ -910,7 +910,7 @@ Provider должен корректно участвовать в `GPT2GIGA_ENA
 
 ### Ошибка 2. Роутер сам решает backend mode
 
-Выбор `achat`/`achat_v2` уже инкапсулирован в feature-layer и mapper-ах. Роутер не должен знать эту деталь, кроме случаев, когда он передает `api_mode` в provider-specific stream presenter для форматирования потока.
+Выбор `achat`/`achat.create` уже инкапсулирован в feature-layer и mapper-ах. Роутер не должен знать эту деталь, кроме случаев, когда он передает `api_mode` в provider-specific stream presenter для форматирования потока.
 
 ### Ошибка 3. Смешивание request normalization и response presentation
 

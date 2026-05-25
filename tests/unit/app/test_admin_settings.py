@@ -201,7 +201,7 @@ async def test_admin_control_plane_settings_service_tests_gigachat_factory():
     assert payload["sample_models"] == ["GigaChat-Max"]
     assert captured_kwargs["ca_bundle_file"] == "/certs/company-root.pem"
     assert captured_kwargs["user"] == "service-account"
-    assert captured_kwargs["password"].get_secret_value() == "super-secret-password"
+    assert captured_kwargs["password"] == "super-secret-password"
 
 
 @pytest.mark.asyncio

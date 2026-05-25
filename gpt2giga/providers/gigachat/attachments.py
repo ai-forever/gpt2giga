@@ -24,6 +24,7 @@ from gpt2giga.core.constants import (
     SUPPORTED_TEXT_EXTENSIONS as CONST_SUPPORTED_TEXT_EXTENSIONS,
     SUPPORTED_TEXT_MIME_TYPES as CONST_SUPPORTED_TEXT_MIME_TYPES,
 )
+from gpt2giga.providers.gigachat.resource_api import upload_file as upload_gigachat_file
 
 
 class CacheEntry(NamedTuple):
@@ -470,7 +471,7 @@ class AttachmentProcessor:
             ext = content_type.split("/")[-1] or "jpg"
             filename = filename or f"{uuid.uuid4()}.{ext}"
             self.logger.info(f"Uploading file to GigaChat... with extension {ext}")
-            file = await giga_client.aupload_file((filename, content_bytes))
+            file = await upload_gigachat_file(giga_client, (filename, content_bytes))
 
             self._set_cached(hashed, file.id_)
             self.logger.info(f"File uploaded successfully, file_id: {file.id_}")

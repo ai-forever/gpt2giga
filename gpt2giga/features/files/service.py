@@ -21,6 +21,13 @@ from gpt2giga.features.batches.transforms import (
     map_openai_file_purpose,
     transform_batch_output_file,
 )
+from gpt2giga.providers.gigachat.resource_api import (
+    delete_file as delete_gigachat_file,
+    list_files as list_gigachat_files,
+    retrieve_file as retrieve_gigachat_file,
+    retrieve_file_content,
+    upload_file,
+)
 
 
 class FilesService:
@@ -36,7 +43,8 @@ class FilesService:
     ) -> FileObjectData:
         """Upload a file and store its local metadata."""
         resolved_store = file_store if file_store is not None else {}
-        uploaded = await giga_client.aupload_file(
+        uploaded = await upload_file(
+            giga_client,
             (
                 upload["filename"],
                 upload["content"],
@@ -64,7 +72,7 @@ class FilesService:
     ) -> dict[str, Any]:
         """List uploaded files using OpenAI-compatible pagination and filtering."""
         resolved_store = file_store if file_store is not None else {}
-        files = await giga_client.aget_files()
+        files = await list_gigachat_files(giga_client)
         data = [
             _serialize_file_object(file_obj, resolved_store.get(file_obj.id_))
             for file_obj in files.data
@@ -91,7 +99,7 @@ class FilesService:
     ) -> FileObjectData:
         """Return file metadata."""
         resolved_store = file_store if file_store is not None else {}
-        file_obj = await giga_client.aget_file(file=file_id)
+        file_obj = await retrieve_gigachat_file(giga_client, file=file_id)
         return _serialize_file_object(file_obj, resolved_store.get(file_id))
 
     async def delete_file(
@@ -102,7 +110,7 @@ class FilesService:
         file_store: FilesMetadataStore | None = None,
     ) -> dict[str, Any]:
         """Delete a file and evict its local metadata."""
-        deleted = await giga_client.adelete_file(file=file_id)
+        deleted = await delete_gigachat_file(giga_client, file=file_id)
         if file_store is not None:
             file_store.pop(file_id, None)
         return {
@@ -121,15 +129,15 @@ class FilesService:
         response_processor: BatchResultProcessor | None = None,
     ) -> bytes:
         """Load file content and post-process batch outputs when needed."""
-        file_response = await giga_client.aget_file_content(file_id=file_id)
+        file_response = await retrieve_file_content(giga_client, file_id=file_id)
         matching_batch = _resolve_batch_output_metadata(
             file_id,
             batch_store=batch_store,
             file_store=file_store,
         )
         if matching_batch is not None and response_processor is not None:
-            input_file = await giga_client.aget_file_content(
-                file_id=matching_batch["input_file_id"]
+            input_file = await retrieve_file_content(
+                giga_client, file_id=matching_batch["input_file_id"]
             )
             return await transform_batch_output_file(
                 file_response.content,

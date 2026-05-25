@@ -21,6 +21,7 @@ from gpt2giga.features.chat.contracts import (
 )
 from gpt2giga.features.chat.stream import stream_chat_completion_generator
 from gpt2giga.providers.gigachat.chat_mapper import GigaChatChatMapper
+from gpt2giga.providers.gigachat.resource_api import create_primary_chat
 
 
 class ChatService:
@@ -66,7 +67,7 @@ class ChatService:
     ) -> Any:
         """Execute an already prepared chat-like request against GigaChat."""
         if self.uses_v2_backend:
-            return await giga_client.achat_v2(prepared_request)
+            return await create_primary_chat(giga_client, prepared_request)
         return await giga_client.achat(prepared_request)
 
     def normalize_provider_response(self, giga_resp: Any) -> dict[str, Any]:

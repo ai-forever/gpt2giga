@@ -1,7 +1,14 @@
 """Responses API v2 backend-request assembly helpers."""
 
 from typing import Any, Dict, List, Optional
-from gigachat.models import ChatV2, ChatV2Storage, ChatV2Tool, ChatV2UserInfo
+
+from gigachat.models import (
+    ChatCompletionRequest,
+    ChatFunctionsTool,
+    ChatStorage,
+    ChatTool,
+    ChatUserInfo,
+)
 
 from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.core.logging.setup import sanitize_for_utf8
@@ -34,8 +41,8 @@ class ResponsesV2BackendRequestMixin(
         data: Any,
         giga_client: Any = None,
         response_store: Optional[Dict[str, Any]] = None,
-    ) -> ChatV2:
-        """Prepare a native GigaChat v2 payload for the Responses API."""
+    ) -> ChatCompletionRequest:
+        """Prepare a primary GigaChat chat payload for the Responses API."""
         request_data = to_backend_payload(data)
 
         function_specs, builtin_tools, _unsupported_tools, user_timezone = (
@@ -56,10 +63,20 @@ class ResponsesV2BackendRequestMixin(
             builtin_tools,
         )
 
-        tools_payload: List[ChatV2Tool] = []
+        tools_payload: List[ChatTool] = []
         if function_specs:
+            function_specs_payload = [
+                spec.model_dump(exclude_none=True, by_alias=True)
+                if hasattr(spec, "model_dump")
+                else spec
+                for spec in function_specs.values()
+            ]
             tools_payload.append(
-                ChatV2Tool.functions_tool(specifications=list(function_specs.values()))
+                ChatTool(
+                    functions=ChatFunctionsTool.model_validate(
+                        {"specifications": function_specs_payload}
+                    )
+                )
             )
         tools_payload.extend(builtin_tools.values())
 
@@ -74,7 +91,7 @@ class ResponsesV2BackendRequestMixin(
 
         storage = self._resolve_response_storage(request_data, response_store)
         if storage is not None:
-            payload["storage"] = ChatV2Storage(**storage)
+            payload["storage"] = ChatStorage(**storage)
 
         if not payload["messages"]:
             raise self._invalid_request(
@@ -91,7 +108,7 @@ class ResponsesV2BackendRequestMixin(
         if tool_config is not None:
             payload["tool_config"] = tool_config
         if user_timezone:
-            payload["user_info"] = ChatV2UserInfo(timezone=user_timezone)
+            payload["user_info"] = ChatUserInfo(timezone=user_timezone)
 
         gpt_model = request_data.get("model")
         if self.config.proxy_settings.pass_model and gpt_model:
@@ -106,4 +123,4 @@ class ResponsesV2BackendRequestMixin(
                 if value is not None
             }
         )
-        return ChatV2.model_validate(sanitized_payload)
+        return ChatCompletionRequest.model_validate(sanitized_payload)

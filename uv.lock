@@ -866,15 +866,15 @@ wheels = [
 
 [[package]]
 name = "gigachat"
-version = "0.2.2a1"
-source = { path = "gigachat-0.2.2a1-py3-none-any.whl" }
+version = "0.2.3a1"
+source = { path = "gigachat-0.2.3a1-py3-none-any.whl" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
 wheels = [
-    { filename = "gigachat-0.2.2a1-py3-none-any.whl", hash = "sha256:f990d2e32a179af75b47edb340a1aee17f9bf41182bec4b22fd09d47d34fef30" },
+    { filename = "gigachat-0.2.3a1-py3-none-any.whl", hash = "sha256:3a84e403106a2b37e437266d41becd2f5d855c3f0afe3c9b0ef39f26c5abd3f6" },
 ]
 
 [package.metadata]
@@ -977,7 +977,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.79.0" },
     { name = "cryptography", specifier = ">=46.0.5" },
     { name = "fastapi", specifier = ">=0.135.3,<1" },
-    { name = "gigachat", path = "gigachat-0.2.2a1-py3-none-any.whl" },
+    { name = "gigachat", path = "gigachat-0.2.3a1-py3-none-any.whl" },
     { name = "google-genai", specifier = ">=1.70.0" },
     { name = "gpt2giga-ui", marker = "extra == 'ui'", directory = "packages/gpt2giga-ui" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },

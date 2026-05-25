@@ -37,20 +37,12 @@ class FakeFileContent:
         self.content = base64.b64encode(content).decode("utf-8")
 
 
-class FakeFilesClient:
-    def __init__(self):
-        self.last_upload = None
-        self.files = {
-            "input-file-1": FakeFileContent(
-                b'{"custom_id":"req-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-x","messages":[{"role":"user","content":"hello"}]}}\n'
-            ),
-            "file-output-1": FakeFileContent(
-                b'{"id":"req-1","result":{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}}\n'
-            ),
-        }
+class FakeFilesResource:
+    def __init__(self, owner):
+        self.owner = owner
 
-    async def aupload_file(self, file, purpose):
-        self.last_upload = (file, purpose)
+    async def upload(self, file, purpose):
+        self.owner.last_upload = (file, purpose)
         filename, content, _ = file
         return FakeUploadedFile(
             "file-1",
@@ -60,10 +52,10 @@ class FakeFilesClient:
             purpose=purpose,
         )
 
-    async def aget_files(self):
+    async def list(self):
         return SimpleNamespace(data=[])
 
-    async def aget_file(self, file):
+    async def retrieve(self, file):
         return FakeUploadedFile(
             file,
             bytes_=11,
@@ -72,11 +64,25 @@ class FakeFilesClient:
             purpose="general",
         )
 
-    async def adelete_file(self, file):
+    async def delete(self, file):
         return FakeDeletedFile(file)
 
-    async def aget_file_content(self, file_id):
-        return self.files[file_id]
+    async def retrieve_content(self, file_id):
+        return self.owner.files[file_id]
+
+
+class FakeFilesClient:
+    def __init__(self):
+        self.last_upload = None
+        self.a_files = FakeFilesResource(self)
+        self.files = {
+            "input-file-1": FakeFileContent(
+                b'{"custom_id":"req-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-x","messages":[{"role":"user","content":"hello"}]}}\n'
+            ),
+            "file-output-1": FakeFileContent(
+                b'{"id":"req-1","result":{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}}\n'
+            ),
+        }
 
 
 @pytest.mark.asyncio

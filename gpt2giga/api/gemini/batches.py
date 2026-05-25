@@ -29,6 +29,7 @@ from gpt2giga.features.batches.transforms import extract_batch_result_body, pars
 from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.gemini import gemini_provider_adapters
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.gigachat.resource_api import retrieve_file_content
 
 router = APIRouter(tags=[provider_tag(TAG_BATCHES, PROVIDER_GEMINI)])
 
@@ -313,7 +314,7 @@ async def _load_batch_requests_from_file(
     model: str,
     logger: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    file_response = await giga_client.aget_file_content(file_id=file_id)
+    file_response = await retrieve_file_content(giga_client, file_id=file_id)
     try:
         file_rows = parse_jsonl(base64.b64decode(file_response.content))
     except Exception as exc:  # pragma: no cover - defensive parsing
@@ -571,7 +572,10 @@ async def download_batch_results(batch_id: str, request: Request):
             status="FAILED_PRECONDITION",
             message="Batch results are not available until processing has completed.",
         )
-    file_response = await giga_client.aget_file_content(file_id=batch.output_file_id)
+    file_response = await retrieve_file_content(
+        giga_client,
+        file_id=batch.output_file_id,
+    )
     content = build_gemini_batch_output_file(
         file_response.content,
         batch_metadata=record["metadata"],

@@ -12,6 +12,7 @@ import gigachat
 from gpt2giga.app.observability import set_request_audit_error
 from gpt2giga.features.chat.contracts import ChatProviderMapper, PreparedChatRequest
 from gpt2giga.features.responses.contracts import PreparedResponsesRequest
+from gpt2giga.providers.gigachat.resource_api import stream_primary_chat
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 StreamChunkT = TypeVar("StreamChunkT")
@@ -218,7 +219,7 @@ async def iter_chat_v2_stream_chunks(
 ) -> AsyncIterator[Any]:
     """Yield raw GigaChat v2 chat stream chunks."""
     try:
-        async for chunk in giga_client.astream_v2(chat_messages):
+        async for chunk in stream_primary_chat(giga_client, chat_messages):
             yield chunk
     except gigachat.exceptions.GigaChatException as exc:
         raise GigaChatStreamError.from_exception(exc) from exc
@@ -264,7 +265,7 @@ async def iter_responses_stream_chunks(
     """Yield provider-normalized Responses API stream chunks."""
     last_tool_state: dict[str, ResponsesToolUpdate] = {}
     try:
-        async for chunk in giga_client.astream_v2(chat_messages):
+        async for chunk in stream_primary_chat(giga_client, chat_messages):
             chunk_dict = response_processor._safe_model_dump(chunk)
             yield ResponsesStreamChunk(
                 model=chunk_dict.get("model"),

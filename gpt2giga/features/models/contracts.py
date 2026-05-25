@@ -18,14 +18,21 @@ ModelListData: TypeAlias = list[ModelDescriptor]
 
 
 @runtime_checkable
+class ModelsResource(Protocol):
+    """GigaChat models resource surface."""
+
+    async def list(self) -> Any:
+        """Return the provider model catalog."""
+
+    async def retrieve(self, model: str) -> Any:
+        """Return a single provider model."""
+
+
+@runtime_checkable
 class ModelsUpstreamClient(Protocol):
     """Minimal upstream client surface required by the models feature."""
 
-    async def aget_models(self) -> Any:
-        """Return the provider model catalog."""
-
-    async def aget_model(self, model: str) -> Any:
-        """Return a single provider model."""
+    a_models: ModelsResource
 
 
 @runtime_checkable

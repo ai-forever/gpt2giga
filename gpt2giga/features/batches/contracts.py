@@ -36,14 +36,28 @@ class BatchRecord(TypedDict):
     metadata: BatchMetadata
 
 
+class BatchFilesResource(Protocol):
+    """GigaChat files resource surface required by batches."""
+
+    async def retrieve_content(self, file_id: str) -> Any:
+        """Return provider file contents as a base64 payload."""
+
+
+class BatchesResource(Protocol):
+    """GigaChat batches resource surface."""
+
+    async def create(self, file: bytes, method: str) -> Any:
+        """Create a provider batch."""
+
+    async def list(self) -> Any:
+        """List provider batches."""
+
+    async def retrieve(self, batch_id: str) -> Any:
+        """Return a single batch by ID."""
+
+
 class BatchesUpstreamClient(Protocol):
     """Minimal upstream client surface required by the batches feature."""
 
-    async def aget_file_content(self, file_id: str) -> Any:
-        """Return provider file contents as a base64 payload."""
-
-    async def acreate_batch(self, file: bytes, method: str) -> Any:
-        """Create a provider batch."""
-
-    async def aget_batches(self, batch_id: str | None = None) -> Any:
-        """List provider batches or return a single batch by ID."""
+    a_files: BatchFilesResource
+    a_batches: BatchesResource

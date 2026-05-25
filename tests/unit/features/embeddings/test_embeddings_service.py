@@ -18,13 +18,19 @@ class FakeMapper:
         return {"input": ["hello"], "model": embeddings_model}
 
 
+class FakeEmbeddingsResource:
+    def __init__(self, owner):
+        self.owner = owner
+
+    async def create(self, texts, model):
+        self.owner.last_request = (list(texts), model)
+        return {"data": [{"embedding": [0.1], "index": 0}], "model": model}
+
+
 class FakeClient:
     def __init__(self):
         self.last_request = None
-
-    async def aembeddings(self, texts, model):
-        self.last_request = (list(texts), model)
-        return {"data": [{"embedding": [0.1], "index": 0}], "model": model}
+        self.a_embeddings = FakeEmbeddingsResource(self)
 
 
 @pytest.mark.asyncio

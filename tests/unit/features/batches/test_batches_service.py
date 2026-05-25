@@ -85,10 +85,38 @@ class FakeRequestTransformer:
         return Prepared()
 
 
+class FakeBatchFilesResource:
+    def __init__(self, owner):
+        self.owner = owner
+
+    async def retrieve_content(self, file_id: str):
+        return self.owner.files[file_id]
+
+
+class FakeBatchesResource:
+    def __init__(self, owner):
+        self.owner = owner
+
+    async def create(self, file: bytes, method: str):
+        self.owner.last_batch_content = file
+        self.owner.last_batch_method = method
+        batch = self.owner.batches["batch-1"]
+        return batch
+
+    async def list(self):
+        return FakeBatches(list(self.owner.batches.values()))
+
+    async def retrieve(self, batch_id: str):
+        batch = self.owner.batches.get(batch_id)
+        return FakeBatches([batch] if batch else [])
+
+
 class FakeBatchesClient:
     def __init__(self):
         self.last_batch_content = None
         self.last_batch_method = None
+        self.a_files = FakeBatchFilesResource(self)
+        self.a_batches = FakeBatchesResource(self)
         self.files = {
             "input-file-1": FakeFileContent(
                 b'{"custom_id":"req-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-x","messages":[{"role":"user","content":"hello"}]}}\n'
@@ -98,21 +126,6 @@ class FakeBatchesClient:
             "batch-1": FakeBatch("batch-1", output_file_id="file-output-1"),
             "batch-2": FakeBatch("batch-2", output_file_id="file-output-2"),
         }
-
-    async def aget_file_content(self, file_id: str):
-        return self.files[file_id]
-
-    async def acreate_batch(self, file: bytes, method: str):
-        self.last_batch_content = file
-        self.last_batch_method = method
-        batch = self.batches["batch-1"]
-        return batch
-
-    async def aget_batches(self, batch_id: str | None = None):
-        if batch_id is None:
-            return FakeBatches(list(self.batches.values()))
-        batch = self.batches.get(batch_id)
-        return FakeBatches([batch] if batch else [])
 
 
 @pytest.mark.asyncio

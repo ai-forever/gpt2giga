@@ -20,6 +20,7 @@ from gpt2giga.features.batches import (
     BatchValidationReport,
 )
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.gigachat.resource_api import retrieve_file_content
 
 
 def build_batch_input_validator(request: Request) -> BatchInputValidator:
@@ -134,8 +135,8 @@ async def resolve_batch_input_bytes(
     if isinstance(cached_bytes, bytes):
         return cached_bytes
 
-    file_response = await get_gigachat_client(request).aget_file_content(
-        file_id=file_id
+    file_response = await retrieve_file_content(
+        get_gigachat_client(request), file_id=file_id
     )
     content = base64.b64decode(file_response.content)
     stores.batch_input_bytes[file_id] = content

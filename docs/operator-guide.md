@@ -184,7 +184,7 @@ GPT2GIGA_GIGACHAT_API_MODE=v2
 
 - testing/staging;
 - отдельных инстансов для новых клиентов;
-- поэтапного перевода chat-like traffic на `achat_v2/astream_v2`.
+- поэтапного перевода chat-like traffic на `achat.create/achat.stream`.
 
 ## Локальный запуск
 

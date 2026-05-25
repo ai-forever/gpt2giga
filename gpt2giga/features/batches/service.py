@@ -29,6 +29,12 @@ from gpt2giga.features.batches.transforms import (
     get_batch_target,
     transform_batch_input_file,
 )
+from gpt2giga.providers.gigachat.resource_api import (
+    create_batch as create_gigachat_batch,
+    list_batches as list_gigachat_batches,
+    retrieve_batch as retrieve_gigachat_batch,
+    retrieve_file_content,
+)
 
 
 class BatchesService:
@@ -86,7 +92,7 @@ class BatchesService:
                 },
             )
 
-        file_content = await giga_client.aget_file_content(file_id=input_file_id)
+        file_content = await retrieve_file_content(giga_client, file_id=input_file_id)
         record = await self.create_batch_from_content(
             base64.b64decode(file_content.content),
             endpoint=str(data.get("endpoint", "")),
@@ -155,7 +161,8 @@ class BatchesService:
             gigachat_api_mode=self.gigachat_api_mode,
             pass_model=self.pass_model,
         )
-        batch = await giga_client.acreate_batch(
+        batch = await create_gigachat_batch(
+            giga_client,
             transformed_content,
             method=target.method,
         )
@@ -232,7 +239,7 @@ class BatchesService:
         default_metadata_factory: Any | None = None,
     ) -> list[BatchRecord]:
         """List provider batch records with synced local metadata."""
-        batches = await giga_client.aget_batches()
+        batches = await list_gigachat_batches(giga_client)
         records: list[BatchRecord] = []
         for batch in batches.batches:
             metadata = self._get_batch_metadata(batch.id_, batch_store)
@@ -261,7 +268,7 @@ class BatchesService:
         default_metadata_factory: Any | None = None,
     ) -> BatchRecord | None:
         """Return a provider batch record with synced local metadata."""
-        batches = await giga_client.aget_batches(batch_id=batch_id)
+        batches = await retrieve_gigachat_batch(giga_client, batch_id=batch_id)
         if not batches.batches:
             return None
 
@@ -286,7 +293,7 @@ class BatchesService:
         file_store: FilesMetadataStore | None = None,
     ) -> list[BatchRecord]:
         """List stored Anthropic message-batch records."""
-        batches = await giga_client.aget_batches()
+        batches = await list_gigachat_batches(giga_client)
         data = []
         sorted_batches = sorted(
             batches.batches,
@@ -320,7 +327,7 @@ class BatchesService:
         if not metadata or metadata.get("api_format") != "anthropic_messages":
             return None
 
-        batches = await giga_client.aget_batches(batch_id=batch_id)
+        batches = await retrieve_gigachat_batch(giga_client, batch_id=batch_id)
         if not batches.batches:
             return None
         return self._sync_batch_record(

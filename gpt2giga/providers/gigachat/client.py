@@ -1,11 +1,27 @@
 """GigaChat client lifecycle and request access helpers."""
 
-from typing import Any
+from typing import Any, Protocol, cast
 
 from fastapi import FastAPI, Request
 from gigachat import GigaChat
 
 from gpt2giga.app.dependencies import get_runtime_providers
+from gpt2giga.core.constants import _AUTH_KEYS
+
+
+class _SecretValue(Protocol):
+    def get_secret_value(self) -> str:
+        """Return the raw secret value."""
+
+
+def dump_gigachat_settings(settings: Any) -> dict[str, Any]:
+    """Dump settings into SDK-compatible constructor kwargs."""
+    data = dict(settings.model_dump())
+    for key in _AUTH_KEYS:
+        value = data.get(key)
+        if hasattr(value, "get_secret_value"):
+            data[key] = cast(_SecretValue, value).get_secret_value()
+    return data
 
 
 def get_gigachat_client(request: Request) -> Any:
@@ -29,7 +45,7 @@ def _resolve_gigachat_factory(app: FastAPI):
 def create_app_gigachat_client(app: FastAPI, *, settings) -> Any:
     """Create and store the app-scoped GigaChat client."""
     gigachat_factory = _resolve_gigachat_factory(app)
-    gigachat_client = gigachat_factory(**settings.model_dump())
+    gigachat_client = gigachat_factory(**dump_gigachat_settings(settings))
     providers = get_runtime_providers(app.state)
     providers.gigachat_client = gigachat_client
     return gigachat_client

@@ -3,7 +3,7 @@
 from typing import Optional
 
 from gigachat.settings import Settings as GigachatSettings
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gpt2giga.core.config._settings.access_control import (
@@ -50,6 +50,23 @@ class ProxySettings(
 
 class GigaChatCLI(GigachatSettings):
     """CLI-exposed GigaChat SDK settings."""
+
+    credentials: Optional[SecretStr] = Field(  # type: ignore[assignment]
+        default=None,
+        description="Authorization data.",
+    )
+    access_token: Optional[SecretStr] = Field(  # type: ignore[assignment]
+        default=None,
+        description="JWE token.",
+    )
+    password: Optional[SecretStr] = Field(  # type: ignore[assignment]
+        default=None,
+        description="Password for basic authentication.",
+    )
+    key_file_password: Optional[SecretStr] = Field(  # type: ignore[assignment]
+        default=None,
+        description="Password for encrypted client private key file.",
+    )
 
     model_config = SettingsConfigDict(env_prefix="gigachat_", case_sensitive=False)
 

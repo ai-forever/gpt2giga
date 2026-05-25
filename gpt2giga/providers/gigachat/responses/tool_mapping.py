@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from gigachat.models import ChatV2Tool, ChatV2ToolConfig
+from gigachat.models import ChatTool, ChatToolConfig, ChatWebSearchTool
 
 from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
 from gpt2giga.providers.gigachat.tool_mapping import (
@@ -55,7 +55,7 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
         return coerced or None
 
     @classmethod
-    def _build_web_search_tool(cls, tool: Dict[str, Any]) -> ChatV2Tool:
+    def _build_web_search_tool(cls, tool: Dict[str, Any]) -> ChatTool:
         raw_config = tool.get("web_search")
         config = raw_config if isinstance(raw_config, dict) else {}
 
@@ -67,10 +67,12 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
             config.get("indexes", tool.get("indexes"))
         )
         flags = cls._coerce_optional_string_list(config.get("flags", tool.get("flags")))
-        return ChatV2Tool.web_search_tool(
-            type=search_type,
-            indexes=indexes,
-            flags=flags,
+        return ChatTool(
+            web_search=ChatWebSearchTool(
+                type=search_type,
+                indexes=indexes,
+                flags=flags,
+            )
         )
 
     def _collect_response_tools(
@@ -78,12 +80,12 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
         tools: List[Dict[str, Any]],
     ) -> tuple[
         Dict[str, Any],
-        Dict[str, ChatV2Tool],
+        Dict[str, ChatTool],
         List[Dict[str, Any]],
         Optional[str],
     ]:
         function_specs: Dict[str, Any] = {}
-        builtin_tools: Dict[str, ChatV2Tool] = {}
+        builtin_tools: Dict[str, ChatTool] = {}
         unsupported_tools: List[Dict[str, Any]] = []
         user_timezone: Optional[str] = None
 
@@ -114,16 +116,16 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
                         user_timezone = timezone.strip()
                 continue
             if giga_tool_name == "code_interpreter":
-                builtin_tools[giga_tool_name] = ChatV2Tool.code_interpreter_tool()
+                builtin_tools[giga_tool_name] = ChatTool(code_interpreter={})
                 continue
             if giga_tool_name == "image_generate":
-                builtin_tools[giga_tool_name] = ChatV2Tool.image_generate_tool()
+                builtin_tools[giga_tool_name] = ChatTool(image_generate={})
                 continue
             if giga_tool_name == "url_content_extraction":
-                builtin_tools[giga_tool_name] = ChatV2Tool.url_content_extraction_tool()
+                builtin_tools[giga_tool_name] = ChatTool(url_content_extraction={})
                 continue
             if giga_tool_name == "model_3d_generate":
-                builtin_tools[giga_tool_name] = ChatV2Tool.model_3d_generate_tool()
+                builtin_tools[giga_tool_name] = ChatTool(model_3d_generate={})
                 continue
 
             unsupported_tools.append(tool)
@@ -133,11 +135,11 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
     def _filter_allowed_response_tools(
         self,
         function_specs: Dict[str, Any],
-        builtin_tools: Dict[str, ChatV2Tool],
+        builtin_tools: Dict[str, ChatTool],
         allowed_tools: List[Dict[str, Any]],
-    ) -> tuple[Dict[str, Any], Dict[str, ChatV2Tool]]:
+    ) -> tuple[Dict[str, Any], Dict[str, ChatTool]]:
         allowed_functions: Dict[str, Any] = {}
-        allowed_builtins: Dict[str, ChatV2Tool] = {}
+        allowed_builtins: Dict[str, ChatTool] = {}
 
         for tool in allowed_tools:
             if not isinstance(tool, dict):
@@ -157,40 +159,40 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
     def _single_tool_target_config(
         self,
         function_specs: Dict[str, Any],
-        builtin_tools: Dict[str, ChatV2Tool],
-    ) -> Optional[ChatV2ToolConfig]:
+        builtin_tools: Dict[str, ChatTool],
+    ) -> Optional[ChatToolConfig]:
         target_count = len(function_specs) + len(builtin_tools)
         if target_count != 1:
             return None
         if function_specs:
             name = next(iter(function_specs))
-            return ChatV2ToolConfig(
+            return ChatToolConfig(
                 mode="forced",
                 function_name=map_tool_name_to_gigachat(name),
             )
         giga_tool_name = next(iter(builtin_tools))
-        return ChatV2ToolConfig(mode="forced", tool_name=giga_tool_name)
+        return ChatToolConfig(mode="forced", tool_name=giga_tool_name)
 
     def _build_response_tool_config(
         self,
         tool_choice: Any,
         function_specs: Dict[str, Any],
-        builtin_tools: Dict[str, ChatV2Tool],
-    ) -> Optional[ChatV2ToolConfig]:
+        builtin_tools: Dict[str, ChatTool],
+    ) -> Optional[ChatToolConfig]:
         if tool_choice is None:
             return None
 
         if isinstance(tool_choice, str):
             if tool_choice == "none":
-                return ChatV2ToolConfig(mode="none")
+                return ChatToolConfig(mode="none")
             if tool_choice == "auto":
-                return ChatV2ToolConfig(mode="auto")
+                return ChatToolConfig(mode="auto")
             if tool_choice == "required":
                 return self._single_tool_target_config(
                     function_specs,
                     builtin_tools,
-                ) or ChatV2ToolConfig(mode="auto")
-            return ChatV2ToolConfig(mode="auto")
+                ) or ChatToolConfig(mode="auto")
+            return ChatToolConfig(mode="auto")
 
         if not isinstance(tool_choice, dict):
             return None
@@ -202,8 +204,8 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
                 return self._single_tool_target_config(
                     function_specs,
                     builtin_tools,
-                ) or ChatV2ToolConfig(mode="auto")
-            return ChatV2ToolConfig(mode="auto")
+                ) or ChatToolConfig(mode="auto")
+            return ChatToolConfig(mode="auto")
 
         if tool_type == "function":
             name = tool_choice.get("name")
@@ -212,7 +214,7 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
                     f"Unsupported forced tool choice for function {name!r}.",
                     param="tool_choice",
                 )
-            return ChatV2ToolConfig(
+            return ChatToolConfig(
                 mode="forced",
                 function_name=map_tool_name_to_gigachat(name),
             )
@@ -224,7 +226,7 @@ class ResponsesV2ToolMappingMixin(RequestTransformerBaseMixin):
                     f"Unsupported forced tool choice for tool type {tool_type!r}.",
                     param="tool_choice",
                 )
-            return ChatV2ToolConfig(mode="forced", tool_name=giga_tool_name)
+            return ChatToolConfig(mode="forced", tool_name=giga_tool_name)
 
         raise self._invalid_request(
             f"Unsupported forced tool choice for tool type {tool_type!r}.",

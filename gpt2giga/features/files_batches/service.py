@@ -38,6 +38,7 @@ from gpt2giga.features.files_batches.normalizers import (
     normalize_openai_batch,
     normalize_openai_file,
 )
+from gpt2giga.providers.gigachat.resource_api import retrieve_file_content
 from gpt2giga.providers.anthropic import anthropic_provider_adapters
 
 _NEEDS_ATTENTION_STATUSES = {"failed", "cancelled", "expired"}
@@ -715,7 +716,7 @@ async def _load_file_bytes(
     *,
     file_id: str,
 ) -> bytes:
-    file_response = await giga_client.aget_file_content(file_id=file_id)
+    file_response = await retrieve_file_content(giga_client, file_id=file_id)
     return base64.b64decode(file_response.content)
 
 

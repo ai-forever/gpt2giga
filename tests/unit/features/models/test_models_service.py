@@ -45,17 +45,23 @@ class FakeMapper:
         }
 
 
+class FakeModelsResource:
+    def __init__(self, owner):
+        self.owner = owner
+
+    async def list(self):
+        return self.owner.list_response
+
+    async def retrieve(self, model: str):
+        self.owner.last_model = model
+        return SimpleNamespace(id=model)
+
+
 class FakeClient:
     def __init__(self):
         self.list_response = SimpleNamespace(data=["raw-model"])
         self.last_model = None
-
-    async def aget_models(self):
-        return self.list_response
-
-    async def aget_model(self, model: str):
-        self.last_model = model
-        return SimpleNamespace(id=model)
+        self.a_models = FakeModelsResource(self)
 
 
 @pytest.mark.asyncio
@@ -82,11 +88,14 @@ async def test_models_service_uses_mapper_contract_and_adds_embeddings_model():
 @pytest.mark.asyncio
 async def test_get_models_service_from_state_supports_normalized_embeddings_id():
     class UnusedClient:
-        async def aget_models(self):
-            raise AssertionError("aget_models should not be called")
+        class a_models:
+            @staticmethod
+            async def list():
+                raise AssertionError("a_models.list should not be called")
 
-        async def aget_model(self, model: str):
-            raise AssertionError("aget_model should not be called")
+            @staticmethod
+            async def retrieve(model: str):
+                raise AssertionError("a_models.retrieve should not be called")
 
     state = SimpleNamespace(config=ProxyConfig())
     service = get_models_service_from_state(state)

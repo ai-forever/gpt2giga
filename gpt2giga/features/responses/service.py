@@ -26,6 +26,10 @@ from gpt2giga.features.responses.contracts import (
 )
 from gpt2giga.features.responses.store import get_response_store
 from gpt2giga.features.responses.stream import stream_responses_generator
+from gpt2giga.providers.gigachat.resource_api import (
+    create_primary_chat,
+    retrieve_file_content,
+)
 
 
 class ResponsesService:
@@ -130,10 +134,6 @@ class ResponsesService:
         if not isinstance(output, list):
             return response
 
-        get_file_content = getattr(giga_client, "aget_file_content", None)
-        if not callable(get_file_content):
-            return response
-
         for item in output:
             if (
                 not isinstance(item, dict)
@@ -144,7 +144,10 @@ class ResponsesService:
             if not isinstance(file_id, str) or not file_id:
                 continue
             try:
-                file_response = await get_file_content(file_id=file_id)
+                file_response = await retrieve_file_content(
+                    giga_client,
+                    file_id=file_id,
+                )
             except Exception:
                 continue
             file_content = getattr(file_response, "content", None)
@@ -189,7 +192,7 @@ class ResponsesService:
             response_store=response_store,
         )
         if self.uses_v2_backend:
-            response = await giga_client.achat_v2(prepared_request)
+            response = await create_primary_chat(giga_client, prepared_request)
             result = self.response_processor.process_response_api_v2(
                 request_payload,
                 response,

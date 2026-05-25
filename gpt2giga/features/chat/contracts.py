@@ -21,20 +21,27 @@ ChatBackendMode: TypeAlias = Literal["v1", "v2"]
 
 
 @runtime_checkable
+class PrimaryChatResource(Protocol):
+    """GigaChat primary-chat resource surface used by v2 chat calls."""
+
+    async def create(self, chat: PreparedChatRequest) -> Any:
+        """Run a non-streaming primary chat request."""
+
+    def stream(self, chat: Any) -> AsyncIterator[Any]:
+        """Run a streaming primary chat request."""
+
+    async def __call__(self, chat: PreparedChatRequest) -> Any:
+        """Run a legacy chat request through the callable namespace shim."""
+
+
+@runtime_checkable
 class ChatUpstreamClient(Protocol):
     """Minimal upstream client surface required by the chat feature."""
 
-    async def achat(self, chat: PreparedChatRequest) -> Any:
-        """Run a non-streaming chat request."""
-
-    async def achat_v2(self, chat: PreparedChatRequest) -> Any:
-        """Run a non-streaming v2 chat request."""
+    achat: PrimaryChatResource
 
     def astream(self, chat: Any) -> AsyncIterator[Any]:
         """Run a streaming chat request."""
-
-    def astream_v2(self, chat: Any) -> AsyncIterator[Any]:
-        """Run a streaming v2 chat request."""
 
 
 @runtime_checkable

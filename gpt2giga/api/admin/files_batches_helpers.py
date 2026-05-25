@@ -24,6 +24,7 @@ from gpt2giga.features.files import get_files_service_from_state
 from gpt2giga.features.files.store import get_file_store
 from gpt2giga.features.files_batches import get_files_batches_service_from_state
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.gigachat.resource_api import retrieve_file_content
 
 
 @dataclass(slots=True)
@@ -153,7 +154,10 @@ async def load_admin_batch_output_content(
             detail=f"Batch `{batch_record.id}` output is not available yet.",
         )
 
-    file_response = await context.giga_client.aget_file_content(file_id=output_file_id)
+    file_response = await retrieve_file_content(
+        context.giga_client,
+        file_id=output_file_id,
+    )
     if output_api_format == "anthropic":
         return (
             _build_anthropic_batch_results(file_response.content, raw_metadata),
@@ -190,8 +194,8 @@ async def resolve_batch_output_api_format(
 
     if input_file_id:
         try:
-            input_file_response = await giga_client.aget_file_content(
-                file_id=input_file_id
+            input_file_response = await retrieve_file_content(
+                giga_client, file_id=input_file_id
             )
             input_rows = parse_jsonl(base64.b64decode(input_file_response.content))
         except Exception:

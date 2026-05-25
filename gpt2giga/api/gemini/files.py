@@ -32,6 +32,7 @@ from gpt2giga.features.files import get_files_service_from_state
 from gpt2giga.features.files.contracts import FileMetadata
 from gpt2giga.features.files.store import get_file_store
 from gpt2giga.providers.gigachat.client import get_gigachat_client
+from gpt2giga.providers.gigachat.resource_api import retrieve_file_content
 
 router = APIRouter(tags=[provider_tag(TAG_FILES, PROVIDER_GEMINI)])
 upload_router = APIRouter(tags=[provider_tag(TAG_FILES, PROVIDER_GEMINI)])
@@ -270,7 +271,10 @@ async def download_file(file_id: str, request: Request):
         normalized_file_id,
     )
     if batch_metadata and batch_metadata.get("api_format") == "gemini_generate_content":
-        file_response = await giga_client.aget_file_content(file_id=normalized_file_id)
+        file_response = await retrieve_file_content(
+            giga_client,
+            file_id=normalized_file_id,
+        )
         content = build_gemini_batch_output_file(
             file_response.content,
             batch_metadata=dict(batch_metadata),

@@ -248,6 +248,7 @@ class FakeBatchesService:
 
 class FakeFilesContentClient:
     def __init__(self):
+        self.a_files = self
         self.files = {
             "file-openai-1": (
                 b'{"custom_id":"req-1","method":"POST","url":"/v1/chat/completions","body":{"model":"gpt-test","messages":[{"role":"user","content":"hello"}]}}\n'
@@ -263,7 +264,7 @@ class FakeFilesContentClient:
             ),
         }
 
-    async def aget_file_content(self, file_id: str):
+    async def retrieve_content(self, file_id: str):
         return SimpleNamespace(
             content=base64.b64encode(self.files[file_id]).decode("utf-8")
         )

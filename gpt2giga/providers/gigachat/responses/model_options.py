@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, Optional
 
-from gigachat.models import ChatV2ModelOptions, ChatV2Reasoning, ChatV2ResponseFormat
+from gigachat.models import ChatModelOptions, ChatReasoning, ChatResponseFormat
 
 from gpt2giga.core.schema.json_schema import normalize_json_schema, resolve_schema_refs
 from gpt2giga.providers.gigachat.request_mapping_base import RequestTransformerBaseMixin
@@ -14,7 +14,7 @@ class ResponsesV2ModelOptionsMixin(RequestTransformerBaseMixin):
     def _build_response_v2_model_options(
         self,
         data: Dict[str, Any],
-    ) -> Optional[ChatV2ModelOptions]:
+    ) -> Optional[ChatModelOptions]:
         options: Dict[str, Any] = {}
 
         temperature = data.get("temperature")
@@ -39,9 +39,9 @@ class ResponsesV2ModelOptionsMixin(RequestTransformerBaseMixin):
         if isinstance(reasoning, dict):
             effort = reasoning.get("effort")
             if effort in {"low", "medium", "high"}:
-                options["reasoning"] = ChatV2Reasoning(effort=effort)
+                options["reasoning"] = ChatReasoning(effort=effort)
         elif getattr(self.config.proxy_settings, "enable_reasoning", False):
-            options["reasoning"] = ChatV2Reasoning(effort="high")
+            options["reasoning"] = ChatReasoning(effort="high")
 
         text_config = data.get("text")
         if isinstance(text_config, dict):
@@ -49,7 +49,7 @@ class ResponsesV2ModelOptionsMixin(RequestTransformerBaseMixin):
             if isinstance(response_format, dict):
                 format_type = response_format.get("type")
                 if format_type == "text":
-                    options["response_format"] = ChatV2ResponseFormat(type="text")
+                    options["response_format"] = ChatResponseFormat(type="text")
                 elif format_type == "json_schema":
                     schema_holder = response_format.get("json_schema")
                     if isinstance(schema_holder, dict):
@@ -66,10 +66,10 @@ class ResponsesV2ModelOptionsMixin(RequestTransformerBaseMixin):
                             "`text.format.schema` must be an object for json_schema responses.",
                             param="text",
                         )
-                    options["response_format"] = ChatV2ResponseFormat(
+                    options["response_format"] = ChatResponseFormat(
                         type="json_schema",
                         schema=normalize_json_schema(resolve_schema_refs(schema)),
                         strict=strict,
                     )
 
-        return ChatV2ModelOptions(**options) if options else None
+        return ChatModelOptions(**options) if options else None

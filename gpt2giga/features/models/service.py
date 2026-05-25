@@ -18,6 +18,7 @@ from gpt2giga.features.models.contracts import (
     ModelsUpstreamClient,
 )
 from gpt2giga.providers.gigachat.models_mapper import GigaChatModelsMapper
+from gpt2giga.providers.gigachat.resource_api import list_models, retrieve_model
 
 
 class ModelsService:
@@ -35,9 +36,7 @@ class ModelsService:
         include_embeddings_model: bool = False,
     ) -> ModelListData:
         """Return internal descriptors for available models."""
-        descriptors = list(
-            self.mapper.list_descriptors(await giga_client.aget_models())
-        )
+        descriptors = list(self.mapper.list_descriptors(await list_models(giga_client)))
         if (
             self.normalized_embeddings_model
             and include_embeddings_model
@@ -66,7 +65,9 @@ class ModelsService:
             and _normalize_model_id(model) == self.normalized_embeddings_model
         ):
             return self.mapper.build_embeddings_descriptor(model)
-        return self.mapper.build_descriptor(await giga_client.aget_model(model=model))
+        return self.mapper.build_descriptor(
+            await retrieve_model(giga_client, model=model)
+        )
 
 
 def get_models_service_from_state(state: Any) -> Any:

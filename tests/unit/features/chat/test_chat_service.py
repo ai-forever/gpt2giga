@@ -38,17 +38,16 @@ class FakeMapper:
         }
 
 
-class FakeClient:
-    def __init__(self):
-        self.last_request = None
-        self.last_request_v2 = None
+class FakeChatResource:
+    def __init__(self, owner):
+        self.owner = owner
 
-    async def achat(self, chat):
-        self.last_request = chat
+    async def __call__(self, chat):
+        self.owner.last_request = chat
         return SimpleNamespace(payload=chat)
 
-    async def achat_v2(self, chat):
-        self.last_request_v2 = chat
+    async def create(self, chat):
+        self.owner.last_request_v2 = chat
         return SimpleNamespace(
             payload={
                 "messages": [
@@ -60,6 +59,13 @@ class FakeClient:
                 "finish_reason": "stop",
             }
         )
+
+
+class FakeClient:
+    def __init__(self):
+        self.last_request = None
+        self.last_request_v2 = None
+        self.achat = FakeChatResource(self)
 
 
 class LegacyRequestTransformer:

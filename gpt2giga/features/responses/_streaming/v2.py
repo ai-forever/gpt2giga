@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, MutableMapping
 from typing import Any, Optional, cast
-from gigachat.models import Chat, ChatV2
+
+from gigachat.models import Chat, ChatCompletionRequest
 from starlette.requests import Request
 
 from gpt2giga.app.dependencies import (
@@ -40,7 +41,7 @@ from gpt2giga.providers.gigachat.streaming import (
 
 async def stream_responses_generator(
     request: Request,
-    chat_messages: ChatV2 | Chat | Any,
+    chat_messages: ChatCompletionRequest | Chat | Any,
     response_id: str,
     giga_client: Any = None,
     request_data: Optional[dict[str, Any]] = None,

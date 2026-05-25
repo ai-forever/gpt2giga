@@ -20,23 +20,34 @@ ResponsesMetadataStore: TypeAlias = MutableMapping[str, Any]
 ResponsesBackendMode: TypeAlias = Literal["v1", "v2"]
 
 
+class ResponsesChatResource(Protocol):
+    """GigaChat chat resource surface used by Responses calls."""
+
+    async def create(self, chat: PreparedResponsesRequest) -> Any:
+        """Run a non-streaming primary chat request."""
+
+    def stream(self, chat: PreparedResponsesRequest) -> AsyncIterator[Any]:
+        """Run a streaming primary chat request."""
+
+    async def __call__(self, chat: PreparedResponsesRequest) -> Any:
+        """Run a legacy chat request through the callable namespace shim."""
+
+
+class ResponsesFilesResource(Protocol):
+    """GigaChat files resource surface used by Responses calls."""
+
+    async def retrieve_content(self, file_id: str) -> Any:
+        """Return provider file contents as a base64 payload."""
+
+
 class ResponsesUpstreamClient(Protocol):
     """Minimal upstream client surface required by the responses feature."""
 
-    async def achat(self, chat: PreparedResponsesRequest) -> Any:
-        """Run a non-streaming legacy Responses API request."""
-
-    async def achat_v2(self, chat: PreparedResponsesRequest) -> Any:
-        """Run a non-streaming Responses API request."""
-
-    async def aget_file_content(self, file_id: str) -> Any:
-        """Return provider file contents as a base64 payload."""
+    achat: ResponsesChatResource
+    a_files: ResponsesFilesResource
 
     def astream(self, chat: PreparedResponsesRequest) -> AsyncIterator[Any]:
         """Run a streaming legacy Responses API request."""
-
-    def astream_v2(self, chat: PreparedResponsesRequest) -> AsyncIterator[Any]:
-        """Run a streaming Responses API request."""
 
 
 class ResponsesRequestPreparer(Protocol):

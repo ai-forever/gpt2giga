@@ -29,6 +29,8 @@ from gpt2giga.core.config.observability import (
     ObservabilitySettingsUpdate,
 )
 from gpt2giga.core.config.settings import ProxyConfig
+from gpt2giga.providers.gigachat.client import dump_gigachat_settings
+from gpt2giga.providers.gigachat.resource_api import list_models
 
 from gpt2giga.app._admin_settings.models import (
     ApplicationSettingsUpdate,
@@ -200,9 +202,9 @@ class AdminControlPlaneSettingsService:
 
             gigachat_factory = GigaChat
 
-        client = gigachat_factory(**updated.gigachat_settings.model_dump())
+        client = gigachat_factory(**dump_gigachat_settings(updated.gigachat_settings))
         try:
-            models_response = await client.aget_models()
+            models_response = await list_models(client)
             raw_models = list(getattr(models_response, "data", []) or [])
             sample_models: list[str] = []
             for model in raw_models[:5]:

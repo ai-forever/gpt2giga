@@ -23,6 +23,7 @@ from gpt2giga.providers.gigachat.embeddings_mapper import (
     apply_embedding_encoding_format,
     normalize_embedding_response,
 )
+from gpt2giga.providers.gigachat.resource_api import create_embeddings
 
 
 class EmbeddingsService:
@@ -59,7 +60,8 @@ class EmbeddingsService:
         """Execute an embeddings request from an OpenAI-style payload."""
         request_payload = to_backend_payload(data)
         prepared_request = await self.prepare_request(data)
-        response = await giga_client.aembeddings(
+        response = await create_embeddings(
+            giga_client,
             texts=prepared_request["input"],
             model=prepared_request["model"],
         )
@@ -79,7 +81,11 @@ class EmbeddingsService:
         giga_client: EmbeddingsUpstreamClient,
     ) -> Any:
         """Execute an embeddings request for already-normalized texts."""
-        return await giga_client.aembeddings(texts=texts, model=self.embeddings_model)
+        return await create_embeddings(
+            giga_client,
+            texts=texts,
+            model=self.embeddings_model,
+        )
 
 
 def get_embeddings_service_from_state(state: Any) -> Any:

@@ -99,21 +99,30 @@ class FakeResponseProcessor:
         }
 
 
+class FakeChatResource:
+    def __init__(self, owner):
+        self.owner = owner
+
+    async def __call__(self, chat):
+        self.owner.last_legacy_request = chat
+        return SimpleNamespace(payload=chat)
+
+    async def create(self, chat):
+        self.owner.last_request = chat
+        return SimpleNamespace(payload=chat)
+
+
+class FakeFilesResource:
+    async def retrieve_content(self, file_id):
+        return SimpleNamespace(content=f"b64:{file_id}")
+
+
 class FakeClient:
     def __init__(self):
         self.last_request = None
         self.last_legacy_request = None
-
-    async def achat(self, chat):
-        self.last_legacy_request = chat
-        return SimpleNamespace(payload=chat)
-
-    async def achat_v2(self, chat):
-        self.last_request = chat
-        return SimpleNamespace(payload=chat)
-
-    async def aget_file_content(self, file_id):
-        return SimpleNamespace(content=f"b64:{file_id}")
+        self.achat = FakeChatResource(self)
+        self.a_files = FakeFilesResource()
 
 
 @pytest.mark.asyncio

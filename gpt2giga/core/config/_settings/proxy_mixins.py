@@ -116,9 +116,9 @@ class ProviderProxySettingsMixin:
             "'v1' направляет OpenAI chat/completions, Anthropic messages, "
             "Gemini generateContent и batch chat requests через legacy API "
             "(achat/astream). "
-            "'v2' направляет эти capability через native v2 API "
-            "(achat_v2/astream_v2). Responses API может быть переопределен "
-            "отдельно через `gigachat_responses_api_mode`."
+            "'v2' направляет эти capability через primary chat resource API "
+            "(achat.create/achat.stream). Responses API может быть "
+            "переопределен отдельно через `gigachat_responses_api_mode`."
         ),
     )
     gigachat_responses_api_mode: GigaChatAPIMode | None = Field(
@@ -127,7 +127,7 @@ class ProviderProxySettingsMixin:
             "Опциональное переопределение backend API GigaChat только для "
             "OpenAI Responses API. Пусто = использовать `gigachat_api_mode`. "
             "'v1' направляет /responses через legacy API (achat/astream), "
-            "'v2' через native v2 API (achat_v2/astream_v2)."
+            "'v2' через primary chat resource API (achat.create/achat.stream)."
         ),
     )
     embeddings: str = Field(

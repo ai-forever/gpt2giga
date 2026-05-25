@@ -11,6 +11,7 @@ from gigachat import GigaChat
 from gpt2giga.features.responses._streaming.events import (
     ResponsesStreamEventSequencer,
 )
+from gpt2giga.providers.gigachat.resource_api import retrieve_file_content
 
 
 def _empty_output_text_part() -> dict[str, Any]:
@@ -522,12 +523,8 @@ class ResponsesV2StreamState:
             item["result"] = cached_result
             return item
 
-        get_file_content = getattr(giga_client, "aget_file_content", None)
-        if not callable(get_file_content):
-            return item
-
         try:
-            file_response = await get_file_content(file_id=file_id)
+            file_response = await retrieve_file_content(giga_client, file_id=file_id)
         except Exception:
             return item
 

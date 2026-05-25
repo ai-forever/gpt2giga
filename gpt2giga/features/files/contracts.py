@@ -31,27 +31,33 @@ class FileMetadata(TypedDict, total=False):
     sha256_hash: str
 
 
-class FilesUpstreamClient(Protocol):
-    """Minimal upstream client surface required by the files feature."""
+class FilesResource(Protocol):
+    """GigaChat files resource surface."""
 
-    async def aupload_file(
+    async def upload(
         self,
         file: tuple[str | None, bytes, str],
         purpose: str,
     ) -> Any:
         """Upload a file to the provider."""
 
-    async def aget_files(self) -> Any:
+    async def list(self) -> Any:
         """List provider files."""
 
-    async def aget_file(self, file: str) -> Any:
+    async def retrieve(self, file: str) -> Any:
         """Retrieve provider file metadata."""
 
-    async def adelete_file(self, file: str) -> Any:
+    async def delete(self, file: str) -> Any:
         """Delete a provider file."""
 
-    async def aget_file_content(self, file_id: str) -> Any:
+    async def retrieve_content(self, file_id: str) -> Any:
         """Return provider file contents as a base64 payload."""
+
+
+class FilesUpstreamClient(Protocol):
+    """Minimal upstream client surface required by the files feature."""
+
+    a_files: FilesResource
 
 
 class BatchResultProcessor(Protocol):
