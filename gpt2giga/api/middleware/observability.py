@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import AsyncIterator, Callable
 
 from fastapi.routing import APIRoute
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import Headers
 from starlette.requests import Request
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
 from gpt2giga.api.tags import resolve_tag_provider
 from gpt2giga.app.dependencies import get_config_from_state
 from gpt2giga.app.observability import (
@@ -28,45 +29,86 @@ _IGNORED_PREFIXES = (
 )
 
 
-class ObservabilityMiddleware(BaseHTTPMiddleware):
+class ObservabilityMiddleware:
     """Record recent request and error events for admin observability."""
 
-    async def dispatch(self, request: Request, call_next: Callable):
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive)
         started_at = datetime.now(UTC).isoformat()
         started = perf_counter()
-        response = None
+        stream_started: float | None = None
+        response_status_code: int | None = None
+        response_headers: Headers | None = None
         error_type: str | None = None
+        recorded = False
+
+        def is_streaming_response() -> bool:
+            content_type = (
+                response_headers.get("content-type", "")
+                if response_headers is not None
+                else ""
+            )
+            return content_type.startswith("text/event-stream")
+
+        def record_once(final_error_type: str | None) -> None:
+            nonlocal recorded
+            if recorded or response_status_code is None:
+                return
+            recorded = True
+            is_stream = is_streaming_response()
+            now = perf_counter()
+            self._record_event(
+                request,
+                response_status_code=response_status_code,
+                started_at=started_at,
+                duration_ms=round((now - started) * 1000, 3),
+                stream_duration_ms=(
+                    round((now - stream_started) * 1000, 3)
+                    if is_stream and stream_started is not None
+                    else None
+                ),
+                error_type=final_error_type,
+                request_id=(
+                    response_headers.get("x-request-id")
+                    if response_headers is not None
+                    else None
+                ),
+            )
+
+        async def send_with_observability(message: Message) -> None:
+            nonlocal response_headers, response_status_code, stream_started
+            is_final_body = False
+            if message["type"] == "http.response.start":
+                response_status_code = int(message["status"])
+                response_headers = Headers(raw=message.get("headers") or [])
+                if is_streaming_response():
+                    stream_started = perf_counter()
+            elif message["type"] == "http.response.body" and not message.get(
+                "more_body",
+                False,
+            ):
+                is_final_body = True
+
+            await send(message)
+            if is_final_body:
+                record_once(error_type)
 
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, send_with_observability)
         except Exception as exc:
             error_type = type(exc).__name__
             set_request_audit_error(request, error_type)
+            record_once(error_type)
             raise
-        if response is None:
-            return None
-
-        content_type = response.headers.get("content-type", "")
-        if content_type.startswith("text/event-stream"):
-            self._wrap_streaming_response(
-                request,
-                response,
-                started_at=started_at,
-                started=started,
-                error_type=error_type,
-            )
-            return response
-
-        self._record_event(
-            request,
-            response_status_code=response.status_code,
-            started_at=started_at,
-            duration_ms=round((perf_counter() - started) * 1000, 3),
-            stream_duration_ms=None,
-            error_type=error_type,
-            request_id=response.headers.get("x-request-id"),
-        )
-        return response
+        finally:
+            record_once(error_type)
 
     def _build_event(
         self,
@@ -138,43 +180,6 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         )
         if event is not None:
             record_request_event(request.app.state, event)
-
-    def _wrap_streaming_response(
-        self,
-        request: Request,
-        response,
-        *,
-        started_at: str,
-        started: float,
-        error_type: str | None,
-    ) -> None:
-        body_iterator = response.body_iterator
-        stream_started = perf_counter()
-
-        async def observed_body_iterator() -> AsyncIterator[bytes | str]:
-            final_error_type = error_type
-            try:
-                async for chunk in body_iterator:
-                    yield chunk
-            except Exception as exc:
-                final_error_type = type(exc).__name__
-                set_request_audit_error(request, final_error_type)
-                raise
-            finally:
-                self._record_event(
-                    request,
-                    response_status_code=response.status_code,
-                    started_at=started_at,
-                    duration_ms=round((perf_counter() - started) * 1000, 3),
-                    stream_duration_ms=round(
-                        (perf_counter() - stream_started) * 1000,
-                        3,
-                    ),
-                    error_type=final_error_type,
-                    request_id=response.headers.get("x-request-id"),
-                )
-
-        response.body_iterator = observed_body_iterator()
 
 
 def _resolve_endpoint(route: object, request: Request) -> str:

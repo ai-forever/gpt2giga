@@ -51,6 +51,50 @@ async def test_iter_stream_with_disconnect_stops_after_disconnect():
     logger.info.assert_called_once_with("[rq-1] Client disconnected during streaming")
 
 
+@pytest.mark.asyncio
+async def test_iter_stream_with_disconnect_closes_upstream_after_disconnect():
+    request = DummyRequest([True])
+    closed = False
+
+    async def stream():
+        nonlocal closed
+        try:
+            yield "chunk-1"
+            yield "chunk-2"
+        finally:
+            closed = True
+
+    stream_iter = stream()
+    chunks = []
+    async for chunk in iter_stream_with_disconnect(request, stream_iter):
+        chunks.append(chunk)
+
+    assert chunks == []
+    assert closed is True
+
+
+@pytest.mark.asyncio
+async def test_iter_stream_with_disconnect_closes_upstream_when_consumer_stops():
+    request = DummyRequest([False])
+    closed = False
+
+    async def stream():
+        nonlocal closed
+        try:
+            yield "chunk-1"
+            yield "chunk-2"
+        finally:
+            closed = True
+
+    stream_iter = stream()
+    observed_iter = iter_stream_with_disconnect(request, stream_iter)
+
+    assert await anext(observed_iter) == "chunk-1"
+    await observed_iter.aclose()
+
+    assert closed is True
+
+
 def test_report_stream_failure_wraps_provider_error():
     request = DummyRequest([False])
     logger = MagicMock()

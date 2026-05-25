@@ -153,12 +153,19 @@ async def iter_stream_with_disconnect(
     rquid: str | None = None,
 ) -> AsyncIterator[StreamChunkT]:
     """Yield stream chunks until the client disconnects."""
-    async for chunk in stream_iter:
-        if await request.is_disconnected():
-            if logger:
-                logger.info(f"{_log_prefix(rquid)}Client disconnected during streaming")
-            break
-        yield chunk
+    try:
+        async for chunk in stream_iter:
+            if await request.is_disconnected():
+                if logger:
+                    logger.info(
+                        f"{_log_prefix(rquid)}Client disconnected during streaming"
+                    )
+                break
+            yield chunk
+    finally:
+        aclose = getattr(stream_iter, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
 
 def report_stream_failure(
