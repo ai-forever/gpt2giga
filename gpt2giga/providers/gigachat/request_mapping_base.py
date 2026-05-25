@@ -62,11 +62,12 @@ class RequestTransformerBaseMixin:
         if not self.config.proxy_settings.pass_model and gpt_model:
             del transformed["model"]
 
-        temperature = transformed.pop("temperature", 0)
-        if temperature == 0:
-            transformed["top_p"] = 0
-        elif temperature > 0:
-            transformed["temperature"] = temperature
+        temperature = transformed.pop("temperature", None)
+        if temperature is not None:
+            if temperature == 0:
+                transformed["top_p"] = 0
+            elif temperature > 0:
+                transformed["temperature"] = temperature
 
         max_tokens = transformed.pop("max_output_tokens", None)
         if max_tokens:
@@ -113,6 +114,22 @@ class RequestTransformerBaseMixin:
 
         transformed["functions"].append(function_def)
         transformed["function_call"] = {"name": schema_name}
+
+    @staticmethod
+    def _apply_json_schema_natively(
+        transformed: Dict,
+        schema: Dict,
+        strict: Any = None,
+    ) -> None:
+        """Apply JSON schema as a native GigaChat response format."""
+        resolved_schema = resolve_schema_refs(schema)
+        response_format: Dict[str, Any] = {
+            "type": "json_schema",
+            "schema": resolved_schema,
+        }
+        if strict is not None:
+            response_format["strict"] = strict
+        transformed["response_format"] = response_format
 
     @staticmethod
     def _invalid_request(

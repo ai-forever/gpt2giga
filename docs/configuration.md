@@ -255,10 +255,11 @@ client = OpenAI(
 )
 ```
 
-Если хотите, чтобы клиентская модель пробрасывалась в upstream без замены на `GIGACHAT_MODEL`, включите:
+Клиентская модель по умолчанию пробрасывается в upstream без замены на `GIGACHAT_MODEL`.
+Чтобы принудительно использовать модель из настроек proxy, отключите:
 
 ```dotenv
-GPT2GIGA_PASS_MODEL=True
+GPT2GIGA_PASS_MODEL=False
 ```
 
 ## HTTPS

@@ -95,6 +95,7 @@
     }
   },
   "backend_payload": {
+    "model": "claude-test",
     "messages": [
       {
         "role": "system",

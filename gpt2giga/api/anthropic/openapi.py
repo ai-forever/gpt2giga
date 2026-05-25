@@ -138,6 +138,11 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
                 "description": "Thinking budget (mapped to reasoning_effort best effort).",
                 "additionalProperties": True,
             },
+            "output_config": {
+                "type": "object",
+                "description": "Structured output config (`format.type=json_schema`).",
+                "additionalProperties": True,
+            },
         },
         "additionalProperties": True,
     }
@@ -170,7 +175,34 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
                     "messages": [{"role": "user", "content": "Stream it"}],
                     "stream": True,
                 },
-            }
+            },
+            "structured_output": {
+                "summary": "Structured JSON output",
+                "value": {
+                    "model": "GigaChat-2-Max",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "Extract contact information from this text.",
+                        }
+                    ],
+                    "max_tokens": 256,
+                    "output_config": {
+                        "format": {
+                            "type": "json_schema",
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string"},
+                                    "email": {"type": "string"},
+                                },
+                                "required": ["name", "email"],
+                                "additionalProperties": False,
+                            },
+                        }
+                    },
+                },
+            },
         },
         description=description,
     )
@@ -268,6 +300,11 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
                                         "additionalProperties": True,
                                     },
                                 },
+                                "output_config": {
+                                    "type": "object",
+                                    "description": "Structured output config (`format.type=json_schema`).",
+                                    "additionalProperties": True,
+                                },
                             },
                             "additionalProperties": True,
                         },
@@ -319,6 +356,19 @@ def anthropic_message_batches_openapi_extra() -> Dict[str, Any]:
                                 "content": "Summarize yesterday's deployment notes.",
                             }
                         ],
+                        "output_config": {
+                            "format": {
+                                "type": "json_schema",
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "summary": {"type": "string"},
+                                    },
+                                    "required": ["summary"],
+                                    "additionalProperties": False,
+                                },
+                            }
+                        },
                         "tools": [
                             {
                                 "name": "lookup_release_notes",

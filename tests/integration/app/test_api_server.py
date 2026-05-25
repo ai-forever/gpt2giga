@@ -344,7 +344,7 @@ def test_v1_translate_endpoint_converts_openai_chat_to_gigachat(monkeypatch):
     assert body["to"] == "gigachat"
     assert body["kind"] == "chat"
     assert "endpoint" not in body
-    assert "model" not in body["payload"]
+    assert body["payload"]["model"] == "GigaChat-2-Max"
     assert body["payload"]["stream"] is False
     assert body["payload"]["temperature"] == 0.1
     assert body["payload"]["messages"] == [{"role": "user", "content": "Hello"}]

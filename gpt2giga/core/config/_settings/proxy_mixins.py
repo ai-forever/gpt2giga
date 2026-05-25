@@ -94,7 +94,7 @@ class ProviderProxySettingsMixin:
     """Provider selection and backend-routing settings."""
 
     pass_model: bool = Field(
-        default=False,
+        default=True,
         description="Передавать модель из запроса в API",
     )
     pass_token: bool = Field(
@@ -141,6 +141,13 @@ class ProviderProxySettingsMixin:
             "в payload к GigaChat, если клиент не указал reasoning_effort явно"
         ),
     )
+    structured_output_mode: Literal["function_call", "native"] = Field(
+        default="function_call",
+        description=(
+            "Режим structured output: function_call использует совместимый "
+            "function-calling fallback, native передает response_format в GigaChat"
+        ),
+    )
 
     @field_validator("enabled_providers", mode="before")
     @classmethod
@@ -157,6 +164,12 @@ class ProviderProxySettingsMixin:
     def normalize_gigachat_api_mode(cls, value: Any) -> Any:
         """Normalize backend mode names from ENV/CLI friendly forms."""
         return normalize_api_mode(value)
+
+    @field_validator("structured_output_mode", mode="before")
+    @classmethod
+    def normalize_structured_output_mode(cls, value: Any) -> Any:
+        """Normalize structured output mode names from ENV/CLI friendly forms."""
+        return normalize_lowercase_string(value)
 
     @property
     def chat_backend_mode(self) -> Literal["v1", "v2"]:

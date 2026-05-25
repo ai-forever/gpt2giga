@@ -17,6 +17,8 @@ class ResponsesResultBuilderMixin(
 ):
     """Assemble top-level Responses API payloads."""
 
+    _structured_output_mode: str
+
     @classmethod
     def _build_responses_api_result(
         cls,
@@ -134,7 +136,9 @@ class ResponsesResultBuilderMixin(
 
         is_structured_output = False
         text_param = data.get("text")
-        if text_param and isinstance(text_param, dict):
+        if self._structured_output_mode == "function_call" and isinstance(
+            text_param, dict
+        ):
             fmt = text_param.get("format")
             if fmt and isinstance(fmt, dict) and fmt.get("type") == "json_schema":
                 is_structured_output = True

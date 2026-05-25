@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Query, Request, Response
 
 from gpt2giga.api.anthropic.openapi import anthropic_message_batches_openapi_extra
+from gpt2giga.api.anthropic.request import _is_anthropic_structured_output_request
 from gpt2giga.api.anthropic.response import (
     _anthropic_http_exception,
     _build_anthropic_response,
@@ -223,10 +224,14 @@ def _build_anthropic_batch_results(
             ):
                 anthropic_message = message_payload
             else:
+                structured_output_fallback = batch_metadata.get(
+                    "structured_output_mode", "function_call"
+                ) == "function_call" and _is_anthropic_structured_output_request(params)
                 anthropic_message = _build_anthropic_response(
                     message_payload,
                     params.get("model", "unknown"),
                     request_id,
+                    is_structured_output=structured_output_fallback,
                 )
 
             anthropic_result = {
@@ -274,6 +279,7 @@ async def create_message_batch(request: Request):
         metadata={
             "api_format": "anthropic_messages",
             "requests": batch_payload.stored_requests,
+            "structured_output_mode": request.app.state.config.proxy_settings.structured_output_mode,
         },
         giga_client=giga_client,
         batch_store=get_batch_store(request),

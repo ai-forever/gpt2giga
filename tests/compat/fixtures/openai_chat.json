@@ -89,6 +89,7 @@
     }
   },
   "backend_payload": {
+    "model": "gpt-x",
     "messages": [
       {
         "role": "system",

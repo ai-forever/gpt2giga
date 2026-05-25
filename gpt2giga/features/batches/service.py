@@ -40,10 +40,12 @@ class BatchesService:
         *,
         embeddings_model: str,
         gigachat_api_mode: str = "v1",
+        pass_model: bool = False,
     ):
         self.request_transformer = request_transformer
         self.embeddings_model = embeddings_model
         self.gigachat_api_mode = gigachat_api_mode
+        self.pass_model = pass_model
 
     async def create_batch(
         self,
@@ -151,6 +153,7 @@ class BatchesService:
             giga_client=giga_client,
             embeddings_model=self.embeddings_model,
             gigachat_api_mode=self.gigachat_api_mode,
+            pass_model=self.pass_model,
         )
         batch = await giga_client.acreate_batch(
             transformed_content,
@@ -414,6 +417,7 @@ def get_batches_service_from_state(state: Any) -> Any:
         request_transformer,
         embeddings_model=config.proxy_settings.embeddings,
         gigachat_api_mode=config.proxy_settings.chat_backend_mode,
+        pass_model=config.proxy_settings.pass_model,
     )
     return set_runtime_service(state, "batches", service)
 

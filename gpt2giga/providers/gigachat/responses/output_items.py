@@ -9,6 +9,10 @@ from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEv
 from gpt2giga.providers.gigachat.response_mapping_common import (
     ResponseProcessorCommonMixin,
 )
+from gpt2giga.providers.gigachat.reasoning import (
+    extract_reasoning_from_content,
+    merge_reasoning_text,
+)
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
@@ -425,6 +429,15 @@ class ResponsesOutputItemsMixin(ResponseProcessorCommonMixin):
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
+            content = message.get("content")
+            if isinstance(content, str) and content:
+                parsed_content = extract_reasoning_from_content(content)
+                if parsed_content.reasoning_content:
+                    message["content"] = parsed_content.content
+                    message["reasoning_content"] = merge_reasoning_text(
+                        message.get("reasoning_content"),
+                        parsed_content.reasoning_content,
+                    )
 
             if message.get("role") == "assistant" and message.get("function_call"):
                 self._process_function_call_responses(message, response_id)

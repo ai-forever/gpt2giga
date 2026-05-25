@@ -11,6 +11,7 @@ from gpt2giga.app.dependencies import (
     set_runtime_provider,
     set_runtime_service,
 )
+from gpt2giga.core.contracts import to_backend_payload
 from gpt2giga.features.embeddings.contracts import (
     EmbeddingsProviderMapper,
     EmbeddingsRequestData,
@@ -18,14 +19,25 @@ from gpt2giga.features.embeddings.contracts import (
     PreparedEmbeddingsRequest,
 )
 from gpt2giga.providers.gigachat.embeddings_mapper import GigaChatEmbeddingsMapper
+from gpt2giga.providers.gigachat.embeddings_mapper import (
+    apply_embedding_encoding_format,
+    normalize_embedding_response,
+)
 
 
 class EmbeddingsService:
     """Coordinate the internal embeddings flow."""
 
-    def __init__(self, mapper: EmbeddingsProviderMapper, *, embeddings_model: str):
+    def __init__(
+        self,
+        mapper: EmbeddingsProviderMapper,
+        *,
+        embeddings_model: str,
+        pass_model: bool = False,
+    ):
         self.mapper = mapper
         self.embeddings_model = embeddings_model
+        self.pass_model = pass_model
 
     async def prepare_request(
         self,
@@ -35,6 +47,7 @@ class EmbeddingsService:
         return await self.mapper.prepare_request(
             data,
             embeddings_model=self.embeddings_model,
+            pass_model=self.pass_model,
         )
 
     async def create_embeddings(
@@ -44,10 +57,19 @@ class EmbeddingsService:
         giga_client: EmbeddingsUpstreamClient,
     ) -> Any:
         """Execute an embeddings request from an OpenAI-style payload."""
+        request_payload = to_backend_payload(data)
         prepared_request = await self.prepare_request(data)
-        return await giga_client.aembeddings(
+        response = await giga_client.aembeddings(
             texts=prepared_request["input"],
             model=prepared_request["model"],
+        )
+        normalized = normalize_embedding_response(
+            response,
+            model=prepared_request["model"],
+        )
+        return apply_embedding_encoding_format(
+            normalized,
+            request_payload.get("encoding_format"),
         )
 
     async def embed_texts(
@@ -74,6 +96,10 @@ def get_embeddings_service_from_state(state: Any) -> Any:
         set_runtime_provider(state, "embeddings_mapper", mapper)
 
     config = get_config_from_state(state)
-    embeddings_model = config.proxy_settings.embeddings
-    service = EmbeddingsService(mapper, embeddings_model=embeddings_model)
+    proxy_settings = config.proxy_settings
+    service = EmbeddingsService(
+        mapper,
+        embeddings_model=proxy_settings.embeddings,
+        pass_model=proxy_settings.pass_model,
+    )
     return set_runtime_service(state, "embeddings", service)

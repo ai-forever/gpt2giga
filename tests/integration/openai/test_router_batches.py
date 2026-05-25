@@ -489,7 +489,7 @@ def test_batches_endpoints_translate_embeddings_flow():
     translated_line = json.loads(giga_client.last_batch_content.decode("utf-8").strip())
     assert translated_line["request"] == {
         "input": ["hello"],
-        "model": "EmbeddingsGigaR",
+        "model": "text-embedding-3-small",
     }
 
 

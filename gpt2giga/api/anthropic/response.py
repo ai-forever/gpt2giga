@@ -7,6 +7,10 @@ from typing import Optional
 from fastapi.responses import JSONResponse
 
 from gpt2giga.core.logging.setup import rquid_context
+from gpt2giga.providers.gigachat.reasoning import (
+    extract_reasoning_from_content,
+    merge_reasoning_text,
+)
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
@@ -21,10 +25,21 @@ def _map_stop_reason(finish_reason: Optional[str]) -> str:
     return mapping.get(finish_reason or "stop", "end_turn")
 
 
+def _tool_call_arguments_to_text(tool_call: dict) -> str:
+    """Extract function-call arguments as JSON text."""
+    function = tool_call.get("function", {})
+    arguments = function.get("arguments", {})
+    if isinstance(arguments, str):
+        return arguments
+    return json.dumps(arguments, ensure_ascii=False)
+
+
 def _build_anthropic_response(
     giga_dict: dict,
     model: str,
     response_id: str,
+    *,
+    is_structured_output: bool = False,
 ) -> dict:
     """Build Anthropic Messages API response from a GigaChat response."""
     choice = giga_dict["choices"][0]
@@ -33,19 +48,31 @@ def _build_anthropic_response(
     usage = giga_dict.get("usage", {})
 
     content_blocks: list[dict] = []
-    reasoning = message.get("reasoning_content")
+    parsed_content = extract_reasoning_from_content(message.get("content", "") or "")
+    reasoning = merge_reasoning_text(
+        message.get("reasoning_content"),
+        parsed_content.reasoning_content,
+    )
     if reasoning:
         content_blocks.append({"type": "thinking", "thinking": reasoning})
 
-    text_content = message.get("content", "") or ""
-    if text_content:
-        content_blocks.append({"type": "text", "text": text_content})
+    text_content = parsed_content.content
 
     tool_calls = list(message.get("tool_calls") or [])
     if message.get("function_call"):
         tool_calls.append({"function": message["function_call"]})
 
-    if tool_calls:
+    if is_structured_output and tool_calls:
+        content_blocks.append(
+            {
+                "type": "text",
+                "text": _tool_call_arguments_to_text(tool_calls[0]),
+            }
+        )
+        stop_reason = "end_turn"
+    elif tool_calls:
+        if text_content:
+            content_blocks.append({"type": "text", "text": text_content})
         for tool_call in tool_calls:
             function = tool_call.get("function", {})
             arguments = function.get("arguments", {})
@@ -67,6 +94,8 @@ def _build_anthropic_response(
             )
         stop_reason = "tool_use"
     else:
+        if text_content:
+            content_blocks.append({"type": "text", "text": text_content})
         if not content_blocks:
             content_blocks.append({"type": "text", "text": ""})
         stop_reason = _map_stop_reason(finish_reason)

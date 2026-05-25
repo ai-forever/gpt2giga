@@ -119,6 +119,24 @@
 - **Старый layout deploy/docs**: старое расположение `compose/`, `traefik/` и `integrations/` заменено новым `deploy/` и `docs/` layout
 - **Устаревшие тестовые файлы**: удалён заметный объём прежних плоских тестов после переноса на новую layered test-структуру
 
+## [0.1.6] - 2026-05-20
+### Добавлено
+- **Reasoning / think tags**: добавлено извлечение `<think>...</think>` в reasoning/thinking content для OpenAI Chat Completions, OpenAI Responses и Anthropic Messages, включая streaming
+- **Structured output mode**: добавлена поддержка `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` с режимами `function_call` и `native`
+- **Anthropic structured output**: добавлена поддержка `output_config.format` и legacy `output_format` с `json_schema`
+- **Embeddings dimensions**: добавлена проверка параметра `dimensions` для известных embedding-моделей
+
+### Изменено
+- **Model forwarding**: `GPT2GIGA_PASS_MODEL` применяется к `/embeddings` и batch-запросам на `/v1/embeddings`
+- **Примеры**: OpenAI и Anthropic runnable-примеры обновлены под актуальную структуру и модели `GigaChat-2-Max`
+- **Зависимости**: обновлены зависимости после security/dependabot bump
+
+### Исправлено
+- **Embeddings**: `encoding_format="base64"` теперь возвращает OpenAI-совместимые base64 float32 embeddings для прямого `/embeddings` и embeddings batches
+- **Embeddings input validation**: OpenAI-совместимая валидация отклоняет пустой или смешанный `input`, неподдерживаемый `encoding_format`, некорректный `model` и token id inputs без декодируемой модели
+- **Model/top_p mapping**: исправлена передача модели по умолчанию и предотвращена неявная установка `top_p=0`, когда клиент не передавал `temperature`
+- **Unsupported Files/Batches routes**: временно отключены неподдерживаемые OpenAI Files/Batches и Anthropic Message Batches маршруты в default routers до появления полной поддержки в GigaChat SDK
+
 ## [0.1.6a1] - 2026-03-24
 ### Добавлено
 - **OpenAI Files API**: добавлены эндпоинты `/files`, `/files/{file_id}` и `/files/{file_id}/content`, а также пример `examples/openai/files.py`
@@ -345,7 +363,8 @@
 
 ---
 
-[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...HEAD
+[0.1.6]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...v0.1.6
+[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...v0.1.6a1
 [0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4...v0.1.4.post1
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4

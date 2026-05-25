@@ -11,6 +11,11 @@ from gpt2giga.providers.gigachat.response_mapping_common import (
 from gpt2giga.providers.gigachat.responses import (
     ResponseProcessorResponsesMixin,
 )
+from gpt2giga.providers.gigachat.reasoning import (
+    ReasoningContentParser,
+    extract_reasoning_from_content,
+    merge_reasoning_text,
+)
 from gpt2giga.providers.gigachat.tool_mapping import map_tool_name_from_gigachat
 
 
@@ -20,13 +25,24 @@ class ResponseProcessor(
 ):
     """Transform GigaChat responses into OpenAI-compatible payloads."""
 
-    def __init__(self, logger=None, mode: str = "DEV"):
+    def __init__(
+        self,
+        logger=None,
+        mode: str = "DEV",
+        structured_output_mode: str = "function_call",
+    ):
         if logger is None:
             from loguru import logger as default_logger
 
             logger = default_logger
         self.logger = logger
         self._mode = mode.upper() if isinstance(mode, str) else "DEV"
+        self._structured_output_mode = (
+            structured_output_mode.lower()
+            if isinstance(structured_output_mode, str)
+            else "function_call"
+        )
+        self._reasoning_stream_parsers: dict[str, ReasoningContentParser] = {}
 
     def process_response(
         self,
@@ -41,7 +57,8 @@ class ResponseProcessor(
 
         is_structured_output = False
         if (
-            request_data
+            self._structured_output_mode == "function_call"
+            and request_data
             and request_data.get("response_format", {}).get("type") == "json_schema"
         ):
             is_structured_output = True
@@ -229,7 +246,8 @@ class ResponseProcessor(
 
         is_structured_output = False
         if (
-            request_data
+            self._structured_output_mode == "function_call"
+            and request_data
             and request_data.get("response_format", {}).get("type") == "json_schema"
         ):
             is_structured_output = True
@@ -238,6 +256,7 @@ class ResponseProcessor(
             self._process_choice(
                 choice,
                 is_tool_call,
+                response_id=response_id,
                 is_stream=True,
                 is_structured_output=is_structured_output,
             )
@@ -282,6 +301,7 @@ class ResponseProcessor(
         self,
         choice: Dict,
         is_tool_call: bool,
+        response_id: str | None = None,
         is_stream: bool = False,
         is_structured_output: bool = False,
     ):
@@ -315,6 +335,30 @@ class ResponseProcessor(
         if message_key in choice:
             message = choice[message_key]
             message["refusal"] = None
+            content = message.get("content")
+            if isinstance(content, str) and content:
+                if is_stream:
+                    parser_key = response_id or "_default"
+                    parser = self._reasoning_stream_parsers.setdefault(
+                        parser_key,
+                        ReasoningContentParser(),
+                    )
+                    parsed_content = parser.feed(content)
+                    if choice.get("finish_reason"):
+                        flushed = parser.flush()
+                        self._reasoning_stream_parsers.pop(parser_key, None)
+                        parsed_content.content += flushed.content
+                        parsed_content.reasoning_content += flushed.reasoning_content
+                else:
+                    parsed_content = extract_reasoning_from_content(content)
+                if parsed_content.reasoning_content:
+                    message["content"] = parsed_content.content
+                    message["reasoning_content"] = merge_reasoning_text(
+                        message.get("reasoning_content"),
+                        parsed_content.reasoning_content,
+                    )
+                elif parsed_content.content != content:
+                    message["content"] = parsed_content.content
             if message.get("function_call") and not is_structured_output:
                 self._process_function_call(message, is_tool_call)
 

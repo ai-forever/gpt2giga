@@ -7,6 +7,7 @@ from gpt2giga.api.anthropic.openapi import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
 )
+from gpt2giga.api.anthropic.request import _is_anthropic_structured_output_request
 from gpt2giga.api.anthropic.response import _build_anthropic_response
 from gpt2giga.api.anthropic.streaming import _stream_anthropic_generator
 from gpt2giga.api.tags import (
@@ -85,6 +86,10 @@ async def messages(request: Request):
         normalized_request,
         giga_client=giga_client,
     )
+    structured_output_fallback = (
+        _is_anthropic_structured_output_request(data)
+        and app_state.config.proxy_settings.structured_output_mode == "function_call"
+    )
 
     if not stream:
         response = await chat_service.execute_prepared_request(
@@ -92,7 +97,12 @@ async def messages(request: Request):
             giga_client=giga_client,
         )
         giga_dict = chat_service.normalize_provider_response(response)
-        anthropic_response = _build_anthropic_response(giga_dict, model, current_rquid)
+        anthropic_response = _build_anthropic_response(
+            giga_dict,
+            model,
+            current_rquid,
+            is_structured_output=structured_output_fallback,
+        )
         annotate_request_audit_from_payload(
             request,
             anthropic_response,
@@ -109,6 +119,7 @@ async def messages(request: Request):
             giga_client,
             api_mode=api_mode,
             response_processor=chat_service.response_processor,
+            is_structured_output=structured_output_fallback,
         ),
         media_type="text/event-stream",
     )

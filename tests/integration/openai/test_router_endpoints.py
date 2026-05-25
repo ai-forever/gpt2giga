@@ -596,6 +596,4 @@ def test_embeddings_with_token_ids(monkeypatch):
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert (
-        "data" in body and body["model"] == app.state.config.proxy_settings.embeddings
-    )
+    assert "data" in body and body["model"] == "gpt-x"

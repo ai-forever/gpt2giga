@@ -174,13 +174,13 @@ vim .env   # заполните GIGACHAT_*, GPT2GIGA_*
 **Вариант с observability** (mitmweb для отладки трафика):
 
 ```bash
-docker compose -f deploy/compose/observability.yaml --profile PROD up -d
+docker compose --env-file .env -f deploy/compose/observability.yaml --profile PROD up -d
 ```
 
 **Без observability** (только прокси):
 
 ```bash
-docker compose -f deploy/compose/base.yaml --profile PROD up -d
+docker compose --env-file .env -f deploy/compose/base.yaml --profile PROD up -d
 ```
 
 ---

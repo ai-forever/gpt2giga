@@ -803,7 +803,7 @@ def test_batch_embed_contents():
     ]
     assert (
         app.state.providers.gigachat_client.last_embedding_model
-        == app.state.config.proxy_settings.embeddings
+        == "gemini-embedding-001"
     )
 
 

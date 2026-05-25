@@ -15,7 +15,7 @@ image_path = "../../../image.png"
 # Getting the base64 string
 base64_image = encode_image(image_path)
 response = client.responses.create(
-    model="gpt-4o",
+    model="GigaChat-2-Max",
     input=[
         {
             "role": "user",

@@ -213,14 +213,15 @@ class NormalizedEmbeddingsRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    model: str
-    input: str | list[Any]
+    model: Any = None
+    input: Any = None
     options: dict[str, Any] = Field(default_factory=dict)
 
     def to_backend_payload(self) -> dict[str, Any]:
         """Render the canonical embeddings request into the backend payload."""
         payload = deepcopy(self.options)
-        payload["model"] = self.model
+        if self.model is not None:
+            payload["model"] = self.model
         payload["input"] = deepcopy(self.input)
         return payload
 

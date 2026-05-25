@@ -71,6 +71,25 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v4
 
+    - name: Prepare Docker tags
+      id: docker_tags
+      shell: bash
+      run: |
+        PYTHON_VERSION="${{ matrix.python-version }}"
+        VERSION="${{ steps.get_version.outputs.VERSION }}"
+
+        {
+          echo "tags<<EOF"
+          echo "${IMAGE_NAME}:python${PYTHON_VERSION}"
+          echo "${IMAGE_NAME}:python${PYTHON_VERSION}-${GITHUB_SHA}"
+          echo "${IMAGE_NAME}:${VERSION}-python${PYTHON_VERSION}"
+          if [ "${PYTHON_VERSION}" = "3.13" ]; then
+            echo "${IMAGE_NAME}:${VERSION}"
+            echo "${IMAGE_NAME}:latest"
+          fi
+          echo "EOF"
+        } >> "$GITHUB_OUTPUT"
+
     - name: Build and push Docker image
       if: matrix.publish-stable-tags != 'true'
       uses: docker/build-push-action@v5
@@ -100,12 +119,7 @@ jobs:
           PYTHON_VERSION=${{ matrix.python-version }}
         push: true
         platforms: linux/amd64,linux/arm64
-        tags: |
-          ${{ env.IMAGE_NAME }}:python${{ matrix.python-version }}
-          ${{ env.IMAGE_NAME }}:python${{ matrix.python-version }}-${{ github.sha }}
-          ${{ env.IMAGE_NAME }}:${{ steps.get_version.outputs.VERSION }}-python${{ matrix.python-version }}
-          ${{ env.IMAGE_NAME }}:${{ steps.get_version.outputs.VERSION }}
-          ${{ env.IMAGE_NAME }}:latest
+        tags: ${{ steps.docker_tags.outputs.tags }}
         labels: |
           org.opencontainers.image.source=https://github.com/${{ github.repository }}
         cache-from: type=gha

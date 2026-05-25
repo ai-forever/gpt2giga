@@ -153,7 +153,7 @@ def build_normalized_embeddings_request(
     options.pop("model", None)
     options.pop("input", None)
     return NormalizedEmbeddingsRequest(
-        model=str(request_payload.get("model", "unknown")),
-        input=deepcopy(request_payload.get("input", [])),
+        model=deepcopy(request_payload.get("model")),
+        input=deepcopy(request_payload.get("input")),
         options=options,
     )

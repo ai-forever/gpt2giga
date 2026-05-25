@@ -13,8 +13,8 @@ class FakeMapper:
     def __init__(self):
         self.prepared_with = None
 
-    async def prepare_request(self, data, *, embeddings_model):
-        self.prepared_with = (data, embeddings_model)
+    async def prepare_request(self, data, *, embeddings_model, pass_model=False):
+        self.prepared_with = (data, embeddings_model, pass_model)
         return {"input": ["hello"], "model": embeddings_model}
 
 
@@ -36,7 +36,7 @@ async def test_embeddings_service_create_embeddings_uses_mapper_contract():
 
     result = await service.create_embeddings(data, giga_client=giga_client)
 
-    assert mapper.prepared_with == (data, "EmbeddingsGigaR")
+    assert mapper.prepared_with == (data, "EmbeddingsGigaR", False)
     assert giga_client.last_request == (["hello"], "EmbeddingsGigaR")
     assert result["model"] == "EmbeddingsGigaR"
 
@@ -52,5 +52,5 @@ async def test_get_embeddings_service_from_state_builds_default_mapper_from_conf
     assert state.providers.embeddings_mapper is service.mapper
     assert prepared == {
         "input": ["hello"],
-        "model": state.config.proxy_settings.embeddings,
+        "model": "gpt-x",
     }

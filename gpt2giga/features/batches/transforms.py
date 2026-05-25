@@ -7,7 +7,11 @@ from typing import Any, Optional
 
 from fastapi import HTTPException
 
-from gpt2giga.providers.gigachat.embeddings_mapper import transform_embedding_body
+from gpt2giga.providers.gigachat.embeddings_mapper import (
+    apply_embedding_encoding_format,
+    normalize_embedding_response,
+    transform_embedding_body,
+)
 
 
 @dataclass(frozen=True)
@@ -123,6 +127,7 @@ async def transform_batch_input_file(
     giga_client: Any,
     embeddings_model: str,
     gigachat_api_mode: str = "v1",
+    pass_model: bool = False,
 ) -> bytes:
     """Transform OpenAI JSONL batch input into GigaChat `{id, request}` JSONL."""
     transformed_lines = []
@@ -172,7 +177,11 @@ async def transform_batch_input_file(
             if batch_model and "model" not in transformed_body:
                 transformed_body["model"] = batch_model
         else:
-            transformed_body = await transform_embedding_body(body, embeddings_model)
+            transformed_body = await transform_embedding_body(
+                body,
+                embeddings_model,
+                pass_model=pass_model,
+            )
 
         custom_id = (
             row.get("custom_id") or row.get("id") or f"batch-request-{line_number}"
@@ -290,7 +299,14 @@ async def transform_batch_output_file(
                     raw_body, response_processor, custom_id, original_body
                 )
             else:
-                transformed_body = raw_body
+                transformed_body = normalize_embedding_response(
+                    raw_body,
+                    model=original_body.get("model"),
+                )
+                transformed_body = apply_embedding_encoding_format(
+                    transformed_body,
+                    original_body.get("encoding_format"),
+                )
 
             transformed_row = {
                 "id": row.get("id", custom_id),

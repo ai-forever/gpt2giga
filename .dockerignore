@@ -21,6 +21,9 @@ build/
 local/
 examples/
 tests/
+docs/internal/
+scripts/internal/
+node_modules/
 
 .git/
 .github/
@@ -28,4 +31,3 @@ tests/
 .vscode/
 .env
 .env.example
-

@@ -8,9 +8,9 @@ def test_transform_chat_parameters_temperature_and_top_p():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"temperature": 0, "model": "gpt-x"})
-    # при temperature=0 должен быть top_p=0 и без model (pass_model False по умолчанию)
+    # при temperature=0 должен быть top_p=0, model сохраняется по умолчанию
     assert out.get("top_p") == 0
-    assert "model" not in out
+    assert out.get("model") == "gpt-x"
 
 
 def test_transform_chat_parameters_max_tokens_and_tools():
@@ -37,12 +37,34 @@ def test_transform_common_parameters_positive_temperature():
     assert "top_p" not in out
 
 
+def test_transform_common_parameters_without_temperature_does_not_add_top_p():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x"})
+    assert "top_p" not in out
+
+
+def test_transform_common_parameters_preserves_explicit_top_p_without_temperature():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x", "top_p": 0.9})
+    assert out.get("top_p") == 0.9
+
+
 def test_transform_common_parameters_pass_model_true():
     """Тест что model сохраняется при pass_model=True"""
     cfg = ProxyConfig(proxy=ProxySettings(pass_model=True))
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"model": "gpt-x"})
     assert out.get("model") == "gpt-x"
+
+
+def test_transform_common_parameters_pass_model_false():
+    """Тест что model удаляется при pass_model=False."""
+    cfg = ProxyConfig(proxy=ProxySettings(pass_model=False))
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x"})
+    assert "model" not in out
 
 
 def test_transform_chat_parameters_maps_extra_body_to_additional_fields():
@@ -101,7 +123,7 @@ def test_transform_responses_parameters_uses_common():
     out = rt.transform_responses_parameters(data)
     assert out.get("temperature") == 0.5
     assert out.get("max_tokens") == 256
-    assert "model" not in out
+    assert out.get("model") == "gpt-y"
     assert "functions" in out
 
 
@@ -147,7 +169,7 @@ def test_apply_json_schema_as_function():
 
 def test_transform_chat_parameters_json_schema_response_format():
     """Тест обработки response_format с json_schema"""
-    cfg = ProxyConfig()
+    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
     rt = RequestTransformer(cfg, logger=logger)
     data = {
         "response_format": {
@@ -164,9 +186,53 @@ def test_transform_chat_parameters_json_schema_response_format():
     assert out["function_call"] == {"name": "OutputFormat"}
 
 
+def test_transform_chat_parameters_json_schema_native_response_format():
+    """Native SO forwards response_format to GigaChat without synthetic functions."""
+    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="native"))
+    rt = RequestTransformer(cfg, logger=logger)
+    data = {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "OutputFormat",
+                "schema": {"type": "object"},
+                "strict": True,
+            },
+        }
+    }
+    out = rt.transform_chat_parameters(data)
+    assert out["response_format"] == {
+        "type": "json_schema",
+        "schema": {"type": "object"},
+        "strict": True,
+    }
+    assert "functions" not in out
+    assert "function_call" not in out
+
+
+def test_transform_chat_parameters_native_keeps_user_tools_as_functions():
+    """Native SO should not disable normal OpenAI tools conversion."""
+    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="native"))
+    rt = RequestTransformer(cfg, logger=logger)
+    data = {
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"schema": {"type": "object"}},
+        },
+        "tools": [{"type": "function", "function": {"name": "sum"}}],
+    }
+    out = rt.transform_chat_parameters(data)
+    assert out["response_format"] == {
+        "type": "json_schema",
+        "schema": {"type": "object"},
+    }
+    assert out["functions"] == [{"name": "sum"}]
+    assert "function_call" not in out
+
+
 def test_transform_responses_parameters_text_json_schema():
     """Тест обработки text.format.json_schema в responses API"""
-    cfg = ProxyConfig()
+    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
     rt = RequestTransformer(cfg, logger=logger)
     data = {
         "text": {
@@ -181,6 +247,30 @@ def test_transform_responses_parameters_text_json_schema():
     assert "functions" in out
     assert out["functions"][0]["name"] == "ResponseSchema"
     assert out["function_call"] == {"name": "ResponseSchema"}
+
+
+def test_transform_responses_parameters_text_json_schema_native():
+    """Native SO maps Responses API text.format to GigaChat response_format."""
+    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="native"))
+    rt = RequestTransformer(cfg, logger=logger)
+    data = {
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "ResponseSchema",
+                "schema": {"type": "object"},
+                "strict": True,
+            }
+        }
+    }
+    out = rt.transform_responses_parameters(data)
+    assert out["response_format"] == {
+        "type": "json_schema",
+        "schema": {"type": "object"},
+        "strict": True,
+    }
+    assert "functions" not in out
+    assert "function_call" not in out
 
 
 def test_apply_json_schema_resolves_refs():

@@ -122,6 +122,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Old deploy/docs layout**: replaced the old `compose/`, `traefik/`, and `integrations/` layout with the new `deploy/` and `docs/` structure
 - **Old flat tests**: removed a substantial set of older flat test files after the move to the new layered test structure
 
+## [0.1.6] - 2026-05-20
+
+### Added
+- **Reasoning / think tags**: added extraction of `<think>...</think>` into reasoning/thinking content for OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages, including streaming
+- **Structured output mode**: added `GPT2GIGA_STRUCTURED_OUTPUT_MODE` / `--proxy.structured-output-mode` with `function_call` and `native` modes
+- **Anthropic structured output**: added `output_config.format` and legacy `output_format` support with `json_schema`
+- **Embeddings dimensions**: added `dimensions` validation for known embedding models
+
+### Changed
+- **Model forwarding**: `GPT2GIGA_PASS_MODEL` now applies to `/embeddings` and batch requests to `/v1/embeddings`
+- **Examples**: refreshed OpenAI and Anthropic runnable examples for the current layout and `GigaChat-2-Max` models
+- **Dependencies**: updated dependencies after the security/dependabot bump
+
+### Fixed
+- **Embeddings**: `encoding_format="base64"` now returns OpenAI-compatible base64 float32 embeddings for direct `/embeddings` calls and embeddings batches
+- **Embeddings input validation**: OpenAI-compatible validation now rejects empty or mixed `input`, unsupported `encoding_format`, invalid `model`, and token id inputs without a decodable model
+- **Model/top_p mapping**: fixed default model forwarding and avoided implicitly setting `top_p=0` when the client did not send `temperature`
+- **Unsupported Files/Batches routes**: temporarily disabled unsupported OpenAI Files/Batches and Anthropic Message Batches routes in the default routers until GigaChat SDK support lands
+
 ## [0.1.6a1] - 2026-03-24
 
 ### Added
@@ -351,7 +370,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...HEAD
+[0.1.6]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...v0.1.6
+[0.1.6a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...v0.1.6a1
 [0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4...v0.1.4.post1
 [0.1.4]: https://github.com/ai-forever/gpt2giga/compare/v0.1.3.post1...v0.1.4

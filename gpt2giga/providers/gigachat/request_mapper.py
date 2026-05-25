@@ -48,10 +48,23 @@ class RequestTransformer(
         response_format: dict | None = transformed.pop("response_format", None)
         if response_format:
             if response_format.get("type") == "json_schema":
-                json_schema = response_format.get("json_schema", {})
-                schema_name = json_schema.get("name", "structured_output")
-                schema = json_schema.get("schema")
-                self._apply_json_schema_as_function(transformed, schema_name, schema)
+                if "json_schema" in response_format:
+                    json_schema = response_format.get("json_schema", {})
+                    schema_name = json_schema.get("name", "structured_output")
+                    schema = json_schema.get("schema")
+                    strict = json_schema.get("strict")
+                else:
+                    schema_name = response_format.get("name", "structured_output")
+                    schema = response_format.get("schema")
+                    strict = response_format.get("strict")
+                if self.config.proxy_settings.structured_output_mode == "native":
+                    self._apply_json_schema_natively(transformed, schema, strict)
+                else:
+                    self._apply_json_schema_as_function(
+                        transformed,
+                        schema_name,
+                        schema,
+                    )
             else:
                 transformed["response_format"] = {
                     "type": response_format.get("type"),
@@ -72,10 +85,19 @@ class RequestTransformer(
                     json_schema = response_format.get("json_schema", {})
                     schema_name = json_schema.get("name", "structured_output")
                     schema = json_schema.get("schema")
+                    strict = json_schema.get("strict")
                 else:
                     schema_name = response_format.get("name", "structured_output")
                     schema = response_format.get("schema")
-                self._apply_json_schema_as_function(transformed, schema_name, schema)
+                    strict = response_format.get("strict")
+                if self.config.proxy_settings.structured_output_mode == "native":
+                    self._apply_json_schema_natively(transformed, schema, strict)
+                else:
+                    self._apply_json_schema_as_function(
+                        transformed,
+                        schema_name,
+                        schema,
+                    )
             else:
                 transformed["response_format"] = response_format
 

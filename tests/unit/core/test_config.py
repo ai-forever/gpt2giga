@@ -10,12 +10,15 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_ENABLED_PROVIDERS", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_RESPONSES_API_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     s = ProxySettings()
     assert s.mode == "DEV"
     assert s.host == "localhost"
     assert isinstance(s.port, int)
     assert isinstance(s.log_level, str)
     assert s.enable_reasoning is False
+    assert s.pass_model is True
+    assert s.structured_output_mode == "function_call"
     assert s.enabled_providers == ["openai", "anthropic", "gemini"]
     assert s.gigachat_api_mode == "v1"
     assert s.gigachat_responses_api_mode is None
@@ -50,6 +53,24 @@ def test_proxy_settings_mode_normalized(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_MODE", "prod")
     s = ProxySettings()
     assert s.mode == "PROD"
+
+
+def test_proxy_settings_structured_output_mode_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", "native")
+    s = ProxySettings()
+    assert s.structured_output_mode == "native"
+
+
+def test_proxy_settings_structured_output_mode_normalized(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", " NATIVE ")
+    s = ProxySettings()
+    assert s.structured_output_mode == "native"
+
+
+def test_proxy_settings_invalid_structured_output_mode(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", "unsupported")
+    with pytest.raises(ValueError):
+        ProxySettings()
 
 
 def test_proxy_settings_bool_cast_from_env(monkeypatch):

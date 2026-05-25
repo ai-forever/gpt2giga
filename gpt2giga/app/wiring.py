@@ -77,6 +77,7 @@ def _wire_runtime_providers(app: FastAPI, *, config, logger) -> None:
         ResponseProcessor(
             logger,
             mode=config.proxy_settings.mode,
+            structured_output_mode=config.proxy_settings.structured_output_mode,
         ),
     )
     providers.chat_mapper = GigaChatChatMapper(

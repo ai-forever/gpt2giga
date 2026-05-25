@@ -7,7 +7,11 @@ import uuid
 from copy import deepcopy
 from typing import Any
 
-from gpt2giga.api.anthropic.request import _extract_tool_definitions_text
+from gpt2giga.api.anthropic.request import (
+    _convert_anthropic_output_format_to_openai_response_format,
+    _extract_structured_output_text,
+    _extract_tool_definitions_text,
+)
 from gpt2giga.core.contracts import (
     NormalizedChatRequest,
     NormalizedMessage,
@@ -245,6 +249,12 @@ def build_normalized_chat_request(
     if "stop_sequences" in request_payload:
         options["stop"] = request_payload["stop_sequences"]
 
+    response_format = _convert_anthropic_output_format_to_openai_response_format(
+        request_payload
+    )
+    if response_format is not None:
+        options["response_format"] = response_format
+
     reasoning_effort = _thinking_to_reasoning_effort(request_payload.get("thinking"))
     if reasoning_effort is not None:
         options["reasoning_effort"] = reasoning_effort
@@ -295,6 +305,7 @@ def build_token_count_texts(payload: dict[str, Any]) -> list[str]:
 
     if isinstance(payload.get("tools"), list):
         texts.extend(_extract_tool_definitions_text(payload["tools"]))
+    texts.extend(_extract_structured_output_text(payload))
 
     return texts
 

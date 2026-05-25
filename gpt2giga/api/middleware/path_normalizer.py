@@ -54,8 +54,16 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
         for index, segment in enumerate(segments):
             if segment not in self.valid_roots:
                 continue
-            if index == 0:
+            normalized_segments = segments[index:]
+            while (
+                len(normalized_segments) > 1
+                and normalized_segments[0] == "v1"
+                and normalized_segments[1] == "v1"
+            ):
+                normalized_segments.pop(1)
+
+            if index == 0 and normalized_segments == segments:
                 return None
-            return "/" + "/".join(segments[index:])
+            return "/" + "/".join(normalized_segments)
 
         return None

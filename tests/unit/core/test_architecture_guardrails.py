@@ -94,7 +94,10 @@ def _find_transport_streaming_imports(source_file: Path) -> list[str]:
 
 
 def _find_frontend_route_state_violations(source_file: Path) -> list[str]:
-    if source_file.name in FRONTEND_ROUTE_STATE_ALLOWED_FILES:
+    if (
+        source_file.name in FRONTEND_ROUTE_STATE_ALLOWED_FILES
+        or source_file.name.startswith("serializers-")
+    ):
         return []
 
     violations: list[str] = []

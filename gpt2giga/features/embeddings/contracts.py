@@ -27,5 +27,6 @@ class EmbeddingsProviderMapper(Protocol):
         data: EmbeddingsRequestData,
         *,
         embeddings_model: str,
+        pass_model: bool = False,
     ) -> PreparedEmbeddingsRequest:
         """Map the feature request into a provider-specific embeddings payload."""
