@@ -17,11 +17,31 @@ from .paths import (
 )
 from .readiness import (
     gigachat_auth_methods as _gigachat_auth_methods,
-    is_control_plane_setup_complete as is_control_plane_setup_complete,
-    is_gigachat_ready as is_gigachat_ready,
-    is_security_ready,
-    requires_admin_bootstrap,
+    is_control_plane_setup_complete as _is_control_plane_setup_complete,
+    is_gigachat_ready as _is_gigachat_ready,
+    is_security_ready as _is_security_ready,
+    requires_admin_bootstrap as _requires_admin_bootstrap,
 )
+
+
+def is_gigachat_ready(config: ProxyConfig) -> bool:
+    """Return whether upstream GigaChat auth is configured."""
+    return _is_gigachat_ready(config)
+
+
+def is_security_ready(config: ProxyConfig) -> bool:
+    """Return whether gateway auth is enabled and has at least one usable key."""
+    return _is_security_ready(config)
+
+
+def is_control_plane_setup_complete(config: ProxyConfig) -> bool:
+    """Return whether persisted config, upstream auth and gateway auth are all ready."""
+    return _is_control_plane_setup_complete(config)
+
+
+def requires_admin_bootstrap(config: ProxyConfig) -> bool:
+    """Return whether PROD admin access must stay in bootstrap mode."""
+    return _requires_admin_bootstrap(config)
 
 
 def build_control_plane_status(config: ProxyConfig) -> dict[str, Any]:
