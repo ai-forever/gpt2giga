@@ -1,0 +1,7 @@
+name: gpt2giga-codeql
+
+queries:
+  - uses: security-and-quality
+
+paths-ignore:
+  - tests/**
