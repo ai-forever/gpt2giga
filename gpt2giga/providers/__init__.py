@@ -1,5 +1,7 @@
 """Provider adapter registry accessors."""
 
+from gpt2giga.providers.descriptors import ProviderDescriptor, ProviderMountSpec
+
 
 def list_provider_descriptors():
     """Return registered provider descriptors."""
@@ -29,19 +31,6 @@ def register_provider(descriptor):
     from gpt2giga.providers.registry import register_provider as _register
 
     return _register(descriptor)
-
-
-def __getattr__(name: str):
-    if name not in {"ProviderDescriptor", "ProviderMountSpec"}:
-        raise AttributeError(name)
-
-    from gpt2giga.providers.descriptors import ProviderDescriptor, ProviderMountSpec
-
-    exported = {
-        "ProviderDescriptor": ProviderDescriptor,
-        "ProviderMountSpec": ProviderMountSpec,
-    }
-    return exported[name]
 
 
 __all__ = [

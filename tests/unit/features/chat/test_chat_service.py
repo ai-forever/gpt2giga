@@ -19,10 +19,10 @@ def _get_messages(data):
 
 
 class FakeMapper:
-    def __init__(self):
+    def __init__(self, *, uses_v2_backend: bool = False):
         self.prepared_with = None
         self.processed_with = None
-        self.uses_v2_backend = False
+        self.uses_v2_backend = uses_v2_backend
 
     async def prepare_request(self, data, giga_client=None):
         self.prepared_with = (data, giga_client)
@@ -138,8 +138,7 @@ class LegacyResponseProcessor:
 
 class FakeMapperV2(FakeMapper):
     def __init__(self):
-        super().__init__()
-        self.uses_v2_backend = True
+        super().__init__(uses_v2_backend=True)
 
 
 @pytest.mark.asyncio

@@ -205,6 +205,35 @@ async def test_admin_control_plane_settings_service_tests_gigachat_factory():
 
 
 @pytest.mark.asyncio
+async def test_admin_control_plane_settings_service_sanitizes_gigachat_test_errors():
+    request = _build_request()
+
+    class FakeGigaChat:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        async def aget_models(self):
+            raise RuntimeError("token leaked-from-upstream")
+
+        async def aclose(self):
+            return None
+
+    request.app.state.providers.gigachat_factory = FakeGigaChat
+
+    payload = await AdminControlPlaneSettingsService(request).test_gigachat_settings(
+        GigaChatSettingsUpdate(access_token="super-secret-token")
+    )
+
+    assert payload["ok"] is False
+    assert payload["error_type"] == "connection_failed"
+    assert payload["error"] == (
+        "GigaChat connection test failed. Check server logs for details."
+    )
+    assert "leaked-from-upstream" not in str(payload)
+    assert "super-secret-token" not in str(payload)
+
+
+@pytest.mark.asyncio
 async def test_admin_key_management_service_manages_scoped_keys(tmp_path, monkeypatch):
     monkeypatch.setenv("GPT2GIGA_CONTROL_PLANE_DIR", str(tmp_path))
     request = _build_request()

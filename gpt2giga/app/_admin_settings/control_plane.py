@@ -222,8 +222,8 @@ class AdminControlPlaneSettingsService:
                 logger.warning(f"GigaChat connection test failed: {exc}")
             return {
                 "ok": False,
-                "error_type": exc.__class__.__name__,
-                "error": str(exc),
+                "error_type": "connection_failed",
+                "error": "GigaChat connection test failed. Check server logs for details.",
                 "gigachat_api_mode": self.config.proxy_settings.gigachat_api_mode,
             }
         finally:

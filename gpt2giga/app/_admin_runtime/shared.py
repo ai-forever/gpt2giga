@@ -50,7 +50,7 @@ def _collect_event_filter_options(
         values = {
             event.get(key) for event in events if event.get(key) not in (None, "")
         }
-        options[key] = sorted(values, key=lambda item: str(item))
+        options[key] = sorted(values, key=str)
     return options
 
 

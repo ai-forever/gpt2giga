@@ -18,6 +18,7 @@ from .paths import (
     utc_now,
     write_json,
 )
+from .readiness import is_control_plane_setup_complete
 from .revisions import (
     new_revision_id,
     write_control_plane_revision,
@@ -296,7 +297,6 @@ def persist_control_plane_config(
     path = get_control_plane_file()
     write_json(path, payload)
     write_control_plane_revision(payload)
-    from .status import is_control_plane_setup_complete
 
     if is_control_plane_setup_complete(config):
         clear_bootstrap_token()
