@@ -62,9 +62,9 @@ sequenceDiagram
 - использовать structured outputs для получения JSON-ответов;
 - обрабатывать ответы модели в потоковом режиме с помощью `stream=true`;
 - создавать эмбеддинги через `/embeddings` и `/v1/embeddings`;
-- использовать подготовленные OpenAI-совместимые **Files API** и **Batches API** после включения соответствующих роутеров в следующем релизе;
+- использовать подготовленные OpenAI-совместимые **Files API** и **Batches API** после появления полного batch API в GigaChat SDK/backend;
 - использовать подготовленный **Anthropic Message Batches API** после появления batch methods в GigaChat SDK;
-- получать список моделей и информацию о конкретной модели через OpenAI-совместимый **Models API**;
+- получать список моделей и информацию о конкретной модели через OpenAI- и Anthropic-совместимый **Models API**;
 - использовать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
 - работать с несколькими клиентами и множеством запросов в асинхронном режиме;
 - настраивать прокси через `.env`, переменные окружения и аргументы командной строки;
@@ -83,14 +83,14 @@ sequenceDiagram
 | `GET /models/{model}` | Да | Да | Информация по конкретной модели |
 | `POST /embeddings` | Да | Да | Создание эмбеддингов через модель из запроса или настроек прокси |
 | `POST /responses` | Да | Да | OpenAI Responses API для новых клиентов |
-| `POST /files` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `GET /files` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `GET /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `DELETE /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `GET /files/{file_id}/content` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `POST /batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `GET /batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `GET /batches/{batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `POST /files` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
+| `GET /files` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
+| `GET /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
+| `DELETE /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
+| `GET /files/{file_id}/content` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
+| `POST /batches` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: в `gigachat==0.2.1` нет полного набора batch methods |
+| `GET /batches` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: в `gigachat==0.2.1` нет полного набора batch methods |
+| `GET /batches/{batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: в `gigachat==0.2.1` нет полного набора batch methods |
 | `POST /batches/{batch_id}/cancel` | Да | Временно отключено | Не смонтирован: в текущем `gigachat==0.2.1` нет полного набора batch methods, включая cancel |
 | `GET/POST /chat/completions` stored-completions routes | Да | Нет | Маршруты для хранения, выборки и обновления сохранённых chat completions не реализованы |
 | `POST /completions` | Да | Нет | Legacy Completions API не реализован |
@@ -117,13 +117,68 @@ sequenceDiagram
 | `GET /messages/batches/{message_batch_id}/results` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
 | `POST /messages/batches/{message_batch_id}/cancel` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
 | `DELETE /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
-| Другие route Anthropic API | Частично | Нет | В проекте нет отдельной реализации дополнительных route вне Messages API и Message Batches API |
+| Files API beta | Да | Нет | Anthropic file upload/download/delete routes не реализованы |
+| Skills API beta | Да | Нет | Anthropic Skills API не реализован |
+| Agents API beta | Да | Нет | Anthropic Agents API не реализован |
+| Sessions / Environments / Admin API beta | Да | Нет | Управляемые beta/API группы Anthropic не реализованы |
 
 ### Коротко по покрытию
 
 - **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`; router-модули `files` и `batches` подготовлены, но временно не смонтированы, потому что в `gigachat==0.2.1` отсутствует полный batch API.
 - **Anthropic:** поддерживается `Models API`, `Messages API` и `count_tokens`; router-модуль `Message Batches API` подготовлен, но временно не смонтирован.
 - **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic API, включая fine-tuning, images, audio, vector stores, assistants и realtime.
+
+### Совместимость SDK и политика `extra_*`
+
+Клиентские настройки SDK вроде `base_url`, `api_key`, `timeout`, retry-настроек, `http_client` и proxy/transport остаются на стороне клиента. Сервер не трактует их как body-параметры и не прокидывает пользовательские `Authorization`, `x-api-key`, cookies, transport headers, `x-stainless-*`, `openai-*` или `anthropic-*` во внешний GigaChat upstream.
+
+`extra_headers` и HTTP headers проходят только через allowlist диагностических заголовков: `x-request-id`, `x-correlation-id`, `x-trace-id`, `traceparent`. `extra_query` по умолчанию не прокидывает произвольные query-параметры upstream. Неподдержанные body-параметры возвращают совместимую ошибку `400`.
+
+`extra_body` поддержан только там, где есть явная allowlist-политика:
+
+- OpenAI Chat Completions, OpenAI Responses и Anthropic Messages принимают GigaChat-specific поля `flags`, `function_ranker`, `profanity_check`, `repetition_penalty`, `storage`, `update_interval` и переносят их в `additional_fields`.
+- OpenAI Embeddings не поддерживает `extra_body`; используйте только `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query`.
+- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` и built-in tools возвращают `400`.
+- Для Anthropic Messages unsupported параметры и блоки вроде `container`, `context_management`, `mcp_servers`, server tools, `document`, `file`, `container_upload`, `search_result`, `thinking`/`redacted_thinking` во входном контенте возвращают `400`.
+
+OpenAI SDK:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8090/v1", api_key="local-key")
+
+client.chat.completions.create(
+    model="GigaChat",
+    messages=[{"role": "user", "content": "Привет"}],
+    extra_body={"profanity_check": False},
+)
+```
+
+Anthropic SDK:
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(base_url="http://localhost:8090", api_key="local-key")
+
+client.messages.create(
+    model="GigaChat",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Привет"}],
+)
+```
+
+Пример ожидаемой ошибки:
+
+```python
+client.messages.create(
+    model="GigaChat",
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Привет"}],
+    extra_body={"mcp_servers": []},  # 400: MCP server tools are not supported
+)
+```
 
 ## Начало работы
 
