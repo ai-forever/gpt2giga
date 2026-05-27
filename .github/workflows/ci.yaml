@@ -54,7 +54,7 @@ jobs:
         continue-on-error: false
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.python-version }}
           path: coverage.json
@@ -95,7 +95,7 @@ jobs:
           uv run python scripts/generate_badge.py "$COVERAGE" badges/coverage.svg
 
       - name: Upload badge artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-badge
           path: badges/coverage.svg
