@@ -108,6 +108,20 @@ def test_transform_common_parameters_merges_extra_body_with_additional_fields():
     assert "extra_body" not in out
 
 
+def test_transform_common_parameters_drops_extra_headers_and_extra_query():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters(
+        {
+            "model": "gpt-x",
+            "extra_headers": {"x-me": "kus"},
+            "extra_query": {"beta": "true"},
+        }
+    )
+    assert "extra_headers" not in out
+    assert "extra_query" not in out
+
+
 def test_transform_responses_parameters_uses_common():
     """Тест что transform_responses_parameters использует общую логику"""
     cfg = ProxyConfig()

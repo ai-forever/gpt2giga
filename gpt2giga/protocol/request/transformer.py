@@ -247,6 +247,9 @@ class RequestTransformer:
         """Common parameter transformation logic for Chat Completions and Responses API."""
         transformed = data.copy()
 
+        transformed.pop("extra_headers", None)
+        transformed.pop("extra_query", None)
+
         extra_body = transformed.pop("extra_body", None)
         additional_fields = transformed.get("additional_fields")
         if isinstance(extra_body, dict):

@@ -65,10 +65,14 @@ async def transform_embedding_body(
     normalized_inputs = await _normalize_embedding_inputs(
         data["input"], openai_model or model
     )
-    return {
+    transformed = {
         "input": normalized_inputs,
         "model": model,
     }
+    extra_body = data.get("extra_body")
+    if isinstance(extra_body, dict):
+        return {**extra_body, **transformed}
+    return transformed
 
 
 def normalize_embedding_response(

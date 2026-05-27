@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.models.config import ProxyConfig
+from gpt2giga.protocol.embeddings import transform_embedding_body
 from gpt2giga.routers.openai import router as openai_router
 
 
@@ -79,6 +80,20 @@ def test_embeddings_pass_model_falls_back_to_configured(monkeypatch):
     resp = client.post("/embeddings", json={"input": "hello"})
     assert resp.status_code == 200
     assert resp.json()["model"] == app.state.config.proxy_settings.embeddings
+
+
+@pytest.mark.asyncio
+async def test_transform_embedding_body_merges_extra_body():
+    transformed = await transform_embedding_body(
+        {"input": "hello", "extra_body": {"custom_flag": "on"}},
+        "EmbeddingsGigaR",
+    )
+
+    assert transformed == {
+        "input": ["hello"],
+        "model": "EmbeddingsGigaR",
+        "custom_flag": "on",
+    }
 
 
 def test_embeddings_accepts_matching_dimensions_for_configured_model():

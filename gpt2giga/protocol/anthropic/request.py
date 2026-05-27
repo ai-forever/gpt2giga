@@ -242,6 +242,9 @@ def _build_openai_data_from_anthropic_request(
         openai_data["top_p"] = data["top_p"]
     if "stop_sequences" in data:
         openai_data["stop"] = data["stop_sequences"]
+    for extra_key in ("extra_body", "extra_headers", "extra_query"):
+        if extra_key in data:
+            openai_data[extra_key] = data[extra_key]
 
     response_format = _convert_anthropic_output_format_to_openai_response_format(data)
     if response_format:

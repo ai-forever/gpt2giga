@@ -6,6 +6,10 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
 from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.gigachat_options import (
+    extract_gigachat_request_options,
+    gigachat_request_options,
+)
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.openapi_specs.openai import batches_openapi_extra
 from gpt2giga.protocol.batches import (
@@ -23,6 +27,9 @@ router = APIRouter(tags=["OpenAI"])
 async def create_batch(request: Request):
     """Create a batch job."""
     data = await read_request_json(request)
+    request_options = extract_gigachat_request_options(
+        request, data, include_extra_body=True
+    )
     completion_window = data.get("completion_window", "24h")
     if completion_window is None:
         completion_window = "24h"
@@ -54,23 +61,26 @@ async def create_batch(request: Request):
 
     target = get_batch_target(data.get("endpoint", ""))
     giga_client = get_gigachat_client(request)
-    file_content = await giga_client.aget_file_content(file_id=input_file_id)
+    async with gigachat_request_options(giga_client, request_options):
+        file_content = await giga_client.aget_file_content(file_id=input_file_id)
 
     import base64
 
     proxy_settings = request.app.state.config.proxy_settings
-    transformed_content = await transform_batch_input_file(
-        base64.b64decode(file_content.content),
-        target=target,
-        request_transformer=request.app.state.request_transformer,
-        giga_client=giga_client,
-        embeddings_model=proxy_settings.embeddings,
-        pass_model=proxy_settings.pass_model,
-    )
-    batch = await giga_client.acreate_batch(
-        transformed_content,
-        method=target.method,
-    )
+    async with gigachat_request_options(giga_client, request_options):
+        transformed_content = await transform_batch_input_file(
+            base64.b64decode(file_content.content),
+            target=target,
+            request_transformer=request.app.state.request_transformer,
+            giga_client=giga_client,
+            embeddings_model=proxy_settings.embeddings,
+            pass_model=proxy_settings.pass_model,
+        )
+    async with gigachat_request_options(giga_client, request_options):
+        batch = await giga_client.acreate_batch(
+            transformed_content,
+            method=target.method,
+        )
 
     metadata = {
         "endpoint": target.endpoint,
@@ -96,9 +106,13 @@ async def list_batches(
 ):
     """List batch jobs."""
     giga_client = get_gigachat_client(request)
+    request_options = extract_gigachat_request_options(
+        request, exclude_query_params=("after", "limit")
+    )
     batch_store = get_batch_store(request)
     file_store = get_file_store(request)
-    batches = await giga_client.aget_batches()
+    async with gigachat_request_options(giga_client, request_options):
+        batches = await giga_client.aget_batches()
     data = []
     for batch in batches.batches:
         metadata = batch_store.get(batch.id_) or {
@@ -120,9 +134,11 @@ async def list_batches(
 async def retrieve_batch(batch_id: str, request: Request):
     """Return batch metadata."""
     giga_client = get_gigachat_client(request)
+    request_options = extract_gigachat_request_options(request)
     batch_store = get_batch_store(request)
     file_store = get_file_store(request)
-    batches = await giga_client.aget_batches(batch_id=batch_id)
+    async with gigachat_request_options(giga_client, request_options):
+        batches = await giga_client.aget_batches(batch_id=batch_id)
     if not batches.batches:
         raise HTTPException(
             status_code=404,

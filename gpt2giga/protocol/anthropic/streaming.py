@@ -9,6 +9,10 @@ import gigachat
 from fastapi import Request
 from gigachat import GigaChat
 
+from gpt2giga.common.gigachat_options import (
+    GigaRequestOptions,
+    gigachat_request_options,
+)
 from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
@@ -22,6 +26,7 @@ async def _stream_anthropic_generator(
     giga_client: GigaChat,
     *,
     is_structured_output: bool = False,
+    request_options: Optional[GigaRequestOptions] = None,
 ) -> AsyncGenerator[str, None]:
     """SSE generator producing Anthropic Messages streaming events."""
     logger = None
@@ -59,67 +64,149 @@ async def _stream_anthropic_generator(
         content_index = 0
         output_tokens = 0
 
-        async for chunk in giga_client.astream(chat_messages):
-            if await request.is_disconnected():
-                if logger:
-                    logger.info(f"[{rquid}] Client disconnected during streaming")
-                break
+        async with gigachat_request_options(giga_client, request_options):
+            async for chunk in giga_client.astream(chat_messages):
+                if await request.is_disconnected():
+                    if logger:
+                        logger.info(f"[{rquid}] Client disconnected during streaming")
+                    break
 
-            giga_dict = chunk.model_dump()
-            choice = giga_dict["choices"][0]
-            delta = choice.get("delta", {})
-            delta_content = delta.get("content", "")
-            delta_function_call = delta.get("function_call")
-            delta_reasoning = delta.get("reasoning_content", "")
-            parsed_content = reasoning_parser.feed(delta_content)
-            delta_content = parsed_content.content
-            delta_reasoning = f"{delta_reasoning}{parsed_content.reasoning_content}"
+                giga_dict = chunk.model_dump()
+                choice = giga_dict["choices"][0]
+                delta = choice.get("delta", {})
+                delta_content = delta.get("content", "")
+                delta_function_call = delta.get("function_call")
+                delta_reasoning = delta.get("reasoning_content", "")
+                parsed_content = reasoning_parser.feed(delta_content)
+                delta_content = parsed_content.content
+                delta_reasoning = f"{delta_reasoning}{parsed_content.reasoning_content}"
 
-            if delta_reasoning:
-                if not thinking_block_started or thinking_block_stopped:
+                if delta_reasoning:
+                    if not thinking_block_started or thinking_block_stopped:
+                        yield sse(
+                            "content_block_start",
+                            {
+                                "type": "content_block_start",
+                                "index": content_index,
+                                "content_block": {"type": "thinking", "thinking": ""},
+                            },
+                        )
+                        thinking_block_started = True
+                        thinking_block_stopped = False
                     yield sse(
-                        "content_block_start",
+                        "content_block_delta",
                         {
-                            "type": "content_block_start",
+                            "type": "content_block_delta",
                             "index": content_index,
-                            "content_block": {"type": "thinking", "thinking": ""},
+                            "delta": {
+                                "type": "thinking_delta",
+                                "thinking": delta_reasoning,
+                            },
                         },
                     )
-                    thinking_block_started = True
-                    thinking_block_stopped = False
-                yield sse(
-                    "content_block_delta",
-                    {
-                        "type": "content_block_delta",
-                        "index": content_index,
-                        "delta": {
-                            "type": "thinking_delta",
-                            "thinking": delta_reasoning,
-                        },
-                    },
-                )
 
-            if delta_function_call:
-                if thinking_block_started and not thinking_block_stopped:
-                    yield sse(
-                        "content_block_stop",
-                        {"type": "content_block_stop", "index": content_index},
-                    )
-                    content_index += 1
-                    thinking_block_stopped = True
+                if delta_function_call:
+                    if thinking_block_started and not thinking_block_stopped:
+                        yield sse(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": content_index},
+                        )
+                        content_index += 1
+                        thinking_block_stopped = True
 
-                arguments = delta_function_call.get("arguments")
-                if is_structured_output:
-                    if arguments is None:
+                    arguments = delta_function_call.get("arguments")
+                    if is_structured_output:
+                        if arguments is None:
+                            continue
+
+                        arguments_str = (
+                            json.dumps(arguments, ensure_ascii=False)
+                            if isinstance(arguments, dict)
+                            else str(arguments)
+                        )
+                        if not arguments_str:
+                            continue
+
+                        if not content_block_started:
+                            yield sse(
+                                "content_block_start",
+                                {
+                                    "type": "content_block_start",
+                                    "index": content_index,
+                                    "content_block": {"type": "text", "text": ""},
+                                },
+                            )
+                            content_block_started = True
+
+                        yield sse(
+                            "content_block_delta",
+                            {
+                                "type": "content_block_delta",
+                                "index": content_index,
+                                "delta": {
+                                    "type": "text_delta",
+                                    "text": arguments_str,
+                                },
+                            },
+                        )
                         continue
 
-                    arguments_str = (
-                        json.dumps(arguments, ensure_ascii=False)
-                        if isinstance(arguments, dict)
-                        else str(arguments)
-                    )
-                    if not arguments_str:
-                        continue
+                    if function_call_data is None:
+                        tool_id = f"toolu_{uuid.uuid4().hex[:24]}"
+                        function_call_data = {
+                            "name": map_tool_name_from_gigachat(
+                                delta_function_call.get("name", "")
+                            ),
+                            "arguments": "",
+                            "tool_id": tool_id,
+                        }
+                        yield sse(
+                            "content_block_start",
+                            {
+                                "type": "content_block_start",
+                                "index": content_index,
+                                "content_block": {
+                                    "type": "tool_use",
+                                    "id": tool_id,
+                                    "name": function_call_data["name"],
+                                    "input": {},
+                                },
+                            },
+                        )
+                        content_block_started = True
+
+                    if delta_function_call.get("name"):
+                        function_call_data["name"] = map_tool_name_from_gigachat(
+                            delta_function_call["name"]
+                        )
+
+                    if arguments is not None:
+                        arguments_str = (
+                            json.dumps(arguments, ensure_ascii=False)
+                            if isinstance(arguments, dict)
+                            else str(arguments)
+                        )
+                        if arguments_str:
+                            function_call_data["arguments"] += arguments_str
+                            yield sse(
+                                "content_block_delta",
+                                {
+                                    "type": "content_block_delta",
+                                    "index": content_index,
+                                    "delta": {
+                                        "type": "input_json_delta",
+                                        "partial_json": arguments_str,
+                                    },
+                                },
+                            )
+                elif delta_content:
+                    if thinking_block_started and not thinking_block_stopped:
+                        yield sse(
+                            "content_block_stop",
+                            {"type": "content_block_stop", "index": content_index},
+                        )
+                        content_index += 1
+                        thinking_block_stopped = True
 
                     if not content_block_started:
                         yield sse(
@@ -139,95 +226,14 @@ async def _stream_anthropic_generator(
                             "index": content_index,
                             "delta": {
                                 "type": "text_delta",
-                                "text": arguments_str,
+                                "text": delta_content,
                             },
                         },
                     )
-                    continue
 
-                if function_call_data is None:
-                    tool_id = f"toolu_{uuid.uuid4().hex[:24]}"
-                    function_call_data = {
-                        "name": map_tool_name_from_gigachat(
-                            delta_function_call.get("name", "")
-                        ),
-                        "arguments": "",
-                        "tool_id": tool_id,
-                    }
-                    yield sse(
-                        "content_block_start",
-                        {
-                            "type": "content_block_start",
-                            "index": content_index,
-                            "content_block": {
-                                "type": "tool_use",
-                                "id": tool_id,
-                                "name": function_call_data["name"],
-                                "input": {},
-                            },
-                        },
-                    )
-                    content_block_started = True
-
-                if delta_function_call.get("name"):
-                    function_call_data["name"] = map_tool_name_from_gigachat(
-                        delta_function_call["name"]
-                    )
-
-                if arguments is not None:
-                    arguments_str = (
-                        json.dumps(arguments, ensure_ascii=False)
-                        if isinstance(arguments, dict)
-                        else str(arguments)
-                    )
-                    if arguments_str:
-                        function_call_data["arguments"] += arguments_str
-                        yield sse(
-                            "content_block_delta",
-                            {
-                                "type": "content_block_delta",
-                                "index": content_index,
-                                "delta": {
-                                    "type": "input_json_delta",
-                                    "partial_json": arguments_str,
-                                },
-                            },
-                        )
-            elif delta_content:
-                if thinking_block_started and not thinking_block_stopped:
-                    yield sse(
-                        "content_block_stop",
-                        {"type": "content_block_stop", "index": content_index},
-                    )
-                    content_index += 1
-                    thinking_block_stopped = True
-
-                if not content_block_started:
-                    yield sse(
-                        "content_block_start",
-                        {
-                            "type": "content_block_start",
-                            "index": content_index,
-                            "content_block": {"type": "text", "text": ""},
-                        },
-                    )
-                    content_block_started = True
-
-                yield sse(
-                    "content_block_delta",
-                    {
-                        "type": "content_block_delta",
-                        "index": content_index,
-                        "delta": {
-                            "type": "text_delta",
-                            "text": delta_content,
-                        },
-                    },
-                )
-
-            chunk_usage = giga_dict.get("usage")
-            if chunk_usage and chunk_usage.get("completion_tokens"):
-                output_tokens = chunk_usage["completion_tokens"]
+                chunk_usage = giga_dict.get("usage")
+                if chunk_usage and chunk_usage.get("completion_tokens"):
+                    output_tokens = chunk_usage["completion_tokens"]
 
         flushed_reasoning = reasoning_parser.flush()
         if flushed_reasoning.reasoning_content:

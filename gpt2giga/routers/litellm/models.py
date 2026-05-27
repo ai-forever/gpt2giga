@@ -4,6 +4,10 @@ from fastapi import APIRouter, Request
 
 from gpt2giga.app_state import get_gigachat_client
 from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.gigachat_options import (
+    extract_gigachat_request_options,
+    gigachat_request_options,
+)
 
 router = APIRouter(tags=["LiteLLM"])
 
@@ -33,10 +37,15 @@ def _model_info_entry(model_id: str) -> dict:
 async def get_model_info(request: Request, model: Optional[str] = None):
     """Return LiteLLM-style model info."""
     giga_client = get_gigachat_client(request)
+    request_options = extract_gigachat_request_options(
+        request, exclude_query_params=("model",)
+    )
     if model:
-        response = await giga_client.aget_model(model=model)
+        async with gigachat_request_options(giga_client, request_options):
+            response = await giga_client.aget_model(model=model)
         return _model_info_entry(_extract_model_id(response))
-    response = await giga_client.aget_models()
+    async with gigachat_request_options(giga_client, request_options):
+        response = await giga_client.aget_models()
     return {
         "data": [
             _model_info_entry(_extract_model_id(model_info))

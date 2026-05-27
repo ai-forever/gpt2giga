@@ -91,6 +91,22 @@ class FakeGigachat:
         return gen()
 
 
+def test_build_openai_data_from_anthropic_request_preserves_extra_options():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "extra_body": {"profanity_check": False},
+        "extra_headers": {"x-me": "kus"},
+        "extra_query": {"beta": "true"},
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    assert openai_data["extra_body"] == {"profanity_check": False}
+    assert openai_data["extra_headers"] == {"x-me": "kus"}
+    assert openai_data["extra_query"] == {"beta": "true"}
+
+
 class FakeGigachatReasoning:
     """Fake that returns a response with reasoning_content."""
 

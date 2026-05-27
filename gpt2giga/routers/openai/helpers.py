@@ -5,8 +5,12 @@ from typing import Optional
 from fastapi import Request
 
 from gpt2giga.app_state import get_batch_store, get_gigachat_client
-from gpt2giga.protocol.batches import infer_openai_file_purpose
+from gpt2giga.common.gigachat_options import (
+    extract_gigachat_request_options,
+    gigachat_request_options,
+)
 from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.protocol.batches import infer_openai_file_purpose
 
 
 def _paginate_items(
@@ -54,7 +58,9 @@ def populate_giga_functions(data: dict, logger) -> None:
 async def _load_batch_output_content(request: Request, file_id: str) -> bytes:
     """Load file content and post-process batch output files when needed."""
     giga_client = get_gigachat_client(request)
-    file_response = await giga_client.aget_file_content(file_id=file_id)
+    request_options = extract_gigachat_request_options(request)
+    async with gigachat_request_options(giga_client, request_options):
+        file_response = await giga_client.aget_file_content(file_id=file_id)
     batch_store = get_batch_store(request)
     matching_batch = next(
         (
@@ -65,9 +71,10 @@ async def _load_batch_output_content(request: Request, file_id: str) -> bytes:
         None,
     )
     if matching_batch:
-        input_file = await giga_client.aget_file_content(
-            file_id=matching_batch["input_file_id"]
-        )
+        async with gigachat_request_options(giga_client, request_options):
+            input_file = await giga_client.aget_file_content(
+                file_id=matching_batch["input_file_id"]
+            )
         from gpt2giga.protocol.batches import transform_batch_output_file
 
         return await transform_batch_output_file(
