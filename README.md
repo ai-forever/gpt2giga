@@ -130,6 +130,8 @@ sequenceDiagram
 
 ### Совместимость SDK и политика `extra_*`
 
+Подробная таблица совместимости параметров вынесена в [`docs/client-parameter-compatibility.md`](./docs/client-parameter-compatibility.md).
+
 Клиентские настройки SDK вроде `base_url`, `api_key`, `timeout`, retry-настроек, `http_client` и proxy/transport остаются на стороне клиента. Сервер не трактует их как body-параметры и не прокидывает пользовательские `Authorization`, `x-api-key`, cookies, transport headers, `x-stainless-*`, `openai-*` или `anthropic-*` во внешний GigaChat upstream.
 
 `extra_headers` и HTTP headers проходят только через allowlist диагностических заголовков: `x-request-id`, `x-correlation-id`, `x-trace-id`, `traceparent`. `extra_query` по умолчанию не прокидывает произвольные query-параметры upstream. Неподдержанные body-параметры возвращают совместимую ошибку `400`.
