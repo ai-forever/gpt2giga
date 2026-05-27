@@ -258,6 +258,9 @@ def _apply_tool_choice_policy(data: dict[str, Any]) -> None:
             if isinstance(function, Mapping) and function.get("name"):
                 data["function_call"] = {"name": function["name"]}
                 return
+            if tool_choice.get("name"):
+                data["function_call"] = {"name": tool_choice["name"]}
+                return
         _raise_openai_param_error(
             "tool_choice",
             "Only `auto`, `none`, and forced function tool choices are supported.",

@@ -1,5 +1,9 @@
+from collections.abc import Mapping
+from typing import Any
+
 from gigachat.models import Function, FunctionParameters
 
+from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
 
 _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
@@ -36,10 +40,35 @@ def map_tool_name_from_gigachat(name: str) -> str:
     return _RESERVED_GIGACHAT_TOOL_NAME_MAP_REVERSE.get(name, name)
 
 
+def _tool_source(data: dict) -> tuple[str, Any]:
+    if "tools" in data:
+        tools = data.get("tools")
+        if tools not in (None, []):
+            return "tools", tools
+        if "functions" not in data:
+            return "tools", tools
+    return "functions", data.get("functions", [])
+
+
 def convert_tool_to_giga_functions(data: dict):
     functions = []
-    tools = data.get("tools", []) or data.get("functions", [])
-    for tool in tools:
+    source, tools = _tool_source(data)
+    if tools is None:
+        return functions
+    if not isinstance(tools, list):
+        raise ClientCompatibilityError(
+            f"`{source}` must be an array.",
+            provider="openai",
+            param=source,
+        )
+
+    for index, tool in enumerate(tools):
+        if not isinstance(tool, Mapping):
+            raise ClientCompatibilityError(
+                f"`{source}[{index}]` must be an object.",
+                provider="openai",
+                param=source,
+            )
         if tool.get("function"):
             function = tool["function"]
             if "parameters" not in function:

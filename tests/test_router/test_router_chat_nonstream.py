@@ -91,6 +91,22 @@ def test_chat_completions_rejects_unsupported_param_with_openai_error():
     assert resp.json()["detail"]["error"]["param"] == "logprobs"
 
 
+def test_chat_completions_rejects_malformed_tools_with_openai_error():
+    app = make_app_with_real_transformer()
+    client = TestClient(app)
+    payload = {
+        "model": "gpt-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": "bad",
+    }
+
+    resp = client.post("/chat/completions", json=payload)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
+    assert resp.json()["detail"]["error"]["param"] == "tools"
+
+
 def test_chat_completions_non_stream_response_api():
     app = make_app()
     client = TestClient(app)

@@ -10,6 +10,11 @@ from gpt2giga.protocol.request.params import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_pass_model_env(monkeypatch):
+    monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
+
+
 def test_transform_chat_parameters_temperature_and_top_p():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -95,6 +100,27 @@ def test_transform_responses_parameters_maps_extra_body_to_additional_fields():
     )
     assert out.get("additional_fields") == {"profanity_check": False}
     assert "extra_body" not in out
+
+
+def test_transform_responses_parameters_accepts_flat_forced_function_tool_choice():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "lookup",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            "tool_choice": {"type": "function", "name": "lookup"},
+        }
+    )
+
+    assert out["function_call"] == {"name": "lookup"}
 
 
 def test_transform_common_parameters_merges_extra_body_with_additional_fields():
