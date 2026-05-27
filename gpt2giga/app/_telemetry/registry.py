@@ -23,6 +23,7 @@ def create_observability_hub(
     logger: Any | None = None,
 ) -> ObservabilityHub:
     """Instantiate an observability hub for the selected sinks."""
+    _ensure_builtin_sinks_registered()
     sinks = {}
     for name in names:
         descriptor = _OBSERVABILITY_SINKS.get(name)
@@ -33,3 +34,10 @@ def create_observability_hub(
             )
         sinks[name] = descriptor.factory(config=config, logger=logger)
     return ObservabilityHub(sinks)
+
+
+def _ensure_builtin_sinks_registered() -> None:
+    """Ensure built-in sinks are available before resolving names."""
+    from .builtin import register_builtin_sinks
+
+    register_builtin_sinks()

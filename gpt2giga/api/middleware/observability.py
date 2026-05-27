@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from time import perf_counter
 
 from fastapi.routing import APIRoute
@@ -27,6 +27,7 @@ _IGNORED_PREFIXES = (
     "/redoc",
     "/openapi.json",
 )
+UTC = timezone.utc
 
 
 class ObservabilityMiddleware:

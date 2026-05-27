@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValue
 
 from .utils import _label_value, _safe_int
+
+UTC = timezone.utc
 
 
 def _build_span_name(event: dict[str, Any] | Any) -> str:

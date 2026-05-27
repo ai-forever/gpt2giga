@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +9,8 @@ from gpt2giga.api.dependencies.governance import build_governance_verifier
 from gpt2giga.app.dependencies import ensure_runtime_dependencies
 from gpt2giga.app.observability import record_request_event
 from gpt2giga.core.config.settings import ProxyConfig, ProxySettings
+
+UTC = timezone.utc
 
 
 def make_request(
