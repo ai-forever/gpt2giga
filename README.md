@@ -107,6 +107,8 @@ sequenceDiagram
 
 | Route / группа | Официальный Anthropic API | В gpt2giga | Что поддерживается |
 |---|---|---|---|
+| `GET /models` | Да | Да | Список моделей в Anthropic-совместимом виде для запросов с Anthropic SDK headers |
+| `GET /models/{model_id}` | Да | Да | Информация о модели в Anthropic-совместимом виде для запросов с Anthropic SDK headers |
 | `POST /messages` | Да | Да | Основной Messages API, включая стриминг |
 | `POST /messages/count_tokens` | Да | Да | Подсчёт токенов для Messages API |
 | `POST /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
@@ -120,7 +122,7 @@ sequenceDiagram
 ### Коротко по покрытию
 
 - **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`; router-модули `files` и `batches` подготовлены, но временно не смонтированы, потому что в `gigachat==0.2.1` отсутствует полный batch API.
-- **Anthropic:** поддерживается `Messages API` и `count_tokens`; router-модуль `Message Batches API` подготовлен, но временно не смонтирован.
+- **Anthropic:** поддерживается `Models API`, `Messages API` и `count_tokens`; router-модуль `Message Batches API` подготовлен, но временно не смонтирован.
 - **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic API, включая fine-tuning, images, audio, vector stores, assistants и realtime.
 
 ## Начало работы
