@@ -91,6 +91,7 @@ sequenceDiagram
 | `POST /batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
 | `GET /batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
 | `GET /batches/{batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `POST /batches/{batch_id}/cancel` | Да | Временно отключено | Не смонтирован: в текущем `gigachat==0.2.1` нет полного набора batch methods, включая cancel |
 | `GET/POST /chat/completions` stored-completions routes | Да | Нет | Маршруты для хранения, выборки и обновления сохранённых chat completions не реализованы |
 | `POST /completions` | Да | Нет | Legacy Completions API не реализован |
 | `POST /images*` | Да | Нет | Генерация и редактирование изображений не реализованы |
@@ -118,7 +119,7 @@ sequenceDiagram
 
 ### Коротко по покрытию
 
-- **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`; router-модули `files` и `batches` подготовлены, но временно не смонтированы.
+- **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`; router-модули `files` и `batches` подготовлены, но временно не смонтированы, потому что в `gigachat==0.2.1` отсутствует полный batch API.
 - **Anthropic:** поддерживается `Messages API` и `count_tokens`; router-модуль `Message Batches API` подготовлен, но временно не смонтирован.
 - **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic API, включая fine-tuning, images, audio, vector stores, assistants и realtime.
 
