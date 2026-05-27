@@ -17,6 +17,10 @@ from gpt2giga.common.tools import map_tool_name_to_gigachat
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
+from gpt2giga.protocol.request.params import (
+    sanitize_openai_chat_parameters,
+    sanitize_openai_responses_parameters,
+)
 
 
 class RequestTransformer:
@@ -364,6 +368,7 @@ class RequestTransformer:
 
     def transform_chat_parameters(self, data: Dict) -> Dict:
         """Transforms chat parameters (Chat Completions API)."""
+        data = sanitize_openai_chat_parameters(data)
         transformed = self._transform_common_parameters(data)
 
         response_format: dict | None = transformed.pop("response_format", None)
@@ -388,6 +393,7 @@ class RequestTransformer:
 
     def transform_responses_parameters(self, data: Dict) -> Dict:
         """Transforms responses parameters (Responses API)."""
+        data = sanitize_openai_responses_parameters(data)
         transformed = self._transform_common_parameters(data)
 
         response_format_responses: dict | None = transformed.pop("text", None)
