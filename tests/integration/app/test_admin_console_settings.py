@@ -550,8 +550,11 @@ def test_gigachat_settings_test_endpoint_reports_failure(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is False
-    assert payload["error_type"] == "RuntimeError"
-    assert payload["error"] == "upstream auth failed"
+    assert payload["error_type"] == "connection_failed"
+    assert (
+        payload["error"]
+        == "GigaChat connection test failed. Check server logs for details."
+    )
 
 
 def test_scoped_key_create_rotate_and_delete(tmp_path, monkeypatch):
