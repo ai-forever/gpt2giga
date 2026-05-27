@@ -6,7 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.tools import convert_tool_to_giga_functions
-from gpt2giga.protocol.anthropic.params import sanitize_anthropic_messages_parameters
+from gpt2giga.protocol.anthropic.params import (
+    sanitize_anthropic_messages_parameters,
+    validate_anthropic_content_blocks,
+)
 
 
 def _extract_anthropic_output_format(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -77,6 +80,7 @@ def _convert_anthropic_messages_to_openai(
     messages: List[Dict],
 ) -> List[Dict]:
     """Convert Anthropic messages to OpenAI messages format."""
+    validate_anthropic_content_blocks(system, messages)
     openai_messages: List[Dict] = []
     tool_use_names: Dict[str, str] = {}
 

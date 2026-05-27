@@ -166,3 +166,127 @@ def test_build_openai_data_from_anthropic_request_keeps_function_tools():
     assert openai_data["tools"][0]["type"] == "function"
     assert openai_data["tools"][0]["function"]["name"] == "sum"
     assert len(openai_data["functions"]) == 1
+
+
+@pytest.mark.parametrize(
+    "block_type",
+    [
+        "document",
+        "file",
+        "thinking",
+        "redacted_thinking",
+        "search_result",
+        "container_upload",
+    ],
+)
+def test_build_openai_data_from_anthropic_request_rejects_unsupported_content_blocks(
+    block_type,
+):
+    data = {
+        "model": "claude-x",
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": block_type}],
+            }
+        ],
+    }
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        _build_openai_data_from_anthropic_request(data, logger)
+
+    assert exc_info.value.provider == "anthropic"
+    assert block_type in exc_info.value.message
+    assert "Supported request content blocks" in exc_info.value.message
+
+
+def test_build_openai_data_from_anthropic_request_rejects_text_citations():
+    data = {
+        "model": "claude-x",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "quoted",
+                        "citations": [{"type": "char_location"}],
+                    }
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        _build_openai_data_from_anthropic_request(data, logger)
+
+    assert exc_info.value.param == "messages[0].content[0].citations"
+    assert "citations" in exc_info.value.message
+
+
+def test_build_openai_data_from_anthropic_request_rejects_image_file_source():
+    data = {
+        "model": "claude-x",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {"type": "file", "file_id": "file_123"},
+                    }
+                ],
+            }
+        ],
+    }
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        _build_openai_data_from_anthropic_request(data, logger)
+
+    assert exc_info.value.param == "messages[0].content[0].source.type"
+    assert "base64" in exc_info.value.message
+    assert "url" in exc_info.value.message
+
+
+def test_build_openai_data_from_anthropic_request_rejects_nested_tool_result_blocks():
+    data = {
+        "model": "claude-x",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_1", "name": "search", "input": {}}
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_1",
+                        "content": [{"type": "search_result", "title": "Result"}],
+                    }
+                ],
+            },
+        ],
+    }
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        _build_openai_data_from_anthropic_request(data, logger)
+
+    assert exc_info.value.param == "messages[1].content[0].content[0]"
+    assert "search_result" in exc_info.value.message
+
+
+def test_build_openai_data_from_anthropic_request_rejects_unsupported_system_block():
+    data = {
+        "model": "claude-x",
+        "system": [{"type": "document", "source": {"type": "text", "data": "doc"}}],
+        "messages": [{"role": "user", "content": "hi"}],
+    }
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        _build_openai_data_from_anthropic_request(data, logger)
+
+    assert exc_info.value.param == "system[0]"
+    assert "document" in exc_info.value.message

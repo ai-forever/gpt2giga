@@ -3,10 +3,12 @@
 import base64
 import json
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
+from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.anthropic.request import (
@@ -718,6 +720,26 @@ class TestConvertAnthropicMessagesToOpenai:
         assert isinstance(content, list)
         assert content[0]["image_url"]["url"] == "https://example.com/img.png"
 
+    def test_rejects_unsupported_document_block(self):
+        with pytest.raises(ClientCompatibilityError) as exc_info:
+            _convert_anthropic_messages_to_openai(
+                None,
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {"type": "text", "data": "doc"},
+                            }
+                        ],
+                    }
+                ],
+            )
+
+        assert exc_info.value.param == "messages[0].content[0]"
+        assert "document" in exc_info.value.message
+
     def test_assistant_tool_use(self):
         result = _convert_anthropic_messages_to_openai(
             None,
@@ -1107,6 +1129,33 @@ class TestMessagesEndpoint:
         assert resp.json()["type"] == "error"
         assert resp.json()["error"]["type"] == "invalid_request_error"
         assert "containers" in resp.json()["error"]["message"]
+
+    def test_rejects_unsupported_document_content_block(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {"type": "text", "data": "doc"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 400
+        assert resp.json()["type"] == "error"
+        assert resp.json()["error"]["type"] == "invalid_request_error"
+        assert "document" in resp.json()["error"]["message"]
+        assert "Supported request content blocks" in resp.json()["error"]["message"]
 
     def test_non_stream_basic(self):
         app = make_app()
