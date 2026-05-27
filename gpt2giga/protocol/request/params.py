@@ -97,6 +97,7 @@ def sanitize_openai_chat_parameters(data: Mapping[str, Any]) -> dict[str, Any]:
     """Return a sanitized Chat Completions payload or raise compatibility errors."""
     sanitized = dict(data)
     _sanitize_openai_payload(sanitized, OPENAI_CHAT_SUPPORTED_PARAMS)
+    _normalize_gigachat_extra_fields(sanitized)
     _apply_tool_choice_policy(sanitized)
     _validate_tools(sanitized.get("tools"))
     return sanitized
@@ -106,6 +107,7 @@ def sanitize_openai_responses_parameters(data: Mapping[str, Any]) -> dict[str, A
     """Return a sanitized Responses API payload or raise compatibility errors."""
     sanitized = dict(data)
     _sanitize_openai_payload(sanitized, OPENAI_RESPONSES_SUPPORTED_PARAMS)
+    _normalize_gigachat_extra_fields(sanitized)
     _apply_tool_choice_policy(sanitized)
     _validate_tools(sanitized.get("tools"))
     return sanitized
@@ -199,6 +201,37 @@ def _sanitize_parallel_tool_calls(data: dict[str, Any]) -> None:
             "parallel_tool_calls",
             "Parallel tool calls are not supported by GigaChat.",
         )
+
+
+def _normalize_gigachat_extra_fields(data: dict[str, Any]) -> None:
+    sdk_style_fields = {}
+    for key in OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS:
+        if key in data:
+            sdk_style_fields[key] = data.pop(key)
+
+    extra_body = data.get("extra_body")
+    if extra_body is None:
+        if sdk_style_fields:
+            data["extra_body"] = sdk_style_fields
+        return
+
+    if not isinstance(extra_body, Mapping):
+        _raise_openai_param_error(
+            "extra_body",
+            "`extra_body` must be an object with allowlisted GigaChat fields.",
+        )
+
+    unsupported_keys = sorted(
+        key for key in extra_body if key not in OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS
+    )
+    if unsupported_keys:
+        unsupported = ", ".join(f"`{key}`" for key in unsupported_keys)
+        _raise_openai_param_error(
+            "extra_body",
+            f"Unsupported `extra_body` field(s): {unsupported}.",
+        )
+
+    data["extra_body"] = {**sdk_style_fields, **dict(extra_body)}
 
 
 def _apply_tool_choice_policy(data: dict[str, Any]) -> None:

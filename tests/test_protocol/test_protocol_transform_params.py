@@ -90,10 +90,10 @@ def test_transform_responses_parameters_maps_extra_body_to_additional_fields():
         {
             "model": "gpt-x",
             "input": "hello",
-            "extra_body": {"custom_flag": "on"},
+            "extra_body": {"profanity_check": False},
         }
     )
-    assert out.get("additional_fields") == {"custom_flag": "on"}
+    assert out.get("additional_fields") == {"profanity_check": False}
     assert "extra_body" not in out
 
 
@@ -103,26 +103,66 @@ def test_transform_common_parameters_merges_extra_body_with_additional_fields():
     out = rt.transform_chat_parameters(
         {
             "model": "gpt-x",
-            "extra_body": {"temperature": 0.2, "custom_flag": "from-extra-body"},
-            "additional_fields": {"custom_flag": "from-additional-fields"},
+            "extra_body": {
+                "profanity_check": False,
+                "repetition_penalty": 1.1,
+            },
+            "additional_fields": {"profanity_check": True},
         }
     )
     assert out.get("additional_fields") == {
-        "temperature": 0.2,
-        "custom_flag": "from-additional-fields",
+        "profanity_check": True,
+        "repetition_penalty": 1.1,
     }
     assert "extra_body" not in out
 
 
-def test_transform_common_parameters_leaves_sdk_style_extra_fields_top_level():
+def test_transform_common_parameters_maps_sdk_style_extra_fields_to_additional_fields():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters(
         {"model": "gpt-x", "messages": [], "profanity_check": False}
     )
 
-    assert out.get("profanity_check") is False
-    assert "additional_fields" not in out
+    assert out.get("additional_fields") == {"profanity_check": False}
+    assert "profanity_check" not in out
+
+
+def test_transform_common_parameters_merges_sdk_and_literal_extra_body():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters(
+        {
+            "model": "gpt-x",
+            "profanity_check": True,
+            "extra_body": {
+                "profanity_check": False,
+                "repetition_penalty": 1.2,
+            },
+        }
+    )
+
+    assert out.get("additional_fields") == {
+        "profanity_check": False,
+        "repetition_penalty": 1.2,
+    }
+
+
+@pytest.mark.parametrize(
+    "extra_body",
+    [
+        {"custom_flag": "on"},
+        ["not", "an", "object"],
+    ],
+)
+def test_transform_common_parameters_rejects_unsupported_extra_body(extra_body):
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        rt.transform_chat_parameters({"model": "gpt-x", "extra_body": extra_body})
+
+    assert exc_info.value.param == "extra_body"
 
 
 def test_transform_chat_parameters_maps_max_completion_tokens():
