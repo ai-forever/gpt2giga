@@ -125,13 +125,30 @@ def test_transform_common_parameters_leaves_sdk_style_extra_fields_top_level():
     assert "additional_fields" not in out
 
 
-def test_transform_chat_parameters_does_not_map_max_completion_tokens_yet():
+def test_transform_chat_parameters_maps_max_completion_tokens():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"model": "gpt-x", "max_completion_tokens": 128})
 
-    assert out.get("max_completion_tokens") == 128
-    assert "max_tokens" not in out
+    assert out.get("max_tokens") == 128
+    assert "max_completion_tokens" not in out
+
+
+@pytest.mark.parametrize("conflict_param", ["max_tokens", "max_output_tokens"])
+def test_transform_chat_parameters_rejects_token_limit_conflicts(conflict_param):
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        rt.transform_chat_parameters(
+            {
+                "model": "gpt-x",
+                "max_completion_tokens": 128,
+                conflict_param: 64,
+            }
+        )
+
+    assert exc_info.value.param == "max_completion_tokens"
 
 
 def test_transform_common_parameters_drops_extra_headers_and_extra_query():
