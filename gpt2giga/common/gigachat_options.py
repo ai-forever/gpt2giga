@@ -9,34 +9,11 @@ from typing import Any, AsyncIterator, Iterable, Mapping, Optional
 import httpx
 from starlette.requests import Request
 
-_BLOCKED_HEADER_NAMES = {
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "connection",
-    "content-length",
-    "content-type",
-    "cookie",
-    "expect",
-    "forwarded",
-    "host",
-    "keep-alive",
-    "proxy-authorization",
-    "set-cookie",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-    "user-agent",
-    "x-api-key",
-    "x-forwarded-for",
-    "x-forwarded-host",
-    "x-forwarded-port",
-    "x-forwarded-proto",
-    "x-real-ip",
-}
-_BLOCKED_HEADER_PREFIXES = ("x-stainless-",)
-_PROXY_QUERY_PARAMS = {"x-api-key"}
+from gpt2giga.common.client_params import (
+    filter_safe_diagnostic_headers,
+    filter_safe_query_items,
+)
+
 _OPTIONS_HOOK_MARKER = "_gpt2giga_request_options_hook"
 
 
@@ -102,76 +79,46 @@ async def gigachat_request_options(
 
 
 def _extract_request_headers(request: Request) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    for name, value in request.headers.items():
-        normalized = name.lower()
-        if _is_blocked_header(normalized):
-            continue
-        headers[normalized] = value
-    return headers
+    return filter_safe_diagnostic_headers(request.headers)
 
 
 def _extract_request_query(
     request: Request, exclude_query_params: Iterable[str]
 ) -> list[tuple[str, str]]:
-    excluded = {item.lower() for item in exclude_query_params} | _PROXY_QUERY_PARAMS
-    query: list[tuple[str, str]] = []
-    for key, value in request.query_params.multi_items():
-        if key.lower() in excluded:
-            continue
-        query.append((key, value))
-    return query
+    excluded = {item.lower() for item in exclude_query_params} | {"x-api-key"}
+    items = (
+        (key, value)
+        for key, value in request.query_params.multi_items()
+        if key.lower() not in excluded
+    )
+    return list(filter_safe_query_items(items))
 
 
 def _normalize_headers(raw: Any) -> dict[str, str]:
-    if not isinstance(raw, Mapping):
-        return {}
-
-    headers: dict[str, str] = {}
-    for name, value in raw.items():
-        if not isinstance(name, str) or value is None:
-            continue
-        normalized = name.lower()
-        if _is_blocked_header(normalized):
-            continue
-        if isinstance(value, (str, int, float, bool)):
-            headers[normalized] = str(value)
-    return headers
+    return filter_safe_diagnostic_headers(raw)
 
 
 def _normalize_query(raw: Any) -> list[tuple[str, str]]:
     if not isinstance(raw, Mapping):
         return []
 
-    query: list[tuple[str, str]] = []
+    items: list[tuple[str, Any]] = []
     for key, value in raw.items():
         if not isinstance(key, str) or value is None:
             continue
         if isinstance(value, (list, tuple)):
             for item in value:
                 if item is not None:
-                    query.append((key, _stringify_query_value(item)))
+                    items.append((key, item))
         else:
-            query.append((key, _stringify_query_value(value)))
-    return query
+            items.append((key, value))
+    return list(filter_safe_query_items(items))
 
 
 def _normalize_body(raw: Any) -> dict[str, Any]:
     if isinstance(raw, Mapping):
         return dict(raw)
     return {}
-
-
-def _stringify_query_value(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
-
-
-def _is_blocked_header(normalized_name: str) -> bool:
-    return normalized_name in _BLOCKED_HEADER_NAMES or normalized_name.startswith(
-        _BLOCKED_HEADER_PREFIXES
-    )
 
 
 def _ensure_request_options_hook(giga_client: Any) -> None:
