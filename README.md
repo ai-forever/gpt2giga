@@ -63,7 +63,7 @@ sequenceDiagram
 - обрабатывать ответы модели в потоковом режиме с помощью `stream=true`;
 - создавать эмбеддинги через `/embeddings` и `/v1/embeddings`;
 - использовать подготовленные OpenAI-совместимые **Files API** и **Batches API** после включения соответствующих роутеров в следующем релизе;
-- использовать подготовленный **Anthropic Message Batches API** после включения соответствующего роутера в следующем релизе;
+- использовать подготовленный **Anthropic Message Batches API** после появления batch methods в GigaChat SDK;
 - получать список моделей и информацию о конкретной модели через OpenAI-совместимый **Models API**;
 - использовать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
 - работать с несколькими клиентами и множеством запросов в асинхронном режиме;
@@ -109,12 +109,12 @@ sequenceDiagram
 |---|---|---|---|
 | `POST /messages` | Да | Да | Основной Messages API, включая стриминг |
 | `POST /messages/count_tokens` | Да | Да | Подсчёт токенов для Messages API |
-| `POST /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `GET /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `GET /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `GET /messages/batches/{message_batch_id}/results` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `POST /messages/batches/{message_batch_id}/cancel` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
-| `DELETE /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован до следующего релиза GigaChat SDK |
+| `POST /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
+| `GET /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
+| `GET /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
+| `GET /messages/batches/{message_batch_id}/results` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
+| `POST /messages/batches/{message_batch_id}/cancel` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
+| `DELETE /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
 | Другие route Anthropic API | Частично | Нет | В проекте нет отдельной реализации дополнительных route вне Messages API и Message Batches API |
 
 ### Коротко по покрытию

@@ -2028,6 +2028,7 @@ class TestMessageBatchesEndpoint:
     def test_message_batch_routes_are_disabled(self):
         client = TestClient(make_app(FakeGigachatBatches()))
 
+        assert hasattr(client.app.state.gigachat_client, "acreate_batch")
         assert client.post("/messages/batches").status_code == 404
         assert client.get("/messages/batches").status_code == 404
         assert client.get("/messages/batches/batch-1").status_code == 404
