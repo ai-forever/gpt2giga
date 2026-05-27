@@ -175,7 +175,14 @@ def _validate_tool_choice(tool_choice: Any) -> None:
     if not isinstance(tool_choice, Mapping):
         _raise_anthropic_param_error("tool_choice", "`tool_choice` must be an object.")
     tool_choice_type = tool_choice.get("type")
-    if tool_choice_type in {"auto", "none", "tool"}:
+    if tool_choice_type in {"auto", "none"}:
+        return
+    if tool_choice_type == "tool":
+        if not _is_non_empty_string(tool_choice.get("name")):
+            _raise_anthropic_param_error(
+                "tool_choice",
+                "`tool_choice.name` must be a non-empty string for forced `tool` choices.",
+            )
         return
     _raise_anthropic_param_error(
         "tool_choice",
@@ -200,11 +207,17 @@ def _validate_tools(tools: Any) -> None:
                 "tools",
                 "Only local function tools with `input_schema` are supported.",
             )
-        if "name" not in tool or "input_schema" not in tool:
+        if not _is_non_empty_string(tool.get("name")) or not isinstance(
+            tool.get("input_schema"), Mapping
+        ):
             _raise_anthropic_param_error(
                 "tools",
-                "Only local function tools with `name` and `input_schema` are supported.",
+                "Only local function tools with non-empty `name` and object `input_schema` are supported.",
             )
+
+
+def _is_non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value)
 
 
 def _validate_system_content_blocks(system: Any) -> None:

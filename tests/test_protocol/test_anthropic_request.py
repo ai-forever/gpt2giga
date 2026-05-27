@@ -132,6 +132,30 @@ def test_build_openai_data_from_anthropic_request_rejects_tool_choice_any():
     assert exc_info.value.param == "tool_choice"
 
 
+@pytest.mark.parametrize(
+    "tool_choice",
+    [
+        {"type": "tool"},
+        {"type": "tool", "name": ""},
+        {"type": "tool", "name": None},
+    ],
+)
+def test_build_openai_data_from_anthropic_request_rejects_forced_tool_without_name(
+    tool_choice,
+):
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tool_choice": tool_choice,
+    }
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        _build_openai_data_from_anthropic_request(data, logger)
+
+    assert exc_info.value.provider == "anthropic"
+    assert exc_info.value.param == "tool_choice"
+
+
 def test_build_openai_data_from_anthropic_request_rejects_server_tools():
     data = {
         "model": "claude-x",
@@ -142,6 +166,30 @@ def test_build_openai_data_from_anthropic_request_rejects_server_tools():
     with pytest.raises(ClientCompatibilityError) as exc_info:
         _build_openai_data_from_anthropic_request(data, logger)
 
+    assert exc_info.value.param == "tools"
+
+
+@pytest.mark.parametrize(
+    "tool",
+    [
+        {"name": "", "input_schema": {"type": "object"}},
+        {"name": None, "input_schema": {"type": "object"}},
+        {"name": "sum", "input_schema": "bad"},
+    ],
+)
+def test_build_openai_data_from_anthropic_request_rejects_invalid_function_tools(
+    tool,
+):
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [tool],
+    }
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        _build_openai_data_from_anthropic_request(data, logger)
+
+    assert exc_info.value.provider == "anthropic"
     assert exc_info.value.param == "tools"
 
 
