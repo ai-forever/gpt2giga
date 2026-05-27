@@ -134,6 +134,28 @@ def test_responses_non_stream_includes_reasoning_item():
     assert body["output"][1]["content"][0]["text"] == "The capital of France is Paris."
 
 
+def test_responses_rejects_tool_definition_without_name():
+    app = make_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/responses",
+        json={
+            "input": "hi",
+            "model": "gpt-x",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {"parameters": {"type": "object", "properties": {}}},
+                }
+            ],
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
+    assert resp.json()["detail"]["error"]["param"] == "tools"
+
+
 def test_embeddings_with_token_ids(monkeypatch):
     app = make_app(monkeypatch)
     client = TestClient(app)

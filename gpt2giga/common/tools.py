@@ -50,6 +50,17 @@ def _tool_source(data: dict) -> tuple[str, Any]:
     return "functions", data.get("functions", [])
 
 
+def _require_tool_name(definition: Mapping, source: str, index: int) -> str:
+    name = definition.get("name")
+    if not isinstance(name, str) or not name:
+        raise ClientCompatibilityError(
+            f"`{source}[{index}].name` must be a non-empty string.",
+            provider="openai",
+            param=source,
+        )
+    return name
+
+
 def convert_tool_to_giga_functions(data: dict):
     functions = []
     source, tools = _tool_source(data)
@@ -69,8 +80,14 @@ def convert_tool_to_giga_functions(data: dict):
                 provider="openai",
                 param=source,
             )
-        if tool.get("function"):
+        if "function" in tool:
             function = tool["function"]
+            if not isinstance(function, Mapping):
+                raise ClientCompatibilityError(
+                    f"`{source}[{index}].function` must be an object.",
+                    provider="openai",
+                    param=source,
+                )
             if "parameters" not in function:
                 # Skip tools without parameters (e.g., custom/freeform tools)
                 continue
@@ -78,7 +95,9 @@ def convert_tool_to_giga_functions(data: dict):
             resolved_params = resolve_schema_refs(function["parameters"])
             normalized_params = normalize_json_schema(resolved_params)
             giga_function = Function(
-                name=map_tool_name_to_gigachat(function["name"]),
+                name=map_tool_name_to_gigachat(
+                    _require_tool_name(function, source, index)
+                ),
                 description=function.get("description", ""),
                 parameters=FunctionParameters(**normalized_params),
             )
@@ -87,7 +106,7 @@ def convert_tool_to_giga_functions(data: dict):
             resolved_params = resolve_schema_refs(tool["parameters"])
             normalized_params = normalize_json_schema(resolved_params)
             giga_function = Function(
-                name=map_tool_name_to_gigachat(tool["name"]),
+                name=map_tool_name_to_gigachat(_require_tool_name(tool, source, index)),
                 description=tool.get("description", ""),
                 parameters=FunctionParameters(**normalized_params),
             )

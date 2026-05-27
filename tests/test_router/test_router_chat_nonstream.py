@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
+import pytest
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
@@ -105,6 +106,44 @@ def test_chat_completions_rejects_malformed_tools_with_openai_error():
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
     assert resp.json()["detail"]["error"]["param"] == "tools"
+
+
+@pytest.mark.parametrize(
+    ("tool_payload", "param"),
+    [
+        (
+            {"functions": [{"parameters": {"type": "object", "properties": {}}}]},
+            "functions",
+        ),
+        (
+            {
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "parameters": {"type": "object", "properties": {}}
+                        },
+                    }
+                ]
+            },
+            "tools",
+        ),
+    ],
+)
+def test_chat_completions_rejects_tool_definitions_without_name(tool_payload, param):
+    app = make_app_with_real_transformer()
+    client = TestClient(app)
+    payload = {
+        "model": "gpt-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        **tool_payload,
+    }
+
+    resp = client.post("/chat/completions", json=payload)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
+    assert resp.json()["detail"]["error"]["param"] == param
 
 
 def test_chat_completions_non_stream_response_api():
