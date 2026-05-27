@@ -27,20 +27,21 @@ def _make_request(headers=None, query_string=b""):
     )
 
 
-def test_extract_gigachat_request_options_merges_sources_and_sanitizes():
+def test_extract_gigachat_request_options_allows_only_safe_metadata():
     request = _make_request(
         headers={
             "Authorization": "Bearer proxy-token",
             "Content-Type": "application/json",
-            "X-Me": "from-header",
+            "X-Request-ID": "from-header",
             "X-Stainless-Lang": "python",
         },
         query_string=b"beta=true&x-api-key=secret&local=skip",
     )
     data = {
         "extra_headers": {
-            "X-Me": "from-body",
-            "X-Body": 123,
+            "X-Request-ID": "from-body",
+            "X-Correlation-ID": 123,
+            "X-Body": "drop",
             "Authorization": "Bearer bad",
         },
         "extra_query": {"feature": ["a", "b"], "enabled": True},
@@ -54,15 +55,35 @@ def test_extract_gigachat_request_options_merges_sources_and_sanitizes():
         exclude_query_params=("local",),
     )
 
-    assert options.headers == {"x-me": "from-body", "x-body": "123"}
-    assert options.query == (
-        ("beta", "true"),
-        ("feature", "a"),
-        ("feature", "b"),
-        ("enabled", "true"),
-    )
+    assert options.headers == {
+        "x-request-id": "from-body",
+        "x-correlation-id": "123",
+    }
+    assert options.query == ()
     assert options.body == {"profanity_check": False}
     assert data == {}
+
+
+def test_extract_gigachat_request_options_drops_arbitrary_metadata():
+    request = _make_request(
+        headers={
+            "X-Foo": "from-header",
+            "Anthropic-Beta": "tools-2026-01-01",
+            "OpenAI-Organization": "org_test",
+        },
+        query_string=b"unknown=1&feature=on",
+    )
+
+    options = extract_gigachat_request_options(
+        request,
+        {
+            "extra_headers": {"X-Bar": "from-extra-headers"},
+            "extra_query": {"extra": "from-extra-query"},
+        },
+    )
+
+    assert options.headers == {}
+    assert options.query == ()
 
 
 @pytest.mark.asyncio

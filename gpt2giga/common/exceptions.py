@@ -6,6 +6,11 @@ import gigachat
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
+from gpt2giga.common.client_params import (
+    ClientCompatibilityError,
+    anthropic_compatibility_response,
+    openai_compatibility_error,
+)
 from gpt2giga.logger import rquid_context
 
 ERROR_MAPPING = {
@@ -40,6 +45,20 @@ def exceptions_handler(func):
         except HTTPException:
             # Preserve FastAPI/Starlette semantics (status codes, details, headers).
             raise
+        except ClientCompatibilityError as e:
+            if e.provider == "anthropic":
+                return anthropic_compatibility_response(
+                    e.message,
+                    status_code=e.status_code,
+                    error_type=e.error_type,
+                )
+            raise openai_compatibility_error(
+                e.message,
+                status_code=e.status_code,
+                param=e.param,
+                code=e.code,
+                error_type=e.error_type,
+            )
         except gigachat.exceptions.GigaChatException as e:
             # Log the exception with context
             from loguru import logger

@@ -17,6 +17,7 @@ from gpt2giga.openapi_specs.anthropic import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
 )
+from gpt2giga.protocol.anthropic.params import sanitize_anthropic_messages_parameters
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
     _convert_anthropic_messages_to_openai,
@@ -37,10 +38,8 @@ router = APIRouter(tags=["Anthropic"])
 @exceptions_handler
 async def count_tokens(request: Request):
     """Anthropic Messages count_tokens API compatible endpoint."""
-    data = await read_request_json(request)
-    request_options = extract_gigachat_request_options(
-        request, data, include_extra_body=True
-    )
+    data = sanitize_anthropic_messages_parameters(await read_request_json(request))
+    request_options = extract_gigachat_request_options(request, dict(data))
     giga_client = get_gigachat_client(request)
     model = data.get("model", "unknown")
 

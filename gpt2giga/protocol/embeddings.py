@@ -11,6 +11,15 @@ import tiktoken
 from fastapi import HTTPException
 
 _VALID_ENCODING_FORMATS = {"float", "base64"}
+_EMBEDDING_SUPPORTED_PARAMS = {
+    "dimensions",
+    "encoding_format",
+    "extra_headers",
+    "extra_query",
+    "input",
+    "model",
+    "user",
+}
 EMBEDDING_MODEL_DIMENSIONS = {
     "Embeddings": 1024,
     "Embeddings-2": 1024,
@@ -38,6 +47,8 @@ def validate_embedding_request(data: Dict[str, Any]) -> None:
     if "input" not in data:
         _invalid_request("`input` is required.", param="input")
 
+    _validate_embedding_params(data)
+
     encoding_format = data.get("encoding_format")
     if encoding_format is not None and encoding_format not in _VALID_ENCODING_FORMATS:
         _invalid_request(
@@ -50,6 +61,21 @@ def validate_embedding_request(data: Dict[str, Any]) -> None:
         _invalid_request("`model` must be a non-empty string.", param="model")
 
     _validate_embedding_input(data["input"])
+
+
+def _validate_embedding_params(data: Dict[str, Any]) -> None:
+    if "extra_body" in data:
+        _invalid_request(
+            "`extra_body` is not supported for embeddings.",
+            param="extra_body",
+        )
+
+    for param in data:
+        if param not in _EMBEDDING_SUPPORTED_PARAMS:
+            _invalid_request(
+                f"Unsupported embeddings request parameter: `{param}`.",
+                param=param,
+            )
 
 
 async def transform_embedding_body(
@@ -69,9 +95,6 @@ async def transform_embedding_body(
         "input": normalized_inputs,
         "model": model,
     }
-    extra_body = data.get("extra_body")
-    if isinstance(extra_body, dict):
-        return {**extra_body, **transformed}
     return transformed
 
 

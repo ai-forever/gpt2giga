@@ -24,9 +24,7 @@ router = APIRouter(tags=["OpenAI"])
 async def embeddings(request: Request):
     """Create embeddings."""
     data = await read_request_json(request)
-    request_options = extract_gigachat_request_options(
-        request, data, include_extra_body=True
-    )
+    request_options = extract_gigachat_request_options(request, data)
     giga_client = get_gigachat_client(request)
     proxy_settings = request.app.state.config.proxy_settings
     transformed = await transform_embedding_body(

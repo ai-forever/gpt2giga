@@ -2,7 +2,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from gpt2giga.models.config import ProxyConfig
@@ -11,7 +11,11 @@ from gpt2giga.routers.openai import router as openai_router
 
 
 class FakeClient:
+    def __init__(self):
+        self.embedding_calls = []
+
     async def aembeddings(self, texts, model):
+        self.embedding_calls.append({"texts": texts, "model": model})
         return {"data": [{"embedding": [0.1], "index": 0}], "model": model}
 
 
@@ -82,17 +86,45 @@ def test_embeddings_pass_model_falls_back_to_configured(monkeypatch):
     assert resp.json()["model"] == app.state.config.proxy_settings.embeddings
 
 
+def test_embeddings_endpoint_rejects_extra_body():
+    app = make_app(pass_model=True)
+    client = TestClient(app)
+    resp = client.post(
+        "/embeddings",
+        json={
+            "model": "Embeddings-2",
+            "input": "hello",
+            "extra_body": {"custom_flag": "on"},
+        },
+    )
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"]["param"] == "extra_body"
+    assert app.state.gigachat_client.embedding_calls == []
+
+
 @pytest.mark.asyncio
-async def test_transform_embedding_body_merges_extra_body():
+async def test_transform_embedding_body_rejects_extra_body():
+    with pytest.raises(HTTPException) as exc_info:
+        await transform_embedding_body(
+            {"input": "hello", "extra_body": {"custom_flag": "on"}},
+            "EmbeddingsGigaR",
+        )
+
+    assert getattr(exc_info.value, "status_code", None) == 400
+    assert exc_info.value.detail["error"]["param"] == "extra_body"
+
+
+@pytest.mark.asyncio
+async def test_transform_embedding_body_ignores_user():
     transformed = await transform_embedding_body(
-        {"input": "hello", "extra_body": {"custom_flag": "on"}},
+        {"input": "hello", "user": "user-1"},
         "EmbeddingsGigaR",
     )
 
     assert transformed == {
         "input": ["hello"],
         "model": "EmbeddingsGigaR",
-        "custom_flag": "on",
     }
 
 
@@ -141,6 +173,8 @@ def test_embeddings_accepts_matching_dimensions_for_passed_model(model, dimensio
         ({"input": "hello", "dimensions": 128}, "dimensions"),
         ({"input": "hello", "dimensions": 0}, "dimensions"),
         ({"input": "hello", "dimensions": "1024"}, "dimensions"),
+        ({"input": "hello", "extra_body": {"custom_flag": "on"}}, "extra_body"),
+        ({"input": "hello", "custom_flag": "on"}, "custom_flag"),
         (
             {"input": "hello", "model": "UnknownEmbeddings", "dimensions": 1024},
             "dimensions",

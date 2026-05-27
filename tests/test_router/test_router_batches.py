@@ -200,6 +200,7 @@ def test_files_and_batches_routes_are_disabled_in_openai_router():
     assert client.post("/batches").status_code == 404
     assert client.get("/batches").status_code == 404
     assert client.get("/batches/batch-1").status_code == 404
+    assert client.post("/batches/batch-1/cancel").status_code == 404
 
 
 def test_openapi_omits_files_and_batches_routes_from_openai_router():
@@ -210,6 +211,7 @@ def test_openapi_omits_files_and_batches_routes_from_openai_router():
     assert "/files/{file_id}/content" not in paths
     assert "/batches" not in paths
     assert "/batches/{batch_id}" not in paths
+    assert "/batches/{batch_id}/cancel" not in paths
 
 
 def test_files_endpoints_roundtrip_when_router_is_mounted_directly():

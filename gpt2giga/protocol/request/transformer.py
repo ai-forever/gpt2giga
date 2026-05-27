@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from gigachat import GigaChat
 from gigachat.models import FunctionCall, Messages, MessagesRole
 
+from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
 from gpt2giga.common.message_utils import (
@@ -17,6 +18,10 @@ from gpt2giga.common.tools import map_tool_name_to_gigachat
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
+from gpt2giga.protocol.request.params import (
+    sanitize_openai_chat_parameters,
+    sanitize_openai_responses_parameters,
+)
 
 
 class RequestTransformer:
@@ -364,6 +369,8 @@ class RequestTransformer:
 
     def transform_chat_parameters(self, data: Dict) -> Dict:
         """Transforms chat parameters (Chat Completions API)."""
+        data = sanitize_openai_chat_parameters(data)
+        data = self._map_chat_token_limit(data)
         transformed = self._transform_common_parameters(data)
 
         response_format: dict | None = transformed.pop("response_format", None)
@@ -386,8 +393,32 @@ class RequestTransformer:
 
         return transformed
 
+    @staticmethod
+    def _map_chat_token_limit(data: Dict) -> Dict:
+        """Map OpenAI Chat max_completion_tokens to GigaChat max_tokens."""
+        if "max_completion_tokens" not in data:
+            return data
+
+        transformed = data.copy()
+        max_completion_tokens = transformed.pop("max_completion_tokens")
+        if max_completion_tokens is None:
+            return transformed
+
+        for conflict_param in ("max_tokens", "max_output_tokens"):
+            if transformed.get(conflict_param) is not None:
+                raise ClientCompatibilityError(
+                    "`max_completion_tokens` cannot be combined with "
+                    f"`{conflict_param}`.",
+                    provider="openai",
+                    param="max_completion_tokens",
+                )
+
+        transformed["max_tokens"] = max_completion_tokens
+        return transformed
+
     def transform_responses_parameters(self, data: Dict) -> Dict:
         """Transforms responses parameters (Responses API)."""
+        data = sanitize_openai_responses_parameters(data)
         transformed = self._transform_common_parameters(data)
 
         response_format_responses: dict | None = transformed.pop("text", None)

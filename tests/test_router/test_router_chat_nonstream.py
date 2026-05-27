@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.openai import router
 
 
@@ -52,6 +52,16 @@ def make_app():
     return app
 
 
+def make_app_with_real_transformer():
+    app = FastAPI()
+    app.include_router(router)
+    app.state.gigachat_client = FakeGigachat()
+    app.state.response_processor = ResponseProcessor(logger=logger)
+    app.state.config = ProxyConfig()
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
+    return app
+
+
 def test_chat_completions_non_stream_basic():
     app = make_app()
     client = TestClient(app)
@@ -63,6 +73,22 @@ def test_chat_completions_non_stream_basic():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
+
+
+def test_chat_completions_rejects_unsupported_param_with_openai_error():
+    app = make_app_with_real_transformer()
+    client = TestClient(app)
+    payload = {
+        "model": "gpt-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "logprobs": True,
+    }
+
+    resp = client.post("/chat/completions", json=payload)
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
+    assert resp.json()["detail"]["error"]["param"] == "logprobs"
 
 
 def test_chat_completions_non_stream_response_api():
