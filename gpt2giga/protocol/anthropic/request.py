@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.protocol.anthropic.params import sanitize_anthropic_messages_parameters
 
 
 def _extract_anthropic_output_format(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -227,6 +228,7 @@ def _build_openai_data_from_anthropic_request(
     logger: Any,
 ) -> Dict[str, Any]:
     """Translate an Anthropic Messages request into an OpenAI-style payload."""
+    data = sanitize_anthropic_messages_parameters(data)
     openai_data: Dict[str, Any] = {
         "model": data.get("model", "unknown"),
         "messages": _convert_anthropic_messages_to_openai(

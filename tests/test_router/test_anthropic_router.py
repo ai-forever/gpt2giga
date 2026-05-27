@@ -1091,6 +1091,23 @@ class TestBuildAnthropicResponse:
 
 
 class TestMessagesEndpoint:
+    def test_rejects_unsupported_container_param(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "container": {"id": "container-1"},
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 400
+        assert resp.json()["type"] == "error"
+        assert resp.json()["error"]["type"] == "invalid_request_error"
+        assert "containers" in resp.json()["error"]["message"]
+
     def test_non_stream_basic(self):
         app = make_app()
         client = TestClient(app)
