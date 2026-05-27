@@ -65,6 +65,37 @@ def test_extract_gigachat_request_options_merges_sources_and_sanitizes():
     assert data == {}
 
 
+def test_extract_gigachat_request_options_currently_forwards_arbitrary_metadata():
+    request = _make_request(
+        headers={
+            "X-Foo": "from-header",
+            "Anthropic-Beta": "tools-2026-01-01",
+            "OpenAI-Organization": "org_test",
+        },
+        query_string=b"unknown=1&feature=on",
+    )
+
+    options = extract_gigachat_request_options(
+        request,
+        {
+            "extra_headers": {"X-Bar": "from-extra-headers"},
+            "extra_query": {"extra": "from-extra-query"},
+        },
+    )
+
+    assert options.headers == {
+        "x-foo": "from-header",
+        "anthropic-beta": "tools-2026-01-01",
+        "openai-organization": "org_test",
+        "x-bar": "from-extra-headers",
+    }
+    assert options.query == (
+        ("unknown", "1"),
+        ("feature", "on"),
+        ("extra", "from-extra-query"),
+    )
+
+
 @pytest.mark.asyncio
 async def test_gigachat_request_options_hook_applies_headers_query_and_body():
     captured = {}

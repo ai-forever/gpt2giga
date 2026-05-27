@@ -108,6 +108,26 @@ def test_transform_common_parameters_merges_extra_body_with_additional_fields():
     assert "extra_body" not in out
 
 
+def test_transform_common_parameters_leaves_sdk_style_extra_fields_top_level():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters(
+        {"model": "gpt-x", "messages": [], "profanity_check": False}
+    )
+
+    assert out.get("profanity_check") is False
+    assert "additional_fields" not in out
+
+
+def test_transform_chat_parameters_does_not_map_max_completion_tokens_yet():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters({"model": "gpt-x", "max_completion_tokens": 128})
+
+    assert out.get("max_completion_tokens") == 128
+    assert "max_tokens" not in out
+
+
 def test_transform_common_parameters_drops_extra_headers_and_extra_query():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

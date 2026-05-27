@@ -11,7 +11,11 @@ from gpt2giga.routers.openai import router as openai_router
 
 
 class FakeClient:
+    def __init__(self):
+        self.embedding_calls = []
+
     async def aembeddings(self, texts, model):
+        self.embedding_calls.append({"texts": texts, "model": model})
         return {"data": [{"embedding": [0.1], "index": 0}], "model": model}
 
 
@@ -80,6 +84,24 @@ def test_embeddings_pass_model_falls_back_to_configured(monkeypatch):
     resp = client.post("/embeddings", json={"input": "hello"})
     assert resp.status_code == 200
     assert resp.json()["model"] == app.state.config.proxy_settings.embeddings
+
+
+def test_embeddings_endpoint_currently_does_not_pass_extra_body_to_aembeddings():
+    app = make_app(pass_model=True)
+    client = TestClient(app)
+    resp = client.post(
+        "/embeddings",
+        json={
+            "model": "Embeddings-2",
+            "input": "hello",
+            "extra_body": {"custom_flag": "on"},
+        },
+    )
+
+    assert resp.status_code == 200
+    assert app.state.gigachat_client.embedding_calls == [
+        {"texts": ["hello"], "model": "Embeddings-2"}
+    ]
 
 
 @pytest.mark.asyncio
