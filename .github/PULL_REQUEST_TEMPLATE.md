@@ -1,20 +1,18 @@
 ## Description
 
-Fix pre-release compatibility and dependency hardening issues:
-
-- Restore Python 3.10 compatibility in telemetry and request observability code.
-- Ensure built-in observability sinks are registered before configured sink names are resolved.
-- Update the locked `python-multipart` package from `0.0.26` to `0.0.29`.
+<!-- Provide a clear and concise description of what this PR does -->
 
 ## Motivation
 
-This keeps the pre-release branch compatible with the supported Python 3.10-3.14 range and addresses a vulnerable multipart dependency before release.
+<!-- Why is this change needed? Link to related issues if applicable -->
 
-Closes: N/A
+Closes #<!-- issue number -->
 
 ## Type of Change
 
-- [x] Bug fix (non-breaking change that fixes an issue)
+<!-- Mark the relevant option with an "x" -->
+
+- [ ] Bug fix (non-breaking change that fixes an issue)
 - [ ] New feature (non-breaking change that adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
 - [ ] Documentation update
@@ -25,92 +23,112 @@ Closes: N/A
 
 ## Changes Made
 
-- Replaced `datetime.UTC` imports with `datetime.timezone.utc` aliases in telemetry, observability middleware, and affected tests so imports work on Python 3.10.
-- Added lazy built-in sink registration before observability hub creation resolves sink names.
-- Refreshed the `uv.lock` entry for `python-multipart` to `0.0.29`.
+<!-- List the main changes made in this PR -->
+
+-
+-
+-
 
 ## Testing
 
-Ran the full local quality gate and package build.
+<!-- Describe the tests you ran and how to reproduce them -->
 
 ### Test Coverage
 
-- [x] Unit tests added/updated
+- [ ] Unit tests added/updated
 - [ ] Integration tests added/updated (if applicable)
-- [x] All existing tests pass locally
+- [ ] All existing tests pass locally
 
 ### Manual Testing
 
-No manual API exercise was needed for this compatibility and dependency-maintenance change.
+<!-- Describe any manual testing performed -->
 
 #### Method Used
 
 - [ ] OpenAI Python SDK
 - [ ] curl
 - [ ] Docker
-- [x] Other: automated local quality gate and package build
+- [ ] Other: <!-- specify -->
 
 <details>
 <summary>Test commands / code</summary>
 
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest tests/ --cov=. --cov-fail-under=80
-uv build
+**Example with OpenAI SDK:**
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8090", api_key="your-key")
+
+completion = client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user", "content": "Test message"}
+    ],
+)
+print(completion.choices[0].message.content)
 ```
 
-Results:
+**Example with curl:**
 
-- `uv run ruff check .`: passed
-- `uv run ruff format --check .`: passed, 377 files already formatted
-- `uv run pytest tests/ --cov=. --cov-fail-under=80`: 745 passed, 2 skipped, 23 warnings; total coverage 85.68%
-- `uv build`: built `dist/gpt2giga-1.0.0rc3.tar.gz` and `dist/gpt2giga-1.0.0rc3-py3-none-any.whl`
+```bash
+curl -X POST http://localhost:8090/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-key" \
+  -d '{
+    "model": "gpt-4",
+    "messages": [{"role": "user", "content": "Test"}]
+  }'
+```
 
 </details>
 
 ## Checklist
 
+<!-- Mark completed items with an "x" -->
+
 ### Code Quality
 
-- [x] Code follows the project's style guidelines
-- [x] I have performed a self-review of my code
-- [x] I have commented my code, particularly in hard-to-understand areas
-- [x] Ruff lint passes (`uv run ruff check .`)
-- [x] Ruff format check passes (`uv run ruff format --check .`)
-- [x] All tests pass (`uv run pytest tests/ --cov=. --cov-fail-under=80`)
-- [x] Package build passes (`uv build`)
+- [ ] Code follows the project's style guidelines
+- [ ] I have performed a self-review of my code
+- [ ] I have commented my code, particularly in hard-to-understand areas
+- [ ] Ruff lint passes (`uv run ruff check .`)
+- [ ] Ruff format check passes (`uv run ruff format --check .`)
+- [ ] All tests pass (`uv run pytest tests/ --cov=. --cov-fail-under=80`)
+- [ ] Package build passes (`uv build`)
 
 ### Documentation
 
-- [x] I have updated the documentation accordingly
-- [x] Docstrings follow Google style with imperative mood
+- [ ] I have updated the documentation accordingly
+- [ ] Docstrings follow Google style with imperative mood
 - [ ] I have added examples for new features (if applicable)
 - [ ] README.md updated (if applicable)
 
 ### Dependencies
 
-- [x] No new dependencies added
-- [x] If dependencies added, they are justified and minimal
-- [x] `uv.lock` updated (if dependencies changed)
+- [ ] No new dependencies added
+- [ ] If dependencies added, they are justified and minimal
+- [ ] `uv.lock` updated (if dependencies changed)
 
 ### Compatibility
 
-- [x] Changes are compatible with Python 3.10-3.14
-- [x] Async/sync variants both work correctly (if applicable)
+- [ ] Changes are compatible with Python 3.10-3.14
+- [ ] Async/sync variants both work correctly (if applicable)
 
 ### Commits
 
-- [x] Commit messages are clear and follow conventional commits style
-- [x] Commits are logically organized
-- [x] No debug code or commented-out code left in
+- [ ] Commit messages are clear and follow conventional commits style
+- [ ] Commits are logically organized
+- [ ] No debug code or commented-out code left in
 
 ## Additional Context
 
-No linked issue and no UI changes.
+<!-- Add any other context, screenshots, or information about the PR here -->
 
 ## Pre-merge Actions
 
+<!-- For maintainers -->
+
 - [ ] Changelog updated (if applicable)
-- [x] Version bump considered (if applicable)
-- [x] Release gate reviewed for version/docs/assets drift when applicable (see [docs/release-checklist.md](../docs/release-checklist.md))
+- [ ] Version bump considered (if applicable)
+- [ ] Release gate reviewed for version/docs/assets drift when applicable (see [docs/release-checklist.md](../docs/release-checklist.md))
