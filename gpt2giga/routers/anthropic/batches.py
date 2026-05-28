@@ -7,7 +7,12 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, Request, Response
 
+from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
 from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.gigachat_options import (
+    extract_gigachat_request_options,
+    gigachat_request_options,
+)
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.openapi_specs.anthropic import anthropic_message_batches_openapi_extra
 from gpt2giga.protocol.batches import (
@@ -16,7 +21,6 @@ from gpt2giga.protocol.batches import (
     parse_jsonl,
     transform_batch_input_file,
 )
-from gpt2giga.app_state import get_batch_store, get_file_store, get_gigachat_client
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
     _is_anthropic_structured_output_request,
@@ -259,6 +263,9 @@ def _build_anthropic_batch_results(
 async def create_message_batch(request: Request):
     """Anthropic Message Batches API compatible create endpoint."""
     data = await read_request_json(request)
+    request_options = extract_gigachat_request_options(
+        request, data, include_extra_body=True
+    )
     completion_window = data.get("completion_window", "24h")
     if completion_window is None:
         completion_window = "24h"
@@ -334,18 +341,20 @@ async def create_message_batch(request: Request):
     ).encode("utf-8")
     giga_client = get_gigachat_client(request)
     proxy_settings = request.app.state.config.proxy_settings
-    transformed_content = await transform_batch_input_file(
-        raw_input,
-        target=target,
-        request_transformer=request.app.state.request_transformer,
-        giga_client=giga_client,
-        embeddings_model=proxy_settings.embeddings,
-        pass_model=proxy_settings.pass_model,
-    )
-    batch = await giga_client.acreate_batch(
-        transformed_content,
-        method=target.method,
-    )
+    async with gigachat_request_options(giga_client, request_options):
+        transformed_content = await transform_batch_input_file(
+            raw_input,
+            target=target,
+            request_transformer=request.app.state.request_transformer,
+            giga_client=giga_client,
+            embeddings_model=proxy_settings.embeddings,
+            pass_model=proxy_settings.pass_model,
+        )
+    async with gigachat_request_options(giga_client, request_options):
+        batch = await giga_client.acreate_batch(
+            transformed_content,
+            method=target.method,
+        )
 
     metadata = {
         "api_format": "anthropic_messages",
@@ -370,9 +379,13 @@ async def list_message_batches(
 ):
     """Anthropic Message Batches API compatible list endpoint."""
     giga_client = get_gigachat_client(request)
+    request_options = extract_gigachat_request_options(
+        request, exclude_query_params=("after_id", "before_id", "limit")
+    )
     batch_store = get_batch_store(request)
     file_store = get_file_store(request)
-    batches = await giga_client.aget_batches()
+    async with gigachat_request_options(giga_client, request_options):
+        batches = await giga_client.aget_batches()
 
     data = []
     sorted_batches = sorted(
@@ -418,7 +431,9 @@ async def retrieve_message_batch(message_batch_id: str, request: Request):
         )
 
     giga_client = get_gigachat_client(request)
-    batches = await giga_client.aget_batches(batch_id=message_batch_id)
+    request_options = extract_gigachat_request_options(request)
+    async with gigachat_request_options(giga_client, request_options):
+        batches = await giga_client.aget_batches(batch_id=message_batch_id)
     if not batches.batches:
         return _anthropic_http_exception(
             404,
@@ -486,7 +501,9 @@ async def get_message_batch_results(message_batch_id: str, request: Request):
         )
 
     giga_client = get_gigachat_client(request)
-    batches = await giga_client.aget_batches(batch_id=message_batch_id)
+    request_options = extract_gigachat_request_options(request)
+    async with gigachat_request_options(giga_client, request_options):
+        batches = await giga_client.aget_batches(batch_id=message_batch_id)
     if not batches.batches:
         return _anthropic_http_exception(
             404,
@@ -504,6 +521,9 @@ async def get_message_batch_results(message_batch_id: str, request: Request):
             "Results are not available until message batch processing has ended.",
         )
 
-    file_response = await giga_client.aget_file_content(file_id=batch.output_file_id)
+    async with gigachat_request_options(giga_client, request_options):
+        file_response = await giga_client.aget_file_content(
+            file_id=batch.output_file_id
+        )
     content = _build_anthropic_batch_results(file_response.content, metadata)
     return Response(content=content, media_type="application/binary")

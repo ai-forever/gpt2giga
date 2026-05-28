@@ -6,6 +6,10 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from gpt2giga.app_state import get_file_store, get_gigachat_client
 from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.common.gigachat_options import (
+    extract_gigachat_request_options,
+    gigachat_request_options,
+)
 from gpt2giga.common.request_form import read_request_multipart
 from gpt2giga.openapi_specs.openai import files_openapi_extra
 from gpt2giga.protocol.batches import map_openai_file_purpose
@@ -39,10 +43,12 @@ async def create_file(request: Request):
         )
 
     giga_client = get_gigachat_client(request)
-    uploaded = await giga_client.aupload_file(
-        (upload["filename"], upload["content"], upload["content_type"]),
-        purpose=map_openai_file_purpose(purpose),
-    )
+    request_options = extract_gigachat_request_options(request)
+    async with gigachat_request_options(giga_client, request_options):
+        uploaded = await giga_client.aupload_file(
+            (upload["filename"], upload["content"], upload["content_type"]),
+            purpose=map_openai_file_purpose(purpose),
+        )
 
     file_store = get_file_store(request)
     file_store[uploaded.id_] = {
@@ -64,7 +70,11 @@ async def list_files(
 ):
     """List uploaded files."""
     giga_client = get_gigachat_client(request)
-    files = await giga_client.aget_files()
+    request_options = extract_gigachat_request_options(
+        request, exclude_query_params=("after", "limit", "order", "purpose")
+    )
+    async with gigachat_request_options(giga_client, request_options):
+        files = await giga_client.aget_files()
     file_store = get_file_store(request)
     data = [
         _serialize_file_object(file_obj, file_store.get(file_obj.id_))
@@ -86,7 +96,9 @@ async def retrieve_file(file_id: str, request: Request):
     """Return file metadata."""
     giga_client = get_gigachat_client(request)
     file_store = get_file_store(request)
-    file_obj = await giga_client.aget_file(file=file_id)
+    request_options = extract_gigachat_request_options(request)
+    async with gigachat_request_options(giga_client, request_options):
+        file_obj = await giga_client.aget_file(file=file_id)
     return _serialize_file_object(file_obj, file_store.get(file_id))
 
 
@@ -95,7 +107,9 @@ async def retrieve_file(file_id: str, request: Request):
 async def delete_file(file_id: str, request: Request):
     """Delete a file."""
     giga_client = get_gigachat_client(request)
-    deleted = await giga_client.adelete_file(file=file_id)
+    request_options = extract_gigachat_request_options(request)
+    async with gigachat_request_options(giga_client, request_options):
+        deleted = await giga_client.adelete_file(file=file_id)
     get_file_store(request).pop(file_id, None)
     return {
         "id": deleted.id_,

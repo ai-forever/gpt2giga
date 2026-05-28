@@ -3,10 +3,12 @@
 import base64
 import json
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
+from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.anthropic.request import (
@@ -89,6 +91,34 @@ class FakeGigachat:
             )
 
         return gen()
+
+
+class FakeGigachatTokenRecorder(FakeGigachat):
+    def __init__(self):
+        super().__init__()
+        self.token_inputs = []
+        self.token_model = None
+
+    async def atokens_count(self, input_, model=None):
+        self.token_inputs = list(input_)
+        self.token_model = model
+        return await super().atokens_count(input_, model=model)
+
+
+def test_build_openai_data_from_anthropic_request_preserves_extra_options():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "extra_body": {"profanity_check": False},
+        "extra_headers": {"x-me": "kus"},
+        "extra_query": {"beta": "true"},
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    assert openai_data["extra_body"] == {"profanity_check": False}
+    assert openai_data["extra_headers"] == {"x-me": "kus"}
+    assert openai_data["extra_query"] == {"beta": "true"}
 
 
 class FakeGigachatReasoning:
@@ -702,6 +732,26 @@ class TestConvertAnthropicMessagesToOpenai:
         assert isinstance(content, list)
         assert content[0]["image_url"]["url"] == "https://example.com/img.png"
 
+    def test_rejects_unsupported_document_block(self):
+        with pytest.raises(ClientCompatibilityError) as exc_info:
+            _convert_anthropic_messages_to_openai(
+                None,
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {"type": "text", "data": "doc"},
+                            }
+                        ],
+                    }
+                ],
+            )
+
+        assert exc_info.value.param == "messages[0].content[0]"
+        assert "document" in exc_info.value.message
+
     def test_assistant_tool_use(self):
         result = _convert_anthropic_messages_to_openai(
             None,
@@ -1075,6 +1125,50 @@ class TestBuildAnthropicResponse:
 
 
 class TestMessagesEndpoint:
+    def test_rejects_unsupported_container_param(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "container": {"id": "container-1"},
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 400
+        assert resp.json()["type"] == "error"
+        assert resp.json()["error"]["type"] == "invalid_request_error"
+        assert "containers" in resp.json()["error"]["message"]
+
+    def test_rejects_unsupported_document_content_block(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {"type": "text", "data": "doc"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 400
+        assert resp.json()["type"] == "error"
+        assert resp.json()["error"]["type"] == "invalid_request_error"
+        assert "document" in resp.json()["error"]["message"]
+        assert "Supported request content blocks" in resp.json()["error"]["message"]
+
     def test_non_stream_basic(self):
         app = make_app()
         client = TestClient(app)
@@ -1745,7 +1839,8 @@ class TestCountTokensEndpoint:
         assert body["input_tokens"] > 0
 
     def test_count_with_system(self):
-        app = make_app()
+        giga = FakeGigachatTokenRecorder()
+        app = make_app(giga)
         client = TestClient(app)
         payload = {
             "model": "claude-test",
@@ -1756,9 +1851,12 @@ class TestCountTokensEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert body["input_tokens"] > 0
+        assert giga.token_inputs == ["You are a helpful assistant.", "Hi"]
+        assert giga.token_model == "claude-test"
 
     def test_count_with_tools(self):
-        app = make_app()
+        giga = FakeGigachatTokenRecorder()
+        app = make_app(giga)
         client = TestClient(app)
         payload = {
             "model": "claude-test",
@@ -1779,9 +1877,13 @@ class TestCountTokensEndpoint:
         body = resp.json()
         # Should count both message tokens and tool definition tokens
         assert body["input_tokens"] > 0
+        assert "Weather?" in giga.token_inputs
+        assert any("get_weather" in item for item in giga.token_inputs)
+        assert any("location" in item for item in giga.token_inputs)
 
     def test_count_with_structured_output_schema(self):
-        app = make_app()
+        giga = FakeGigachatTokenRecorder()
+        app = make_app(giga)
         client = TestClient(app)
         payload = {
             "model": "claude-test",
@@ -1800,6 +1902,83 @@ class TestCountTokensEndpoint:
         assert resp.status_code == 200
         body = resp.json()
         assert body["input_tokens"] > 0
+        assert any('"properties"' in item for item in giga.token_inputs)
+        assert any('"name"' in item for item in giga.token_inputs)
+
+    def test_count_ignores_generation_only_params(self):
+        giga = FakeGigachatTokenRecorder()
+        app = make_app(giga)
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "temperature": 0.2,
+            "thinking": {"type": "enabled", "budget_tokens": 1000},
+            "tool_choice": {"type": "none"},
+            "top_k": 50,
+            "top_p": 0.8,
+            "messages": [{"role": "user", "content": "Hello world"}],
+        }
+
+        resp = client.post("/messages/count_tokens", json=payload)
+
+        assert resp.status_code == 200
+        assert resp.json()["input_tokens"] == 2
+        assert giga.token_inputs == ["Hello world"]
+
+    def test_count_rejects_unsupported_document_block(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {"type": "text", "data": "doc"},
+                        }
+                    ],
+                }
+            ],
+        }
+
+        resp = client.post("/messages/count_tokens", json=payload)
+
+        assert resp.status_code == 400
+        assert resp.json()["type"] == "error"
+        assert resp.json()["error"]["type"] == "invalid_request_error"
+        assert "document" in resp.json()["error"]["message"]
+
+    def test_count_accepts_custom_extra_body_key(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "extra_body": {"custom_flag": "on"},
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post("/messages/count_tokens", json=payload)
+
+        assert resp.status_code == 200
+        assert resp.json()["input_tokens"] == 1
+
+    def test_count_accepts_known_extra_body_key(self):
+        app = make_app()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "extra_body": {"profanity_check": False},
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post("/messages/count_tokens", json=payload)
+
+        assert resp.status_code == 200
+        assert resp.json()["input_tokens"] == 1
 
     def test_count_empty_messages(self):
         app = make_app()
@@ -1847,6 +2026,7 @@ class TestMessageBatchesEndpoint:
     def test_message_batch_routes_are_disabled(self):
         client = TestClient(make_app(FakeGigachatBatches()))
 
+        assert hasattr(client.app.state.gigachat_client, "acreate_batch")
         assert client.post("/messages/batches").status_code == 404
         assert client.get("/messages/batches").status_code == 404
         assert client.get("/messages/batches/batch-1").status_code == 404

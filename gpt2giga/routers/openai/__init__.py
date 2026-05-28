@@ -9,7 +9,7 @@ from gpt2giga.routers.openai.embeddings import router as embeddings_router
 from gpt2giga.routers.openai.models import router as models_router
 from gpt2giga.routers.openai.responses import router as responses_router
 
-# TODO: enable with next gigachat lib release.
+# Disabled until the installed GigaChat SDK exposes batch create/list/retrieve/cancel.
 # from gpt2giga.routers.openai.batches import router as batches_router
 # from gpt2giga.routers.openai.files import router as files_router
 
@@ -18,7 +18,7 @@ router.include_router(models_router)
 router.include_router(chat_completions_router)
 router.include_router(embeddings_router)
 router.include_router(responses_router)
-# TODO: enable with next gigachat lib release.
+# Keep disabled as a pair: files alone would expose an incomplete OpenAI batch flow.
 # router.include_router(files_router)
 # router.include_router(batches_router)
 

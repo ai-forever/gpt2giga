@@ -4,12 +4,33 @@ from typing import Any, Dict
 
 from gpt2giga.openapi_specs.common import _request_body_oneof
 
+OPENAI_ADDITIONAL_PROPERTIES_NOTE = (
+    "Additional properties are shown for SDK `extra_body` compatibility; known "
+    "unsupported parameters may be rejected with a 400 OpenAI-compatible error."
+)
+GIGACHAT_EXTRA_BODY_DESCRIPTION = (
+    "Object moved to GigaChat `additional_fields`; SDK-style unknown top-level "
+    "fields are treated the same way. Known unsupported client parameters are "
+    "still rejected when sent as top-level fields."
+)
+SAFE_EXTRA_HEADERS_DESCRIPTION = (
+    "Client SDK extra headers. Safe GigaChat context headers (`x-request-id`, "
+    "`x-session-id`, `x-service-id`, `x-operation-id`, `x-client-id`, "
+    "`x-trace-id`, `x-agent-id`) and custom non-transport headers are forwarded; "
+    "auth, transport, `x-stainless-*`, `openai-*`, and `anthropic-*` headers are blocked."
+)
+SAFE_EXTRA_QUERY_DESCRIPTION = (
+    "Client SDK extra query parameters. The upstream allowlist is empty by default, "
+    "so arbitrary query parameters are not forwarded to GigaChat."
+)
+
 
 def chat_completions_openapi_extra() -> Dict[str, Any]:
     """OpenAPI extras for POST /chat/completions."""
     minimal_schema: Dict[str, Any] = {
         "title": "ChatCompletionsRequestMinimal",
         "type": "object",
+        "description": OPENAI_ADDITIONAL_PROPERTIES_NOTE,
         "required": ["model", "messages"],
         "properties": {
             "model": {
@@ -67,6 +88,7 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
     full_schema: Dict[str, Any] = {
         "title": "ChatCompletionsRequestFull",
         "type": "object",
+        "description": OPENAI_ADDITIONAL_PROPERTIES_NOTE,
         "required": ["model", "messages"],
         "properties": {
             "model": {"type": "string", "description": "Model id."},
@@ -85,6 +107,13 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
             "max_tokens": {
                 "type": "integer",
                 "description": "Maximum number of output tokens.",
+            },
+            "max_completion_tokens": {
+                "type": "integer",
+                "description": (
+                    "OpenAI Chat Completions output-token limit. Mapped to "
+                    "`max_tokens`; rejected if it conflicts with `max_tokens`."
+                ),
             },
             "max_output_tokens": {
                 "type": "integer",
@@ -116,10 +145,54 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
                 "description": "Force function/tool call (best effort).",
                 "oneOf": [{"type": "string"}, {"type": "object"}],
             },
-            "user": {"type": "string", "description": "End-user identifier."},
+            "extra_body": {
+                "type": "object",
+                "description": GIGACHAT_EXTRA_BODY_DESCRIPTION,
+                "additionalProperties": True,
+            },
+            "extra_headers": {
+                "type": "object",
+                "description": SAFE_EXTRA_HEADERS_DESCRIPTION,
+                "additionalProperties": True,
+            },
+            "extra_query": {
+                "type": "object",
+                "description": SAFE_EXTRA_QUERY_DESCRIPTION,
+                "additionalProperties": True,
+            },
+            "user": {
+                "type": "string",
+                "description": "OpenAI abuse-monitoring metadata; accepted and ignored.",
+            },
             "metadata": {
                 "type": "object",
-                "description": "Custom metadata.",
+                "description": "OpenAI storage/query metadata; accepted and ignored.",
+                "additionalProperties": True,
+            },
+            "service_tier": {
+                "type": "string",
+                "description": "OpenAI service-tier option; accepted and ignored.",
+            },
+            "safety_identifier": {
+                "type": "string",
+                "description": "OpenAI safety identifier; accepted and ignored.",
+            },
+            "logprobs": {
+                "type": "boolean",
+                "description": "Rejected: log probabilities are not supported.",
+            },
+            "top_logprobs": {
+                "type": "integer",
+                "description": "Rejected: log probabilities are not supported.",
+            },
+            "audio": {
+                "type": "object",
+                "description": "Rejected: audio output is not supported.",
+                "additionalProperties": True,
+            },
+            "prediction": {
+                "type": "object",
+                "description": "Rejected: predicted outputs are not supported.",
                 "additionalProperties": True,
             },
         },
@@ -182,7 +255,9 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
         "**Required**: `model`, `messages`.\n\n"
         "**Notes**:\n"
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
-        "- Unknown optional parameters are accepted on a best-effort basis."
+        "- `extra_body` objects and SDK-style unknown top-level fields are moved "
+        "to GigaChat `additional_fields`.\n"
+        "- Known unsupported optional parameters may be rejected with `400`."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -199,6 +274,7 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
     minimal_schema: Dict[str, Any] = {
         "title": "EmbeddingsRequestMinimal",
         "type": "object",
+        "description": OPENAI_ADDITIONAL_PROPERTIES_NOTE,
         "required": ["input"],
         "properties": {
             "input": {
@@ -227,6 +303,7 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
     full_schema: Dict[str, Any] = {
         "title": "EmbeddingsRequestFull",
         "type": "object",
+        "description": OPENAI_ADDITIONAL_PROPERTIES_NOTE,
         "required": ["input"],
         "properties": {
             **minimal_schema["properties"],
@@ -243,7 +320,25 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
                     "GigaEmbeddings-3B-2025-09=2048, EmbeddingsGigaR=2560."
                 ),
             },
-            "user": {"type": "string", "description": "End-user identifier."},
+            "user": {
+                "type": "string",
+                "description": "OpenAI abuse-monitoring metadata; accepted and ignored.",
+            },
+            "extra_body": {
+                "type": "object",
+                "description": "Rejected for embeddings; no GigaChat embeddings extras are allowlisted.",
+                "additionalProperties": True,
+            },
+            "extra_headers": {
+                "type": "object",
+                "description": SAFE_EXTRA_HEADERS_DESCRIPTION,
+                "additionalProperties": True,
+            },
+            "extra_query": {
+                "type": "object",
+                "description": SAFE_EXTRA_QUERY_DESCRIPTION,
+                "additionalProperties": True,
+            },
         },
         "additionalProperties": True,
     }
@@ -256,7 +351,8 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
         "- Token-id inputs (`List[int]` / `List[List[int]]`) require a model "
         "known to `tiktoken` for decoding.\n"
         "- `dimensions` is a strict compatibility check: accepted only when it "
-        "matches the native dimension of the resolved GigaChat embedding model."
+        "matches the native dimension of the resolved GigaChat embedding model.\n"
+        "- `extra_body` and unknown top-level fields are rejected for embeddings."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -272,6 +368,7 @@ def responses_openapi_extra() -> Dict[str, Any]:
     minimal_schema: Dict[str, Any] = {
         "title": "ResponsesRequestMinimal",
         "type": "object",
+        "description": OPENAI_ADDITIONAL_PROPERTIES_NOTE,
         "required": ["model", "input"],
         "properties": {
             "model": {"type": "string", "description": "Model id."},
@@ -294,6 +391,7 @@ def responses_openapi_extra() -> Dict[str, Any]:
     full_schema: Dict[str, Any] = {
         "title": "ResponsesRequestFull",
         "type": "object",
+        "description": OPENAI_ADDITIONAL_PROPERTIES_NOTE,
         "required": ["model", "input"],
         "properties": {
             **minimal_schema["properties"],
@@ -328,8 +426,41 @@ def responses_openapi_extra() -> Dict[str, Any]:
             },
             "metadata": {
                 "type": "object",
-                "description": "Custom metadata.",
+                "description": "OpenAI storage/query metadata; accepted and ignored.",
                 "additionalProperties": True,
+            },
+            "extra_body": {
+                "type": "object",
+                "description": GIGACHAT_EXTRA_BODY_DESCRIPTION,
+                "additionalProperties": True,
+            },
+            "extra_headers": {
+                "type": "object",
+                "description": SAFE_EXTRA_HEADERS_DESCRIPTION,
+                "additionalProperties": True,
+            },
+            "extra_query": {
+                "type": "object",
+                "description": SAFE_EXTRA_QUERY_DESCRIPTION,
+                "additionalProperties": True,
+            },
+            "previous_response_id": {
+                "type": "string",
+                "description": "Rejected: stateful Responses continuation is not supported.",
+            },
+            "conversation": {
+                "type": "object",
+                "description": "Rejected: stateful Responses conversations are not supported.",
+                "additionalProperties": True,
+            },
+            "background": {
+                "type": "boolean",
+                "description": "Rejected: background responses are not supported.",
+            },
+            "include": {
+                "type": "array",
+                "description": "Rejected: Responses include expansions are not supported.",
+                "items": {"type": "string"},
             },
         },
         "additionalProperties": True,
@@ -358,7 +489,11 @@ def responses_openapi_extra() -> Dict[str, Any]:
         "**Required**: `model`, `input`.\n\n"
         "**Notes**:\n"
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
-        "- Unknown optional parameters are accepted on a best-effort basis."
+        "- Stateful lifecycle features such as `previous_response_id` and "
+        "`conversation` are not supported.\n"
+        "- `extra_body` objects and SDK-style unknown top-level fields are moved "
+        "to GigaChat `additional_fields`.\n"
+        "- Known unsupported optional parameters may be rejected with `400`."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,

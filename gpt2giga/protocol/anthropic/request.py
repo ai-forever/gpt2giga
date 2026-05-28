@@ -6,6 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.protocol.anthropic.params import (
+    sanitize_anthropic_messages_parameters,
+    validate_anthropic_content_blocks,
+)
 
 
 def _extract_anthropic_output_format(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -76,6 +80,7 @@ def _convert_anthropic_messages_to_openai(
     messages: List[Dict],
 ) -> List[Dict]:
     """Convert Anthropic messages to OpenAI messages format."""
+    validate_anthropic_content_blocks(system, messages)
     openai_messages: List[Dict] = []
     tool_use_names: Dict[str, str] = {}
 
@@ -227,6 +232,7 @@ def _build_openai_data_from_anthropic_request(
     logger: Any,
 ) -> Dict[str, Any]:
     """Translate an Anthropic Messages request into an OpenAI-style payload."""
+    data = sanitize_anthropic_messages_parameters(data)
     openai_data: Dict[str, Any] = {
         "model": data.get("model", "unknown"),
         "messages": _convert_anthropic_messages_to_openai(
@@ -242,6 +248,9 @@ def _build_openai_data_from_anthropic_request(
         openai_data["top_p"] = data["top_p"]
     if "stop_sequences" in data:
         openai_data["stop"] = data["stop_sequences"]
+    for extra_key in ("extra_body", "extra_headers", "extra_query"):
+        if extra_key in data:
+            openai_data[extra_key] = data[extra_key]
 
     response_format = _convert_anthropic_output_format_to_openai_response_format(data)
     if response_format:

@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 
@@ -135,7 +136,9 @@ async def transform_batch_input_file(
                 line_number, "Each batch line must contain an object `body`."
             )
 
-        row_target = get_batch_target(str(row.get("url", target.endpoint)))
+        row_url = str(row.get("url", target.endpoint))
+        row_path = urlsplit(row_url).path or row_url
+        row_target = get_batch_target(row_path)
         if row_target.kind != target.kind:
             raise _batch_line_error(
                 line_number,
