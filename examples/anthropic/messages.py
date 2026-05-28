@@ -10,8 +10,6 @@ message = client.messages.create(
     messages=[
         {"role": "user", "content": "Расскажи коротко о Python."},
     ],
-    extra_body={"profanity_check": True},
-    extra_headers={"x-request-id": "meow", "x-session-id": "kus"},
 )
 
 print(message.content[0].text)
