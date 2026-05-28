@@ -24,4 +24,4 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run actionlint
-        uses: devops-actions/actionlint@v0.1.10
+        uses: devops-actions/actionlint@v0.1.12
