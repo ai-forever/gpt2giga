@@ -5,6 +5,29 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.1.7] - 2026-05-28
+
+### Добавлено
+- **Совместимость параметров клиентов**: добавлены политики OpenAI и Anthropic для классификации параметров как `supported`, `accepted_ignored` и `rejected`, включая совместимые `400`-ответы для неподдерживаемых возможностей
+- **Безопасная передача `extra_*`**: добавлена request-scoped передача безопасных `extra_headers`, `extra_query` и `extra_body` в вызовы GigaChat SDK с блокировкой учетных данных, transport headers и SDK-internal заголовков
+- **Anthropic Models API**: `GET /models` и `GET /models/{model_id}` теперь возвращают Anthropic-совместимый формат для запросов Anthropic SDK
+- **Документация совместимости**: добавлен справочник `docs/client-parameter-compatibility.md` с матрицей поддерживаемых, игнорируемых и отклоняемых параметров OpenAI/Anthropic SDK
+- **Тестовое покрытие**: добавлены тесты для client parameter policies, GigaChat options forwarding, OpenAI/Anthropic SDK compatibility, OpenAPI specs, Anthropic models, embeddings и router behavior
+
+### Изменено
+- **OpenAI Chat/Responses**: top-level SDK-style unknown fields и literal `extra_body` нормализуются в GigaChat `additional_fields`, а `tool_choice`, `tools` и function tools проходят явную валидацию
+- **Anthropic Messages**: добавлена валидация `tool_choice`, `tools`, system/messages content blocks и unsupported beta/server-tool возможностей перед преобразованием в GigaChat-запрос
+- **OpenAPI и README**: схемы и таблицы возможностей обновлены под текущие OpenAI/Anthropic routes, временно отключенные Files/Batches routes и ограничения `gigachat==0.2.1`
+- **CI dependencies**: обновлены версии GitHub Actions для `setup-uv`, `upload-artifact`, `dependency-review-action`, `release-drafter` и `actionlint`
+- **Версия пакета**: версия проекта и lock-файла обновлена до `0.1.7`
+
+### Исправлено
+- **`extra_body` passthrough**: ослаблена обработка `extra_body`, чтобы GigaChat-specific поля корректно доходили до upstream через `additional_fields`
+- **Tool validation**: malformed OpenAI/Anthropic tool definitions теперь возвращают понятные совместимые ошибки вместо внутренних исключений
+- **Embeddings**: OpenAI embeddings теперь явно отклоняют unsupported параметры и `extra_body`, сохраняя поддержку `dimensions`, `encoding_format`, `extra_headers`, `extra_query`, `input`, `model` и `user`
+- **Anthropic unsupported options**: `container`, `context_management`, `mcp_servers`, unsupported content blocks и некорректные tool options теперь отклоняются до вызова GigaChat
+- **Batch/File routes**: ответы временно отключенных Files/Batches routes и OpenAPI-представление выровнены с текущей поддержкой GigaChat SDK
+
 ## [0.1.6] - 2026-05-20
 ### Breaking changes
 - **Model forwarding**: `GPT2GIGA_PASS_MODEL` / `--proxy.pass-model` теперь по умолчанию `True`. Модель из клиентского запроса прокидывается в GigaChat для Chat Completions, Responses API и Embeddings; если нужен прежний режим с моделью из настроек прокси, явно задайте `GPT2GIGA_PASS_MODEL=False`.
