@@ -112,7 +112,7 @@ def test_anthropic_compatibility_response_shape():
 
 def test_client_compatibility_error_rejects_unknown_provider():
     with pytest.raises(ValueError, match="provider"):
-        ClientCompatibilityError("bad provider", provider="gemini")
+        raise ClientCompatibilityError("bad provider", provider="gemini")
 
 
 @pytest.mark.asyncio
