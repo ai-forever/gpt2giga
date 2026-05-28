@@ -1,57 +1,57 @@
-# Client Parameter Compatibility
+# Совместимость параметров клиентов
 
-This document is the public compatibility reference for OpenAI and Anthropic
-client SDK parameters in gpt2giga. It reflects the current source layout:
+Этот документ служит публичным справочником совместимости параметров клиентских
+SDK OpenAI и Anthropic в gpt2giga. Он отражает текущую структуру исходного кода:
 
-- OpenAI routers: `gpt2giga/routers/openai/`
-- Anthropic routers: `gpt2giga/routers/anthropic/`
-- Shared request policies: `gpt2giga/common/client_params.py`
-- OpenAI request classification: `gpt2giga/protocol/request/params.py`
-- Anthropic request classification: `gpt2giga/protocol/anthropic/params.py`
+- роутеры OpenAI: `gpt2giga/routers/openai/`
+- роутеры Anthropic: `gpt2giga/routers/anthropic/`
+- общие политики запросов: `gpt2giga/common/client_params.py`
+- классификация запросов OpenAI: `gpt2giga/protocol/request/params.py`
+- классификация запросов Anthropic: `gpt2giga/protocol/anthropic/params.py`
 
-No other client families are covered by this compatibility pass.
+Другие семейства клиентов в этой проверке совместимости не рассматриваются.
 
-## Compatibility Statuses
+## Статусы совместимости
 
-| Status | Meaning |
+| Статус | Значение |
 |---|---|
-| `supported` | The parameter affects the request/response and is tested. |
-| `accepted_ignored` | The parameter is accepted for SDK compatibility but is not sent upstream. |
-| `rejected` | The parameter cannot be emulated correctly and returns a compatible `400` error. |
-| `not_applicable` | The option is client-side transport configuration, not a server body parameter. |
+| `supported` | Параметр влияет на запрос или ответ и покрыт тестами. |
+| `accepted_ignored` | Параметр принимается для совместимости с SDK, но не отправляется upstream. |
+| `rejected` | Параметр нельзя корректно эмулировать, поэтому возвращается совместимая ошибка `400`. |
+| `not_applicable` | Опция относится к клиентской настройке транспорта, а не к серверному параметру тела запроса. |
 
-## SDK Transport Options
+## Транспортные опции SDK
 
-`base_url`, `api_key`, `timeout`, retry settings, custom `http_client`, proxy
-configuration, and low-level transport settings are client-side SDK options.
-gpt2giga does not assign server-side semantics to them.
+`base_url`, `api_key`, `timeout`, настройки повторных попыток, пользовательский
+`http_client`, конфигурация прокси и низкоуровневые транспортные настройки
+являются клиентскими опциями SDK. gpt2giga не назначает им серверную семантику.
 
-Credentials and transport headers are never forwarded to GigaChat as arbitrary
-upstream metadata. This includes `Authorization`, `x-api-key`, cookies,
-`host`, content/transfer headers, `x-stainless-*`, `openai-*`, and
-`anthropic-*`.
+Учетные данные и транспортные заголовки никогда не пересылаются в GigaChat как
+произвольные upstream-метаданные. Это касается `Authorization`, `x-api-key`,
+cookie, `host`, заголовков содержимого и передачи, `x-stainless-*`,
+`openai-*` и `anthropic-*`.
 
-## `extra_headers` and `extra_query`
+## `extra_headers` и `extra_query`
 
-Only these diagnostic headers are allowed to reach the upstream GigaChat HTTP
-request:
+Только эти диагностические заголовки могут попасть в upstream HTTP-запрос
+GigaChat:
 
 - `x-request-id`
 - `x-correlation-id`
 - `x-trace-id`
 - `traceparent`
 
-The upstream query allowlist is empty by default. SDK `extra_query` values and
-ordinary unknown query parameters are accepted by the proxy where the route
-allows them, but arbitrary keys are not forwarded to GigaChat.
+Список разрешенных upstream query-параметров по умолчанию пуст. Значения SDK
+`extra_query` и обычные неизвестные query-параметры принимаются прокси там, где
+это разрешает маршрут, но произвольные ключи не пересылаются в GigaChat.
 
 ## `extra_body`
 
-OpenAI SDK and Anthropic SDK normally merge `extra_body` into the outgoing JSON
-body as top-level fields. Raw HTTP clients may also send a literal
-`extra_body` object. gpt2giga handles both forms.
+SDK OpenAI и Anthropic обычно объединяют `extra_body` с исходящим JSON-телом как
+поля верхнего уровня. HTTP-клиенты, работающие напрямую, также могут отправлять
+буквальный объект `extra_body`. gpt2giga обрабатывает обе формы.
 
-The allowlisted GigaChat-specific fields are:
+Разрешенные поля, специфичные для GigaChat:
 
 - `flags`
 - `function_ranker`
@@ -60,54 +60,55 @@ The allowlisted GigaChat-specific fields are:
 - `storage`
 - `update_interval`
 
-For OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages these
-fields are moved into GigaChat `additional_fields`. Unknown `extra_body` fields
-are rejected with `400`.
+Для OpenAI Chat Completions, OpenAI Responses и Anthropic Messages эти поля
+переносятся в GigaChat `additional_fields`. Неизвестные поля `extra_body`
+отклоняются с ошибкой `400`.
 
-OpenAI Embeddings rejects `extra_body`; no embeddings-specific GigaChat fields
-are currently allowlisted.
+OpenAI Embeddings отклоняет `extra_body`; на данный момент для embeddings нет
+разрешенных полей, специфичных для GigaChat.
 
-## OpenAI Body Parameters
+## Параметры тела OpenAI
 
-| Endpoint | Supported |
+| Эндпоинт | Поддерживается |
 |---|---|
-| Chat Completions | `model`, `messages`, `stream`, `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, function `tools`, `functions`, `function_call`, supported `tool_choice`, `response_format`, `reasoning`, `reasoning_effort`, allowlisted `extra_body` |
-| Responses | `model`, `input`, `instructions`, `stream`, `temperature`, `top_p`, `max_output_tokens`, function `tools`, supported `tool_choice`, `text.format`, `response_format`, `reasoning`, `reasoning_effort`, allowlisted `extra_body` |
+| Chat Completions | `model`, `messages`, `stream`, `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, функциональные `tools`, `functions`, `function_call`, поддерживаемый `tool_choice`, `response_format`, `reasoning`, `reasoning_effort`, разрешенный `extra_body` |
+| Responses | `model`, `input`, `instructions`, `stream`, `temperature`, `top_p`, `max_output_tokens`, функциональные `tools`, поддерживаемый `tool_choice`, `text.format`, `response_format`, `reasoning`, `reasoning_effort`, разрешенный `extra_body` |
 | Embeddings | `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query` |
 | Models | `GET /models`, `GET /models/{model}` |
 
-OpenAI metadata fields such as `user`, `metadata`, `service_tier`,
-`safety_identifier`, `seed`, `prompt_cache_key`, and
-`prompt_cache_retention` are accepted and ignored where classified.
+Поля метаданных OpenAI, такие как `user`, `metadata`, `service_tier`,
+`safety_identifier`, `seed`, `prompt_cache_key` и `prompt_cache_retention`,
+принимаются и игнорируются там, где они классифицированы.
 
-Unsupported OpenAI parameters return `400` when present with meaningful values.
-Examples include `logprobs`, `top_logprobs`, `logit_bias`, audio output,
-`prediction`, `web_search_options`, built-in tools, `n > 1`,
-`parallel_tool_calls=true`, stored completion requests, and stateful Responses
-features such as `previous_response_id` and `conversation`.
+Неподдерживаемые параметры OpenAI возвращают `400`, если присутствуют со
+значимыми значениями. Примеры: `logprobs`, `top_logprobs`, `logit_bias`,
+аудиовывод, `prediction`, `web_search_options`, встроенные инструменты,
+`n > 1`, `parallel_tool_calls=true`, сохраненные запросы completions, а также
+сохраняющие состояние возможности Responses, такие как `previous_response_id` и
+`conversation`.
 
-## Anthropic Body Parameters
+## Параметры тела Anthropic
 
-| Endpoint | Supported |
+| Эндпоинт | Поддерживается |
 |---|---|
-| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, local function `tools`, `tool_choice` values `auto`/`none`/forced `tool`, `thinking`, `output_config.format`, `output_format`, allowlisted `extra_body` |
-| Count Tokens | `model`, `messages`, `system`, `tools`, structured-output schema text, compatible message content validation |
-| Models | `GET /models`, `GET /models/{model_id}` when the request carries Anthropic SDK headers such as `anthropic-version` |
+| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, локальные функциональные `tools`, значения `tool_choice` `auto`/`none`/принудительный `tool`, `thinking`, `output_config.format`, `output_format`, разрешенный `extra_body` |
+| Count Tokens | `model`, `messages`, `system`, `tools`, текст схемы structured output, совместимая валидация содержимого сообщений |
+| Models | `GET /models`, `GET /models/{model_id}`, когда запрос содержит заголовки Anthropic SDK, например `anthropic-version` |
 
-Anthropic `metadata`, `service_tier`, `top_k`, beta headers, and `betas` are
-accepted and ignored where classified.
+Anthropic `metadata`, `service_tier`, `top_k`, beta-заголовки и `betas`
+принимаются и игнорируются там, где они классифицированы.
 
-Unsupported Anthropic parameters or features return `400`. Examples include
-`container`, `context_management`, `mcp_servers`, server-side tools, web search,
-code execution, computer use, document/file content blocks, container uploads,
-search result blocks, citations, and input `thinking`/`redacted_thinking`
-blocks.
+Неподдерживаемые параметры или возможности Anthropic возвращают `400`. Примеры:
+`container`, `context_management`, `mcp_servers`, серверные инструменты,
+веб-поиск, выполнение кода, управление компьютером, блоки содержимого
+document/file, загрузки в container, блоки результатов поиска, citations, а
+также входные блоки `thinking`/`redacted_thinking`.
 
-Anthropic Message Batches code exists but the public router is not mounted
-until GigaChat SDK/backend batch support is available.
+Код Anthropic Message Batches существует, но публичный роутер не подключается,
+пока в GigaChat SDK или backend не появится поддержка batch-операций.
 
-## Route Scope
+## Область маршрутов
 
-Mounted routes are available both at root and under `/v1` through the app
-router. Prepared but disabled OpenAI Files/Batches and Anthropic Message Batches
-routes are intentionally omitted from the default OpenAPI schema.
+Подключенные маршруты доступны и в корне, и под `/v1` через роутер приложения.
+Подготовленные, но отключенные маршруты OpenAI Files/Batches и Anthropic Message
+Batches намеренно исключены из схемы OpenAPI по умолчанию.
