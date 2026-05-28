@@ -5,13 +5,16 @@ from fastapi import HTTPException
 
 from gpt2giga.common.client_params import (
     CLIENT_PARAM_STATUSES,
+    GIGACHAT_CONTEXT_HEADER_NAMES,
     SAFE_GIGACHAT_QUERY_PARAM_NAMES,
     ClientCompatibilityError,
     ClientParamStatus,
     anthropic_compatibility_response,
     filter_safe_diagnostic_headers,
+    filter_safe_extra_headers,
     filter_safe_query_items,
     is_blocked_client_header,
+    is_safe_extra_header,
     is_safe_diagnostic_header,
     openai_compatibility_error,
 )
@@ -27,6 +30,19 @@ def test_client_param_status_values_are_stable():
         "not_applicable",
     }
     assert ClientParamStatus.SUPPORTED.value == "supported"
+
+
+def test_gigachat_context_header_names_are_stable():
+    assert GIGACHAT_CONTEXT_HEADER_NAMES == {
+        "authorization",
+        "x-agent-id",
+        "x-client-id",
+        "x-operation-id",
+        "x-request-id",
+        "x-service-id",
+        "x-session-id",
+        "x-trace-id",
+    }
 
 
 def test_header_policy_blocks_secrets_transport_and_sdk_headers():
@@ -55,6 +71,29 @@ def test_filter_safe_diagnostic_headers_allows_only_allowlisted_scalars():
     }
 
 
+def test_filter_safe_extra_headers_allows_gigachat_context_and_custom_headers():
+    assert filter_safe_extra_headers(
+        {
+            "X-Request-ID": "rq-1",
+            "X-Session-ID": 123,
+            "X-Service-ID": "svc",
+            "X-Custom-Flag": True,
+            "TraceParent": "00-trace",
+            "Authorization": "Bearer secret",
+            "Content-Type": "application/json",
+            "X-Stainless-Lang": "python",
+            "OpenAI-Organization": "org_test",
+            "X-None": None,
+        }
+    ) == {
+        "x-request-id": "rq-1",
+        "x-session-id": "123",
+        "x-service-id": "svc",
+        "x-custom-flag": "True",
+        "traceparent": "00-trace",
+    }
+
+
 def test_safe_query_policy_defaults_to_empty_allowlist():
     assert SAFE_GIGACHAT_QUERY_PARAM_NAMES == frozenset()
     assert filter_safe_query_items([("feature", "on"), ("debug", True)]) == ()
@@ -68,6 +107,13 @@ def test_safe_diagnostic_header_rejects_blocked_names():
     assert is_safe_diagnostic_header("X-Request-ID") is True
     assert is_safe_diagnostic_header("Authorization") is False
     assert is_safe_diagnostic_header("OpenAI-Request-ID") is False
+
+
+def test_safe_extra_header_rejects_only_blocked_names():
+    assert is_safe_extra_header("X-Session-ID") is True
+    assert is_safe_extra_header("X-Custom-Flag") is True
+    assert is_safe_extra_header("Authorization") is False
+    assert is_safe_extra_header("OpenAI-Request-ID") is False
 
 
 def test_openai_compatibility_error_shape():

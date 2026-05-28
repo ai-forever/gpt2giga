@@ -154,6 +154,17 @@ def test_transform_common_parameters_maps_sdk_style_extra_fields_to_additional_f
     assert "profanity_check" not in out
 
 
+def test_transform_common_parameters_maps_unknown_sdk_style_extra_to_additional_fields():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters(
+        {"model": "gpt-x", "messages": [], "custom_flag": "on"}
+    )
+
+    assert out.get("additional_fields") == {"custom_flag": "on"}
+    assert "custom_flag" not in out
+
+
 def test_transform_common_parameters_merges_sdk_and_literal_extra_body():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -174,19 +185,25 @@ def test_transform_common_parameters_merges_sdk_and_literal_extra_body():
     }
 
 
-@pytest.mark.parametrize(
-    "extra_body",
-    [
-        {"custom_flag": "on"},
-        ["not", "an", "object"],
-    ],
-)
-def test_transform_common_parameters_rejects_unsupported_extra_body(extra_body):
+def test_transform_common_parameters_accepts_custom_extra_body():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_chat_parameters(
+        {"model": "gpt-x", "extra_body": {"custom_flag": "on"}}
+    )
+
+    assert out.get("additional_fields") == {"custom_flag": "on"}
+
+
+def test_transform_common_parameters_rejects_non_object_extra_body():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
     with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_chat_parameters({"model": "gpt-x", "extra_body": extra_body})
+        rt.transform_chat_parameters(
+            {"model": "gpt-x", "extra_body": ["not", "an", "object"]}
+        )
 
     assert exc_info.value.param == "extra_body"
 
@@ -360,6 +377,7 @@ def test_openai_parameter_classifier_marks_known_states():
         ClientParamStatus.SUPPORTED
     )
     assert classify_openai_chat_parameter("logprobs") == ClientParamStatus.REJECTED
+    assert classify_openai_chat_parameter("custom_flag") == ClientParamStatus.SUPPORTED
     assert classify_openai_responses_parameter("input") == ClientParamStatus.SUPPORTED
     assert classify_openai_responses_parameter("include") == ClientParamStatus.REJECTED
     assert classify_openai_responses_parameter("previous_response_id") == (
@@ -378,7 +396,6 @@ def test_openai_parameter_classifier_marks_known_states():
         ({"n": 2}, "n"),
         ({"parallel_tool_calls": True}, "parallel_tool_calls"),
         ({"web_search_options": {"search_context_size": "low"}}, "web_search_options"),
-        ({"unknown_param": "value"}, "unknown_param"),
     ],
 )
 def test_transform_chat_parameters_rejects_unsupported_openai_params(body, param):

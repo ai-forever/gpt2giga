@@ -203,7 +203,9 @@ def test_anthropic_sdk_extra_headers_uses_safe_forwarding_policy():
         messages=[{"role": "user", "content": "hello"}],
         extra_headers={
             "authorization": "Bearer leak",
+            "x-custom": "sdk-custom",
             "x-request-id": "sdk-request-id",
+            "x-session-id": "sdk-session-id",
             "x-stainless-test": "drop-me",
         },
         extra_query={"unsafe": "1"},
@@ -211,25 +213,27 @@ def test_anthropic_sdk_extra_headers_uses_safe_forwarding_policy():
 
     upstream_headers = app.state.gigachat_client.last_upstream_headers
     assert upstream_headers["x-request-id"] == "sdk-request-id"
+    assert upstream_headers["x-session-id"] == "sdk-session-id"
+    assert upstream_headers["x-custom"] == "sdk-custom"
     assert "authorization" not in upstream_headers
     assert "x-stainless-test" not in upstream_headers
     assert app.state.gigachat_client.last_upstream_query == ""
 
 
-def test_anthropic_sdk_extra_body_unsupported_key_raises_bad_request():
+def test_anthropic_sdk_custom_extra_body_reaches_additional_fields():
     app = _make_app()
     client = _make_anthropic_client(app)
 
-    with pytest.raises(BadRequestError) as exc_info:
-        client.messages.create(
-            model="GigaChat",
-            max_tokens=16,
-            messages=[{"role": "user", "content": "hello"}],
-            extra_body={"custom_flag": "on"},
-        )
+    client.messages.create(
+        model="GigaChat",
+        max_tokens=16,
+        messages=[{"role": "user", "content": "hello"}],
+        extra_body={"custom_flag": "on"},
+    )
 
-    assert exc_info.value.status_code == 400
-    assert "custom_flag" in str(exc_info.value)
+    assert app.state.gigachat_client.chat_payloads[-1]["additional_fields"] == {
+        "custom_flag": "on"
+    }
 
 
 def test_anthropic_sdk_rejected_unsupported_beta_feature():

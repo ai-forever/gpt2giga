@@ -134,11 +134,10 @@ sequenceDiagram
 
 Клиентские настройки SDK вроде `base_url`, `api_key`, `timeout`, retry-настроек, `http_client` и proxy/transport остаются на стороне клиента. Сервер не трактует их как body-параметры и не прокидывает пользовательские `Authorization`, `x-api-key`, cookies, transport headers, `x-stainless-*`, `openai-*` или `anthropic-*` во внешний GigaChat upstream.
 
-`extra_headers` и HTTP headers проходят только через allowlist диагностических заголовков: `x-request-id`, `x-correlation-id`, `x-trace-id`, `traceparent`. `extra_query` по умолчанию не прокидывает произвольные query-параметры upstream. Неподдержанные body-параметры возвращают совместимую ошибку `400`.
+`extra_headers` и HTTP headers переносятся в request-scoped contextvars SDK GigaChat для безопасных служебных заголовков: `x-request-id`, `x-session-id`, `x-service-id`, `x-operation-id`, `x-client-id`, `x-trace-id`, `x-agent-id`. Прочие безопасные пользовательские заголовки идут через `custom_headers_cvar`; `Authorization`, `x-api-key`, transport headers, `x-stainless-*`, `openai-*` и `anthropic-*` заблокированы. `extra_query` по умолчанию не прокидывает произвольные query-параметры upstream. Неподдержанные body-параметры возвращают совместимую ошибку `400`.
 
-`extra_body` поддержан только там, где есть явная allowlist-политика:
+`extra_body` для Chat Completions, Responses и Anthropic Messages переносится в GigaChat `additional_fields` целиком, включая SDK-style поля, которые клиент разворачивает в top-level JSON:
 
-- OpenAI Chat Completions, OpenAI Responses и Anthropic Messages принимают GigaChat-specific поля `flags`, `function_ranker`, `profanity_check`, `repetition_penalty`, `storage`, `update_interval` и переносят их в `additional_fields`.
 - OpenAI Embeddings не поддерживает `extra_body`; используйте только `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query`.
 - Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` и built-in tools возвращают `400`.
 - Для Anthropic Messages unsupported параметры и блоки вроде `container`, `context_management`, `mcp_servers`, server tools, `document`, `file`, `container_upload`, `search_result`, `thinking`/`redacted_thinking` во входном контенте возвращают `400`.

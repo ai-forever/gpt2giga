@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from gigachat.api.utils import build_headers
 from starlette.requests import Request
 
 from gpt2giga.common.gigachat_options import (
@@ -40,8 +41,9 @@ def test_extract_gigachat_request_options_allows_only_safe_metadata():
     data = {
         "extra_headers": {
             "X-Request-ID": "from-body",
+            "X-Session-ID": "sdk-session",
             "X-Correlation-ID": 123,
-            "X-Body": "drop",
+            "X-Body": "from-extra-headers",
             "Authorization": "Bearer bad",
         },
         "extra_query": {"feature": ["a", "b"], "enabled": True},
@@ -57,14 +59,16 @@ def test_extract_gigachat_request_options_allows_only_safe_metadata():
 
     assert options.headers == {
         "x-request-id": "from-body",
+        "x-session-id": "sdk-session",
         "x-correlation-id": "123",
+        "x-body": "from-extra-headers",
     }
     assert options.query == ()
     assert options.body == {"profanity_check": False}
     assert data == {}
 
 
-def test_extract_gigachat_request_options_drops_arbitrary_metadata():
+def test_extract_gigachat_request_options_drops_provider_sdk_metadata():
     request = _make_request(
         headers={
             "X-Foo": "from-header",
@@ -82,8 +86,46 @@ def test_extract_gigachat_request_options_drops_arbitrary_metadata():
         },
     )
 
-    assert options.headers == {}
+    assert options.headers == {
+        "x-foo": "from-header",
+        "x-bar": "from-extra-headers",
+    }
     assert options.query == ()
+
+
+@pytest.mark.asyncio
+async def test_gigachat_request_options_sets_gigachat_header_contextvars():
+    options = GigaRequestOptions(
+        headers={
+            "Authorization": "Bearer jwe",
+            "x-request-id": "rq-1",
+            "x-session-id": "session-1",
+            "x-client-id": "client-1",
+            "x-service-id": "service-1",
+            "x-operation-id": "operation-1",
+            "x-trace-id": "trace-1",
+            "x-agent-id": "agent-1",
+            "x-custom": "custom-1",
+        },
+        query=(),
+        body={},
+    )
+
+    async with gigachat_request_options(SimpleNamespace(), options):
+        headers = build_headers()
+
+    assert headers["Authorization"] == "Bearer jwe"
+    assert headers["X-Request-ID"] == "rq-1"
+    assert headers["X-Session-ID"] == "session-1"
+    assert headers["X-Client-ID"] == "client-1"
+    assert headers["X-Service-ID"] == "service-1"
+    assert headers["X-Operation-ID"] == "operation-1"
+    assert headers["X-Trace-ID"] == "trace-1"
+    assert headers["X-Agent-ID"] == "agent-1"
+    assert headers["x-custom"] == "custom-1"
+
+    headers_after_context = build_headers()
+    assert headers_after_context == {"User-Agent": "GigaChat-python-lib"}
 
 
 @pytest.mark.asyncio

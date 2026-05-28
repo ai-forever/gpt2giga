@@ -5,18 +5,19 @@ from typing import Any, Dict
 from gpt2giga.openapi_specs.common import _request_body_oneof
 
 ANTHROPIC_ADDITIONAL_PROPERTIES_NOTE = (
-    "Additional properties are shown for Anthropic SDK compatibility; unsupported "
-    "unknown parameters may be rejected with a 400 Anthropic-compatible error."
+    "Additional properties are shown for Anthropic SDK `extra_body` compatibility; "
+    "known unsupported parameters may be rejected with a 400 Anthropic-compatible error."
 )
 ANTHROPIC_EXTRA_BODY_DESCRIPTION = (
-    "Allowlisted GigaChat-specific fields moved to `additional_fields`: `flags`, "
-    "`function_ranker`, `profanity_check`, `repetition_penalty`, `storage`, "
-    "`update_interval`. Unsupported keys are rejected."
+    "Object moved to GigaChat `additional_fields`; SDK-style unknown top-level "
+    "fields are treated the same way. Known unsupported client parameters are "
+    "still rejected when sent as top-level fields."
 )
 ANTHROPIC_EXTRA_HEADERS_DESCRIPTION = (
-    "Client SDK extra headers. Only diagnostic headers are forwarded upstream: "
-    "`x-request-id`, `x-correlation-id`, `x-trace-id`, `traceparent`; auth, "
-    "transport, `x-stainless-*`, `openai-*`, and `anthropic-*` headers are blocked."
+    "Client SDK extra headers. Safe GigaChat context headers (`x-request-id`, "
+    "`x-session-id`, `x-service-id`, `x-operation-id`, `x-client-id`, "
+    "`x-trace-id`, `x-agent-id`) and custom non-transport headers are forwarded; "
+    "auth, transport, `x-stainless-*`, `openai-*`, and `anthropic-*` headers are blocked."
 )
 ANTHROPIC_EXTRA_QUERY_DESCRIPTION = (
     "Client SDK extra query parameters. The upstream allowlist is empty by default, "
@@ -85,8 +86,8 @@ def anthropic_count_tokens_openapi_extra() -> Dict[str, Any]:
         "**Notes**:\n"
         "- Returns `{input_tokens: <count>}` without creating a message.\n"
         "- Tool definitions are included in the token count if provided.\n"
-        "- Generation-only options are ignored for counting, but unsupported "
-        "content blocks and unsupported `extra_body` keys are rejected."
+        "- Generation-only options and `extra_body` are accepted but ignored for "
+        "counting; unsupported content blocks are rejected."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -238,7 +239,9 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
         "- Supported request content blocks are `text`, `image`, `tool_use`, "
         "and `tool_result`; document/file/container/search/thinking input blocks "
         "are rejected.\n"
-        "- Unknown or unsupported optional parameters may be rejected with `400`."
+        "- `extra_body` objects and SDK-style unknown top-level fields are moved "
+        "to GigaChat `additional_fields`.\n"
+        "- Known unsupported optional parameters may be rejected with `400`."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,

@@ -1952,7 +1952,7 @@ class TestCountTokensEndpoint:
         assert resp.json()["error"]["type"] == "invalid_request_error"
         assert "document" in resp.json()["error"]["message"]
 
-    def test_count_rejects_unsupported_extra_body_key(self):
+    def test_count_accepts_custom_extra_body_key(self):
         app = make_app()
         client = TestClient(app)
         payload = {
@@ -1963,12 +1963,10 @@ class TestCountTokensEndpoint:
 
         resp = client.post("/messages/count_tokens", json=payload)
 
-        assert resp.status_code == 400
-        assert resp.json()["type"] == "error"
-        assert resp.json()["error"]["type"] == "invalid_request_error"
-        assert "custom_flag" in resp.json()["error"]["message"]
+        assert resp.status_code == 200
+        assert resp.json()["input_tokens"] == 1
 
-    def test_count_accepts_allowlisted_extra_body_key(self):
+    def test_count_accepts_known_extra_body_key(self):
         app = make_app()
         client = TestClient(app)
         payload = {

@@ -37,6 +37,9 @@ def test_anthropic_messages_parameter_classifier_marks_known_states():
     assert classify_anthropic_messages_parameter("container") == (
         ClientParamStatus.REJECTED
     )
+    assert classify_anthropic_messages_parameter("custom_flag") == (
+        ClientParamStatus.SUPPORTED
+    )
 
 
 def test_build_openai_data_from_anthropic_request_ignores_top_k():
@@ -94,17 +97,28 @@ def test_build_openai_data_from_anthropic_request_normalizes_sdk_style_extra_bod
     assert "profanity_check" not in openai_data
 
 
-def test_build_openai_data_from_anthropic_request_rejects_unknown_extra_body():
+def test_build_openai_data_from_anthropic_request_accepts_custom_extra_body():
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
         "extra_body": {"custom_flag": "on"},
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.param == "extra_body"
+    assert openai_data["extra_body"] == {"custom_flag": "on"}
+
+
+def test_build_openai_data_from_anthropic_request_maps_unknown_sdk_style_extra_body():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "custom_flag": "on",
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    assert openai_data["extra_body"] == {"custom_flag": "on"}
 
 
 def test_build_openai_data_from_anthropic_request_accepts_tool_choice_auto():

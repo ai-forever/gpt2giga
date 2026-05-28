@@ -5,18 +5,19 @@ from typing import Any, Dict
 from gpt2giga.openapi_specs.common import _request_body_oneof
 
 OPENAI_ADDITIONAL_PROPERTIES_NOTE = (
-    "Additional properties are shown for SDK compatibility; unsupported unknown "
-    "parameters may be rejected with a 400 OpenAI-compatible error."
+    "Additional properties are shown for SDK `extra_body` compatibility; known "
+    "unsupported parameters may be rejected with a 400 OpenAI-compatible error."
 )
 GIGACHAT_EXTRA_BODY_DESCRIPTION = (
-    "Allowlisted GigaChat-specific fields moved to `additional_fields`: `flags`, "
-    "`function_ranker`, `profanity_check`, `repetition_penalty`, `storage`, "
-    "`update_interval`. Unsupported keys are rejected."
+    "Object moved to GigaChat `additional_fields`; SDK-style unknown top-level "
+    "fields are treated the same way. Known unsupported client parameters are "
+    "still rejected when sent as top-level fields."
 )
 SAFE_EXTRA_HEADERS_DESCRIPTION = (
-    "Client SDK extra headers. Only diagnostic headers are forwarded upstream: "
-    "`x-request-id`, `x-correlation-id`, `x-trace-id`, `traceparent`; auth, "
-    "transport, `x-stainless-*`, `openai-*`, and `anthropic-*` headers are blocked."
+    "Client SDK extra headers. Safe GigaChat context headers (`x-request-id`, "
+    "`x-session-id`, `x-service-id`, `x-operation-id`, `x-client-id`, "
+    "`x-trace-id`, `x-agent-id`) and custom non-transport headers are forwarded; "
+    "auth, transport, `x-stainless-*`, `openai-*`, and `anthropic-*` headers are blocked."
 )
 SAFE_EXTRA_QUERY_DESCRIPTION = (
     "Client SDK extra query parameters. The upstream allowlist is empty by default, "
@@ -254,8 +255,9 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
         "**Required**: `model`, `messages`.\n\n"
         "**Notes**:\n"
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
-        "- `extra_body` supports only allowlisted GigaChat-specific fields.\n"
-        "- Unknown or unsupported optional parameters may be rejected with `400`."
+        "- `extra_body` objects and SDK-style unknown top-level fields are moved "
+        "to GigaChat `additional_fields`.\n"
+        "- Known unsupported optional parameters may be rejected with `400`."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -489,7 +491,9 @@ def responses_openapi_extra() -> Dict[str, Any]:
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
         "- Stateful lifecycle features such as `previous_response_id` and "
         "`conversation` are not supported.\n"
-        "- Unknown or unsupported optional parameters may be rejected with `400`."
+        "- `extra_body` objects and SDK-style unknown top-level fields are moved "
+        "to GigaChat `additional_fields`.\n"
+        "- Known unsupported optional parameters may be rejected with `400`."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,

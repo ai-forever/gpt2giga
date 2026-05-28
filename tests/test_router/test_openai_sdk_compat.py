@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
-from openai import BadRequestError, OpenAI
+from openai import OpenAI
 
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.models.config import ProxyConfig
@@ -173,18 +173,16 @@ def test_openai_sdk_extra_body_supported_key_reaches_additional_fields():
     }
 
 
-def test_openai_sdk_extra_body_unsupported_key_raises_bad_request():
+def test_openai_sdk_custom_extra_body_reaches_additional_fields():
     app = _make_app()
     client = _make_openai_client(app)
 
-    try:
-        client.chat.completions.create(
-            model="GigaChat",
-            messages=[{"role": "user", "content": "hello"}],
-            extra_body={"custom_flag": "on"},
-        )
-    except BadRequestError as exc:
-        assert exc.status_code == 400
-        assert "custom_flag" in str(exc)
-    else:
-        raise AssertionError("Expected OpenAI SDK BadRequestError")
+    client.chat.completions.create(
+        model="GigaChat",
+        messages=[{"role": "user", "content": "hello"}],
+        extra_body={"custom_flag": "on"},
+    )
+
+    assert app.state.gigachat_client.chat_payloads[-1]["additional_fields"] == {
+        "custom_flag": "on"
+    }

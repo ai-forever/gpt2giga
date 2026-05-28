@@ -2,16 +2,28 @@
 
 import json
 from contextlib import asynccontextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Iterable, Mapping, Optional
 
 import httpx
+from gigachat.context import (
+    agent_id_cvar,
+    authorization_cvar,
+    client_id_cvar,
+    custom_headers_cvar,
+    operation_id_cvar,
+    request_id_cvar,
+    service_id_cvar,
+    session_id_cvar,
+    trace_id_cvar,
+)
 from starlette.requests import Request
 
 from gpt2giga.common.client_params import (
-    filter_safe_diagnostic_headers,
+    filter_safe_extra_headers,
     filter_safe_query_items,
+    normalize_header_name,
 )
 
 _OPTIONS_HOOK_MARKER = "_gpt2giga_request_options_hook"
@@ -34,6 +46,17 @@ _current_options: ContextVar[Optional[GigaRequestOptions]] = ContextVar(
     "gpt2giga_current_gigachat_request_options",
     default=None,
 )
+
+_GIGACHAT_HEADER_CONTEXT_VARS: Mapping[str, ContextVar[Optional[str]]] = {
+    "authorization": authorization_cvar,
+    "x-agent-id": agent_id_cvar,
+    "x-client-id": client_id_cvar,
+    "x-operation-id": operation_id_cvar,
+    "x-request-id": request_id_cvar,
+    "x-service-id": service_id_cvar,
+    "x-session-id": session_id_cvar,
+    "x-trace-id": trace_id_cvar,
+}
 
 
 def extract_gigachat_request_options(
@@ -71,15 +94,17 @@ async def gigachat_request_options(
         return
 
     _ensure_request_options_hook(giga_client)
+    header_tokens = _set_gigachat_header_context(options.headers)
     token = _current_options.set(options)
     try:
         yield
     finally:
         _current_options.reset(token)
+        _reset_context_tokens(header_tokens)
 
 
 def _extract_request_headers(request: Request) -> dict[str, str]:
-    return filter_safe_diagnostic_headers(request.headers)
+    return filter_safe_extra_headers(request.headers)
 
 
 def _extract_request_query(
@@ -95,7 +120,38 @@ def _extract_request_query(
 
 
 def _normalize_headers(raw: Any) -> dict[str, str]:
-    return filter_safe_diagnostic_headers(raw)
+    return filter_safe_extra_headers(raw)
+
+
+def _set_gigachat_header_context(
+    headers: Mapping[str, str],
+) -> list[tuple[ContextVar[Any], Token]]:
+    tokens: list[tuple[ContextVar[Any], Token]] = []
+    custom_headers: dict[str, str] = {}
+
+    for name, value in headers.items():
+        normalized = normalize_header_name(name)
+        cvar = _GIGACHAT_HEADER_CONTEXT_VARS.get(normalized)
+        if cvar is not None:
+            tokens.append((cvar, cvar.set(value)))
+        else:
+            custom_headers[normalized] = value
+
+    if custom_headers:
+        existing_headers = custom_headers_cvar.get() or {}
+        tokens.append(
+            (
+                custom_headers_cvar,
+                custom_headers_cvar.set({**existing_headers, **custom_headers}),
+            )
+        )
+
+    return tokens
+
+
+def _reset_context_tokens(tokens: list[tuple[ContextVar[Any], Token]]) -> None:
+    for cvar, token in reversed(tokens):
+        cvar.reset(token)
 
 
 def _normalize_query(raw: Any) -> list[tuple[str, str]]:

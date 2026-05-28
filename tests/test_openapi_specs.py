@@ -23,9 +23,7 @@ def test_openapi_openai_documents_client_parameter_policy():
     chat_schema = _full_schema(chat_extra)
     chat_properties = chat_schema["properties"]
 
-    assert (
-        "unsupported unknown parameters may be rejected" in chat_schema["description"]
-    )
+    assert "SDK `extra_body` compatibility" in chat_schema["description"]
     assert "max_completion_tokens" in chat_properties
     assert "extra_body" in chat_properties
     assert "extra_headers" in chat_properties
@@ -34,7 +32,7 @@ def test_openapi_openai_documents_client_parameter_policy():
         "Rejected: log probabilities are not supported."
         in (chat_properties["logprobs"]["description"])
     )
-    assert "Unknown or unsupported optional parameters may be rejected" in (
+    assert "Known unsupported optional parameters may be rejected" in (
         _request_body_description(chat_extra)
     )
 
@@ -61,10 +59,7 @@ def test_openapi_anthropic_documents_client_parameter_policy():
     messages_schema = _full_schema(messages_extra)
     messages_properties = messages_schema["properties"]
 
-    assert (
-        "unsupported unknown parameters may be rejected"
-        in messages_schema["description"]
-    )
+    assert "SDK `extra_body` compatibility" in messages_schema["description"]
     assert "extra_body" in messages_properties
     assert "extra_headers" in messages_properties
     assert "extra_query" in messages_properties
@@ -81,8 +76,8 @@ def test_openapi_anthropic_documents_count_tokens_and_disabled_batches_policy():
     batches_extra = anthropic_message_batches_openapi_extra()
 
     assert "extra_body" in count_properties
-    assert "Generation-only options are ignored" in _request_body_description(
-        count_extra
+    assert "Generation-only options and `extra_body` are accepted but ignored" in (
+        _request_body_description(count_extra)
     )
     assert "default public Anthropic router omits batch routes" in (
         _request_body_description(batches_extra)

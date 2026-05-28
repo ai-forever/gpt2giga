@@ -65,7 +65,30 @@ def classify_anthropic_messages_parameter(name: str) -> ClientParamStatus:
         return ClientParamStatus.SUPPORTED
     if name in ANTHROPIC_ACCEPTED_IGNORED_PARAMS:
         return ClientParamStatus.ACCEPTED_IGNORED
-    return ClientParamStatus.REJECTED
+    if name in ANTHROPIC_REJECTED_PARAMS:
+        return ClientParamStatus.REJECTED
+    return ClientParamStatus.SUPPORTED
+
+
+def _merge_unknown_extra_fields(
+    data: dict[str, Any], extra_fields: dict[str, Any]
+) -> None:
+    if not extra_fields:
+        return
+
+    extra_body = data.get("extra_body")
+    if extra_body is None:
+        data["extra_body"] = extra_fields
+    elif isinstance(extra_body, Mapping):
+        data["extra_body"] = {**extra_fields, **dict(extra_body)}
+
+
+def _pop_unknown_as_extra_field(
+    data: dict[str, Any],
+    name: str,
+    extra_fields: dict[str, Any],
+) -> None:
+    extra_fields[name] = data.pop(name)
 
 
 def sanitize_anthropic_messages_parameters(data: Mapping[str, Any]) -> dict[str, Any]:
@@ -115,6 +138,7 @@ def validate_anthropic_content_blocks(system: Any, messages: Any) -> None:
 
 
 def _sanitize_top_level_params(data: dict[str, Any]) -> None:
+    extra_fields: dict[str, Any] = {}
     for name in list(data):
         if name in ANTHROPIC_ACCEPTED_IGNORED_PARAMS:
             data.pop(name, None)
@@ -132,10 +156,9 @@ def _sanitize_top_level_params(data: dict[str, Any]) -> None:
         if name in OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS:
             continue
 
-        _raise_anthropic_param_error(
-            name,
-            f"Unsupported Anthropic request parameter: `{name}`.",
-        )
+        _pop_unknown_as_extra_field(data, name, extra_fields)
+
+    _merge_unknown_extra_fields(data, extra_fields)
 
 
 def _normalize_gigachat_extra_fields(data: dict[str, Any]) -> None:
@@ -153,17 +176,7 @@ def _normalize_gigachat_extra_fields(data: dict[str, Any]) -> None:
     if not isinstance(extra_body, Mapping):
         _raise_anthropic_param_error(
             "extra_body",
-            "`extra_body` must be an object with allowlisted GigaChat fields.",
-        )
-
-    unsupported_keys = sorted(
-        key for key in extra_body if key not in OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS
-    )
-    if unsupported_keys:
-        unsupported = ", ".join(f"`{key}`" for key in unsupported_keys)
-        _raise_anthropic_param_error(
-            "extra_body",
-            f"Unsupported `extra_body` field(s): {unsupported}.",
+            "`extra_body` must be an object.",
         )
 
     data["extra_body"] = {**sdk_style_fields, **dict(extra_body)}

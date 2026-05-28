@@ -29,6 +29,19 @@ SAFE_DIAGNOSTIC_HEADER_NAMES = frozenset(
     }
 )
 
+GIGACHAT_CONTEXT_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "x-agent-id",
+        "x-client-id",
+        "x-operation-id",
+        "x-request-id",
+        "x-service-id",
+        "x-session-id",
+        "x-trace-id",
+    }
+)
+
 SAFE_GIGACHAT_QUERY_PARAM_NAMES = frozenset()
 
 BLOCKED_CLIENT_HEADER_NAMES = frozenset(
@@ -112,6 +125,12 @@ def is_safe_diagnostic_header(name: str) -> bool:
     )
 
 
+def is_safe_extra_header(name: str) -> bool:
+    """Return true if an SDK extra header may be forwarded upstream."""
+    normalized = normalize_header_name(name)
+    return bool(normalized) and not is_blocked_client_header(normalized)
+
+
 def filter_safe_diagnostic_headers(raw: Any) -> dict[str, str]:
     """Return allowlisted diagnostic headers with scalar values stringified."""
     if not isinstance(raw, Mapping):
@@ -123,6 +142,23 @@ def filter_safe_diagnostic_headers(raw: Any) -> dict[str, str]:
             continue
         normalized = normalize_header_name(name)
         if not is_safe_diagnostic_header(normalized):
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            headers[normalized] = str(value)
+    return headers
+
+
+def filter_safe_extra_headers(raw: Any) -> dict[str, str]:
+    """Return safe SDK extra headers with scalar values stringified."""
+    if not isinstance(raw, Mapping):
+        return {}
+
+    headers: dict[str, str] = {}
+    for name, value in raw.items():
+        if not isinstance(name, str) or value is None:
+            continue
+        normalized = normalize_header_name(name)
+        if not is_safe_extra_header(normalized):
             continue
         if isinstance(value, (str, int, float, bool)):
             headers[normalized] = str(value)
