@@ -60,7 +60,7 @@ class ProxySettings(BaseSettings):
             "в payload к GigaChat, если клиент не указал reasoning_effort явно"
         ),
     )
-    default_max_tokens: int = Field(
+    default_max_tokens: int | None = Field(
         default=DEFAULT_MAX_TOKENS,
         description=(
             "Значение max_tokens по умолчанию, отправляемое в GigaChat API, "
