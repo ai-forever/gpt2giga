@@ -5,12 +5,13 @@ from typing import Dict, List
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from gpt2giga.app_state import get_gigachat_client
+from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
+from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.anthropic import (
@@ -41,6 +42,7 @@ async def count_tokens(request: Request):
     data = sanitize_anthropic_messages_parameters(await read_request_json(request))
     request_options = extract_gigachat_request_options(request, dict(data))
     giga_client = get_gigachat_client(request)
+    model_limiter = get_model_concurrency_limiter(request)
     model = data.get("model", "unknown")
 
     openai_messages = _convert_anthropic_messages_to_openai(
@@ -55,8 +57,9 @@ async def count_tokens(request: Request):
     if not texts:
         return {"input_tokens": 0}
 
-    async with gigachat_request_options(giga_client, request_options):
-        token_counts = await giga_client.atokens_count(texts, model=model)
+    async with model_limiter.limit(model, provider="anthropic"):
+        async with gigachat_request_options(giga_client, request_options):
+            token_counts = await giga_client.atokens_count(texts, model=model)
     total_tokens = sum(token_count.tokens for token_count in token_counts)
     return {"input_tokens": total_tokens}
 
@@ -71,6 +74,7 @@ async def messages(request: Request):
     current_rquid = rquid_context.get()
     state = request.app.state
     giga_client = get_gigachat_client(request)
+    model_limiter = get_model_concurrency_limiter(request)
 
     model = data.get("model", "unknown")
     openai_data: Dict = _build_openai_data_from_anthropic_request(data, state.logger)
@@ -78,14 +82,16 @@ async def messages(request: Request):
         chat_messages = await state.request_transformer.prepare_chat_completion(
             openai_data, giga_client
         )
+    effective_model = resolve_gigachat_model(chat_messages, state.config)
     structured_output_fallback = (
         _is_anthropic_structured_output_request(data)
         and state.config.proxy_settings.structured_output_mode == "function_call"
     )
 
     if not stream:
-        async with gigachat_request_options(giga_client, request_options):
-            response = await giga_client.achat(chat_messages)
+        async with model_limiter.limit(effective_model, provider="anthropic"):
+            async with gigachat_request_options(giga_client, request_options):
+                response = await giga_client.achat(chat_messages)
         giga_dict = response.model_dump()
         return _build_anthropic_response(
             giga_dict,
@@ -103,6 +109,8 @@ async def messages(request: Request):
             giga_client,
             is_structured_output=structured_output_fallback,
             request_options=request_options,
+            model_limiter=model_limiter,
+            effective_model=effective_model,
         ),
         media_type="text/event-stream",
     )
