@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Request
 
-from gpt2giga.app_state import get_gigachat_client
+from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
@@ -26,15 +26,18 @@ async def embeddings(request: Request):
     data = await read_request_json(request)
     request_options = extract_gigachat_request_options(request, data)
     giga_client = get_gigachat_client(request)
+    model_limiter = get_model_concurrency_limiter(request)
     proxy_settings = request.app.state.config.proxy_settings
     transformed = await transform_embedding_body(
         data,
         proxy_settings.embeddings,
         pass_model=proxy_settings.pass_model,
     )
-    async with gigachat_request_options(giga_client, request_options):
-        response = await giga_client.aembeddings(
-            texts=transformed["input"], model=transformed["model"]
-        )
-    normalized = normalize_embedding_response(response, model=transformed["model"])
+    effective_model = transformed["model"]
+    async with model_limiter.limit(effective_model, provider="openai"):
+        async with gigachat_request_options(giga_client, request_options):
+            response = await giga_client.aembeddings(
+                texts=transformed["input"], model=effective_model
+            )
+    normalized = normalize_embedding_response(response, model=effective_model)
     return apply_embedding_encoding_format(normalized, data.get("encoding_format"))
