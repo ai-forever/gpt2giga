@@ -226,14 +226,19 @@ def anthropic_error_payload(
     message: str,
     *,
     error_type: str = "invalid_request_error",
+    code: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build an Anthropic-compatible error response payload."""
+    error: dict[str, str] = {
+        "type": error_type,
+        "message": message,
+    }
+    if code is not None:
+        error["code"] = code
+
     return {
         "type": "error",
-        "error": {
-            "type": error_type,
-            "message": message,
-        },
+        "error": error,
         "request_id": rquid_context.get(),
     }
 
@@ -243,11 +248,12 @@ def anthropic_compatibility_response(
     *,
     status_code: int = 400,
     error_type: str = "invalid_request_error",
+    code: Optional[str] = None,
 ) -> JSONResponse:
     """Build an Anthropic-compatible compatibility JSON response."""
     return JSONResponse(
         status_code=status_code,
-        content=anthropic_error_payload(message, error_type=error_type),
+        content=anthropic_error_payload(message, error_type=error_type, code=code),
     )
 
 
