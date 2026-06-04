@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from loguru import logger
 import pytest
 
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.openai import router
 
@@ -49,7 +49,7 @@ def make_app():
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     return app
 
 
@@ -58,7 +58,7 @@ def make_app_with_real_transformer():
     app.include_router(router)
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
-    app.state.config = ProxyConfig()
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
     return app
 

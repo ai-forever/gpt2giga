@@ -850,21 +850,21 @@ wheels = [
 
 [[package]]
 name = "gigachat"
-version = "0.2.1"
+version = "0.2.2a1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/54/12/376c5379edaba910e2ddd1e286e711ad0e3d43e2008123a62dc7cd05b4bb/gigachat-0.2.1.tar.gz", hash = "sha256:4b6bb976ffd1fec22c813e2f40f100fff60efc2c50b91cc36aa6df5f888d0373", size = 34644, upload-time = "2026-04-27T07:58:13.014Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/7b/5a976ad2541149ae82f1348a6d38203cacf0ea0149eae3f078741be02135/gigachat-0.2.2a1.tar.gz", hash = "sha256:dcaa0264e31110590f1fb2d973293d8d5e9716b138cc60fa2832047bc43fa28d", size = 42062, upload-time = "2026-06-02T14:44:51.166Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/30/f5743775b7bcf9da5b9bdc70717c92b3a570ab3215b68a77c9eba504bcd9/gigachat-0.2.1-py3-none-any.whl", hash = "sha256:a4a4fb9e2db0905b7ab5a340d5029527a177811b8b609998d600c95e8a8a060c", size = 45150, upload-time = "2026-04-27T07:58:14.411Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/0b/622fa8a575896c64259f4b9750092cc9dc30272567a545137d71db0871d1/gigachat-0.2.2a1-py3-none-any.whl", hash = "sha256:18c2ea7b4c14ec7192d95daacacf26983ebd7b6fc7d92e784c87fc1acd1b4254", size = 54719, upload-time = "2026-06-02T14:44:52.303Z" },
 ]
 
 [[package]]
 name = "gpt2giga"
-version = "0.1.7"
+version = "0.1.8a1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -905,7 +905,7 @@ requires-dist = [
     { name = "aioitertools", specifier = ">=0.13.0,<0.14" },
     { name = "anthropic", specifier = ">=0.79.0" },
     { name = "fastapi", specifier = ">=0.133.0,<1" },
-    { name = "gigachat", specifier = ">=0.2.1,<0.3.0" },
+    { name = "gigachat", specifier = ">=0.2.2a1,<0.3.0" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=2.3.0,<3" },
     { name = "pillow", specifier = ">=12.2.0,<13" },

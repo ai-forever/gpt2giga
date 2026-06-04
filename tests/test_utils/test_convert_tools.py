@@ -257,6 +257,29 @@ def test_convert_skips_tools_without_parameters():
     assert out[0].name == "valid_tool"
 
 
+def test_convert_skips_gigachat_builtin_tools_with_parameters():
+    data = {
+        "tools": [
+            {
+                "type": "web_search_preview",
+                "parameters": {"type": "object"},
+                "indexes": ["web"],
+            },
+            {
+                "type": "function",
+                "name": "valid_tool",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"arg": {"type": "string"}},
+                },
+            },
+        ]
+    }
+    out = convert_tool_to_giga_functions(data)
+    assert len(out) == 1
+    assert out[0].name == "valid_tool"
+
+
 def test_convert_skips_function_wrapper_without_parameters():
     """Test that function wrappers without parameters are skipped."""
     data = {

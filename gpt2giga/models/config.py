@@ -66,6 +66,20 @@ class ProxySettings(BaseSettings):
             "function-calling fallback, native передает response_format в GigaChat"
         ),
     )
+    gigachat_api_mode: Literal["v1", "v2"] = Field(
+        default="v1",
+        description=(
+            "Backend contract for GigaChat chat-like requests: v1 uses "
+            "root compatibility methods, v2 uses primary chat resource methods"
+        ),
+    )
+    responses_api_mode: Literal["inherit", "v1", "v2"] = Field(
+        default="inherit",
+        description=(
+            "Backend contract for OpenAI /responses: inherit follows "
+            "gigachat_api_mode, v1/v2 override only /responses"
+        ),
+    )
     max_request_body_bytes: int = Field(
         default=DEFAULT_MAX_REQUEST_BODY_BYTES,
         description="Глобальный лимит размера HTTP-тела запроса в байтах (до парсинга JSON)",
@@ -125,6 +139,22 @@ class ProxySettings(BaseSettings):
         if isinstance(value, str):
             return value.strip().lower()
         return value
+
+    @field_validator("gigachat_api_mode", "responses_api_mode", mode="before")
+    @classmethod
+    def normalize_api_modes(cls, value, info):
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if info.field_name == "responses_api_mode" and normalized == "":
+                return "inherit"
+            return normalized
+        return value
+
+    def resolve_responses_api_mode(self) -> Literal["v1", "v2"]:
+        """Return the effective GigaChat backend mode for `/responses`."""
+        if self.responses_api_mode == "inherit":
+            return self.gigachat_api_mode
+        return self.responses_api_mode
 
     @model_validator(mode="after")
     def _validate_prod_security(self):

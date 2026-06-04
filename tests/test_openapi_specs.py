@@ -51,7 +51,9 @@ def test_openapi_openai_documents_embeddings_and_responses_policy():
     )
     assert "previous_response_id" in responses_properties
     assert "conversation" in responses_properties
-    assert "Stateful lifecycle features" in _request_body_description(responses_extra)
+    assert "maps to GigaChat `storage.thread_id`" in _request_body_description(
+        responses_extra
+    )
 
 
 def test_openapi_anthropic_documents_client_parameter_policy():

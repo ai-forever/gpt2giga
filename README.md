@@ -139,7 +139,7 @@ sequenceDiagram
 `extra_body` для Chat Completions, Responses и Anthropic Messages переносится в GigaChat `additional_fields` целиком, включая SDK-style поля, которые клиент разворачивает в top-level JSON:
 
 - OpenAI Embeddings не поддерживает `extra_body`; используйте только `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query`.
-- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` и built-in tools возвращают `400`.
+- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` возвращают `400`. Built-in tools поддерживаются для Responses API в режиме GigaChat v2 (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); в остальных режимах возвращают `400`.
 - Для Anthropic Messages unsupported параметры и блоки вроде `container`, `context_management`, `mcp_servers`, server tools, `document`, `file`, `container_upload`, `search_result`, `thinking`/`redacted_thinking` во входном контенте возвращают `400`.
 
 OpenAI SDK:
@@ -401,6 +401,8 @@ gpt2giga \
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
 - `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
+- `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
+- `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
 - `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
 - `GPT2GIGA_LOG_FILENAME="gpt2giga.log"` — Имя лог файла. По умолчанию `gpt2giga.log`
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
@@ -409,6 +411,34 @@ gpt2giga \
 - `GPT2GIGA_CORS_ALLOW_ORIGINS='["*"]'` — список разрешенных Origin (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_HEADERS='["*"]'` — список разрешенных заголовков (JSON массив).
+
+#### Режим backend API GigaChat
+
+По умолчанию gpt2giga сохраняет прежний контракт GigaChat SDK через root compatibility methods `achat`/`astream`:
+
+```dotenv
+GPT2GIGA_GIGACHAT_API_MODE=v1
+GPT2GIGA_RESPONSES_API_MODE=inherit
+```
+
+Чтобы переключить chat-like запросы на primary `v2/chat/completions` surface из `gigachat==0.2.2a1`, задайте:
+
+```dotenv
+GPT2GIGA_GIGACHAT_API_MODE=v2
+```
+
+`GPT2GIGA_RESPONSES_API_MODE` управляет только OpenAI `/responses`:
+
+| `GPT2GIGA_GIGACHAT_API_MODE` | `GPT2GIGA_RESPONSES_API_MODE` | `/chat/completions` | `/responses` |
+|---|---|---|---|
+| `v1` | `inherit` | `v1` | `v1` |
+| `v2` | `inherit` | `v2` | `v2` |
+| `v1` | `v2` | `v1` | `v2` |
+| `v2` | `v1` | `v2` | `v1` |
+
+Режим `v2` меняет только backend-вызовы к GigaChat (`achat.create` / `achat.stream`); внешние OpenAI-compatible маршруты и URL `/v1/...` остаются прежними.
+
+> Для maintainers: эта реализация целится в `gigachat==0.2.2a1` и не является переносом pre-release/1.0.0 архитектуры из PR #123.
 
 > **Breaking change в 0.1.6:** `GPT2GIGA_PASS_MODEL` по умолчанию `True`. Если клиент отправляет OpenAI/Anthropic-имя модели, оно будет передано в GigaChat. Чтобы всегда использовать модель из `GIGACHAT_MODEL` / настроек прокси, задайте `GPT2GIGA_PASS_MODEL=False`.
 

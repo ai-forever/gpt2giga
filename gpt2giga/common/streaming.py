@@ -2,7 +2,8 @@ import asyncio
 import json
 import time
 import traceback
-from typing import AsyncGenerator, Optional
+from types import SimpleNamespace
+from typing import Any, AsyncGenerator, Optional
 
 import gigachat
 from aioitertools import enumerate as aio_enumerate
@@ -18,6 +19,11 @@ from gpt2giga.common.gigachat_options import (
 from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
+from gpt2giga.protocol.response import (
+    adapt_v2_chunk_to_v1_shape,
+    hydrate_v2_image_files,
+)
+from gpt2giga.protocol.response.processor import ResponseProcessor
 
 
 async def stream_chat_completion_generator(
@@ -116,6 +122,193 @@ async def stream_chat_completion_generator(
         yield "data: [DONE]\n\n"
 
 
+async def stream_chat_completion_v2_generator(
+    request: Request,
+    model: str,
+    chat_request: Any,
+    response_id: str,
+    giga_client: Optional[GigaChat] = None,
+    request_options: Optional[GigaRequestOptions] = None,
+) -> AsyncGenerator[str, None]:
+    logger = None
+    rquid = rquid_context.get()
+
+    try:
+        if giga_client is None:
+            giga_client = get_gigachat_client(request)
+        logger = getattr(request.app.state, "logger", None)
+
+        async with gigachat_request_options(giga_client, request_options):
+            async for chunk in giga_client.achat.stream(chat_request):
+                if await request.is_disconnected():
+                    if logger:
+                        logger.info(f"[{rquid}] Client disconnected during streaming")
+                    break
+                adapted = adapt_v2_chunk_to_v1_shape(chunk, default_model=model)
+                processed = request.app.state.response_processor.process_stream_chunk(
+                    SimpleNamespace(model_dump=lambda: adapted),
+                    model,
+                    response_id,
+                )
+                yield f"data: {json.dumps(processed)}\n\n"
+
+        response_processor = request.app.state.response_processor
+        flush_stream_reasoning = getattr(
+            response_processor, "flush_stream_reasoning", None
+        )
+        if flush_stream_reasoning:
+            flushed_reasoning = flush_stream_reasoning(response_id, family="chat")
+            if flushed_reasoning.content or flushed_reasoning.reasoning_content:
+                delta = {"content": flushed_reasoning.content}
+                if flushed_reasoning.reasoning_content:
+                    delta["reasoning_content"] = flushed_reasoning.reasoning_content
+                processed = {
+                    "id": f"chatcmpl-{response_id}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": delta,
+                            "finish_reason": None,
+                            "logprobs": None,
+                        }
+                    ],
+                    "usage": None,
+                    "system_fingerprint": f"fp_{response_id}",
+                }
+                yield f"data: {json.dumps(processed)}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    except gigachat.exceptions.GigaChatException as e:
+        error_type = type(e).__name__
+        error_message = str(e)
+        if logger:
+            logger.error(
+                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
+            )
+        error_response = {
+            "error": {
+                "message": error_message,
+                "type": error_type,
+                "code": "stream_error",
+            }
+        }
+        yield f"data: {json.dumps(error_response)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    except asyncio.CancelledError:
+        raise
+
+    except Exception as e:
+        error_type = type(e).__name__
+        tb = traceback.format_exc()
+        if logger:
+            logger.error(
+                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
+            )
+        error_response = {
+            "error": {
+                "message": "Stream interrupted",
+                "type": error_type,
+                "code": "internal_error",
+            }
+        }
+        yield f"data: {json.dumps(error_response)}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+class _V2ResponsesStreamClient:
+    def __init__(
+        self,
+        giga_client: GigaChat,
+        model: str,
+        request_options: Optional[GigaRequestOptions],
+    ):
+        self._giga_client = giga_client
+        self._model = model
+        self._request_options = request_options
+
+    def astream(self, chat_request: Any):
+        async def gen():
+            async with gigachat_request_options(
+                self._giga_client, self._request_options
+            ):
+                async for chunk in self._giga_client.achat.stream(chat_request):
+                    adapted = adapt_v2_chunk_to_v1_shape(
+                        chunk,
+                        default_model=self._model,
+                    )
+                    await hydrate_v2_image_files(adapted, self._giga_client)
+                    yield SimpleNamespace(model_dump=lambda adapted=adapted: adapted)
+
+        return gen()
+
+    async def aget_image(self, file_id: str):
+        async with gigachat_request_options(self._giga_client, self._request_options):
+            return await self._giga_client.aget_image(file_id)
+
+
+async def stream_responses_v2_generator(
+    request: Request,
+    chat_request: Any,
+    response_id: str,
+    giga_client: Optional[GigaChat] = None,
+    request_data: Optional[dict] = None,
+    request_options: Optional[GigaRequestOptions] = None,
+) -> AsyncGenerator[str, None]:
+    if giga_client is None:
+        giga_client = get_gigachat_client(request)
+    model = request_data.get("model", "unknown") if request_data else "unknown"
+    adapter_client = _V2ResponsesStreamClient(giga_client, model, request_options)
+
+    async for event in stream_responses_generator(
+        request,
+        chat_request,
+        response_id,
+        giga_client=adapter_client,
+        request_data=request_data,
+        request_options=None,
+    ):
+        yield event
+
+
+def _accumulate_builtin_metadata(target: dict[str, Any], delta: dict[str, Any]) -> None:
+    tool_executions = delta.get("tool_executions")
+    if isinstance(tool_executions, list):
+        target["tool_executions"].extend(
+            item for item in tool_executions if isinstance(item, dict)
+        )
+
+    files = delta.get("files")
+    if isinstance(files, list):
+        target["files"].extend(item for item in files if isinstance(item, dict))
+
+    inline_data = delta.get("inline_data")
+    if isinstance(inline_data, dict):
+        _merge_inline_data(target["inline_data"], inline_data)
+
+
+def _merge_inline_data(target: dict[str, Any], inline_data: dict[str, Any]) -> None:
+    for key, value in inline_data.items():
+        if key == "sources" and isinstance(value, dict):
+            sources = target.setdefault("sources", {})
+            if isinstance(sources, dict):
+                sources.update(value)
+            else:
+                target["sources"] = value
+        elif isinstance(value, list):
+            items = target.setdefault(key, [])
+            if isinstance(items, list):
+                items.extend(value)
+            else:
+                target[key] = value
+        elif value is not None:
+            target[key] = value
+
+
 async def stream_responses_generator(
     request: Request,
     chat_messages: Chat,
@@ -163,11 +356,13 @@ async def stream_responses_generator(
             "parallel_tool_calls": True,
             "previous_response_id": None,
             "reasoning": build_reasoning_config(),
-            "store": True,
+            "store": request_data.get("store", True) if request_data else True,
             "temperature": request_data.get("temperature", 1) if request_data else 1,
             "text": {"format": {"type": "text"}},
-            "tool_choice": "auto",
-            "tools": [],
+            "tool_choice": request_data.get("tool_choice", "auto")
+            if request_data
+            else "auto",
+            "tools": request_data.get("tools", []) if request_data else [],
             "top_p": request_data.get("top_p", 1) if request_data else 1,
             "truncation": "disabled",
             "usage": usage,
@@ -209,6 +404,12 @@ async def stream_responses_generator(
         functions_state_id = None
         output_item_added = False
         is_function_call = False
+        final_usage = None
+        builtin_message_metadata = {
+            "tool_executions": [],
+            "files": [],
+            "inline_data": {},
+        }
 
         async with gigachat_request_options(giga_client, request_options):
             async for _i, chunk in aio_enumerate(giga_client.astream(chat_messages)):
@@ -218,6 +419,17 @@ async def stream_responses_generator(
                     break
 
                 giga_dict = chunk.model_dump()
+                if giga_dict.get("usage"):
+                    usage_builder = getattr(
+                        request.app.state.response_processor,
+                        "_build_response_usage",
+                        None,
+                    )
+                    final_usage = (
+                        usage_builder(giga_dict["usage"])
+                        if callable(usage_builder)
+                        else None
+                    )
                 choice = giga_dict["choices"][0]
                 delta = choice.get("delta", {})
                 delta_content = delta.get("content", "")
@@ -229,6 +441,7 @@ async def stream_responses_generator(
                     reasoning_text += parsed_content.reasoning_content
                 if delta_reasoning:
                     reasoning_text += delta_reasoning
+                _accumulate_builtin_metadata(builtin_message_metadata, delta)
 
                 if delta_function_call:
                     is_function_call = True
@@ -391,98 +604,117 @@ async def stream_responses_generator(
                 "response.completed",
                 {
                     "type": "response.completed",
-                    "response": build_response_obj("completed", output=final_output),
+                    "response": build_response_obj(
+                        "completed", output=final_output, usage=final_usage
+                    ),
                     "sequence_number": sequence_number,
                 },
             )
         else:
-            if not output_item_added:
-                yield sse_event(
-                    "response.output_item.added",
-                    {
-                        "type": "response.output_item.added",
-                        "output_index": 0,
-                        "item": {
-                            "id": msg_id,
-                            "status": "in_progress",
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [],
+            metadata_message = {
+                "content": full_text,
+                "tool_executions": builtin_message_metadata["tool_executions"],
+                "files": builtin_message_metadata["files"],
+                "inline_data": builtin_message_metadata["inline_data"],
+            }
+            builtin_items = ResponseProcessor._create_builtin_tool_items(
+                metadata_message,
+                response_id,
+                request_data=request_data,
+            )
+            annotations = ResponseProcessor._create_url_annotations(
+                full_text,
+                builtin_message_metadata["inline_data"],
+            )
+            output_text_part = {
+                "type": "output_text",
+                "text": full_text,
+                "annotations": annotations,
+            }
+            if builtin_message_metadata["inline_data"]:
+                output_text_part["inline_data"] = builtin_message_metadata[
+                    "inline_data"
+                ]
+            message_needed = bool(full_text or not builtin_items)
+
+            if message_needed:
+                if not output_item_added:
+                    yield sse_event(
+                        "response.output_item.added",
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": 0,
+                            "item": {
+                                "id": msg_id,
+                                "status": "in_progress",
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [],
+                            },
+                            "sequence_number": sequence_number,
                         },
-                        "sequence_number": sequence_number,
-                    },
-                )
-                sequence_number += 1
+                    )
+                    sequence_number += 1
+
+                    yield sse_event(
+                        "response.content_part.added",
+                        {
+                            "type": "response.content_part.added",
+                            "item_id": msg_id,
+                            "output_index": 0,
+                            "content_index": 0,
+                            "part": {
+                                "type": "output_text",
+                                "text": "",
+                                "annotations": [],
+                            },
+                            "sequence_number": sequence_number,
+                        },
+                    )
+                    sequence_number += 1
 
                 yield sse_event(
-                    "response.content_part.added",
+                    "response.output_text.done",
                     {
-                        "type": "response.content_part.added",
+                        "type": "response.output_text.done",
                         "item_id": msg_id,
                         "output_index": 0,
                         "content_index": 0,
-                        "part": {
-                            "type": "output_text",
-                            "text": "",
-                            "annotations": [],
-                        },
+                        "text": full_text,
                         "sequence_number": sequence_number,
                     },
                 )
                 sequence_number += 1
 
-            yield sse_event(
-                "response.output_text.done",
-                {
-                    "type": "response.output_text.done",
-                    "item_id": msg_id,
-                    "output_index": 0,
-                    "content_index": 0,
-                    "text": full_text,
-                    "sequence_number": sequence_number,
-                },
-            )
-            sequence_number += 1
-
-            yield sse_event(
-                "response.content_part.done",
-                {
-                    "type": "response.content_part.done",
-                    "item_id": msg_id,
-                    "output_index": 0,
-                    "content_index": 0,
-                    "part": {
-                        "type": "output_text",
-                        "text": full_text,
-                        "annotations": [],
+                yield sse_event(
+                    "response.content_part.done",
+                    {
+                        "type": "response.content_part.done",
+                        "item_id": msg_id,
+                        "output_index": 0,
+                        "content_index": 0,
+                        "part": output_text_part,
+                        "sequence_number": sequence_number,
                     },
-                    "sequence_number": sequence_number,
-                },
-            )
-            sequence_number += 1
+                )
+                sequence_number += 1
 
-            yield sse_event(
-                "response.output_item.done",
-                {
-                    "type": "response.output_item.done",
-                    "output_index": 0,
-                    "item": {
-                        "id": msg_id,
-                        "status": "completed",
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": full_text,
-                                "annotations": [],
-                            }
-                        ],
+                yield sse_event(
+                    "response.output_item.done",
+                    {
+                        "type": "response.output_item.done",
+                        "output_index": 0,
+                        "item": {
+                            "id": msg_id,
+                            "status": "completed",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [output_text_part],
+                        },
+                        "sequence_number": sequence_number,
                     },
-                    "sequence_number": sequence_number,
-                },
-            )
-            sequence_number += 1
+                )
+                sequence_number += 1
 
             final_output = []
             if reasoning_text:
@@ -498,26 +730,24 @@ async def stream_responses_generator(
                         ],
                     }
                 )
-            final_output.append(
-                {
-                    "id": msg_id,
-                    "type": "message",
-                    "status": "completed",
-                    "role": "assistant",
-                    "content": [
-                        {
-                            "type": "output_text",
-                            "text": full_text,
-                            "annotations": [],
-                        }
-                    ],
-                }
-            )
+            final_output.extend(builtin_items)
+            if message_needed:
+                final_output.append(
+                    {
+                        "id": msg_id,
+                        "type": "message",
+                        "status": "completed",
+                        "role": "assistant",
+                        "content": [output_text_part],
+                    }
+                )
             yield sse_event(
                 "response.completed",
                 {
                     "type": "response.completed",
-                    "response": build_response_obj("completed", output=final_output),
+                    "response": build_response_obj(
+                        "completed", output=final_output, usage=final_usage
+                    ),
                     "sequence_number": sequence_number,
                 },
             )

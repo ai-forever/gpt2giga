@@ -1,7 +1,8 @@
 import json
+import re
 import time
 import uuid
-from typing import Dict, Literal, Optional
+from typing import Any, Dict, Literal, Mapping, Optional
 
 from gigachat.models import ChatCompletion, ChatCompletionChunk
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
@@ -142,6 +143,7 @@ class ResponseProcessor:
                 is_tool_call,
                 response_id,
                 is_structured_output=is_structured_output,
+                request_data=data,
             ),
             usage=self._build_response_usage(giga_dict.get("usage")),
             response_text=response_text,
@@ -240,20 +242,28 @@ class ResponseProcessor:
         }
 
     @staticmethod
-    def _create_message_item(text: Optional[str], response_id: str) -> dict:
+    def _create_message_item(
+        text: Optional[str],
+        response_id: str,
+        *,
+        annotations: Optional[list] = None,
+        inline_data: Optional[dict] = None,
+    ) -> dict:
+        content_part = {
+            "type": "output_text",
+            "text": text or "",
+            "annotations": annotations or [],
+            "logprobs": [],
+        }
+        if inline_data:
+            content_part["inline_data"] = inline_data
+
         return {
             "type": "message",
             "id": f"msg_{response_id}",
             "status": "completed",
             "role": "assistant",
-            "content": [
-                {
-                    "type": "output_text",
-                    "text": text,
-                    "annotations": [],
-                    "logprobs": [],
-                }
-            ],
+            "content": [content_part],
         }
 
     @staticmethod
@@ -263,6 +273,7 @@ class ResponseProcessor:
         response_id: Optional[str] = None,
         message_key: Literal["message", "delta"] = "message",
         is_structured_output: bool = False,
+        request_data: Optional[dict] = None,
     ) -> list:
         response_id = str(uuid.uuid4()) if response_id is None else response_id
         choice = data["choices"][0]
@@ -279,17 +290,272 @@ class ResponseProcessor:
                 return reasoning_items + [
                     ResponseProcessor._create_message_item(arguments, response_id)
                 ]
-            return reasoning_items + [
-                ResponseProcessor._create_message_item(
-                    message.get("content"), response_id
+            builtin_items = ResponseProcessor._create_builtin_tool_items(
+                message,
+                response_id,
+                request_data=request_data,
+            )
+            content = message.get("content")
+            if content or not builtin_items:
+                inline_data = ResponseProcessor._normalize_inline_data(
+                    message.get("inline_data")
                 )
-            ]
+                annotations = ResponseProcessor._create_url_annotations(
+                    content,
+                    inline_data,
+                )
+                builtin_items.append(
+                    ResponseProcessor._create_message_item(
+                        content,
+                        response_id,
+                        annotations=annotations,
+                        inline_data=inline_data,
+                    )
+                )
+            return reasoning_items + builtin_items
         except Exception:
             return reasoning_items + [
                 ResponseProcessor._create_message_item(
                     message.get("content"), response_id
                 )
             ]
+
+    @staticmethod
+    def _create_builtin_tool_items(
+        message: Mapping[str, Any],
+        response_id: str,
+        *,
+        request_data: Optional[dict] = None,
+    ) -> list[dict[str, Any]]:
+        items = []
+        inline_data = ResponseProcessor._normalize_inline_data(
+            message.get("inline_data")
+        )
+        sources = ResponseProcessor._extract_sources(inline_data)
+        tool_names = ResponseProcessor._tool_execution_names(message)
+        files = ResponseProcessor._extract_files(message)
+
+        if sources or "web_search" in tool_names:
+            items.append(
+                {
+                    "id": f"ws_{response_id}",
+                    "type": "web_search_call",
+                    "status": ResponseProcessor._tool_status(
+                        message, "web_search", default="completed"
+                    ),
+                    "action": {
+                        "type": "search",
+                        "query": ResponseProcessor._request_input_text(request_data),
+                        "sources": [
+                            {"type": "url", "url": source["url"]}
+                            for source in sources.values()
+                            if source.get("url")
+                        ],
+                    },
+                }
+            )
+
+        image_files = [
+            file_data
+            for file_data in files
+            if ResponseProcessor._is_image_file(file_data)
+        ]
+        if image_files or "image_generate" in tool_names:
+            if image_files:
+                for index, file_data in enumerate(image_files):
+                    item = {
+                        "id": f"ig_{response_id}_{index}",
+                        "type": "image_generation_call",
+                        "status": "completed"
+                        if file_data.get("content")
+                        else ResponseProcessor._tool_status(
+                            message, "image_generate", default="completed"
+                        ),
+                        "result": file_data.get("content"),
+                    }
+                    ResponseProcessor._copy_file_metadata(item, file_data)
+                    items.append(item)
+            else:
+                items.append(
+                    {
+                        "id": f"ig_{response_id}",
+                        "type": "image_generation_call",
+                        "status": ResponseProcessor._tool_status(
+                            message, "image_generate", default="in_progress"
+                        ),
+                        "result": None,
+                    }
+                )
+
+        return items
+
+    @staticmethod
+    def _normalize_inline_data(value: Any) -> dict[str, Any]:
+        if isinstance(value, Mapping):
+            return dict(value)
+        return {}
+
+    @staticmethod
+    def _extract_sources(inline_data: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        sources = inline_data.get("sources")
+        if not isinstance(sources, Mapping):
+            return {}
+
+        normalized_sources: dict[str, dict[str, Any]] = {}
+        for key, source in sources.items():
+            if isinstance(source, Mapping):
+                normalized_sources[str(key)] = dict(source)
+        return normalized_sources
+
+    @staticmethod
+    def _create_url_annotations(text: Any, inline_data: Mapping[str, Any]) -> list:
+        if not isinstance(text, str) or not text:
+            return []
+
+        sources = ResponseProcessor._extract_sources(inline_data)
+        if not sources:
+            return []
+
+        annotations = []
+        annotated_sources: set[str] = set()
+        for match in re.finditer(r"\[sources=\[([^\]]+)\]\]", text):
+            source_ids = [
+                item.strip()
+                for item in re.split(r"[,;\s]+", match.group(1))
+                if item.strip()
+            ]
+            for source_id in source_ids:
+                source = sources.get(source_id)
+                if not source or not source.get("url"):
+                    continue
+                annotations.append(
+                    ResponseProcessor._create_url_annotation(
+                        source,
+                        start_index=match.start(),
+                        end_index=match.end(),
+                    )
+                )
+                annotated_sources.add(source_id)
+
+        for source_id, source in sources.items():
+            if source_id in annotated_sources or not source.get("url"):
+                continue
+            annotations.append(
+                ResponseProcessor._create_url_annotation(
+                    source,
+                    start_index=len(text),
+                    end_index=len(text),
+                )
+            )
+
+        return annotations
+
+    @staticmethod
+    def _create_url_annotation(
+        source: Mapping[str, Any], *, start_index: int, end_index: int
+    ) -> dict:
+        return {
+            "type": "url_citation",
+            "start_index": start_index,
+            "end_index": end_index,
+            "url": source.get("url", ""),
+            "title": source.get("title") or source.get("url", ""),
+        }
+
+    @staticmethod
+    def _tool_execution_names(message: Mapping[str, Any]) -> set[str]:
+        names = set()
+        for execution in message.get("tool_executions") or []:
+            if isinstance(execution, Mapping):
+                name = execution.get("name")
+                if isinstance(name, str) and name:
+                    names.add(ResponseProcessor._normalize_builtin_tool_name(name))
+        return names
+
+    @staticmethod
+    def _tool_status(
+        message: Mapping[str, Any], tool_name: str, *, default: str
+    ) -> str:
+        for execution in message.get("tool_executions") or []:
+            if not isinstance(execution, Mapping):
+                continue
+            name = execution.get("name")
+            if ResponseProcessor._normalize_builtin_tool_name(name) != tool_name:
+                continue
+            status = execution.get("status")
+            if status in {"success", "completed"}:
+                return "completed"
+            if status == "failed":
+                return "failed"
+            if status in {"generating", "in_progress"}:
+                return status
+        return default
+
+    @staticmethod
+    def _extract_files(message: Mapping[str, Any]) -> list[dict[str, Any]]:
+        files = message.get("files")
+        if not isinstance(files, list):
+            return []
+        return [
+            dict(file_data) for file_data in files if isinstance(file_data, Mapping)
+        ]
+
+    @staticmethod
+    def _is_image_file(file_data: Mapping[str, Any]) -> bool:
+        target = file_data.get("target")
+        mime = file_data.get("mime")
+        return target == "image" or (
+            isinstance(mime, str) and mime.startswith("image/")
+        )
+
+    @staticmethod
+    def _copy_file_metadata(item: dict[str, Any], file_data: Mapping[str, Any]) -> None:
+        for source_key, target_key in (
+            ("id", "file_id"),
+            ("mime", "mime"),
+            ("target", "target"),
+        ):
+            value = file_data.get(source_key)
+            if value:
+                item[target_key] = value
+
+    @staticmethod
+    def _normalize_builtin_tool_name(name: Any) -> str:
+        if not isinstance(name, str):
+            return ""
+        if name.startswith("web_search"):
+            return "web_search"
+        if name in {"image_generation", "image_generate"}:
+            return "image_generate"
+        return name
+
+    @staticmethod
+    def _request_input_text(request_data: Optional[dict]) -> str:
+        if not isinstance(request_data, Mapping):
+            return ""
+
+        input_data = request_data.get("input")
+        if isinstance(input_data, str):
+            return input_data
+        if not isinstance(input_data, list):
+            return ""
+
+        texts = []
+        for item in input_data:
+            if not isinstance(item, Mapping) or item.get("role") != "user":
+                continue
+            content = item.get("content")
+            if isinstance(content, str):
+                texts.append(content)
+            elif isinstance(content, list):
+                for content_part in content:
+                    if (
+                        isinstance(content_part, Mapping)
+                        and content_part.get("type") == "input_text"
+                        and isinstance(content_part.get("text"), str)
+                    ):
+                        texts.append(content_part["text"])
+        return "\n".join(texts)
 
     def process_stream_chunk(
         self,
