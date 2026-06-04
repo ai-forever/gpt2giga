@@ -412,6 +412,34 @@ gpt2giga \
 - `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_HEADERS='["*"]'` — список разрешенных заголовков (JSON массив).
 
+#### Режим backend API GigaChat
+
+По умолчанию gpt2giga сохраняет прежний контракт GigaChat SDK через root compatibility methods `achat`/`astream`:
+
+```dotenv
+GPT2GIGA_GIGACHAT_API_MODE=v1
+GPT2GIGA_RESPONSES_API_MODE=inherit
+```
+
+Чтобы переключить chat-like запросы на primary `v2/chat/completions` surface из `gigachat==0.2.2a1`, задайте:
+
+```dotenv
+GPT2GIGA_GIGACHAT_API_MODE=v2
+```
+
+`GPT2GIGA_RESPONSES_API_MODE` управляет только OpenAI `/responses`:
+
+| `GPT2GIGA_GIGACHAT_API_MODE` | `GPT2GIGA_RESPONSES_API_MODE` | `/chat/completions` | `/responses` |
+|---|---|---|---|
+| `v1` | `inherit` | `v1` | `v1` |
+| `v2` | `inherit` | `v2` | `v2` |
+| `v1` | `v2` | `v1` | `v2` |
+| `v2` | `v1` | `v2` | `v1` |
+
+Режим `v2` меняет только backend-вызовы к GigaChat (`achat.create` / `achat.stream`); внешние OpenAI-compatible маршруты и URL `/v1/...` остаются прежними.
+
+> Для maintainers: эта реализация целится в `gigachat==0.2.2a1` и не является переносом pre-release/1.0.0 архитектуры из PR #123.
+
 > **Breaking change в 0.1.6:** `GPT2GIGA_PASS_MODEL` по умолчанию `True`. Если клиент отправляет OpenAI/Anthropic-имя модели, оно будет передано в GigaChat. Чтобы всегда использовать модель из `GIGACHAT_MODEL` / настроек прокси, задайте `GPT2GIGA_PASS_MODEL=False`.
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
