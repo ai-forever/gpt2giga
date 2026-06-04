@@ -752,6 +752,7 @@ class ResponseProcessor:
                 ensure_ascii=False,
             )
             tool_name = map_tool_name_from_gigachat(message["function_call"]["name"])
+            tool_call_id = self._backend_state_id_from_message(message)
             function_call = {
                 "name": tool_name,
                 "arguments": arguments,
@@ -760,7 +761,7 @@ class ResponseProcessor:
                 message["tool_calls"] = [
                     {
                         "index": 0,  # Required for streaming tool calls
-                        "id": f"call_{uuid.uuid4()}",
+                        "id": tool_call_id or f"call_{uuid.uuid4()}",
                         "type": "function",
                         "function": function_call,
                     }
@@ -771,6 +772,34 @@ class ResponseProcessor:
             message.pop("functions_state_id", None)
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")
+
+    @classmethod
+    def _backend_state_id_from_message(
+        cls, message: Mapping[str, Any]
+    ) -> Optional[str]:
+        for field_name in (
+            "tools_state_id",
+            "tool_state_id",
+            "functions_state_id",
+            "function_state_id",
+            "tool_call_id",
+        ):
+            state_id = cls._normalize_backend_state_id(message.get(field_name))
+            if state_id:
+                return state_id
+        return None
+
+    @staticmethod
+    def _normalize_backend_state_id(value: Any) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        state_id = value.strip()
+        if not state_id:
+            return None
+        for prefix in ("fc_", "call_"):
+            if state_id.startswith(prefix) and len(state_id) > len(prefix):
+                return state_id.removeprefix(prefix)
+        return state_id
 
     def _process_choice_responses(
         self, choice: Dict, response_id: str, is_stream: bool = False
@@ -801,11 +830,12 @@ class ResponseProcessor:
                 message["function_call"]["arguments"],
                 ensure_ascii=False,
             )
+            state_id = self._backend_state_id_from_message(message) or response_id
             message["output"] = ResponseFunctionToolCall(
                 arguments=arguments,
-                call_id=f"call_{response_id}",
+                call_id=state_id,
                 name=map_tool_name_from_gigachat(message["function_call"]["name"]),
-                id=f"fc_{message['functions_state_id']}",
+                id=f"fc_{state_id}",
                 status="completed",
                 type="function_call",
             ).model_dump()

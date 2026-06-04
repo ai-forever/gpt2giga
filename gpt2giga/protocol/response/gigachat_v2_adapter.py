@@ -358,12 +358,27 @@ def _finish_reason(
 
 
 def _functions_state_id(response_or_chunk: dict, message: dict) -> str:
-    return str(
-        message.get("tools_state_id")
-        or message.get("tool_state_id")
-        or response_or_chunk.get("tools_state_id")
-        or response_or_chunk.get("tool_state_id")
-        or message.get("message_id")
-        or response_or_chunk.get("message_id")
-        or "v2"
-    )
+    for container in (message, response_or_chunk):
+        for field_name in (
+            "tools_state_id",
+            "tool_state_id",
+            "functions_state_id",
+            "function_state_id",
+        ):
+            state_id = _normalize_state_id(container.get(field_name))
+            if state_id:
+                return state_id
+
+    return str(message.get("message_id") or response_or_chunk.get("message_id") or "v2")
+
+
+def _normalize_state_id(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    state_id = value.strip()
+    if not state_id:
+        return None
+    for prefix in ("fc_", "call_"):
+        if state_id.startswith(prefix) and len(state_id) > len(prefix):
+            return state_id.removeprefix(prefix)
+    return state_id

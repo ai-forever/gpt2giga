@@ -322,6 +322,40 @@ def test_adapted_v2_function_call_unmaps_reserved_tool_name_through_processor():
     assert tool_call["function"]["arguments"] == '{"query": "cats"}'
 
 
+def test_adapted_v2_function_call_preserves_state_as_tool_call_id():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tool_state_id": "019e94aa-de11-705c-998b-040af4d06462",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "write_file",
+                                "arguments": {"file_path": "/app/regex.txt"},
+                            }
+                        }
+                    ],
+                }
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+    )
+    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+
+    processor = ResponseProcessor(logger=logger)
+    processed = processor.process_response(
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+    )
+
+    tool_call = processed["choices"][0]["message"]["tool_calls"][0]
+    assert tool_call["id"] == "019e94aa-de11-705c-998b-040af4d06462"
+    assert tool_call["function"]["name"] == "write_file"
+
+
 def test_extract_v2_function_call_from_content_part():
     message = {
         "role": "assistant",

@@ -71,6 +71,8 @@ class RequestTransformer:
         transformed_messages = []
         attachment_count = 0
         system_message = None
+        pending_tool_calls: list[tuple[str, Optional[str]]] = []
+        tool_name_by_call_id: dict[str, str] = {}
 
         size_totals = {"audio_image_total": 0}
 
@@ -90,6 +92,17 @@ class RequestTransformer:
 
             # Handle tool/function role specifics
             if original_role in {"tool", "function"}:
+                tool_call_id = self._extract_tool_call_id(message)
+                function_name = self._resolve_tool_result_name(
+                    message,
+                    tool_call_id,
+                    pending_tool_calls,
+                    tool_name_by_call_id,
+                )
+                if function_name and not message.get("name"):
+                    message["name"] = function_name
+                if tool_call_id and not message.get("tools_state_id"):
+                    message["tools_state_id"] = tool_call_id
                 message["content"] = ensure_json_object_str(message.get("content"))
                 if message.get("name"):
                     message["name"] = map_tool_name_to_gigachat(message["name"])
@@ -101,28 +114,59 @@ class RequestTransformer:
             if message.get("content") is None:
                 message["content"] = ""
 
+            if (
+                isinstance(message.get("content"), list)
+                and original_role == "assistant"
+            ):
+                (
+                    extracted_function_call,
+                    remaining_content,
+                ) = self._extract_legacy_content_function_call(message["content"])
+                if (
+                    extracted_function_call is not None
+                    and message.get("function_call") is None
+                ):
+                    message["function_call"] = extracted_function_call
+                message["content"] = remaining_content
+
             # Process tool_calls
             if "tool_calls" in message and message["tool_calls"]:
-                message["function_call"] = message["tool_calls"][0]["function"]
-                if isinstance(message.get("function_call"), dict) and message[
-                    "function_call"
-                ].get("name"):
-                    message["function_call"]["name"] = map_tool_name_to_gigachat(
-                        message["function_call"]["name"]
+                tool_call = message["tool_calls"][0]
+                if isinstance(tool_call, dict):
+                    tool_call_id = self._extract_tool_call_id(tool_call)
+                    if tool_call_id and not message.get("tools_state_id"):
+                        message["tools_state_id"] = tool_call_id
+                    message["function_call"] = tool_call.get("function")
+                    if isinstance(message.get("function_call"), dict):
+                        self._normalize_message_function_call(message["function_call"])
+                        self._track_pending_tool_call(
+                            message["function_call"],
+                            tool_call_id,
+                            pending_tool_calls,
+                            tool_name_by_call_id,
+                        )
+                elif isinstance(message.get("function_call"), dict):
+                    self._normalize_message_function_call(message["function_call"])
+                    self._track_pending_tool_call(
+                        message["function_call"],
+                        self._extract_tool_call_id(message),
+                        pending_tool_calls,
+                        tool_name_by_call_id,
                     )
-                try:
-                    message["function_call"]["arguments"] = json.loads(
-                        message["function_call"]["arguments"]
-                    )
-                except json.JSONDecodeError as e:
-                    self.logger.warning(f"Failed to parse function call arguments: {e}")
             elif (
                 message.get("function_call")
                 and isinstance(message["function_call"], dict)
                 and message["function_call"].get("name")
             ):
-                message["function_call"]["name"] = map_tool_name_to_gigachat(
-                    message["function_call"]["name"]
+                tool_call_id = self._extract_tool_call_id(message)
+                if tool_call_id and not message.get("tools_state_id"):
+                    message["tools_state_id"] = tool_call_id
+                self._normalize_message_function_call(message["function_call"])
+                self._track_pending_tool_call(
+                    message["function_call"],
+                    tool_call_id,
+                    pending_tool_calls,
+                    tool_name_by_call_id,
                 )
 
             # Process compound content (text + images/files)
@@ -147,6 +191,112 @@ class RequestTransformer:
             limit_attachments(transformed_messages, max_total=10, logger=self.logger)
 
         return transformed_messages
+
+    def _normalize_message_function_call(self, function_call: Dict[str, Any]) -> None:
+        name = function_call.get("name")
+        if name:
+            function_call["name"] = map_tool_name_to_gigachat(name)
+
+        arguments = function_call.get("arguments")
+        if not isinstance(arguments, str):
+            return
+
+        try:
+            function_call["arguments"] = json.loads(arguments)
+        except json.JSONDecodeError as e:
+            self.logger.warning(f"Failed to parse function call arguments: {e}")
+
+    @staticmethod
+    def _extract_legacy_content_function_call(
+        content: List[Dict[str, Any]],
+    ) -> tuple[Optional[dict], List[Dict[str, Any]]]:
+        """Extract first legacy content function_call block and return remaining content."""
+        function_call = None
+        remaining: List[Dict[str, Any]] = []
+
+        for item in content:
+            if (
+                function_call is None
+                and isinstance(item, dict)
+                and isinstance(item.get("function_call"), dict)
+                and item["function_call"].get("name")
+            ):
+                function_call = item["function_call"]
+                continue
+            if isinstance(item, dict):
+                remaining.append(item)
+
+        return function_call, remaining
+
+    @staticmethod
+    def _extract_tool_call_id(message: Dict[str, Any]) -> Optional[str]:
+        for field_name in (
+            "tool_call_id",
+            "tools_state_id",
+            "tool_state_id",
+            "functions_state_id",
+            "function_state_id",
+            "call_id",
+            "id",
+        ):
+            value = message.get(field_name)
+            normalized = RequestTransformer._normalize_backend_state_id(value)
+            if normalized:
+                return normalized
+        return None
+
+    @staticmethod
+    def _normalize_backend_state_id(value: Any) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        state_id = value.strip()
+        if not state_id:
+            return None
+        for prefix in ("fc_", "call_"):
+            if state_id.startswith(prefix) and len(state_id) > len(prefix):
+                return state_id.removeprefix(prefix)
+        return state_id
+
+    @staticmethod
+    def _track_pending_tool_call(
+        function_call: Dict[str, Any],
+        tool_call_id: Optional[str],
+        pending_tool_calls: list[tuple[str, Optional[str]]],
+        tool_name_by_call_id: dict[str, str],
+    ) -> None:
+        name = function_call.get("name")
+        if not isinstance(name, str) or not name:
+            return
+        pending_tool_calls.append((name, tool_call_id))
+        if tool_call_id:
+            tool_name_by_call_id[tool_call_id] = name
+
+    @staticmethod
+    def _resolve_tool_result_name(
+        message: Dict[str, Any],
+        tool_call_id: Optional[str],
+        pending_tool_calls: list[tuple[str, Optional[str]]],
+        tool_name_by_call_id: dict[str, str],
+    ) -> Optional[str]:
+        name = message.get("name")
+        if isinstance(name, str) and name:
+            return name
+
+        if tool_call_id:
+            mapped_name = tool_name_by_call_id.get(tool_call_id)
+            if mapped_name:
+                pending_tool_calls[:] = [
+                    item for item in pending_tool_calls if item[1] != tool_call_id
+                ]
+                return mapped_name
+
+        if pending_tool_calls:
+            pending_name, pending_call_id = pending_tool_calls.pop(0)
+            if pending_call_id and not tool_call_id:
+                message["tools_state_id"] = pending_call_id
+            return pending_name
+
+        return None
 
     async def _process_content_parts(
         self,
@@ -502,7 +652,11 @@ class RequestTransformer:
                             call_id, (None, None)
                         )
 
-                    tools_state_id = call_state_id or last_tools_state_id
+                    tools_state_id = (
+                        call_state_id
+                        or self._extract_responses_tools_state_id(message)
+                        or last_tools_state_id
+                    )
                     fn_name = message.get("name") or call_function_name
                     fn_name = fn_name or last_function_name
                     fn_name = map_tool_name_to_gigachat(fn_name) if fn_name else fn_name
@@ -581,16 +735,23 @@ class RequestTransformer:
 
     @staticmethod
     def _extract_responses_tools_state_id(message: dict) -> Optional[str]:
-        for field_name in ("tools_state_id", "functions_state_id"):
-            field_value = message.get(field_name)
-            if isinstance(field_value, str) and field_value:
-                return field_value
-
-        item_id = message.get("id")
-        if isinstance(item_id, str) and item_id.startswith("fc_"):
-            state_id = item_id.removeprefix("fc_")
+        for field_name in (
+            "tools_state_id",
+            "tool_state_id",
+            "functions_state_id",
+            "function_state_id",
+            "tool_call_id",
+        ):
+            state_id = RequestTransformer._normalize_backend_state_id(
+                message.get(field_name)
+            )
             if state_id:
                 return state_id
+
+        item_id = message.get("id")
+        state_id = RequestTransformer._normalize_backend_state_id(item_id)
+        if state_id:
+            return state_id
 
         return None
 

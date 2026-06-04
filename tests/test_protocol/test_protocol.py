@@ -152,6 +152,35 @@ def test_response_processor_unmaps_reserved_tool_name_web_search():
     assert tool_calls[0]["function"]["name"] == "web_search"
 
 
+def test_response_processor_preserves_backend_state_as_tool_call_id():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": {
+                            "name": "write_file",
+                            "arguments": {"file_path": "/app/regex.txt"},
+                        },
+                        "functions_state_id": "019e94aa-de11-705c-998b-040af4d06462",
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+
+    tool_call = out["choices"][0]["message"]["tool_calls"][0]
+    assert tool_call["id"] == "019e94aa-de11-705c-998b-040af4d06462"
+    assert tool_call["function"]["name"] == "write_file"
+
+
 def test_response_processor_stream_chunk_handles_delta():
     rp = ResponseProcessor(logger)
     giga_resp = MockResponse(
@@ -302,6 +331,8 @@ def test_response_processor_native_so_preserves_responses_tool_call():
     assert out["output"][0]["type"] == "function_call"
     assert out["output"][0]["name"] == "sum"
     assert out["output"][0]["arguments"] == '{"a": 1}'
+    assert out["output"][0]["call_id"] == "state-1"
+    assert out["output"][0]["id"] == "fc_state-1"
 
 
 def test_response_processor_response_api_extracts_think_tags():

@@ -408,3 +408,101 @@ async def test_prepare_chat_completion_v2_reuses_attachment_uploads():
     content = request.messages[0].content
     assert content[0].text == "look"
     assert content[1].files[0].id_ == "file_1"
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_maps_tool_call_result_history():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_019e94aa-de11-705c-998b-040af4d06462",
+                            "type": "function",
+                            "function": {
+                                "name": "write_file",
+                                "arguments": '{"file_path": "/app/regex.txt"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "call_019e94aa-de11-705c-998b-040af4d06462",
+                    "content": {
+                        "output": [
+                            {
+                                "type": "text",
+                                "text": "Successfully wrote /app/regex.txt.",
+                            }
+                        ]
+                    },
+                },
+            ],
+        }
+    )
+
+    assert [message.role for message in request.messages] == ["assistant", "tool"]
+    assert request.messages[0].tools_state_id == (
+        "019e94aa-de11-705c-998b-040af4d06462"
+    )
+    function_call = request.messages[0].content[0].function_call
+    assert function_call.name == "write_file"
+    assert function_call.arguments == {"file_path": "/app/regex.txt"}
+
+    assert request.messages[1].tools_state_id == (
+        "019e94aa-de11-705c-998b-040af4d06462"
+    )
+    function_result = request.messages[1].content[0].function_result
+    assert function_result.name == "write_file"
+    assert function_result.result == {
+        "output": [
+            {
+                "type": "text",
+                "text": "Successfully wrote /app/regex.txt.",
+            }
+        ]
+    }
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_repairs_legacy_empty_tool_result():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {
+                                    "command": "qemu-system-x86_64 -cdrom alpine.iso"
+                                },
+                            }
+                        }
+                    ],
+                },
+                {"role": "tool"},
+            ],
+        }
+    )
+
+    assert len(request.messages) == 2
+    assert request.messages[0].role == "assistant"
+    assert request.messages[0].content[0].function_call.name == "run_shell_command"
+    assert request.messages[1].role == "tool"
+    function_result = request.messages[1].content[0].function_result
+    assert function_result.name == "run_shell_command"
+    assert function_result.result == {}
