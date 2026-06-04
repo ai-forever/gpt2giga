@@ -905,7 +905,7 @@ requires-dist = [
     { name = "aioitertools", specifier = ">=0.13.0,<0.14" },
     { name = "anthropic", specifier = ">=0.79.0" },
     { name = "fastapi", specifier = ">=0.133.0,<1" },
-    { name = "gigachat", specifier = "==0.2.2a1" },
+    { name = "gigachat", specifier = ">=0.2.2a1,<0.3.0" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "openai", specifier = ">=2.3.0,<3" },
     { name = "pillow", specifier = ">=12.2.0,<13" },
