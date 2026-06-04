@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 
+import pytest
 from gigachat.models import ChatCompletionResponse
 from gigachat.models.chat_completions import ChatCompletionChunk
 from loguru import logger
+from openai.types.responses.response import Response
 
 from gpt2giga.protocol.response.gigachat_v2_adapter import (
     adapt_v2_chunk_to_v1_shape,
@@ -10,6 +12,7 @@ from gpt2giga.protocol.response.gigachat_v2_adapter import (
     adapt_v2_usage,
     extract_v2_assistant_text,
     extract_v2_function_call,
+    hydrate_v2_image_files,
     extract_v2_reasoning_text,
     extract_v2_thread_id,
 )
@@ -196,6 +199,97 @@ def test_adapted_v2_reasoning_flows_through_response_processors():
     )
     assert responses["output"][1]["type"] == "message"
     assert responses["output"][1]["content"][0]["text"] == "Paris"
+
+
+@pytest.mark.asyncio
+async def test_adapted_v2_builtin_tool_outputs_flow_through_responses_processor():
+    class FakeImageClient:
+        async def aget_image(self, file_id):
+            assert file_id == "image-file-1"
+            return SimpleNamespace(model_dump=lambda **_kwargs: {"content": "aW1n"})
+
+    response = ChatCompletionResponse.model_validate(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {"tool_execution": {"name": "image_generate"}},
+                        {"tool_execution": {"name": "web_search", "status": "success"}},
+                        {
+                            "files": [
+                                {
+                                    "id": "image-file-1",
+                                    "mime": "image/jpeg",
+                                    "target": "image",
+                                }
+                            ]
+                        },
+                        {
+                            "text": "Answer with a source. [sources=[1]]",
+                            "inline_data": {
+                                "sources": {
+                                    "1": {
+                                        "url": "https://example.test/source",
+                                        "title": "Example Source",
+                                    }
+                                }
+                            },
+                        },
+                    ],
+                }
+            ],
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+        }
+    )
+    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    await hydrate_v2_image_files(adapted, FakeImageClient())
+
+    processor = ResponseProcessor(logger=logger)
+    processed = processor.process_response_api(
+        {
+            "model": "gpt-x",
+            "input": "Find and draw",
+            "tools": [{"type": "web_search"}, {"type": "image_generation"}],
+            "store": False,
+        },
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+    )
+
+    assert processed["store"] is False
+    assert processed["output"][0]["type"] == "web_search_call"
+    assert processed["output"][0]["action"]["query"] == "Find and draw"
+    assert processed["output"][0]["action"]["sources"] == [
+        {"type": "url", "url": "https://example.test/source"}
+    ]
+    assert processed["output"][1]["type"] == "image_generation_call"
+    assert processed["output"][1]["result"] == "aW1n"
+    assert processed["output"][1]["file_id"] == "image-file-1"
+    message = processed["output"][2]
+    assert message["type"] == "message"
+    content = message["content"][0]
+    assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
+    assert content["annotations"] == [
+        {
+            "type": "url_citation",
+            "start_index": 22,
+            "end_index": 35,
+            "url": "https://example.test/source",
+            "title": "Example Source",
+        }
+    ]
+
+    parsed = Response.model_validate(processed)
+    assert parsed.output[0].type == "web_search_call"
+    assert parsed.output[1].type == "image_generation_call"
+    assert parsed.output[1].result == "aW1n"
+    assert parsed.output[2].content[0].annotations[0].type == "url_citation"
+    assert parsed.output[2].content[0].inline_data["sources"]["1"]["title"] == (
+        "Example Source"
+    )
 
 
 def test_adapted_v2_function_call_unmaps_reserved_tool_name_through_processor():

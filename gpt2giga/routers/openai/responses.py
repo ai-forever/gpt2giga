@@ -21,6 +21,7 @@ from gpt2giga.openapi_specs.openai import responses_openapi_extra
 from gpt2giga.protocol.response import (
     adapt_v2_completion_to_v1_shape,
     extract_v2_thread_id,
+    hydrate_v2_image_files,
 )
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 
@@ -64,6 +65,12 @@ async def responses(request: Request):
             response,
             default_model=data["model"],
         )
+        async with gigachat_request_options(giga_client, request_options):
+            await hydrate_v2_image_files(
+                adapted,
+                giga_client,
+                getattr(state, "logger", None),
+            )
         response_id = extract_v2_thread_id(response) or current_rquid
         return state.response_processor.process_response_api(
             data,

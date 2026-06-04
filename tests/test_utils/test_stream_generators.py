@@ -124,8 +124,14 @@ class FakeAChatStreamResource:
 
 
 class FakeClientV2Stream:
-    def __init__(self, chunks=None, error=None):
+    def __init__(self, chunks=None, error=None, images=None):
         self.achat = FakeAChatStreamResource(chunks=chunks, error=error)
+        self.images = images or {}
+
+    async def aget_image(self, file_id):
+        return SimpleNamespace(
+            model_dump=lambda **_kwargs: {"content": self.images[file_id]}
+        )
 
 
 class FakeClientCancelled:
@@ -357,6 +363,105 @@ async def test_stream_responses_v2_generator_text_and_usage():
     assert '"text": "Hi"' in completed
     assert '"input_tokens": 1' in completed
     assert '"output_tokens": 2' in completed
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_builtin_tool_outputs():
+    import json
+
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"tool_execution": {"name": "image_generate"}},
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "files": [
+                                    {
+                                        "id": "image-file-1",
+                                        "mime": "image/jpeg",
+                                        "target": "image",
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "text": "Done. [sources=[1]]",
+                                "inline_data": {
+                                    "sources": {
+                                        "1": {
+                                            "url": "https://example.test/source",
+                                            "title": "Example Source",
+                                        }
+                                    }
+                                },
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+    ]
+    req = FakeRequest(
+        FakeClientV2Stream(chunks=chunks, images={"image-file-1": "aW1n"})
+    )
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={
+            "model": "gpt-x",
+            "input": "Draw and cite",
+            "store": False,
+            "tools": [{"type": "image_generation"}, {"type": "web_search"}],
+        },
+    ):
+        lines.append(line)
+
+    completed = [line for line in lines if "event: response.completed" in line][-1]
+    payload = json.loads(completed.strip().split("\n")[1].replace("data: ", ""))
+    response = payload["response"]
+    output = response["output"]
+
+    assert response["store"] is False
+    assert response["tools"] == [{"type": "image_generation"}, {"type": "web_search"}]
+    image_call = next(
+        item for item in output if item["type"] == "image_generation_call"
+    )
+    web_call = next(item for item in output if item["type"] == "web_search_call")
+    message = next(item for item in output if item["type"] == "message")
+    assert image_call["result"] == "aW1n"
+    assert image_call["file_id"] == "image-file-1"
+    assert web_call["action"]["query"] == "Draw and cite"
+    content = message["content"][0]
+    assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
+    assert content["annotations"][0]["type"] == "url_citation"
+    assert content["annotations"][0]["url"] == "https://example.test/source"
 
 
 @pytest.mark.asyncio

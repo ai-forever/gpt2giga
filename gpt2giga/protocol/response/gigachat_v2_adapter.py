@@ -8,11 +8,13 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
     function_call = extract_v2_function_call(message)
     text = extract_v2_assistant_text(message)
     reasoning_text = extract_v2_reasoning_text(response_data)
+    metadata = extract_v2_message_metadata(response_data)
 
     message_payload: dict[str, Any] = {
         "role": _adapt_role(message.get("role")),
         "content": None if function_call and not text else text,
     }
+    message_payload.update(metadata)
     if reasoning_text:
         message_payload["reasoning_content"] = reasoning_text
     if function_call:
@@ -46,8 +48,10 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
     function_call = extract_v2_function_call(message)
     text = extract_v2_assistant_text(message)
     reasoning_text = extract_v2_reasoning_text(chunk_data)
+    metadata = extract_v2_message_metadata(chunk_data)
 
     delta: dict[str, Any] = {"content": text}
+    delta.update(metadata)
     if message.get("role"):
         delta["role"] = _adapt_role(message["role"])
     if reasoning_text:
@@ -127,6 +131,43 @@ def extract_v2_function_call(message_or_response: Any) -> Optional[dict]:
     return None
 
 
+def extract_v2_message_metadata(message_or_response: Any) -> dict[str, Any]:
+    """Extract v2 built-in tool metadata from a message, response, or chunk."""
+    data = _dump_model(message_or_response)
+    message = _select_message(data)
+
+    tool_executions: list[dict[str, Any]] = []
+    files: list[dict[str, Any]] = []
+    inline_data: dict[str, Any] = {}
+
+    _append_tool_execution(tool_executions, data.get("tool_execution"))
+    _append_tool_execution(tool_executions, message.get("tool_execution"))
+    _merge_inline_data(inline_data, message.get("inline_data"))
+
+    content = message.get("content")
+    if isinstance(content, list):
+        for part in content:
+            part_data = _dump_model(part)
+            _append_tool_execution(tool_executions, part_data.get("tool_execution"))
+            _merge_inline_data(inline_data, part_data.get("inline_data"))
+
+            part_files = part_data.get("files")
+            if isinstance(part_files, list):
+                for file_data in part_files:
+                    normalized_file = _dump_model(file_data)
+                    if normalized_file:
+                        files.append(normalized_file)
+
+    metadata: dict[str, Any] = {}
+    if tool_executions:
+        metadata["tool_executions"] = tool_executions
+    if files:
+        metadata["files"] = files
+    if inline_data:
+        metadata["inline_data"] = inline_data
+    return metadata
+
+
 def extract_v2_thread_id(response_or_chunk: Any) -> Optional[str]:
     """Extract a v2 storage thread identifier."""
     data = _dump_model(response_or_chunk)
@@ -134,6 +175,47 @@ def extract_v2_thread_id(response_or_chunk: Any) -> Optional[str]:
     if isinstance(thread_id, str) and thread_id:
         return thread_id
     return None
+
+
+async def hydrate_v2_image_files(
+    adapted_response: dict, giga_client: Any, logger: Any = None
+) -> None:
+    """Fetch base64 image payloads for v2 image file references in-place."""
+    if not hasattr(giga_client, "aget_image"):
+        return
+
+    choices = adapted_response.get("choices")
+    if not isinstance(choices, list):
+        return
+
+    for choice in choices:
+        choice_data = _dump_model(choice)
+        for message_key in ("message", "delta"):
+            message = choice_data.get(message_key)
+            if not isinstance(message, dict):
+                continue
+            files = message.get("files")
+            if not isinstance(files, list):
+                continue
+            for file_data in files:
+                if not isinstance(file_data, dict) or file_data.get("content"):
+                    continue
+                file_id = file_data.get("id")
+                if not isinstance(file_id, str) or not file_id:
+                    continue
+                if not _is_image_file(file_data):
+                    continue
+                try:
+                    image = await giga_client.aget_image(file_id)
+                    image_data = _dump_model(image)
+                    content = image_data.get("content")
+                    if isinstance(content, str) and content:
+                        file_data["content"] = content
+                except Exception as exc:
+                    if logger:
+                        logger.warning(
+                            f"Failed to fetch GigaChat image file {file_id}: {exc}"
+                        )
 
 
 def adapt_v2_usage(usage: Any) -> Optional[dict]:
@@ -204,6 +286,40 @@ def _extract_text_content(message: dict) -> str:
     return "".join(text_parts)
 
 
+def _append_tool_execution(items: list[dict[str, Any]], value: Any) -> None:
+    execution = _dump_model(value)
+    if execution:
+        items.append(execution)
+
+
+def _merge_inline_data(target: dict[str, Any], value: Any) -> None:
+    inline_data = _dump_model(value)
+    if not inline_data:
+        return
+
+    for key, item in inline_data.items():
+        if key == "sources" and isinstance(item, dict):
+            existing = target.setdefault("sources", {})
+            if isinstance(existing, dict):
+                existing.update(item)
+            else:
+                target["sources"] = item
+        elif isinstance(item, list):
+            existing_list = target.setdefault(key, [])
+            if isinstance(existing_list, list):
+                existing_list.extend(item)
+            else:
+                target[key] = item
+        elif item is not None:
+            target[key] = item
+
+
+def _is_image_file(file_data: dict[str, Any]) -> bool:
+    target = file_data.get("target")
+    mime = file_data.get("mime")
+    return target == "image" or (isinstance(mime, str) and mime.startswith("image/"))
+
+
 def _adapt_role(role: Any) -> str:
     if role == "reasoning" or not isinstance(role, str) or not role:
         return "assistant"
@@ -244,7 +360,9 @@ def _finish_reason(
 def _functions_state_id(response_or_chunk: dict, message: dict) -> str:
     return str(
         message.get("tools_state_id")
+        or message.get("tool_state_id")
         or response_or_chunk.get("tools_state_id")
+        or response_or_chunk.get("tool_state_id")
         or message.get("message_id")
         or response_or_chunk.get("message_id")
         or "v2"

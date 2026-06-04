@@ -7,6 +7,7 @@ from .gigachat_v2_adapter import (
     extract_v2_assistant_text,
     extract_v2_function_call,
     extract_v2_thread_id,
+    hydrate_v2_image_files,
 )
 from .processor import ResponseProcessor
 
@@ -18,4 +19,5 @@ __all__ = [
     "extract_v2_assistant_text",
     "extract_v2_function_call",
     "extract_v2_thread_id",
+    "hydrate_v2_image_files",
 ]
