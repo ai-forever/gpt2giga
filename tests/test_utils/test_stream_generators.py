@@ -223,6 +223,31 @@ async def test_stream_chat_completion_v2_generator_text_chunks():
 
 
 @pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_reasoning_chunks():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "reasoning", "content": [{"text": "Plan"}]}]}
+        ),
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "Answer"}]}]}
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    assert len(lines) == 3
+    assert '"content": ""' in lines[0]
+    assert '"reasoning_content": "Plan"' in lines[0]
+    assert '"content": "Answer"' in lines[1]
+    assert lines[2].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
 async def test_stream_chat_completion_v2_generator_usage_only_chunk():
     chunks = [
         ChatCompletionChunk.model_validate(
@@ -332,6 +357,59 @@ async def test_stream_responses_v2_generator_text_and_usage():
     assert '"text": "Hi"' in completed
     assert '"input_tokens": 1' in completed
     assert '"output_tokens": 2' in completed
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_maps_reasoning_role_to_output_item():
+    import json
+
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "reasoning",
+                        "content": [{"text": "Use a known geography fact."}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "Paris"}]}]}
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={"model": "gpt-x"},
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    output_text_deltas = []
+    for line in lines:
+        event_type, data = parse_sse(line)
+        if event_type == "response.output_text.delta":
+            output_text_deltas.append(data["delta"])
+
+    assert output_text_deltas == ["Paris"]
+
+    event_type, data = parse_sse(lines[-1])
+    assert event_type == "response.completed"
+    output = data["response"]["output"]
+    assert output[0]["type"] == "reasoning"
+    assert output[0]["summary"][0]["text"] == "Use a known geography fact."
+    assert output[1]["type"] == "message"
+    assert output[1]["content"][0]["text"] == "Paris"
 
 
 @pytest.mark.asyncio

@@ -7,11 +7,14 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
     message = _select_message(response_data)
     function_call = extract_v2_function_call(message)
     text = extract_v2_assistant_text(message)
+    reasoning_text = extract_v2_reasoning_text(response_data)
 
     message_payload: dict[str, Any] = {
-        "role": message.get("role") or "assistant",
+        "role": _adapt_role(message.get("role")),
         "content": None if function_call and not text else text,
     }
+    if reasoning_text:
+        message_payload["reasoning_content"] = reasoning_text
     if function_call:
         message_payload["function_call"] = function_call
         message_payload["functions_state_id"] = _functions_state_id(
@@ -41,10 +44,13 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
     message = _select_message(chunk_data)
     function_call = extract_v2_function_call(message)
     text = extract_v2_assistant_text(message)
+    reasoning_text = extract_v2_reasoning_text(chunk_data)
 
     delta: dict[str, Any] = {"content": text}
     if message.get("role"):
-        delta["role"] = message["role"]
+        delta["role"] = _adapt_role(message["role"])
+    if reasoning_text:
+        delta["reasoning_content"] = reasoning_text
     if function_call:
         delta["function_call"] = function_call
         delta["functions_state_id"] = _functions_state_id(chunk_data, message)
@@ -70,18 +76,30 @@ def extract_v2_assistant_text(message_or_response: Any) -> str:
     """Extract assistant text content from a v2 message, response, or chunk."""
     data = _dump_model(message_or_response)
     message = _select_message(data)
-    content = message.get("content")
+    role = message.get("role")
+    if role and role != "assistant":
+        return ""
 
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, list):
+    return _extract_text_content(message)
+
+
+def extract_v2_reasoning_text(message_or_response: Any) -> str:
+    """Extract reasoning text content from v2 reasoning messages."""
+    data = _dump_model(message_or_response)
+    messages = data.get("messages")
+    if not isinstance(messages, list):
+        message = _select_message(data)
+        if message.get("role") == "reasoning":
+            return _extract_text_content(message)
         return ""
 
     text_parts = []
-    for part in content:
-        part_data = _dump_model(part)
-        text = part_data.get("text")
-        if isinstance(text, str):
+    for message in messages:
+        message_data = _dump_model(message)
+        if message_data.get("role") != "reasoning":
+            continue
+        text = _extract_text_content(message_data)
+        if text:
             text_parts.append(text)
     return "".join(text_parts)
 
@@ -156,6 +174,29 @@ def _select_message(data: dict) -> dict:
             return message_data
 
     return _dump_model(messages[0])
+
+
+def _extract_text_content(message: dict) -> str:
+    content = message.get("content")
+
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+
+    text_parts = []
+    for part in content:
+        part_data = _dump_model(part)
+        text = part_data.get("text")
+        if isinstance(text, str):
+            text_parts.append(text)
+    return "".join(text_parts)
+
+
+def _adapt_role(role: Any) -> str:
+    if role == "reasoning" or not isinstance(role, str) or not role:
+        return "assistant"
+    return role
 
 
 def _normalize_function_call(function_call: Any) -> Optional[dict]:
