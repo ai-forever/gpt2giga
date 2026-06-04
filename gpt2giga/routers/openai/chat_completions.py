@@ -1,5 +1,7 @@
 """OpenAI chat completions endpoint."""
 
+from types import SimpleNamespace
+
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
@@ -13,6 +15,7 @@ from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import stream_chat_completion_generator
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import chat_completions_openapi_extra
+from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 
 router = APIRouter(tags=["OpenAI"])
@@ -28,8 +31,27 @@ async def chat_completions(request: Request):
     current_rquid = rquid_context.get()
     state = request.app.state
     giga_client = get_gigachat_client(request)
+    mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
 
     populate_giga_functions(data, getattr(state, "logger", None))
+    if mode == "v2" and not stream:
+        async with gigachat_request_options(giga_client, request_options):
+            chat_request = await state.request_transformer.prepare_chat_completion_v2(
+                data, giga_client
+            )
+        async with gigachat_request_options(giga_client, request_options):
+            response = await giga_client.achat.create(chat_request)
+        adapted = adapt_v2_completion_to_v1_shape(
+            response,
+            default_model=data["model"],
+        )
+        return state.response_processor.process_response(
+            SimpleNamespace(model_dump=lambda: adapted),
+            data["model"],
+            current_rquid,
+            request_data=data,
+        )
+
     async with gigachat_request_options(giga_client, request_options):
         chat_messages = await state.request_transformer.prepare_chat_completion(
             data, giga_client

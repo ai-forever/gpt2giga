@@ -758,7 +758,7 @@ class RequestTransformer:
         if isinstance(value, dict):
             return value
         if hasattr(value, "model_dump"):
-            return value.model_dump(exclude_none=True)
+            return value.model_dump(exclude_none=True, by_alias=True)
         return {}
 
     def _build_v2_tool_config(self, function_call: Any) -> dict[str, str]:
