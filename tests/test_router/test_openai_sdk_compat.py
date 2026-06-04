@@ -4,7 +4,7 @@ from loguru import logger
 from openai import OpenAI
 
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.openai import router as openai_router
 
@@ -76,7 +76,7 @@ def _make_app():
     app = FastAPI()
     app.add_middleware(RquidMiddleware)
     app.include_router(openai_router)
-    config = ProxyConfig()
+    config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     app.state.config = config
     app.state.gigachat_client = FakeGigachat()
     app.state.request_transformer = RequestTransformer(config, logger=logger)

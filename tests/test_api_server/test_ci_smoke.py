@@ -68,7 +68,11 @@ class FakeRequestTransformer:
 
 def make_app(monkeypatch):
     config = ProxyConfig(
-        proxy=ProxySettings(mode="DEV", log_filename="/tmp/gpt2giga-ci-smoke.log")
+        proxy=ProxySettings(
+            mode="DEV",
+            log_filename="/tmp/gpt2giga-ci-smoke.log",
+            gigachat_api_mode="v1",
+        )
     )
     monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: FakeGigaChat())
     return create_app(config=config)

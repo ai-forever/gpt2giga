@@ -84,6 +84,7 @@ def test_proxy_settings_responses_api_mode_from_env(monkeypatch, mode):
 
 
 def test_proxy_settings_responses_api_mode_empty_env_inherits(monkeypatch):
+    monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
     monkeypatch.setenv("GPT2GIGA_RESPONSES_API_MODE", "")
     s = ProxySettings()
     assert s.responses_api_mode == "inherit"
