@@ -779,6 +779,9 @@ class RequestTransformer:
         else:
             request_payload.pop("storage", None)
 
+        if self._v2_storage_has_thread_id(storage):
+            request_payload.pop("model", None)
+
         if model_options:
             request_payload["model_options"] = model_options
 
@@ -812,6 +815,16 @@ class RequestTransformer:
         if thread_id:
             storage.setdefault("thread_id", thread_id)
         return storage
+
+    @staticmethod
+    def _v2_storage_has_thread_id(storage: Any) -> bool:
+        if isinstance(storage, dict):
+            thread_id = storage.get("thread_id")
+            return isinstance(thread_id, str) and bool(thread_id)
+        if hasattr(storage, "thread_id"):
+            thread_id = getattr(storage, "thread_id")
+            return isinstance(thread_id, str) and bool(thread_id)
+        return False
 
     @staticmethod
     def _responses_thread_id_from_response_id(response_id: Any) -> Optional[str]:

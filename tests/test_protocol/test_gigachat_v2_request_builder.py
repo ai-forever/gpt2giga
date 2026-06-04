@@ -218,8 +218,10 @@ async def test_prepare_response_v2_maps_previous_response_id_to_storage_thread_i
         }
     )
 
+    assert request.model is None
     assert request.storage.thread_id == "thread_1"
     assert request.model_dump(exclude_none=True)["storage"] == {"thread_id": "thread_1"}
+    assert "model" not in request.model_dump(exclude_none=True)
 
 
 @pytest.mark.asyncio
