@@ -446,6 +446,7 @@ class RequestTransformer:
         data = sanitize_openai_responses_parameters(
             data,
             allow_builtin_tools=builtin_tools_enabled,
+            allow_stateful=builtin_tools_enabled,
         )
         transformed = self._transform_common_parameters(data)
         if builtin_tools_enabled:
@@ -769,12 +770,56 @@ class RequestTransformer:
             request_payload,
             model_options,
         )
-        request_payload.setdefault("storage", {})
+        storage = self._build_v2_storage(
+            transformed_data,
+            existing_storage=request_payload.get("storage"),
+        )
+        if storage is not None:
+            request_payload["storage"] = storage
+        else:
+            request_payload.pop("storage", None)
 
         if model_options:
             request_payload["model_options"] = model_options
 
         return request_payload
+
+    @classmethod
+    def _build_v2_storage(
+        cls,
+        transformed_data: Dict[str, Any],
+        *,
+        existing_storage: Any = None,
+    ) -> Any:
+        is_responses_api = bool(transformed_data.get("_gpt2giga_responses_api"))
+        store_enabled = (
+            transformed_data.get("store", True) is not False
+            if is_responses_api
+            else False
+        )
+        previous_response_id = transformed_data.get("previous_response_id")
+        if not store_enabled and previous_response_id is None:
+            return existing_storage
+
+        if isinstance(existing_storage, dict):
+            storage = dict(existing_storage)
+        elif existing_storage is None or existing_storage is True:
+            storage = {}
+        else:
+            return existing_storage
+
+        thread_id = cls._responses_thread_id_from_response_id(previous_response_id)
+        if thread_id:
+            storage.setdefault("thread_id", thread_id)
+        return storage
+
+    @staticmethod
+    def _responses_thread_id_from_response_id(response_id: Any) -> Optional[str]:
+        if not isinstance(response_id, str) or not response_id:
+            return None
+        if response_id.startswith("resp_"):
+            return response_id.removeprefix("resp_") or None
+        return response_id
 
     def _apply_v2_additional_fields(
         self,
@@ -931,6 +976,7 @@ class RequestTransformer:
         transformed_data = self.transform_responses_parameters(
             data, allow_builtin_tools=True
         )
+        transformed_data["_gpt2giga_responses_api"] = True
         transformed_data["messages"] = self.transform_response_format(transformed_data)
         return await self._finalize_transformation_v2(transformed_data, giga_client)
 

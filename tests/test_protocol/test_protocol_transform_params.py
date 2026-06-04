@@ -559,6 +559,24 @@ def test_transform_responses_parameters_rejects_stateful_params():
     assert exc_info.value.param == "previous_response_id"
 
 
+def test_transform_responses_parameters_allows_stateful_params_in_v2_mode():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "previous_response_id": "resp_1",
+            "store": True,
+        },
+        allow_builtin_tools=True,
+    )
+
+    assert out["previous_response_id"] == "resp_1"
+    assert out["store"] is True
+
+
 @pytest.mark.parametrize("param", ["include", "max_tool_calls", "truncation"])
 def test_transform_responses_parameters_rejects_unsupported_controls(param):
     cfg = ProxyConfig()

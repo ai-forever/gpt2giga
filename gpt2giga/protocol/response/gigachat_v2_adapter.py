@@ -23,6 +23,7 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
 
     return {
         "model": response_data.get("model") or default_model,
+        "thread_id": extract_v2_thread_id(response_data),
         "choices": [
             {
                 "message": message_payload,
@@ -57,6 +58,7 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
 
     return {
         "model": chunk_data.get("model") or default_model,
+        "thread_id": extract_v2_thread_id(chunk_data),
         "choices": [
             {
                 "delta": delta,
@@ -122,6 +124,15 @@ def extract_v2_function_call(message_or_response: Any) -> Optional[dict]:
         function_call = _normalize_function_call(part_data.get("function_call"))
         if function_call:
             return function_call
+    return None
+
+
+def extract_v2_thread_id(response_or_chunk: Any) -> Optional[str]:
+    """Extract a v2 storage thread identifier."""
+    data = _dump_model(response_or_chunk)
+    thread_id = data.get("thread_id")
+    if isinstance(thread_id, str) and thread_id:
+        return thread_id
     return None
 
 

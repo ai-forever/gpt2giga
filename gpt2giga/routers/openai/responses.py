@@ -18,7 +18,10 @@ from gpt2giga.common.streaming import (
 )
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import responses_openapi_extra
-from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
+from gpt2giga.protocol.response import (
+    adapt_v2_completion_to_v1_shape,
+    extract_v2_thread_id,
+)
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 
 router = APIRouter(tags=["OpenAI"])
@@ -61,11 +64,12 @@ async def responses(request: Request):
             response,
             default_model=data["model"],
         )
+        response_id = extract_v2_thread_id(response) or current_rquid
         return state.response_processor.process_response_api(
             data,
             SimpleNamespace(model_dump=lambda: adapted),
             data["model"],
-            current_rquid,
+            response_id,
         )
 
     async with gigachat_request_options(giga_client, request_options):

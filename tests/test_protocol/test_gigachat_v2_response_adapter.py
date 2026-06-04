@@ -11,6 +11,7 @@ from gpt2giga.protocol.response.gigachat_v2_adapter import (
     extract_v2_assistant_text,
     extract_v2_function_call,
     extract_v2_reasoning_text,
+    extract_v2_thread_id,
 )
 from gpt2giga.protocol.response.processor import ResponseProcessor
 
@@ -46,6 +47,25 @@ def test_adapt_v2_completion_text_to_v1_shape():
         "total_tokens": 5,
         "precached_prompt_tokens": 1,
     }
+
+
+def test_adapt_v2_completion_preserves_thread_id():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "thread_id": "thread_1",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [{"text": "Hello"}],
+                }
+            ],
+        }
+    )
+
+    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+
+    assert extract_v2_thread_id(response) == "thread_1"
+    assert adapted["thread_id"] == "thread_1"
 
 
 def test_adapt_v2_completion_reasoning_role_to_v1_reasoning_content():

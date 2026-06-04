@@ -185,6 +185,41 @@ async def test_prepare_response_v2_builds_primary_request_from_responses_input()
     assert request.messages[0].content[0].text == "be concise"
     assert request.messages[1].content[0].text == "hello"
     assert request.model_options.max_tokens == 32
+    assert request.storage.model_dump(exclude_none=True) == {}
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_omits_storage_when_store_false():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "hello",
+            "store": False,
+        }
+    )
+
+    assert request.storage is None
+    assert "storage" not in request.model_dump(exclude_none=True)
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_maps_previous_response_id_to_storage_thread_id():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "hello",
+            "previous_response_id": "resp_thread_1",
+        }
+    )
+
+    assert request.storage.thread_id == "thread_1"
+    assert request.model_dump(exclude_none=True)["storage"] == {"thread_id": "thread_1"}
 
 
 @pytest.mark.asyncio

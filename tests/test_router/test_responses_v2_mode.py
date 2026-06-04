@@ -23,6 +23,7 @@ class FakeAChatResource:
         self.v1_calls = []
         self.v2_calls = []
         self.stream_calls = []
+        self.thread_id = None
 
     async def __call__(self, payload):
         self.v1_calls.append(payload)
@@ -44,23 +45,24 @@ class FakeAChatResource:
 
     async def create(self, payload):
         self.v2_calls.append(payload)
-        return ChatCompletionResponse.model_validate(
-            {
-                "model": "GigaChat-2-Max",
-                "messages": [
-                    {
-                        "role": "assistant",
-                        "content": [{"text": "ok-v2"}],
-                    }
-                ],
-                "finish_reason": "stop",
-                "usage": {
-                    "input_tokens": 2,
-                    "output_tokens": 3,
-                    "total_tokens": 5,
-                },
-            }
-        )
+        response_payload = {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [{"text": "ok-v2"}],
+                }
+            ],
+            "finish_reason": "stop",
+            "usage": {
+                "input_tokens": 2,
+                "output_tokens": 3,
+                "total_tokens": 5,
+            },
+        }
+        if self.thread_id is not None:
+            response_payload["thread_id"] = self.thread_id
+        return ChatCompletionResponse.model_validate(response_payload)
 
     def stream(self, payload):
         self.stream_calls.append(payload)
@@ -181,6 +183,23 @@ def test_responses_v2_non_stream_returns_openai_response_object():
     assert body["output"][0]["content"][0]["text"] == "ok-v2"
     assert body["usage"]["input_tokens"] == 2
     assert body["usage"]["output_tokens"] == 3
+
+
+def test_responses_v2_uses_thread_id_as_response_id():
+    app = make_app("v2", "inherit")
+    app.state.gigachat_client.achat.thread_id = "thread_1"
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        json={
+            "model": "gpt-x",
+            "input": "hi",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "resp_thread_1"
 
 
 def test_responses_v2_stream_uses_primary_stream():

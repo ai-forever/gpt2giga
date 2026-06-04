@@ -451,7 +451,10 @@ def responses_openapi_extra() -> Dict[str, Any]:
             },
             "previous_response_id": {
                 "type": "string",
-                "description": "Rejected: stateful Responses continuation is not supported.",
+                "description": (
+                    "Supported in Responses v2 mode: maps to GigaChat "
+                    "`storage.thread_id`; rejected in Responses v1 mode."
+                ),
             },
             "conversation": {
                 "type": "object",
@@ -508,8 +511,8 @@ def responses_openapi_extra() -> Dict[str, Any]:
         "**Required**: `model`, `input`.\n\n"
         "**Notes**:\n"
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
-        "- Stateful lifecycle features such as `previous_response_id` and "
-        "`conversation` are not supported.\n"
+        "- In Responses v2 mode, `previous_response_id` maps to GigaChat "
+        "`storage.thread_id`; `conversation` is not supported.\n"
         "- `extra_body` objects and SDK-style unknown top-level fields are moved "
         "to GigaChat `additional_fields`.\n"
         "- Known unsupported optional parameters may be rejected with `400`."

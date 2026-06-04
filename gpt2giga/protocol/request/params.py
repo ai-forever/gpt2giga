@@ -105,11 +105,18 @@ def sanitize_openai_chat_parameters(data: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def sanitize_openai_responses_parameters(
-    data: Mapping[str, Any], *, allow_builtin_tools: bool = False
+    data: Mapping[str, Any],
+    *,
+    allow_builtin_tools: bool = False,
+    allow_stateful: bool = False,
 ) -> dict[str, Any]:
     """Return a sanitized Responses API payload or raise compatibility errors."""
     sanitized = dict(data)
-    _sanitize_openai_payload(sanitized, OPENAI_RESPONSES_SUPPORTED_PARAMS)
+    _sanitize_openai_payload(
+        sanitized,
+        OPENAI_RESPONSES_SUPPORTED_PARAMS,
+        allow_stateful_responses=allow_stateful,
+    )
     _normalize_gigachat_extra_fields(sanitized)
     _apply_tool_choice_policy(sanitized, allow_builtin_tools=allow_builtin_tools)
     _validate_tools(sanitized.get("tools"), allow_builtin_tools=allow_builtin_tools)
@@ -155,12 +162,20 @@ def _pop_unknown_as_extra_field(
 
 
 def _sanitize_openai_payload(
-    data: dict[str, Any], supported_params: frozenset[str]
+    data: dict[str, Any],
+    supported_params: frozenset[str],
+    *,
+    allow_stateful_responses: bool = False,
 ) -> None:
     extra_fields: dict[str, Any] = {}
     for name in list(data):
         if name in OPENAI_ACCEPTED_IGNORED_PARAMS:
             data.pop(name, None)
+            continue
+
+        if name == "previous_response_id" and allow_stateful_responses:
+            if data.get(name) is None:
+                data.pop(name, None)
             continue
 
         if name in OPENAI_REJECTED_PARAMS:
@@ -170,7 +185,7 @@ def _sanitize_openai_payload(
             continue
 
         if name == "store":
-            _sanitize_store(data)
+            _sanitize_store(data, allow_true=allow_stateful_responses)
             continue
 
         if name == "n":
@@ -193,7 +208,19 @@ def _sanitize_openai_payload(
     _merge_unknown_extra_fields(data, extra_fields)
 
 
-def _sanitize_store(data: dict[str, Any]) -> None:
+def _sanitize_store(data: dict[str, Any], *, allow_true: bool = False) -> None:
+    value = data.get("store")
+    if allow_true:
+        if value is None:
+            data.pop("store", None)
+            return
+        if isinstance(value, bool):
+            return
+        _raise_openai_param_error(
+            "store",
+            "`store` must be a boolean.",
+        )
+
     value = data.pop("store", None)
     if value is True:
         _raise_openai_param_error(
