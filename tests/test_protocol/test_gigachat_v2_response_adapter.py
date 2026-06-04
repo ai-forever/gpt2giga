@@ -155,7 +155,7 @@ def test_adapt_v2_chunk_text_to_v1_shape():
         "content": "Hi",
         "role": "assistant",
     }
-    assert adapted["choices"][0]["finish_reason"] == "stop"
+    assert adapted["choices"][0]["finish_reason"] is None
     assert adapted["usage"] is None
 
 

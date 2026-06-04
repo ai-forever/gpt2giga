@@ -12,7 +12,10 @@ from gpt2giga.common.gigachat_options import (
     gigachat_request_options,
 )
 from gpt2giga.common.request_json import read_request_json
-from gpt2giga.common.streaming import stream_responses_generator
+from gpt2giga.common.streaming import (
+    stream_responses_generator,
+    stream_responses_v2_generator,
+)
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import responses_openapi_extra
 from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
@@ -35,10 +38,22 @@ async def responses(request: Request):
     mode = settings.resolve_responses_api_mode()
 
     populate_giga_functions(data, getattr(state, "logger", None))
-    if mode == "v2" and not stream:
+    if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
             chat_request = await state.request_transformer.prepare_response_v2(
                 data, giga_client
+            )
+        if stream:
+            return StreamingResponse(
+                stream_responses_v2_generator(
+                    request,
+                    chat_request,
+                    current_rquid,
+                    giga_client,
+                    request_data=data,
+                    request_options=request_options,
+                ),
+                media_type="text/event-stream",
             )
         async with gigachat_request_options(giga_client, request_options):
             response = await giga_client.achat.create(chat_request)

@@ -24,7 +24,10 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
             {
                 "message": message_payload,
                 "finish_reason": _finish_reason(
-                    response_data, message, has_function_call=bool(function_call)
+                    response_data,
+                    message,
+                    has_function_call=bool(function_call),
+                    default_stop=True,
                 ),
             }
         ],
@@ -52,7 +55,10 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
             {
                 "delta": delta,
                 "finish_reason": _finish_reason(
-                    chunk_data, message, has_function_call=bool(function_call)
+                    chunk_data,
+                    message,
+                    has_function_call=bool(function_call),
+                    default_stop=False,
                 ),
             }
         ],
@@ -165,7 +171,11 @@ def _normalize_function_call(function_call: Any) -> Optional[dict]:
 
 
 def _finish_reason(
-    response_or_chunk: dict, message: dict, *, has_function_call: bool
+    response_or_chunk: dict,
+    message: dict,
+    *,
+    has_function_call: bool,
+    default_stop: bool,
 ) -> Optional[str]:
     finish_reason = response_or_chunk.get("finish_reason") or message.get(
         "finish_reason"
@@ -173,8 +183,8 @@ def _finish_reason(
     if finish_reason:
         return finish_reason
     if has_function_call:
-        return "function_call"
-    if message or "messages" in response_or_chunk:
+        return "function_call" if default_stop else None
+    if default_stop and (message or "messages" in response_or_chunk):
         return "stop"
     return None
 

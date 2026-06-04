@@ -216,6 +216,56 @@ async def stream_chat_completion_v2_generator(
         yield "data: [DONE]\n\n"
 
 
+class _V2ResponsesStreamClient:
+    def __init__(
+        self,
+        giga_client: GigaChat,
+        model: str,
+        request_options: Optional[GigaRequestOptions],
+    ):
+        self._giga_client = giga_client
+        self._model = model
+        self._request_options = request_options
+
+    def astream(self, chat_request: Any):
+        async def gen():
+            async with gigachat_request_options(
+                self._giga_client, self._request_options
+            ):
+                async for chunk in self._giga_client.achat.stream(chat_request):
+                    adapted = adapt_v2_chunk_to_v1_shape(
+                        chunk,
+                        default_model=self._model,
+                    )
+                    yield SimpleNamespace(model_dump=lambda adapted=adapted: adapted)
+
+        return gen()
+
+
+async def stream_responses_v2_generator(
+    request: Request,
+    chat_request: Any,
+    response_id: str,
+    giga_client: Optional[GigaChat] = None,
+    request_data: Optional[dict] = None,
+    request_options: Optional[GigaRequestOptions] = None,
+) -> AsyncGenerator[str, None]:
+    if giga_client is None:
+        giga_client = get_gigachat_client(request)
+    model = request_data.get("model", "unknown") if request_data else "unknown"
+    adapter_client = _V2ResponsesStreamClient(giga_client, model, request_options)
+
+    async for event in stream_responses_generator(
+        request,
+        chat_request,
+        response_id,
+        giga_client=adapter_client,
+        request_data=request_data,
+        request_options=None,
+    ):
+        yield event
+
+
 async def stream_responses_generator(
     request: Request,
     chat_messages: Chat,
@@ -309,6 +359,7 @@ async def stream_responses_generator(
         functions_state_id = None
         output_item_added = False
         is_function_call = False
+        final_usage = None
 
         async with gigachat_request_options(giga_client, request_options):
             async for _i, chunk in aio_enumerate(giga_client.astream(chat_messages)):
@@ -318,6 +369,17 @@ async def stream_responses_generator(
                     break
 
                 giga_dict = chunk.model_dump()
+                if giga_dict.get("usage"):
+                    usage_builder = getattr(
+                        request.app.state.response_processor,
+                        "_build_response_usage",
+                        None,
+                    )
+                    final_usage = (
+                        usage_builder(giga_dict["usage"])
+                        if callable(usage_builder)
+                        else None
+                    )
                 choice = giga_dict["choices"][0]
                 delta = choice.get("delta", {})
                 delta_content = delta.get("content", "")
@@ -491,7 +553,9 @@ async def stream_responses_generator(
                 "response.completed",
                 {
                     "type": "response.completed",
-                    "response": build_response_obj("completed", output=final_output),
+                    "response": build_response_obj(
+                        "completed", output=final_output, usage=final_usage
+                    ),
                     "sequence_number": sequence_number,
                 },
             )
@@ -617,7 +681,9 @@ async def stream_responses_generator(
                 "response.completed",
                 {
                     "type": "response.completed",
-                    "response": build_response_obj("completed", output=final_output),
+                    "response": build_response_obj(
+                        "completed", output=final_output, usage=final_usage
+                    ),
                     "sequence_number": sequence_number,
                 },
             )

@@ -10,6 +10,7 @@ from gpt2giga.common.streaming import (
     stream_chat_completion_generator,
     stream_chat_completion_v2_generator,
     stream_responses_generator,
+    stream_responses_v2_generator,
 )
 
 
@@ -28,6 +29,19 @@ class FakeResponseProcessor:
             "id": response_id,
             "sequence": sequence_number,
             "delta": chunk.model_dump()["choices"][0]["delta"],
+        }
+
+    @staticmethod
+    def _build_response_usage(usage_data):
+        return {
+            "input_tokens": usage_data.get("prompt_tokens", 0),
+            "output_tokens": usage_data.get("completion_tokens", 0),
+            "total_tokens": usage_data.get("total_tokens", 0),
+            "prompt_tokens_details": {
+                "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
+            },
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 0},
         }
 
 
@@ -281,6 +295,67 @@ async def test_stream_responses_generator_gigachat_exception():
     assert "event: response.created" in lines[0]
     assert "event: response.in_progress" in lines[1]
     assert "GigaChat" in lines[2]
+    assert "stream_error" in lines[2]
+    assert "event: error" in lines[2]
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_text_and_usage():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "Hi"}]}]}
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 2,
+                    "total_tokens": 3,
+                }
+            }
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={"model": "gpt-x"},
+    ):
+        lines.append(line)
+
+    assert any("event: response.output_text.delta" in line for line in lines)
+    assert any('"delta": "Hi"' in line for line in lines)
+    completed = [line for line in lines if "event: response.completed" in line][-1]
+    assert '"text": "Hi"' in completed
+    assert '"input_tokens": 1' in completed
+    assert '"output_tokens": 2' in completed
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_gigachat_exception():
+    logger = MagicMock()
+    req = FakeRequest(
+        FakeClientV2Stream(
+            error=gigachat.exceptions.GigaChatException("GigaChat API error occurred")
+        ),
+        logger=logger,
+    )
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={"model": "gpt-x"},
+    ):
+        lines.append(line)
+
+    assert len(lines) == 3
+    assert "event: response.created" in lines[0]
+    assert "event: response.in_progress" in lines[1]
     assert "stream_error" in lines[2]
     assert "event: error" in lines[2]
 
