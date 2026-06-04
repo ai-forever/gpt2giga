@@ -315,6 +315,9 @@ async def stream_responses_v2_generator(
     giga_client: Optional[GigaChat] = None,
     request_data: Optional[dict] = None,
     request_options: Optional[GigaRequestOptions] = None,
+    *,
+    model_limiter: Optional[ModelConcurrencyLimiter] = None,
+    effective_model: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     if giga_client is None:
         giga_client = get_gigachat_client(request)
@@ -328,6 +331,8 @@ async def stream_responses_v2_generator(
         giga_client=adapter_client,
         request_data=request_data,
         request_options=None,
+        model_limiter=model_limiter,
+        effective_model=effective_model,
     ):
         yield event
 
@@ -373,6 +378,9 @@ async def stream_responses_generator(
     giga_client: Optional[GigaChat] = None,
     request_data: Optional[dict] = None,
     request_options: Optional[GigaRequestOptions] = None,
+    *,
+    model_limiter: Optional[ModelConcurrencyLimiter] = None,
+    effective_model: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     import time
 
@@ -432,6 +440,12 @@ async def stream_responses_generator(
     try:
         if giga_client is None:
             giga_client = get_gigachat_client(request)
+        if model_limiter is None:
+            model_limiter = get_model_concurrency_limiter(request)
+        if effective_model is None:
+            effective_model = resolve_gigachat_model(
+                chat_messages, getattr(request.app.state, "config", None)
+            )
         logger = getattr(request.app.state, "logger", None)
 
         yield sse_event(
@@ -468,146 +482,151 @@ async def stream_responses_generator(
             "inline_data": {},
         }
 
-        async with gigachat_request_options(giga_client, request_options):
-            async for _i, chunk in aio_enumerate(giga_client.astream(chat_messages)):
-                if await request.is_disconnected():
-                    if logger:
-                        logger.info(f"[{rquid}] Client disconnected during streaming")
-                    break
+        async with model_limiter.limit(effective_model, provider="openai"):
+            async with gigachat_request_options(giga_client, request_options):
+                async for _i, chunk in aio_enumerate(
+                    giga_client.astream(chat_messages)
+                ):
+                    if await request.is_disconnected():
+                        if logger:
+                            logger.info(
+                                f"[{rquid}] Client disconnected during streaming"
+                            )
+                        break
 
-                giga_dict = chunk.model_dump()
-                if giga_dict.get("usage"):
-                    usage_builder = getattr(
-                        request.app.state.response_processor,
-                        "_build_response_usage",
-                        None,
-                    )
-                    final_usage = (
-                        usage_builder(giga_dict["usage"])
-                        if callable(usage_builder)
-                        else None
-                    )
-                choice = giga_dict["choices"][0]
-                delta = choice.get("delta", {})
-                delta_content = delta.get("content", "")
-                delta_function_call = delta.get("function_call")
-                delta_reasoning = delta.get("reasoning_content", "")
-                parsed_content = reasoning_parser.feed(delta_content)
-                delta_content = parsed_content.content
-                if parsed_content.reasoning_content:
-                    reasoning_text += parsed_content.reasoning_content
-                if delta_reasoning:
-                    reasoning_text += delta_reasoning
-                _accumulate_builtin_metadata(builtin_message_metadata, delta)
-
-                if delta_function_call:
-                    is_function_call = True
-                    if functions_state_id is None:
-                        functions_state_id = delta.get("functions_state_id")
-
-                    if function_call_data is None:
-                        tool_name = map_tool_name_from_gigachat(
-                            delta_function_call.get("name", "")
+                    giga_dict = chunk.model_dump()
+                    if giga_dict.get("usage"):
+                        usage_builder = getattr(
+                            request.app.state.response_processor,
+                            "_build_response_usage",
+                            None,
                         )
-                        function_call_data = {
-                            "name": tool_name,
-                            "arguments": "",
-                        }
-                        yield sse_event(
-                            "response.output_item.added",
-                            {
-                                "type": "response.output_item.added",
-                                "output_index": 0,
-                                "item": {
-                                    "id": fc_id,
-                                    "type": "function_call",
-                                    "status": "in_progress",
-                                    "call_id": f"call_{response_id}",
-                                    "name": function_call_data["name"],
-                                    "arguments": "",
-                                },
-                                "sequence_number": sequence_number,
-                            },
+                        final_usage = (
+                            usage_builder(giga_dict["usage"])
+                            if callable(usage_builder)
+                            else None
                         )
-                        sequence_number += 1
-                        output_item_added = True
+                    choice = giga_dict["choices"][0]
+                    delta = choice.get("delta", {})
+                    delta_content = delta.get("content", "")
+                    delta_function_call = delta.get("function_call")
+                    delta_reasoning = delta.get("reasoning_content", "")
+                    parsed_content = reasoning_parser.feed(delta_content)
+                    delta_content = parsed_content.content
+                    if parsed_content.reasoning_content:
+                        reasoning_text += parsed_content.reasoning_content
+                    if delta_reasoning:
+                        reasoning_text += delta_reasoning
+                    _accumulate_builtin_metadata(builtin_message_metadata, delta)
 
-                    if delta_function_call.get("name"):
-                        function_call_data["name"] = map_tool_name_from_gigachat(
-                            delta_function_call["name"]
-                        )
+                    if delta_function_call:
+                        is_function_call = True
+                        if functions_state_id is None:
+                            functions_state_id = delta.get("functions_state_id")
 
-                    args = delta_function_call.get("arguments")
-                    if args is not None:
-                        if isinstance(args, dict):
-                            args_str = json.dumps(args, ensure_ascii=False)
-                        else:
-                            args_str = str(args)
-
-                        if args_str:
+                        if function_call_data is None:
+                            tool_name = map_tool_name_from_gigachat(
+                                delta_function_call.get("name", "")
+                            )
+                            function_call_data = {
+                                "name": tool_name,
+                                "arguments": "",
+                            }
                             yield sse_event(
-                                "response.function_call_arguments.delta",
+                                "response.output_item.added",
                                 {
-                                    "type": "response.function_call_arguments.delta",
-                                    "item_id": fc_id,
+                                    "type": "response.output_item.added",
                                     "output_index": 0,
-                                    "delta": args_str,
+                                    "item": {
+                                        "id": fc_id,
+                                        "type": "function_call",
+                                        "status": "in_progress",
+                                        "call_id": f"call_{response_id}",
+                                        "name": function_call_data["name"],
+                                        "arguments": "",
+                                    },
                                     "sequence_number": sequence_number,
                                 },
                             )
                             sequence_number += 1
-                            function_call_data["arguments"] += args_str
+                            output_item_added = True
 
-                elif delta_content:
-                    if not output_item_added:
-                        yield sse_event(
-                            "response.output_item.added",
-                            {
-                                "type": "response.output_item.added",
-                                "output_index": 0,
-                                "item": {
-                                    "id": msg_id,
-                                    "status": "in_progress",
-                                    "type": "message",
-                                    "role": "assistant",
-                                    "content": [],
+                        if delta_function_call.get("name"):
+                            function_call_data["name"] = map_tool_name_from_gigachat(
+                                delta_function_call["name"]
+                            )
+
+                        args = delta_function_call.get("arguments")
+                        if args is not None:
+                            if isinstance(args, dict):
+                                args_str = json.dumps(args, ensure_ascii=False)
+                            else:
+                                args_str = str(args)
+
+                            if args_str:
+                                yield sse_event(
+                                    "response.function_call_arguments.delta",
+                                    {
+                                        "type": "response.function_call_arguments.delta",
+                                        "item_id": fc_id,
+                                        "output_index": 0,
+                                        "delta": args_str,
+                                        "sequence_number": sequence_number,
+                                    },
+                                )
+                                sequence_number += 1
+                                function_call_data["arguments"] += args_str
+
+                    elif delta_content:
+                        if not output_item_added:
+                            yield sse_event(
+                                "response.output_item.added",
+                                {
+                                    "type": "response.output_item.added",
+                                    "output_index": 0,
+                                    "item": {
+                                        "id": msg_id,
+                                        "status": "in_progress",
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": [],
+                                    },
+                                    "sequence_number": sequence_number,
                                 },
-                                "sequence_number": sequence_number,
-                            },
-                        )
-                        sequence_number += 1
+                            )
+                            sequence_number += 1
 
+                            yield sse_event(
+                                "response.content_part.added",
+                                {
+                                    "type": "response.content_part.added",
+                                    "item_id": msg_id,
+                                    "output_index": 0,
+                                    "content_index": 0,
+                                    "part": {
+                                        "type": "output_text",
+                                        "text": "",
+                                        "annotations": [],
+                                    },
+                                    "sequence_number": sequence_number,
+                                },
+                            )
+                            sequence_number += 1
+                            output_item_added = True
+
+                        full_text += delta_content
                         yield sse_event(
-                            "response.content_part.added",
+                            "response.output_text.delta",
                             {
-                                "type": "response.content_part.added",
+                                "type": "response.output_text.delta",
                                 "item_id": msg_id,
                                 "output_index": 0,
                                 "content_index": 0,
-                                "part": {
-                                    "type": "output_text",
-                                    "text": "",
-                                    "annotations": [],
-                                },
+                                "delta": delta_content,
                                 "sequence_number": sequence_number,
                             },
                         )
                         sequence_number += 1
-                        output_item_added = True
-
-                    full_text += delta_content
-                    yield sse_event(
-                        "response.output_text.delta",
-                        {
-                            "type": "response.output_text.delta",
-                            "item_id": msg_id,
-                            "output_index": 0,
-                            "content_index": 0,
-                            "delta": delta_content,
-                            "sequence_number": sequence_number,
-                        },
-                    )
-                    sequence_number += 1
 
         flushed_reasoning = reasoning_parser.flush()
         if flushed_reasoning.content:
@@ -808,6 +827,16 @@ async def stream_responses_generator(
                     "sequence_number": sequence_number,
                 },
             )
+
+    except ModelConcurrencyTimeoutError as e:
+        error_response = {
+            "type": "error",
+            "code": "model_concurrency_limit",
+            "message": str(e),
+            "param": "model",
+            "sequence_number": sequence_number,
+        }
+        yield sse_event("error", error_response)
 
     except gigachat.exceptions.GigaChatException as e:
         error_type = type(e).__name__
