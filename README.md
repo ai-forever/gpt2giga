@@ -401,6 +401,8 @@ gpt2giga \
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
 - `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
+- `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
+- `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
 - `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
 - `GPT2GIGA_LOG_FILENAME="gpt2giga.log"` — Имя лог файла. По умолчанию `gpt2giga.log`
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
