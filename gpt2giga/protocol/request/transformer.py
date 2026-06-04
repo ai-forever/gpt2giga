@@ -464,22 +464,50 @@ class RequestTransformer:
 
         elif isinstance(input_, list):
             last_function_name: Optional[str] = None
+            last_tools_state_id: Optional[str] = None
+            tool_state_by_call_id: dict[str, tuple[Optional[str], Optional[str]]] = {}
             for message in input_:
                 message_type = message.get("type")
                 if message_type == "function_call_output":
-                    fn_name = message.get("name") or last_function_name
+                    call_state_id = None
+                    call_function_name = None
+                    call_id = message.get("call_id")
+                    if isinstance(call_id, str):
+                        call_state_id, call_function_name = tool_state_by_call_id.get(
+                            call_id, (None, None)
+                        )
+
+                    tools_state_id = call_state_id or last_tools_state_id
+                    fn_name = message.get("name") or call_function_name
+                    fn_name = fn_name or last_function_name
                     fn_name = map_tool_name_to_gigachat(fn_name) if fn_name else fn_name
-                    message_payload.append(
-                        {
-                            "role": "function",
-                            "name": fn_name,
-                            "content": ensure_json_object_str(message.get("output")),
-                        }
-                    )
+                    payload = {
+                        "role": "function",
+                        "name": fn_name,
+                        "content": ensure_json_object_str(message.get("output")),
+                    }
+                    if tools_state_id:
+                        payload["tools_state_id"] = tools_state_id
+                    message_payload.append(payload)
                     continue
                 if message_type == "function_call":
                     last_function_name = message.get("name") or last_function_name
-                    message_payload.append(self.mock_completion(message))
+                    tools_state_id = (
+                        self._extract_responses_tools_state_id(message)
+                        or last_tools_state_id
+                    )
+                    last_tools_state_id = tools_state_id
+                    call_id = message.get("call_id")
+                    if isinstance(call_id, str):
+                        tool_state_by_call_id[call_id] = (
+                            tools_state_id,
+                            last_function_name,
+                        )
+
+                    completion_payload = self.mock_completion(message)
+                    if tools_state_id:
+                        completion_payload["tools_state_id"] = tools_state_id
+                    message_payload.append(completion_payload)
                     continue
 
                 role = message.get("role")
@@ -515,12 +543,31 @@ class RequestTransformer:
     @staticmethod
     def mock_completion(message: dict) -> dict:
         """Creates a mock completion message for function calls."""
-        arguments = json.loads(message.get("arguments"))
+        raw_arguments = message.get("arguments", {})
+        if isinstance(raw_arguments, str):
+            arguments = json.loads(raw_arguments)
+        else:
+            arguments = raw_arguments
         name = map_tool_name_to_gigachat(message.get("name"))
         return Messages(
             role=MessagesRole.ASSISTANT,
             function_call=FunctionCall(name=name, arguments=arguments),
         ).model_dump()
+
+    @staticmethod
+    def _extract_responses_tools_state_id(message: dict) -> Optional[str]:
+        for field_name in ("tools_state_id", "functions_state_id"):
+            field_value = message.get(field_name)
+            if isinstance(field_value, str) and field_value:
+                return field_value
+
+        item_id = message.get("id")
+        if isinstance(item_id, str) and item_id.startswith("fc_"):
+            state_id = item_id.removeprefix("fc_")
+            if state_id:
+                return state_id
+
+        return None
 
     async def _finalize_transformation(
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None
@@ -593,19 +640,25 @@ class RequestTransformer:
         ]
 
     def _build_v2_message_payload(self, message: Dict) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {"role": str(message.get("role", "user"))}
+        role = str(message.get("role", "user"))
+        is_function_result = role in {"function", "tool"}
+        payload_role = "tool" if is_function_result else role
+        payload: Dict[str, Any] = {"role": payload_role}
         content_parts: list[dict[str, Any]] = []
 
+        function_call_part = None
         function_call = message.get("function_call")
         if isinstance(function_call, dict):
             name = function_call.get("name")
             if name:
-                payload["function_call"] = {
-                    "name": map_tool_name_to_gigachat(name),
-                    "arguments": function_call.get("arguments", {}),
+                function_call_part = {
+                    "function_call": {
+                        "name": map_tool_name_to_gigachat(name),
+                        "arguments": function_call.get("arguments", {}),
+                    }
                 }
 
-        if payload["role"] == "function":
+        if is_function_result:
             function_name = message.get("name")
             if function_name:
                 content_parts.append(
@@ -622,7 +675,10 @@ class RequestTransformer:
             content = message.get("content")
             if content is None:
                 content = ""
-            content_parts.append({"text": str(content)})
+            if content or function_call_part is None:
+                content_parts.append({"text": str(content)})
+            if function_call_part is not None:
+                content_parts.append(function_call_part)
 
         attachments = message.get("attachments")
         if isinstance(attachments, list) and attachments:
@@ -685,6 +741,7 @@ class RequestTransformer:
             request_payload,
             model_options,
         )
+        request_payload.setdefault("storage", {})
 
         if model_options:
             request_payload["model_options"] = model_options
@@ -713,6 +770,7 @@ class RequestTransformer:
             return []
 
         specifications = []
+        seen_names: set[str] = set()
         for function in functions:
             function_payload = self._dump_mapping(function)
             if not function_payload:
@@ -723,9 +781,13 @@ class RequestTransformer:
             name = function_payload.get("name")
             if not isinstance(name, str) or not name:
                 continue
+            mapped_name = map_tool_name_to_gigachat(name)
+            if mapped_name in seen_names:
+                continue
+            seen_names.add(mapped_name)
 
             spec_payload = {
-                "name": map_tool_name_to_gigachat(name),
+                "name": mapped_name,
                 "parameters": function_payload.get("parameters") or {},
             }
             for field_name in (
