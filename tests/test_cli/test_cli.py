@@ -42,6 +42,30 @@ def test_load_config_boolean_flags(monkeypatch):
     assert config.gigachat_settings.verify_ssl_certs is False
 
 
+def test_load_config_model_max_connections_cli(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "prog",
+            "--proxy.model-max-connections",
+            '{"GigaChat":1,"GigaChat-Max":5}',
+            "--proxy.model-max-connections-default",
+            "2",
+            "--proxy.model-max-connections-acquire-timeout",
+            "0",
+        ],
+    )
+
+    config = load_config()
+
+    assert config.proxy_settings.model_max_connections == {
+        "GigaChat": 1,
+        "GigaChat-Max": 5,
+    }
+    assert config.proxy_settings.model_max_connections_default == 2
+    assert config.proxy_settings.model_max_connections_acquire_timeout == 0
+
+
 def test_warn_sensitive_cli_args_credentials(monkeypatch):
     """Log warning is emitted when --gigachat.credentials is passed via CLI."""
     monkeypatch.setattr("sys.argv", ["prog", "--gigachat.credentials", "secret123"])

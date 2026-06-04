@@ -1,6 +1,6 @@
 import pytest
 
-from gpt2giga.models.config import ProxySettings, ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 
 
 def test_proxy_settings_defaults(monkeypatch):
@@ -10,6 +10,9 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_RESPONSES_API_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", raising=False)
+    monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", raising=False)
     s = ProxySettings()
     assert s.mode == "DEV"
     assert s.host == "localhost"
@@ -25,6 +28,9 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024
     assert s.max_audio_image_total_size_bytes == 80 * 1024 * 1024
+    assert s.model_max_connections == {}
+    assert s.model_max_connections_default is None
+    assert s.model_max_connections_acquire_timeout is None
 
 
 def test_proxy_config_instantiation():
@@ -36,6 +42,50 @@ def test_proxy_settings_env_prefix(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_HOST", "127.0.0.1")
     s = ProxySettings()
     assert s.host == "127.0.0.1"
+
+
+def test_proxy_settings_model_max_connections_from_env(monkeypatch):
+    monkeypatch.setenv(
+        "GPT2GIGA_MODEL_MAX_CONNECTIONS",
+        '{"GigaChat":1,"GigaChat-Pro":2,"GigaChat-Max":5}',
+    )
+    monkeypatch.setenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", "3")
+    monkeypatch.setenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", "30")
+
+    s = ProxySettings()
+
+    assert s.model_max_connections == {
+        "GigaChat": 1,
+        "GigaChat-Pro": 2,
+        "GigaChat-Max": 5,
+    }
+    assert s.model_max_connections_default == 3
+    assert s.model_max_connections_acquire_timeout == 30
+
+
+def test_proxy_settings_model_max_connections_timeout_zero_is_valid(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", "0")
+
+    s = ProxySettings()
+
+    assert s.model_max_connections_acquire_timeout == 0
+
+
+@pytest.mark.parametrize(
+    ("env_name", "env_value"),
+    [
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS", '{"GigaChat":0}'),
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS", '{"GigaChat":-1}'),
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", "0"),
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", "-1"),
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", "-1"),
+    ],
+)
+def test_proxy_settings_invalid_model_max_connections(monkeypatch, env_name, env_value):
+    monkeypatch.setenv(env_name, env_value)
+
+    with pytest.raises(Exception):
+        ProxySettings()
 
 
 def test_proxy_settings_mode_normalized(monkeypatch):
