@@ -2,7 +2,16 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from gigachat import GigaChat
-from gigachat.models import FunctionCall, Messages, MessagesRole
+from gigachat.models import (
+    ChatCompletionRequest,
+    ChatFunctionSpecification,
+    ChatMessage,
+    ChatModelOptions,
+    ChatTool,
+    FunctionCall,
+    Messages,
+    MessagesRole,
+)
 
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.content_utils import ensure_json_object_str
@@ -26,6 +35,9 @@ from gpt2giga.protocol.request.params import (
 
 class RequestTransformer:
     """Transformer for converting OpenAI requests to GigaChat format."""
+
+    _V2_REQUEST_FIELDS = set(ChatCompletionRequest.model_fields)
+    _V2_MODEL_OPTION_FIELDS = set(ChatModelOptions.model_fields)
 
     def __init__(
         self,
@@ -74,7 +86,7 @@ class RequestTransformer:
                 system_message = message
 
             # Handle tool/function role specifics
-            if original_role == "tool":
+            if original_role in {"tool", "function"}:
                 message["content"] = ensure_json_object_str(message.get("content"))
                 if message.get("name"):
                     message["name"] = map_tool_name_to_gigachat(message["name"])
@@ -544,12 +556,237 @@ class RequestTransformer:
 
         return transformed_data
 
+    async def _finalize_transformation_v2(
+        self, transformed_data: dict, giga_client: Optional[GigaChat] = None
+    ) -> ChatCompletionRequest:
+        """Build a primary v2 chat completions request."""
+        transformed_data["messages"] = await self.transform_messages(
+            transformed_data.get("messages", []), giga_client
+        )
+
+        messages = self._build_v2_messages(transformed_data["messages"])
+        request_payload = self._build_v2_request_payload(transformed_data, messages)
+        chat_request = ChatCompletionRequest.model_validate(request_payload)
+
+        if self.config.proxy_settings.mode == "PROD":
+            self.logger.bind(event="gigachat_request_v2").debug(
+                "Sending v2 request to GigaChat API (payload omitted in PROD)"
+            )
+        else:
+            msg_count = len(chat_request.messages)
+            has_tools = bool(chat_request.tools)
+            self.logger.bind(
+                event="gigachat_request_v2",
+                message_count=msg_count,
+                has_tools=has_tools,
+            ).debug(
+                f"Sending v2 request to GigaChat API: "
+                f"{msg_count} messages, tools={has_tools}"
+            )
+
+        return chat_request
+
+    def _build_v2_messages(self, messages: List[Dict]) -> List[ChatMessage]:
+        return [
+            ChatMessage.model_validate(self._build_v2_message_payload(message))
+            for message in messages
+        ]
+
+    def _build_v2_message_payload(self, message: Dict) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {"role": str(message.get("role", "user"))}
+        content_parts: list[dict[str, Any]] = []
+
+        function_call = message.get("function_call")
+        if isinstance(function_call, dict):
+            name = function_call.get("name")
+            if name:
+                payload["function_call"] = {
+                    "name": map_tool_name_to_gigachat(name),
+                    "arguments": function_call.get("arguments", {}),
+                }
+
+        if payload["role"] == "function":
+            function_name = message.get("name")
+            if function_name:
+                content_parts.append(
+                    {
+                        "function_result": {
+                            "name": map_tool_name_to_gigachat(function_name),
+                            "result": self._parse_function_result(
+                                message.get("content")
+                            ),
+                        }
+                    }
+                )
+        else:
+            content = message.get("content")
+            if content is None:
+                content = ""
+            content_parts.append({"text": str(content)})
+
+        attachments = message.get("attachments")
+        if isinstance(attachments, list) and attachments:
+            content_parts.append(
+                {
+                    "files": [
+                        {"id": attachment}
+                        for attachment in attachments
+                        if isinstance(attachment, str) and attachment
+                    ]
+                }
+            )
+
+        if content_parts:
+            payload["content"] = content_parts
+
+        for field_name in ("message_id", "tools_state_id", "inline_data"):
+            if field_name in message:
+                payload[field_name] = message[field_name]
+
+        return payload
+
+    @staticmethod
+    def _parse_function_result(content: Any) -> Any:
+        if isinstance(content, str):
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                return content
+        return content
+
+    def _build_v2_request_payload(
+        self, transformed_data: Dict[str, Any], messages: List[ChatMessage]
+    ) -> Dict[str, Any]:
+        request_payload: Dict[str, Any] = {"messages": messages}
+        model_options: Dict[str, Any] = {}
+
+        for field_name in ("model", "stream"):
+            if field_name in transformed_data:
+                request_payload[field_name] = transformed_data[field_name]
+
+        for field_name in ("temperature", "top_p", "max_tokens", "response_format"):
+            if field_name in transformed_data:
+                model_options[field_name] = transformed_data[field_name]
+
+        reasoning_effort = transformed_data.get("reasoning_effort")
+        if reasoning_effort is not None:
+            model_options["reasoning"] = {"effort": reasoning_effort}
+
+        tools = self._build_v2_tools(transformed_data.get("functions"))
+        if tools:
+            request_payload["tools"] = tools
+
+        tool_config = self._build_v2_tool_config(transformed_data.get("function_call"))
+        if tool_config:
+            request_payload["tool_config"] = tool_config
+
+        self._apply_v2_additional_fields(
+            transformed_data.get("additional_fields"),
+            request_payload,
+            model_options,
+        )
+
+        if model_options:
+            request_payload["model_options"] = model_options
+
+        return request_payload
+
+    def _apply_v2_additional_fields(
+        self,
+        additional_fields: Any,
+        request_payload: Dict[str, Any],
+        model_options: Dict[str, Any],
+    ) -> None:
+        if not isinstance(additional_fields, dict):
+            return
+
+        for key, value in additional_fields.items():
+            if key in self._V2_MODEL_OPTION_FIELDS:
+                model_options.setdefault(key, value)
+            elif key in self._V2_REQUEST_FIELDS:
+                request_payload.setdefault(key, value)
+            else:
+                request_payload.setdefault(key, value)
+
+    def _build_v2_tools(self, functions: Any) -> list[ChatTool]:
+        if not isinstance(functions, list) or not functions:
+            return []
+
+        specifications = []
+        for function in functions:
+            function_payload = self._dump_mapping(function)
+            if not function_payload:
+                continue
+            if "function" in function_payload:
+                function_payload = self._dump_mapping(function_payload["function"])
+
+            name = function_payload.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+
+            spec_payload = {
+                "name": map_tool_name_to_gigachat(name),
+                "parameters": function_payload.get("parameters") or {},
+            }
+            for field_name in (
+                "description",
+                "few_shot_examples",
+                "return_parameters",
+            ):
+                if field_name in function_payload:
+                    spec_payload[field_name] = function_payload[field_name]
+
+            specifications.append(
+                ChatFunctionSpecification.model_validate(spec_payload)
+            )
+
+        if not specifications:
+            return []
+
+        return [
+            ChatTool.model_validate(
+                {
+                    "functions": {
+                        "specifications": specifications,
+                    }
+                }
+            )
+        ]
+
+    @staticmethod
+    def _dump_mapping(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if hasattr(value, "model_dump"):
+            return value.model_dump(exclude_none=True)
+        return {}
+
+    def _build_v2_tool_config(self, function_call: Any) -> dict[str, str]:
+        if not isinstance(function_call, dict):
+            return {}
+
+        name = function_call.get("name")
+        if not isinstance(name, str) or not name:
+            return {}
+
+        return {
+            "mode": "function",
+            "function_name": map_tool_name_to_gigachat(name),
+        }
+
     async def prepare_chat_completion(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """Prepares request for Chat Completions API."""
         transformed_data = self.transform_chat_parameters(data)
         return await self._finalize_transformation(transformed_data, giga_client)
+
+    async def prepare_chat_completion_v2(
+        self, data: dict, giga_client: Optional[GigaChat] = None
+    ) -> ChatCompletionRequest:
+        """Prepares primary v2 request for Chat Completions API."""
+        transformed_data = self.transform_chat_parameters(data)
+        return await self._finalize_transformation_v2(transformed_data, giga_client)
 
     async def prepare_response(
         self, data: dict, giga_client: Optional[GigaChat] = None
@@ -558,6 +795,14 @@ class RequestTransformer:
         transformed_data = self.transform_responses_parameters(data)
         transformed_data["messages"] = self.transform_response_format(transformed_data)
         return await self._finalize_transformation(transformed_data, giga_client)
+
+    async def prepare_response_v2(
+        self, data: dict, giga_client: Optional[GigaChat] = None
+    ) -> ChatCompletionRequest:
+        """Prepares primary v2 request for Responses API."""
+        transformed_data = self.transform_responses_parameters(data)
+        transformed_data["messages"] = self.transform_response_format(transformed_data)
+        return await self._finalize_transformation_v2(transformed_data, giga_client)
 
     # Backward-compatible API (used by older tests / integrations)
     async def send_to_gigachat(
