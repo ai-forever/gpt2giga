@@ -105,6 +105,36 @@ def test_adapted_v2_completion_can_flow_through_response_processor():
     assert processed["usage"]["completion_tokens"] == 2
 
 
+def test_adapted_v2_function_call_unmaps_reserved_tool_name_through_processor():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "message_id": "msg_1",
+                    "function_call": {
+                        "name": "__gpt2giga_user_search_web",
+                        "arguments": {"query": "cats"},
+                    },
+                }
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+    )
+    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+
+    processor = ResponseProcessor(logger=logger)
+    processed = processor.process_response(
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+    )
+
+    tool_call = processed["choices"][0]["message"]["tool_calls"][0]
+    assert tool_call["function"]["name"] == "web_search"
+    assert tool_call["function"]["arguments"] == '{"query": "cats"}'
+
+
 def test_extract_v2_function_call_from_content_part():
     message = {
         "role": "assistant",

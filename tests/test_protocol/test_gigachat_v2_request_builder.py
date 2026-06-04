@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from gigachat.models import ChatCompletionRequest
@@ -101,6 +102,68 @@ async def test_prepare_chat_completion_v2_maps_native_structured_output_and_reas
     assert request.model_options.response_format.schema_ == {"type": "object"}
     assert request.model_options.response_format.strict is True
     assert request.tools is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_respects_pass_model_false():
+    cfg = ProxyConfig(proxy=ProxySettings(pass_model=False))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion_v2(
+        {
+            "model": "openai-model",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+    )
+
+    assert request.model is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_structured_output_function_call_fallback():
+    cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="function_call"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "return json"}],
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "Output",
+                    "schema": {"type": "object"},
+                },
+            },
+        }
+    )
+
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.name == "Output"
+    assert spec.parameters == {"type": "object", "properties": {}}
+    assert request.tool_config.mode == "function"
+    assert request.tool_config.function_name == "Output"
+    assert request.model_options is None
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_prod_logging_omits_payload():
+    mock_logger = MagicMock()
+    mock_bound_logger = MagicMock()
+    mock_logger.bind.return_value = mock_bound_logger
+    cfg = ProxyConfig(proxy=ProxySettings(mode="PROD"))
+    rt = RequestTransformer(cfg, logger=mock_logger)
+
+    await rt.prepare_chat_completion_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "secret payload"}],
+        }
+    )
+
+    mock_bound_logger.debug.assert_called_with(
+        "Sending v2 request to GigaChat API (payload omitted in PROD)"
+    )
 
 
 @pytest.mark.asyncio
