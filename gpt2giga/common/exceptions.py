@@ -10,6 +10,7 @@ from gpt2giga.common.client_params import (
     ClientCompatibilityError,
     anthropic_compatibility_response,
     openai_compatibility_error,
+    openai_error_payload,
 )
 from gpt2giga.common.model_concurrency import ModelConcurrencyTimeoutError
 from gpt2giga.logger import rquid_context
@@ -68,12 +69,14 @@ def exceptions_handler(func):
                     error_type="rate_limit_error",
                     code="model_concurrency_limit",
                 )
-            raise openai_compatibility_error(
-                str(e),
+            return JSONResponse(
                 status_code=429,
-                param="model",
-                code="model_concurrency_limit",
-                error_type="rate_limit_error",
+                content=openai_error_payload(
+                    str(e),
+                    error_type="rate_limit_error",
+                    param="model",
+                    code="model_concurrency_limit",
+                ),
             )
         except gigachat.exceptions.GigaChatException as e:
             # Log the exception with context

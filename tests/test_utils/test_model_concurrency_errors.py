@@ -1,7 +1,6 @@
 import json
 
 import pytest
-from fastapi import HTTPException
 
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.model_concurrency import ModelConcurrencyTimeoutError
@@ -14,11 +13,10 @@ async def test_exceptions_handler_renders_openai_model_concurrency_timeout() -> 
     async def boom():
         raise ModelConcurrencyTimeoutError("GigaChat-Max", 5)
 
-    with pytest.raises(HTTPException) as exc_info:
-        await boom()
+    response = await boom()
 
-    assert exc_info.value.status_code == 429
-    assert exc_info.value.detail == {
+    assert response.status_code == 429
+    assert json.loads(response.body) == {
         "error": {
             "message": "Concurrency limit reached for model GigaChat-Max: 5",
             "type": "rate_limit_error",

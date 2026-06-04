@@ -11,10 +11,15 @@ from gigachat import GigaChat
 from gigachat.models import Chat
 from starlette.requests import Request
 
-from gpt2giga.app_state import get_gigachat_client
+from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.gigachat_options import (
     GigaRequestOptions,
     gigachat_request_options,
+)
+from gpt2giga.common.model_concurrency import (
+    ModelConcurrencyLimiter,
+    ModelConcurrencyTimeoutError,
+    resolve_gigachat_model,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.tools import map_tool_name_from_gigachat
@@ -33,6 +38,9 @@ async def stream_chat_completion_generator(
     response_id: str,
     giga_client: Optional[GigaChat] = None,
     request_options: Optional[GigaRequestOptions] = None,
+    *,
+    model_limiter: Optional[ModelConcurrencyLimiter] = None,
+    effective_model: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     logger = None
     rquid = rquid_context.get()
@@ -40,47 +48,70 @@ async def stream_chat_completion_generator(
     try:
         if giga_client is None:
             giga_client = get_gigachat_client(request)
+        if model_limiter is None:
+            model_limiter = get_model_concurrency_limiter(request)
+        if effective_model is None:
+            effective_model = resolve_gigachat_model(
+                chat_messages, getattr(request.app.state, "config", None)
+            )
         logger = getattr(request.app.state, "logger", None)
 
-        async with gigachat_request_options(giga_client, request_options):
-            async for chunk in giga_client.astream(chat_messages):
-                if await request.is_disconnected():
-                    if logger:
-                        logger.info(f"[{rquid}] Client disconnected during streaming")
-                    break
-                processed = request.app.state.response_processor.process_stream_chunk(
-                    chunk, model, response_id
-                )
-                yield f"data: {json.dumps(processed)}\n\n"
+        async with model_limiter.limit(effective_model, provider="openai"):
+            async with gigachat_request_options(giga_client, request_options):
+                async for chunk in giga_client.astream(chat_messages):
+                    if await request.is_disconnected():
+                        if logger:
+                            logger.info(
+                                f"[{rquid}] Client disconnected during streaming"
+                            )
+                        break
+                    processed = (
+                        request.app.state.response_processor.process_stream_chunk(
+                            chunk, model, response_id
+                        )
+                    )
+                    yield f"data: {json.dumps(processed)}\n\n"
 
-        response_processor = request.app.state.response_processor
-        flush_stream_reasoning = getattr(
-            response_processor, "flush_stream_reasoning", None
-        )
-        if flush_stream_reasoning:
-            flushed_reasoning = flush_stream_reasoning(response_id, family="chat")
-            if flushed_reasoning.content or flushed_reasoning.reasoning_content:
-                delta = {"content": flushed_reasoning.content}
-                if flushed_reasoning.reasoning_content:
-                    delta["reasoning_content"] = flushed_reasoning.reasoning_content
-                processed = {
-                    "id": f"chatcmpl-{response_id}",
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": delta,
-                            "finish_reason": None,
-                            "logprobs": None,
-                        }
-                    ],
-                    "usage": None,
-                    "system_fingerprint": f"fp_{response_id}",
-                }
-                yield f"data: {json.dumps(processed)}\n\n"
+            response_processor = request.app.state.response_processor
+            flush_stream_reasoning = getattr(
+                response_processor, "flush_stream_reasoning", None
+            )
+            if flush_stream_reasoning:
+                flushed_reasoning = flush_stream_reasoning(response_id, family="chat")
+                if flushed_reasoning.content or flushed_reasoning.reasoning_content:
+                    delta = {"content": flushed_reasoning.content}
+                    if flushed_reasoning.reasoning_content:
+                        delta["reasoning_content"] = flushed_reasoning.reasoning_content
+                    processed = {
+                        "id": f"chatcmpl-{response_id}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": delta,
+                                "finish_reason": None,
+                                "logprobs": None,
+                            }
+                        ],
+                        "usage": None,
+                        "system_fingerprint": f"fp_{response_id}",
+                    }
+                    yield f"data: {json.dumps(processed)}\n\n"
 
+            yield "data: [DONE]\n\n"
+
+    except ModelConcurrencyTimeoutError as e:
+        error_response = {
+            "error": {
+                "message": str(e),
+                "type": "rate_limit_error",
+                "param": "model",
+                "code": "model_concurrency_limit",
+            }
+        }
+        yield f"data: {json.dumps(error_response)}\n\n"
         yield "data: [DONE]\n\n"
 
     except gigachat.exceptions.GigaChatException as e:
@@ -129,6 +160,9 @@ async def stream_chat_completion_v2_generator(
     response_id: str,
     giga_client: Optional[GigaChat] = None,
     request_options: Optional[GigaRequestOptions] = None,
+    *,
+    model_limiter: Optional[ModelConcurrencyLimiter] = None,
+    effective_model: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     logger = None
     rquid = rquid_context.get()
@@ -136,50 +170,73 @@ async def stream_chat_completion_v2_generator(
     try:
         if giga_client is None:
             giga_client = get_gigachat_client(request)
+        if model_limiter is None:
+            model_limiter = get_model_concurrency_limiter(request)
+        if effective_model is None:
+            effective_model = resolve_gigachat_model(
+                chat_request, getattr(request.app.state, "config", None)
+            )
         logger = getattr(request.app.state, "logger", None)
 
-        async with gigachat_request_options(giga_client, request_options):
-            async for chunk in giga_client.achat.stream(chat_request):
-                if await request.is_disconnected():
-                    if logger:
-                        logger.info(f"[{rquid}] Client disconnected during streaming")
-                    break
-                adapted = adapt_v2_chunk_to_v1_shape(chunk, default_model=model)
-                processed = request.app.state.response_processor.process_stream_chunk(
-                    SimpleNamespace(model_dump=lambda: adapted),
-                    model,
-                    response_id,
-                )
-                yield f"data: {json.dumps(processed)}\n\n"
+        async with model_limiter.limit(effective_model, provider="openai"):
+            async with gigachat_request_options(giga_client, request_options):
+                async for chunk in giga_client.achat.stream(chat_request):
+                    if await request.is_disconnected():
+                        if logger:
+                            logger.info(
+                                f"[{rquid}] Client disconnected during streaming"
+                            )
+                        break
+                    adapted = adapt_v2_chunk_to_v1_shape(chunk, default_model=model)
+                    processed = (
+                        request.app.state.response_processor.process_stream_chunk(
+                            SimpleNamespace(model_dump=lambda: adapted),
+                            model,
+                            response_id,
+                        )
+                    )
+                    yield f"data: {json.dumps(processed)}\n\n"
 
-        response_processor = request.app.state.response_processor
-        flush_stream_reasoning = getattr(
-            response_processor, "flush_stream_reasoning", None
-        )
-        if flush_stream_reasoning:
-            flushed_reasoning = flush_stream_reasoning(response_id, family="chat")
-            if flushed_reasoning.content or flushed_reasoning.reasoning_content:
-                delta = {"content": flushed_reasoning.content}
-                if flushed_reasoning.reasoning_content:
-                    delta["reasoning_content"] = flushed_reasoning.reasoning_content
-                processed = {
-                    "id": f"chatcmpl-{response_id}",
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": delta,
-                            "finish_reason": None,
-                            "logprobs": None,
-                        }
-                    ],
-                    "usage": None,
-                    "system_fingerprint": f"fp_{response_id}",
-                }
-                yield f"data: {json.dumps(processed)}\n\n"
+            response_processor = request.app.state.response_processor
+            flush_stream_reasoning = getattr(
+                response_processor, "flush_stream_reasoning", None
+            )
+            if flush_stream_reasoning:
+                flushed_reasoning = flush_stream_reasoning(response_id, family="chat")
+                if flushed_reasoning.content or flushed_reasoning.reasoning_content:
+                    delta = {"content": flushed_reasoning.content}
+                    if flushed_reasoning.reasoning_content:
+                        delta["reasoning_content"] = flushed_reasoning.reasoning_content
+                    processed = {
+                        "id": f"chatcmpl-{response_id}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": delta,
+                                "finish_reason": None,
+                                "logprobs": None,
+                            }
+                        ],
+                        "usage": None,
+                        "system_fingerprint": f"fp_{response_id}",
+                    }
+                    yield f"data: {json.dumps(processed)}\n\n"
 
+            yield "data: [DONE]\n\n"
+
+    except ModelConcurrencyTimeoutError as e:
+        error_response = {
+            "error": {
+                "message": str(e),
+                "type": "rate_limit_error",
+                "param": "model",
+                "code": "model_concurrency_limit",
+            }
+        }
+        yield f"data: {json.dumps(error_response)}\n\n"
         yield "data: [DONE]\n\n"
 
     except gigachat.exceptions.GigaChatException as e:

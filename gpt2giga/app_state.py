@@ -14,7 +14,10 @@ def get_gigachat_client(request: Request):
 
 def get_model_concurrency_limiter(request: Request) -> ModelConcurrencyLimiter:
     """Return the application-scoped per-model concurrency limiter."""
-    return request.app.state.model_concurrency_limiter
+    app_state = request.app.state
+    if not hasattr(app_state, "model_concurrency_limiter"):
+        app_state.model_concurrency_limiter = ModelConcurrencyLimiter({})
+    return app_state.model_concurrency_limiter
 
 
 def get_batch_store(request: Request) -> dict:
