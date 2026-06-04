@@ -3,6 +3,7 @@
 from typing import Any, Mapping
 
 from gpt2giga.common.client_params import ClientCompatibilityError, ClientParamStatus
+from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 
 OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS = frozenset(
     {
@@ -103,13 +104,15 @@ def sanitize_openai_chat_parameters(data: Mapping[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
-def sanitize_openai_responses_parameters(data: Mapping[str, Any]) -> dict[str, Any]:
+def sanitize_openai_responses_parameters(
+    data: Mapping[str, Any], *, allow_builtin_tools: bool = False
+) -> dict[str, Any]:
     """Return a sanitized Responses API payload or raise compatibility errors."""
     sanitized = dict(data)
     _sanitize_openai_payload(sanitized, OPENAI_RESPONSES_SUPPORTED_PARAMS)
     _normalize_gigachat_extra_fields(sanitized)
-    _apply_tool_choice_policy(sanitized)
-    _validate_tools(sanitized.get("tools"))
+    _apply_tool_choice_policy(sanitized, allow_builtin_tools=allow_builtin_tools)
+    _validate_tools(sanitized.get("tools"), allow_builtin_tools=allow_builtin_tools)
     return sanitized
 
 
@@ -252,7 +255,9 @@ def _normalize_gigachat_extra_fields(data: dict[str, Any]) -> None:
     data["extra_body"] = {**sdk_style_fields, **dict(extra_body)}
 
 
-def _apply_tool_choice_policy(data: dict[str, Any]) -> None:
+def _apply_tool_choice_policy(
+    data: dict[str, Any], *, allow_builtin_tools: bool = False
+) -> None:
     if "tool_choice" not in data:
         return
 
@@ -279,17 +284,37 @@ def _apply_tool_choice_policy(data: dict[str, Any]) -> None:
             if tool_choice.get("name"):
                 data["function_call"] = {"name": tool_choice["name"]}
                 return
+        builtin_tool_name = (
+            normalize_gigachat_builtin_tool_type(choice_type)
+            if allow_builtin_tools
+            else None
+        )
+        if builtin_tool_name:
+            data["_gpt2giga_tool_config"] = {
+                "mode": "tool",
+                "tool_name": builtin_tool_name,
+            }
+            return
         _raise_openai_param_error(
             "tool_choice",
-            "Only `auto`, `none`, and forced function tool choices are supported.",
+            _tool_choice_error_message(allow_builtin_tools=allow_builtin_tools),
         )
     _raise_openai_param_error(
         "tool_choice",
-        "Only `auto`, `none`, and forced function tool choices are supported.",
+        _tool_choice_error_message(allow_builtin_tools=allow_builtin_tools),
     )
 
 
-def _validate_tools(tools: Any) -> None:
+def _tool_choice_error_message(*, allow_builtin_tools: bool = False) -> str:
+    if allow_builtin_tools:
+        return (
+            "Only `auto`, `none`, forced function tool choices, and supported "
+            "GigaChat built-in tool choices are supported."
+        )
+    return "Only `auto`, `none`, and forced function tool choices are supported."
+
+
+def _validate_tools(tools: Any, *, allow_builtin_tools: bool = False) -> None:
     if tools is None:
         return
     if not isinstance(tools, list):
@@ -297,10 +322,20 @@ def _validate_tools(tools: Any) -> None:
     for index, tool in enumerate(tools):
         if not isinstance(tool, Mapping):
             _raise_openai_param_error("tools", f"`tools[{index}]` must be an object.")
-        if tool.get("type") != "function":
+        tool_type = tool.get("type")
+        if tool_type != "function" and not (
+            allow_builtin_tools
+            and normalize_gigachat_builtin_tool_type(tool_type) is not None
+        ):
+            message = "Only function tools are supported."
+            if allow_builtin_tools:
+                message = (
+                    "Only function tools and supported GigaChat built-in tools "
+                    "are supported."
+                )
             _raise_openai_param_error(
                 "tools",
-                "Only function tools are supported.",
+                message,
             )
 
 

@@ -23,7 +23,10 @@ from gpt2giga.common.message_utils import (
     map_role,
     merge_consecutive_messages,
 )
-from gpt2giga.common.tools import map_tool_name_to_gigachat
+from gpt2giga.common.tools import (
+    build_gigachat_builtin_tool_payload,
+    map_tool_name_to_gigachat,
+)
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.attachment.attachments import AttachmentProcessor
@@ -379,6 +382,9 @@ class RequestTransformer:
             "function_call",
         )
 
+    def _responses_builtin_tools_enabled(self) -> bool:
+        return self.config.proxy_settings.resolve_responses_api_mode() == "v2"
+
     def transform_chat_parameters(self, data: Dict) -> Dict:
         """Transforms chat parameters (Chat Completions API)."""
         data = sanitize_openai_chat_parameters(data)
@@ -428,10 +434,24 @@ class RequestTransformer:
         transformed["max_tokens"] = max_completion_tokens
         return transformed
 
-    def transform_responses_parameters(self, data: Dict) -> Dict:
+    def transform_responses_parameters(
+        self, data: Dict, *, allow_builtin_tools: Optional[bool] = None
+    ) -> Dict:
         """Transforms responses parameters (Responses API)."""
-        data = sanitize_openai_responses_parameters(data)
+        builtin_tools_enabled = (
+            self._responses_builtin_tools_enabled()
+            if allow_builtin_tools is None
+            else allow_builtin_tools
+        )
+        data = sanitize_openai_responses_parameters(
+            data,
+            allow_builtin_tools=builtin_tools_enabled,
+        )
         transformed = self._transform_common_parameters(data)
+        if builtin_tools_enabled:
+            builtin_tools = self._build_v2_builtin_tool_payloads(data.get("tools"))
+            if builtin_tools:
+                transformed["_gpt2giga_builtin_tools"] = builtin_tools
 
         response_format_responses: dict | None = transformed.pop("text", None)
         if response_format_responses:
@@ -573,6 +593,8 @@ class RequestTransformer:
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """Common logic for message transformation and logging."""
+        transformed_data.pop("_gpt2giga_builtin_tools", None)
+        transformed_data.pop("_gpt2giga_tool_config", None)
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
@@ -728,11 +750,17 @@ class RequestTransformer:
         if reasoning_effort is not None:
             model_options["reasoning"] = {"effort": reasoning_effort}
 
-        tools = self._build_v2_tools(transformed_data.get("functions"))
+        tools = self._build_v2_tools(
+            transformed_data.get("functions"),
+            transformed_data.get("_gpt2giga_builtin_tools"),
+        )
         if tools:
             request_payload["tools"] = tools
 
-        tool_config = self._build_v2_tool_config(transformed_data.get("function_call"))
+        tool_config = self._build_v2_tool_config(
+            transformed_data.get("function_call"),
+            transformed_data.get("_gpt2giga_tool_config"),
+        )
         if tool_config:
             request_payload["tool_config"] = tool_config
 
@@ -765,9 +793,42 @@ class RequestTransformer:
             else:
                 request_payload.setdefault(key, value)
 
-    def _build_v2_tools(self, functions: Any) -> list[ChatTool]:
-        if not isinstance(functions, list) or not functions:
+    def _build_v2_builtin_tool_payloads(self, tools: Any) -> list[dict[str, Any]]:
+        if not isinstance(tools, list) or not tools:
             return []
+
+        builtin_tools: list[dict[str, Any]] = []
+        seen_fields: set[str] = set()
+        for tool in tools:
+            tool_payload = self._dump_mapping(tool)
+            if not tool_payload:
+                continue
+
+            builtin_payload = build_gigachat_builtin_tool_payload(tool_payload)
+            if not builtin_payload:
+                continue
+
+            field_name = next(iter(builtin_payload))
+            if field_name in seen_fields:
+                continue
+            seen_fields.add(field_name)
+            builtin_tools.append(builtin_payload)
+
+        return builtin_tools
+
+    def _build_v2_tools(
+        self, functions: Any, builtin_tools: Any = None
+    ) -> list[ChatTool]:
+        tools: list[ChatTool] = []
+        if isinstance(builtin_tools, list):
+            for tool in builtin_tools:
+                if isinstance(tool, ChatTool):
+                    tools.append(tool)
+                elif isinstance(tool, dict):
+                    tools.append(ChatTool.model_validate(tool))
+
+        if not isinstance(functions, list) or not functions:
+            return tools
 
         specifications = []
         seen_names: set[str] = set()
@@ -803,9 +864,9 @@ class RequestTransformer:
             )
 
         if not specifications:
-            return []
+            return tools
 
-        return [
+        tools.append(
             ChatTool.model_validate(
                 {
                     "functions": {
@@ -813,7 +874,8 @@ class RequestTransformer:
                     }
                 }
             )
-        ]
+        )
+        return tools
 
     @staticmethod
     def _dump_mapping(value: Any) -> Dict[str, Any]:
@@ -823,13 +885,15 @@ class RequestTransformer:
             return value.model_dump(exclude_none=True, by_alias=True)
         return {}
 
-    def _build_v2_tool_config(self, function_call: Any) -> dict[str, str]:
+    def _build_v2_tool_config(
+        self, function_call: Any, builtin_tool_config: Any = None
+    ) -> dict[str, str]:
         if not isinstance(function_call, dict):
-            return {}
+            return builtin_tool_config if isinstance(builtin_tool_config, dict) else {}
 
         name = function_call.get("name")
         if not isinstance(name, str) or not name:
-            return {}
+            return builtin_tool_config if isinstance(builtin_tool_config, dict) else {}
 
         return {
             "mode": "function",
@@ -854,7 +918,9 @@ class RequestTransformer:
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """Prepares request for Responses API."""
-        transformed_data = self.transform_responses_parameters(data)
+        transformed_data = self.transform_responses_parameters(
+            data, allow_builtin_tools=False
+        )
         transformed_data["messages"] = self.transform_response_format(transformed_data)
         return await self._finalize_transformation(transformed_data, giga_client)
 
@@ -862,7 +928,9 @@ class RequestTransformer:
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> ChatCompletionRequest:
         """Prepares primary v2 request for Responses API."""
-        transformed_data = self.transform_responses_parameters(data)
+        transformed_data = self.transform_responses_parameters(
+            data, allow_builtin_tools=True
+        )
         transformed_data["messages"] = self.transform_response_format(transformed_data)
         return await self._finalize_transformation_v2(transformed_data, giga_client)
 

@@ -417,7 +417,12 @@ def responses_openapi_extra() -> Dict[str, Any]:
             },
             "tools": {
                 "type": "array",
-                "description": "OpenAI tools format (type=function).",
+                "description": (
+                    "OpenAI function tools, plus GigaChat v2 built-in tools for "
+                    "Responses (`web_search*`, `code_interpreter`, "
+                    "`image_generation` / `image_generate`, "
+                    "`url_content_extraction`, `model_3d_generate`)."
+                ),
                 "items": {"type": "object", "additionalProperties": True},
             },
             "tool_choice": {
@@ -481,6 +486,20 @@ def responses_openapi_extra() -> Dict[str, Any]:
                 "model": "GigaChat-2-Max",
                 "input": "What is the capital of France?",
                 "reasoning": {"effort": "high"},
+            },
+        },
+        "gigachat_builtin_tools": {
+            "summary": "GigaChat v2 built-in tools",
+            "value": {
+                "model": "GigaChat-2-Max",
+                "input": "Search the web and summarize the result.",
+                "tools": [
+                    {
+                        "type": "web_search_preview",
+                        "indexes": ["web"],
+                    }
+                ],
+                "tool_choice": {"type": "web_search_preview"},
             },
         },
     }

@@ -291,6 +291,55 @@ async def test_prepare_response_v2_replays_function_call_with_tools_state_id():
 
 
 @pytest.mark.asyncio
+async def test_prepare_response_v2_maps_responses_builtin_tools():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "Find current sources and then calculate a summary.",
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                },
+                {
+                    "type": "code_interpreter",
+                    "container": {"type": "auto"},
+                },
+                {
+                    "type": "image_generation",
+                    "size": "1024x1024",
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "save_result",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"value": {"type": "string"}},
+                        },
+                    },
+                },
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert request.tools[0].web_search.indexes == ["web"]
+    assert request.tools[0].web_search.flags == ["trusted"]
+    assert request.tools[1].code_interpreter == {"container": {"type": "auto"}}
+    assert request.tools[2].image_generate == {"size": "1024x1024"}
+    spec = request.tools[3].functions.specifications[0]
+    assert spec.name == "save_result"
+    assert spec.parameters["properties"]["value"]["type"] == "string"
+    assert request.tool_config.mode == "tool"
+    assert request.tool_config.tool_name == "web_search"
+
+
+@pytest.mark.asyncio
 async def test_prepare_chat_completion_v2_maps_additional_fields():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

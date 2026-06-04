@@ -123,6 +123,56 @@ def test_transform_responses_parameters_accepts_flat_forced_function_tool_choice
     assert out["function_call"] == {"name": "lookup"}
 
 
+def test_transform_responses_parameters_rejects_builtin_tools_in_v1_mode():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        rt.transform_responses_parameters(
+            {
+                "model": "gpt-x",
+                "input": "search",
+                "tools": [{"type": "web_search"}],
+            }
+        )
+
+    assert exc_info.value.param == "tools"
+    assert "Only function tools" in exc_info.value.message
+
+
+def test_transform_responses_parameters_accepts_builtin_tools_in_v2_mode():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "search",
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                },
+                {
+                    "type": "image_generation",
+                    "size": "1024x1024",
+                },
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert out["_gpt2giga_builtin_tools"] == [
+        {"web_search": {"indexes": ["web"], "flags": ["trusted"]}},
+        {"image_generate": {"size": "1024x1024"}},
+    ]
+    assert out["_gpt2giga_tool_config"] == {
+        "mode": "tool",
+        "tool_name": "web_search",
+    }
+
+
 def test_transform_common_parameters_merges_extra_body_with_additional_fields():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
