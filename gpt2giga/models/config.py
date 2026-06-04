@@ -11,6 +11,7 @@ from gpt2giga.constants import (
     DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES,
     DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES,
     DEFAULT_MAX_TEXT_FILE_SIZE_BYTES,
+    DEFAULT_MAX_TOKENS,
 )
 from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
 
@@ -57,6 +58,13 @@ class ProxySettings(BaseSettings):
         description=(
             "Включить reasoning по умолчанию: добавляет reasoning_effort='high' "
             "в payload к GigaChat, если клиент не указал reasoning_effort явно"
+        ),
+    )
+    default_max_tokens: int = Field(
+        default=DEFAULT_MAX_TOKENS,
+        description=(
+            "Значение max_tokens по умолчанию, отправляемое в GigaChat API, "
+            "если клиент не указал max_tokens, max_completion_tokens или max_output_tokens"
         ),
     )
     structured_output_mode: Literal["function_call", "native"] = Field(
