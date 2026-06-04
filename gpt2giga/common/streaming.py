@@ -2,7 +2,8 @@ import asyncio
 import json
 import time
 import traceback
-from typing import AsyncGenerator, Optional
+from types import SimpleNamespace
+from typing import Any, AsyncGenerator, Optional
 
 import gigachat
 from aioitertools import enumerate as aio_enumerate
@@ -18,6 +19,7 @@ from gpt2giga.common.gigachat_options import (
 from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
+from gpt2giga.protocol.response import adapt_v2_chunk_to_v1_shape
 
 
 async def stream_chat_completion_generator(
@@ -96,6 +98,104 @@ async def stream_chat_completion_generator(
 
     except asyncio.CancelledError:
         # Preserve cooperative cancellation for graceful server shutdown.
+        raise
+
+    except Exception as e:
+        error_type = type(e).__name__
+        tb = traceback.format_exc()
+        if logger:
+            logger.error(
+                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
+            )
+        error_response = {
+            "error": {
+                "message": "Stream interrupted",
+                "type": error_type,
+                "code": "internal_error",
+            }
+        }
+        yield f"data: {json.dumps(error_response)}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+async def stream_chat_completion_v2_generator(
+    request: Request,
+    model: str,
+    chat_request: Any,
+    response_id: str,
+    giga_client: Optional[GigaChat] = None,
+    request_options: Optional[GigaRequestOptions] = None,
+) -> AsyncGenerator[str, None]:
+    logger = None
+    rquid = rquid_context.get()
+
+    try:
+        if giga_client is None:
+            giga_client = get_gigachat_client(request)
+        logger = getattr(request.app.state, "logger", None)
+
+        async with gigachat_request_options(giga_client, request_options):
+            async for chunk in giga_client.achat.stream(chat_request):
+                if await request.is_disconnected():
+                    if logger:
+                        logger.info(f"[{rquid}] Client disconnected during streaming")
+                    break
+                adapted = adapt_v2_chunk_to_v1_shape(chunk, default_model=model)
+                processed = request.app.state.response_processor.process_stream_chunk(
+                    SimpleNamespace(model_dump=lambda: adapted),
+                    model,
+                    response_id,
+                )
+                yield f"data: {json.dumps(processed)}\n\n"
+
+        response_processor = request.app.state.response_processor
+        flush_stream_reasoning = getattr(
+            response_processor, "flush_stream_reasoning", None
+        )
+        if flush_stream_reasoning:
+            flushed_reasoning = flush_stream_reasoning(response_id, family="chat")
+            if flushed_reasoning.content or flushed_reasoning.reasoning_content:
+                delta = {"content": flushed_reasoning.content}
+                if flushed_reasoning.reasoning_content:
+                    delta["reasoning_content"] = flushed_reasoning.reasoning_content
+                processed = {
+                    "id": f"chatcmpl-{response_id}",
+                    "object": "chat.completion.chunk",
+                    "created": int(time.time()),
+                    "model": model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": delta,
+                            "finish_reason": None,
+                            "logprobs": None,
+                        }
+                    ],
+                    "usage": None,
+                    "system_fingerprint": f"fp_{response_id}",
+                }
+                yield f"data: {json.dumps(processed)}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+    except gigachat.exceptions.GigaChatException as e:
+        error_type = type(e).__name__
+        error_message = str(e)
+        if logger:
+            logger.error(
+                f"[{rquid}] GigaChat streaming error: {error_type}: {error_message}"
+            )
+        error_response = {
+            "error": {
+                "message": error_message,
+                "type": error_type,
+                "code": "stream_error",
+            }
+        }
+        yield f"data: {json.dumps(error_response)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    except asyncio.CancelledError:
         raise
 
     except Exception as e:

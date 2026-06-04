@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from gigachat.models.chat_completions import ChatCompletionChunk
 from gigachat.models.chat_completions import ChatCompletionResponse
 from loguru import logger
 
@@ -20,6 +21,7 @@ class FakeAChatResource:
     def __init__(self):
         self.v1_calls = []
         self.v2_calls = []
+        self.stream_calls = []
 
     async def __call__(self, payload):
         self.v1_calls.append(payload)
@@ -58,6 +60,23 @@ class FakeAChatResource:
                 },
             }
         )
+
+    def stream(self, payload):
+        self.stream_calls.append(payload)
+
+        async def gen():
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": [{"text": "ok-stream"}],
+                        }
+                    ]
+                }
+            )
+
+        return gen()
 
 
 class FakeGigachat:
@@ -136,3 +155,28 @@ def test_chat_completions_v2_mode_uses_primary_create():
     assert app.state.request_transformer.v2_calls
     assert app.state.gigachat_client.achat.v1_calls == []
     assert app.state.gigachat_client.achat.v2_calls == [{"contract": "v2"}]
+
+
+def test_chat_completions_v2_stream_uses_primary_stream():
+    app = make_app("v2")
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "ok-stream" in body
+    assert "data: [DONE]" in body
+    assert not app.state.request_transformer.v1_calls
+    assert app.state.request_transformer.v2_calls
+    assert app.state.gigachat_client.achat.v1_calls == []
+    assert app.state.gigachat_client.achat.v2_calls == []
+    assert app.state.gigachat_client.achat.stream_calls == [{"contract": "v2"}]

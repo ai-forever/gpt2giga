@@ -4,9 +4,11 @@ from unittest.mock import MagicMock
 
 import gigachat.exceptions
 import pytest
+from gigachat.models.chat_completions import ChatCompletionChunk
 
 from gpt2giga.common.streaming import (
     stream_chat_completion_generator,
+    stream_chat_completion_v2_generator,
     stream_responses_generator,
 )
 
@@ -92,6 +94,26 @@ class FakeClientGigaChatError:
         return gen()
 
 
+class FakeAChatStreamResource:
+    def __init__(self, chunks=None, error=None):
+        self.chunks = chunks or []
+        self.error = error
+
+    def stream(self, chat_request):
+        async def gen():
+            if self.error:
+                raise self.error
+            for chunk in self.chunks:
+                yield chunk
+
+        return gen()
+
+
+class FakeClientV2Stream:
+    def __init__(self, chunks=None, error=None):
+        self.achat = FakeAChatStreamResource(chunks=chunks, error=error)
+
+
 class FakeClientCancelled:
     def astream(self, chat):
         async def gen():
@@ -157,6 +179,78 @@ async def test_stream_chat_completion_generator_gigachat_exception():
         lines.append(line)
     assert len(lines) == 2
     # Проверяем, что ошибка содержит тип и код
+    assert "GigaChatException" in lines[0]
+    assert "stream_error" in lines[0]
+    assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_text_chunks():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "A"}]}]}
+        ),
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "B"}]}]}
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    assert len(lines) == 3
+    assert '"content": "A"' in lines[0]
+    assert '"content": "B"' in lines[1]
+    assert lines[2].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_usage_only_chunk():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 2,
+                    "total_tokens": 3,
+                }
+            }
+        )
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    assert len(lines) == 2
+    assert '"content": ""' in lines[0]
+    assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_gigachat_exception():
+    logger = MagicMock()
+    req = FakeRequest(
+        FakeClientV2Stream(
+            error=gigachat.exceptions.GigaChatException("GigaChat API error occurred")
+        ),
+        logger=logger,
+    )
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    assert len(lines) == 2
     assert "GigaChatException" in lines[0]
     assert "stream_error" in lines[0]
     assert lines[1].strip() == "data: [DONE]"
