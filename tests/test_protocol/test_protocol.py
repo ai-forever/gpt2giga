@@ -326,6 +326,66 @@ def test_response_processor_preserves_backend_state_as_tool_call_id():
     ]
 
 
+def test_response_processor_chat_metadata_includes_input_tool_calls():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Aquarius: stars are aligned.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="1",
+        request_data={
+            "messages": [
+                {"role": "user", "content": "What is my horoscope?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "019e97ee-44ad-711e-bee2-9bd35832e31f",
+                            "type": "function",
+                            "function": {
+                                "name": "get_horoscope",
+                                "arguments": '{"sign":"Aquarius"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "019e97ee-44ad-711e-bee2-9bd35832e31f",
+                    "content": '{"horoscope":"Aquarius: stars are aligned."}',
+                },
+            ]
+        },
+    )
+
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 1,
+            "name": "get_horoscope",
+            "arguments": {"sign": "Aquarius"},
+            "tool_call_index": 0,
+            "role": "assistant",
+            "call_id": "019e97ee-44ad-711e-bee2-9bd35832e31f",
+            "tools_state_id": "019e97ee-44ad-711e-bee2-9bd35832e31f",
+        }
+    ]
+
+
 def test_response_processor_stream_chunk_handles_delta():
     rp = ResponseProcessor(logger)
     giga_resp = MockResponse(

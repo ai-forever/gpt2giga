@@ -92,7 +92,18 @@ class ResponseProcessor:
         if is_structured_output:
             provider_metadata.pop("gigachat_called_tools", None)
         else:
-            response_metadata.update(self._extract_called_tools_metadata(giga_dict))
+            called_tools = self._extract_chat_messages_called_tool_items(
+                request_data or {}
+            )
+            called_tools.extend(
+                self._extract_called_tool_items_from_metadata(
+                    provider_metadata.pop("gigachat_called_tools", None)
+                )
+            )
+            called_tools.extend(
+                self._extract_called_tool_items_from_response(giga_dict)
+            )
+            response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
@@ -1021,6 +1032,90 @@ class ResponseProcessor:
                 item["status"] = status
             called_tools.append(item)
         return called_tools
+
+    @classmethod
+    def _extract_chat_messages_called_tool_items(
+        cls,
+        request_data: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        messages = request_data.get("messages")
+        if not isinstance(messages, list):
+            return []
+
+        called_tools: list[dict[str, Any]] = []
+        for message_index, raw_message in enumerate(messages):
+            if not isinstance(raw_message, Mapping):
+                continue
+
+            tool_calls = raw_message.get("tool_calls")
+            if isinstance(tool_calls, list):
+                for tool_call_index, raw_tool_call in enumerate(tool_calls):
+                    if not isinstance(raw_tool_call, Mapping):
+                        continue
+                    function = raw_tool_call.get("function")
+                    if not isinstance(function, Mapping):
+                        continue
+                    item = cls._chat_tool_call_item(
+                        function,
+                        raw_message,
+                        raw_tool_call,
+                        call_index=len(called_tools),
+                        message_index=message_index,
+                        tool_call_index=tool_call_index,
+                    )
+                    if item:
+                        called_tools.append(item)
+
+            function_call = raw_message.get("function_call")
+            if isinstance(function_call, Mapping):
+                item = cls._chat_tool_call_item(
+                    function_call,
+                    raw_message,
+                    raw_message,
+                    call_index=len(called_tools),
+                    message_index=message_index,
+                )
+                if item:
+                    called_tools.append(item)
+
+        return called_tools
+
+    @classmethod
+    def _chat_tool_call_item(
+        cls,
+        function: Mapping[str, Any],
+        message: Mapping[str, Any],
+        tool_call: Mapping[str, Any],
+        *,
+        call_index: int,
+        message_index: int,
+        tool_call_index: Optional[int] = None,
+    ) -> Optional[dict[str, Any]]:
+        name = function.get("name")
+        if not isinstance(name, str) or not name:
+            return None
+
+        item: dict[str, Any] = {
+            "index": call_index,
+            "message_index": message_index,
+            "name": map_tool_name_from_gigachat(name),
+            "arguments": cls._normalize_called_tool_arguments(
+                function.get("arguments", {})
+            ),
+        }
+        if tool_call_index is not None:
+            item["tool_call_index"] = tool_call_index
+        role = message.get("role")
+        if isinstance(role, str) and role:
+            item["role"] = role
+        call_id = cls._normalize_metadata_string(tool_call.get("id"))
+        if call_id:
+            item["call_id"] = call_id
+            item["tools_state_id"] = call_id
+        state_id = cls._raw_backend_state_id_from_message(message)
+        if state_id:
+            item["tools_state_id"] = state_id
+        return item
 
     @classmethod
     def _extract_called_tool_items_from_metadata(
