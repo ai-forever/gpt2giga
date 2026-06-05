@@ -378,7 +378,7 @@ class ResponseProcessor:
             else:
                 items.append(
                     {
-                        "id": f"ig_{response_id}",
+                        "id": f"ig_{response_id}_0",
                         "type": "image_generation_call",
                         "status": ResponseProcessor._tool_status(
                             message, "image_generate", default="in_progress"

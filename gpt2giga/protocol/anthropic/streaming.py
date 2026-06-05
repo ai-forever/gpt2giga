@@ -3,6 +3,7 @@
 import json
 import traceback
 import uuid
+from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Dict, Optional
 
 import gigachat
@@ -22,6 +23,7 @@ from gpt2giga.common.model_concurrency import (
 from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
+from gpt2giga.protocol.response import adapt_v2_chunk_to_v1_shape
 
 
 async def _stream_anthropic_generator(
@@ -29,7 +31,7 @@ async def _stream_anthropic_generator(
     model: str,
     chat_messages: Dict[str, Any],
     response_id: str,
-    giga_client: GigaChat,
+    giga_client: Any,
     *,
     is_structured_output: bool = False,
     request_options: Optional[GigaRequestOptions] = None,
@@ -376,3 +378,58 @@ async def _stream_anthropic_generator(
                 },
             },
         )
+
+
+class _V2AnthropicStreamClient:
+    def __init__(
+        self,
+        giga_client: GigaChat,
+        model: str,
+        request_options: Optional[GigaRequestOptions],
+    ):
+        self._giga_client = giga_client
+        self._model = model
+        self._request_options = request_options
+
+    def astream(self, chat_request: Any):
+        async def gen():
+            async with gigachat_request_options(
+                self._giga_client,
+                self._request_options,
+            ):
+                async for chunk in self._giga_client.achat.stream(chat_request):
+                    adapted = adapt_v2_chunk_to_v1_shape(
+                        chunk,
+                        default_model=self._model,
+                    )
+                    yield SimpleNamespace(model_dump=lambda adapted=adapted: adapted)
+
+        return gen()
+
+
+async def _stream_anthropic_v2_generator(
+    request: Request,
+    model: str,
+    chat_request: Any,
+    response_id: str,
+    giga_client: GigaChat,
+    *,
+    is_structured_output: bool = False,
+    request_options: Optional[GigaRequestOptions] = None,
+    model_limiter: Optional[ModelConcurrencyLimiter] = None,
+    effective_model: Optional[str] = None,
+) -> AsyncGenerator[str, None]:
+    """SSE generator for Anthropic Messages backed by GigaChat v2 streaming."""
+    adapter_client = _V2AnthropicStreamClient(giga_client, model, request_options)
+    async for event in _stream_anthropic_generator(
+        request,
+        model,
+        chat_request,
+        response_id,
+        adapter_client,
+        is_structured_output=is_structured_output,
+        request_options=None,
+        model_limiter=model_limiter,
+        effective_model=effective_model,
+    ):
+        yield event
