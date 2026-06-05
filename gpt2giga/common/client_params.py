@@ -42,6 +42,11 @@ GIGACHAT_CONTEXT_HEADER_NAMES = frozenset(
     }
 )
 
+GIGACHAT_RESPONSE_METADATA_HEADER_KEYS = {
+    "x-request-id": "gigachat_x_request_id",
+    "x-session-id": "gigachat_x_session_id",
+}
+
 SAFE_GIGACHAT_QUERY_PARAM_NAMES = frozenset()
 
 BLOCKED_CLIENT_HEADER_NAMES = frozenset(
@@ -163,6 +168,43 @@ def filter_safe_extra_headers(raw: Any) -> dict[str, str]:
         if isinstance(value, (str, int, float, bool)):
             headers[normalized] = str(value)
     return headers
+
+
+def extract_gigachat_response_metadata(raw_headers: Any) -> dict[str, str]:
+    """Return OpenAI metadata fields from allowlisted GigaChat response headers."""
+    if not isinstance(raw_headers, Mapping):
+        return {}
+
+    normalized_headers = {
+        normalize_header_name(name): value
+        for name, value in raw_headers.items()
+        if isinstance(name, str) and value is not None
+    }
+    metadata: dict[str, str] = {}
+    for header_name, metadata_key in GIGACHAT_RESPONSE_METADATA_HEADER_KEYS.items():
+        value = normalized_headers.get(header_name)
+        if isinstance(value, (str, int, float, bool)):
+            metadata[metadata_key] = str(value)
+    return metadata
+
+
+def merge_openai_response_metadata(
+    request_metadata: Any,
+    upstream_metadata: Optional[Mapping[str, str]] = None,
+) -> Any:
+    """Merge user metadata with proxy-added OpenAI response metadata."""
+    metadata = (
+        dict(request_metadata)
+        if isinstance(request_metadata, Mapping)
+        else request_metadata
+    )
+    if not upstream_metadata:
+        return metadata
+
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata.update(upstream_metadata)
+    return metadata
 
 
 def filter_safe_query_items(

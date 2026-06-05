@@ -71,6 +71,36 @@ def test_adapt_v2_completion_preserves_thread_id():
     assert adapted["thread_id"] == "thread_1"
 
 
+def test_adapt_v2_completion_preserves_x_headers_for_response_metadata():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "x_headers": {
+                "x-request-id": "rq-v2",
+                "x-session-id": "session-v2",
+            },
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [{"text": "Hello"}],
+                }
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    processed = ResponseProcessor(logger=logger).process_response(
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+    )
+
+    assert processed["metadata"] == {
+        "gigachat_x_request_id": "rq-v2",
+        "gigachat_x_session_id": "session-v2",
+    }
+
+
 def test_adapt_v2_completion_reasoning_role_to_v1_reasoning_content():
     response = ChatCompletionResponse.model_validate(
         {

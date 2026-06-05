@@ -10,6 +10,8 @@ import anyio
 import tiktoken
 from fastapi import HTTPException
 
+from gpt2giga.common.client_params import extract_gigachat_response_metadata
+
 _VALID_ENCODING_FORMATS = {"float", "base64"}
 _EMBEDDING_SUPPORTED_PARAMS = {
     "dimensions",
@@ -137,7 +139,7 @@ def normalize_embedding_response(
         prompt_tokens = item_prompt_tokens
         total_tokens = item_prompt_tokens
 
-    return {
+    result = {
         "object": "list",
         "data": data,
         "model": _non_empty_string(body.get("model")) or _non_empty_string(model) or "",
@@ -146,6 +148,10 @@ def normalize_embedding_response(
             "total_tokens": total_tokens,
         },
     }
+    response_metadata = extract_gigachat_response_metadata(body.get("x_headers"))
+    if response_metadata:
+        result["metadata"] = response_metadata
+    return result
 
 
 def apply_embedding_encoding_format(response: Any, encoding_format: Any) -> Any:

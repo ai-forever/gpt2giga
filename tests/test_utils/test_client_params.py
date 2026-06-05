@@ -10,12 +10,14 @@ from gpt2giga.common.client_params import (
     ClientCompatibilityError,
     ClientParamStatus,
     anthropic_compatibility_response,
+    extract_gigachat_response_metadata,
     filter_safe_diagnostic_headers,
     filter_safe_extra_headers,
     filter_safe_query_items,
     is_blocked_client_header,
     is_safe_extra_header,
     is_safe_diagnostic_header,
+    merge_openai_response_metadata,
     openai_compatibility_error,
 )
 from gpt2giga.common.exceptions import exceptions_handler
@@ -91,6 +93,31 @@ def test_filter_safe_extra_headers_allows_gigachat_context_and_custom_headers():
         "x-service-id": "svc",
         "x-custom-flag": "True",
         "traceparent": "00-trace",
+    }
+
+
+def test_extract_gigachat_response_metadata_allows_only_trace_ids():
+    assert extract_gigachat_response_metadata(
+        {
+            "X-Request-ID": "rq-1",
+            "x-session-id": 123,
+            "Authorization": "Bearer secret",
+            "X-Trace-ID": "trace-1",
+            "X-Response-Debug": {"not": "scalar"},
+        }
+    ) == {
+        "gigachat_x_request_id": "rq-1",
+        "gigachat_x_session_id": "123",
+    }
+
+
+def test_merge_openai_response_metadata_preserves_user_metadata():
+    assert merge_openai_response_metadata(
+        {"user_id": "user-1"},
+        {"gigachat_x_request_id": "rq-1"},
+    ) == {
+        "user_id": "user-1",
+        "gigachat_x_request_id": "rq-1",
     }
 
 

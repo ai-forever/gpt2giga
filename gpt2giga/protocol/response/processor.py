@@ -7,6 +7,10 @@ from typing import Any, Dict, Literal, Mapping, Optional
 from gigachat.models import ChatCompletion, ChatCompletionChunk
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
+from gpt2giga.common.client_params import (
+    extract_gigachat_response_metadata,
+    merge_openai_response_metadata,
+)
 from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.reasoning import (
     ReasoningContent,
@@ -73,6 +77,9 @@ class ResponseProcessor:
     ) -> dict:
         """Обрабатывает обычный ответ от GigaChat."""
         giga_dict = giga_resp.model_dump()
+        response_metadata = extract_gigachat_response_metadata(
+            giga_dict.get("x_headers")
+        )
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
         is_structured_output = self._is_chat_structured_output_function_call(
@@ -92,6 +99,8 @@ class ResponseProcessor:
             "usage": self._build_usage(giga_dict["usage"]),
             "system_fingerprint": f"fp_{response_id}",
         }
+        if response_metadata:
+            result["metadata"] = response_metadata
 
         choice_count = len(result.get("choices", []))
         usage = result.get("usage") or {}
@@ -116,6 +125,9 @@ class ResponseProcessor:
         response_id: str,
     ) -> dict:
         giga_dict = giga_resp.model_dump()
+        response_metadata = extract_gigachat_response_metadata(
+            giga_dict.get("x_headers")
+        )
         is_tool_call = giga_dict["choices"][0]["finish_reason"] == "function_call"
 
         text_param = data.get("text")
@@ -141,6 +153,7 @@ class ResponseProcessor:
             ),
             usage=self._build_response_usage(giga_dict.get("usage")),
             response_text=response_text,
+            response_metadata=response_metadata,
         )
         output_count = len(result.get("output", []))
         usage = result.get("usage") or {}
@@ -204,6 +217,7 @@ class ResponseProcessor:
         output: list,
         usage: Optional[Dict],
         response_text: dict,
+        response_metadata: Optional[Mapping[str, str]] = None,
     ) -> dict:
         request_data = request_data or {}
         return {
@@ -229,7 +243,9 @@ class ResponseProcessor:
             "truncation": request_data.get("truncation", "disabled"),
             "usage": usage,
             "user": request_data.get("user"),
-            "metadata": request_data.get("metadata", {}),
+            "metadata": merge_openai_response_metadata(
+                request_data.get("metadata", {}), response_metadata
+            ),
         }
 
     @staticmethod
@@ -557,6 +573,9 @@ class ResponseProcessor:
     ) -> dict:
         """Обрабатывает стриминговый чанк от GigaChat."""
         giga_dict = giga_resp.model_dump()
+        response_metadata = extract_gigachat_response_metadata(
+            giga_dict.get("x_headers")
+        )
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
         is_structured_output = self._is_chat_structured_output_function_call(
@@ -581,6 +600,8 @@ class ResponseProcessor:
             "usage": self._build_usage(giga_dict.get("usage")),
             "system_fingerprint": f"fp_{response_id}",
         }
+        if response_metadata:
+            result["metadata"] = response_metadata
 
         log_debug_payload(
             self.logger,

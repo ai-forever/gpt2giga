@@ -139,6 +139,66 @@ def test_response_processor_dev_debug_logging_includes_full_response():
     mock_bound_logger.debug.assert_called_with("Processed chat completion response")
 
 
+def test_response_processor_adds_gigachat_headers_to_chat_metadata():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "x_headers": {
+                "X-Request-ID": "rq-1",
+                "X-Session-ID": "session-1",
+                "Authorization": "Bearer secret",
+            },
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+
+    assert out["metadata"] == {
+        "gigachat_x_request_id": "rq-1",
+        "gigachat_x_session_id": "session-1",
+    }
+    assert "x_headers" not in out
+
+
+def test_response_processor_merges_gigachat_headers_into_responses_metadata():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "x_headers": {
+                "x-request-id": "rq-1",
+                "x-session-id": "session-1",
+            },
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response_api(
+        {"metadata": {"user_id": "user-1"}},
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="1",
+    )
+
+    assert out["metadata"] == {
+        "user_id": "user-1",
+        "gigachat_x_request_id": "rq-1",
+        "gigachat_x_session_id": "session-1",
+    }
+
+
 def test_response_processor_prod_debug_logging_omits_response():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()

@@ -12,6 +12,10 @@ from gigachat.models import Chat
 from starlette.requests import Request
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.client_params import (
+    extract_gigachat_response_metadata,
+    merge_openai_response_metadata,
+)
 from gpt2giga.common.gigachat_options import (
     GigaRequestOptions,
     gigachat_request_options,
@@ -502,6 +506,7 @@ async def stream_responses_generator(
     model = request_data.get("model", "unknown") if request_data else "unknown"
     msg_id = f"msg_{response_id}"
     fc_id = f"fc_{response_id}"  # ID for function call item
+    response_metadata: dict[str, str] = {}
 
     def build_reasoning_config() -> dict:
         reasoning_data = request_data.get("reasoning") if request_data else None
@@ -544,7 +549,10 @@ async def stream_responses_generator(
             "truncation": "disabled",
             "usage": usage,
             "user": None,
-            "metadata": {},
+            "metadata": merge_openai_response_metadata(
+                request_data.get("metadata", {}) if request_data else {},
+                response_metadata,
+            ),
         }
 
     sequence_number = 0
@@ -803,6 +811,9 @@ async def stream_responses_generator(
                         break
 
                     giga_dict = chunk.model_dump()
+                    response_metadata.update(
+                        extract_gigachat_response_metadata(giga_dict.get("x_headers"))
+                    )
                     if giga_dict.get("usage"):
                         usage_builder = getattr(
                             request.app.state.response_processor,

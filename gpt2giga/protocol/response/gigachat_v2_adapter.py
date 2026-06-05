@@ -23,7 +23,7 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
             response_data, message
         )
 
-    return {
+    result = {
         "model": response_data.get("model") or default_model,
         "thread_id": extract_v2_thread_id(response_data),
         "choices": [
@@ -39,6 +39,8 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
         ],
         "usage": adapt_v2_usage(response_data.get("usage")),
     }
+    _copy_x_headers(result, response_data)
+    return result
 
 
 def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
@@ -60,7 +62,7 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
         delta["function_call"] = function_call
         delta["functions_state_id"] = _functions_state_id(chunk_data, message)
 
-    return {
+    result = {
         "model": chunk_data.get("model") or default_model,
         "thread_id": extract_v2_thread_id(chunk_data),
         "choices": [
@@ -76,6 +78,8 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
         ],
         "usage": adapt_v2_usage(chunk_data.get("usage")),
     }
+    _copy_x_headers(result, chunk_data)
+    return result
 
 
 def extract_v2_assistant_text(message_or_response: Any) -> str:
@@ -249,6 +253,12 @@ def _dump_model(value: Any) -> dict:
     if hasattr(value, "dict"):
         return value.dict(exclude_none=True, by_alias=True)
     return {}
+
+
+def _copy_x_headers(target: dict[str, Any], source: dict[str, Any]) -> None:
+    x_headers = source.get("x_headers")
+    if isinstance(x_headers, dict) and x_headers:
+        target["x_headers"] = x_headers
 
 
 def _select_message(data: dict) -> dict:
