@@ -3,7 +3,13 @@ from functools import cached_property
 from typing import Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
-from pydantic import Field, field_validator, model_validator
+from pydantic import (
+    Field,
+    NonNegativeFloat,
+    PositiveInt,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gpt2giga.constants import (
@@ -66,6 +72,18 @@ class ProxySettings(BaseSettings):
             "Значение max_tokens по умолчанию, отправляемое в GigaChat API, "
             "если клиент не указал max_tokens, max_completion_tokens или max_output_tokens"
         ),
+    )
+    model_max_connections: dict[str, PositiveInt] = Field(
+        default_factory=dict,
+        description="Maximum number of concurrent upstream GigaChat calls per model.",
+    )
+    model_max_connections_default: Optional[PositiveInt] = Field(
+        default=None,
+        description="Default per-model concurrency limit for models not listed in model_max_connections.",
+    )
+    model_max_connections_acquire_timeout: Optional[NonNegativeFloat] = Field(
+        default=None,
+        description="Seconds to wait for a free per-model slot; None means wait indefinitely.",
     )
     structured_output_mode: Literal["function_call", "native"] = Field(
         default="function_call",

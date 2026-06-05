@@ -331,6 +331,9 @@ client.messages.create(
 - `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
+- `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat":1,"GigaChat-Pro":1,"GigaChat-Max":5}'`;
+- `--proxy.model-max-connections-default <INT>` — fallback per-model лимит для моделей, которых нет в `--proxy.model-max-connections`;
+- `--proxy.model-max-connections-acquire-timeout <FLOAT>` — сколько секунд ждать свободный model slot; `0` означает fail-fast, отсутствие значения — ждать без локального timeout;
 - `--proxy.log-level` — уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`;
 - `--proxy.log-filename` — имя лог файла. По умолчанию `gpt2giga.log`;
 - `--proxy.log-max-size` — максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB);
@@ -403,6 +406,9 @@ gpt2giga \
 - `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
 - `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
+- `GPT2GIGA_MODEL_MAX_CONNECTIONS='{}'` — JSON-словарь per-model лимитов одновременных upstream model-call внутри gpt2giga;
+- `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` — fallback per-model лимит для моделей, которых нет в `GPT2GIGA_MODEL_MAX_CONNECTIONS`. По умолчанию не задан;
+- `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT` — сколько секунд ждать свободный model slot. По умолчанию не задано, `0` означает fail-fast;
 - `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
 - `GPT2GIGA_LOG_FILENAME="gpt2giga.log"` — Имя лог файла. По умолчанию `gpt2giga.log`
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
@@ -441,6 +447,44 @@ GPT2GIGA_GIGACHAT_API_MODE=v2
 > Для maintainers: эта реализация целится в `gigachat==0.2.2a1` и не является переносом pre-release/1.0.0 архитектуры из PR #123.
 
 > **Breaking change в 0.1.6:** `GPT2GIGA_PASS_MODEL` по умолчанию `True`. Если клиент отправляет OpenAI/Anthropic-имя модели, оно будет передано в GigaChat. Чтобы всегда использовать модель из `GIGACHAT_MODEL` / настроек прокси, задайте `GPT2GIGA_PASS_MODEL=False`.
+
+#### Per-model max connections
+
+`GIGACHAT_MAX_CONNECTIONS` остаётся глобальным лимитом HTTP/SDK подключений к GigaChat. Дополнительно можно включить локальный in-process limiter в gpt2giga, который ограничивает число одновременных upstream model-call отдельно для каждой effective GigaChat модели.
+
+Пример:
+
+```dotenv
+GIGACHAT_MAX_CONNECTIONS=7
+GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat":1,"GigaChat-Pro":1,"GigaChat-Max":5}'
+GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=30
+```
+
+В этом примере общий SDK/HTTP cap равен `7`, но `GigaChat` и `GigaChat-Pro` получают максимум по одному одновременному upstream model-call, а `GigaChat-Max` — максимум пять.
+
+То же через CLI:
+
+```sh
+gpt2giga \
+    --gigachat.max-connections 7 \
+    --proxy.model-max-connections '{"GigaChat":1,"GigaChat-Pro":1,"GigaChat-Max":5}' \
+    --proxy.model-max-connections-acquire-timeout 30
+```
+
+Семантика:
+
+- если `GPT2GIGA_MODEL_MAX_CONNECTIONS` пустой и `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` не задан, limiter выключен и поведение не меняется;
+- если модель есть в `GPT2GIGA_MODEL_MAX_CONNECTIONS`, используется её explicit limit;
+- если модели нет в словаре, но задан `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT`, этот limit применяется отдельно к каждой такой модели;
+- `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=0` возвращает локальный `429` сразу, положительное значение ждёт указанное число секунд, отсутствие значения ждёт без локального timeout;
+- streaming slot удерживается до завершения upstream stream или закрытия генератора клиентом;
+- backend GigaChat всё равно может вернуть собственный `429` по другим причинам.
+
+Ограничения:
+
+- limiter локальный для одного процесса gpt2giga. Несколько workers, контейнеров или pods умножают effective limit;
+- при `GPT2GIGA_PASS_TOKEN=True` разные credentials делят один per-model pool внутри процесса;
+- limiter применяется только к model-call endpoint-ам: Chat Completions, Responses, Embeddings, Anthropic Messages и `messages/count_tokens`. Model list/info endpoints не лимитируются.
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;

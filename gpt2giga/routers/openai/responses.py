@@ -5,12 +5,13 @@ from types import SimpleNamespace
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from gpt2giga.app_state import get_gigachat_client
+from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
+from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
     stream_responses_generator,
@@ -38,6 +39,7 @@ async def responses(request: Request):
     current_rquid = rquid_context.get()
     state = request.app.state
     giga_client = get_gigachat_client(request)
+    model_limiter = get_model_concurrency_limiter(request)
     settings = state.config.proxy_settings
     mode = settings.resolve_responses_api_mode()
 
@@ -47,6 +49,7 @@ async def responses(request: Request):
             chat_request = await state.request_transformer.prepare_response_v2(
                 data, giga_client
             )
+        effective_model = resolve_gigachat_model(chat_request, state.config)
         if stream:
             return StreamingResponse(
                 stream_responses_v2_generator(
@@ -56,11 +59,14 @@ async def responses(request: Request):
                     giga_client,
                     request_data=data,
                     request_options=request_options,
+                    model_limiter=model_limiter,
+                    effective_model=effective_model,
                 ),
                 media_type="text/event-stream",
             )
-        async with gigachat_request_options(giga_client, request_options):
-            response = await giga_client.achat.create(chat_request)
+        async with model_limiter.limit(effective_model, provider="openai"):
+            async with gigachat_request_options(giga_client, request_options):
+                response = await giga_client.achat.create(chat_request)
         adapted = adapt_v2_completion_to_v1_shape(
             response,
             default_model=data["model"],
@@ -83,9 +89,11 @@ async def responses(request: Request):
         chat_messages = await state.request_transformer.prepare_response(
             data, giga_client
         )
+    effective_model = resolve_gigachat_model(chat_messages, state.config)
     if not stream:
-        async with gigachat_request_options(giga_client, request_options):
-            response = await giga_client.achat(chat_messages)
+        async with model_limiter.limit(effective_model, provider="openai"):
+            async with gigachat_request_options(giga_client, request_options):
+                response = await giga_client.achat(chat_messages)
         return state.response_processor.process_response_api(
             data, response, data["model"], current_rquid
         )
@@ -98,6 +106,8 @@ async def responses(request: Request):
             giga_client,
             request_data=data,
             request_options=request_options,
+            model_limiter=model_limiter,
+            effective_model=effective_model,
         ),
         media_type="text/event-stream",
     )
