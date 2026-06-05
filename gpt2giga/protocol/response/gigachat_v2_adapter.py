@@ -1,4 +1,10 @@
+import json
 from typing import Any, Optional
+
+from gpt2giga.common.tools import map_tool_name_from_gigachat
+
+
+GIGACHAT_PROVIDER_METADATA_KEY = "_gpt2giga_provider_metadata"
 
 
 def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dict:
@@ -39,6 +45,7 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
         ],
         "usage": adapt_v2_usage(response_data.get("usage")),
     }
+    _copy_provider_metadata(result, response_data)
     _copy_x_headers(result, response_data)
     return result
 
@@ -78,6 +85,7 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
         ],
         "usage": adapt_v2_usage(chunk_data.get("usage")),
     }
+    _copy_provider_metadata(result, chunk_data)
     _copy_x_headers(result, chunk_data)
     return result
 
@@ -181,6 +189,47 @@ def extract_v2_thread_id(response_or_chunk: Any) -> Optional[str]:
     return None
 
 
+def extract_v2_provider_metadata(response_or_chunk: Any) -> dict[str, str]:
+    """Extract GigaChat v2 state identifiers for OpenAI metadata."""
+    data = _dump_model(response_or_chunk)
+    message = _select_message(data)
+    metadata: dict[str, str] = {}
+
+    thread_id = _normalize_metadata_string(data.get("thread_id"))
+    if thread_id:
+        metadata["gigachat_thread_id"] = thread_id
+
+    message_id = _normalize_metadata_string(
+        data.get("message_id")
+    ) or _normalize_metadata_string(message.get("message_id"))
+    if message_id:
+        metadata["gigachat_message_id"] = message_id
+
+    tool_state_id = _extract_message_tool_state_id(
+        message
+    ) or _extract_message_tool_state_id(data)
+    if tool_state_id:
+        metadata["gigachat_tool_state_id"] = tool_state_id
+
+    message_tool_state_items = _extract_message_tool_state_items(data)
+    if message_tool_state_items:
+        metadata["gigachat_message_tools_state_ids"] = json.dumps(
+            message_tool_state_items,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    called_tools = _extract_called_tool_items(data)
+    if called_tools:
+        metadata["gigachat_called_tools"] = json.dumps(
+            called_tools,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    return metadata
+
+
 async def hydrate_v2_image_files(
     adapted_response: dict, giga_client: Any, logger: Any = None
 ) -> None:
@@ -259,6 +308,12 @@ def _copy_x_headers(target: dict[str, Any], source: dict[str, Any]) -> None:
     x_headers = source.get("x_headers")
     if isinstance(x_headers, dict) and x_headers:
         target["x_headers"] = x_headers
+
+
+def _copy_provider_metadata(target: dict[str, Any], source: dict[str, Any]) -> None:
+    metadata = extract_v2_provider_metadata(source)
+    if metadata:
+        target[GIGACHAT_PROVIDER_METADATA_KEY] = metadata
 
 
 def _select_message(data: dict) -> dict:
@@ -380,6 +435,127 @@ def _functions_state_id(response_or_chunk: dict, message: dict) -> str:
                 return state_id
 
     return str(message.get("message_id") or response_or_chunk.get("message_id") or "v2")
+
+
+def _extract_message_tool_state_id(message: dict) -> Optional[str]:
+    for field_name in (
+        "tools_state_id",
+        "tool_state_id",
+        "functions_state_id",
+        "function_state_id",
+    ):
+        state_id = _normalize_metadata_string(message.get(field_name))
+        if state_id:
+            return state_id
+    return None
+
+
+def _extract_message_tool_state_items(data: dict) -> list[dict[str, Any]]:
+    messages = data.get("messages")
+    if not isinstance(messages, list):
+        return []
+
+    items: list[dict[str, Any]] = []
+    for index, raw_message in enumerate(messages):
+        message = _dump_model(raw_message)
+        state_id = _extract_message_tool_state_id(message)
+        if not state_id:
+            continue
+
+        item: dict[str, Any] = {
+            "index": index,
+            "tools_state_id": state_id,
+        }
+        role = _normalize_metadata_string(message.get("role"))
+        if role:
+            item["role"] = role
+        message_id = _normalize_metadata_string(message.get("message_id"))
+        if message_id:
+            item["message_id"] = message_id
+        items.append(item)
+    return items
+
+
+def _extract_called_tool_items(data: dict) -> list[dict[str, Any]]:
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        message_items = [
+            (index, _dump_model(raw_message))
+            for index, raw_message in enumerate(messages)
+        ]
+    elif {"role", "content", "function_call"} & data.keys():
+        message_items = [(0, data)]
+    else:
+        return []
+
+    items: list[dict[str, Any]] = []
+    for message_index, message in message_items:
+        function_call = _normalize_function_call(message.get("function_call"))
+        if function_call:
+            items.append(
+                _called_tool_item(
+                    function_call,
+                    message,
+                    call_index=len(items),
+                    message_index=message_index,
+                )
+            )
+
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+
+        for content_index, raw_part in enumerate(content):
+            part = _dump_model(raw_part)
+            function_call = _normalize_function_call(part.get("function_call"))
+            if not function_call:
+                continue
+            items.append(
+                _called_tool_item(
+                    function_call,
+                    message,
+                    call_index=len(items),
+                    message_index=message_index,
+                    content_index=content_index,
+                )
+            )
+
+    return items
+
+
+def _called_tool_item(
+    function_call: dict[str, Any],
+    message: dict[str, Any],
+    *,
+    call_index: int,
+    message_index: int,
+    content_index: Optional[int] = None,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "index": call_index,
+        "message_index": message_index,
+        "name": map_tool_name_from_gigachat(function_call["name"]),
+        "arguments": function_call.get("arguments", {}),
+    }
+    if content_index is not None:
+        item["content_index"] = content_index
+    role = _normalize_metadata_string(message.get("role"))
+    if role:
+        item["role"] = role
+    message_id = _normalize_metadata_string(message.get("message_id"))
+    if message_id:
+        item["message_id"] = message_id
+    state_id = _extract_message_tool_state_id(message)
+    if state_id:
+        item["tools_state_id"] = state_id
+    return item
+
+
+def _normalize_metadata_string(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 def _normalize_state_id(value: Any) -> Optional[str]:

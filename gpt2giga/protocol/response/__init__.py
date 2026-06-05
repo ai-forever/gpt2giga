@@ -1,6 +1,7 @@
 """Response transformation (GigaChat -> OpenAI)."""
 
 from .gigachat_v2_adapter import (
+    GIGACHAT_PROVIDER_METADATA_KEY,
     adapt_v2_chunk_to_v1_shape,
     adapt_v2_completion_to_v1_shape,
     adapt_v2_usage,
@@ -12,6 +13,7 @@ from .gigachat_v2_adapter import (
 from .processor import ResponseProcessor
 
 __all__ = [
+    "GIGACHAT_PROVIDER_METADATA_KEY",
     "ResponseProcessor",
     "adapt_v2_chunk_to_v1_shape",
     "adapt_v2_completion_to_v1_shape",

@@ -19,6 +19,9 @@ from gpt2giga.common.reasoning import (
     merge_reasoning_text,
 )
 from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.protocol.response.gigachat_v2_adapter import (
+    GIGACHAT_PROVIDER_METADATA_KEY,
+)
 
 
 class ResponseProcessor:
@@ -85,6 +88,12 @@ class ResponseProcessor:
         is_structured_output = self._is_chat_structured_output_function_call(
             request_data
         )
+        provider_metadata = self._extract_provider_response_metadata(giga_dict)
+        if is_structured_output:
+            provider_metadata.pop("gigachat_called_tools", None)
+        else:
+            response_metadata.update(self._extract_called_tools_metadata(giga_dict))
+        response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
             self._process_choice(
@@ -132,6 +141,12 @@ class ResponseProcessor:
 
         text_param = data.get("text")
         is_structured_output = self._is_responses_structured_output_function_call(data)
+        provider_metadata = self._extract_provider_response_metadata(giga_dict)
+        if is_structured_output:
+            provider_metadata.pop("gigachat_called_tools", None)
+        else:
+            response_metadata.update(self._extract_called_tools_metadata(giga_dict))
+        response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
             self._process_choice_responses(choice, response_id)
@@ -576,6 +591,7 @@ class ResponseProcessor:
         response_metadata = extract_gigachat_response_metadata(
             giga_dict.get("x_headers")
         )
+        response_metadata.update(self._extract_provider_response_metadata(giga_dict))
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
         is_structured_output = self._is_chat_structured_output_function_call(
@@ -895,3 +911,97 @@ class ResponseProcessor:
             "input_tokens_details": {"cached_tokens": 0},
             "output_tokens_details": {"reasoning_tokens": 0},
         }
+
+    @staticmethod
+    def _extract_provider_response_metadata(data: Mapping[str, Any]) -> dict[str, str]:
+        raw_metadata = data.get(GIGACHAT_PROVIDER_METADATA_KEY)
+        if not isinstance(raw_metadata, Mapping):
+            return {}
+
+        metadata: dict[str, str] = {}
+        for key, value in raw_metadata.items():
+            if isinstance(key, str) and isinstance(value, str):
+                metadata[key] = value
+        return metadata
+
+    @classmethod
+    def _extract_called_tools_metadata(
+        cls,
+        data: Mapping[str, Any],
+    ) -> dict[str, str]:
+        choices = data.get("choices")
+        if not isinstance(choices, list):
+            return {}
+
+        called_tools: list[dict[str, Any]] = []
+        for choice_index, raw_choice in enumerate(choices):
+            if not isinstance(raw_choice, Mapping):
+                continue
+            message = raw_choice.get("message")
+            if not isinstance(message, Mapping):
+                continue
+            function_call = message.get("function_call")
+            if not isinstance(function_call, Mapping):
+                continue
+            name = function_call.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+
+            item: dict[str, Any] = {
+                "index": len(called_tools),
+                "choice_index": choice_index,
+                "name": map_tool_name_from_gigachat(name),
+                "arguments": cls._normalize_called_tool_arguments(
+                    function_call.get("arguments", {})
+                ),
+            }
+            role = message.get("role")
+            if isinstance(role, str) and role:
+                item["role"] = role
+            state_id = cls._raw_backend_state_id_from_message(message)
+            if state_id:
+                item["tools_state_id"] = state_id
+            called_tools.append(item)
+
+        if not called_tools:
+            return {}
+
+        return {
+            "gigachat_called_tools": json.dumps(
+                called_tools,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        }
+
+    @staticmethod
+    def _normalize_called_tool_arguments(arguments: Any) -> Any:
+        if not isinstance(arguments, str):
+            return arguments
+        try:
+            return json.loads(arguments)
+        except json.JSONDecodeError:
+            return arguments
+
+    @classmethod
+    def _raw_backend_state_id_from_message(
+        cls, message: Mapping[str, Any]
+    ) -> Optional[str]:
+        for field_name in (
+            "tools_state_id",
+            "tool_state_id",
+            "functions_state_id",
+            "function_state_id",
+            "tool_call_id",
+        ):
+            state_id = cls._normalize_metadata_string(message.get(field_name))
+            if state_id:
+                return state_id
+        return None
+
+    @staticmethod
+    def _normalize_metadata_string(value: Any) -> Optional[str]:
+        if not isinstance(value, str):
+            return None
+        normalized = value.strip()
+        return normalized or None

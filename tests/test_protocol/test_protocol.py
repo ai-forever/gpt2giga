@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -313,6 +314,16 @@ def test_response_processor_preserves_backend_state_as_tool_call_id():
     tool_call = out["choices"][0]["message"]["tool_calls"][0]
     assert tool_call["id"] == "019e94aa-de11-705c-998b-040af4d06462"
     assert tool_call["function"]["name"] == "write_file"
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "choice_index": 0,
+            "name": "write_file",
+            "arguments": {"file_path": "/app/regex.txt"},
+            "role": "assistant",
+            "tools_state_id": "019e94aa-de11-705c-998b-040af4d06462",
+        }
+    ]
 
 
 def test_response_processor_stream_chunk_handles_delta():
@@ -467,6 +478,16 @@ def test_response_processor_native_so_preserves_responses_tool_call():
     assert out["output"][0]["arguments"] == '{"a": 1}'
     assert out["output"][0]["call_id"] == "state-1"
     assert out["output"][0]["id"] == "fc_state-1"
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "choice_index": 0,
+            "name": "sum",
+            "arguments": {"a": 1},
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
 
 
 def test_response_processor_response_api_extracts_think_tags():
