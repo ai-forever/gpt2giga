@@ -105,3 +105,20 @@ def test_setup_logger_with_redaction_disabled(tmp_path):
     log_file = str(tmp_path / "test.log")
     logger = setup_logger("DEBUG", log_file=log_file, enable_redaction=False)
     assert isinstance(logger, loguru._logger.Logger)
+
+
+def test_structured_payload_tags_are_logged_as_text(tmp_path):
+    log_file = tmp_path / "test.log"
+    logger = setup_logger("DEBUG", log_file=str(log_file), enable_redaction=False)
+
+    logger.bind(
+        payload={
+            "content": "<example>",
+            "already_escaped": r"\<example>",
+        }
+    ).debug("Received client request payload")
+    logger.complete()
+
+    content = log_file.read_text(encoding="utf-8")
+    assert '"content": "<example>"' in content
+    assert r'"already_escaped": "\\<example>"' in content
