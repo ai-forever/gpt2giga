@@ -27,7 +27,7 @@ json_schema = {
 }
 
 response = client.responses.create(
-    model="GigaChat-Pro",
+    model="GigaChat-2-Max",
     input=[
         {"role": "system", "content": "You are a helpful math tutor."},
         {"role": "user", "content": "solve 8x + 31 = 2"},

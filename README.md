@@ -150,7 +150,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8090/v1", api_key="local-key")
 
 client.chat.completions.create(
-    model="GigaChat",
+    model="GigaChat-2-Max",
     messages=[{"role": "user", "content": "Привет"}],
     extra_body={"profanity_check": False},
 )
@@ -164,7 +164,7 @@ from anthropic import Anthropic
 client = Anthropic(base_url="http://localhost:8090", api_key="local-key")
 
 client.messages.create(
-    model="GigaChat",
+    model="GigaChat-2-Max",
     max_tokens=256,
     messages=[{"role": "user", "content": "Привет"}],
 )
@@ -174,7 +174,7 @@ client.messages.create(
 
 ```python
 client.messages.create(
-    model="GigaChat",
+    model="GigaChat-2-Max",
     max_tokens=256,
     messages=[{"role": "user", "content": "Привет"}],
     extra_body={"mcp_servers": []},  # 400: MCP server tools are not supported
@@ -205,7 +205,7 @@ client.messages.create(
     GPT2GIGA_API_KEY="<your_strong_api_key>"
     GIGACHAT_CREDENTIALS="<your_gigachat_credentials>"
     GIGACHAT_SCOPE=<your_api_scope>
-    GIGACHAT_MODEL=GigaChat
+    GIGACHAT_MODEL=GigaChat-2-Max
     GIGACHAT_VERIFY_SSL_CERTS=True
     ```
 
@@ -331,7 +331,7 @@ client.messages.create(
 - `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
-- `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat":1,"GigaChat-Pro":1,"GigaChat-Max":5}'`;
+- `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat-2-Max":5}'`;
 - `--proxy.model-max-connections-default <INT>` — fallback per-model лимит для моделей, которых нет в `--proxy.model-max-connections`;
 - `--proxy.model-max-connections-acquire-timeout <FLOAT>` — сколько секунд ждать свободный model slot; `0` означает fail-fast, отсутствие значения — ждать без локального timeout;
 - `--proxy.log-level` — уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`;
@@ -456,18 +456,18 @@ GPT2GIGA_GIGACHAT_API_MODE=v2
 
 ```dotenv
 GIGACHAT_MAX_CONNECTIONS=7
-GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat":1,"GigaChat-Pro":1,"GigaChat-Max":5}'
+GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat-2-Max":5}'
 GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=30
 ```
 
-В этом примере общий SDK/HTTP cap равен `7`, но `GigaChat` и `GigaChat-Pro` получают максимум по одному одновременному upstream model-call, а `GigaChat-Max` — максимум пять.
+В этом примере общий SDK/HTTP cap равен `7`, но `GigaChat-2-Max` получает максимум пять одновременных upstream model-call.
 
 То же через CLI:
 
 ```sh
 gpt2giga \
     --gigachat.max-connections 7 \
-    --proxy.model-max-connections '{"GigaChat":1,"GigaChat-Pro":1,"GigaChat-Max":5}' \
+    --proxy.model-max-connections '{"GigaChat-2-Max":5}' \
     --proxy.model-max-connections-acquire-timeout 30
 ```
 
@@ -488,7 +488,7 @@ gpt2giga \
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
-- `GIGACHAT_MODEL="GigaChat"` — модель GigaChat API, которая будет обрабатывать запросы по умолчанию;
+- `GIGACHAT_MODEL="GigaChat-2-Max"` — модель GigaChat API, которая будет обрабатывать запросы по умолчанию;
 - `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля;
 - `GIGACHAT_CREDENTIALS` и `GIGACHAT_SCOPE` — для авторизации с помощью ключа авторизации;
 - `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токена доступа, полученного в обмен на ключ;

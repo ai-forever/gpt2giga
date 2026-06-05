@@ -956,11 +956,9 @@ class RequestTransformer:
         existing_storage: Any = None,
     ) -> Any:
         is_responses_api = bool(transformed_data.get("_gpt2giga_responses_api"))
-        store_enabled = (
-            transformed_data.get("store", True) is not False
-            if is_responses_api
-            else False
-        )
+        store_enabled = False
+        if is_responses_api:
+            store_enabled = transformed_data.get("store") is True
         previous_response_id = transformed_data.get("previous_response_id")
         if not store_enabled and previous_response_id is None:
             return existing_storage
