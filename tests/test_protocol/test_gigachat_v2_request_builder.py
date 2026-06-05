@@ -140,6 +140,28 @@ async def test_prepare_chat_completion_v2_prod_logging_omits_payload():
 
 
 @pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_dev_logging_includes_full_payload():
+    mock_logger = MagicMock()
+    mock_bound_logger = MagicMock()
+    mock_logger.bind.return_value = mock_bound_logger
+    cfg = ProxyConfig(proxy=ProxySettings(mode="DEV"))
+    rt = RequestTransformer(cfg, logger=mock_logger)
+
+    await rt.prepare_chat_completion_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+    )
+
+    bind_kwargs = mock_logger.bind.call_args.kwargs
+    assert bind_kwargs["event"] == "gigachat_request_v2"
+    assert bind_kwargs["payload"]["model"] == "GigaChat-2-Max"
+    assert bind_kwargs["payload"]["messages"][0]["content"][0]["text"] == "hello"
+    mock_bound_logger.debug.assert_called_with("Sending v2 request to GigaChat API")
+
+
+@pytest.mark.asyncio
 async def test_prepare_response_v2_builds_primary_request_from_responses_input():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -158,7 +180,25 @@ async def test_prepare_response_v2_builds_primary_request_from_responses_input()
     assert request.messages[0].content[0].text == "be concise"
     assert request.messages[1].content[0].text == "hello"
     assert request.model_options.max_tokens == 32
+    assert request.storage is None
+    assert "storage" not in request.model_dump(exclude_none=True)
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_sends_storage_when_store_true():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "hello",
+            "store": True,
+        }
+    )
+
     assert request.storage.model_dump(exclude_none=True) == {}
+    assert request.model_dump(exclude_none=True)["storage"] == {}
 
 
 @pytest.mark.asyncio
@@ -297,7 +337,8 @@ async def test_prepare_response_v2_replays_function_call_with_tools_state_id():
         "horoscope": "Aquarius: Next Tuesday you will befriend a baby otter."
     }
     assert len(request.tools[0].functions.specifications) == 1
-    assert request.storage.model_dump(exclude_none=True) == {}
+    assert request.storage is None
+    assert "storage" not in request.model_dump(exclude_none=True)
 
 
 @pytest.mark.asyncio

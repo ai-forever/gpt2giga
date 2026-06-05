@@ -12,6 +12,10 @@ from gigachat.models import Chat
 from starlette.requests import Request
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.client_params import (
+    extract_gigachat_response_metadata,
+    merge_openai_response_metadata,
+)
 from gpt2giga.common.gigachat_options import (
     GigaRequestOptions,
     gigachat_request_options,
@@ -25,6 +29,7 @@ from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import (
+    GIGACHAT_PROVIDER_METADATA_KEY,
     adapt_v2_chunk_to_v1_shape,
     hydrate_v2_image_files,
 )
@@ -526,6 +531,7 @@ async def stream_responses_generator(
     model = request_data.get("model", "unknown") if request_data else "unknown"
     msg_id = f"msg_{response_id}"
     fc_id = f"fc_{response_id}"  # ID for function call item
+    response_metadata: dict[str, str] = {}
 
     def build_reasoning_config() -> dict:
         reasoning_data = request_data.get("reasoning") if request_data else None
@@ -568,7 +574,10 @@ async def stream_responses_generator(
             "truncation": "disabled",
             "usage": usage,
             "user": None,
-            "metadata": {},
+            "metadata": merge_openai_response_metadata(
+                request_data.get("metadata", {}) if request_data else {},
+                response_metadata,
+            ),
         }
 
     sequence_number = 0
@@ -827,6 +836,12 @@ async def stream_responses_generator(
                         break
 
                     giga_dict = chunk.model_dump()
+                    response_metadata.update(
+                        extract_gigachat_response_metadata(giga_dict.get("x_headers"))
+                    )
+                    response_metadata.update(
+                        _extract_provider_response_metadata(giga_dict)
+                    )
                     if giga_dict.get("usage"):
                         usage_builder = getattr(
                             request.app.state.response_processor,
@@ -974,6 +989,16 @@ async def stream_responses_generator(
             reasoning_text += flushed_reasoning.reasoning_content
 
         if is_function_call and function_call_data:
+            response_metadata["gigachat_called_tools"] = json.dumps(
+                [
+                    _stream_called_tool_item(
+                        function_call_data,
+                        tools_state_id=functions_state_id,
+                    )
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
             yield sse_event(
                 "response.function_call_arguments.done",
                 {
@@ -1214,3 +1239,41 @@ async def stream_responses_generator(
             "sequence_number": sequence_number,
         }
         yield sse_event("error", error_response)
+
+
+def _extract_provider_response_metadata(data: dict[str, Any]) -> dict[str, str]:
+    raw_metadata = data.get(GIGACHAT_PROVIDER_METADATA_KEY)
+    if not isinstance(raw_metadata, dict):
+        return {}
+
+    metadata: dict[str, str] = {}
+    for key, value in raw_metadata.items():
+        if isinstance(key, str) and isinstance(value, str):
+            metadata[key] = value
+    return metadata
+
+
+def _stream_called_tool_item(
+    function_call_data: dict[str, Any],
+    *,
+    tools_state_id: Optional[str],
+) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "index": 0,
+        "name": function_call_data.get("name", ""),
+        "arguments": _decode_stream_tool_arguments(
+            function_call_data.get("arguments", "")
+        ),
+    }
+    if tools_state_id:
+        item["tools_state_id"] = tools_state_id
+    return item
+
+
+def _decode_stream_tool_arguments(arguments: Any) -> Any:
+    if not isinstance(arguments, str):
+        return arguments
+    try:
+        return json.loads(arguments)
+    except json.JSONDecodeError:
+        return arguments

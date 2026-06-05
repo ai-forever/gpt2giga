@@ -3,6 +3,8 @@ import json
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from gpt2giga.common.debug_logging import log_debug_payload
+
 
 async def read_request_json(request: Request) -> dict:
     """Read and parse JSON request body.
@@ -52,4 +54,15 @@ async def read_request_json(request: Request) -> dict:
                 }
             },
         )
+    state = request.app.state
+    log_debug_payload(
+        getattr(state, "logger", None),
+        getattr(state, "config", None),
+        event="client_request_payload",
+        message="Received client request payload",
+        payload_key="payload",
+        payload=data,
+        method=request.method,
+        path=request.url.path,
+    )
     return data

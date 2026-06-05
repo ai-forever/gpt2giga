@@ -107,6 +107,8 @@ async def messages(request: Request):
                 model,
                 current_rquid,
                 is_structured_output=structured_output_fallback,
+                logger=state.logger,
+                mode=state.config.proxy_settings.mode,
             )
 
         return StreamingResponse(
@@ -140,6 +142,8 @@ async def messages(request: Request):
             model,
             current_rquid,
             is_structured_output=structured_output_fallback,
+            logger=state.logger,
+            mode=state.config.proxy_settings.mode,
         )
 
     return StreamingResponse(

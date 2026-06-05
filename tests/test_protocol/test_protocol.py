@@ -1,5 +1,9 @@
+import json
+from unittest.mock import MagicMock
+
 import pytest
-from gpt2giga.models.config import ProxyConfig
+
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from loguru import logger
 
@@ -59,6 +63,25 @@ async def test_request_transformer_tools_to_functions():
     assert chat.get("functions") and len(chat["functions"]) == 1
 
 
+@pytest.mark.asyncio
+async def test_request_transformer_dev_debug_logging_includes_full_payload():
+    mock_logger = MagicMock()
+    mock_bound_logger = MagicMock()
+    mock_logger.bind.return_value = mock_bound_logger
+    cfg = ProxyConfig(proxy=ProxySettings(mode="DEV"))
+    rt = RequestTransformer(cfg, mock_logger)
+
+    await rt.send_to_gigachat(
+        {"model": "GigaChat", "messages": [{"role": "user", "content": "hello"}]}
+    )
+
+    bind_kwargs = mock_logger.bind.call_args.kwargs
+    assert bind_kwargs["event"] == "gigachat_request"
+    assert bind_kwargs["payload"]["model"] == "GigaChat"
+    assert bind_kwargs["payload"]["messages"][0]["content"] == "hello"
+    mock_bound_logger.debug.assert_called_with("Sending request to GigaChat API")
+
+
 class MockResponse:
     def __init__(self, data):
         self.data = data
@@ -89,6 +112,118 @@ def test_response_processor_process_function_call():
     out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
     choice = out["choices"][0]
     assert choice["message"]["tool_calls"][0]["type"] == "function"
+
+
+def test_response_processor_dev_debug_logging_includes_full_response():
+    mock_logger = MagicMock()
+    mock_bound_logger = MagicMock()
+    mock_logger.bind.return_value = mock_bound_logger
+    rp = ResponseProcessor(mock_logger, mode="DEV")
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+
+    bind_kwargs = mock_logger.bind.call_args.kwargs
+    assert bind_kwargs["event"] == "chat_completion_response"
+    assert bind_kwargs["response"] == out
+    assert bind_kwargs["response"]["choices"][0]["message"]["content"] == "Hello!"
+    mock_bound_logger.debug.assert_called_with("Processed chat completion response")
+
+
+def test_response_processor_adds_gigachat_headers_to_chat_metadata():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "x_headers": {
+                "X-Request-ID": "rq-1",
+                "X-Session-ID": "session-1",
+                "Authorization": "Bearer secret",
+            },
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+
+    assert out["metadata"] == {
+        "gigachat_x_request_id": "rq-1",
+        "gigachat_x_session_id": "session-1",
+    }
+    assert "x_headers" not in out
+
+
+def test_response_processor_merges_gigachat_headers_into_responses_metadata():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "x_headers": {
+                "x-request-id": "rq-1",
+                "x-session-id": "session-1",
+            },
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response_api(
+        {"metadata": {"user_id": "user-1"}},
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="1",
+    )
+
+    assert out["metadata"] == {
+        "user_id": "user-1",
+        "gigachat_x_request_id": "rq-1",
+        "gigachat_x_session_id": "session-1",
+    }
+
+
+def test_response_processor_prod_debug_logging_omits_response():
+    mock_logger = MagicMock()
+    mock_bound_logger = MagicMock()
+    mock_logger.bind.return_value = mock_bound_logger
+    rp = ResponseProcessor(mock_logger, mode="PROD")
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "secret response"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+
+    bind_kwargs = mock_logger.bind.call_args.kwargs
+    assert bind_kwargs == {"event": "chat_completion_response"}
+    mock_bound_logger.debug.assert_called_with(
+        "Processed chat completion response (payload omitted in PROD)"
+    )
 
 
 def test_response_processor_native_so_preserves_chat_tool_call():
@@ -179,6 +314,76 @@ def test_response_processor_preserves_backend_state_as_tool_call_id():
     tool_call = out["choices"][0]["message"]["tool_calls"][0]
     assert tool_call["id"] == "019e94aa-de11-705c-998b-040af4d06462"
     assert tool_call["function"]["name"] == "write_file"
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "choice_index": 0,
+            "name": "write_file",
+            "arguments": {"file_path": "/app/regex.txt"},
+            "role": "assistant",
+            "tools_state_id": "019e94aa-de11-705c-998b-040af4d06462",
+        }
+    ]
+
+
+def test_response_processor_chat_metadata_includes_input_tool_calls():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Aquarius: stars are aligned.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="1",
+        request_data={
+            "messages": [
+                {"role": "user", "content": "What is my horoscope?"},
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "019e97ee-44ad-711e-bee2-9bd35832e31f",
+                            "type": "function",
+                            "function": {
+                                "name": "get_horoscope",
+                                "arguments": '{"sign":"Aquarius"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "019e97ee-44ad-711e-bee2-9bd35832e31f",
+                    "content": '{"horoscope":"Aquarius: stars are aligned."}',
+                },
+            ]
+        },
+    )
+
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 1,
+            "name": "get_horoscope",
+            "arguments": {"sign": "Aquarius"},
+            "tool_call_index": 0,
+            "role": "assistant",
+            "call_id": "019e97ee-44ad-711e-bee2-9bd35832e31f",
+            "tools_state_id": "019e97ee-44ad-711e-bee2-9bd35832e31f",
+        }
+    ]
 
 
 def test_response_processor_stream_chunk_handles_delta():
@@ -333,6 +538,71 @@ def test_response_processor_native_so_preserves_responses_tool_call():
     assert out["output"][0]["arguments"] == '{"a": 1}'
     assert out["output"][0]["call_id"] == "state-1"
     assert out["output"][0]["id"] == "fc_state-1"
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "choice_index": 0,
+            "name": "sum",
+            "arguments": {"a": 1},
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
+
+
+def test_response_processor_responses_metadata_includes_input_called_tools():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Aquarius: stars are aligned.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response_api(
+        {
+            "input": [
+                {"role": "user", "content": "What is my horoscope?"},
+                {
+                    "type": "function_call",
+                    "id": "fc_state-1",
+                    "call_id": "state-1",
+                    "name": "sum",
+                    "arguments": '{"a":1}',
+                    "status": "completed",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "state-1",
+                    "output": '{"result":1}',
+                },
+            ]
+        },
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="resp-1",
+    )
+
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "input_index": 1,
+            "name": "sum",
+            "arguments": {"a": 1},
+            "call_id": "state-1",
+            "tools_state_id": "state-1",
+            "id": "fc_state-1",
+            "status": "completed",
+        }
+    ]
 
 
 def test_response_processor_response_api_extracts_think_tags():

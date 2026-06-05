@@ -1164,6 +1164,14 @@ async def test_stream_responses_generator_function_call():
     assert data["response"]["status"] == "completed"
     assert data["response"]["output"][0]["type"] == "function_call"
     assert data["response"]["output"][0]["name"] == "get_weather"
+    assert json.loads(data["response"]["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "name": "get_weather",
+            "arguments": {"location": "Moscow"},
+            "tools_state_id": "state_123",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -1215,6 +1223,14 @@ async def test_stream_responses_generator_function_call_streamed_args():
     assert data["response"]["output"][0]["type"] == "function_call"
     assert data["response"]["output"][0]["name"] == "search"
     assert data["response"]["output"][0]["arguments"] == '{"query": "test"}'
+    assert json.loads(data["response"]["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "name": "search",
+            "arguments": {"query": "test"},
+            "tools_state_id": "state_456",
+        }
+    ]
 
 
 @pytest.mark.asyncio

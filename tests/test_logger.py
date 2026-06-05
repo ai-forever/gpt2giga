@@ -2,7 +2,7 @@ import logging
 
 import loguru
 
-from gpt2giga.logger import setup_logger, redact_sensitive
+from gpt2giga.logger import redact_sensitive, redact_sensitive_data, setup_logger
 
 
 def test_init_logger_info_level():
@@ -82,6 +82,19 @@ def test_redact_case_insensitive():
     assert "mykey123" not in result
 
 
+def test_redact_sensitive_data_redacts_nested_structured_extra():
+    payload = {
+        "authorization": "Bearer tok123",
+        "messages": [{"role": "user", "content": "hello", "api_key": "sk-secret"}],
+    }
+
+    result = redact_sensitive_data(payload)
+
+    assert result["authorization"] == "***"
+    assert result["messages"][0]["api_key"] == "***"
+    assert result["messages"][0]["content"] == "hello"
+
+
 def test_setup_logger_with_redaction_enabled(tmp_path):
     log_file = str(tmp_path / "test.log")
     logger = setup_logger("DEBUG", log_file=log_file, enable_redaction=True)
@@ -92,3 +105,20 @@ def test_setup_logger_with_redaction_disabled(tmp_path):
     log_file = str(tmp_path / "test.log")
     logger = setup_logger("DEBUG", log_file=log_file, enable_redaction=False)
     assert isinstance(logger, loguru._logger.Logger)
+
+
+def test_structured_payload_tags_are_logged_as_text(tmp_path):
+    log_file = tmp_path / "test.log"
+    logger = setup_logger("DEBUG", log_file=str(log_file), enable_redaction=False)
+
+    logger.bind(
+        payload={
+            "content": "<example>",
+            "already_escaped": r"\<example>",
+        }
+    ).debug("Received client request payload")
+    logger.complete()
+
+    content = log_file.read_text(encoding="utf-8")
+    assert '"content": "<example>"' in content
+    assert r'"already_escaped": "\\<example>"' in content
