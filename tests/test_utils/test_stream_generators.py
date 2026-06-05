@@ -465,6 +465,189 @@ async def test_stream_responses_v2_generator_builtin_tool_outputs():
 
 
 @pytest.mark.asyncio
+async def test_stream_responses_v2_generator_emits_builtin_tool_progress_events():
+    import json
+
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"tool_execution": {"name": "image_generate"}}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "seconds_left": 12,
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "seconds_left": 6,
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "seconds_left": 3,
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "status": "success",
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "files": [
+                                    {
+                                        "id": "image-file-1",
+                                        "mime": "image/jpeg",
+                                        "target": "image",
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "Done."}],
+                    }
+                ]
+            }
+        ),
+    ]
+    req = FakeRequest(
+        FakeClientV2Stream(chunks=chunks, images={"image-file-1": "aW1n"})
+    )
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={
+            "model": "gpt-x",
+            "input": "Draw space",
+            "tools": [{"type": "image_generation"}],
+        },
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        return parts[0].replace("event: ", ""), json.loads(
+            parts[1].replace("data: ", "")
+        )
+
+    events = [parse_sse(line) for line in lines]
+    image_added = next(
+        data
+        for event_type, data in events
+        if event_type == "response.output_item.added"
+        and data["item"]["type"] == "image_generation_call"
+    )
+    progress_events = [
+        data
+        for event_type, data in events
+        if event_type == "response.image_generation_call.in_progress"
+    ]
+    image_completed = next(
+        data
+        for event_type, data in events
+        if event_type == "response.image_generation_call.completed"
+    )
+    image_done = next(
+        data
+        for event_type, data in events
+        if event_type == "response.output_item.done"
+        and data["item"]["type"] == "image_generation_call"
+    )
+    completed = [
+        data for event_type, data in events if event_type == "response.completed"
+    ][-1]
+
+    assert image_added["item"]["status"] == "in_progress"
+    assert [event.get("seconds_left") for event in progress_events] == [
+        None,
+        12,
+        6,
+        3,
+    ]
+    assert image_completed["item_id"] == image_added["item"]["id"]
+    assert image_done["item"]["id"] == image_added["item"]["id"]
+    assert image_done["item"]["result"] == "aW1n"
+    assert image_done["item"]["file_id"] == "image-file-1"
+    image_call = next(
+        item
+        for item in completed["response"]["output"]
+        if item["type"] == "image_generation_call"
+    )
+    assert image_call["result"] == "aW1n"
+
+
+@pytest.mark.asyncio
 async def test_stream_responses_v2_generator_maps_reasoning_role_to_output_item():
     import json
 

@@ -309,6 +309,118 @@ def _merge_inline_data(target: dict[str, Any], inline_data: dict[str, Any]) -> N
             target[key] = value
 
 
+def _builtin_tool_stream_name(name: Any) -> str:
+    tool_name = ResponseProcessor._normalize_builtin_tool_name(name)
+    if tool_name in {"image_generate", "web_search"}:
+        return tool_name
+    return ""
+
+
+def _builtin_tool_stream_status(tool_name: str, status: Any) -> str:
+    if status in {"success", "completed"}:
+        return "completed"
+    if status == "failed":
+        return "failed"
+    if tool_name == "image_generate" and status == "generating":
+        return "generating"
+    if tool_name == "web_search" and status == "searching":
+        return "searching"
+    return "in_progress"
+
+
+def _builtin_tool_stream_event_type(tool_name: str, status: str) -> str:
+    if tool_name == "image_generate":
+        if status == "completed":
+            return "response.image_generation_call.completed"
+        if status == "generating":
+            return "response.image_generation_call.generating"
+        return "response.image_generation_call.in_progress"
+
+    if status == "completed":
+        return "response.web_search_call.completed"
+    if status == "searching":
+        return "response.web_search_call.searching"
+    return "response.web_search_call.in_progress"
+
+
+def _builtin_tool_stream_item_id(tool_name: str, response_id: str) -> str:
+    if tool_name == "image_generate":
+        return f"ig_{response_id}_0"
+    return f"ws_{response_id}"
+
+
+def _image_generation_stream_item(
+    response_id: str,
+    status: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    image_files = [
+        file_data
+        for file_data in ResponseProcessor._extract_files(metadata)
+        if ResponseProcessor._is_image_file(file_data)
+    ]
+    file_data = image_files[0] if image_files else {}
+    item = {
+        "id": _builtin_tool_stream_item_id("image_generate", response_id),
+        "type": "image_generation_call",
+        "status": status,
+        "result": file_data.get("content"),
+    }
+    if file_data:
+        ResponseProcessor._copy_file_metadata(item, file_data)
+    return item
+
+
+def _web_search_stream_item(
+    response_id: str,
+    status: str,
+    request_data: Optional[dict],
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    inline_data = ResponseProcessor._normalize_inline_data(metadata.get("inline_data"))
+    sources = ResponseProcessor._extract_sources(inline_data)
+    return {
+        "id": _builtin_tool_stream_item_id("web_search", response_id),
+        "type": "web_search_call",
+        "status": status,
+        "action": {
+            "type": "search",
+            "query": ResponseProcessor._request_input_text(request_data),
+            "sources": [
+                {"type": "url", "url": source["url"]}
+                for source in sources.values()
+                if source.get("url")
+            ],
+        },
+    }
+
+
+def _builtin_tool_stream_item(
+    tool_name: str,
+    response_id: str,
+    status: str,
+    request_data: Optional[dict],
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    if tool_name == "image_generate":
+        return _image_generation_stream_item(response_id, status, metadata)
+    return _web_search_stream_item(response_id, status, request_data, metadata)
+
+
+def _builtin_tool_has_stream_result(
+    tool_name: str,
+    metadata: dict[str, Any],
+) -> bool:
+    if tool_name == "image_generate":
+        return any(
+            ResponseProcessor._is_image_file(file_data)
+            for file_data in ResponseProcessor._extract_files(metadata)
+        )
+
+    inline_data = ResponseProcessor._normalize_inline_data(metadata.get("inline_data"))
+    return bool(ResponseProcessor._extract_sources(inline_data))
+
+
 async def stream_responses_generator(
     request: Request,
     chat_messages: Chat,
@@ -410,6 +522,202 @@ async def stream_responses_generator(
             "files": [],
             "inline_data": {},
         }
+        builtin_tool_streams: dict[str, dict[str, Any]] = {}
+        builtin_tool_stream_order: list[str] = []
+        text_output_index = 0
+
+        def emit_sequenced_event(event_type: str, data: dict[str, Any]) -> str:
+            nonlocal sequence_number
+            data["type"] = event_type
+            data["sequence_number"] = sequence_number
+            sequence_number += 1
+            return sse_event(event_type, data)
+
+        def ensure_builtin_tool_stream(tool_name: str) -> list[str]:
+            if tool_name in builtin_tool_streams:
+                return []
+
+            output_index = len(builtin_tool_stream_order)
+            builtin_tool_stream_order.append(tool_name)
+            item = _builtin_tool_stream_item(
+                tool_name,
+                response_id,
+                "in_progress",
+                request_data,
+                builtin_message_metadata,
+            )
+            builtin_tool_streams[tool_name] = {
+                "item_id": item["id"],
+                "output_index": output_index,
+                "last_status": "in_progress",
+                "completed_event_emitted": False,
+                "item_done": False,
+            }
+            return [
+                emit_sequenced_event(
+                    "response.output_item.added",
+                    {
+                        "output_index": output_index,
+                        "item": item,
+                    },
+                )
+            ]
+
+        def emit_builtin_tool_execution_events(
+            executions: Any,
+        ) -> list[str]:
+            if not isinstance(executions, list):
+                return []
+
+            events = []
+            for execution in executions:
+                if not isinstance(execution, dict):
+                    continue
+                tool_name = _builtin_tool_stream_name(execution.get("name"))
+                if not tool_name:
+                    continue
+
+                events.extend(ensure_builtin_tool_stream(tool_name))
+                state = builtin_tool_streams[tool_name]
+                status = _builtin_tool_stream_status(
+                    tool_name,
+                    execution.get("status"),
+                )
+                state["last_status"] = status
+
+                if status == "failed":
+                    continue
+                if status == "completed" and state["completed_event_emitted"]:
+                    continue
+
+                event_data = {
+                    "item_id": state["item_id"],
+                    "output_index": state["output_index"],
+                    "tool_execution": execution,
+                }
+                if "seconds_left" in execution:
+                    event_data["seconds_left"] = execution["seconds_left"]
+                events.append(
+                    emit_sequenced_event(
+                        _builtin_tool_stream_event_type(tool_name, status),
+                        event_data,
+                    )
+                )
+                if status == "completed":
+                    state["completed_event_emitted"] = True
+            return events
+
+        def emit_builtin_tool_result_events() -> list[str]:
+            events = []
+            for tool_name in builtin_tool_stream_order:
+                state = builtin_tool_streams[tool_name]
+                if state["item_done"] or not _builtin_tool_has_stream_result(
+                    tool_name,
+                    builtin_message_metadata,
+                ):
+                    continue
+
+                if not state["completed_event_emitted"]:
+                    events.append(
+                        emit_sequenced_event(
+                            _builtin_tool_stream_event_type(
+                                tool_name,
+                                "completed",
+                            ),
+                            {
+                                "item_id": state["item_id"],
+                                "output_index": state["output_index"],
+                            },
+                        )
+                    )
+                    state["completed_event_emitted"] = True
+
+                item = _builtin_tool_stream_item(
+                    tool_name,
+                    response_id,
+                    "completed",
+                    request_data,
+                    builtin_message_metadata,
+                )
+                events.append(
+                    emit_sequenced_event(
+                        "response.output_item.done",
+                        {
+                            "output_index": state["output_index"],
+                            "item": item,
+                        },
+                    )
+                )
+                state["item_done"] = True
+            return events
+
+        def emit_pending_builtin_tool_done_events(
+            final_items: list[dict[str, Any]],
+        ) -> list[str]:
+            events = []
+            final_items_by_tool = {
+                "image_generate": next(
+                    (
+                        item
+                        for item in final_items
+                        if item.get("type") == "image_generation_call"
+                    ),
+                    None,
+                ),
+                "web_search": next(
+                    (
+                        item
+                        for item in final_items
+                        if item.get("type") == "web_search_call"
+                    ),
+                    None,
+                ),
+            }
+            for tool_name in builtin_tool_stream_order:
+                state = builtin_tool_streams[tool_name]
+                if state["item_done"]:
+                    continue
+                final_item = final_items_by_tool[tool_name]
+                if final_item:
+                    item = dict(final_item)
+                    item["id"] = state["item_id"]
+                    status = item.get("status", state["last_status"])
+                else:
+                    status = state["last_status"]
+                    item = _builtin_tool_stream_item(
+                        tool_name,
+                        response_id,
+                        status,
+                        request_data,
+                        builtin_message_metadata,
+                    )
+
+                if status == "completed" and not state["completed_event_emitted"]:
+                    events.append(
+                        emit_sequenced_event(
+                            _builtin_tool_stream_event_type(
+                                tool_name,
+                                "completed",
+                            ),
+                            {
+                                "item_id": state["item_id"],
+                                "output_index": state["output_index"],
+                            },
+                        )
+                    )
+                    state["completed_event_emitted"] = True
+
+                events.append(
+                    emit_sequenced_event(
+                        "response.output_item.done",
+                        {
+                            "output_index": state["output_index"],
+                            "item": item,
+                        },
+                    )
+                )
+                state["item_done"] = True
+            return events
 
         async with gigachat_request_options(giga_client, request_options):
             async for _i, chunk in aio_enumerate(giga_client.astream(chat_messages)):
@@ -442,6 +750,12 @@ async def stream_responses_generator(
                 if delta_reasoning:
                     reasoning_text += delta_reasoning
                 _accumulate_builtin_metadata(builtin_message_metadata, delta)
+                for event in emit_builtin_tool_execution_events(
+                    delta.get("tool_executions")
+                ):
+                    yield event
+                for event in emit_builtin_tool_result_events():
+                    yield event
 
                 if delta_function_call:
                     is_function_call = True
@@ -503,11 +817,12 @@ async def stream_responses_generator(
 
                 elif delta_content:
                     if not output_item_added:
+                        text_output_index = len(builtin_tool_stream_order)
                         yield sse_event(
                             "response.output_item.added",
                             {
                                 "type": "response.output_item.added",
-                                "output_index": 0,
+                                "output_index": text_output_index,
                                 "item": {
                                     "id": msg_id,
                                     "status": "in_progress",
@@ -525,7 +840,7 @@ async def stream_responses_generator(
                             {
                                 "type": "response.content_part.added",
                                 "item_id": msg_id,
-                                "output_index": 0,
+                                "output_index": text_output_index,
                                 "content_index": 0,
                                 "part": {
                                     "type": "output_text",
@@ -544,7 +859,7 @@ async def stream_responses_generator(
                         {
                             "type": "response.output_text.delta",
                             "item_id": msg_id,
-                            "output_index": 0,
+                            "output_index": text_output_index,
                             "content_index": 0,
                             "delta": delta_content,
                             "sequence_number": sequence_number,
@@ -639,11 +954,12 @@ async def stream_responses_generator(
 
             if message_needed:
                 if not output_item_added:
+                    text_output_index = len(builtin_tool_stream_order)
                     yield sse_event(
                         "response.output_item.added",
                         {
                             "type": "response.output_item.added",
-                            "output_index": 0,
+                            "output_index": text_output_index,
                             "item": {
                                 "id": msg_id,
                                 "status": "in_progress",
@@ -661,7 +977,7 @@ async def stream_responses_generator(
                         {
                             "type": "response.content_part.added",
                             "item_id": msg_id,
-                            "output_index": 0,
+                            "output_index": text_output_index,
                             "content_index": 0,
                             "part": {
                                 "type": "output_text",
@@ -678,7 +994,7 @@ async def stream_responses_generator(
                     {
                         "type": "response.output_text.done",
                         "item_id": msg_id,
-                        "output_index": 0,
+                        "output_index": text_output_index,
                         "content_index": 0,
                         "text": full_text,
                         "sequence_number": sequence_number,
@@ -691,7 +1007,7 @@ async def stream_responses_generator(
                     {
                         "type": "response.content_part.done",
                         "item_id": msg_id,
-                        "output_index": 0,
+                        "output_index": text_output_index,
                         "content_index": 0,
                         "part": output_text_part,
                         "sequence_number": sequence_number,
@@ -703,7 +1019,7 @@ async def stream_responses_generator(
                     "response.output_item.done",
                     {
                         "type": "response.output_item.done",
-                        "output_index": 0,
+                        "output_index": text_output_index,
                         "item": {
                             "id": msg_id,
                             "status": "completed",
@@ -731,6 +1047,8 @@ async def stream_responses_generator(
                     }
                 )
             final_output.extend(builtin_items)
+            for event in emit_pending_builtin_tool_done_events(builtin_items):
+                yield event
             if message_needed:
                 final_output.append(
                     {
