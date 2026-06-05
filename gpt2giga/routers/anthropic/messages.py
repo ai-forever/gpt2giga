@@ -27,7 +27,11 @@ from gpt2giga.protocol.anthropic.request import (
     _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
-from gpt2giga.protocol.anthropic.streaming import _stream_anthropic_generator
+from gpt2giga.protocol.anthropic.streaming import (
+    _stream_anthropic_generator,
+    _stream_anthropic_v2_generator,
+)
+from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
 
 router = APIRouter(tags=["Anthropic"])
 
@@ -74,14 +78,48 @@ async def messages(request: Request):
 
     model = data.get("model", "unknown")
     openai_data: Dict = _build_openai_data_from_anthropic_request(data, state.logger)
-    async with gigachat_request_options(giga_client, request_options):
-        chat_messages = await state.request_transformer.prepare_chat_completion(
-            openai_data, giga_client
-        )
     structured_output_fallback = (
         _is_anthropic_structured_output_request(data)
         and state.config.proxy_settings.structured_output_mode == "function_call"
     )
+    mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
+
+    if mode == "v2":
+        async with gigachat_request_options(giga_client, request_options):
+            chat_request = await state.request_transformer.prepare_chat_completion_v2(
+                openai_data, giga_client
+            )
+        if not stream:
+            async with gigachat_request_options(giga_client, request_options):
+                response = await giga_client.achat.create(chat_request)
+            giga_dict = adapt_v2_completion_to_v1_shape(
+                response,
+                default_model=model,
+            )
+            return _build_anthropic_response(
+                giga_dict,
+                model,
+                current_rquid,
+                is_structured_output=structured_output_fallback,
+            )
+
+        return StreamingResponse(
+            _stream_anthropic_v2_generator(
+                request,
+                model,
+                chat_request,
+                current_rquid,
+                giga_client,
+                is_structured_output=structured_output_fallback,
+                request_options=request_options,
+            ),
+            media_type="text/event-stream",
+        )
+
+    async with gigachat_request_options(giga_client, request_options):
+        chat_messages = await state.request_transformer.prepare_chat_completion(
+            openai_data, giga_client
+        )
 
     if not stream:
         async with gigachat_request_options(giga_client, request_options):
