@@ -180,7 +180,25 @@ async def test_prepare_response_v2_builds_primary_request_from_responses_input()
     assert request.messages[0].content[0].text == "be concise"
     assert request.messages[1].content[0].text == "hello"
     assert request.model_options.max_tokens == 32
+    assert request.storage is None
+    assert "storage" not in request.model_dump(exclude_none=True)
+
+
+@pytest.mark.asyncio
+async def test_prepare_response_v2_sends_storage_when_store_true():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "hello",
+            "store": True,
+        }
+    )
+
     assert request.storage.model_dump(exclude_none=True) == {}
+    assert request.model_dump(exclude_none=True)["storage"] == {}
 
 
 @pytest.mark.asyncio
@@ -319,7 +337,8 @@ async def test_prepare_response_v2_replays_function_call_with_tools_state_id():
         "horoscope": "Aquarius: Next Tuesday you will befriend a baby otter."
     }
     assert len(request.tools[0].functions.specifications) == 1
-    assert request.storage.model_dump(exclude_none=True) == {}
+    assert request.storage is None
+    assert "storage" not in request.model_dump(exclude_none=True)
 
 
 @pytest.mark.asyncio
