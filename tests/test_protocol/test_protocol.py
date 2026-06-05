@@ -490,6 +490,61 @@ def test_response_processor_native_so_preserves_responses_tool_call():
     ]
 
 
+def test_response_processor_responses_metadata_includes_input_called_tools():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Aquarius: stars are aligned.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response_api(
+        {
+            "input": [
+                {"role": "user", "content": "What is my horoscope?"},
+                {
+                    "type": "function_call",
+                    "id": "fc_state-1",
+                    "call_id": "state-1",
+                    "name": "sum",
+                    "arguments": '{"a":1}',
+                    "status": "completed",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "state-1",
+                    "output": '{"result":1}',
+                },
+            ]
+        },
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="resp-1",
+    )
+
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "input_index": 1,
+            "name": "sum",
+            "arguments": {"a": 1},
+            "call_id": "state-1",
+            "tools_state_id": "state-1",
+            "id": "fc_state-1",
+            "status": "completed",
+        }
+    ]
+
+
 def test_response_processor_response_api_extracts_think_tags():
     rp = ResponseProcessor(logger)
     giga_resp = MockResponse(

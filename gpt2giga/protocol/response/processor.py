@@ -145,7 +145,16 @@ class ResponseProcessor:
         if is_structured_output:
             provider_metadata.pop("gigachat_called_tools", None)
         else:
-            response_metadata.update(self._extract_called_tools_metadata(giga_dict))
+            called_tools = self._extract_responses_input_called_tool_items(data)
+            called_tools.extend(
+                self._extract_called_tool_items_from_metadata(
+                    provider_metadata.pop("gigachat_called_tools", None)
+                )
+            )
+            called_tools.extend(
+                self._extract_called_tool_items_from_response(giga_dict)
+            )
+            response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
@@ -929,9 +938,18 @@ class ResponseProcessor:
         cls,
         data: Mapping[str, Any],
     ) -> dict[str, str]:
+        return cls._called_tools_metadata(
+            cls._extract_called_tool_items_from_response(data)
+        )
+
+    @classmethod
+    def _extract_called_tool_items_from_response(
+        cls,
+        data: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
         choices = data.get("choices")
         if not isinstance(choices, list):
-            return {}
+            return []
 
         called_tools: list[dict[str, Any]] = []
         for choice_index, raw_choice in enumerate(choices):
@@ -962,10 +980,72 @@ class ResponseProcessor:
             if state_id:
                 item["tools_state_id"] = state_id
             called_tools.append(item)
+        return called_tools
 
+    @classmethod
+    def _extract_responses_input_called_tool_items(
+        cls,
+        request_data: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        input_items = request_data.get("input")
+        if not isinstance(input_items, list):
+            return []
+
+        called_tools: list[dict[str, Any]] = []
+        for input_index, raw_item in enumerate(input_items):
+            if not isinstance(raw_item, Mapping):
+                continue
+            if raw_item.get("type") != "function_call":
+                continue
+            name = raw_item.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+
+            item: dict[str, Any] = {
+                "index": len(called_tools),
+                "input_index": input_index,
+                "name": map_tool_name_from_gigachat(name),
+                "arguments": cls._normalize_called_tool_arguments(
+                    raw_item.get("arguments", {})
+                ),
+            }
+            call_id = cls._normalize_metadata_string(raw_item.get("call_id"))
+            if call_id:
+                item["call_id"] = call_id
+                item["tools_state_id"] = call_id
+            item_id = cls._normalize_metadata_string(raw_item.get("id"))
+            if item_id:
+                item["id"] = item_id
+            status = cls._normalize_metadata_string(raw_item.get("status"))
+            if status:
+                item["status"] = status
+            called_tools.append(item)
+        return called_tools
+
+    @classmethod
+    def _extract_called_tool_items_from_metadata(
+        cls,
+        raw_called_tools: Any,
+    ) -> list[dict[str, Any]]:
+        if not isinstance(raw_called_tools, str) or not raw_called_tools:
+            return []
+        try:
+            decoded = json.loads(raw_called_tools)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(decoded, list):
+            return []
+        return [dict(item) for item in decoded if isinstance(item, Mapping)]
+
+    @classmethod
+    def _called_tools_metadata(
+        cls,
+        called_tools: list[dict[str, Any]],
+    ) -> dict[str, str]:
         if not called_tools:
             return {}
 
+        called_tools = cls._dedupe_called_tool_items(called_tools)
         return {
             "gigachat_called_tools": json.dumps(
                 called_tools,
@@ -973,6 +1053,37 @@ class ResponseProcessor:
                 separators=(",", ":"),
             )
         }
+
+    @classmethod
+    def _dedupe_called_tool_items(
+        cls,
+        called_tools: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in called_tools:
+            key = cls._called_tool_item_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            normalized = dict(item)
+            normalized["index"] = len(deduped)
+            deduped.append(normalized)
+        return deduped
+
+    @staticmethod
+    def _called_tool_item_key(item: Mapping[str, Any]) -> str:
+        return json.dumps(
+            {
+                "name": item.get("name"),
+                "arguments": item.get("arguments"),
+                "call_id": item.get("call_id"),
+                "tools_state_id": item.get("tools_state_id"),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
 
     @staticmethod
     def _normalize_called_tool_arguments(arguments: Any) -> Any:

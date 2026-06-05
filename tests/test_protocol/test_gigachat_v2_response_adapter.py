@@ -142,6 +142,69 @@ def test_adapted_v2_response_preserves_provider_state_ids_in_responses_metadata(
     assert parsed.metadata["gigachat_thread_id"] == "thread_1"
 
 
+def test_adapted_v2_text_response_preserves_called_tools_from_responses_input():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "thread_id": "thread_1",
+            "message_id": "provider_message_2",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "019e94aa-de11-705c-998b-040af4d06462",
+                    "content": [{"text": "Aquarius: stars are aligned."}],
+                }
+            ],
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+    )
+    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+
+    processor = ResponseProcessor(logger=logger)
+    processed = processor.process_response_api(
+        {
+            "input": [
+                {"role": "user", "content": "What is my horoscope?"},
+                {
+                    "type": "function_call",
+                    "id": "fc_019e94aa-de11-705c-998b-040af4d06462",
+                    "call_id": "019e94aa-de11-705c-998b-040af4d06462",
+                    "name": "get_horoscope",
+                    "arguments": '{"sign":"Aquarius"}',
+                    "status": "completed",
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "019e94aa-de11-705c-998b-040af4d06462",
+                    "output": '{"horoscope":"Aquarius: stars are aligned."}',
+                },
+            ]
+        },
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="thread_1",
+    )
+
+    assert processed["output"][0]["content"][0]["text"] == (
+        "Aquarius: stars are aligned."
+    )
+    assert json.loads(processed["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "input_index": 1,
+            "name": "get_horoscope",
+            "arguments": {"sign": "Aquarius"},
+            "call_id": "019e94aa-de11-705c-998b-040af4d06462",
+            "tools_state_id": "019e94aa-de11-705c-998b-040af4d06462",
+            "id": "fc_019e94aa-de11-705c-998b-040af4d06462",
+            "status": "completed",
+        }
+    ]
+    assert processed["metadata"]["gigachat_tool_state_id"] == (
+        "019e94aa-de11-705c-998b-040af4d06462"
+    )
+
+
 def test_adapt_v2_completion_preserves_x_headers_for_response_metadata():
     response = ChatCompletionResponse.model_validate(
         {
