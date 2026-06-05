@@ -28,7 +28,7 @@ uv run python examples/openai/responses/single_prompt.py
 - `reasoning.py`: reasoning в стиле Responses API
 - `with_instructions.py`: instructions/system
 - `function_calling.py`: tool use / function calling
+- `multiple_tool_calls.py`: несколько tool calls в одном сценарии
 - `structured_output.py`, `structured_output_nested.py`: Structured Outputs
 - `json_schema.py`: JSON Schema
 - `image_url.py`, `base64_image.py`: изображения
-
