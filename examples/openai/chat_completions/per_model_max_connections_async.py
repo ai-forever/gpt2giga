@@ -2,7 +2,7 @@
 
 Start the proxy in another terminal with a visible fail-fast limit:
 
-    GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat-2-Max":1}' \
+    GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat-2":1}' \
     GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=0 \
     uv run gpt2giga
 
@@ -24,7 +24,7 @@ from openai import APIStatusError, AsyncOpenAI
 
 BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8090")
 API_KEY = os.getenv("OPENAI_API_KEY", "0")
-MODEL = os.getenv("GPT2GIGA_EXAMPLE_MODEL", "GigaChat-2-Max")
+MODEL = os.getenv("GPT2GIGA_EXAMPLE_MODEL", "GigaChat-2")
 HOLD_SECONDS = float(os.getenv("GPT2GIGA_EXAMPLE_HOLD_SECONDS", "3"))
 CONTENDERS = int(os.getenv("GPT2GIGA_EXAMPLE_CONTENDERS", "2"))
 FIRST_CHUNK_TIMEOUT = float(os.getenv("GPT2GIGA_EXAMPLE_FIRST_CHUNK_TIMEOUT", "30"))
