@@ -7,6 +7,7 @@ from typing import Any, Dict, Literal, Mapping, Optional
 from gigachat.models import ChatCompletion, ChatCompletionChunk
 from openai.types.responses import ResponseFunctionToolCall, ResponseTextDeltaEvent
 
+from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.reasoning import (
     ReasoningContent,
     ReasoningContentParser,
@@ -37,10 +38,6 @@ class ResponseProcessor:
             else "function_call"
         )
         self._stream_reasoning_parsers: dict[str, ReasoningContentParser] = {}
-
-    @property
-    def _is_prod_mode(self) -> bool:
-        return self._mode == "PROD"
 
     def _uses_structured_output_function_call(self) -> bool:
         return self._structured_output_mode == "function_call"
@@ -96,22 +93,19 @@ class ResponseProcessor:
             "system_fingerprint": f"fp_{response_id}",
         }
 
-        if self._is_prod_mode:
-            self.logger.bind(event="chat_completion_response").debug(
-                "Processed chat completion response (payload omitted in PROD)"
-            )
-        else:
-            choice_count = len(result.get("choices", []))
-            usage = result.get("usage") or {}
-            self.logger.bind(
-                event="chat_completion_response",
-                response_id=result.get("id"),
-                choice_count=choice_count,
-                total_tokens=usage.get("total_tokens"),
-            ).debug(
-                f"Processed chat completion: {choice_count} choices, "
-                f"tokens={usage.get('total_tokens')}"
-            )
+        choice_count = len(result.get("choices", []))
+        usage = result.get("usage") or {}
+        log_debug_payload(
+            self.logger,
+            self._mode,
+            event="chat_completion_response",
+            message="Processed chat completion response",
+            payload_key="response",
+            payload=result,
+            response_id=result.get("id"),
+            choice_count=choice_count,
+            total_tokens=usage.get("total_tokens"),
+        )
         return result
 
     def process_response_api(
@@ -148,22 +142,19 @@ class ResponseProcessor:
             usage=self._build_response_usage(giga_dict.get("usage")),
             response_text=response_text,
         )
-        if self._is_prod_mode:
-            self.logger.bind(event="responses_api_response").debug(
-                "Processed responses API response (payload omitted in PROD)"
-            )
-        else:
-            output_count = len(result.get("output", []))
-            usage = result.get("usage") or {}
-            self.logger.bind(
-                event="responses_api_response",
-                response_id=result.get("id"),
-                output_count=output_count,
-                total_tokens=usage.get("total_tokens"),
-            ).debug(
-                f"Processed responses API: {output_count} outputs, "
-                f"tokens={usage.get('total_tokens')}"
-            )
+        output_count = len(result.get("output", []))
+        usage = result.get("usage") or {}
+        log_debug_payload(
+            self.logger,
+            self._mode,
+            event="responses_api_response",
+            message="Processed responses API response",
+            payload_key="response",
+            payload=result,
+            response_id=result.get("id"),
+            output_count=output_count,
+            total_tokens=usage.get("total_tokens"),
+        )
 
         return result
 
@@ -591,15 +582,15 @@ class ResponseProcessor:
             "system_fingerprint": f"fp_{response_id}",
         }
 
-        if self._is_prod_mode:
-            self.logger.bind(event="stream_chunk").debug(
-                "Processed stream chunk (payload omitted in PROD)"
-            )
-        else:
-            self.logger.bind(
-                event="stream_chunk",
-                response_id=result.get("id"),
-            ).debug("Processed stream chunk")
+        log_debug_payload(
+            self.logger,
+            self._mode,
+            event="stream_chunk",
+            message="Processed stream chunk",
+            payload_key="response",
+            payload=result,
+            response_id=result.get("id"),
+        )
         return result
 
     def flush_stream_reasoning(
@@ -643,6 +634,16 @@ class ResponseProcessor:
                 response_id=response_id,
             )
 
+        log_debug_payload(
+            self.logger,
+            self._mode,
+            event="responses_stream_chunk",
+            message="Processed responses stream chunk",
+            payload_key="response",
+            payload=result,
+            response_id=response_id,
+            sequence_number=sequence_number,
+        )
         return result
 
     def _process_choice(

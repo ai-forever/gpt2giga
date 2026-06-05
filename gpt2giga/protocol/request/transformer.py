@@ -15,6 +15,7 @@ from gigachat.models import (
 
 from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.content_utils import ensure_json_object_str
+from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
 from gpt2giga.common.message_utils import (
     collapse_user_messages,
@@ -773,21 +774,18 @@ class RequestTransformer:
             m.model_dump(exclude_none=True) for m in collapsed_objs
         ]
 
-        if self.config.proxy_settings.mode == "PROD":
-            self.logger.bind(event="gigachat_request").debug(
-                "Sending request to GigaChat API (payload omitted in PROD)"
-            )
-        else:
-            msg_count = len(transformed_data.get("messages", []))
-            has_functions = bool(transformed_data.get("functions"))
-            self.logger.bind(
-                event="gigachat_request",
-                message_count=msg_count,
-                has_functions=has_functions,
-            ).debug(
-                f"Sending request to GigaChat API: "
-                f"{msg_count} messages, functions={has_functions}"
-            )
+        msg_count = len(transformed_data.get("messages", []))
+        has_functions = bool(transformed_data.get("functions"))
+        log_debug_payload(
+            self.logger,
+            self.config,
+            event="gigachat_request",
+            message="Sending request to GigaChat API",
+            payload_key="payload",
+            payload=transformed_data,
+            message_count=msg_count,
+            has_functions=has_functions,
+        )
 
         return transformed_data
 
@@ -803,21 +801,19 @@ class RequestTransformer:
         request_payload = self._build_v2_request_payload(transformed_data, messages)
         chat_request = ChatCompletionRequest.model_validate(request_payload)
 
-        if self.config.proxy_settings.mode == "PROD":
-            self.logger.bind(event="gigachat_request_v2").debug(
-                "Sending v2 request to GigaChat API (payload omitted in PROD)"
-            )
-        else:
-            msg_count = len(chat_request.messages)
-            has_tools = bool(chat_request.tools)
-            self.logger.bind(
-                event="gigachat_request_v2",
-                message_count=msg_count,
-                has_tools=has_tools,
-            ).debug(
-                f"Sending v2 request to GigaChat API: "
-                f"{msg_count} messages, tools={has_tools}"
-            )
+        msg_count = len(chat_request.messages)
+        has_tools = bool(chat_request.tools)
+        log_debug_payload(
+            self.logger,
+            self.config,
+            event="gigachat_request_v2",
+            message="Sending v2 request to GigaChat API",
+            payload_key="payload",
+            payload=chat_request,
+            exclude_none=True,
+            message_count=msg_count,
+            has_tools=has_tools,
+        )
 
         return chat_request
 

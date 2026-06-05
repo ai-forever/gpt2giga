@@ -1,5 +1,8 @@
+from unittest.mock import MagicMock
+
 import pytest
-from gpt2giga.models.config import ProxyConfig
+
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from loguru import logger
 
@@ -59,6 +62,25 @@ async def test_request_transformer_tools_to_functions():
     assert chat.get("functions") and len(chat["functions"]) == 1
 
 
+@pytest.mark.asyncio
+async def test_request_transformer_dev_debug_logging_includes_full_payload():
+    mock_logger = MagicMock()
+    mock_bound_logger = MagicMock()
+    mock_logger.bind.return_value = mock_bound_logger
+    cfg = ProxyConfig(proxy=ProxySettings(mode="DEV"))
+    rt = RequestTransformer(cfg, mock_logger)
+
+    await rt.send_to_gigachat(
+        {"model": "GigaChat", "messages": [{"role": "user", "content": "hello"}]}
+    )
+
+    bind_kwargs = mock_logger.bind.call_args.kwargs
+    assert bind_kwargs["event"] == "gigachat_request"
+    assert bind_kwargs["payload"]["model"] == "GigaChat"
+    assert bind_kwargs["payload"]["messages"][0]["content"] == "hello"
+    mock_bound_logger.debug.assert_called_with("Sending request to GigaChat API")
+
+
 class MockResponse:
     def __init__(self, data):
         self.data = data
@@ -89,6 +111,58 @@ def test_response_processor_process_function_call():
     out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
     choice = out["choices"][0]
     assert choice["message"]["tool_calls"][0]["type"] == "function"
+
+
+def test_response_processor_dev_debug_logging_includes_full_response():
+    mock_logger = MagicMock()
+    mock_bound_logger = MagicMock()
+    mock_logger.bind.return_value = mock_bound_logger
+    rp = ResponseProcessor(mock_logger, mode="DEV")
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+
+    bind_kwargs = mock_logger.bind.call_args.kwargs
+    assert bind_kwargs["event"] == "chat_completion_response"
+    assert bind_kwargs["response"] == out
+    assert bind_kwargs["response"]["choices"][0]["message"]["content"] == "Hello!"
+    mock_bound_logger.debug.assert_called_with("Processed chat completion response")
+
+
+def test_response_processor_prod_debug_logging_omits_response():
+    mock_logger = MagicMock()
+    mock_bound_logger = MagicMock()
+    mock_logger.bind.return_value = mock_bound_logger
+    rp = ResponseProcessor(mock_logger, mode="PROD")
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "secret response"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    rp.process_response(giga_resp, gpt_model="gpt-x", response_id="1")
+
+    bind_kwargs = mock_logger.bind.call_args.kwargs
+    assert bind_kwargs == {"event": "chat_completion_response"}
+    mock_bound_logger.debug.assert_called_with(
+        "Processed chat completion response (payload omitted in PROD)"
+    )
 
 
 def test_response_processor_native_so_preserves_chat_tool_call():

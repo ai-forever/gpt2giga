@@ -2,10 +2,12 @@
 import contextvars
 import json
 import sys
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from loguru import logger
 
-from .constants import _JSON_KV_RE, _KV_EQ_RE, _BEARER_RE
+from .constants import _JSON_KV_RE, _KV_EQ_RE, _BEARER_RE, SENSITIVE_KEYS
 
 # Context variable for rquid
 rquid_context = contextvars.ContextVar("rquid", default="-")
@@ -17,6 +19,27 @@ def redact_sensitive(message: str) -> str:
     message = _KV_EQ_RE.sub(r"\1=***", message)
     message = _BEARER_RE.sub(r"\1***", message)
     return message
+
+
+def redact_sensitive_data(value: Any) -> Any:
+    """Redact sensitive values inside structured log extras."""
+    if isinstance(value, Mapping):
+        redacted = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if key_text in SENSITIVE_KEYS:
+                redacted[key] = "***"
+            else:
+                redacted[key] = redact_sensitive_data(item)
+        return redacted
+
+    if isinstance(value, str):
+        return redact_sensitive(value)
+
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return [redact_sensitive_data(item) for item in value]
+
+    return value
 
 
 def get_rquid() -> str:
@@ -90,6 +113,7 @@ def setup_logger(
             record["extra"]["rquid"] = get_rquid()
             if _do_redact:
                 record["message"] = redact_sensitive(record["message"])
+                record["extra"] = redact_sensitive_data(record["extra"])
 
     logger.configure(patcher=RquidAndRedactPatcher())
     return logger
