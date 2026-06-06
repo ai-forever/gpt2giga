@@ -141,7 +141,7 @@ sequenceDiagram
 `extra_body` для Chat Completions, Responses и Anthropic Messages переносится в GigaChat `additional_fields` целиком, включая SDK-style поля, которые клиент разворачивает в top-level JSON:
 
 - OpenAI Embeddings не поддерживает `extra_body`; используйте только `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query`.
-- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` возвращают `400`. Built-in tools поддерживаются для Responses API в режиме GigaChat v2 (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); в остальных режимах возвращают `400`.
+- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` возвращают `400`. Built-in tools принимаются для Responses API в режиме GigaChat v2 (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); нормализованные OpenAI Responses output items и stream progress events сейчас строятся для `web_search*` и `image_generation` / `image_generate`.
 - Для Anthropic Messages unsupported параметры и блоки вроде `container`, `context_management`, `mcp_servers`, server tools, `document`, `file`, `container_upload`, `search_result`, `thinking`/`redacted_thinking` во входном контенте возвращают `400`.
 
 OpenAI SDK:
@@ -405,6 +405,7 @@ gpt2giga \
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов по умолчанию. При `GPT2GIGA_PASS_MODEL=True` используется модель из запроса клиента (с fallback на это значение).
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
 - `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
+- `GPT2GIGA_DEFAULT_MAX_TOKENS` — опциональный default `max_tokens`. По умолчанию не задан, и gpt2giga не добавляет `max_tokens` к GigaChat-запросу, если клиент сам не передал лимит;
 - `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
 - `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
@@ -484,9 +485,11 @@ gpt2giga \
 
 Ограничения:
 
-- limiter локальный для одного процесса gpt2giga. Несколько workers, контейнеров или pods умножают effective limit;
+- limiter локальный для одного процесса gpt2giga. Несколько workers, контейнеров или pods умножают effective limit: `effective_limit = per_process_model_limit * workers * pods`. Например, `{"GigaChat-2-Max":5}` при двух workers в каждом из трёх pods даёт до `5 * 2 * 3 = 30` одновременных upstream-вызовов этой модели;
 - при `GPT2GIGA_PASS_TOKEN=True` разные credentials делят один per-model pool внутри процесса;
 - limiter применяется только к model-call endpoint-ам: Chat Completions, Responses, Embeddings, Anthropic Messages и `messages/count_tokens`. Model list/info endpoints не лимитируются.
+
+При локальном timeout-е limiter возвращает `429` с кодом `model_concurrency_limit` и пишет warning log event `model_concurrency_timeout` с `provider`, `model` и `limit`.
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;

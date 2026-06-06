@@ -54,6 +54,14 @@ def test_proxy_settings_default_max_tokens_from_env(monkeypatch):
     assert s.default_max_tokens == 128000
 
 
+@pytest.mark.parametrize("env_value", ["0", "-1"])
+def test_proxy_settings_default_max_tokens_must_be_positive(monkeypatch, env_value):
+    monkeypatch.setenv("GPT2GIGA_DEFAULT_MAX_TOKENS", env_value)
+
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
 def test_proxy_settings_model_max_connections_from_env(monkeypatch):
     monkeypatch.setenv(
         "GPT2GIGA_MODEL_MAX_CONNECTIONS",

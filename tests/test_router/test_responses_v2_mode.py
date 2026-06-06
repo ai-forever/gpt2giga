@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -68,16 +70,17 @@ class FakeAChatResource:
         self.stream_calls.append(payload)
 
         async def gen():
-            yield ChatCompletionChunk.model_validate(
-                {
-                    "messages": [
-                        {
-                            "role": "assistant",
-                            "content": [{"text": "ok-stream"}],
-                        }
-                    ]
-                }
-            )
+            chunk_payload = {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "ok-stream"}],
+                    }
+                ]
+            }
+            if self.thread_id is not None:
+                chunk_payload["thread_id"] = self.thread_id
+            yield ChatCompletionChunk.model_validate(chunk_payload)
 
         return gen()
 
@@ -227,3 +230,33 @@ def test_responses_v2_stream_uses_primary_stream():
     assert app.state.gigachat_client.achat.stream_calls == [
         {"contract": "responses-v2"}
     ]
+
+
+def test_responses_v2_stream_uses_thread_id_as_response_id():
+    app = make_app("v2", "inherit")
+    app.state.gigachat_client.achat.thread_id = "thread_1"
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/responses",
+        json={
+            "model": "gpt-x",
+            "input": "hi",
+            "previous_response_id": "resp_previous",
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    completed_event = [
+        block for block in body.split("\n\n") if "event: response.completed" in block
+    ][-1]
+    payload = json.loads(
+        next(
+            line for line in completed_event.splitlines() if line.startswith("data: ")
+        ).removeprefix("data: ")
+    )
+    assert payload["response"]["id"] == "resp_thread_1"
+    assert payload["response"]["previous_response_id"] == "resp_previous"

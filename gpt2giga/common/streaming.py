@@ -353,6 +353,7 @@ async def stream_responses_v2_generator(
     *,
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
+    acquired_model_limit: Optional[Any] = None,
 ) -> AsyncGenerator[str, None]:
     if giga_client is None:
         giga_client = get_gigachat_client(request)
@@ -368,6 +369,8 @@ async def stream_responses_v2_generator(
         request_options=None,
         model_limiter=model_limiter,
         effective_model=effective_model,
+        acquired_model_limit=acquired_model_limit,
+        response_id_from_stream_metadata=True,
     ):
         yield event
 
@@ -528,6 +531,8 @@ async def stream_responses_generator(
     *,
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
+    acquired_model_limit: Optional[Any] = None,
+    response_id_from_stream_metadata: bool = False,
 ) -> AsyncGenerator[str, None]:
     import time
 
@@ -552,6 +557,17 @@ async def stream_responses_generator(
     def sse_event(event_type: str, data: dict) -> str:
         return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
+    def update_response_identity() -> None:
+        nonlocal fc_id, msg_id, response_id
+        if not response_id_from_stream_metadata:
+            return
+        thread_id = response_metadata.get("gigachat_thread_id")
+        if not thread_id or thread_id == response_id:
+            return
+        response_id = thread_id
+        msg_id = f"msg_{response_id}"
+        fc_id = f"fc_{response_id}"
+
     def build_response_obj(status: str, output: list = None, usage: dict = None):
         return {
             "id": f"resp_{response_id}",
@@ -567,7 +583,9 @@ async def stream_responses_generator(
             "model": model,
             "output": output or [],
             "parallel_tool_calls": True,
-            "previous_response_id": None,
+            "previous_response_id": (
+                request_data.get("previous_response_id") if request_data else None
+            ),
             "reasoning": build_reasoning_config(),
             "store": request_data.get("store", True) if request_data else True,
             "temperature": request_data.get("temperature", 1) if request_data else 1,
@@ -586,7 +604,34 @@ async def stream_responses_generator(
             ),
         }
 
+    def response_start_events() -> list[str]:
+        nonlocal sequence_number
+        events = [
+            sse_event(
+                "response.created",
+                {
+                    "type": "response.created",
+                    "response": build_response_obj("in_progress"),
+                    "sequence_number": sequence_number,
+                },
+            )
+        ]
+        sequence_number += 1
+        events.append(
+            sse_event(
+                "response.in_progress",
+                {
+                    "type": "response.in_progress",
+                    "response": build_response_obj("in_progress"),
+                    "sequence_number": sequence_number,
+                },
+            )
+        )
+        sequence_number += 1
+        return events
+
     sequence_number = 0
+    release_acquired_model_limit = acquired_model_limit is not None
 
     try:
         if giga_client is None:
@@ -598,26 +643,6 @@ async def stream_responses_generator(
                 chat_messages, getattr(request.app.state, "config", None)
             )
         logger = getattr(request.app.state, "logger", None)
-
-        yield sse_event(
-            "response.created",
-            {
-                "type": "response.created",
-                "response": build_response_obj("in_progress"),
-                "sequence_number": sequence_number,
-            },
-        )
-        sequence_number += 1
-
-        yield sse_event(
-            "response.in_progress",
-            {
-                "type": "response.in_progress",
-                "response": build_response_obj("in_progress"),
-                "sequence_number": sequence_number,
-            },
-        )
-        sequence_number += 1
 
         full_text = ""
         reasoning_text = ""
@@ -829,11 +854,53 @@ async def stream_responses_generator(
                 state["item_done"] = True
             return events
 
-        async with model_limiter.limit(effective_model, provider="openai"):
+        async def iterate_chunks_with_optional_prefetch():
+            stream = aio_enumerate(giga_client.astream(chat_messages))
+            if not response_id_from_stream_metadata:
+                for event in response_start_events():
+                    yield event, None
+                async for item in stream:
+                    yield None, item
+                return
+
+            first_item = None
+            try:
+                first_item = await anext(stream)
+            except StopAsyncIteration:
+                pass
+            except Exception:
+                for event in response_start_events():
+                    yield event, None
+                raise
+            if first_item is not None:
+                first_giga_dict = first_item[1].model_dump()
+                response_metadata.update(
+                    extract_gigachat_response_metadata(first_giga_dict.get("x_headers"))
+                )
+                response_metadata.update(
+                    _extract_provider_response_metadata(first_giga_dict)
+                )
+                update_response_identity()
+            for event in response_start_events():
+                yield event, None
+            if first_item is not None:
+                yield None, first_item
+            async for item in stream:
+                yield None, item
+
+        async def emit_upstream_events() -> AsyncGenerator[str, None]:
+            nonlocal final_usage, full_text, function_call_data, functions_state_id
+            nonlocal is_function_call, output_item_added, reasoning_text
+            nonlocal sequence_number, text_output_index
             async with gigachat_request_options(giga_client, request_options):
-                async for _i, chunk in aio_enumerate(
-                    giga_client.astream(chat_messages)
-                ):
+                async for (
+                    prebuilt_event,
+                    chunk_item,
+                ) in iterate_chunks_with_optional_prefetch():
+                    if prebuilt_event is not None:
+                        yield prebuilt_event
+                        continue
+                    _i, chunk = chunk_item
                     if await request.is_disconnected():
                         if logger:
                             logger.info(
@@ -848,6 +915,7 @@ async def stream_responses_generator(
                     response_metadata.update(
                         _extract_provider_response_metadata(giga_dict)
                     )
+                    update_response_identity()
                     if giga_dict.get("usage"):
                         usage_builder = getattr(
                             request.app.state.response_processor,
@@ -987,6 +1055,14 @@ async def stream_responses_generator(
                             },
                         )
                         sequence_number += 1
+
+        if acquired_model_limit is not None:
+            async for event in emit_upstream_events():
+                yield event
+        else:
+            async with model_limiter.limit(effective_model, provider="openai"):
+                async for event in emit_upstream_events():
+                    yield event
 
         flushed_reasoning = reasoning_parser.flush()
         if flushed_reasoning.content:
@@ -1245,6 +1321,9 @@ async def stream_responses_generator(
             "sequence_number": sequence_number,
         }
         yield sse_event("error", error_response)
+    finally:
+        if release_acquired_model_limit:
+            await acquired_model_limit.__aexit__(None, None, None)
 
 
 def _extract_provider_response_metadata(data: dict[str, Any]) -> dict[str, str]:

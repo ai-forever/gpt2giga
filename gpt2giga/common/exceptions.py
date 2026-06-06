@@ -62,6 +62,14 @@ def exceptions_handler(func):
                 error_type=e.error_type,
             )
         except ModelConcurrencyTimeoutError as e:
+            from loguru import logger
+
+            logger.bind(
+                event="model_concurrency_timeout",
+                provider=e.provider,
+                model=e.model,
+                limit=e.limit,
+            ).warning(str(e))
             if e.provider == "anthropic":
                 return anthropic_compatibility_response(
                     str(e),

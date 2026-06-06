@@ -134,6 +134,13 @@ async def _post_response(client: httpx.AsyncClient, model: str):
     return await client.post("/responses", json={"model": model, "input": "hi"})
 
 
+async def _post_stream_response(client: httpx.AsyncClient, model: str):
+    return await client.post(
+        "/responses",
+        json={"model": model, "input": "hi", "stream": True},
+    )
+
+
 async def _wait_for_call_count(gigachat: GateGigachat, count: int) -> None:
     while gigachat.call_count < count:
         await asyncio.sleep(0)
@@ -186,6 +193,24 @@ async def test_responses_non_stream_timeout_returns_429() -> None:
     assert first_response.status_code == 200
     assert limited.status_code == 429
     assert limited.json()["error"]["code"] == "model_concurrency_limit"
+
+
+@pytest.mark.asyncio
+async def test_responses_stream_timeout_returns_http_429_before_sse() -> None:
+    limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
+    gigachat = GateGigachat()
+    app = _make_responses_app(limiter=limiter, gigachat=gigachat)
+
+    async with limiter.limit("GigaChat"):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            limited = await _post_stream_response(client, "GigaChat")
+
+    assert limited.status_code == 429
+    assert limited.headers["content-type"].startswith("application/json")
+    assert limited.json()["error"]["code"] == "model_concurrency_limit"
+    assert gigachat.call_count == 0
 
 
 @pytest.mark.asyncio
@@ -242,7 +267,6 @@ async def test_stream_responses_timeout_does_not_call_upstream() -> None:
         ]
 
     assert client.astream_calls == 0
-    assert "event: response.created" in lines[0]
-    assert "event: response.in_progress" in lines[1]
-    assert "event: error" in lines[2]
-    assert '"code": "model_concurrency_limit"' in lines[2]
+    assert len(lines) == 1
+    assert "event: error" in lines[0]
+    assert '"code": "model_concurrency_limit"' in lines[0]
