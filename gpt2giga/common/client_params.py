@@ -42,6 +42,11 @@ GIGACHAT_CONTEXT_HEADER_NAMES = frozenset(
     }
 )
 
+GIGACHAT_RESPONSE_METADATA_HEADER_KEYS = {
+    "x-request-id": "gigachat_x_request_id",
+    "x-session-id": "gigachat_x_session_id",
+}
+
 SAFE_GIGACHAT_QUERY_PARAM_NAMES = frozenset()
 
 BLOCKED_CLIENT_HEADER_NAMES = frozenset(
@@ -165,6 +170,43 @@ def filter_safe_extra_headers(raw: Any) -> dict[str, str]:
     return headers
 
 
+def extract_gigachat_response_metadata(raw_headers: Any) -> dict[str, str]:
+    """Return OpenAI metadata fields from allowlisted GigaChat response headers."""
+    if not isinstance(raw_headers, Mapping):
+        return {}
+
+    normalized_headers = {
+        normalize_header_name(name): value
+        for name, value in raw_headers.items()
+        if isinstance(name, str) and value is not None
+    }
+    metadata: dict[str, str] = {}
+    for header_name, metadata_key in GIGACHAT_RESPONSE_METADATA_HEADER_KEYS.items():
+        value = normalized_headers.get(header_name)
+        if isinstance(value, (str, int, float, bool)):
+            metadata[metadata_key] = str(value)
+    return metadata
+
+
+def merge_openai_response_metadata(
+    request_metadata: Any,
+    upstream_metadata: Optional[Mapping[str, str]] = None,
+) -> Any:
+    """Merge user metadata with proxy-added OpenAI response metadata."""
+    metadata = (
+        dict(request_metadata)
+        if isinstance(request_metadata, Mapping)
+        else request_metadata
+    )
+    if not upstream_metadata:
+        return metadata
+
+    if not isinstance(metadata, dict):
+        metadata = {}
+    metadata.update(upstream_metadata)
+    return metadata
+
+
 def filter_safe_query_items(
     items: Iterable[tuple[str, Any]],
     *,
@@ -226,14 +268,19 @@ def anthropic_error_payload(
     message: str,
     *,
     error_type: str = "invalid_request_error",
+    code: Optional[str] = None,
 ) -> dict[str, Any]:
     """Build an Anthropic-compatible error response payload."""
+    error: dict[str, str] = {
+        "type": error_type,
+        "message": message,
+    }
+    if code is not None:
+        error["code"] = code
+
     return {
         "type": "error",
-        "error": {
-            "type": error_type,
-            "message": message,
-        },
+        "error": error,
         "request_id": rquid_context.get(),
     }
 
@@ -243,11 +290,12 @@ def anthropic_compatibility_response(
     *,
     status_code: int = 400,
     error_type: str = "invalid_request_error",
+    code: Optional[str] = None,
 ) -> JSONResponse:
     """Build an Anthropic-compatible compatibility JSON response."""
     return JSONResponse(
         status_code=status_code,
-        content=anthropic_error_payload(message, error_type=error_type),
+        content=anthropic_error_payload(message, error_type=error_type, code=code),
     )
 
 

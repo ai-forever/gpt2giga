@@ -1,18 +1,23 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import gigachat.exceptions
 import pytest
+from gigachat.models.chat_completions import ChatCompletionChunk
 
 from gpt2giga.common.streaming import (
     stream_chat_completion_generator,
+    stream_chat_completion_v2_generator,
     stream_responses_generator,
+    stream_responses_v2_generator,
 )
+from gpt2giga.protocol import ResponseProcessor
 
 
 class FakeResponseProcessor:
-    def process_stream_chunk(self, chunk, model, response_id: str):
+    def process_stream_chunk(self, chunk, model, response_id: str, request_data=None):
         return {
             "id": response_id,
             "model": model,
@@ -26,6 +31,19 @@ class FakeResponseProcessor:
             "id": response_id,
             "sequence": sequence_number,
             "delta": chunk.model_dump()["choices"][0]["delta"],
+        }
+
+    @staticmethod
+    def _build_response_usage(usage_data):
+        return {
+            "input_tokens": usage_data.get("prompt_tokens", 0),
+            "output_tokens": usage_data.get("completion_tokens", 0),
+            "total_tokens": usage_data.get("total_tokens", 0),
+            "prompt_tokens_details": {
+                "cached_tokens": usage_data.get("precached_prompt_tokens", 0)
+            },
+            "input_tokens_details": {"cached_tokens": 0},
+            "output_tokens_details": {"reasoning_tokens": 0},
         }
 
 
@@ -43,6 +61,29 @@ class FakeClient:
                 model_dump=lambda: {
                     "choices": [{"delta": {"content": "B"}}],
                     "usage": None,
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
+class FakeClientV1TerminalChunk:
+    def astream(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {"role": "assistant", "content": ""},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 2,
+                        "total_tokens": 12,
+                    },
                     "model": "giga",
                 }
             )
@@ -90,6 +131,32 @@ class FakeClientGigaChatError:
             yield  # pragma: no cover
 
         return gen()
+
+
+class FakeAChatStreamResource:
+    def __init__(self, chunks=None, error=None):
+        self.chunks = chunks or []
+        self.error = error
+
+    def stream(self, chat_request):
+        async def gen():
+            if self.error:
+                raise self.error
+            for chunk in self.chunks:
+                yield chunk
+
+        return gen()
+
+
+class FakeClientV2Stream:
+    def __init__(self, chunks=None, error=None, images=None):
+        self.achat = FakeAChatStreamResource(chunks=chunks, error=error)
+        self.images = images or {}
+
+    async def aget_image(self, file_id):
+        return SimpleNamespace(
+            model_dump=lambda **_kwargs: {"content": self.images[file_id]}
+        )
 
 
 class FakeClientCancelled:
@@ -163,6 +230,238 @@ async def test_stream_chat_completion_generator_gigachat_exception():
 
 
 @pytest.mark.asyncio
+async def test_stream_chat_completion_generator_preserves_input_called_tools():
+    req = FakeRequest(FakeClientV1TerminalChunk())
+    req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+
+    async for line in stream_chat_completion_generator(
+        req,
+        "gpt-x",
+        chat,
+        response_id="v1",
+        request_data={
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {"command": "make install"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "run_shell_command",
+                                "result": {"result": "ok"},
+                            }
+                        }
+                    ],
+                },
+            ]
+        },
+    ):
+        lines.append(line)
+
+    payload = json.loads(lines[0].replace("data: ", ""))
+    assert json.loads(payload["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "run_shell_command",
+            "arguments": {"command": "make install"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
+    assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_text_chunks():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "A"}]}]}
+        ),
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "B"}]}]}
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    assert len(lines) == 3
+    assert '"content": "A"' in lines[0]
+    assert '"content": "B"' in lines[1]
+    assert lines[2].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_reasoning_chunks():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "reasoning", "content": [{"text": "Plan"}]}]}
+        ),
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "Answer"}]}]}
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    assert len(lines) == 3
+    assert '"content": ""' in lines[0]
+    assert '"reasoning_content": "Plan"' in lines[0]
+    assert '"content": "Answer"' in lines[1]
+    assert lines[2].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_usage_only_chunk():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 2,
+                    "total_tokens": 3,
+                }
+            }
+        )
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    assert len(lines) == 2
+    assert '"content": ""' in lines[0]
+    assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_preserves_input_called_tools():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tools_state_id": "new-state",
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                    "total_tokens": 12,
+                },
+            }
+        )
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req,
+        "gpt-x",
+        {"contract": "v2"},
+        response_id="v2",
+        request_data={
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {"command": "make install"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "run_shell_command",
+                                "result": {"result": "ok"},
+                            }
+                        }
+                    ],
+                },
+            ]
+        },
+    ):
+        lines.append(line)
+
+    payload = json.loads(lines[0].replace("data: ", ""))
+    metadata = payload["metadata"]
+    assert metadata["gigachat_tool_state_id"] == "new-state"
+    assert json.loads(metadata["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "run_shell_command",
+            "arguments": {"command": "make install"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
+    assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_gigachat_exception():
+    logger = MagicMock()
+    req = FakeRequest(
+        FakeClientV2Stream(
+            error=gigachat.exceptions.GigaChatException("GigaChat API error occurred")
+        ),
+        logger=logger,
+    )
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    assert len(lines) == 2
+    assert "GigaChatException" in lines[0]
+    assert "stream_error" in lines[0]
+    assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
 async def test_stream_chat_completion_generator_propagates_cancellation():
     req = FakeRequest(FakeClientCancelled())
     chat = SimpleNamespace(model="giga")
@@ -187,6 +486,402 @@ async def test_stream_responses_generator_gigachat_exception():
     assert "event: response.created" in lines[0]
     assert "event: response.in_progress" in lines[1]
     assert "GigaChat" in lines[2]
+    assert "stream_error" in lines[2]
+    assert "event: error" in lines[2]
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_text_and_usage():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "Hi"}]}]}
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 2,
+                    "total_tokens": 3,
+                }
+            }
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={"model": "gpt-x"},
+    ):
+        lines.append(line)
+
+    assert any("event: response.output_text.delta" in line for line in lines)
+    assert any('"delta": "Hi"' in line for line in lines)
+    completed = [line for line in lines if "event: response.completed" in line][-1]
+    assert '"text": "Hi"' in completed
+    assert '"input_tokens": 1' in completed
+    assert '"output_tokens": 2' in completed
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_builtin_tool_outputs():
+    import json
+
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {"tool_execution": {"name": "image_generate"}},
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "files": [
+                                    {
+                                        "id": "image-file-1",
+                                        "mime": "image/jpeg",
+                                        "target": "image",
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "text": "Done. [sources=[1]]",
+                                "inline_data": {
+                                    "sources": {
+                                        "1": {
+                                            "url": "https://example.test/source",
+                                            "title": "Example Source",
+                                        }
+                                    }
+                                },
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+    ]
+    req = FakeRequest(
+        FakeClientV2Stream(chunks=chunks, images={"image-file-1": "aW1n"})
+    )
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={
+            "model": "gpt-x",
+            "input": "Draw and cite",
+            "store": False,
+            "tools": [{"type": "image_generation"}, {"type": "web_search"}],
+        },
+    ):
+        lines.append(line)
+
+    completed = [line for line in lines if "event: response.completed" in line][-1]
+    payload = json.loads(completed.strip().split("\n")[1].replace("data: ", ""))
+    response = payload["response"]
+    output = response["output"]
+
+    assert response["store"] is False
+    assert response["tools"] == [{"type": "image_generation"}, {"type": "web_search"}]
+    image_call = next(
+        item for item in output if item["type"] == "image_generation_call"
+    )
+    web_call = next(item for item in output if item["type"] == "web_search_call")
+    message = next(item for item in output if item["type"] == "message")
+    assert image_call["result"] == "aW1n"
+    assert image_call["file_id"] == "image-file-1"
+    assert web_call["action"]["query"] == "Draw and cite"
+    content = message["content"][0]
+    assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
+    assert content["annotations"][0]["type"] == "url_citation"
+    assert content["annotations"][0]["url"] == "https://example.test/source"
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_emits_builtin_tool_progress_events():
+    import json
+
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"tool_execution": {"name": "image_generate"}}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "seconds_left": 12,
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "seconds_left": 6,
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "seconds_left": 3,
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "tool_execution": {
+                                    "name": "image_generate",
+                                    "status": "success",
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "files": [
+                                    {
+                                        "id": "image-file-1",
+                                        "mime": "image/jpeg",
+                                        "target": "image",
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "Done."}],
+                    }
+                ]
+            }
+        ),
+    ]
+    req = FakeRequest(
+        FakeClientV2Stream(chunks=chunks, images={"image-file-1": "aW1n"})
+    )
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={
+            "model": "gpt-x",
+            "input": "Draw space",
+            "tools": [{"type": "image_generation"}],
+        },
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        return parts[0].replace("event: ", ""), json.loads(
+            parts[1].replace("data: ", "")
+        )
+
+    events = [parse_sse(line) for line in lines]
+    image_added = next(
+        data
+        for event_type, data in events
+        if event_type == "response.output_item.added"
+        and data["item"]["type"] == "image_generation_call"
+    )
+    progress_events = [
+        data
+        for event_type, data in events
+        if event_type == "response.image_generation_call.in_progress"
+    ]
+    image_completed = next(
+        data
+        for event_type, data in events
+        if event_type == "response.image_generation_call.completed"
+    )
+    image_done = next(
+        data
+        for event_type, data in events
+        if event_type == "response.output_item.done"
+        and data["item"]["type"] == "image_generation_call"
+    )
+    completed = [
+        data for event_type, data in events if event_type == "response.completed"
+    ][-1]
+
+    assert image_added["item"]["status"] == "in_progress"
+    assert [event.get("seconds_left") for event in progress_events] == [
+        None,
+        12,
+        6,
+        3,
+    ]
+    assert image_completed["item_id"] == image_added["item"]["id"]
+    assert image_done["item"]["id"] == image_added["item"]["id"]
+    assert image_done["item"]["result"] == "aW1n"
+    assert image_done["item"]["file_id"] == "image-file-1"
+    image_call = next(
+        item
+        for item in completed["response"]["output"]
+        if item["type"] == "image_generation_call"
+    )
+    assert image_call["result"] == "aW1n"
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_maps_reasoning_role_to_output_item():
+    import json
+
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "reasoning",
+                        "content": [{"text": "Use a known geography fact."}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "Paris"}]}]}
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={"model": "gpt-x"},
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    output_text_deltas = []
+    for line in lines:
+        event_type, data = parse_sse(line)
+        if event_type == "response.output_text.delta":
+            output_text_deltas.append(data["delta"])
+
+    assert output_text_deltas == ["Paris"]
+
+    event_type, data = parse_sse(lines[-1])
+    assert event_type == "response.completed"
+    output = data["response"]["output"]
+    assert output[0]["type"] == "reasoning"
+    assert output[0]["summary"][0]["text"] == "Use a known geography fact."
+    assert output[1]["type"] == "message"
+    assert output[1]["content"][0]["text"] == "Paris"
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_v2_generator_gigachat_exception():
+    logger = MagicMock()
+    req = FakeRequest(
+        FakeClientV2Stream(
+            error=gigachat.exceptions.GigaChatException("GigaChat API error occurred")
+        ),
+        logger=logger,
+    )
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={"model": "gpt-x"},
+    ):
+        lines.append(line)
+
+    assert len(lines) == 3
+    assert "event: response.created" in lines[0]
+    assert "event: response.in_progress" in lines[1]
     assert "stream_error" in lines[2]
     assert "event: error" in lines[2]
 
@@ -629,6 +1324,14 @@ async def test_stream_responses_generator_function_call():
     assert data["response"]["status"] == "completed"
     assert data["response"]["output"][0]["type"] == "function_call"
     assert data["response"]["output"][0]["name"] == "get_weather"
+    assert json.loads(data["response"]["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "name": "get_weather",
+            "arguments": {"location": "Moscow"},
+            "tools_state_id": "state_123",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -680,6 +1383,14 @@ async def test_stream_responses_generator_function_call_streamed_args():
     assert data["response"]["output"][0]["type"] == "function_call"
     assert data["response"]["output"][0]["name"] == "search"
     assert data["response"]["output"][0]["arguments"] == '{"query": "test"}'
+    assert json.loads(data["response"]["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "name": "search",
+            "arguments": {"query": "test"},
+            "tools_state_id": "state_456",
+        }
+    ]
 
 
 @pytest.mark.asyncio

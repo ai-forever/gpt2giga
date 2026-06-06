@@ -3,7 +3,13 @@ from functools import cached_property
 from typing import Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
-from pydantic import Field, field_validator, model_validator
+from pydantic import (
+    Field,
+    NonNegativeFloat,
+    PositiveInt,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gpt2giga.constants import (
@@ -11,6 +17,7 @@ from gpt2giga.constants import (
     DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES,
     DEFAULT_MAX_IMAGE_FILE_SIZE_BYTES,
     DEFAULT_MAX_TEXT_FILE_SIZE_BYTES,
+    DEFAULT_MAX_TOKENS,
 )
 from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
 
@@ -59,11 +66,45 @@ class ProxySettings(BaseSettings):
             "в payload к GigaChat, если клиент не указал reasoning_effort явно"
         ),
     )
+    default_max_tokens: Optional[PositiveInt] = Field(
+        default=DEFAULT_MAX_TOKENS,
+        description=(
+            "Опциональное значение max_tokens по умолчанию, отправляемое в GigaChat API, "
+            "если клиент не указал max_tokens, max_completion_tokens или max_output_tokens; "
+            "None означает не добавлять max_tokens"
+        ),
+    )
+    model_max_connections: dict[str, PositiveInt] = Field(
+        default_factory=dict,
+        description="Maximum number of concurrent upstream GigaChat calls per model.",
+    )
+    model_max_connections_default: Optional[PositiveInt] = Field(
+        default=None,
+        description="Default per-model concurrency limit for models not listed in model_max_connections.",
+    )
+    model_max_connections_acquire_timeout: Optional[NonNegativeFloat] = Field(
+        default=None,
+        description="Seconds to wait for a free per-model slot; None means wait indefinitely.",
+    )
     structured_output_mode: Literal["function_call", "native"] = Field(
         default="function_call",
         description=(
             "Режим structured output: function_call использует совместимый "
             "function-calling fallback, native передает response_format в GigaChat"
+        ),
+    )
+    gigachat_api_mode: Literal["v1", "v2"] = Field(
+        default="v1",
+        description=(
+            "Backend contract for GigaChat chat-like requests: v1 uses "
+            "root compatibility methods, v2 uses primary chat resource methods"
+        ),
+    )
+    responses_api_mode: Literal["inherit", "v1", "v2"] = Field(
+        default="inherit",
+        description=(
+            "Backend contract for OpenAI /responses: inherit follows "
+            "gigachat_api_mode, v1/v2 override only /responses"
         ),
     )
     max_request_body_bytes: int = Field(
@@ -125,6 +166,22 @@ class ProxySettings(BaseSettings):
         if isinstance(value, str):
             return value.strip().lower()
         return value
+
+    @field_validator("gigachat_api_mode", "responses_api_mode", mode="before")
+    @classmethod
+    def normalize_api_modes(cls, value, info):
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if info.field_name == "responses_api_mode" and normalized == "":
+                return "inherit"
+            return normalized
+        return value
+
+    def resolve_responses_api_mode(self) -> Literal["v1", "v2"]:
+        """Return the effective GigaChat backend mode for `/responses`."""
+        if self.responses_api_mode == "inherit":
+            return self.gigachat_api_mode
+        return self.responses_api_mode
 
     @model_validator(mode="after")
     def _validate_prod_security(self):

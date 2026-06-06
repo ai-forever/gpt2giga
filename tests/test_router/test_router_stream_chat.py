@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from fastapi import FastAPI
 
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.routers.openai import router
 
@@ -32,5 +32,5 @@ def make_app():
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor()
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     return app

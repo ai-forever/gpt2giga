@@ -134,12 +134,14 @@ sequenceDiagram
 
 Клиентские настройки SDK вроде `base_url`, `api_key`, `timeout`, retry-настроек, `http_client` и proxy/transport остаются на стороне клиента. Сервер не трактует их как body-параметры и не прокидывает пользовательские `Authorization`, `x-api-key`, cookies, transport headers, `x-stainless-*`, `openai-*` или `anthropic-*` во внешний GigaChat upstream.
 
+При ответе `429` OpenAI SDK по умолчанию повторяет запросы: `max_retries=2`, то есть один клиентский вызов может отправить до трёх HTTP-запросов в gpt2giga. Чтобы отключить эти клиентские повторы, передайте `max_retries=0` при создании `OpenAI`/`AsyncOpenAI` клиента.
+
 `extra_headers` и HTTP headers переносятся в request-scoped contextvars SDK GigaChat для безопасных служебных заголовков: `x-request-id`, `x-session-id`, `x-service-id`, `x-operation-id`, `x-client-id`, `x-trace-id`, `x-agent-id`. Прочие безопасные пользовательские заголовки идут через `custom_headers_cvar`; `Authorization`, `x-api-key`, transport headers, `x-stainless-*`, `openai-*` и `anthropic-*` заблокированы. `extra_query` по умолчанию не прокидывает произвольные query-параметры upstream. Неподдержанные body-параметры возвращают совместимую ошибку `400`.
 
 `extra_body` для Chat Completions, Responses и Anthropic Messages переносится в GigaChat `additional_fields` целиком, включая SDK-style поля, которые клиент разворачивает в top-level JSON:
 
 - OpenAI Embeddings не поддерживает `extra_body`; используйте только `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query`.
-- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` и built-in tools возвращают `400`.
+- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` возвращают `400`. Built-in tools принимаются для Responses API в режиме GigaChat v2 (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); нормализованные OpenAI Responses output items и stream progress events сейчас строятся для `web_search*` и `image_generation` / `image_generate`.
 - Для Anthropic Messages unsupported параметры и блоки вроде `container`, `context_management`, `mcp_servers`, server tools, `document`, `file`, `container_upload`, `search_result`, `thinking`/`redacted_thinking` во входном контенте возвращают `400`.
 
 OpenAI SDK:
@@ -150,7 +152,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8090/v1", api_key="local-key")
 
 client.chat.completions.create(
-    model="GigaChat",
+    model="GigaChat-2-Max",
     messages=[{"role": "user", "content": "Привет"}],
     extra_body={"profanity_check": False},
 )
@@ -164,7 +166,7 @@ from anthropic import Anthropic
 client = Anthropic(base_url="http://localhost:8090", api_key="local-key")
 
 client.messages.create(
-    model="GigaChat",
+    model="GigaChat-2-Max",
     max_tokens=256,
     messages=[{"role": "user", "content": "Привет"}],
 )
@@ -174,7 +176,7 @@ client.messages.create(
 
 ```python
 client.messages.create(
-    model="GigaChat",
+    model="GigaChat-2-Max",
     max_tokens=256,
     messages=[{"role": "user", "content": "Привет"}],
     extra_body={"mcp_servers": []},  # 400: MCP server tools are not supported
@@ -205,7 +207,7 @@ client.messages.create(
     GPT2GIGA_API_KEY="<your_strong_api_key>"
     GIGACHAT_CREDENTIALS="<your_gigachat_credentials>"
     GIGACHAT_SCOPE=<your_api_scope>
-    GIGACHAT_MODEL=GigaChat
+    GIGACHAT_MODEL=GigaChat-2-Max
     GIGACHAT_VERIFY_SSL_CERTS=True
     ```
 
@@ -331,6 +333,9 @@ client.messages.create(
 - `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
+- `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat-2-Max":5}'`;
+- `--proxy.model-max-connections-default <INT>` — fallback per-model лимит для моделей, которых нет в `--proxy.model-max-connections`;
+- `--proxy.model-max-connections-acquire-timeout <FLOAT>` — сколько секунд ждать свободный model slot; `0` означает fail-fast, отсутствие значения — ждать без локального timeout;
 - `--proxy.log-level` — уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`;
 - `--proxy.log-filename` — имя лог файла. По умолчанию `gpt2giga.log`;
 - `--proxy.log-max-size` — максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB);
@@ -400,7 +405,13 @@ gpt2giga \
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов по умолчанию. При `GPT2GIGA_PASS_MODEL=True` используется модель из запроса клиента (с fallback на это значение).
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
 - `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
+- `GPT2GIGA_DEFAULT_MAX_TOKENS` — опциональный default `max_tokens`. По умолчанию не задан, и gpt2giga не добавляет `max_tokens` к GigaChat-запросу, если клиент сам не передал лимит;
 - `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
+- `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
+- `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
+- `GPT2GIGA_MODEL_MAX_CONNECTIONS='{}'` — JSON-словарь per-model лимитов одновременных upstream model-call внутри gpt2giga;
+- `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` — fallback per-model лимит для моделей, которых нет в `GPT2GIGA_MODEL_MAX_CONNECTIONS`. По умолчанию не задан;
+- `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT` — сколько секунд ждать свободный model slot. По умолчанию не задано, `0` означает fail-fast;
 - `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
 - `GPT2GIGA_LOG_FILENAME="gpt2giga.log"` — Имя лог файла. По умолчанию `gpt2giga.log`
 - `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
@@ -410,11 +421,79 @@ gpt2giga \
 - `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
 - `GPT2GIGA_CORS_ALLOW_HEADERS='["*"]'` — список разрешенных заголовков (JSON массив).
 
+#### Режим backend API GigaChat
+
+По умолчанию gpt2giga сохраняет прежний контракт GigaChat SDK через root compatibility methods `achat`/`astream`:
+
+```dotenv
+GPT2GIGA_GIGACHAT_API_MODE=v1
+GPT2GIGA_RESPONSES_API_MODE=inherit
+```
+
+Чтобы переключить chat-like запросы на primary `v2/chat/completions` surface из `gigachat==0.2.2a1`, задайте:
+
+```dotenv
+GPT2GIGA_GIGACHAT_API_MODE=v2
+```
+
+`GPT2GIGA_RESPONSES_API_MODE` управляет только OpenAI `/responses`:
+
+| `GPT2GIGA_GIGACHAT_API_MODE` | `GPT2GIGA_RESPONSES_API_MODE` | `/chat/completions` | `/responses` |
+|---|---|---|---|
+| `v1` | `inherit` | `v1` | `v1` |
+| `v2` | `inherit` | `v2` | `v2` |
+| `v1` | `v2` | `v1` | `v2` |
+| `v2` | `v1` | `v2` | `v1` |
+
+Режим `v2` меняет только backend-вызовы к GigaChat (`achat.create` / `achat.stream`); внешние OpenAI-compatible маршруты и URL `/v1/...` остаются прежними.
+
+> Для maintainers: эта реализация целится в `gigachat==0.2.2a1` и не является переносом pre-release/1.0.0 архитектуры из PR #123.
+
 > **Breaking change в 0.1.6:** `GPT2GIGA_PASS_MODEL` по умолчанию `True`. Если клиент отправляет OpenAI/Anthropic-имя модели, оно будет передано в GigaChat. Чтобы всегда использовать модель из `GIGACHAT_MODEL` / настроек прокси, задайте `GPT2GIGA_PASS_MODEL=False`.
+
+#### Per-model max connections
+
+`GIGACHAT_MAX_CONNECTIONS` остаётся глобальным лимитом HTTP/SDK подключений к GigaChat. Дополнительно можно включить локальный in-process limiter в gpt2giga, который ограничивает число одновременных upstream model-call отдельно для каждой effective GigaChat модели.
+
+Пример:
+
+```dotenv
+GIGACHAT_MAX_CONNECTIONS=7
+GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat-2-Max":5}'
+GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=30
+```
+
+В этом примере общий SDK/HTTP cap равен `7`, но `GigaChat-2-Max` получает максимум пять одновременных upstream model-call.
+
+То же через CLI:
+
+```sh
+gpt2giga \
+    --gigachat.max-connections 7 \
+    --proxy.model-max-connections '{"GigaChat-2-Max":5}' \
+    --proxy.model-max-connections-acquire-timeout 30
+```
+
+Семантика:
+
+- если `GPT2GIGA_MODEL_MAX_CONNECTIONS` пустой и `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` не задан, limiter выключен и поведение не меняется;
+- если модель есть в `GPT2GIGA_MODEL_MAX_CONNECTIONS`, используется её explicit limit;
+- если модели нет в словаре, но задан `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT`, этот limit применяется отдельно к каждой такой модели;
+- `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=0` возвращает локальный `429` сразу, положительное значение ждёт указанное число секунд, отсутствие значения ждёт без локального timeout;
+- streaming slot удерживается до завершения upstream stream или закрытия генератора клиентом;
+- backend GigaChat всё равно может вернуть собственный `429` по другим причинам.
+
+Ограничения:
+
+- limiter локальный для одного процесса gpt2giga. Несколько workers, контейнеров или pods умножают effective limit: `effective_limit = per_process_model_limit * workers * pods`. Например, `{"GigaChat-2-Max":5}` при двух workers в каждом из трёх pods даёт до `5 * 2 * 3 = 30` одновременных upstream-вызовов этой модели;
+- при `GPT2GIGA_PASS_TOKEN=True` разные credentials делят один per-model pool внутри процесса;
+- limiter применяется только к model-call endpoint-ам: Chat Completions, Responses, Embeddings, Anthropic Messages и `messages/count_tokens`. Model list/info endpoints не лимитируются.
+
+При локальном timeout-е limiter возвращает `429` с кодом `model_concurrency_limit` и пишет warning log event `model_concurrency_timeout` с `provider`, `model` и `limit`.
 
 Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
 - `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
-- `GIGACHAT_MODEL="GigaChat"` — модель GigaChat API, которая будет обрабатывать запросы по умолчанию;
+- `GIGACHAT_MODEL="GigaChat-2-Max"` — модель GigaChat API, которая будет обрабатывать запросы по умолчанию;
 - `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля;
 - `GIGACHAT_CREDENTIALS` и `GIGACHAT_SCOPE` — для авторизации с помощью ключа авторизации;
 - `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токена доступа, полученного в обмен на ключ;

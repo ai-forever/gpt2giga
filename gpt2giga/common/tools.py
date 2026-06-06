@@ -14,6 +14,14 @@ _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
 _RESERVED_GIGACHAT_TOOL_NAME_MAP_REVERSE = {
     v: k for k, v in _RESERVED_GIGACHAT_TOOL_NAME_MAP.items()
 }
+_GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES = {
+    "code_interpreter": "code_interpreter",
+    "image_generate": "image_generate",
+    "image_generation": "image_generate",
+    "model_3d_generate": "model_3d_generate",
+    "url_content_extraction": "url_content_extraction",
+}
+_GIGACHAT_WEB_SEARCH_TOOL_PREFIX = "web_search"
 
 
 def map_tool_name_to_gigachat(name: str) -> str:
@@ -38,6 +46,44 @@ def map_tool_name_from_gigachat(name: str) -> str:
         Name to return to the client (may be unchanged).
     """
     return _RESERVED_GIGACHAT_TOOL_NAME_MAP_REVERSE.get(name, name)
+
+
+def normalize_gigachat_builtin_tool_type(tool_type: Any) -> str | None:
+    """Return a GigaChat v2 built-in tool field name for a Responses tool type."""
+    if not isinstance(tool_type, str):
+        return None
+
+    normalized = tool_type.strip()
+    if normalized.startswith(_GIGACHAT_WEB_SEARCH_TOOL_PREFIX):
+        return "web_search"
+    return _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES.get(normalized)
+
+
+def build_gigachat_builtin_tool_payload(tool: Mapping[str, Any]) -> dict[str, Any]:
+    """Build a GigaChat v2 ChatTool payload from a Responses built-in tool."""
+    tool_type = tool.get("type")
+    field_name = normalize_gigachat_builtin_tool_type(tool_type)
+    if field_name is None:
+        return {}
+
+    config: dict[str, Any] = {}
+    nested_config = tool.get(field_name)
+    if isinstance(nested_config, Mapping):
+        config.update(nested_config)
+
+    if isinstance(tool_type, str) and tool_type != field_name:
+        alias_config = tool.get(tool_type)
+        if isinstance(alias_config, Mapping):
+            config.update(alias_config)
+
+    structural_keys = {"type", "function", field_name}
+    if isinstance(tool_type, str):
+        structural_keys.add(tool_type)
+    for key, value in tool.items():
+        if key not in structural_keys:
+            config.setdefault(key, value)
+
+    return {field_name: config}
 
 
 def _tool_source(data: dict) -> tuple[str, Any]:
@@ -80,6 +126,8 @@ def convert_tool_to_giga_functions(data: dict):
                 provider="openai",
                 param=source,
             )
+        if normalize_gigachat_builtin_tool_type(tool.get("type")) is not None:
+            continue
         if "function" in tool:
             function = tool["function"]
             if not isinstance(function, Mapping):

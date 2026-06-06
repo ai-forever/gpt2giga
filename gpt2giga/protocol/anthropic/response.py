@@ -2,10 +2,11 @@
 
 import json
 import uuid
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi.responses import JSONResponse
 
+from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.reasoning import (
     extract_reasoning_from_content,
     merge_reasoning_text,
@@ -40,6 +41,8 @@ def _build_anthropic_response(
     response_id: str,
     *,
     is_structured_output: bool = False,
+    logger: Any = None,
+    mode: str = "DEV",
 ) -> Dict:
     """Build Anthropic Messages API response from a GigaChat response."""
     choice = giga_dict["choices"][0]
@@ -100,7 +103,7 @@ def _build_anthropic_response(
             content_blocks.append({"type": "text", "text": ""})
         stop_reason = _map_stop_reason(finish_reason)
 
-    return {
+    result = {
         "id": f"msg_{response_id}",
         "type": "message",
         "role": "assistant",
@@ -113,6 +116,17 @@ def _build_anthropic_response(
             "output_tokens": usage.get("completion_tokens", 0),
         },
     }
+    log_debug_payload(
+        logger,
+        mode,
+        event="anthropic_message_response",
+        message="Processed Anthropic message response",
+        payload_key="response",
+        payload=result,
+        response_id=result["id"],
+        content_block_count=len(content_blocks),
+    )
+    return result
 
 
 def _anthropic_http_exception(

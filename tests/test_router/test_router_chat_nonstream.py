@@ -1,9 +1,11 @@
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 import pytest
 
-from gpt2giga.models.config import ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.openai import router
 
@@ -34,6 +36,26 @@ class FakeGigachat:
             }
         )
 
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "choices": [
+                        {
+                            "delta": {"role": "assistant", "content": ""},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                }
+            )
+
+        return gen()
+
 
 class FakeRequestTransformer:
     async def prepare_chat_completion(self, data, giga_client=None):
@@ -49,7 +71,7 @@ def make_app():
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
-    app.state.config = ProxyConfig()
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     return app
 
 
@@ -58,7 +80,7 @@ def make_app_with_real_transformer():
     app.include_router(router)
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
-    app.state.config = ProxyConfig()
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
     return app
 
@@ -74,6 +96,119 @@ def test_chat_completions_non_stream_basic():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
+
+
+def test_chat_completions_v1_non_stream_preserves_called_tools_from_request():
+    app = make_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {"command": "make install"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "run_shell_command",
+                                "result": {"result": "ok"},
+                            }
+                        }
+                    ],
+                },
+            ],
+        },
+    )
+
+    metadata = resp.json()["metadata"]
+    assert resp.status_code == 200
+    assert json.loads(metadata["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "run_shell_command",
+            "arguments": {"command": "make install"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
+
+
+def test_chat_completions_v1_stream_preserves_called_tools_from_request():
+    app = make_app()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {"command": "make install"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "run_shell_command",
+                                "result": {"result": "ok"},
+                            }
+                        }
+                    ],
+                },
+            ],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    chunks = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: {")
+    ]
+    metadata = chunks[-1]["metadata"]
+
+    assert response.status_code == 200
+    assert json.loads(metadata["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "run_shell_command",
+            "arguments": {"command": "make install"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
 
 
 def test_chat_completions_rejects_unsupported_param_with_openai_error():

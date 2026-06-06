@@ -10,6 +10,7 @@ from starlette.responses import RedirectResponse
 from gpt2giga.auth import verify_api_key
 from gpt2giga.cli import load_config
 from gpt2giga.common.app_meta import check_port_available, get_app_version
+from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.constants import SECURITY_FIELDS
 from gpt2giga.logger import setup_logger
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
@@ -45,6 +46,11 @@ async def lifespan(app: FastAPI):
 
     app.state.config = config
     app.state.logger = logger
+    app.state.model_concurrency_limiter = ModelConcurrencyLimiter(
+        limits=config.proxy_settings.model_max_connections,
+        default_limit=config.proxy_settings.model_max_connections_default,
+        acquire_timeout=config.proxy_settings.model_max_connections_acquire_timeout,
+    )
     app.state.gigachat_client = GigaChat(**config.gigachat_settings.model_dump())
 
     attachment_processor = AttachmentProcessor(

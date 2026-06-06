@@ -1,14 +1,18 @@
 # logger.py
 import contextvars
 import json
+import re
 import sys
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from loguru import logger
 
-from .constants import _JSON_KV_RE, _KV_EQ_RE, _BEARER_RE
+from .constants import _JSON_KV_RE, _KV_EQ_RE, _BEARER_RE, SENSITIVE_KEYS
 
 # Context variable for rquid
 rquid_context = contextvars.ContextVar("rquid", default="-")
+_LOGURU_TAG_RE = re.compile(r"(\\*)(</?(?:[fb]g\s)?[^<>\s]*>)")
 
 
 def redact_sensitive(message: str) -> str:
@@ -19,9 +23,40 @@ def redact_sensitive(message: str) -> str:
     return message
 
 
+def redact_sensitive_data(value: Any) -> Any:
+    """Redact sensitive values inside structured log extras."""
+    if isinstance(value, Mapping):
+        redacted = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if key_text in SENSITIVE_KEYS:
+                redacted[key] = "***"
+            else:
+                redacted[key] = redact_sensitive_data(item)
+        return redacted
+
+    if isinstance(value, str):
+        return redact_sensitive(value)
+
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        return [redact_sensitive_data(item) for item in value]
+
+    return value
+
+
 def get_rquid() -> str:
     """Retrieve current request's RQUID from contextvar."""
     return rquid_context.get()
+
+
+def _escape_loguru_markup(text: str) -> str:
+    """Escape Loguru color tags while preserving visible text."""
+
+    def escape_match(match: re.Match[str]) -> str:
+        slashes, tag = match.groups()
+        return "\\" * (len(slashes) * 2 + 1) + tag
+
+    return _LOGURU_TAG_RE.sub(escape_match, text)
 
 
 def _format_structured_extra(extra: dict) -> str:
@@ -31,7 +66,8 @@ def _format_structured_extra(extra: dict) -> str:
     Returns an empty string when there are no extra fields to show.
 
     Note: Curly braces in the JSON output are escaped (doubled) to prevent
-    Loguru's format_map from interpreting them as format placeholders.
+    Loguru's format_map from interpreting them as format placeholders. Loguru
+    markup-like tags are escaped because payload values are formatter literals.
     """
     filtered = {k: v for k, v in extra.items() if k != "rquid" and v is not None}
     if not filtered:
@@ -40,6 +76,7 @@ def _format_structured_extra(extra: dict) -> str:
         json_str = json.dumps(filtered, ensure_ascii=False, default=str)
         # Escape curly braces to prevent Loguru format_map interpretation
         json_str = json_str.replace("{", "{{").replace("}", "}}")
+        json_str = _escape_loguru_markup(json_str)
         return " | " + json_str
     except (TypeError, ValueError):
         return ""
@@ -90,6 +127,7 @@ def setup_logger(
             record["extra"]["rquid"] = get_rquid()
             if _do_redact:
                 record["message"] = redact_sensitive(record["message"])
+                record["extra"] = redact_sensitive_data(record["extra"])
 
     logger.configure(patcher=RquidAndRedactPatcher())
     return logger

@@ -1,13 +1,21 @@
 from fastapi.testclient import TestClient
 
 from gpt2giga.api_server import create_app
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 
 
 def test_app_lifespan_initializes_state(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_ENABLE_API_KEY_AUTH", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_API_KEY", raising=False)
-    app = create_app()
+    config = ProxyConfig(
+        proxy=ProxySettings(
+            model_max_connections={"GigaChat": 2},
+            model_max_connections_default=3,
+            model_max_connections_acquire_timeout=0,
+        )
+    )
+    app = create_app(config)
 
     class Dummy:
         def __init__(self, **kwargs):
@@ -16,14 +24,20 @@ def test_app_lifespan_initializes_state(monkeypatch):
         async def aget_models(self):
             return type("R", (), {"data": [], "object_": "list"})()
 
+        async def aclose(self):
+            pass
+
     # Подменяем клиента GigaChat при старте lifespan
     monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: Dummy())
 
-    client = TestClient(app)
-    # Триггерим lifespan
-    resp = client.get("/health")
+    with TestClient(app) as client:
+        resp = client.get("/health")
+
     assert resp.status_code == 200
     assert hasattr(app.state, "config")
+    assert hasattr(app.state, "model_concurrency_limiter")
+    assert app.state.model_concurrency_limiter.limit_for("GigaChat") == 2
+    assert app.state.model_concurrency_limiter.limit_for("Other") == 3
 
 
 def test_lifespan_closes_gigachat_client(monkeypatch):

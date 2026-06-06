@@ -1,6 +1,6 @@
 import pytest
 
-from gpt2giga.models.config import ProxySettings, ProxyConfig
+from gpt2giga.models.config import ProxyConfig, ProxySettings
 
 
 def test_proxy_settings_defaults(monkeypatch):
@@ -8,6 +8,12 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
     monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_RESPONSES_API_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", raising=False)
+    monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", raising=False)
     s = ProxySettings()
     assert s.mode == "DEV"
     assert s.host == "localhost"
@@ -16,10 +22,17 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.pass_model is True
     assert s.enable_reasoning is False
     assert s.structured_output_mode == "function_call"
+    assert s.gigachat_api_mode == "v1"
+    assert s.responses_api_mode == "inherit"
+    assert s.resolve_responses_api_mode() == "v1"
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024
     assert s.max_audio_image_total_size_bytes == 80 * 1024 * 1024
+    assert s.default_max_tokens is None
+    assert s.model_max_connections == {}
+    assert s.model_max_connections_default is None
+    assert s.model_max_connections_acquire_timeout is None
 
 
 def test_proxy_config_instantiation():
@@ -31,6 +44,66 @@ def test_proxy_settings_env_prefix(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_HOST", "127.0.0.1")
     s = ProxySettings()
     assert s.host == "127.0.0.1"
+
+
+def test_proxy_settings_default_max_tokens_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_DEFAULT_MAX_TOKENS", "128000")
+
+    s = ProxySettings()
+
+    assert s.default_max_tokens == 128000
+
+
+@pytest.mark.parametrize("env_value", ["0", "-1"])
+def test_proxy_settings_default_max_tokens_must_be_positive(monkeypatch, env_value):
+    monkeypatch.setenv("GPT2GIGA_DEFAULT_MAX_TOKENS", env_value)
+
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
+def test_proxy_settings_model_max_connections_from_env(monkeypatch):
+    monkeypatch.setenv(
+        "GPT2GIGA_MODEL_MAX_CONNECTIONS",
+        '{"GigaChat":1,"GigaChat-Pro":2,"GigaChat-Max":5}',
+    )
+    monkeypatch.setenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", "3")
+    monkeypatch.setenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", "30")
+
+    s = ProxySettings()
+
+    assert s.model_max_connections == {
+        "GigaChat": 1,
+        "GigaChat-Pro": 2,
+        "GigaChat-Max": 5,
+    }
+    assert s.model_max_connections_default == 3
+    assert s.model_max_connections_acquire_timeout == 30
+
+
+def test_proxy_settings_model_max_connections_timeout_zero_is_valid(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", "0")
+
+    s = ProxySettings()
+
+    assert s.model_max_connections_acquire_timeout == 0
+
+
+@pytest.mark.parametrize(
+    ("env_name", "env_value"),
+    [
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS", '{"GigaChat":0}'),
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS", '{"GigaChat":-1}'),
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", "0"),
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", "-1"),
+        ("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", "-1"),
+    ],
+)
+def test_proxy_settings_invalid_model_max_connections(monkeypatch, env_name, env_value):
+    monkeypatch.setenv(env_name, env_value)
+
+    with pytest.raises(Exception):
+        ProxySettings()
 
 
 def test_proxy_settings_mode_normalized(monkeypatch):
@@ -60,6 +133,51 @@ def test_proxy_settings_structured_output_mode_normalized(monkeypatch):
 
 def test_proxy_settings_invalid_structured_output_mode(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", "unsupported")
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
+def test_proxy_settings_gigachat_api_mode_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_GIGACHAT_API_MODE", "v2")
+    s = ProxySettings()
+    assert s.gigachat_api_mode == "v2"
+    assert s.resolve_responses_api_mode() == "v2"
+
+
+@pytest.mark.parametrize("mode", ["v1", "v2", "inherit"])
+def test_proxy_settings_responses_api_mode_from_env(monkeypatch, mode):
+    monkeypatch.setenv("GPT2GIGA_RESPONSES_API_MODE", mode)
+    s = ProxySettings()
+    assert s.responses_api_mode == mode
+
+
+def test_proxy_settings_responses_api_mode_empty_env_inherits(monkeypatch):
+    monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
+    monkeypatch.setenv("GPT2GIGA_RESPONSES_API_MODE", "")
+    s = ProxySettings()
+    assert s.responses_api_mode == "inherit"
+    assert s.resolve_responses_api_mode() == "v1"
+
+
+def test_proxy_settings_api_modes_normalized(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_GIGACHAT_API_MODE", " V2 ")
+    monkeypatch.setenv("GPT2GIGA_RESPONSES_API_MODE", " V1 ")
+    s = ProxySettings()
+    assert s.gigachat_api_mode == "v2"
+    assert s.responses_api_mode == "v1"
+    assert s.resolve_responses_api_mode() == "v1"
+
+
+@pytest.mark.parametrize(
+    ("env_name", "env_value"),
+    [
+        ("GPT2GIGA_GIGACHAT_API_MODE", "inherit"),
+        ("GPT2GIGA_GIGACHAT_API_MODE", "unsupported"),
+        ("GPT2GIGA_RESPONSES_API_MODE", "unsupported"),
+    ],
+)
+def test_proxy_settings_invalid_api_modes(monkeypatch, env_name, env_value):
+    monkeypatch.setenv(env_name, env_value)
     with pytest.raises(Exception):
         ProxySettings()
 

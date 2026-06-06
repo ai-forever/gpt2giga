@@ -64,6 +64,9 @@ def test_embeddings_response_uses_openai_envelope():
     assert body["object"] == "list"
     assert body["model"] == "EmbeddingsGigaR"
     assert body["usage"] == {"prompt_tokens": 4, "total_tokens": 4}
+    assert body["metadata"] == {
+        "gigachat_x_request_id": "secret-upstream-header",
+    }
     assert "x_headers" not in body
     assert "object_" not in body
     assert body["data"][0]["object"] == "embedding"
