@@ -5,6 +5,9 @@ from fastapi import FastAPI
 from fastapi import Request
 from starlette.testclient import TestClient
 
+from gpt2giga.common.request_json import read_request_json
+from gpt2giga.core.context import get_request_context
+from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 
@@ -144,3 +147,62 @@ def test_pass_token_middleware(monkeypatch):
     assert resp.status_code == 200
     # Nothing should happen, no warning
     test_app.state.logger.warning.assert_not_called()
+
+
+def test_rquid_middleware_sets_request_context_and_header():
+    test_app = FastAPI()
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v1/messages")
+    async def context_view(request: Request):
+        context = get_request_context()
+        assert context is request.state.request_context
+        return {
+            "request_id": context.request_id,
+            "trace_id": context.trace_id,
+            "protocol": context.protocol,
+            "route": context.route,
+            "method": context.method,
+            "client_ip_hash": context.client_ip_hash,
+            "api_key_hash": context.api_key_hash,
+        }
+
+    client = TestClient(test_app)
+    response = client.get(
+        "/v1/messages",
+        headers={
+            "Authorization": "Bearer local-secret",
+            "x-trace-id": "trace-123",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert response.headers["x-request-id"] == data["request_id"]
+    assert data["trace_id"] == "trace-123"
+    assert data["protocol"] == "anthropic"
+    assert data["route"] == "/v1/messages"
+    assert data["method"] == "GET"
+    assert data["client_ip_hash"].startswith("sha256:")
+    assert data["api_key_hash"].startswith("sha256:")
+    assert "local-secret" not in data["api_key_hash"]
+
+
+def test_read_request_json_updates_request_context_model():
+    test_app = FastAPI()
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.post("/chat/completions")
+    async def read_body(request: Request):
+        await read_request_json(request)
+        context = get_request_context()
+        return {"model_requested": context.model_requested}
+
+    client = TestClient(test_app)
+    response = client.post(
+        "/chat/completions",
+        json={"model": "GigaChat-2-Max", "messages": []},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"model_requested": "GigaChat-2-Max"}

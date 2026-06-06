@@ -1,0 +1,2 @@
+data: {"id":"chatcmpl-golden-stream","object":"chat.completion.chunk","created":0,"model":"gpt-x","choices":[{"delta":{"content":"ok","refusal":null},"finish_reason":null,"index":0,"logprobs":null}],"usage":null,"system_fingerprint":"fp_golden-stream"}
+

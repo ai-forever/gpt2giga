@@ -1,0 +1,18 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "embedding",
+      "embedding": [
+        0.0,
+        1.0
+      ],
+      "index": 0
+    }
+  ],
+  "model": "EmbeddingsGigaR",
+  "usage": {
+    "prompt_tokens": 2,
+    "total_tokens": 2
+  }
+}

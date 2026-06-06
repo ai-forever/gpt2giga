@@ -1,0 +1,44 @@
+{
+  "id": "chatcmpl-golden-tools",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "gpt-x",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "",
+        "refusal": null,
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "<tool_call_id>",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"city\": \"Moscow\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls",
+      "index": 0,
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 3,
+    "completion_tokens": 2,
+    "total_tokens": 5,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "system_fingerprint": "fp_golden-tools",
+  "metadata": {
+    "gigachat_called_tools": "[{\"index\":0,\"choice_index\":0,\"name\":\"get_weather\",\"arguments\":{\"city\":\"Moscow\"},\"role\":\"assistant\"}]"
+  }
+}

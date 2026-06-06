@@ -107,6 +107,37 @@ class ProxySettings(BaseSettings):
             "gigachat_api_mode, v1/v2 override only /responses"
         ),
     )
+    experimental_normalized_layer: bool = Field(
+        default=False,
+        description="Enable experimental normalized protocol layer wiring.",
+    )
+    normalization_mode: Literal["off", "shadow", "on"] = Field(
+        default="off",
+        description=(
+            "Normalized layer execution mode: off disables it, shadow records "
+            "parallel translation only, on uses normalized execution."
+        ),
+    )
+    legacy_chat_fallback: bool = Field(
+        default=True,
+        description="Allow legacy chat path fallback while modular migration is experimental.",
+    )
+    traffic_log_enabled: bool = Field(
+        default=False,
+        description="Enable future traffic log event emission.",
+    )
+    observability_enabled: bool = Field(
+        default=False,
+        description="Enable future OpenTelemetry/OpenInference observability hooks.",
+    )
+    ui_enabled: bool = Field(
+        default=False,
+        description="Enable future built-in debugging and playground UI.",
+    )
+    debug_translate_enabled: bool = Field(
+        default=False,
+        description="Enable future debug translation endpoints.",
+    )
     max_request_body_bytes: int = Field(
         default=DEFAULT_MAX_REQUEST_BODY_BYTES,
         description="Глобальный лимит размера HTTP-тела запроса в байтах (до парсинга JSON)",
@@ -167,7 +198,12 @@ class ProxySettings(BaseSettings):
             return value.strip().lower()
         return value
 
-    @field_validator("gigachat_api_mode", "responses_api_mode", mode="before")
+    @field_validator(
+        "gigachat_api_mode",
+        "responses_api_mode",
+        "normalization_mode",
+        mode="before",
+    )
     @classmethod
     def normalize_api_modes(cls, value, info):
         if isinstance(value, str):

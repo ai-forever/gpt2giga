@@ -10,6 +10,13 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_RESPONSES_API_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER", raising=False)
+    monkeypatch.delenv("GPT2GIGA_NORMALIZATION_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", raising=False)
+    monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_UI_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", raising=False)
@@ -25,6 +32,13 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.gigachat_api_mode == "v1"
     assert s.responses_api_mode == "inherit"
     assert s.resolve_responses_api_mode() == "v1"
+    assert s.experimental_normalized_layer is False
+    assert s.normalization_mode == "off"
+    assert s.legacy_chat_fallback is True
+    assert s.traffic_log_enabled is False
+    assert s.observability_enabled is False
+    assert s.ui_enabled is False
+    assert s.debug_translate_enabled is False
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024
@@ -157,6 +171,32 @@ def test_proxy_settings_responses_api_mode_empty_env_inherits(monkeypatch):
     s = ProxySettings()
     assert s.responses_api_mode == "inherit"
     assert s.resolve_responses_api_mode() == "v1"
+
+
+def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER", "true")
+    monkeypatch.setenv("GPT2GIGA_NORMALIZATION_MODE", " SHADOW ")
+    monkeypatch.setenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", "false")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
+
+    s = ProxySettings()
+
+    assert s.experimental_normalized_layer is True
+    assert s.normalization_mode == "shadow"
+    assert s.legacy_chat_fallback is False
+    assert s.traffic_log_enabled is True
+    assert s.observability_enabled is True
+    assert s.ui_enabled is True
+    assert s.debug_translate_enabled is True
+
+
+def test_proxy_settings_invalid_normalization_mode(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_NORMALIZATION_MODE", "unsupported")
+    with pytest.raises(Exception):
+        ProxySettings()
 
 
 def test_proxy_settings_api_modes_normalized(monkeypatch):

@@ -1,0 +1,30 @@
+{
+  "id": "chatcmpl-golden-chat",
+  "object": "chat.completion",
+  "created": 0,
+  "model": "gpt-x",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "ok",
+        "refusal": null
+      },
+      "finish_reason": "stop",
+      "index": 0,
+      "logprobs": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1,
+    "completion_tokens": 1,
+    "total_tokens": 2,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "system_fingerprint": "fp_golden-chat"
+}

@@ -5,6 +5,15 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
+### Добавлено
+- **Modular roadmap safety baseline**: начата подготовка release-дисциплины для `v0.1.9` с правилами semantic versioning и release checklist.
+- **Modular feature flags**: добавлены выключенные по умолчанию `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED` и `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
+- **RequestContext**: добавлен внутренний request-scoped context с `request_id`, `trace_id`, protocol/route metadata и безопасными hash-полями для будущих traffic logs/observability без изменения публичного API.
+- **Golden compatibility fixtures**: добавлены fixtures и тесты для OpenAI chat/tool/structured/streaming/embeddings и Anthropic messages/streaming shapes на mocked upstream.
+- **Logging terminology**: добавлен architecture doc, разделяющий runtime logs, future traffic logs, observability traces и metrics.
+
 ## [0.1.8a1] - 2026-06-06
 
 ### Добавлено

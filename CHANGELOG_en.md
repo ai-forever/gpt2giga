@@ -5,6 +5,15 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Modular roadmap safety baseline**: started the `v0.1.9` release discipline with semantic versioning rules and a release checklist.
+- **Modular feature flags**: added default-safe `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED`, and `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
+- **RequestContext**: added an internal request-scoped context with `request_id`, `trace_id`, protocol/route metadata, and safe hash fields for future traffic logs and observability without changing the public API.
+- **Golden compatibility fixtures**: added mocked-upstream fixtures and tests for OpenAI chat/tool/structured/streaming/embeddings and Anthropic messages/streaming response shapes.
+- **Logging terminology**: added an architecture document that separates runtime logs, future traffic logs, observability traces, and metrics.
+
 ## [0.1.8a1] - 2026-06-06
 
 ### Added

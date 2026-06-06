@@ -333,6 +333,13 @@ client.messages.create(
 - `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
+- `--proxy.experimental-normalized-layer <true/false>` — включить экспериментальную подготовку normalized layer. По умолчанию `False`;
+- `--proxy.normalization-mode <off/shadow/on>` — режим normalized layer. По умолчанию `off`, поэтому текущий legacy path не меняется;
+- `--proxy.legacy-chat-fallback <true/false>` — разрешить fallback на legacy chat path во время модульной миграции. По умолчанию `True`;
+- `--proxy.traffic-log-enabled <true/false>` — включить будущие traffic log events. По умолчанию `False`;
+- `--proxy.observability-enabled <true/false>` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию `False`;
+- `--proxy.ui-enabled <true/false>` — включить будущий встроенный UI. По умолчанию `False`;
+- `--proxy.debug-translate-enabled <true/false>` — включить будущие debug translation endpoints. По умолчанию `False`;
 - `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat-2-Max":5}'`;
 - `--proxy.model-max-connections-default <INT>` — fallback per-model лимит для моделей, которых нет в `--proxy.model-max-connections`;
 - `--proxy.model-max-connections-acquire-timeout <FLOAT>` — сколько секунд ждать свободный model slot; `0` означает fail-fast, отсутствие значения — ждать без локального timeout;
@@ -409,6 +416,13 @@ gpt2giga \
 - `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
 - `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
+- `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER="False"` — включить экспериментальную подготовку normalized layer. По умолчанию выключено;
+- `GPT2GIGA_NORMALIZATION_MODE="off"` — режим normalized layer: `off`, `shadow` или `on`. По умолчанию `off`;
+- `GPT2GIGA_LEGACY_CHAT_FALLBACK="True"` — разрешить fallback на legacy chat path во время модульной миграции;
+- `GPT2GIGA_TRAFFIC_LOG_ENABLED="False"` — включить будущие traffic log events. По умолчанию выключено;
+- `GPT2GIGA_OBSERVABILITY_ENABLED="False"` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию выключено;
+- `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
+- `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS='{}'` — JSON-словарь per-model лимитов одновременных upstream model-call внутри gpt2giga;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` — fallback per-model лимит для моделей, которых нет в `GPT2GIGA_MODEL_MAX_CONNECTIONS`. По умолчанию не задан;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT` — сколько секунд ждать свободный model slot. По умолчанию не задано, `0` означает fail-fast;
@@ -450,6 +464,22 @@ GPT2GIGA_GIGACHAT_API_MODE=v2
 > Для maintainers: эта реализация целится в `gigachat==0.2.2a1` и не является переносом pre-release/1.0.0 архитектуры из PR #123.
 
 > **Breaking change в 0.1.6:** `GPT2GIGA_PASS_MODEL` по умолчанию `True`. Если клиент отправляет OpenAI/Anthropic-имя модели, оно будет передано в GigaChat. Чтобы всегда использовать модель из `GIGACHAT_MODEL` / настроек прокси, задайте `GPT2GIGA_PASS_MODEL=False`.
+
+#### Экспериментальные modular flags
+
+Флаги modular roadmap добавлены заранее и по умолчанию не меняют runtime behavior:
+
+```dotenv
+GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER=False
+GPT2GIGA_NORMALIZATION_MODE=off
+GPT2GIGA_LEGACY_CHAT_FALLBACK=True
+GPT2GIGA_TRAFFIC_LOG_ENABLED=False
+GPT2GIGA_OBSERVABILITY_ENABLED=False
+GPT2GIGA_UI_ENABLED=False
+GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
+```
+
+`off` сохраняет текущий legacy path. Режимы `shadow` и `on`, traffic logs, observability hooks, UI и debug translation endpoints зарезервированы для следующих релизов roadmap.
 
 #### Per-model max connections
 
