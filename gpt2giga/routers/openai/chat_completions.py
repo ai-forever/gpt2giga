@@ -1,5 +1,6 @@
 """OpenAI chat completions endpoint."""
 
+from copy import deepcopy
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Request
@@ -30,6 +31,7 @@ router = APIRouter(tags=["OpenAI"])
 async def chat_completions(request: Request):
     """Create a chat completion."""
     data = await read_request_json(request)
+    request_data = deepcopy(data)
     request_options = extract_gigachat_request_options(request, data)
     stream = data.get("stream", False)
     current_rquid = rquid_context.get()
@@ -59,6 +61,7 @@ async def chat_completions(request: Request):
                     current_rquid,
                     giga_client,
                     request_options,
+                    request_data=request_data,
                     model_limiter=model_limiter,
                     effective_model=effective_model,
                     acquired_model_limit=acquired_model_limit,
@@ -76,7 +79,7 @@ async def chat_completions(request: Request):
             SimpleNamespace(model_dump=lambda: adapted),
             data["model"],
             current_rquid,
-            request_data=data,
+            request_data=request_data,
         )
 
     async with gigachat_request_options(giga_client, request_options):
@@ -89,7 +92,7 @@ async def chat_completions(request: Request):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat(chat_messages)
         return state.response_processor.process_response(
-            response, data["model"], current_rquid, request_data=data
+            response, data["model"], current_rquid, request_data=request_data
         )
 
     acquired_model_limit = model_limiter.limit(effective_model, provider="openai")
@@ -102,6 +105,7 @@ async def chat_completions(request: Request):
             current_rquid,
             giga_client,
             request_options,
+            request_data=request_data,
             model_limiter=model_limiter,
             effective_model=effective_model,
             acquired_model_limit=acquired_model_limit,

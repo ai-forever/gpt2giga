@@ -386,6 +386,70 @@ def test_response_processor_chat_metadata_includes_input_tool_calls():
     ]
 
 
+def test_response_processor_chat_metadata_includes_v2_content_function_calls():
+    rp = ResponseProcessor(logger)
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Done.",
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response(
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="1",
+        request_data={
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {"command": "make install"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "run_shell_command",
+                                "result": {"result": "ok"},
+                            }
+                        }
+                    ],
+                },
+            ]
+        },
+    )
+
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "run_shell_command",
+            "arguments": {"command": "make install"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
+
+
 def test_response_processor_stream_chunk_handles_delta():
     rp = ResponseProcessor(logger)
     giga_resp = MockResponse(

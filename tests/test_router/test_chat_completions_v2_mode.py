@@ -1,3 +1,5 @@
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gigachat.models.chat_completions import ChatCompletionChunk
@@ -73,6 +75,22 @@ class FakeAChatResource:
                             "content": [{"text": "ok-stream"}],
                         }
                     ]
+                }
+            )
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "tools_state_id": "new-state",
+                        }
+                    ],
+                    "finish_reason": "stop",
+                    "usage": {
+                        "input_tokens": 2,
+                        "output_tokens": 3,
+                        "total_tokens": 5,
+                    },
                 }
             )
 
@@ -180,3 +198,65 @@ def test_chat_completions_v2_stream_uses_primary_stream():
     assert app.state.gigachat_client.achat.v1_calls == []
     assert app.state.gigachat_client.achat.v2_calls == []
     assert app.state.gigachat_client.achat.stream_calls == [{"contract": "v2"}]
+
+
+def test_chat_completions_v2_stream_preserves_called_tools_from_request():
+    app = make_app("v2")
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {"command": "make install"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "run_shell_command",
+                                "result": {"result": "ok"},
+                            }
+                        }
+                    ],
+                },
+            ],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    chunks = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: {")
+    ]
+    metadata = chunks[-1]["metadata"]
+
+    assert response.status_code == 200
+    assert metadata["gigachat_tool_state_id"] == "new-state"
+    assert json.loads(metadata["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "run_shell_command",
+            "arguments": {"command": "make install"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]

@@ -44,6 +44,7 @@ async def stream_chat_completion_generator(
     giga_client: Optional[GigaChat] = None,
     request_options: Optional[GigaRequestOptions] = None,
     *,
+    request_data: Optional[dict[str, Any]] = None,
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
     acquired_model_limit: Optional[Any] = None,
@@ -73,7 +74,10 @@ async def stream_chat_completion_generator(
                         break
                     processed = (
                         request.app.state.response_processor.process_stream_chunk(
-                            chunk, model, response_id
+                            chunk,
+                            model,
+                            response_id,
+                            request_data=request_data,
                         )
                     )
                     yield f"data: {json.dumps(processed)}\n\n"
@@ -178,6 +182,7 @@ async def stream_chat_completion_v2_generator(
     giga_client: Optional[GigaChat] = None,
     request_options: Optional[GigaRequestOptions] = None,
     *,
+    request_data: Optional[dict[str, Any]] = None,
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
     acquired_model_limit: Optional[Any] = None,
@@ -211,6 +216,7 @@ async def stream_chat_completion_v2_generator(
                             SimpleNamespace(model_dump=lambda: adapted),
                             model,
                             response_id,
+                            request_data=request_data,
                         )
                     )
                     yield f"data: {json.dumps(processed)}\n\n"

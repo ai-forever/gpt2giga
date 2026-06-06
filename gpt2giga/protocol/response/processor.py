@@ -611,12 +611,27 @@ class ResponseProcessor:
         response_metadata = extract_gigachat_response_metadata(
             giga_dict.get("x_headers")
         )
-        response_metadata.update(self._extract_provider_response_metadata(giga_dict))
+        provider_metadata = self._extract_provider_response_metadata(giga_dict)
         is_tool_call = giga_dict["choices"][0].get("finish_reason") == "function_call"
 
         is_structured_output = self._is_chat_structured_output_function_call(
             request_data
         )
+        if is_structured_output:
+            provider_metadata.pop("gigachat_called_tools", None)
+        else:
+            called_tools: list[dict[str, Any]] = []
+            if self._is_terminal_stream_chunk(giga_dict):
+                called_tools = self._extract_chat_messages_called_tool_items(
+                    request_data or {}
+                )
+            called_tools.extend(
+                self._extract_called_tool_items_from_metadata(
+                    provider_metadata.pop("gigachat_called_tools", None)
+                )
+            )
+            response_metadata.update(self._called_tools_metadata(called_tools))
+        response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
             self._process_choice(
@@ -649,6 +664,20 @@ class ResponseProcessor:
             response_id=result.get("id"),
         )
         return result
+
+    @staticmethod
+    def _is_terminal_stream_chunk(data: Mapping[str, Any]) -> bool:
+        if data.get("usage"):
+            return True
+
+        choices = data.get("choices")
+        if not isinstance(choices, list):
+            return False
+
+        return any(
+            isinstance(choice, Mapping) and choice.get("finish_reason") is not None
+            for choice in choices
+        )
 
     def flush_stream_reasoning(
         self,
@@ -1078,6 +1107,25 @@ class ResponseProcessor:
                 if item:
                     called_tools.append(item)
 
+            content = raw_message.get("content")
+            if isinstance(content, list):
+                for content_index, raw_part in enumerate(content):
+                    if not isinstance(raw_part, Mapping):
+                        continue
+                    function_call = raw_part.get("function_call")
+                    if not isinstance(function_call, Mapping):
+                        continue
+                    item = cls._chat_tool_call_item(
+                        function_call,
+                        raw_message,
+                        raw_message,
+                        call_index=len(called_tools),
+                        message_index=message_index,
+                        content_index=content_index,
+                    )
+                    if item:
+                        called_tools.append(item)
+
         return called_tools
 
     @classmethod
@@ -1090,6 +1138,7 @@ class ResponseProcessor:
         call_index: int,
         message_index: int,
         tool_call_index: Optional[int] = None,
+        content_index: Optional[int] = None,
     ) -> Optional[dict[str, Any]]:
         name = function.get("name")
         if not isinstance(name, str) or not name:
@@ -1105,6 +1154,8 @@ class ResponseProcessor:
         }
         if tool_call_index is not None:
             item["tool_call_index"] = tool_call_index
+        if content_index is not None:
+            item["content_index"] = content_index
         role = message.get("role")
         if isinstance(role, str) and role:
             item["role"] = role

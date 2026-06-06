@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -12,10 +13,11 @@ from gpt2giga.common.streaming import (
     stream_responses_generator,
     stream_responses_v2_generator,
 )
+from gpt2giga.protocol import ResponseProcessor
 
 
 class FakeResponseProcessor:
-    def process_stream_chunk(self, chunk, model, response_id: str):
+    def process_stream_chunk(self, chunk, model, response_id: str, request_data=None):
         return {
             "id": response_id,
             "model": model,
@@ -59,6 +61,29 @@ class FakeClient:
                 model_dump=lambda: {
                     "choices": [{"delta": {"content": "B"}}],
                     "usage": None,
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
+class FakeClientV1TerminalChunk:
+    def astream(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {"role": "assistant", "content": ""},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 2,
+                        "total_tokens": 12,
+                    },
                     "model": "giga",
                 }
             )
@@ -205,6 +230,64 @@ async def test_stream_chat_completion_generator_gigachat_exception():
 
 
 @pytest.mark.asyncio
+async def test_stream_chat_completion_generator_preserves_input_called_tools():
+    req = FakeRequest(FakeClientV1TerminalChunk())
+    req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+
+    async for line in stream_chat_completion_generator(
+        req,
+        "gpt-x",
+        chat,
+        response_id="v1",
+        request_data={
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {"command": "make install"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "run_shell_command",
+                                "result": {"result": "ok"},
+                            }
+                        }
+                    ],
+                },
+            ]
+        },
+    ):
+        lines.append(line)
+
+    payload = json.loads(lines[0].replace("data: ", ""))
+    assert json.loads(payload["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "run_shell_command",
+            "arguments": {"command": "make install"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
+    assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
 async def test_stream_chat_completion_v2_generator_text_chunks():
     chunks = [
         ChatCompletionChunk.model_validate(
@@ -276,6 +359,83 @@ async def test_stream_chat_completion_v2_generator_usage_only_chunk():
 
     assert len(lines) == 2
     assert '"content": ""' in lines[0]
+    assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_completion_v2_generator_preserves_input_called_tools():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tools_state_id": "new-state",
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 2,
+                    "total_tokens": 12,
+                },
+            }
+        )
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
+    lines = []
+
+    async for line in stream_chat_completion_v2_generator(
+        req,
+        "gpt-x",
+        {"contract": "v2"},
+        response_id="v2",
+        request_data={
+            "messages": [
+                {
+                    "role": "assistant",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_call": {
+                                "name": "run_shell_command",
+                                "arguments": {"command": "make install"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tools_state_id": "state-1",
+                    "content": [
+                        {
+                            "function_result": {
+                                "name": "run_shell_command",
+                                "result": {"result": "ok"},
+                            }
+                        }
+                    ],
+                },
+            ]
+        },
+    ):
+        lines.append(line)
+
+    payload = json.loads(lines[0].replace("data: ", ""))
+    metadata = payload["metadata"]
+    assert metadata["gigachat_tool_state_id"] == "new-state"
+    assert json.loads(metadata["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "message_index": 0,
+            "name": "run_shell_command",
+            "arguments": {"command": "make install"},
+            "content_index": 0,
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
     assert lines[1].strip() == "data: [DONE]"
 
 
