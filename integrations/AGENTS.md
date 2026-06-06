@@ -35,7 +35,8 @@
 - Runtime config reference: `.env.example`
 - Proxy config models: `gpt2giga/models/config.py`
 - Security behavior: `gpt2giga/models/security.py`
-- Entrypoint and mounted routes: `gpt2giga/api_server.py`
+- Entrypoint facade: `gpt2giga/api_server.py`
+- Mounted routes and middleware: `gpt2giga/app/factory.py`
 - Example clients to cross-check docs: `examples/`
 
 ## Quick Find Commands

@@ -2,8 +2,13 @@ from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
 
 from gpt2giga.api_server import create_app
+from gpt2giga.app.factory import create_app as create_modular_app
 from gpt2giga.common.app_meta import check_port_available
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+
+
+def test_legacy_create_app_facade_uses_modular_factory():
+    assert create_app is create_modular_app
 
 
 def test_root_redirect():
@@ -30,7 +35,10 @@ def test_v1_prefix_router_is_registered(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
 
     with TestClient(create_app()) as client:
         # Используем контекстный менеджер, чтобы lifespan сработал и инициализировал state
@@ -49,7 +57,10 @@ def test_v1_litellm_router_is_registered(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
 
     with TestClient(create_app()) as client:
         response = client.get("/v1/model/info")
@@ -68,7 +79,10 @@ def test_v1_models_no_307_redirect(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
 
     with TestClient(create_app()) as client:
         response = client.get("/v1/models", follow_redirects=False)
@@ -130,7 +144,10 @@ def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypa
         async def aclose(self):
             return None
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
 
     log_file = tmp_path / "gpt2giga.log"
     log_file.write_text("INFO: log line\n")

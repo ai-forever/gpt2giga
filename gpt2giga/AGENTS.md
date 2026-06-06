@@ -26,7 +26,10 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 
 | Path | Role |
 |---|---|
-| `api_server.py` | App factory, lifespan, middleware registration, router mounting, `run()` |
+| `api_server.py` | Compatibility facade and `run()` entrypoint |
+| `app/factory.py` | FastAPI app factory, middleware registration, router mounting |
+| `app/lifecycle.py` | Startup/shutdown dependency wiring |
+| `app/settings.py` | App-level config loading, validation, CORS policy, logger setup |
 | `app_state.py` | Request/app-scoped accessors for GigaChat client, batch store, file store |
 | `cli.py` | Config loading and env-path handling |
 | `auth.py` | API-key verification dependency |
@@ -34,8 +37,9 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 | `constants.py` | Size limits, security field lists, shared constants |
 | `models/config.py` | `ProxySettings`, `GigaChatCLI`, `ProxyConfig` |
 | `models/security.py` | Security posture summary and request-size defaults |
-| `common/` | Shared exception handling, auth helpers, request parsing, streaming, schema/tool utilities |
+| `common/` | Shared exception handling, compatibility helpers, request parsing, streaming, schema/tool utilities |
 | `protocol/` | Request, response, attachment, batch, and Anthropic translation logic |
+| `providers/gigachat/` | GigaChat SDK client creation, shutdown, and token handoff |
 | `routers/` | OpenAI-compatible, Anthropic-compatible, system, and logs endpoints |
 | `openapi_specs/` | OpenAPI schema fragments for OpenAI and Anthropic endpoints |
 | `templates/log_viewer.html` | HTML log viewer for `/logs/html` |
@@ -74,7 +78,8 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 ## Common Utilities
 
 - `common/exceptions.py`: `@exceptions_handler` and exception normalization
-- `common/gigachat_auth.py`: per-request GigaChat auth/token handoff
+- `providers/gigachat/auth.py`: per-request GigaChat auth/token handoff
+- `common/gigachat_auth.py`: compatibility facade for GigaChat auth helpers
 - `common/request_json.py` and `common/request_form.py`: safe request parsing
 - `common/streaming.py`: SSE generators for chat and responses
 - `common/tools.py`: tool/function conversion helpers
@@ -89,12 +94,12 @@ GigaChat SDK -> response processor -> router -> client-compatible response
 - Decorate router handlers with `@exceptions_handler`.
 - Use `request.app.state` and helpers in `app_state.py` for shared state instead of globals.
 - New config belongs in `ProxySettings` or `GigaChatCLI` with a `Field(...)` description.
-- Middleware order matters; revalidate behavior if changing `api_server.py`.
+- Middleware order matters; revalidate behavior if changing `app/factory.py`.
 - `PROD` mode behavior is security-sensitive. Treat changes to auth, CORS, docs exposure, and log endpoints carefully.
 
 ## Middleware Order
 
-Applied via `api_server.py`:
+Applied via `app/factory.py`:
 
 1. `CORSMiddleware`
 2. `PathNormalizationMiddleware`

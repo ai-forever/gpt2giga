@@ -28,7 +28,9 @@ def test_app_lifespan_initializes_state(monkeypatch):
             pass
 
     # Подменяем клиента GigaChat при старте lifespan
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: Dummy())
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client", lambda settings: Dummy()
+    )
 
     with TestClient(app) as client:
         resp = client.get("/health")
@@ -51,7 +53,10 @@ def test_lifespan_closes_gigachat_client(monkeypatch):
         async def aclose(self):
             closed.append(True)
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: DummyWithClose())
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: DummyWithClose(),
+    )
 
     app = create_app()
     with TestClient(app):
@@ -71,7 +76,8 @@ def test_lifespan_handles_aclose_error(monkeypatch):
             raise RuntimeError("close failed")
 
     monkeypatch.setattr(
-        "gpt2giga.api_server.GigaChat", lambda **kw: DummyWithBrokenClose()
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: DummyWithBrokenClose(),
     )
 
     app = create_app()

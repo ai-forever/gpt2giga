@@ -1,0 +1,1 @@
+"""Traffic log sink namespace."""

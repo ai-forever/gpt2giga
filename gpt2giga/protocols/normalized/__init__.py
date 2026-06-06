@@ -1,0 +1,1 @@
+"""Normalized protocol model namespace."""

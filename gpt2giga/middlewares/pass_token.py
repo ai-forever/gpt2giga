@@ -3,7 +3,7 @@ from typing import Callable
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from gpt2giga.common.gigachat_auth import create_gigachat_client_for_request
+from gpt2giga.providers.gigachat.auth import create_gigachat_client_for_request
 
 
 class PassTokenMiddleware(BaseHTTPMiddleware):
