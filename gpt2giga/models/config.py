@@ -69,8 +69,9 @@ class ProxySettings(BaseSettings):
     default_max_tokens: int | None = Field(
         default=DEFAULT_MAX_TOKENS,
         description=(
-            "Значение max_tokens по умолчанию, отправляемое в GigaChat API, "
-            "если клиент не указал max_tokens, max_completion_tokens или max_output_tokens"
+            "Опциональное значение max_tokens по умолчанию, отправляемое в GigaChat API, "
+            "если клиент не указал max_tokens, max_completion_tokens или max_output_tokens; "
+            "None означает не добавлять max_tokens"
         ),
     )
     model_max_connections: dict[str, PositiveInt] = Field(

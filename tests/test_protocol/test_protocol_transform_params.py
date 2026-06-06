@@ -13,6 +13,7 @@ from gpt2giga.protocol.request.params import (
 @pytest.fixture(autouse=True)
 def _clear_pass_model_env(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
+    monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
 
 
 def test_transform_chat_parameters_temperature_and_top_p():
@@ -53,6 +54,24 @@ def test_transform_common_parameters_without_temperature_does_not_add_top_p():
     rt = RequestTransformer(cfg, logger=logger)
     out = rt.transform_chat_parameters({"model": "gpt-x"})
     assert "top_p" not in out
+
+
+def test_transform_chat_parameters_omits_unset_default_max_tokens():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_chat_parameters({"model": "gpt-x"})
+
+    assert "max_tokens" not in out
+
+
+def test_transform_chat_parameters_applies_configured_default_max_tokens():
+    cfg = ProxyConfig(proxy=ProxySettings(default_max_tokens=128000))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_chat_parameters({"model": "gpt-x"})
+
+    assert out.get("max_tokens") == 128000
 
 
 def test_transform_common_parameters_preserves_explicit_top_p_without_temperature():

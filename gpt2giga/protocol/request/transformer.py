@@ -455,9 +455,10 @@ class RequestTransformer:
         if max_tokens:
             transformed["max_tokens"] = max_tokens
 
-        # Apply default max_tokens if none was provided by the client
-        if "max_tokens" not in transformed:
-            transformed["max_tokens"] = self.config.proxy_settings.default_max_tokens
+        # Apply default max_tokens if configured and none was provided by the client.
+        default_max_tokens = self.config.proxy_settings.default_max_tokens
+        if "max_tokens" not in transformed and default_max_tokens is not None:
+            transformed["max_tokens"] = default_max_tokens
 
         if "functions" not in transformed and "tools" in transformed:
             functions = []

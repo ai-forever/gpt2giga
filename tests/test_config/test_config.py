@@ -10,6 +10,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_RESPONSES_API_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT", raising=False)
@@ -28,6 +29,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024
     assert s.max_audio_image_total_size_bytes == 80 * 1024 * 1024
+    assert s.default_max_tokens is None
     assert s.model_max_connections == {}
     assert s.model_max_connections_default is None
     assert s.model_max_connections_acquire_timeout is None
@@ -42,6 +44,14 @@ def test_proxy_settings_env_prefix(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_HOST", "127.0.0.1")
     s = ProxySettings()
     assert s.host == "127.0.0.1"
+
+
+def test_proxy_settings_default_max_tokens_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_DEFAULT_MAX_TOKENS", "128000")
+
+    s = ProxySettings()
+
+    assert s.default_max_tokens == 128000
 
 
 def test_proxy_settings_model_max_connections_from_env(monkeypatch):

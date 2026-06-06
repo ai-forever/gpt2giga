@@ -15,7 +15,7 @@
 - **Примеры и покрытие**: добавлены runnable-примеры для per-model concurrency, GigaChat built-in tools и multiple tool calls, а также тесты для v2 adapters, v2 routes, streaming, metadata и model concurrency
 
 ### Изменено
-- **`max_tokens` по умолчанию**: добавлен `GPT2GIGA_DEFAULT_MAX_TOKENS=128000`; значение по умолчанию применяется к GigaChat-запросам, если клиент не передал `max_tokens`, `max_completion_tokens` или `max_output_tokens`, и может быть отключено через `None`
+- **`max_tokens` по умолчанию**: `GPT2GIGA_DEFAULT_MAX_TOKENS` теперь не задан по умолчанию; `max_tokens` добавляется к GigaChat-запросам только если клиент передал лимит сам или администратор явно настроил переменную окружения
 - **OpenAI Responses stateful mapping**: в GigaChat v2 mode `store=true` и `previous_response_id` маппятся в GigaChat storage/thread state, а response id строится из `thread_id`, когда он доступен
 - **Метаданные ответов**: GigaChat `x-request-id`, `x-session-id`, `thread_id`, `message_id`, tool state ids, called tools, files и inline data прокидываются в OpenAI/Anthropic-compatible ответы и stream events там, где это применимо
 - **Логирование**: структурированные extra-поля теперь редактируются рекурсивно, а Loguru markup в structured logs экранируется

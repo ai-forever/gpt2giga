@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Examples and coverage**: added runnable examples for per-model concurrency, GigaChat built-in tools, and multiple tool calls, plus tests for v2 adapters, v2 routes, streaming, metadata, and model concurrency
 
 ### Changed
-- **Default `max_tokens`**: added `GPT2GIGA_DEFAULT_MAX_TOKENS=128000`; the default is applied to GigaChat requests when the client does not send `max_tokens`, `max_completion_tokens`, or `max_output_tokens`, and can be disabled with `None`
+- **Default `max_tokens`**: `GPT2GIGA_DEFAULT_MAX_TOKENS` is now unset by default; `max_tokens` is added to GigaChat requests only when the client sends a limit or the administrator explicitly configures the environment variable
 - **OpenAI Responses stateful mapping**: in GigaChat v2 mode, `store=true` and `previous_response_id` now map to GigaChat storage/thread state, and the response id is built from `thread_id` when available
 - **Response metadata**: GigaChat `x-request-id`, `x-session-id`, `thread_id`, `message_id`, tool state ids, called tools, files, and inline data are forwarded into OpenAI/Anthropic-compatible responses and stream events where applicable
 - **Logging**: structured extra fields are now recursively redacted, and Loguru markup in structured logs is escaped
