@@ -5,6 +5,30 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8a1] - 2026-06-06
+
+### Added
+- **GigaChat v2 backend mode**: added `GPT2GIGA_GIGACHAT_API_MODE` and `GPT2GIGA_RESPONSES_API_MODE` to switch chat-like upstream calls to the primary `v2/chat/completions` surface in GigaChat SDK 0.2.2a1 while keeping the external OpenAI/Anthropic-compatible contract and URLs unchanged
+- **Responses built-in tools in v2 mode**: added support for GigaChat built-in tools in OpenAI Responses API (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`), including `tool_choice`, output items, stream events, file/inline metadata, and image hydration
+- **Per-model max connections**: added local in-process limits for concurrent upstream model calls by effective GigaChat model via `GPT2GIGA_MODEL_MAX_CONNECTIONS`, `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT`, and `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT`, plus matching CLI flags
+- **Debug payload logs**: added non-PROD DEBUG payload logs for upstream GigaChat requests and processed responses; payloads are omitted in PROD
+- **Examples and coverage**: added runnable examples for per-model concurrency, GigaChat built-in tools, and multiple tool calls, plus tests for v2 adapters, v2 routes, streaming, metadata, and model concurrency
+
+### Changed
+- **Default `max_tokens`**: added `GPT2GIGA_DEFAULT_MAX_TOKENS=128000`; the default is applied to GigaChat requests when the client does not send `max_tokens`, `max_completion_tokens`, or `max_output_tokens`, and can be disabled with `None`
+- **OpenAI Responses stateful mapping**: in GigaChat v2 mode, `store=true` and `previous_response_id` now map to GigaChat storage/thread state, and the response id is built from `thread_id` when available
+- **Response metadata**: GigaChat `x-request-id`, `x-session-id`, `thread_id`, `message_id`, tool state ids, called tools, files, and inline data are forwarded into OpenAI/Anthropic-compatible responses and stream events where applicable
+- **Logging**: structured extra fields are now recursively redacted, and Loguru markup in structured logs is escaped
+- **Documentation and settings**: README, `.env.example`, OpenAPI specs, and the client parameter compatibility guide now cover v2 mode, built-in tools, per-model limits, and new defaults
+- **Dependencies**: updated `aiohttp`, `openai-agents`, integration extras, security-sensitive dependencies, and GitHub Actions versions
+
+### Fixed
+- **Streaming built-in tools**: fixed progress/result/done event generation for GigaChat built-in tools in Responses streaming
+- **Tool state ids**: aligned `functions_state_id` and GigaChat v2 tool/message state metadata handling across non-streaming and streaming responses
+- **Response id metadata**: OpenAI-compatible responses now preserve upstream identifiers in `metadata` without dropping user-provided `metadata`
+- **Embeddings metadata**: OpenAI embeddings responses now include allowlisted GigaChat response headers in `metadata`
+- **Reserved tool names**: user-defined `web_search` is mapped to an internal safe name before sending to GigaChat and mapped back in client responses to avoid conflicts with the built-in GigaChat tool
+
 ## [0.1.7] - 2026-05-28
 
 ### Added
