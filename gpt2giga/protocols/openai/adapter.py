@@ -17,6 +17,9 @@ from gpt2giga.protocols.normalized import (
     NormalizedTool,
     NormalizedToolCall,
 )
+from gpt2giga.protocols.openai.response_adapter import (
+    normalized_chat_response_to_openai,
+)
 
 _CHAT_TOP_LEVEL_FIELDS = {
     "additional_fields",
@@ -67,7 +70,11 @@ class OpenAIProtocolAdapter:
         context: RequestContext | None = None,
     ) -> Any:
         """Convert normalized responses back to OpenAI payloads."""
-        raise NotImplementedError("OpenAI response mapping is added in v0.3.1")
+        return normalized_chat_response_to_openai(
+            payload,
+            requested_model=getattr(payload, "model", None) or "GigaChat",
+            context=context,
+        )
 
     def chat_to_normalized(
         self,

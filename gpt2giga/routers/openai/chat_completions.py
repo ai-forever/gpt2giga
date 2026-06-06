@@ -18,10 +18,13 @@ from gpt2giga.common.streaming import (
     stream_chat_completion_generator,
     stream_chat_completion_v2_generator,
 )
+from gpt2giga.core.context import get_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import chat_completions_openapi_extra
 from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
+from gpt2giga.protocols.openai import normalized_chat_response_to_openai
 from gpt2giga.protocols.normalized import run_openai_chat_shadow_normalization
+from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 
 router = APIRouter(tags=["OpenAI"])
@@ -40,6 +43,16 @@ async def chat_completions(request: Request):
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
     mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
+
+    normalized_response = await _try_normalized_non_stream_chat(
+        request,
+        request_data,
+        request_options,
+        giga_client,
+        model_limiter,
+    )
+    if normalized_response is not None:
+        return normalized_response
 
     await run_openai_chat_shadow_normalization(request, request_data)
     populate_giga_functions(data, getattr(state, "logger", None))
@@ -114,3 +127,56 @@ async def chat_completions(request: Request):
         ),
         media_type="text/event-stream",
     )
+
+
+async def _try_normalized_non_stream_chat(
+    request: Request,
+    payload: dict,
+    request_options,
+    giga_client,
+    model_limiter,
+) -> dict | None:
+    state = request.app.state
+    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+    if (
+        settings is None
+        or settings.normalization_mode != "on"
+        or payload.get("stream", False)
+    ):
+        return None
+
+    try:
+        protocol_adapter = state.openai_protocol_adapter
+        context = get_request_context()
+        normalized_request = await protocol_adapter.to_normalized(
+            payload,
+            context=context,
+        )
+        provider_adapter = GigaChatProviderAdapter(
+            config=state.config,
+            request_transformer=state.request_transformer,
+            giga_client=giga_client,
+            model_limiter=model_limiter,
+            request_options=request_options,
+        )
+        normalized_response = await provider_adapter.chat(
+            normalized_request,
+            context=context,
+        )
+        return normalized_chat_response_to_openai(
+            normalized_response,
+            requested_model=payload["model"],
+            context=context,
+        )
+    except Exception as exc:
+        if not settings.legacy_chat_fallback:
+            raise
+        logger = getattr(state, "logger", None)
+        if logger is not None:
+            logger.bind(
+                event="normalized_chat_fallback",
+                route=request.url.path,
+                error_type=type(exc).__name__,
+                request_id=getattr(get_request_context(), "request_id", None),
+            ).warning("Normalized chat path failed; using legacy fallback")
+        return None

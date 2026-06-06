@@ -334,7 +334,7 @@ client.messages.create(
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
 - `--proxy.experimental-normalized-layer <true/false>` — включить экспериментальную подготовку normalized layer. По умолчанию `False`;
-- `--proxy.normalization-mode <off/shadow/on>` — режим normalized layer. По умолчанию `off`; `shadow` строит normalized-представление OpenAI Chat параллельно с legacy path и не меняет ответ клиента;
+- `--proxy.normalization-mode <off/shadow/on>` — режим normalized layer. По умолчанию `off`; `shadow` строит normalized-представление OpenAI Chat параллельно с legacy path и не меняет ответ клиента; `on` переводит OpenAI Chat non-stream на экспериментальный normalized path;
 - `--proxy.legacy-chat-fallback <true/false>` — разрешить fallback на legacy chat path во время модульной миграции. По умолчанию `True`;
 - `--proxy.traffic-log-enabled <true/false>` — включить будущие traffic log events. По умолчанию `False`;
 - `--proxy.observability-enabled <true/false>` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию `False`;
@@ -417,7 +417,7 @@ gpt2giga \
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
 - `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
 - `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER="False"` — включить экспериментальную подготовку normalized layer. По умолчанию выключено;
-- `GPT2GIGA_NORMALIZATION_MODE="off"` — режим normalized layer: `off`, `shadow` или `on`. По умолчанию `off`; `shadow` включает best-effort OpenAI Chat normalization diagnostics без изменения legacy response path;
+- `GPT2GIGA_NORMALIZATION_MODE="off"` — режим normalized layer: `off`, `shadow` или `on`. По умолчанию `off`; `shadow` включает best-effort OpenAI Chat normalization diagnostics без изменения legacy response path; `on` переводит OpenAI Chat non-stream на экспериментальный normalized path;
 - `GPT2GIGA_LEGACY_CHAT_FALLBACK="True"` — разрешить fallback на legacy chat path во время модульной миграции;
 - `GPT2GIGA_TRAFFIC_LOG_ENABLED="False"` — включить будущие traffic log events. По умолчанию выключено;
 - `GPT2GIGA_TRAFFIC_LOG_SINK="noop"` — backend traffic logs: `noop` или `jsonl`. По умолчанию `noop`;
@@ -483,7 +483,7 @@ GPT2GIGA_UI_ENABLED=False
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
 ```
 
-`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. Режим `on`, observability hooks, UI и debug translation endpoints зарезервированы для следующих релизов roadmap. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
+`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions non-stream на экспериментальный normalized path: request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter. Streaming, Anthropic normalization, observability hooks, UI и debug translation endpoints остаются scope следующих релизов roadmap. Если normalized path падает и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
 
 #### Per-model max connections
 

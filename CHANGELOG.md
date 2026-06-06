@@ -21,6 +21,7 @@
 - **OpenAI normalized adapter**: добавлен внутренний OpenAI Chat Completions -> `NormalizedChatRequest` adapter для shadow mode с покрытием messages, model, generation params, tools, tool_choice, response_format и metadata.
 - **Normalized shadow mode**: OpenAI Chat route теперь может запускать normalized adapter в best-effort shadow mode при `GPT2GIGA_NORMALIZATION_MODE=shadow`; ошибки shadow translation не ломают legacy request path.
 - **Shadow diagnostics**: добавлены safe diagnostic events для normalized shadow mode с `normalization_status`, `route`, `request_id`, shape hash, warnings и errors без записи raw prompt/response content.
+- **Normalized OpenAI Chat path**: при `GPT2GIGA_NORMALIZATION_MODE=on` OpenAI Chat Completions non-stream проходит через `NormalizedChatRequest`, GigaChat provider adapter и normalized-to-OpenAI response adapter; `GPT2GIGA_LEGACY_CHAT_FALLBACK=True` сохраняет fallback на legacy path без записи raw prompt/response content.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.

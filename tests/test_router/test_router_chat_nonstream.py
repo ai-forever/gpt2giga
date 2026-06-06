@@ -7,6 +7,7 @@ import pytest
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.routers.openai import router
 
 
@@ -58,10 +59,16 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
+    def __init__(self):
+        self.chat_calls = []
+        self.response_calls = []
+
     async def prepare_chat_completion(self, data, giga_client=None):
+        self.chat_calls.append((data, giga_client))
         return {"model": data.get("model", "giga")}
 
     async def prepare_response(self, data, giga_client=None):
+        self.response_calls.append((data, giga_client))
         return {"model": data.get("model", "giga")}
 
 
@@ -71,6 +78,7 @@ def make_app():
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
+    app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     return app
 
@@ -96,6 +104,102 @@ def test_chat_completions_non_stream_basic():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
+
+
+def test_chat_completions_normalization_on_uses_non_stream_normalized_path():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="on", gigachat_api_mode="v1")
+    )
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["object"] == "chat.completion"
+    assert body["model"] == "gpt-x"
+    assert body["choices"][0]["message"]["content"] == "ok"
+    assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_skips_streaming_path():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="on", gigachat_api_mode="v1")
+    )
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in body
+    assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_falls_back_to_legacy_when_enabled():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            legacy_chat_fallback=True,
+            gigachat_api_mode="v1",
+        )
+    )
+
+    class BrokenAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            raise RuntimeError("normalized failed")
+
+    app.state.openai_protocol_adapter = BrokenAdapter()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["object"] == "chat.completion"
+    assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_without_fallback_returns_error():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            legacy_chat_fallback=False,
+            gigachat_api_mode="v1",
+        )
+    )
+
+    class BrokenAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            raise RuntimeError("normalized failed")
+
+    app.state.openai_protocol_adapter = BrokenAdapter()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 500
+    assert resp.json()["error"]["type"] == "server_error"
 
 
 def test_chat_completions_shadow_mode_adapter_error_does_not_break_legacy_response():
