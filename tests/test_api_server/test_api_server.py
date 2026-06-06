@@ -5,6 +5,7 @@ from gpt2giga.api_server import create_app
 from gpt2giga.app.factory import create_app as create_modular_app
 from gpt2giga.common.app_meta import check_port_available
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
 from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 
@@ -104,6 +105,12 @@ def test_app_factory_creates_default_extension_sinks():
 
     assert isinstance(app.state.traffic_log_sink, NoopTrafficLogSink)
     assert isinstance(app.state.observability_sink, NoopObservabilitySink)
+
+
+def test_app_factory_creates_openai_protocol_adapter():
+    app = create_app()
+
+    assert isinstance(app.state.openai_protocol_adapter, OpenAIProtocolAdapter)
 
 
 def test_docs_disabled_in_prod_mode():

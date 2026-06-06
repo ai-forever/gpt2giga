@@ -21,6 +21,7 @@ from gpt2giga.common.streaming import (
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import chat_completions_openapi_extra
 from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
+from gpt2giga.protocols.normalized import run_openai_chat_shadow_normalization
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 
 router = APIRouter(tags=["OpenAI"])
@@ -40,6 +41,7 @@ async def chat_completions(request: Request):
     model_limiter = get_model_concurrency_limiter(request)
     mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
 
+    await run_openai_chat_shadow_normalization(request, request_data)
     populate_giga_functions(data, getattr(state, "logger", None))
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):

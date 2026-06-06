@@ -98,6 +98,74 @@ def test_chat_completions_non_stream_basic():
     assert body["object"] == "chat.completion"
 
 
+def test_chat_completions_shadow_mode_adapter_error_does_not_break_legacy_response():
+    calls = []
+    app = make_app()
+    app.state.config = ProxyConfig(proxy=ProxySettings(normalization_mode="shadow"))
+
+    class BrokenShadowAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            calls.append((payload, context))
+            raise RuntimeError("shadow failed")
+
+    app.state.openai_protocol_adapter = BrokenShadowAdapter()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["object"] == "chat.completion"
+    assert len(calls) == 1
+    event = app.state.normalization_shadow_events[-1]
+    assert event.normalization_status == "error"
+    assert event.errors == ["RuntimeError"]
+
+
+def test_chat_completions_normalization_off_does_not_call_shadow_adapter():
+    calls = []
+    app = make_app()
+    app.state.config = ProxyConfig(proxy=ProxySettings(normalization_mode="off"))
+
+    class RecordingShadowAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            calls.append(payload)
+
+    app.state.openai_protocol_adapter = RecordingShadowAdapter()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 200
+    assert calls == []
+
+
+def test_chat_completions_shadow_mode_records_shape_diagnostic_without_raw_prompt():
+    app = make_app()
+    app.state.config = ProxyConfig(proxy=ProxySettings(normalization_mode="shadow"))
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "secret prompt"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    event = app.state.normalization_shadow_events[-1]
+    payload = event.to_json_dict()
+    assert payload["normalization_status"] == "ok"
+    assert payload["normalized_shape_hash"].startswith("sha256:")
+    assert "secret prompt" not in json.dumps(payload)
+
+
 def test_chat_completions_v1_non_stream_preserves_called_tools_from_request():
     app = make_app()
     client = TestClient(app)

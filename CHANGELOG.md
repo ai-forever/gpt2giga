@@ -17,6 +17,10 @@
 - **Extension interfaces**: добавлены внутренние `ProtocolAdapter`, `ProviderAdapter`, `TrafficLogSink`, `TrafficLogQueryStore`, `ObservabilitySink` и `MetricsSink` для будущих backend/provider/storage расширений без тяжелых зависимостей.
 - **Traffic log event and sinks**: добавлена storage-independent модель `TrafficLogEvent`, noop traffic sink по умолчанию и opt-in JSONL sink для локальной проверки через `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
 - **Observability noop sink**: добавлен noop observability sink и безопасные helper-функции для будущих trace events.
+- **Normalized schemas**: добавлены внутренние JSON-сериализуемые модели normalized layer для chat, embeddings, response, usage, error и stream events с `raw_extensions` и provider metadata.
+- **OpenAI normalized adapter**: добавлен внутренний OpenAI Chat Completions -> `NormalizedChatRequest` adapter для shadow mode с покрытием messages, model, generation params, tools, tool_choice, response_format и metadata.
+- **Normalized shadow mode**: OpenAI Chat route теперь может запускать normalized adapter в best-effort shadow mode при `GPT2GIGA_NORMALIZATION_MODE=shadow`; ошибки shadow translation не ломают legacy request path.
+- **Shadow diagnostics**: добавлены safe diagnostic events для normalized shadow mode с `normalization_status`, `route`, `request_id`, shape hash, warnings и errors без записи raw prompt/response content.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.

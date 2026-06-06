@@ -21,6 +21,7 @@ from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.models.config import ProxyConfig
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.routers.litellm import router as litellm_router
 from gpt2giga.routers.logs_router import logs_api_router, logs_router
 from gpt2giga.routers.system_router import system_router
@@ -47,6 +48,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         openapi_url=None if prod_mode else "/openapi.json",
     )
     app.state.config = config
+    app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.traffic_log_sink = create_traffic_log_sink(config.proxy_settings)
     app.state.observability_sink = create_observability_sink(config.proxy_settings)
 
