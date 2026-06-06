@@ -310,3 +310,38 @@ async def test_stream_chat_completion_timeout_does_not_call_upstream() -> None:
     assert '"type": "rate_limit_error"' in lines[0]
     assert '"code": "model_concurrency_limit"' in lines[0]
     assert lines[1].strip() == "data: [DONE]"
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_stream_timeout_returns_http_429() -> None:
+    limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
+    gigachat = StreamingGigachat()
+    app = _make_chat_app(
+        limiter=limiter,
+        gigachat=gigachat,
+        transformer=RecordingTransformer(),
+    )
+
+    async with limiter.limit("GigaChat"):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            response = await client.post(
+                "/chat/completions",
+                json={
+                    "model": "GigaChat",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                },
+            )
+
+    assert response.status_code == 429
+    assert response.json() == {
+        "error": {
+            "message": "Concurrency limit reached for model GigaChat: 1",
+            "type": "rate_limit_error",
+            "param": "model",
+            "code": "model_concurrency_limit",
+        }
+    }
+    assert gigachat.astream_calls == 0

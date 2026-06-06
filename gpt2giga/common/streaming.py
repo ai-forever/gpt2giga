@@ -46,6 +46,7 @@ async def stream_chat_completion_generator(
     *,
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
+    acquired_model_limit: Optional[Any] = None,
 ) -> AsyncGenerator[str, None]:
     logger = None
     rquid = rquid_context.get()
@@ -61,7 +62,7 @@ async def stream_chat_completion_generator(
             )
         logger = getattr(request.app.state, "logger", None)
 
-        async with model_limiter.limit(effective_model, provider="openai"):
+        async def emit_stream() -> AsyncGenerator[str, None]:
             async with gigachat_request_options(giga_client, request_options):
                 async for chunk in giga_client.astream(chat_messages):
                     if await request.is_disconnected():
@@ -106,6 +107,17 @@ async def stream_chat_completion_generator(
                     yield f"data: {json.dumps(processed)}\n\n"
 
             yield "data: [DONE]\n\n"
+
+        if acquired_model_limit is not None:
+            try:
+                async for event in emit_stream():
+                    yield event
+            finally:
+                await acquired_model_limit.__aexit__(None, None, None)
+        else:
+            async with model_limiter.limit(effective_model, provider="openai"):
+                async for event in emit_stream():
+                    yield event
 
     except ModelConcurrencyTimeoutError as e:
         error_response = {
@@ -168,6 +180,7 @@ async def stream_chat_completion_v2_generator(
     *,
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
+    acquired_model_limit: Optional[Any] = None,
 ) -> AsyncGenerator[str, None]:
     logger = None
     rquid = rquid_context.get()
@@ -183,7 +196,7 @@ async def stream_chat_completion_v2_generator(
             )
         logger = getattr(request.app.state, "logger", None)
 
-        async with model_limiter.limit(effective_model, provider="openai"):
+        async def emit_stream() -> AsyncGenerator[str, None]:
             async with gigachat_request_options(giga_client, request_options):
                 async for chunk in giga_client.achat.stream(chat_request):
                     if await request.is_disconnected():
@@ -231,6 +244,17 @@ async def stream_chat_completion_v2_generator(
                     yield f"data: {json.dumps(processed)}\n\n"
 
             yield "data: [DONE]\n\n"
+
+        if acquired_model_limit is not None:
+            try:
+                async for event in emit_stream():
+                    yield event
+            finally:
+                await acquired_model_limit.__aexit__(None, None, None)
+        else:
+            async with model_limiter.limit(effective_model, provider="openai"):
+                async for event in emit_stream():
+                    yield event
 
     except ModelConcurrencyTimeoutError as e:
         error_response = {

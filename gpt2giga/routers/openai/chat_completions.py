@@ -46,6 +46,11 @@ async def chat_completions(request: Request):
             )
         effective_model = resolve_gigachat_model(chat_request, state.config)
         if stream:
+            acquired_model_limit = model_limiter.limit(
+                effective_model,
+                provider="openai",
+            )
+            await acquired_model_limit.__aenter__()
             return StreamingResponse(
                 stream_chat_completion_v2_generator(
                     request,
@@ -56,6 +61,7 @@ async def chat_completions(request: Request):
                     request_options,
                     model_limiter=model_limiter,
                     effective_model=effective_model,
+                    acquired_model_limit=acquired_model_limit,
                 ),
                 media_type="text/event-stream",
             )
@@ -86,6 +92,8 @@ async def chat_completions(request: Request):
             response, data["model"], current_rquid, request_data=data
         )
 
+    acquired_model_limit = model_limiter.limit(effective_model, provider="openai")
+    await acquired_model_limit.__aenter__()
     return StreamingResponse(
         stream_chat_completion_generator(
             request,
@@ -96,6 +104,7 @@ async def chat_completions(request: Request):
             request_options,
             model_limiter=model_limiter,
             effective_model=effective_model,
+            acquired_model_limit=acquired_model_limit,
         ),
         media_type="text/event-stream",
     )

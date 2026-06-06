@@ -24,10 +24,10 @@ uv run python examples/openai/chat_completions/chat_completion.py
 ## Файлы
 
 - `chat_completion.py`: базовый streaming
+- `per_model_max_connections_async.py`: async-проверка per-model max connections
 - `chat_reasoning.py`: reasoning/chain-of-thought режимы (если поддерживаются моделью)
 - `function_calling.py`: tool use / function calling
 - `structured_output.py`, `structured_output_nested.py`: Structured Outputs
 - `json_schema.py`: JSON Schema
 - `image_url.py`, `base64_image.py`: изображения
 - `documents.py`: документы/вложения
-
