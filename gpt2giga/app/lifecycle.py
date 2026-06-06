@@ -11,6 +11,11 @@ from gpt2giga.providers.gigachat.client import (
     close_gigachat_client,
     create_gigachat_client,
 )
+from gpt2giga.sinks.logs.factory import create_traffic_log_sink, flush_traffic_log_sink
+from gpt2giga.sinks.observability.factory import (
+    create_observability_sink,
+    flush_observability_sink,
+)
 
 
 @asynccontextmanager
@@ -23,6 +28,14 @@ async def lifespan(app: FastAPI):
 
     app.state.config = config
     app.state.logger = logger
+    if not hasattr(app.state, "traffic_log_sink"):
+        app.state.traffic_log_sink = create_traffic_log_sink(
+            config.proxy_settings, logger=logger
+        )
+    if not hasattr(app.state, "observability_sink"):
+        app.state.observability_sink = create_observability_sink(
+            config.proxy_settings, logger=logger
+        )
     app.state.model_concurrency_limiter = ModelConcurrencyLimiter(
         limits=config.proxy_settings.model_max_connections,
         default_limit=config.proxy_settings.model_max_connections_default,
@@ -50,5 +63,11 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Application shutdown initiated")
+    await flush_observability_sink(
+        getattr(app.state, "observability_sink", None), logger=logger
+    )
+    await flush_traffic_log_sink(
+        getattr(app.state, "traffic_log_sink", None), logger=logger
+    )
     await close_gigachat_client(getattr(app.state, "gigachat_client", None), logger)
     await attachment_processor.close()

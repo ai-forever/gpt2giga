@@ -5,6 +5,8 @@ from gpt2giga.api_server import create_app
 from gpt2giga.app.factory import create_app as create_modular_app
 from gpt2giga.common.app_meta import check_port_available
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 
 
 def test_legacy_create_app_facade_uses_modular_factory():
@@ -95,6 +97,13 @@ def test_redirect_slashes_disabled():
     """FastAPI app must be created with redirect_slashes=False."""
     app = create_app()
     assert app.router.redirect_slashes is False
+
+
+def test_app_factory_creates_default_extension_sinks():
+    app = create_app()
+
+    assert isinstance(app.state.traffic_log_sink, NoopTrafficLogSink)
+    assert isinstance(app.state.observability_sink, NoopObservabilitySink)
 
 
 def test_docs_disabled_in_prod_mode():

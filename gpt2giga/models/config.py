@@ -126,6 +126,14 @@ class ProxySettings(BaseSettings):
         default=False,
         description="Enable future traffic log event emission.",
     )
+    traffic_log_sink: Literal["noop", "jsonl"] = Field(
+        default="noop",
+        description="Traffic log sink backend: noop disables storage, jsonl writes local JSONL.",
+    )
+    traffic_log_jsonl_path: str = Field(
+        default="traffic_logs.jsonl",
+        description="Path to local JSONL traffic log file when traffic_log_sink=jsonl.",
+    )
     observability_enabled: bool = Field(
         default=False,
         description="Enable future OpenTelemetry/OpenInference observability hooks.",
@@ -202,6 +210,7 @@ class ProxySettings(BaseSettings):
         "gigachat_api_mode",
         "responses_api_mode",
         "normalization_mode",
+        "traffic_log_sink",
         mode="before",
     )
     @classmethod

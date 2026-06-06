@@ -420,6 +420,8 @@ gpt2giga \
 - `GPT2GIGA_NORMALIZATION_MODE="off"` — режим normalized layer: `off`, `shadow` или `on`. По умолчанию `off`;
 - `GPT2GIGA_LEGACY_CHAT_FALLBACK="True"` — разрешить fallback на legacy chat path во время модульной миграции;
 - `GPT2GIGA_TRAFFIC_LOG_ENABLED="False"` — включить будущие traffic log events. По умолчанию выключено;
+- `GPT2GIGA_TRAFFIC_LOG_SINK="noop"` — backend traffic logs: `noop` или `jsonl`. По умолчанию `noop`;
+- `GPT2GIGA_TRAFFIC_LOG_JSONL_PATH="traffic_logs.jsonl"` — путь к локальному JSONL-файлу при `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`;
 - `GPT2GIGA_OBSERVABILITY_ENABLED="False"` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию выключено;
 - `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
 - `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
@@ -474,12 +476,14 @@ GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER=False
 GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 GPT2GIGA_TRAFFIC_LOG_ENABLED=False
+GPT2GIGA_TRAFFIC_LOG_SINK=noop
+GPT2GIGA_TRAFFIC_LOG_JSONL_PATH=traffic_logs.jsonl
 GPT2GIGA_OBSERVABILITY_ENABLED=False
 GPT2GIGA_UI_ENABLED=False
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
 ```
 
-`off` сохраняет текущий legacy path. Режимы `shadow` и `on`, traffic logs, observability hooks, UI и debug translation endpoints зарезервированы для следующих релизов roadmap.
+`off` сохраняет текущий legacy path. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Режимы `shadow` и `on`, observability hooks, UI и debug translation endpoints зарезервированы для следующих релизов roadmap.
 
 #### Per-model max connections
 

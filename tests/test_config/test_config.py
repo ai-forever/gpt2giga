@@ -178,6 +178,8 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_NORMALIZATION_MODE", " SHADOW ")
     monkeypatch.setenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", "false")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", " JSONL ")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_JSONL_PATH", "/tmp/gpt2giga-traffic.jsonl")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
@@ -188,9 +190,17 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.normalization_mode == "shadow"
     assert s.legacy_chat_fallback is False
     assert s.traffic_log_enabled is True
+    assert s.traffic_log_sink == "jsonl"
+    assert s.traffic_log_jsonl_path == "/tmp/gpt2giga-traffic.jsonl"
     assert s.observability_enabled is True
     assert s.ui_enabled is True
     assert s.debug_translate_enabled is True
+
+
+def test_proxy_settings_invalid_traffic_log_sink(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", "postgres")
+    with pytest.raises(Exception):
+        ProxySettings()
 
 
 def test_proxy_settings_invalid_normalization_mode(monkeypatch):

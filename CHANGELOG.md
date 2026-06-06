@@ -14,12 +14,16 @@
 - **Golden compatibility fixtures**: добавлены fixtures и тесты для OpenAI chat/tool/structured/streaming/embeddings и Anthropic messages/streaming shapes на mocked upstream.
 - **Logging terminology**: добавлен architecture doc, разделяющий runtime logs, future traffic logs, observability traces и metrics.
 - **Modular package skeleton**: добавлены пустые namespace-пакеты `gpt2giga.api`, `gpt2giga.app`, `gpt2giga.protocols`, `gpt2giga.providers` и `gpt2giga.sinks` для поэтапной миграции без изменения текущего runtime wiring.
+- **Extension interfaces**: добавлены внутренние `ProtocolAdapter`, `ProviderAdapter`, `TrafficLogSink`, `TrafficLogQueryStore`, `ObservabilitySink` и `MetricsSink` для будущих backend/provider/storage расширений без тяжелых зависимостей.
+- **Traffic log event and sinks**: добавлена storage-independent модель `TrafficLogEvent`, noop traffic sink по умолчанию и opt-in JSONL sink для локальной проверки через `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
+- **Observability noop sink**: добавлен noop observability sink и безопасные helper-функции для будущих trace events.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.
 - **OpenAI API namespace**: OpenAI-compatible router aggregator добавлен в `gpt2giga.api.openai.routes`, а app factory подключает OpenAI routes через новый modular namespace без изменения публичных paths и response shapes.
 - **Anthropic API namespace**: Anthropic-compatible router aggregator добавлен в `gpt2giga.api.anthropic.routes`, а app factory подключает Anthropic routes через новый modular namespace без изменения публичных paths, headers behavior и response shapes.
 - **GigaChat provider namespace**: создание/закрытие GigaChat SDK client и request-scoped token handoff вынесены в `gpt2giga.providers.gigachat`, при этом env/settings parsing и публичное proxy behavior не изменены.
+- **Extension sink lifecycle**: app factory создает traffic/observability sinks в `app.state`, а lifecycle делает best-effort flush на shutdown; ошибки sink-ов изолированы от API request path.
 - **Internal docs alignment**: package-level AGENTS notes обновлены под новый app factory/lifecycle/provider layout и сохраненный `gpt2giga.api_server` entrypoint facade.
 
 ## [0.1.8a1] - 2026-06-06

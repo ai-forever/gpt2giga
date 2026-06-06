@@ -84,3 +84,32 @@ def test_lifespan_handles_aclose_error(monkeypatch):
     with TestClient(app):
         TestClient(app).get("/health")
         # App should still work even if close will fail later
+
+
+def test_lifespan_flushes_extension_sinks(monkeypatch):
+    flushed = []
+
+    class DummyClient:
+        async def aclose(self):
+            pass
+
+    class DummySink:
+        def __init__(self, name):
+            self.name = name
+
+        async def flush(self):
+            flushed.append(self.name)
+
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: DummyClient(),
+    )
+
+    app = create_app()
+    app.state.traffic_log_sink = DummySink("traffic")
+    app.state.observability_sink = DummySink("observability")
+
+    with TestClient(app):
+        pass
+
+    assert flushed == ["observability", "traffic"]
