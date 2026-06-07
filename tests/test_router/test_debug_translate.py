@@ -116,6 +116,50 @@ def test_debug_translate_enabled_without_admin_key_returns_403():
     assert response.status_code == 403
 
 
+def test_debug_translate_generic_openai_to_anthropic():
+    client = TestClient(make_debug_app())
+
+    response = client.post(
+        "/_debug/translate",
+        json={
+            "from": "openai",
+            "to": "anthropic",
+            "payload": _fixture("openai_tools.json"),
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = body["payload"]
+    assert body["from"] == "openai"
+    assert body["to"] == "anthropic"
+    assert payload["messages"][0]["role"] == "user"
+    assert payload["messages"][0]["content"][0]["text"] == "lookup weather"
+    assert payload["tools"][0]["name"] == "lookup_weather"
+    assert payload["tool_choice"] == {
+        "type": "tool",
+        "name": "lookup_weather",
+    }
+    assert body["intermediate"]["normalized"]["tools"][0]["name"] == "lookup_weather"
+
+
+def test_debug_translate_generic_returns_400_for_unsupported_pair():
+    client = TestClient(make_debug_app())
+
+    response = client.post(
+        "/_debug/translate",
+        json={"from": "gigachat", "to": "anthropic", "payload": {}},
+        headers=_headers(),
+    )
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"]
+        == "Unsupported translation pair: gigachat -> anthropic"
+    )
+
+
 @pytest.mark.parametrize(
     ("fixture_name", "assertion_key"),
     [

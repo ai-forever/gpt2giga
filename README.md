@@ -492,7 +492,23 @@ GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
 
 Debug translate endpoints выключены по умолчанию и не являются публичным production API. Для локальной отладки или admin-сценариев задайте `GPT2GIGA_DEBUG_TRANSLATE_ENABLED=True` и `GPT2GIGA_ADMIN_API_KEY`. Доступ защищен заголовком `x-admin-api-key: <secret>` или `Authorization: Bearer <secret>`. Если флаг выключен, routes не монтируются и возвращают `404`; если флаг включен, но admin key не задан или передан неверно, возвращается `403`.
 
-Доступные endpoints:
+Основной endpoint:
+
+- `POST /_debug/translate`
+
+Тело запроса:
+
+```json
+{
+  "from": "openai",
+  "to": "anthropic",
+  "payload": {}
+}
+```
+
+Поддерживаемые форматы: `openai`, `anthropic`, `normalized`, `gigachat`. Request payloads можно переводить из `openai`, `anthropic` и `normalized` в `openai`, `anthropic`, `normalized` или текущую GigaChat request-форму. `gigachat` сейчас трактуется как response shape и поддерживает перевод в `normalized` или `openai`; неподдержанные пары возвращают `400`. Ответ возвращает итоговую форму в поле `payload` и, если трансляция шла через промежуточные представления, добавляет `intermediate`.
+
+Совместимые shortcut-endpoints:
 
 - `POST /_debug/translate/openai-to-normalized`
 - `POST /_debug/translate/anthropic-to-normalized`
