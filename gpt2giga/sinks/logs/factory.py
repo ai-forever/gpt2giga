@@ -6,8 +6,10 @@ from typing import Any
 
 from gpt2giga.core.interfaces import TrafficLogSink
 from gpt2giga.models.config import ProxySettings
+from gpt2giga.sinks.logs.composite import CompositeTrafficLogSink
 from gpt2giga.sinks.logs.jsonl import JsonlTrafficLogSink
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.logs.opensearch import OpenSearchTrafficLogSink
 from gpt2giga.sinks.logs.postgres import PostgresTrafficLogSink
 from gpt2giga.sinks.logs.queue import QueuedTrafficLogSink
 
@@ -18,13 +20,38 @@ def create_traffic_log_sink(
     logger: Any | None = None,
 ) -> TrafficLogSink:
     """Create the configured traffic log sink."""
-    if not settings.traffic_log_enabled or settings.traffic_log_sink == "noop":
+    if not settings.traffic_log_enabled:
         return NoopTrafficLogSink()
 
-    if settings.traffic_log_sink == "jsonl":
+    sinks = [
+        _create_one_traffic_log_sink(sink_name, settings, logger=logger)
+        for sink_name in _configured_sink_names(settings)
+        if sink_name != "noop"
+    ]
+    sinks = [sink for sink in sinks if not isinstance(sink, NoopTrafficLogSink)]
+    if not sinks:
+        return NoopTrafficLogSink()
+    if len(sinks) == 1:
+        return sinks[0]
+    return CompositeTrafficLogSink(sinks, logger=logger)
+
+
+def _configured_sink_names(settings: ProxySettings) -> list[str]:
+    if settings.traffic_log_sinks:
+        return list(dict.fromkeys(settings.traffic_log_sinks))
+    return [settings.traffic_log_sink]
+
+
+def _create_one_traffic_log_sink(
+    sink_name: str,
+    settings: ProxySettings,
+    *,
+    logger: Any | None = None,
+) -> TrafficLogSink:
+    if sink_name == "jsonl":
         return JsonlTrafficLogSink(settings.traffic_log_jsonl_path)
 
-    if settings.traffic_log_sink == "postgres":
+    if sink_name == "postgres":
         if not settings.traffic_log_postgres_dsn:
             if logger is not None:
                 logger.warning(
@@ -40,10 +67,27 @@ def create_traffic_log_sink(
             logger=logger,
         )
 
+    if sink_name == "opensearch":
+        return QueuedTrafficLogSink(
+            OpenSearchTrafficLogSink(
+                settings.opensearch_url,
+                username=settings.opensearch_username,
+                password=settings.opensearch_password,
+                index=settings.opensearch_index,
+                data_stream=settings.opensearch_data_stream,
+                logger=logger,
+            ),
+            queue_size=settings.traffic_log_queue_size,
+            batch_size=settings.opensearch_bulk_size,
+            flush_interval_ms=settings.opensearch_flush_interval_ms,
+            drop_on_backpressure=settings.traffic_log_drop_on_backpressure,
+            logger=logger,
+        )
+
     if logger is not None:
         logger.warning(
             "Unknown traffic log sink configured; using noop",
-            sink=settings.traffic_log_sink,
+            sink=sink_name,
         )
     return NoopTrafficLogSink()
 

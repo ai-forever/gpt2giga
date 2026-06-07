@@ -73,6 +73,7 @@ SENSITIVE_KEYS = frozenset(
         "x-api-key",
         "admin_api_key",
         "x-admin-api-key",
+        "opensearch_password",
         "token",
         "access_token",
         "refresh_token",
@@ -107,6 +108,7 @@ _SENSITIVE_CLI_ARGS = frozenset(
     {
         "--proxy.api-key",
         "--proxy.admin-api-key",
+        "--proxy.opensearch-password",
         "--gigachat.credentials",
         "--gigachat.password",
         "--gigachat.access-token",

@@ -32,6 +32,9 @@ postgres = [
     "sqlalchemy[asyncio]>=2.0.0,<3",
     "alembic>=1.17.0,<2",
 ]
+opensearch = [
+    "opensearch-py>=2.8.0,<3",
+]
 
 [build-system]
 requires = ["hatchling"]

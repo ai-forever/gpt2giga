@@ -31,6 +31,8 @@
 - **Traffic event emission**: `RquidMiddleware` теперь эмитит safe traffic events для completed requests, validation errors, unhandled errors и stream completion/abort через configured sink; default noop path сохраняет публичное API behavior.
 - **Postgres compose profile**: добавлен `compose/postgres.yaml` для локального Postgres traffic log backend и Dockerfile build arg `INSTALL_EXTRAS` для сборки образа с optional extra `[postgres]`.
 - **Admin traffic logs API**: добавлены opt-in protected endpoints `/_admin/logs*` для list/get/request/response/tail/NDJSON export Postgres traffic logs с pagination, filters и admin-key auth; routes выключены по умолчанию.
+- **OpenSearch traffic log extra**: добавлен optional extra `opensearch` с `opensearch-py` для будущего opt-in search mirror backend без изменения базовой установки.
+- **OpenSearch traffic log mirror**: добавлены настройки `GPT2GIGA_TRAFFIC_LOG_SINKS`, `GPT2GIGA_OPENSEARCH_*`, OpenSearch bulk writer с retry/backoff, composite sink для `postgres,opensearch`, index template helper и `compose/opensearch.yaml`.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.

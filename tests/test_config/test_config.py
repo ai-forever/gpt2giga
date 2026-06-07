@@ -14,6 +14,15 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_NORMALIZATION_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", raising=False)
     monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_SINK", raising=False)
+    monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_SINKS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OPENSEARCH_URL", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OPENSEARCH_USERNAME", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OPENSEARCH_PASSWORD", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OPENSEARCH_INDEX", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OPENSEARCH_DATA_STREAM", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OPENSEARCH_BULK_SIZE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_UI_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", raising=False)
@@ -38,6 +47,15 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.normalization_mode == "off"
     assert s.legacy_chat_fallback is True
     assert s.traffic_log_enabled is False
+    assert s.traffic_log_sink == "noop"
+    assert s.traffic_log_sinks == []
+    assert s.opensearch_url == "http://localhost:9200"
+    assert s.opensearch_username is None
+    assert s.opensearch_password is None
+    assert s.opensearch_index == "gpt2giga-traffic"
+    assert s.opensearch_data_stream is True
+    assert s.opensearch_bulk_size == 500
+    assert s.opensearch_flush_interval_ms == 2000
     assert s.observability_enabled is False
     assert s.ui_enabled is False
     assert s.debug_translate_enabled is False
@@ -183,6 +201,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", "false")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", " JSONL ")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINKS", "postgres, opensearch")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_JSONL_PATH", "/tmp/gpt2giga-traffic.jsonl")
     monkeypatch.setenv(
         "GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN",
@@ -195,6 +214,13 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_DROP_ON_BACKPRESSURE", "false")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_REDACT_SENSITIVE", "false")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS", '["session_id"]')
+    monkeypatch.setenv("GPT2GIGA_OPENSEARCH_URL", "https://opensearch.example")
+    monkeypatch.setenv("GPT2GIGA_OPENSEARCH_USERNAME", "search-user")
+    monkeypatch.setenv("GPT2GIGA_OPENSEARCH_PASSWORD", "search-secret")
+    monkeypatch.setenv("GPT2GIGA_OPENSEARCH_INDEX", "gpt2giga-traffic-dev")
+    monkeypatch.setenv("GPT2GIGA_OPENSEARCH_DATA_STREAM", "false")
+    monkeypatch.setenv("GPT2GIGA_OPENSEARCH_BULK_SIZE", "25")
+    monkeypatch.setenv("GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS", "789")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
@@ -208,6 +234,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.legacy_chat_fallback is False
     assert s.traffic_log_enabled is True
     assert s.traffic_log_sink == "jsonl"
+    assert s.traffic_log_sinks == ["postgres", "opensearch"]
     assert s.traffic_log_jsonl_path == "/tmp/gpt2giga-traffic.jsonl"
     assert (
         s.traffic_log_postgres_dsn == "postgresql://user:pass@localhost:5432/gpt2giga"
@@ -219,6 +246,13 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.traffic_log_drop_on_backpressure is False
     assert s.traffic_log_redact_sensitive is False
     assert s.traffic_log_redact_extra_keys == ["session_id"]
+    assert s.opensearch_url == "https://opensearch.example"
+    assert s.opensearch_username == "search-user"
+    assert s.opensearch_password == "search-secret"
+    assert s.opensearch_index == "gpt2giga-traffic-dev"
+    assert s.opensearch_data_stream is False
+    assert s.opensearch_bulk_size == 25
+    assert s.opensearch_flush_interval_ms == 789
     assert s.observability_enabled is True
     assert s.ui_enabled is True
     assert s.debug_translate_enabled is True
@@ -228,6 +262,20 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
 
 def test_proxy_settings_invalid_traffic_log_sink(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", "unsupported")
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
+def test_proxy_settings_traffic_log_sinks_from_json_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINKS", '["postgres","opensearch"]')
+
+    s = ProxySettings()
+
+    assert s.traffic_log_sinks == ["postgres", "opensearch"]
+
+
+def test_proxy_settings_invalid_traffic_log_sinks(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINKS", "postgres,unsupported")
     with pytest.raises(Exception):
         ProxySettings()
 
@@ -290,3 +338,16 @@ def test_admin_api_key_hidden_from_repr():
     text = repr(s)
     assert "admin-secret-12345" not in text
     assert "admin_api_key=" not in text
+
+
+def test_opensearch_credentials_hidden_from_repr():
+    """OpenSearch credential values must not appear in ProxySettings repr."""
+    s = ProxySettings(
+        opensearch_username="search-user",
+        opensearch_password="search-secret",
+    )
+    text = repr(s)
+    assert "search-user" not in text
+    assert "search-secret" not in text
+    assert "opensearch_username=" not in text
+    assert "opensearch_password=" not in text

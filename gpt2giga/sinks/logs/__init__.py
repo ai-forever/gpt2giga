@@ -5,9 +5,11 @@ from gpt2giga.sinks.logs.factory import (
     emit_traffic_log,
     flush_traffic_log_sink,
 )
+from gpt2giga.sinks.logs.composite import CompositeTrafficLogSink
 from gpt2giga.sinks.logs.jsonl import JsonlTrafficLogSink
 from gpt2giga.sinks.logs.models import TrafficLogEvent
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.logs.opensearch import OpenSearchTrafficLogSink
 from gpt2giga.sinks.logs.postgres import PostgresTrafficLogSink
 from gpt2giga.sinks.logs.query import (
     TrafficLogQueryUnavailable,
@@ -20,6 +22,8 @@ from gpt2giga.sinks.logs.queue import QueuedTrafficLogSink
 __all__ = [
     "JsonlTrafficLogSink",
     "NoopTrafficLogSink",
+    "CompositeTrafficLogSink",
+    "OpenSearchTrafficLogSink",
     "PostgresTrafficLogSink",
     "QueuedTrafficLogSink",
     "TrafficLogEvent",

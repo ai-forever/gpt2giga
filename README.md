@@ -250,6 +250,20 @@ docker compose --env-file .env \
 
 По умолчанию Postgres доступен только на `127.0.0.1:${GPT2GIGA_POSTGRES_PORT:-5432}`. Для production задайте сильный `GPT2GIGA_POSTGRES_PASSWORD` и не включайте `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT`, пока не утверждена политика хранения и redaction.
 
+#### Запуск Docker Compose с OpenSearch mirror
+
+OpenSearch traffic logs являются optional search/index mirror, а не source of truth. Для локальной проверки используйте OpenSearch вместе с Postgres override:
+
+```sh
+docker compose --env-file .env \
+  -f compose/base.yaml -f compose/postgres.yaml -f compose/opensearch.yaml \
+  --profile DEV --profile postgres --profile opensearch up -d --build
+```
+
+Профиль включает `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch`, собирает образ с optional extras `[postgres,opensearch]` и запускает single-node OpenSearch на `127.0.0.1:${GPT2GIGA_OPENSEARCH_PORT:-9200}`. Postgres остается durable source of truth; OpenSearch можно удалить или пересоздать без изменения gateway API.
+
+Для production создайте index template/data stream заранее через `gpt2giga.storage.opensearch.build_traffic_log_index_template()` или `install_traffic_log_index_template()`. Template маппит `created_at`/`@timestamp` как `date`, `request_id`, `trace_id`, `model`, `provider` как `keyword`, `status_code` как `integer`, а `metadata` как `object`.
+
 ### Запуск в Docker с Traefik
 
 В репозитории есть готовый стек `Traefik + несколько инстансов gpt2giga` в файле [`compose/traefik.yaml`](./compose/traefik.yaml):
@@ -434,9 +448,16 @@ gpt2giga \
 - `GPT2GIGA_NORMALIZATION_MODE="off"` — режим normalized layer: `off`, `shadow` или `on`. По умолчанию `off`; `shadow` включает best-effort OpenAI Chat normalization diagnostics без изменения legacy response path; `on` переводит OpenAI Chat на экспериментальный normalized path;
 - `GPT2GIGA_LEGACY_CHAT_FALLBACK="True"` — разрешить fallback на legacy chat path во время модульной миграции;
 - `GPT2GIGA_TRAFFIC_LOG_ENABLED="False"` — включить будущие traffic log events. По умолчанию выключено;
-- `GPT2GIGA_TRAFFIC_LOG_SINK="noop"` — backend traffic logs: `noop`, `jsonl` или `postgres`. По умолчанию `noop`;
+- `GPT2GIGA_TRAFFIC_LOG_SINK="noop"` — backend traffic logs: `noop`, `jsonl`, `postgres` или `opensearch`. По умолчанию `noop`;
+- `GPT2GIGA_TRAFFIC_LOG_SINKS` — optional ordered mirror list, например `postgres,opensearch`; если список пуст, используется `GPT2GIGA_TRAFFIC_LOG_SINK`;
 - `GPT2GIGA_TRAFFIC_LOG_JSONL_PATH="traffic_logs.jsonl"` — путь к локальному JSONL-файлу при `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`;
 - `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN` — Postgres DSN для opt-in backend `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`;
+- `GPT2GIGA_OPENSEARCH_URL="http://localhost:9200"` — OpenSearch URL для opt-in mirror backend;
+- `GPT2GIGA_OPENSEARCH_USERNAME` / `GPT2GIGA_OPENSEARCH_PASSWORD` — optional OpenSearch credentials;
+- `GPT2GIGA_OPENSEARCH_INDEX="gpt2giga-traffic"` — OpenSearch index/data stream name;
+- `GPT2GIGA_OPENSEARCH_DATA_STREAM="True"` — использовать Bulk `create` operations для data stream mode; `False` использует plain index mode;
+- `GPT2GIGA_OPENSEARCH_BULK_SIZE="500"` — максимальный размер OpenSearch bulk batch;
+- `GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS="2000"` — best-effort flush interval для OpenSearch queue;
 - `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT="False"` — сохранять redacted request/response bodies в future traffic logs. По умолчанию выключено;
 - `GPT2GIGA_TRAFFIC_LOG_QUEUE_SIZE="10000"` — размер background queue для durable traffic log writer;
 - `GPT2GIGA_TRAFFIC_LOG_BATCH_SIZE="500"` — максимальный размер batch-записи в durable backend;
@@ -501,12 +522,20 @@ GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 GPT2GIGA_TRAFFIC_LOG_ENABLED=False
 GPT2GIGA_TRAFFIC_LOG_SINK=noop
+# GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch
 GPT2GIGA_TRAFFIC_LOG_JSONL_PATH=traffic_logs.jsonl
 # GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2giga
 # GPT2GIGA_POSTGRES_DB=gpt2giga
 # GPT2GIGA_POSTGRES_USER=gpt2giga
 # GPT2GIGA_POSTGRES_PASSWORD="<strong-postgres-password>"
 # GPT2GIGA_POSTGRES_PORT=5432
+# GPT2GIGA_OPENSEARCH_URL=http://localhost:9200
+# GPT2GIGA_OPENSEARCH_USERNAME=
+# GPT2GIGA_OPENSEARCH_PASSWORD=
+# GPT2GIGA_OPENSEARCH_INDEX=gpt2giga-traffic
+# GPT2GIGA_OPENSEARCH_DATA_STREAM=True
+# GPT2GIGA_OPENSEARCH_BULK_SIZE=500
+# GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS=2000
 GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT=False
 GPT2GIGA_TRAFFIC_LOG_QUEUE_SIZE=10000
 GPT2GIGA_TRAFFIC_LOG_BATCH_SIZE=500
@@ -521,7 +550,7 @@ GPT2GIGA_ADMIN_API_ENABLED=False
 # GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 ```
 
-`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization, observability hooks и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
+`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization, observability hooks и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. OpenSearch traffic logs являются optional mirror: используйте `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch` и extra `opensearch`; Bulk writer делает короткий retry with backoff, а ошибки OpenSearch изолируются от API request path. Dead-letter storage пока не включен: при недоступном OpenSearch events после retry отбрасываются и Postgres остается source of truth. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
 
 #### Admin traffic logs API
 

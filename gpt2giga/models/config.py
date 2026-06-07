@@ -1,6 +1,7 @@
+import json
 import warnings
 from functools import cached_property
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
 from pydantic import (
@@ -10,7 +11,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gpt2giga.constants import (
     DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
@@ -20,6 +21,8 @@ from gpt2giga.constants import (
     DEFAULT_MAX_TOKENS,
 )
 from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
+
+TrafficLogSinkName = Literal["noop", "jsonl", "postgres", "opensearch"]
 
 
 class ProxySettings(BaseSettings):
@@ -126,11 +129,18 @@ class ProxySettings(BaseSettings):
         default=False,
         description="Enable future traffic log event emission.",
     )
-    traffic_log_sink: Literal["noop", "jsonl", "postgres"] = Field(
+    traffic_log_sink: TrafficLogSinkName = Field(
         default="noop",
         description=(
             "Traffic log sink backend: noop disables storage, jsonl writes local JSONL, "
-            "postgres writes to optional Postgres storage."
+            "postgres writes to optional Postgres storage, opensearch writes to optional search mirror."
+        ),
+    )
+    traffic_log_sinks: Annotated[list[TrafficLogSinkName], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "Optional ordered traffic log sink list for mirror setups, e.g. "
+            "['postgres', 'opensearch']. Empty list preserves traffic_log_sink."
         ),
     )
     traffic_log_jsonl_path: str = Field(
@@ -169,6 +179,36 @@ class ProxySettings(BaseSettings):
     traffic_log_redact_extra_keys: list[str] = Field(
         default_factory=list,
         description="Additional case-insensitive keys to redact before traffic log storage.",
+    )
+    opensearch_url: str = Field(
+        default="http://localhost:9200",
+        description="OpenSearch URL for the optional traffic log search mirror.",
+    )
+    opensearch_username: Optional[str] = Field(
+        default=None,
+        description="OpenSearch username for the optional traffic log search mirror.",
+        repr=False,
+    )
+    opensearch_password: Optional[str] = Field(
+        default=None,
+        description="OpenSearch password for the optional traffic log search mirror.",
+        repr=False,
+    )
+    opensearch_index: str = Field(
+        default="gpt2giga-traffic",
+        description="OpenSearch index or data stream name for traffic log mirror events.",
+    )
+    opensearch_data_stream: bool = Field(
+        default=True,
+        description="Use OpenSearch data stream bulk create operations for traffic logs.",
+    )
+    opensearch_bulk_size: PositiveInt = Field(
+        default=500,
+        description="Maximum number of traffic log events per OpenSearch bulk request.",
+    )
+    opensearch_flush_interval_ms: PositiveInt = Field(
+        default=2_000,
+        description="Best-effort OpenSearch traffic log flush interval in milliseconds.",
     )
     observability_enabled: bool = Field(
         default=False,
@@ -265,6 +305,25 @@ class ProxySettings(BaseSettings):
             if info.field_name == "responses_api_mode" and normalized == "":
                 return "inherit"
             return normalized
+        return value
+
+    @field_validator("traffic_log_sinks", mode="before")
+    @classmethod
+    def normalize_traffic_log_sinks(cls, value):
+        if value in (None, ""):
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            if text.startswith("["):
+                return json.loads(text)
+            return [item.strip().lower() for item in text.split(",") if item.strip()]
+        if isinstance(value, list):
+            return [
+                item.strip().lower() if isinstance(item, str) else item
+                for item in value
+            ]
         return value
 
     def resolve_responses_api_mode(self) -> Literal["v1", "v2"]:

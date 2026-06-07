@@ -95,6 +95,8 @@ def test_warn_sensitive_cli_args_multiple(monkeypatch):
             "y",
             "--proxy.admin-api-key",
             "z",
+            "--proxy.opensearch-password",
+            "search-secret",
         ],
     )
     calls: list[str] = []
@@ -110,6 +112,7 @@ def test_warn_sensitive_cli_args_multiple(monkeypatch):
     assert "--gigachat.credentials" in msg
     assert "--proxy.api-key" in msg
     assert "--proxy.admin-api-key" in msg
+    assert "--proxy.opensearch-password" in msg
 
 
 def test_warn_sensitive_cli_args_equals_form(monkeypatch):

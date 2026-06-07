@@ -10,9 +10,11 @@ from gpt2giga.sinks.logs.factory import (
     emit_traffic_log,
     flush_traffic_log_sink,
 )
+from gpt2giga.sinks.logs.composite import CompositeTrafficLogSink
 from gpt2giga.sinks.logs.jsonl import JsonlTrafficLogSink
 from gpt2giga.sinks.logs.models import TrafficLogEvent
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.logs.opensearch import OpenSearchTrafficLogSink
 from gpt2giga.sinks.logs.postgres import PostgresTrafficLogSink
 from gpt2giga.sinks.logs.queue import QueuedTrafficLogSink
 
@@ -125,6 +127,50 @@ def test_traffic_log_factory_creates_queued_postgres_when_enabled():
     assert sink.batch_size == 2
 
 
+def test_traffic_log_factory_creates_queued_opensearch_when_enabled():
+    settings = ProxySettings(
+        traffic_log_enabled=True,
+        traffic_log_sink="opensearch",
+        opensearch_url="http://opensearch:9200",
+        opensearch_username="user",
+        opensearch_password="password",
+        opensearch_index="gpt2giga-traffic-test",
+        opensearch_data_stream=False,
+        opensearch_bulk_size=3,
+        opensearch_flush_interval_ms=10,
+    )
+
+    sink = create_traffic_log_sink(settings)
+
+    assert isinstance(sink, QueuedTrafficLogSink)
+    assert isinstance(sink.sink, OpenSearchTrafficLogSink)
+    assert sink.sink.url == "http://opensearch:9200"
+    assert sink.sink.username == "user"
+    assert sink.sink.password == "password"
+    assert sink.sink.index == "gpt2giga-traffic-test"
+    assert sink.sink.data_stream is False
+    assert sink.batch_size == 3
+    assert sink.flush_interval_ms == 10
+
+
+def test_traffic_log_factory_creates_composite_for_multiple_sinks():
+    settings = ProxySettings(
+        traffic_log_enabled=True,
+        traffic_log_sinks=["postgres", "opensearch"],
+        traffic_log_postgres_dsn="postgresql://user:pass@localhost:5432/gpt2giga",
+        opensearch_url="http://opensearch:9200",
+    )
+
+    sink = create_traffic_log_sink(settings)
+
+    assert isinstance(sink, CompositeTrafficLogSink)
+    assert len(sink.sinks) == 2
+    assert isinstance(sink.sinks[0], QueuedTrafficLogSink)
+    assert isinstance(sink.sinks[0].sink, PostgresTrafficLogSink)
+    assert isinstance(sink.sinks[1], QueuedTrafficLogSink)
+    assert isinstance(sink.sinks[1].sink, OpenSearchTrafficLogSink)
+
+
 @pytest.mark.asyncio
 async def test_traffic_log_safe_helpers_do_not_raise_on_sink_errors():
     class BrokenSink:
@@ -138,6 +184,36 @@ async def test_traffic_log_safe_helpers_do_not_raise_on_sink_errors():
 
     await emit_traffic_log(sink, {"event": "ignored"})
     await flush_traffic_log_sink(sink)
+
+
+@pytest.mark.asyncio
+async def test_composite_traffic_log_sink_isolates_child_errors():
+    class BrokenSink:
+        async def emit(self, event):
+            raise RuntimeError("emit failed")
+
+        async def flush(self):
+            raise RuntimeError("flush failed")
+
+    class RecordingSink:
+        def __init__(self):
+            self.events = []
+            self.flushed = False
+
+        async def emit(self, event):
+            self.events.append(event)
+
+        async def flush(self):
+            self.flushed = True
+
+    recorder = RecordingSink()
+    sink = CompositeTrafficLogSink([BrokenSink(), recorder])
+
+    await sink.emit({"id": 1})
+    await sink.flush()
+
+    assert recorder.events == [{"id": 1}]
+    assert recorder.flushed is True
 
 
 @pytest.mark.asyncio
