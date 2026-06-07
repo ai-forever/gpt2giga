@@ -113,6 +113,41 @@ def test_app_factory_creates_openai_protocol_adapter():
     assert isinstance(app.state.openai_protocol_adapter, OpenAIProtocolAdapter)
 
 
+def test_app_with_unavailable_postgres_traffic_sink_still_serves_requests(
+    monkeypatch,
+):
+    class FakeGigaChat:
+        async def aclose(self):
+            return None
+
+    async def broken_pool(self):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
+    monkeypatch.setattr(
+        "gpt2giga.sinks.logs.postgres.PostgresTrafficLogSink._create_pool",
+        broken_pool,
+    )
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                traffic_log_enabled=True,
+                traffic_log_sink="postgres",
+                traffic_log_postgres_dsn="postgresql://user:pass@127.0.0.1:1/gpt2giga",
+                traffic_log_flush_interval_ms=10,
+            )
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+
+
 def test_docs_disabled_in_prod_mode():
     """In PROD mode OpenAPI docs endpoints must be disabled."""
     app = create_app(config=ProxyConfig(proxy=ProxySettings(mode="PROD", api_key="k")))

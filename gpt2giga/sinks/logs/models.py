@@ -16,6 +16,7 @@ class TrafficLogEvent(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     request_id: str
     trace_id: str
+    span_id: Optional[str] = None
     protocol: str
     route: str
     method: str
@@ -23,6 +24,7 @@ class TrafficLogEvent(BaseModel):
     model_requested: Optional[str] = None
     model_effective: Optional[str] = None
     provider: Optional[str] = None
+    upstream_status_code: Optional[int] = None
     latency_ms: Optional[float] = None
     upstream_latency_ms: Optional[float] = None
     input_tokens: Optional[int] = None
@@ -30,7 +32,10 @@ class TrafficLogEvent(BaseModel):
     total_tokens: Optional[int] = None
     error_type: Optional[str] = None
     error_message: Optional[str] = None
+    api_key_hash: Optional[str] = None
+    client_ip_hash: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    request_headers_redacted: Optional[Any] = None
     request_body_redacted: Optional[Any] = None
     response_body_redacted: Optional[Any] = None
 

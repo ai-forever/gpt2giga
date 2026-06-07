@@ -182,6 +182,17 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", " JSONL ")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_JSONL_PATH", "/tmp/gpt2giga-traffic.jsonl")
+    monkeypatch.setenv(
+        "GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN",
+        "postgresql://user:pass@localhost:5432/gpt2giga",
+    )
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT", "true")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_QUEUE_SIZE", "123")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_BATCH_SIZE", "12")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_FLUSH_INTERVAL_MS", "345")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_DROP_ON_BACKPRESSURE", "false")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_REDACT_SENSITIVE", "false")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS", '["session_id"]')
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
@@ -195,6 +206,16 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.traffic_log_enabled is True
     assert s.traffic_log_sink == "jsonl"
     assert s.traffic_log_jsonl_path == "/tmp/gpt2giga-traffic.jsonl"
+    assert (
+        s.traffic_log_postgres_dsn == "postgresql://user:pass@localhost:5432/gpt2giga"
+    )
+    assert s.traffic_log_capture_content is True
+    assert s.traffic_log_queue_size == 123
+    assert s.traffic_log_batch_size == 12
+    assert s.traffic_log_flush_interval_ms == 345
+    assert s.traffic_log_drop_on_backpressure is False
+    assert s.traffic_log_redact_sensitive is False
+    assert s.traffic_log_redact_extra_keys == ["session_id"]
     assert s.observability_enabled is True
     assert s.ui_enabled is True
     assert s.debug_translate_enabled is True
@@ -202,7 +223,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
 
 
 def test_proxy_settings_invalid_traffic_log_sink(monkeypatch):
-    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", "postgres")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", "unsupported")
     with pytest.raises(Exception):
         ProxySettings()
 

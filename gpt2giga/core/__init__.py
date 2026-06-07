@@ -8,6 +8,7 @@ from gpt2giga.core.interfaces import (
     TrafficLogQueryStore,
     TrafficLogSink,
 )
+from gpt2giga.core.redaction import redact_traffic_payload
 
 __all__ = [
     "MetricsSink",
@@ -16,4 +17,5 @@ __all__ = [
     "ProviderAdapter",
     "TrafficLogQueryStore",
     "TrafficLogSink",
+    "redact_traffic_payload",
 ]

@@ -76,11 +76,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             "batches",
         ],
     )
-    app.add_middleware(RquidMiddleware)
     app.add_middleware(
         RequestValidationMiddleware,
         max_body_bytes=config.proxy_settings.max_request_body_bytes,
     )
+    app.add_middleware(RquidMiddleware)
 
     if config.proxy_settings.pass_token:
         app.add_middleware(PassTokenMiddleware)

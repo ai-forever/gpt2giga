@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -12,6 +13,8 @@ from gpt2giga.sinks.logs.factory import (
 from gpt2giga.sinks.logs.jsonl import JsonlTrafficLogSink
 from gpt2giga.sinks.logs.models import TrafficLogEvent
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.logs.postgres import PostgresTrafficLogSink
+from gpt2giga.sinks.logs.queue import QueuedTrafficLogSink
 
 
 def test_traffic_log_event_is_json_serializable():
@@ -96,6 +99,32 @@ def test_traffic_log_factory_creates_jsonl_when_enabled(tmp_path):
     assert sink.path == path
 
 
+def test_traffic_log_factory_creates_noop_for_postgres_without_dsn():
+    settings = ProxySettings(traffic_log_enabled=True, traffic_log_sink="postgres")
+
+    sink = create_traffic_log_sink(settings)
+
+    assert isinstance(sink, NoopTrafficLogSink)
+
+
+def test_traffic_log_factory_creates_queued_postgres_when_enabled():
+    settings = ProxySettings(
+        traffic_log_enabled=True,
+        traffic_log_sink="postgres",
+        traffic_log_postgres_dsn="postgresql://user:pass@localhost:5432/gpt2giga",
+        traffic_log_queue_size=5,
+        traffic_log_batch_size=2,
+        traffic_log_flush_interval_ms=10,
+    )
+
+    sink = create_traffic_log_sink(settings)
+
+    assert isinstance(sink, QueuedTrafficLogSink)
+    assert isinstance(sink.sink, PostgresTrafficLogSink)
+    assert sink.queue_size == 5
+    assert sink.batch_size == 2
+
+
 @pytest.mark.asyncio
 async def test_traffic_log_safe_helpers_do_not_raise_on_sink_errors():
     class BrokenSink:
@@ -109,3 +138,75 @@ async def test_traffic_log_safe_helpers_do_not_raise_on_sink_errors():
 
     await emit_traffic_log(sink, {"event": "ignored"})
     await flush_traffic_log_sink(sink)
+
+
+@pytest.mark.asyncio
+async def test_queued_traffic_log_sink_flushes_batches():
+    class RecordingSink:
+        def __init__(self):
+            self.batches = []
+            self.flushed = False
+
+        async def emit_many(self, events):
+            self.batches.append(list(events))
+
+        async def flush(self):
+            self.flushed = True
+
+    inner = RecordingSink()
+    sink = QueuedTrafficLogSink(
+        inner, queue_size=10, batch_size=2, flush_interval_ms=10
+    )
+
+    await sink.emit({"id": 1})
+    await sink.emit({"id": 2})
+    await sink.emit({"id": 3})
+    await sink.flush()
+
+    assert inner.batches == [[{"id": 1}, {"id": 2}], [{"id": 3}]]
+    assert inner.flushed is True
+    assert sink.emitted_events == 3
+
+
+@pytest.mark.asyncio
+async def test_queued_traffic_log_sink_drops_on_backpressure():
+    release = asyncio.Event()
+
+    class PausedSink:
+        async def emit_many(self, events):
+            await release.wait()
+
+        async def flush(self):
+            return None
+
+    sink = QueuedTrafficLogSink(
+        PausedSink(),
+        queue_size=1,
+        batch_size=1,
+        flush_interval_ms=10,
+        drop_on_backpressure=True,
+    )
+
+    await sink.emit({"id": 1})
+    await asyncio.sleep(0)
+    await sink.emit({"id": 2})
+    await sink.emit({"id": 3})
+    release.set()
+    await sink.flush()
+
+    assert sink.dropped_events >= 1
+
+
+@pytest.mark.asyncio
+async def test_queued_traffic_log_sink_isolates_inner_errors():
+    class BrokenSink:
+        async def emit_many(self, events):
+            raise RuntimeError("postgres unavailable")
+
+        async def flush(self):
+            raise RuntimeError("flush unavailable")
+
+    sink = QueuedTrafficLogSink(BrokenSink(), flush_interval_ms=10)
+
+    await sink.emit({"id": 1})
+    await sink.flush()

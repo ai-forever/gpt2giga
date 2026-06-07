@@ -126,13 +126,49 @@ class ProxySettings(BaseSettings):
         default=False,
         description="Enable future traffic log event emission.",
     )
-    traffic_log_sink: Literal["noop", "jsonl"] = Field(
+    traffic_log_sink: Literal["noop", "jsonl", "postgres"] = Field(
         default="noop",
-        description="Traffic log sink backend: noop disables storage, jsonl writes local JSONL.",
+        description=(
+            "Traffic log sink backend: noop disables storage, jsonl writes local JSONL, "
+            "postgres writes to optional Postgres storage."
+        ),
     )
     traffic_log_jsonl_path: str = Field(
         default="traffic_logs.jsonl",
         description="Path to local JSONL traffic log file when traffic_log_sink=jsonl.",
+    )
+    traffic_log_postgres_dsn: Optional[str] = Field(
+        default=None,
+        description="Postgres DSN for traffic log storage when traffic_log_sink=postgres.",
+        repr=False,
+    )
+    traffic_log_capture_content: bool = Field(
+        default=False,
+        description="Capture redacted request/response bodies in traffic logs.",
+    )
+    traffic_log_queue_size: PositiveInt = Field(
+        default=10_000,
+        description="Maximum queued traffic log events before applying backpressure policy.",
+    )
+    traffic_log_batch_size: PositiveInt = Field(
+        default=500,
+        description="Maximum traffic log events written per storage batch.",
+    )
+    traffic_log_flush_interval_ms: PositiveInt = Field(
+        default=2_000,
+        description="Best-effort traffic log flush interval in milliseconds.",
+    )
+    traffic_log_drop_on_backpressure: bool = Field(
+        default=True,
+        description="Drop traffic log events instead of blocking when the queue is full.",
+    )
+    traffic_log_redact_sensitive: bool = Field(
+        default=True,
+        description="Redact sensitive keys and token-like strings before traffic log storage.",
+    )
+    traffic_log_redact_extra_keys: list[str] = Field(
+        default_factory=list,
+        description="Additional case-insensitive keys to redact before traffic log storage.",
     )
     observability_enabled: bool = Field(
         default=False,

@@ -103,8 +103,8 @@ Applied via `app/factory.py`:
 
 1. `CORSMiddleware`
 2. `PathNormalizationMiddleware`
-3. `RquidMiddleware`
-4. `RequestValidationMiddleware`
+3. `RequestValidationMiddleware`
+4. `RquidMiddleware`
 5. `PassTokenMiddleware` when enabled
 
 Remember that Starlette executes middleware in reverse registration order on requests.

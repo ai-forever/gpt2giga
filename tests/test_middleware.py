@@ -1,15 +1,21 @@
+import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from fastapi import FastAPI
 from fastapi import Request
+import pytest
 from starlette.testclient import TestClient
 
 from gpt2giga.common.request_json import read_request_json
+from gpt2giga.core.context import RequestContext
 from gpt2giga.core.context import get_request_context
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
+from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
+from gpt2giga.sinks.logs.emission import wrap_traffic_log_body_iterator
 
 app = FastAPI()
 app.add_middleware(PathNormalizationMiddleware, valid_roots=["v1"])
@@ -206,3 +212,135 @@ def test_read_request_json_updates_request_context_model():
 
     assert response.status_code == 200
     assert response.json() == {"model_requested": "GigaChat-2-Max"}
+
+
+class RecordingTrafficSink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, event):
+        self.events.append(event)
+
+    async def flush(self):
+        return None
+
+
+def test_rquid_middleware_emits_traffic_event_for_completed_request():
+    test_app = FastAPI()
+    sink = RecordingTrafficSink()
+    test_app.state.traffic_log_sink = sink
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v1/models")
+    async def models():
+        return {"data": []}
+
+    client = TestClient(test_app)
+    response = client.get(
+        "/v1/models",
+        headers={"Authorization": "Bearer local-secret", "x-trace-id": "trace-1"},
+    )
+
+    assert response.status_code == 200
+    assert len(sink.events) == 1
+    event = sink.events[0]
+    assert event.request_id == response.headers["x-request-id"]
+    assert event.trace_id == "trace-1"
+    assert event.protocol == "openai"
+    assert event.route == "/v1/models"
+    assert event.method == "GET"
+    assert event.status_code == 200
+    assert event.provider == "gigachat"
+    assert event.api_key_hash.startswith("sha256:")
+    assert event.metadata["lifecycle"] == "request_completed"
+    assert event.latency_ms >= 0
+
+
+def test_rquid_middleware_emits_traffic_event_for_validation_error():
+    test_app = FastAPI()
+    sink = RecordingTrafficSink()
+    test_app.state.traffic_log_sink = sink
+    test_app.add_middleware(RequestValidationMiddleware, max_body_bytes=1)
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.post("/v1/chat/completions")
+    async def chat():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+    response = client.post("/v1/chat/completions", json={"model": "GigaChat"})
+
+    assert response.status_code == 413
+    assert len(sink.events) == 1
+    event = sink.events[0]
+    assert event.status_code == 413
+    assert event.error_type == "http_413"
+    assert event.metadata["lifecycle"] == "request_completed"
+
+
+@pytest.mark.asyncio
+async def test_traffic_log_body_iterator_emits_stream_completed():
+    sink = RecordingTrafficSink()
+    context = RequestContext(
+        request_id="req-1",
+        trace_id="trace-1",
+        span_id=None,
+        protocol="openai",
+        route="/v1/chat/completions",
+        method="POST",
+        started_at=datetime.now(timezone.utc),
+    )
+
+    async def stream():
+        yield b"data: {}\n\n"
+
+    chunks = [
+        chunk
+        async for chunk in wrap_traffic_log_body_iterator(
+            stream(),
+            sink=sink,
+            context=context,
+            status_code=200,
+            is_streaming=True,
+        )
+    ]
+
+    assert chunks == [b"data: {}\n\n"]
+    assert len(sink.events) == 1
+    assert sink.events[0].metadata["lifecycle"] == "streaming_completed"
+
+
+@pytest.mark.asyncio
+async def test_traffic_log_body_iterator_emits_stream_aborted():
+    sink = RecordingTrafficSink()
+    context = RequestContext(
+        request_id="req-1",
+        trace_id="trace-1",
+        span_id=None,
+        protocol="openai",
+        route="/v1/chat/completions",
+        method="POST",
+        started_at=datetime.now(timezone.utc),
+    )
+
+    async def stream():
+        yield b"data: {}\n\n"
+        raise asyncio.CancelledError
+
+    chunks = []
+    with pytest.raises(asyncio.CancelledError):
+        async for chunk in wrap_traffic_log_body_iterator(
+            stream(),
+            sink=sink,
+            context=context,
+            status_code=200,
+            is_streaming=True,
+        ):
+            chunks.append(chunk)
+
+    assert chunks == [b"data: {}\n\n"]
+    assert len(sink.events) == 1
+    event = sink.events[0]
+    assert event.status_code == 499
+    assert event.error_type == "stream_cancelled"
+    assert event.metadata["lifecycle"] == "streaming_aborted"

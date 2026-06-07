@@ -24,6 +24,12 @@
 - **Normalized OpenAI Chat path**: при `GPT2GIGA_NORMALIZATION_MODE=on` OpenAI Chat Completions non-stream проходит через `NormalizedChatRequest`, GigaChat provider adapter и normalized-to-OpenAI response adapter; `GPT2GIGA_LEGACY_CHAT_FALLBACK=True` сохраняет fallback на legacy path без записи raw prompt/response content.
 - **Normalized streaming**: при `GPT2GIGA_NORMALIZATION_MODE=on` OpenAI Chat Completions `stream=true` проходит через canonical normalized stream events, GigaChat stream adapter и OpenAI-compatible SSE mapper; legacy stream path остается default при `off`/`shadow`.
 - **Debug translate API**: добавлены protected endpoints `/_debug/translate/*` для просмотра OpenAI/Anthropic/normalized/GigaChat преобразований; routes выключены по умолчанию и требуют `GPT2GIGA_ADMIN_API_KEY` при включении.
+- **Postgres traffic log extra**: добавлен optional extra `postgres` с `asyncpg`, `sqlalchemy[asyncio]` и `alembic` для будущего opt-in storage backend без изменения базовой установки.
+- **Postgres traffic log schema**: добавлена packaged SQL migration для таблицы `gpt2giga_traffic_logs` с request/trace/model/error/token metadata, redacted payload JSONB columns и индексами для query/admin use cases.
+- **Traffic log redaction**: добавлен `gpt2giga.core.redaction` с default-on redaction для durable traffic logs, включая nested dict/list payloads, cookies, auth/API keys, token-like strings и configurable extra keys.
+- **Postgres traffic log writer**: добавлены opt-in `postgres` traffic sink, lazy asyncpg writer и background queue с batch writes, best-effort flush и default drop-on-backpressure policy, чтобы storage failures не ломали API request path.
+- **Traffic event emission**: `RquidMiddleware` теперь эмитит safe traffic events для completed requests, validation errors, unhandled errors и stream completion/abort через configured sink; default noop path сохраняет публичное API behavior.
+- **Postgres compose profile**: добавлен `compose/postgres.yaml` для локального Postgres traffic log backend и Dockerfile build arg `INSTALL_EXTRAS` для сборки образа с optional extra `[postgres]`.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.
@@ -31,6 +37,7 @@
 - **Anthropic API namespace**: Anthropic-compatible router aggregator добавлен в `gpt2giga.api.anthropic.routes`, а app factory подключает Anthropic routes через новый modular namespace без изменения публичных paths, headers behavior и response shapes.
 - **GigaChat provider namespace**: создание/закрытие GigaChat SDK client и request-scoped token handoff вынесены в `gpt2giga.providers.gigachat`, при этом env/settings parsing и публичное proxy behavior не изменены.
 - **Extension sink lifecycle**: app factory создает traffic/observability sinks в `app.state`, а lifecycle делает best-effort flush на shutdown; ошибки sink-ов изолированы от API request path.
+- **Request context protocol inference**: уточнено определение LiteLLM route до точного `/model/info`, чтобы OpenAI `/models` traffic events не классифицировались как LiteLLM.
 - **Internal docs alignment**: package-level AGENTS notes обновлены под новый app factory/lifecycle/provider layout и сохраненный `gpt2giga.api_server` entrypoint facade.
 
 ## [0.1.8a1] - 2026-06-06

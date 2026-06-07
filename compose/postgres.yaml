@@ -1,0 +1,59 @@
+# Optional Postgres traffic-log profile.
+#
+# Usage:
+#   docker compose --env-file .env \
+#     -f compose/base.yaml -f compose/postgres.yaml \
+#     --profile DEV --profile postgres up -d --build
+
+x-gpt2giga-postgres-env: &gpt2giga-postgres-env
+  GPT2GIGA_TRAFFIC_LOG_ENABLED: "True"
+  GPT2GIGA_TRAFFIC_LOG_SINK: "postgres"
+  GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN: "postgresql://${GPT2GIGA_POSTGRES_USER:-gpt2giga}:${GPT2GIGA_POSTGRES_PASSWORD:-gpt2giga}@postgres:5432/${GPT2GIGA_POSTGRES_DB:-gpt2giga}"
+  GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT: "${GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT:-False}"
+
+services:
+  gpt2giga-prod:
+    build:
+      args:
+        INSTALL_EXTRAS: "[postgres]"
+    environment:
+      <<: *gpt2giga-postgres-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gpt2giga-dev:
+    build:
+      args:
+        INSTALL_EXTRAS: "[postgres]"
+    environment:
+      <<: *gpt2giga-postgres-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${GPT2GIGA_POSTGRES_DB:-gpt2giga}"
+      POSTGRES_USER: "${GPT2GIGA_POSTGRES_USER:-gpt2giga}"
+      POSTGRES_PASSWORD: "${GPT2GIGA_POSTGRES_PASSWORD:-gpt2giga}"
+    ports:
+      - "127.0.0.1:${GPT2GIGA_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - gpt2giga-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  gpt2giga-postgres-data:

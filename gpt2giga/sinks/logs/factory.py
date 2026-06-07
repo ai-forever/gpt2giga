@@ -8,6 +8,8 @@ from gpt2giga.core.interfaces import TrafficLogSink
 from gpt2giga.models.config import ProxySettings
 from gpt2giga.sinks.logs.jsonl import JsonlTrafficLogSink
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.logs.postgres import PostgresTrafficLogSink
+from gpt2giga.sinks.logs.queue import QueuedTrafficLogSink
 
 
 def create_traffic_log_sink(
@@ -21,6 +23,22 @@ def create_traffic_log_sink(
 
     if settings.traffic_log_sink == "jsonl":
         return JsonlTrafficLogSink(settings.traffic_log_jsonl_path)
+
+    if settings.traffic_log_sink == "postgres":
+        if not settings.traffic_log_postgres_dsn:
+            if logger is not None:
+                logger.warning(
+                    "Postgres traffic log sink requested without DSN; using noop"
+                )
+            return NoopTrafficLogSink()
+        return QueuedTrafficLogSink(
+            PostgresTrafficLogSink(settings.traffic_log_postgres_dsn, logger=logger),
+            queue_size=settings.traffic_log_queue_size,
+            batch_size=settings.traffic_log_batch_size,
+            flush_interval_ms=settings.traffic_log_flush_interval_ms,
+            drop_on_backpressure=settings.traffic_log_drop_on_backpressure,
+            logger=logger,
+        )
 
     if logger is not None:
         logger.warning(

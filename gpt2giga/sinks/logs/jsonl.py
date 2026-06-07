@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from gpt2giga.sinks.logs.models import TrafficLogEvent
+from gpt2giga.sinks.logs.serialization import traffic_event_to_json_dict
 
 
 class JsonlTrafficLogSink:
@@ -17,9 +17,11 @@ class JsonlTrafficLogSink:
         self.path = Path(path)
         self._lock = asyncio.Lock()
 
-    async def emit(self, event: TrafficLogEvent | Any) -> None:
+    async def emit(self, event: Any) -> None:
         """Append one event as a single JSON line."""
-        line = json.dumps(_event_to_dict(event), ensure_ascii=False, sort_keys=True)
+        line = json.dumps(
+            traffic_event_to_json_dict(event), ensure_ascii=False, sort_keys=True
+        )
         async with self._lock:
             await asyncio.to_thread(self._append_line, line)
 
@@ -36,13 +38,3 @@ class JsonlTrafficLogSink:
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(line)
             stream.write("\n")
-
-
-def _event_to_dict(event: TrafficLogEvent | Any) -> dict[str, Any]:
-    if isinstance(event, TrafficLogEvent):
-        return event.to_json_dict()
-    if hasattr(event, "model_dump"):
-        return event.model_dump(mode="json", exclude_none=True)
-    if isinstance(event, dict):
-        return event
-    raise TypeError(f"Unsupported traffic log event type: {type(event)!r}")
