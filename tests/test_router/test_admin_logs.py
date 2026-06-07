@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from gpt2giga.api.admin import logs_router
@@ -19,6 +19,8 @@ class FakeTrafficLogQueryStore:
         self.unavailable = unavailable
         self.list_calls = []
         self.get_calls = []
+        self.purge_calls = []
+        self.redact_calls = []
 
     async def list(self, *, limit=100, offset=0, filters=None):
         if self.unavailable:
@@ -40,12 +42,70 @@ class FakeTrafficLogQueryStore:
     async def get_by_request_id(self, request_id):
         return [record for record in self.records if record["request_id"] == request_id]
 
+    async def purge_expired(
+        self,
+        *,
+        cutoff,
+        batch_size,
+        dry_run=True,
+        max_batches=1,
+    ):
+        if self.unavailable:
+            raise TrafficLogQueryUnavailable("store unavailable")
+        self.purge_calls.append(
+            {
+                "cutoff": cutoff,
+                "batch_size": batch_size,
+                "dry_run": dry_run,
+                "max_batches": max_batches,
+            }
+        )
+        return {
+            "cutoff": cutoff,
+            "dry_run": dry_run,
+            "expired": 3 if dry_run else None,
+            "deleted": 0 if dry_run else 2,
+            "batch_size": batch_size,
+            "batches": 0 if dry_run else 1,
+            "max_batches": max_batches,
+            "complete": None if dry_run else True,
+        }
 
-def make_logs_app(store, *, admin_key: str | None = "secret"):
+    async def redact_payloads(self, event_id, *, fields, metadata=None):
+        if self.unavailable:
+            raise TrafficLogQueryUnavailable("store unavailable")
+        self.redact_calls.append(
+            {"event_id": event_id, "fields": list(fields), "metadata": metadata}
+        )
+        for record in self.records:
+            if record["id"] != event_id:
+                continue
+            for field in fields:
+                record[field] = None
+            return {
+                "id": event_id,
+                "request_headers_redacted": record.get("request_headers") is None,
+                "request_body_redacted": record.get("request_body") is None,
+                "response_body_redacted": record.get("response_body") is None,
+                "metadata": metadata or {},
+            }
+        return None
+
+
+def make_logs_app(
+    store,
+    *,
+    admin_key: str | None = "secret",
+    replay_enabled: bool = False,
+):
     app = FastAPI()
     app.include_router(logs_router)
     app.state.config = ProxyConfig(
-        proxy=ProxySettings(admin_api_enabled=True, admin_api_key=admin_key)
+        proxy=ProxySettings(
+            admin_api_enabled=True,
+            admin_api_key=admin_key,
+            replay_enabled=replay_enabled,
+        )
     )
     app.state.traffic_log_query_store = store
     return app
@@ -223,10 +283,245 @@ def test_admin_logs_tail_and_ndjson_export():
     assert export.text.endswith("\n")
 
 
+def test_admin_logs_csv_export_omits_payload_bodies():
+    store = FakeTrafficLogQueryStore([_record()])
+    client = TestClient(make_logs_app(store))
+
+    export = client.get("/_admin/logs/export.csv?limit=1", headers=_headers())
+
+    assert export.status_code == 200
+    assert export.headers["content-type"].startswith("text/csv")
+    assert "id,created_at,request_id" in export.text
+    assert EVENT_ID in export.text
+    assert "authorization" not in export.text
+    assert "messages" not in export.text
+    assert "choices" not in export.text
+
+
+def test_admin_logs_retention_purge_defaults_to_dry_run():
+    store = FakeTrafficLogQueryStore([_record()])
+    client = TestClient(make_logs_app(store))
+
+    response = client.post("/_admin/logs/retention/purge", headers=_headers())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["retention_days"] == 30
+    assert body["dry_run"] is True
+    assert body["expired"] == 3
+    assert body["deleted"] == 0
+    assert body["cutoff"].endswith("+00:00")
+    assert store.purge_calls[0]["dry_run"] is True
+    assert store.purge_calls[0]["batch_size"] == 1000
+    assert store.purge_calls[0]["max_batches"] == 1
+
+
+def test_admin_logs_retention_purge_execute_uses_explicit_limits():
+    store = FakeTrafficLogQueryStore([_record()])
+    client = TestClient(make_logs_app(store))
+
+    response = client.post(
+        "/_admin/logs/retention/purge",
+        params={
+            "retention_days": "7",
+            "batch_size": "25",
+            "max_batches": "3",
+            "dry_run": "false",
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["retention_days"] == 7
+    assert body["dry_run"] is False
+    assert body["deleted"] == 2
+    assert body["complete"] is True
+    assert store.purge_calls[0]["dry_run"] is False
+    assert store.purge_calls[0]["batch_size"] == 25
+    assert store.purge_calls[0]["max_batches"] == 3
+
+
+def test_admin_logs_replay_is_disabled_by_default():
+    client = TestClient(make_logs_app(FakeTrafficLogQueryStore([_record()])))
+
+    response = client.post(f"/_admin/logs/{EVENT_ID}/replay", headers=_headers())
+
+    assert response.status_code == 404
+
+
+def test_admin_logs_replay_dispatches_sanitized_request_with_metadata():
+    replayed = []
+    record = _record(
+        request_body={
+            "model": "GigaChat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "metadata": {"tenant": "tenant-1"},
+            "api_key": "raw-secret",
+        }
+    )
+    app = make_logs_app(
+        FakeTrafficLogQueryStore([record]),
+        replay_enabled=True,
+    )
+
+    @app.post("/v1/chat/completions")
+    async def replay_target(request: Request):
+        body = await request.json()
+        replayed.append({"body": body, "headers": dict(request.headers)})
+        return {"ok": True, "metadata": body["metadata"]}
+
+    client = TestClient(app)
+
+    response = client.post(f"/_admin/logs/{EVENT_ID}/replay", headers=_headers())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["replayed"] is True
+    assert body["request"]["path"] == "/v1/chat/completions"
+    assert body["response"]["status_code"] == 200
+    assert body["response"]["body"]["ok"] is True
+    assert replayed[0]["headers"]["x-gpt2giga-replay"] == "true"
+    assert "authorization" not in replayed[0]["headers"]
+    assert replayed[0]["body"]["api_key"] == "***"
+    metadata = replayed[0]["body"]["metadata"]
+    assert metadata["tenant"] == "tenant-1"
+    assert metadata["gpt2giga_replay"]["source_log_id"] == EVENT_ID
+    assert metadata["gpt2giga_replay"]["source_request_id"] == "req-1"
+
+
+def test_admin_logs_replay_rejects_admin_routes():
+    client = TestClient(
+        make_logs_app(
+            FakeTrafficLogQueryStore([_record(route="/_admin/logs")]),
+            replay_enabled=True,
+        )
+    )
+
+    response = client.post(f"/_admin/logs/{EVENT_ID}/replay", headers=_headers())
+
+    assert response.status_code == 400
+    assert (
+        response.json()["detail"] == "Admin, debug, and log routes cannot be replayed"
+    )
+
+
+def test_admin_logs_replay_requires_captured_request_body():
+    client = TestClient(
+        make_logs_app(
+            FakeTrafficLogQueryStore([_record(request_body=None)]),
+            replay_enabled=True,
+        )
+    )
+
+    response = client.post(f"/_admin/logs/{EVENT_ID}/replay", headers=_headers())
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Traffic log request body was not captured"
+
+
+def test_admin_logs_replay_target_exception_returns_502():
+    app = make_logs_app(
+        FakeTrafficLogQueryStore([_record()]),
+        replay_enabled=True,
+    )
+
+    @app.post("/v1/chat/completions")
+    async def replay_target():
+        raise RuntimeError("target failed")
+
+    client = TestClient(app)
+
+    response = client.post(f"/_admin/logs/{EVENT_ID}/replay", headers=_headers())
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Replay request failed"
+
+
+def test_admin_logs_manual_redact_defaults_to_all_payload_fields():
+    store = FakeTrafficLogQueryStore([_record()])
+    client = TestClient(make_logs_app(store))
+
+    response = client.post(f"/_admin/logs/{EVENT_ID}/redact", headers=_headers())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["redacted_fields"] == [
+        "request_body",
+        "request_headers",
+        "response_body",
+    ]
+    assert body["result"]["request_headers_redacted"] is True
+    assert body["result"]["request_body_redacted"] is True
+    assert body["result"]["response_body_redacted"] is True
+    assert store.redact_calls[0]["event_id"] == EVENT_ID
+    assert store.redact_calls[0]["metadata"]["manual_redaction"]["fields"] == [
+        "request_body",
+        "request_headers",
+        "response_body",
+    ]
+
+
+def test_admin_logs_manual_redact_accepts_explicit_fields():
+    store = FakeTrafficLogQueryStore([_record()])
+    client = TestClient(make_logs_app(store))
+
+    response = client.post(
+        f"/_admin/logs/{EVENT_ID}/redact",
+        json={"fields": ["request_body"]},
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["redacted_fields"] == ["request_body"]
+    assert body["result"]["request_headers_redacted"] is False
+    assert body["result"]["request_body_redacted"] is True
+    assert body["result"]["response_body_redacted"] is False
+
+
+def test_admin_logs_manual_redact_rejects_invalid_fields():
+    client = TestClient(make_logs_app(FakeTrafficLogQueryStore([_record()])))
+
+    response = client.post(
+        f"/_admin/logs/{EVENT_ID}/redact",
+        json={"fields": ["api_key"]},
+        headers=_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported redaction fields: api_key"
+
+
+def test_admin_logs_manual_redact_not_found_and_unavailable():
+    missing_client = TestClient(make_logs_app(FakeTrafficLogQueryStore([])))
+    unavailable_client = TestClient(
+        make_logs_app(FakeTrafficLogQueryStore(unavailable=True))
+    )
+
+    missing = missing_client.post(f"/_admin/logs/{EVENT_ID}/redact", headers=_headers())
+    unavailable = unavailable_client.post(
+        f"/_admin/logs/{EVENT_ID}/redact",
+        headers=_headers(),
+    )
+
+    assert missing.status_code == 404
+    assert unavailable.status_code == 503
+
+
 def test_admin_logs_unavailable_store_returns_503():
     client = TestClient(make_logs_app(FakeTrafficLogQueryStore(unavailable=True)))
 
     response = client.get("/_admin/logs", headers=_headers())
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "store unavailable"
+
+
+def test_admin_logs_retention_unavailable_store_returns_503():
+    client = TestClient(make_logs_app(FakeTrafficLogQueryStore(unavailable=True)))
+
+    response = client.post("/_admin/logs/retention/purge", headers=_headers())
 
     assert response.status_code == 503
     assert response.json()["detail"] == "store unavailable"

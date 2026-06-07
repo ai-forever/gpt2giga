@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import datetime
 from typing import Any, Protocol, runtime_checkable
 
 from gpt2giga.core.context import RequestContext
@@ -83,6 +84,25 @@ class TrafficLogQueryStore(Protocol):
         filters: Mapping[str, Any] | None = None,
     ) -> Sequence[Any]:
         """Return a page of events matching optional filters."""
+
+    async def purge_expired(
+        self,
+        *,
+        cutoff: datetime,
+        batch_size: int,
+        dry_run: bool = True,
+        max_batches: int = 1,
+    ) -> Mapping[str, Any]:
+        """Delete or count events older than the retention cutoff."""
+
+    async def redact_payloads(
+        self,
+        event_id: str,
+        *,
+        fields: Sequence[str],
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any] | None:
+        """Redact stored payload fields for one traffic log event."""
 
 
 @runtime_checkable

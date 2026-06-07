@@ -17,6 +17,10 @@ from gpt2giga.sinks.logs.query import (
     close_traffic_log_query_store,
     create_traffic_log_query_store,
 )
+from gpt2giga.sinks.logs.retention import (
+    start_traffic_log_retention_task,
+    stop_traffic_log_retention_task,
+)
 from gpt2giga.sinks.observability.factory import (
     create_observability_sink,
     flush_observability_sink,
@@ -47,6 +51,11 @@ async def lifespan(app: FastAPI):
         app.state.observability_sink = create_observability_sink(
             config.proxy_settings, logger=logger
         )
+    app.state.traffic_log_retention_task = start_traffic_log_retention_task(
+        config.proxy_settings,
+        app.state.traffic_log_query_store,
+        logger=logger,
+    )
     app.state.model_concurrency_limiter = ModelConcurrencyLimiter(
         limits=config.proxy_settings.model_max_connections,
         default_limit=config.proxy_settings.model_max_connections_default,
@@ -79,6 +88,9 @@ async def lifespan(app: FastAPI):
     )
     await flush_traffic_log_sink(
         getattr(app.state, "traffic_log_sink", None), logger=logger
+    )
+    await stop_traffic_log_retention_task(
+        getattr(app.state, "traffic_log_retention_task", None), logger=logger
     )
     await close_traffic_log_query_store(
         getattr(app.state, "traffic_log_query_store", None), logger=logger

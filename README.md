@@ -465,11 +465,14 @@ gpt2giga \
 - `GPT2GIGA_TRAFFIC_LOG_DROP_ON_BACKPRESSURE="True"` — при заполненной queue сбрасывать traffic log events вместо блокировки API request path;
 - `GPT2GIGA_TRAFFIC_LOG_REDACT_SENSITIVE="True"` — редактировать sensitive keys и token-like строки перед будущей durable traffic log storage. По умолчанию включено;
 - `GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS='[]'` — JSON-массив дополнительных case-insensitive ключей для redaction перед traffic log storage;
+- `GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS="30"` — сколько дней хранить Postgres traffic logs перед batch purge по `created_at`;
+- `GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS="3600"` — интервал best-effort background purge job для Postgres traffic logs;
 - `GPT2GIGA_OBSERVABILITY_ENABLED="False"` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию выключено;
 - `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
 - `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
 - `GPT2GIGA_ADMIN_API_ENABLED="False"` — включить protected admin endpoints `/_admin/*`. По умолчанию выключено, включая PROD;
 - `GPT2GIGA_ADMIN_API_KEY="<secret>"` — admin key для protected debug/admin endpoints. Требуется для `/_debug/translate/*` и `/_admin/*`, если они включены;
+- `GPT2GIGA_REPLAY_ENABLED="False"` — включить protected replay endpoint `POST /_admin/logs/{id}/replay`. По умолчанию выключено;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS='{}'` — JSON-словарь per-model лимитов одновременных upstream model-call внутри gpt2giga;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` — fallback per-model лимит для моделей, которых нет в `GPT2GIGA_MODEL_MAX_CONNECTIONS`. По умолчанию не задан;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT` — сколько секунд ждать свободный model slot. По умолчанию не задано, `0` означает fail-fast;
@@ -543,11 +546,14 @@ GPT2GIGA_TRAFFIC_LOG_FLUSH_INTERVAL_MS=2000
 GPT2GIGA_TRAFFIC_LOG_DROP_ON_BACKPRESSURE=True
 GPT2GIGA_TRAFFIC_LOG_REDACT_SENSITIVE=True
 GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS=[]
+GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS=30
+GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS=3600
 GPT2GIGA_OBSERVABILITY_ENABLED=False
 GPT2GIGA_UI_ENABLED=False
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
 GPT2GIGA_ADMIN_API_ENABLED=False
 # GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
+GPT2GIGA_REPLAY_ENABLED=False
 ```
 
 `off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization, observability hooks и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. OpenSearch traffic logs являются optional mirror: используйте `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch` и extra `opensearch`; Bulk writer делает короткий retry with backoff, а ошибки OpenSearch изолируются от API request path. Dead-letter storage пока не включен: при недоступном OpenSearch events после retry отбрасываются и Postgres остается source of truth. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
@@ -572,7 +578,11 @@ GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2
 - `GET /_admin/logs/{id}/request` — stored redacted request headers/body, если capture включен;
 - `GET /_admin/logs/{id}/response` — stored redacted response body, если capture включен;
 - `GET /_admin/logs/tail` — последние записи;
-- `GET /_admin/logs/export.ndjson` — NDJSON export одной страницы.
+- `GET /_admin/logs/export.ndjson` — NDJSON export одной страницы;
+- `GET /_admin/logs/export.csv` — CSV export summary-колонок без stored request/response body payloads;
+- `POST /_admin/logs/retention/purge` — dry-run или execute batch purge записей старше retention cutoff. По умолчанию `dry_run=true`; для удаления нужно явно передать `dry_run=false`;
+- `POST /_admin/logs/{id}/replay` — replay captured POST request через локальный gateway app, если `GPT2GIGA_REPLAY_ENABLED=True`. Stored headers не переиспользуются, payload проходит redaction повторно, а body получает `metadata.gpt2giga_replay`;
+- `POST /_admin/logs/{id}/redact` — manual redaction stored payload columns. Без тела очищает `request_headers`, `request_body` и `response_body`; для частичного удаления передайте `{"fields":["request_body"]}`.
 
 Content capture остается выключенным по умолчанию через `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT=False`; request/response endpoints вернут `null` для body, если payload capture не включен. Все payloads, которые сохраняются в durable traffic logs, проходят redaction перед записью.
 

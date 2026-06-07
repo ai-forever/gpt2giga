@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
 from gpt2giga.core.interfaces import TrafficLogQueryStore
@@ -36,6 +37,27 @@ class UnavailableTrafficLogQueryStore:
         filters: Mapping[str, Any] | None = None,
     ) -> Sequence[Any]:
         """Raise because no query backend is configured."""
+        raise TrafficLogQueryUnavailable(self.reason)
+
+    async def purge_expired(
+        self,
+        *,
+        cutoff: datetime,
+        batch_size: int,
+        dry_run: bool = True,
+        max_batches: int = 1,
+    ) -> Mapping[str, Any]:
+        """Raise because no retention backend is configured."""
+        raise TrafficLogQueryUnavailable(self.reason)
+
+    async def redact_payloads(
+        self,
+        event_id: str,
+        *,
+        fields: Sequence[str],
+        metadata: Mapping[str, Any] | None = None,
+    ) -> Mapping[str, Any] | None:
+        """Raise because no redaction backend is configured."""
         raise TrafficLogQueryUnavailable(self.reason)
 
     async def flush(self) -> None:

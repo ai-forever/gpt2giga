@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
@@ -73,6 +73,41 @@ POSTGRES_SELECT_COLUMNS = """
     request_headers,
     request_body,
     response_body
+"""
+
+POSTGRES_COUNT_EXPIRED_SQL = """
+SELECT count(*)::bigint
+FROM gpt2giga_traffic_logs
+WHERE created_at < $1::timestamptz
+"""
+
+POSTGRES_DELETE_EXPIRED_BATCH_SQL = """
+WITH expired AS (
+    SELECT id
+    FROM gpt2giga_traffic_logs
+    WHERE created_at < $1::timestamptz
+    ORDER BY created_at ASC, id ASC
+    LIMIT $2
+)
+DELETE FROM gpt2giga_traffic_logs
+WHERE id IN (SELECT id FROM expired)
+RETURNING id::text AS id
+"""
+
+POSTGRES_REDACT_PAYLOADS_SQL = """
+UPDATE gpt2giga_traffic_logs
+SET
+    request_headers = CASE WHEN $2 THEN NULL ELSE request_headers END,
+    request_body = CASE WHEN $3 THEN NULL ELSE request_body END,
+    response_body = CASE WHEN $4 THEN NULL ELSE response_body END,
+    metadata = metadata || $5::jsonb
+WHERE id = $1::uuid
+RETURNING
+    id::text AS id,
+    request_headers IS NULL AS request_headers_redacted,
+    request_body IS NULL AS request_body_redacted,
+    response_body IS NULL AS response_body_redacted,
+    metadata
 """
 
 PoolFactory = Callable[[str], Awaitable[Any]]
@@ -171,6 +206,84 @@ class PostgresTrafficLogQueryStore:
     async def get_by_request_id(self, request_id: str) -> list[dict[str, Any]]:
         """Return traffic log events for a gateway request id."""
         return await self.list(filters={"request_id": request_id})
+
+    async def purge_expired(
+        self,
+        *,
+        cutoff: datetime,
+        batch_size: int,
+        dry_run: bool = True,
+        max_batches: int = 1,
+    ) -> dict[str, Any]:
+        """Delete or count traffic log events older than cutoff."""
+        cutoff = _datetime_value(cutoff)
+        batch_size = max(1, int(batch_size))
+        max_batches = max(1, int(max_batches))
+        pool = await self._get_pool()
+
+        if dry_run:
+            expired = await pool.fetchval(POSTGRES_COUNT_EXPIRED_SQL, cutoff)
+            return {
+                "cutoff": cutoff.isoformat(),
+                "dry_run": True,
+                "expired": int(expired or 0),
+                "deleted": 0,
+                "batch_size": batch_size,
+                "batches": 0,
+                "max_batches": max_batches,
+                "complete": None,
+            }
+
+        deleted = 0
+        batches = 0
+        complete = False
+        for _ in range(max_batches):
+            rows = await pool.fetch(
+                POSTGRES_DELETE_EXPIRED_BATCH_SQL,
+                cutoff,
+                batch_size,
+            )
+            batch_deleted = len(rows)
+            deleted += batch_deleted
+            batches += 1
+            if batch_deleted < batch_size:
+                complete = True
+                break
+
+        return {
+            "cutoff": cutoff.isoformat(),
+            "dry_run": False,
+            "expired": None,
+            "deleted": deleted,
+            "batch_size": batch_size,
+            "batches": batches,
+            "max_batches": max_batches,
+            "complete": complete,
+        }
+
+    async def redact_payloads(
+        self,
+        event_id: str,
+        *,
+        fields: Sequence[str],
+        metadata: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Clear selected stored payload columns for one event."""
+        selected = set(fields)
+        pool = await self._get_pool()
+        row = await pool.fetchrow(
+            POSTGRES_REDACT_PAYLOADS_SQL,
+            _uuid_value(event_id),
+            "request_headers" in selected,
+            "request_body" in selected,
+            "response_body" in selected,
+            _jsonb(metadata or {}),
+        )
+        if row is None:
+            return None
+        payload = dict(row)
+        payload["metadata"] = _decode_json(payload.get("metadata"))
+        return payload
 
     async def list(
         self,

@@ -16,6 +16,8 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_SINK", raising=False)
     monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_SINKS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS", raising=False)
     monkeypatch.delenv("GPT2GIGA_OPENSEARCH_URL", raising=False)
     monkeypatch.delenv("GPT2GIGA_OPENSEARCH_USERNAME", raising=False)
     monkeypatch.delenv("GPT2GIGA_OPENSEARCH_PASSWORD", raising=False)
@@ -28,6 +30,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_ADMIN_API_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_ADMIN_API_KEY", raising=False)
+    monkeypatch.delenv("GPT2GIGA_REPLAY_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", raising=False)
@@ -49,6 +52,8 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.traffic_log_enabled is False
     assert s.traffic_log_sink == "noop"
     assert s.traffic_log_sinks == []
+    assert s.traffic_log_retention_days == 30
+    assert s.traffic_log_purge_interval_seconds == 3600
     assert s.opensearch_url == "http://localhost:9200"
     assert s.opensearch_username is None
     assert s.opensearch_password is None
@@ -61,6 +66,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.debug_translate_enabled is False
     assert s.admin_api_enabled is False
     assert s.admin_api_key is None
+    assert s.replay_enabled is False
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024
@@ -214,6 +220,8 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_DROP_ON_BACKPRESSURE", "false")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_REDACT_SENSITIVE", "false")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS", '["session_id"]')
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS", "14")
+    monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS", "600")
     monkeypatch.setenv("GPT2GIGA_OPENSEARCH_URL", "https://opensearch.example")
     monkeypatch.setenv("GPT2GIGA_OPENSEARCH_USERNAME", "search-user")
     monkeypatch.setenv("GPT2GIGA_OPENSEARCH_PASSWORD", "search-secret")
@@ -226,6 +234,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_ADMIN_API_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_ADMIN_API_KEY", "admin-secret")
+    monkeypatch.setenv("GPT2GIGA_REPLAY_ENABLED", "true")
 
     s = ProxySettings()
 
@@ -246,6 +255,8 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.traffic_log_drop_on_backpressure is False
     assert s.traffic_log_redact_sensitive is False
     assert s.traffic_log_redact_extra_keys == ["session_id"]
+    assert s.traffic_log_retention_days == 14
+    assert s.traffic_log_purge_interval_seconds == 600
     assert s.opensearch_url == "https://opensearch.example"
     assert s.opensearch_username == "search-user"
     assert s.opensearch_password == "search-secret"
@@ -258,6 +269,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.debug_translate_enabled is True
     assert s.admin_api_enabled is True
     assert s.admin_api_key == "admin-secret"
+    assert s.replay_enabled is True
 
 
 def test_proxy_settings_invalid_traffic_log_sink(monkeypatch):

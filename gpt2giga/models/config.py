@@ -180,6 +180,14 @@ class ProxySettings(BaseSettings):
         default_factory=list,
         description="Additional case-insensitive keys to redact before traffic log storage.",
     )
+    traffic_log_retention_days: PositiveInt = Field(
+        default=30,
+        description="Number of days to retain Postgres traffic logs before purge.",
+    )
+    traffic_log_purge_interval_seconds: PositiveInt = Field(
+        default=3_600,
+        description="Seconds between best-effort traffic log retention purge runs.",
+    )
     opensearch_url: str = Field(
         default="http://localhost:9200",
         description="OpenSearch URL for the optional traffic log search mirror.",
@@ -230,6 +238,10 @@ class ProxySettings(BaseSettings):
         default=None,
         description="Admin API key for protected debug/admin endpoints.",
         repr=False,
+    )
+    replay_enabled: bool = Field(
+        default=False,
+        description="Enable protected admin traffic-log request replay endpoint.",
     )
     max_request_body_bytes: int = Field(
         default=DEFAULT_MAX_REQUEST_BODY_BYTES,

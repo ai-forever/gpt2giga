@@ -33,6 +33,10 @@
 - **Admin traffic logs API**: добавлены opt-in protected endpoints `/_admin/logs*` для list/get/request/response/tail/NDJSON export Postgres traffic logs с pagination, filters и admin-key auth; routes выключены по умолчанию.
 - **OpenSearch traffic log extra**: добавлен optional extra `opensearch` с `opensearch-py` для будущего opt-in search mirror backend без изменения базовой установки.
 - **OpenSearch traffic log mirror**: добавлены настройки `GPT2GIGA_TRAFFIC_LOG_SINKS`, `GPT2GIGA_OPENSEARCH_*`, OpenSearch bulk writer с retry/backoff, composite sink для `postgres,opensearch`, index template helper и `compose/opensearch.yaml`.
+- **Traffic log retention**: добавлены настройки `GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS` и `GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS`, best-effort Postgres retention job и protected admin dry-run/execute purge command `POST /_admin/logs/retention/purge`.
+- **Traffic log CSV export**: добавлен `GET /_admin/logs/export.csv` для выгрузки summary-колонок traffic logs без stored request/response body payloads.
+- **Traffic log replay**: добавлен выключенный по умолчанию `GPT2GIGA_REPLAY_ENABLED` и protected endpoint `POST /_admin/logs/{id}/replay`, который повторно редактирует captured body, не переиспользует stored credentials и помечает replay metadata.
+- **Manual traffic log redaction**: добавлен protected endpoint `POST /_admin/logs/{id}/redact` для ручной очистки stored request/response payload columns.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.

@@ -18,6 +18,13 @@ from gpt2giga.sinks.logs.query import (
     create_traffic_log_query_store,
 )
 from gpt2giga.sinks.logs.queue import QueuedTrafficLogSink
+from gpt2giga.sinks.logs.retention import (
+    DEFAULT_RETENTION_BATCH_SIZE,
+    purge_expired_traffic_logs,
+    retention_cutoff,
+    start_traffic_log_retention_task,
+    stop_traffic_log_retention_task,
+)
 
 __all__ = [
     "JsonlTrafficLogSink",
@@ -26,6 +33,7 @@ __all__ = [
     "OpenSearchTrafficLogSink",
     "PostgresTrafficLogSink",
     "QueuedTrafficLogSink",
+    "DEFAULT_RETENTION_BATCH_SIZE",
     "TrafficLogEvent",
     "TrafficLogQueryUnavailable",
     "UnavailableTrafficLogQueryStore",
@@ -34,4 +42,8 @@ __all__ = [
     "create_traffic_log_sink",
     "emit_traffic_log",
     "flush_traffic_log_sink",
+    "purge_expired_traffic_logs",
+    "retention_cutoff",
+    "start_traffic_log_retention_task",
+    "stop_traffic_log_retention_task",
 ]

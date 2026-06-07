@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 import pytest
 
@@ -13,6 +14,7 @@ class FakePool:
     def __init__(self):
         self.executed = []
         self.fetched = []
+        self.fetchval_calls = []
         self.fetchrow_calls = []
         self.closed = False
 
@@ -56,6 +58,10 @@ class FakePool:
         self.fetchrow_calls.append((sql, args))
         rows = await self.fetch(sql, *args)
         return rows[0]
+
+    async def fetchval(self, sql, *args):
+        self.fetchval_calls.append((sql, args))
+        return 42
 
     async def close(self):
         self.closed = True
@@ -189,3 +195,114 @@ async def test_postgres_query_store_gets_by_id():
     sql, args = pool.fetchrow_calls[0]
     assert "WHERE id = $1::uuid" in sql
     assert args == ("550e8400-e29b-41d4-a716-446655440000",)
+
+
+@pytest.mark.asyncio
+async def test_postgres_query_store_purge_expired_dry_run_counts_by_created_at():
+    pool = FakePool()
+
+    async def pool_factory(dsn):
+        return pool
+
+    store = PostgresTrafficLogQueryStore(
+        "postgresql://example",
+        pool_factory=pool_factory,
+    )
+    cutoff = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+    result = await store.purge_expired(
+        cutoff=cutoff,
+        batch_size=100,
+        dry_run=True,
+        max_batches=5,
+    )
+
+    assert result == {
+        "cutoff": "2026-06-01T00:00:00+00:00",
+        "dry_run": True,
+        "expired": 42,
+        "deleted": 0,
+        "batch_size": 100,
+        "batches": 0,
+        "max_batches": 5,
+        "complete": None,
+    }
+    sql, args = pool.fetchval_calls[0]
+    assert "created_at < $1::timestamptz" in sql
+    assert args == (cutoff,)
+
+
+@pytest.mark.asyncio
+async def test_postgres_query_store_purge_expired_deletes_bounded_batch():
+    pool = FakePool()
+
+    async def pool_factory(dsn):
+        return pool
+
+    store = PostgresTrafficLogQueryStore(
+        "postgresql://example",
+        pool_factory=pool_factory,
+    )
+    cutoff = datetime(2026, 6, 1, tzinfo=timezone.utc)
+
+    result = await store.purge_expired(
+        cutoff=cutoff,
+        batch_size=100,
+        dry_run=False,
+        max_batches=1,
+    )
+
+    assert result["deleted"] == 1
+    assert result["batch_size"] == 100
+    assert result["batches"] == 1
+    assert result["complete"] is True
+    sql, args = pool.fetched[0]
+    assert "WITH expired AS" in sql
+    assert "WHERE created_at < $1::timestamptz" in sql
+    assert "ORDER BY created_at ASC, id ASC" in sql
+    assert "LIMIT $2" in sql
+    assert args == (cutoff, 100)
+
+
+@pytest.mark.asyncio
+async def test_postgres_query_store_redacts_payload_columns():
+    class RedactPool(FakePool):
+        async def fetchrow(self, sql, *args):
+            self.fetchrow_calls.append((sql, args))
+            return {
+                "id": str(args[0]),
+                "request_headers_redacted": args[1],
+                "request_body_redacted": args[2],
+                "response_body_redacted": args[3],
+                "metadata": args[4],
+            }
+
+    pool = RedactPool()
+
+    async def pool_factory(dsn):
+        return pool
+
+    store = PostgresTrafficLogQueryStore(
+        "postgresql://example",
+        pool_factory=pool_factory,
+    )
+
+    result = await store.redact_payloads(
+        "550e8400-e29b-41d4-a716-446655440000",
+        fields=["request_body"],
+        metadata={"manual_redaction": {"fields": ["request_body"]}},
+    )
+
+    assert result == {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "request_headers_redacted": False,
+        "request_body_redacted": True,
+        "response_body_redacted": False,
+        "metadata": {"manual_redaction": {"fields": ["request_body"]}},
+    }
+    sql, args = pool.fetchrow_calls[0]
+    assert "UPDATE gpt2giga_traffic_logs" in sql
+    assert "request_headers = CASE WHEN $2 THEN NULL ELSE request_headers END" in sql
+    assert "request_body = CASE WHEN $3 THEN NULL ELSE request_body END" in sql
+    assert "response_body = CASE WHEN $4 THEN NULL ELSE response_body END" in sql
+    assert args[1:4] == (False, True, False)
