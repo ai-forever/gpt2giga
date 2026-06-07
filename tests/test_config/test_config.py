@@ -32,6 +32,10 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_PHOENIX_API_KEY", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_SAMPLE_RATE", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED", raising=False)
     monkeypatch.delenv("PHOENIX_COLLECTOR_ENDPOINT", raising=False)
     monkeypatch.delenv("PHOENIX_PROJECT_NAME", raising=False)
@@ -78,6 +82,10 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.phoenix_api_key is None
     assert s.observability_sample_rate == 1.0
     assert s.observability_capture_content is False
+    assert s.observability_capture_messages is False
+    assert s.observability_capture_tool_args is False
+    assert s.observability_capture_responses is False
+    assert s.observability_max_content_length == 8000
     assert s.observability_redaction_enabled is True
     assert s.ui_enabled is False
     assert s.debug_translate_enabled is False
@@ -253,6 +261,10 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_PHOENIX_API_KEY", "phoenix-secret")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SAMPLE_RATE", "0.25")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT", "true")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES", "true")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS", "true")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES", "true")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH", "512")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED", "false")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
@@ -295,6 +307,10 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.phoenix_api_key == "phoenix-secret"
     assert s.observability_sample_rate == 0.25
     assert s.observability_capture_content is True
+    assert s.observability_capture_messages is True
+    assert s.observability_capture_tool_args is True
+    assert s.observability_capture_responses is True
+    assert s.observability_max_content_length == 512
     assert s.observability_redaction_enabled is False
     assert s.ui_enabled is True
     assert s.debug_translate_enabled is True
@@ -344,6 +360,16 @@ def test_proxy_settings_invalid_observability_backend(monkeypatch):
 @pytest.mark.parametrize("sample_rate", ["-0.1", "1.1"])
 def test_proxy_settings_invalid_observability_sample_rate(monkeypatch, sample_rate):
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SAMPLE_RATE", sample_rate)
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
+@pytest.mark.parametrize("max_length", ["0", "-1"])
+def test_proxy_settings_invalid_observability_max_content_length(
+    monkeypatch,
+    max_length,
+):
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH", max_length)
     with pytest.raises(Exception):
         ProxySettings()
 

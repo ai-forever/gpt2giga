@@ -253,6 +253,22 @@ class ProxySettings(BaseSettings):
         default=False,
         description="Capture prompt/response content in observability spans.",
     )
+    observability_capture_messages: bool = Field(
+        default=False,
+        description="Capture normalized input messages in observability spans.",
+    )
+    observability_capture_tool_args: bool = Field(
+        default=False,
+        description="Capture tool schemas and tool call arguments in observability spans.",
+    )
+    observability_capture_responses: bool = Field(
+        default=False,
+        description="Capture normalized model response content in observability spans.",
+    )
+    observability_max_content_length: PositiveInt = Field(
+        default=8_000,
+        description="Maximum serialized content length for one observability attribute.",
+    )
     observability_redaction_enabled: bool = Field(
         default=True,
         description="Redact sensitive content before adding observability attributes.",

@@ -72,6 +72,17 @@ class FakeRequestTransformer:
         return {"model": data.get("model", "giga")}
 
 
+class RecordingObservabilitySink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, name, attributes=None, *, context=None, events=None):
+        self.events.append((name, attributes or {}, context, list(events or [])))
+
+    async def flush(self):
+        return None
+
+
 def make_app():
     app = FastAPI()
     app.include_router(router)
@@ -126,6 +137,34 @@ def test_chat_completions_normalization_on_uses_non_stream_normalized_path():
     assert app.state.request_transformer.chat_calls
 
 
+def test_chat_completions_normalization_on_emits_safe_llm_observability_spans():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="on", gigachat_api_mode="v1")
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "secret prompt"}],
+        },
+    )
+
+    assert response.status_code == 200
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+    assert "protocol.normalize.request" in emitted
+    assert "protocol.normalize.response" in emitted
+    assert emitted["protocol.normalize.request"]["llm.input_messages.count"] == 1
+    assert emitted["protocol.normalize.response"]["llm.finish_reason"] == "tool_calls"
+    assert "secret prompt" not in json.dumps(emitted)
+
+
 def test_chat_completions_normalization_on_uses_streaming_normalized_path():
     app = make_app()
     app.state.config = ProxyConfig(
@@ -148,6 +187,38 @@ def test_chat_completions_normalization_on_uses_streaming_normalized_path():
     assert "chat.completion.chunk" in body
     assert "data: [DONE]" in body
     assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_emits_stream_span_events():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="on", gigachat_api_mode="v1")
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    event_names = [
+        event["name"]
+        for name, _attributes, _context, events in app.state.observability_sink.events
+        if name == "stream.emit"
+        for event in events
+    ]
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in body
+    assert "stream.start" in event_names
+    assert "stream.completed" in event_names
 
 
 def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():

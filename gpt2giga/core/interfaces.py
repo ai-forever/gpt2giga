@@ -115,6 +115,7 @@ class ObservabilitySink(Protocol):
         attributes: Mapping[str, Any] | None = None,
         *,
         context: RequestContext | None = None,
+        events: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         """Record an observability event."""
 

@@ -14,9 +14,15 @@ CONTENT_ATTRIBUTE_KEYS = frozenset(
     {
         "content",
         "input",
+        "input.value",
         "input.messages",
+        "llm.input_messages",
+        "llm.output_messages",
+        "llm.tool_calls",
+        "llm.tools",
         "messages",
         "output",
+        "output.value",
         "output.messages",
         "prompt",
         "request.body",
@@ -53,6 +59,7 @@ class OpenTelemetryObservabilitySink:
         attributes: Mapping[str, Any] | None = None,
         *,
         context: RequestContext | None = None,
+        events: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         """Record one observability event as an OTel span."""
         if not self._should_sample():
@@ -67,6 +74,16 @@ class OpenTelemetryObservabilitySink:
         with self.tracer.start_as_current_span(name) as span:
             for key, value in span_attributes.items():
                 span.set_attribute(key, value)
+            for event in events or ():
+                event_name = str(event.get("name", "event"))
+                event_attributes = build_otel_attributes(
+                    _event_attributes(event),
+                    capture_content=self.capture_content,
+                    redaction_enabled=self.redaction_enabled,
+                )
+                add_event = getattr(span, "add_event", None)
+                if add_event is not None:
+                    add_event(event_name, event_attributes)
 
     async def flush(self) -> None:
         """Flush pending spans best effort."""
@@ -136,3 +153,8 @@ def _coerce_otel_attribute_value(value: Any) -> Any:
         if all(isinstance(item, (str, bool, int, float)) for item in value):
             return list(value)
     return json.dumps(value, ensure_ascii=False, default=str, sort_keys=True)
+
+
+def _event_attributes(event: Mapping[str, Any]) -> Mapping[str, Any]:
+    attributes = event.get("attributes")
+    return attributes if isinstance(attributes, Mapping) else {}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
@@ -34,11 +35,15 @@ async def emit_observability_event(
     attributes: dict[str, Any] | None = None,
     *,
     context: RequestContext | None = None,
+    events: Sequence[Mapping[str, Any]] | None = None,
     logger: Any | None = None,
 ) -> None:
     """Emit an observability event without allowing sink errors to break requests."""
     try:
-        await sink.emit(name, attributes, context=context)
+        if events is None:
+            await sink.emit(name, attributes, context=context)
+        else:
+            await sink.emit(name, attributes, context=context, events=events)
     except Exception as exc:  # pragma: no cover - log branch covered by no-raise tests
         if logger is not None:
             logger.warning("Observability sink emit failed: {}", exc)

@@ -487,7 +487,11 @@ gpt2giga \
 - `PHOENIX_PROJECT_NAME="gpt2giga"` — имя Phoenix project; можно переопределить также через `GPT2GIGA_PHOENIX_PROJECT_NAME`;
 - `PHOENIX_API_KEY` — optional API key для hosted/protected Phoenix collector; можно переопределить также через `GPT2GIGA_PHOENIX_API_KEY`;
 - `GPT2GIGA_OBSERVABILITY_SAMPLE_RATE="1.0"` — доля запросов, для которых создаются traces при включенной observability;
-- `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT="False"` — отправлять prompt/response content в observability attributes. По умолчанию выключено;
+- `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT="False"` — master-флаг для отправки prompt/response/tool content в observability attributes. По умолчанию выключено;
+- `GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES="False"` — отправлять normalized input messages в LLM span attributes; требует `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True`;
+- `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS="False"` — отправлять tool schemas и tool call arguments в LLM span attributes; требует `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True`;
+- `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES="False"` — отправлять normalized model response content в LLM span attributes; требует `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True`;
+- `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH="8000"` — максимальная длина одного сериализованного content attribute перед truncation;
 - `GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED="True"` — редактировать sensitive content перед observability export;
 - `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
 - `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
@@ -578,6 +582,10 @@ PHOENIX_PROJECT_NAME=gpt2giga
 # PHOENIX_GRPC_PORT=4317
 GPT2GIGA_OBSERVABILITY_SAMPLE_RATE=1.0
 GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=False
+GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES=False
+GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=False
+GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=False
+GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH=8000
 GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 GPT2GIGA_UI_ENABLED=False
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
@@ -591,6 +599,10 @@ GPT2GIGA_REPLAY_ENABLED=False
 #### Phoenix observability
 
 Phoenix/OpenTelemetry observability выключена по умолчанию. Для локальной проверки установите пакет с optional extra `phoenix`, задайте `GPT2GIGA_OBSERVABILITY_ENABLED=True`, `GPT2GIGA_OBSERVABILITY_BACKEND=phoenix`, `PHOENIX_COLLECTOR_ENDPOINT` и `PHOENIX_PROJECT_NAME`.
+
+LLM payload attributes требуют двойного opt-in: включите `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True` и только нужный payload-флаг (`GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES`, `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS`, `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES`). Значения ограничиваются `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH`, а redaction остается включенной через `GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True`.
+
+В normalized OpenAI Chat path дополнительно эмитятся LLM spans `protocol.normalize.request` и `protocol.normalize.response` с OpenInference-style metadata: model, provider, operation, token usage, finish reason, tool counts/names и streaming status. Для `stream=true` normalized path добавляет OTel span events `stream.start`, `stream.first_token`, `stream.tool_call_delta`, `stream.completed` и `stream.error`; raw deltas попадают в attributes только при включенном `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=True`.
 
 Traffic logs и Phoenix spans связываются через gateway identifiers. `TrafficLogEvent` сохраняет `trace_id` и, если он доступен во входном `x-span-id`, `span_id`; Phoenix spans `gpt2giga.request`, `provider.gigachat.request` и streaming `stream.emit` получают те же значения как attributes `trace_id`, `span_id`, `request_id`, `route`, `protocol` и `model_requested`. Чтобы расследовать запрос, найдите запись в `GET /_admin/logs?trace_id=<trace_id>` или в Postgres, затем откройте Phoenix и отфильтруйте spans по attribute `trace_id=<trace_id>`. OTel internal trace id может отличаться от gateway `trace_id`, поэтому в этом релизе стабильная связь — именно span attribute `trace_id`.
 

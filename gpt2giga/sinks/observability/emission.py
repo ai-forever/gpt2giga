@@ -43,15 +43,28 @@ async def emit_request_observability_event(
         event, is_streaming=is_streaming
     )
     await emit_observability_event(
-        sink, REQUEST_SPAN_NAME, attributes, context=context, logger=logger
+        sink,
+        REQUEST_SPAN_NAME,
+        attributes,
+        context=context,
+        logger=logger,
     )
     if event.provider:
         await emit_observability_event(
-            sink, PROVIDER_SPAN_NAME, attributes, context=context, logger=logger
+            sink,
+            PROVIDER_SPAN_NAME,
+            attributes,
+            context=context,
+            logger=logger,
         )
     if is_streaming:
         await emit_observability_event(
-            sink, STREAM_SPAN_NAME, attributes, context=context, logger=logger
+            sink,
+            STREAM_SPAN_NAME,
+            attributes,
+            context=context,
+            events=_stream_lifecycle_events(lifecycle, attributes),
+            logger=logger,
         )
 
 
@@ -128,3 +141,18 @@ def traffic_event_to_observability_attributes(
         "error_type": event.error_type,
         "metadata": event.metadata,
     }
+
+
+def _stream_lifecycle_events(
+    lifecycle: str,
+    attributes: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if lifecycle == "streaming_completed":
+        name = "stream.completed"
+    elif lifecycle == "streaming_aborted":
+        name = "stream.aborted"
+    elif lifecycle == "request_error":
+        name = "stream.error"
+    else:
+        return []
+    return [{"name": name, "attributes": attributes}]

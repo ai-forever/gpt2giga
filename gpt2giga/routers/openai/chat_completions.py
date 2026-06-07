@@ -30,6 +30,15 @@ from gpt2giga.protocols.openai import (
 from gpt2giga.protocols.normalized import run_openai_chat_shadow_normalization
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.routers.openai.helpers import populate_giga_functions
+from gpt2giga.sinks.observability.factory import emit_observability_event
+from gpt2giga.sinks.observability.llm import (
+    NORMALIZE_REQUEST_SPAN_NAME,
+    NORMALIZE_RESPONSE_SPAN_NAME,
+    STREAM_SPAN_NAME,
+    build_llm_request_attributes,
+    build_llm_response_attributes,
+    build_stream_span_events,
+)
 
 router = APIRouter(tags=["OpenAI"])
 
@@ -166,6 +175,11 @@ async def _try_normalized_non_stream_chat(
             payload,
             context=context,
         )
+        await _emit_normalized_request_observability(
+            state,
+            normalized_request,
+            context=context,
+        )
         provider_adapter = GigaChatProviderAdapter(
             config=state.config,
             request_transformer=state.request_transformer,
@@ -175,6 +189,11 @@ async def _try_normalized_non_stream_chat(
         )
         normalized_response = await provider_adapter.chat(
             normalized_request,
+            context=context,
+        )
+        await _emit_normalized_response_observability(
+            state,
+            normalized_response,
             context=context,
         )
         return normalized_chat_response_to_openai(
@@ -219,6 +238,11 @@ async def _try_normalized_stream_chat(
             payload,
             context=context,
         )
+        await _emit_normalized_request_observability(
+            state,
+            normalized_request,
+            context=context,
+        )
         provider_adapter = GigaChatProviderAdapter(
             config=state.config,
             request_transformer=state.request_transformer,
@@ -230,12 +254,34 @@ async def _try_normalized_stream_chat(
         response_id = context.request_id if context is not None else rquid_context.get()
 
         async def emit_stream():
+            seen_content_delta = False
             async for event in provider_adapter.stream_chat(
                 normalized_request,
                 context=context,
                 is_disconnected=request.is_disconnected,
                 logger=getattr(state, "logger", None),
             ):
+                first_content_delta = (
+                    event.type == "content_delta"
+                    and bool(event.content_delta)
+                    and not seen_content_delta
+                )
+                span_events = build_stream_span_events(
+                    event,
+                    settings=settings,
+                    first_content_delta=first_content_delta,
+                )
+                if span_events:
+                    await emit_observability_event(
+                        getattr(state, "observability_sink", None),
+                        STREAM_SPAN_NAME,
+                        span_events[0]["attributes"],
+                        context=context,
+                        events=span_events,
+                        logger=getattr(state, "logger", None),
+                    )
+                if event.type == "content_delta" and event.content_delta:
+                    seen_content_delta = True
                 sse = normalized_stream_event_to_openai_sse(
                     event,
                     requested_model=payload["model"],
@@ -258,3 +304,35 @@ async def _try_normalized_stream_chat(
                 request_id=getattr(get_request_context(), "request_id", None),
             ).warning("Normalized chat stream path failed; using legacy fallback")
         return None
+
+
+async def _emit_normalized_request_observability(
+    state,
+    normalized_request,
+    *,
+    context,
+) -> None:
+    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+    await emit_observability_event(
+        getattr(state, "observability_sink", None),
+        NORMALIZE_REQUEST_SPAN_NAME,
+        build_llm_request_attributes(normalized_request, settings=settings),
+        context=context,
+        logger=getattr(state, "logger", None),
+    )
+
+
+async def _emit_normalized_response_observability(
+    state,
+    normalized_response,
+    *,
+    context,
+) -> None:
+    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+    await emit_observability_event(
+        getattr(state, "observability_sink", None),
+        NORMALIZE_RESPONSE_SPAN_NAME,
+        build_llm_response_attributes(normalized_response, settings=settings),
+        context=context,
+        logger=getattr(state, "logger", None),
+    )

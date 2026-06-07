@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
@@ -17,6 +17,7 @@ class NoopObservabilitySink:
         attributes: Mapping[str, Any] | None = None,
         *,
         context: RequestContext | None = None,
+        events: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
         """Drop an observability event."""
         return None

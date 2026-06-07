@@ -10,6 +10,15 @@ from gpt2giga.sinks.observability.factory import (
     emit_observability_event,
     flush_observability_sink,
 )
+from gpt2giga.sinks.observability.llm import (
+    NORMALIZE_REQUEST_SPAN_NAME,
+    NORMALIZE_RESPONSE_SPAN_NAME,
+    STREAM_SPAN_NAME,
+    build_llm_request_attributes,
+    build_llm_response_attributes,
+    build_stream_event_attributes,
+    build_stream_span_events,
+)
 from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 from gpt2giga.sinks.observability.otel import (
     OpenTelemetryObservabilitySink,
@@ -20,7 +29,14 @@ from gpt2giga.sinks.observability.phoenix import create_phoenix_observability_si
 __all__ = [
     "NoopObservabilitySink",
     "OpenTelemetryObservabilitySink",
+    "NORMALIZE_REQUEST_SPAN_NAME",
+    "NORMALIZE_RESPONSE_SPAN_NAME",
+    "STREAM_SPAN_NAME",
     "build_otel_attributes",
+    "build_llm_request_attributes",
+    "build_llm_response_attributes",
+    "build_stream_event_attributes",
+    "build_stream_span_events",
     "create_observability_sink",
     "create_phoenix_observability_sink",
     "emit_observability_event",
