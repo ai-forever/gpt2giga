@@ -17,6 +17,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_UI_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_ADMIN_API_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_ADMIN_API_KEY", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS", raising=False)
@@ -40,6 +41,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.observability_enabled is False
     assert s.ui_enabled is False
     assert s.debug_translate_enabled is False
+    assert s.admin_api_enabled is False
     assert s.admin_api_key is None
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
@@ -196,6 +198,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_ADMIN_API_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_ADMIN_API_KEY", "admin-secret")
 
     s = ProxySettings()
@@ -219,6 +222,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.observability_enabled is True
     assert s.ui_enabled is True
     assert s.debug_translate_enabled is True
+    assert s.admin_api_enabled is True
     assert s.admin_api_key == "admin-secret"
 
 

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import secrets
-from collections.abc import Mapping
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from gpt2giga.api.admin.access import verify_admin_key
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
@@ -32,30 +32,10 @@ SUPPORTED_TRANSLATE_FORMATS = frozenset(
 )
 
 
-def verify_debug_admin_key(request: Request) -> None:
-    """Require the configured admin key for debug translation routes."""
-    settings = getattr(
-        getattr(request.app.state, "config", None), "proxy_settings", None
-    )
-    expected = getattr(settings, "admin_api_key", None)
-    if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin API key is required",
-        )
-
-    supplied = _extract_admin_key(request)
-    if not supplied or not secrets.compare_digest(supplied, expected):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid admin API key",
-        )
-
-
 router = APIRouter(
     prefix="/_debug/translate",
     tags=["Debug"],
-    dependencies=[Depends(verify_debug_admin_key)],
+    dependencies=[Depends(verify_admin_key)],
 )
 
 
@@ -574,20 +554,6 @@ async def _read_json_object(request: Request) -> dict[str, Any]:
             detail="Expected a JSON object",
         )
     return payload
-
-
-def _extract_admin_key(request: Request) -> str | None:
-    header_key = request.headers.get("x-admin-api-key")
-    if header_key:
-        return header_key.strip() or None
-
-    authorization = request.headers.get("authorization")
-    if not authorization:
-        return None
-    authorization = authorization.strip()
-    if authorization[:7].lower() == "bearer ":
-        return authorization[7:].strip() or None
-    return None
 
 
 def _serialize(value: Any) -> Any:

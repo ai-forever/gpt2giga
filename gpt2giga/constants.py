@@ -106,6 +106,7 @@ _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
 _SENSITIVE_CLI_ARGS = frozenset(
     {
         "--proxy.api-key",
+        "--proxy.admin-api-key",
         "--gigachat.credentials",
         "--gigachat.password",
         "--gigachat.access-token",

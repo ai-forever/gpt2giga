@@ -13,6 +13,10 @@ from gpt2giga.providers.gigachat.client import (
     create_gigachat_client,
 )
 from gpt2giga.sinks.logs.factory import create_traffic_log_sink, flush_traffic_log_sink
+from gpt2giga.sinks.logs.query import (
+    close_traffic_log_query_store,
+    create_traffic_log_query_store,
+)
 from gpt2giga.sinks.observability.factory import (
     create_observability_sink,
     flush_observability_sink,
@@ -33,6 +37,10 @@ async def lifespan(app: FastAPI):
         app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     if not hasattr(app.state, "traffic_log_sink"):
         app.state.traffic_log_sink = create_traffic_log_sink(
+            config.proxy_settings, logger=logger
+        )
+    if not hasattr(app.state, "traffic_log_query_store"):
+        app.state.traffic_log_query_store = create_traffic_log_query_store(
             config.proxy_settings, logger=logger
         )
     if not hasattr(app.state, "observability_sink"):
@@ -71,6 +79,9 @@ async def lifespan(app: FastAPI):
     )
     await flush_traffic_log_sink(
         getattr(app.state, "traffic_log_sink", None), logger=logger
+    )
+    await close_traffic_log_query_store(
+        getattr(app.state, "traffic_log_query_store", None), logger=logger
     )
     await close_gigachat_client(getattr(app.state, "gigachat_client", None), logger)
     await attachment_processor.close()

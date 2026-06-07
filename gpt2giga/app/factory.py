@@ -12,7 +12,7 @@ from gpt2giga.app.settings import (
     load_app_config,
     validate_app_config,
 )
-from gpt2giga.api.admin import router as admin_router
+from gpt2giga.api.admin import debug_router, logs_router as admin_logs_router
 from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.openai import router as openai_router
 from gpt2giga.auth import verify_api_key
@@ -27,6 +27,7 @@ from gpt2giga.routers.litellm import router as litellm_router
 from gpt2giga.routers.logs_router import logs_api_router, logs_router
 from gpt2giga.routers.system_router import system_router
 from gpt2giga.sinks.logs.factory import create_traffic_log_sink
+from gpt2giga.sinks.logs.query import create_traffic_log_query_store
 from gpt2giga.sinks.observability.factory import create_observability_sink
 
 
@@ -51,6 +52,9 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     app.state.config = config
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.traffic_log_sink = create_traffic_log_sink(config.proxy_settings)
+    app.state.traffic_log_query_store = create_traffic_log_query_store(
+        config.proxy_settings
+    )
     app.state.observability_sink = create_observability_sink(config.proxy_settings)
 
     app.add_middleware(
@@ -115,7 +119,9 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     app.include_router(litellm_router, dependencies=api_dependencies)
     app.include_router(system_router)
     if config.proxy_settings.debug_translate_enabled:
-        app.include_router(admin_router)
+        app.include_router(debug_router)
+    if config.proxy_settings.admin_api_enabled:
+        app.include_router(admin_logs_router)
     if not prod_mode:
         app.include_router(logs_api_router, dependencies=api_dependencies)
         app.include_router(logs_router, dependencies=api_dependencies)

@@ -30,6 +30,7 @@
 - **Postgres traffic log writer**: добавлены opt-in `postgres` traffic sink, lazy asyncpg writer и background queue с batch writes, best-effort flush и default drop-on-backpressure policy, чтобы storage failures не ломали API request path.
 - **Traffic event emission**: `RquidMiddleware` теперь эмитит safe traffic events для completed requests, validation errors, unhandled errors и stream completion/abort через configured sink; default noop path сохраняет публичное API behavior.
 - **Postgres compose profile**: добавлен `compose/postgres.yaml` для локального Postgres traffic log backend и Dockerfile build arg `INSTALL_EXTRAS` для сборки образа с optional extra `[postgres]`.
+- **Admin traffic logs API**: добавлены opt-in protected endpoints `/_admin/logs*` для list/get/request/response/tail/NDJSON export Postgres traffic logs с pagination, filters и admin-key auth; routes выключены по умолчанию.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.

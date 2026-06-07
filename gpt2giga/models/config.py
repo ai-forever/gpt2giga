@@ -182,6 +182,10 @@ class ProxySettings(BaseSettings):
         default=False,
         description="Enable future debug translation endpoints.",
     )
+    admin_api_enabled: bool = Field(
+        default=False,
+        description="Enable protected admin API endpoints.",
+    )
     admin_api_key: Optional[str] = Field(
         default=None,
         description="Admin API key for protected debug/admin endpoints.",

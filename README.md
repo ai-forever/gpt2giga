@@ -352,6 +352,7 @@ docker compose --env-file .env \
 - `--proxy.observability-enabled <true/false>` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию `False`;
 - `--proxy.ui-enabled <true/false>` — включить будущий встроенный UI. По умолчанию `False`;
 - `--proxy.debug-translate-enabled <true/false>` — включить будущие debug translation endpoints. По умолчанию `False`;
+- `--proxy.admin-api-enabled <true/false>` — включить protected admin endpoints `/_admin/*`. По умолчанию `False`;
 - `--proxy.admin-api-key <secret>` — admin key для protected debug/admin endpoints. Не передавайте секрет через CLI в production; используйте env или `.env`;
 - `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat-2-Max":5}'`;
 - `--proxy.model-max-connections-default <INT>` — fallback per-model лимит для моделей, которых нет в `--proxy.model-max-connections`;
@@ -362,7 +363,7 @@ docker compose --env-file .env \
 - `--proxy.enable-api-key-auth` — нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`;
 - `--proxy.api-key` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
 
-> **⚠️ Безопасность:** Не передавайте секреты (`--proxy.api-key`, `--gigachat.credentials`, `--gigachat.password`, `--gigachat.access-token`, `--gigachat.key-file-password`) через аргументы командной строки — они видны всем пользователям через `ps aux`. Используйте переменные окружения или `.env` файл (см. раздел ниже).
+> **⚠️ Безопасность:** Не передавайте секреты (`--proxy.api-key`, `--proxy.admin-api-key`, `--gigachat.credentials`, `--gigachat.password`, `--gigachat.access-token`, `--gigachat.key-file-password`) через аргументы командной строки — они видны всем пользователям через `ps aux`. Используйте переменные окружения или `.env` файл (см. раздел ниже).
 
 Далее идут стандартные настройки из библиотеки GigaChat:
 - `--gigachat [JSON]` — set gigachat from JSON string (по умолчанию `{}`);
@@ -446,7 +447,8 @@ gpt2giga \
 - `GPT2GIGA_OBSERVABILITY_ENABLED="False"` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию выключено;
 - `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
 - `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
-- `GPT2GIGA_ADMIN_API_KEY="<secret>"` — admin key для protected debug/admin endpoints. Требуется для `/_debug/translate/*`, если они включены;
+- `GPT2GIGA_ADMIN_API_ENABLED="False"` — включить protected admin endpoints `/_admin/*`. По умолчанию выключено, включая PROD;
+- `GPT2GIGA_ADMIN_API_KEY="<secret>"` — admin key для protected debug/admin endpoints. Требуется для `/_debug/translate/*` и `/_admin/*`, если они включены;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS='{}'` — JSON-словарь per-model лимитов одновременных upstream model-call внутри gpt2giga;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` — fallback per-model лимит для моделей, которых нет в `GPT2GIGA_MODEL_MAX_CONNECTIONS`. По умолчанию не задан;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT` — сколько секунд ждать свободный model slot. По умолчанию не задано, `0` означает fail-fast;
@@ -515,10 +517,35 @@ GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS=[]
 GPT2GIGA_OBSERVABILITY_ENABLED=False
 GPT2GIGA_UI_ENABLED=False
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
+GPT2GIGA_ADMIN_API_ENABLED=False
 # GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 ```
 
-`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization, observability hooks и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path.
+`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization, observability hooks и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
+
+#### Admin traffic logs API
+
+Protected admin traffic logs endpoints выключены по умолчанию, включая PROD. Для чтения Postgres traffic logs задайте:
+
+```dotenv
+GPT2GIGA_ADMIN_API_ENABLED=True
+GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
+GPT2GIGA_TRAFFIC_LOG_SINK=postgres
+GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2giga
+```
+
+Доступ защищен заголовком `x-admin-api-key: <secret>` или `Authorization: Bearer <secret>`. Если `GPT2GIGA_ADMIN_API_ENABLED=False`, endpoints не монтируются и возвращают `404`; если admin key не задан или неверный, возвращается `403`.
+
+Доступные endpoints:
+
+- `GET /_admin/logs` — список событий с фильтрами `from`, `to`, `protocol`, `route`, `model`, `status_code`, `has_error`, `request_id`, `trace_id`, `api_key_hash`, `limit`, `cursor`;
+- `GET /_admin/logs/{id}` — summary одной записи;
+- `GET /_admin/logs/{id}/request` — stored redacted request headers/body, если capture включен;
+- `GET /_admin/logs/{id}/response` — stored redacted response body, если capture включен;
+- `GET /_admin/logs/tail` — последние записи;
+- `GET /_admin/logs/export.ndjson` — NDJSON export одной страницы.
+
+Content capture остается выключенным по умолчанию через `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT=False`; request/response endpoints вернут `null` для body, если payload capture не включен. Все payloads, которые сохраняются в durable traffic logs, проходят redaction перед записью.
 
 #### Debug translate API
 
