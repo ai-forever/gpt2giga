@@ -1,0 +1,61 @@
+# Optional Phoenix observability profile.
+#
+# Usage:
+#   docker compose --env-file .env \
+#     -f compose/base.yaml -f compose/phoenix.yaml \
+#     --profile DEV --profile phoenix up -d --build
+
+x-gpt2giga-phoenix-env: &gpt2giga-phoenix-env
+  GPT2GIGA_OBSERVABILITY_ENABLED: "True"
+  GPT2GIGA_OBSERVABILITY_BACKEND: "phoenix"
+  PHOENIX_COLLECTOR_ENDPOINT: "http://phoenix:4317"
+  PHOENIX_PROJECT_NAME: "${PHOENIX_PROJECT_NAME:-gpt2giga}"
+  GPT2GIGA_OBSERVABILITY_SAMPLE_RATE: "${GPT2GIGA_OBSERVABILITY_SAMPLE_RATE:-1.0}"
+  GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT: "${GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT:-False}"
+  GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED: "${GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED:-True}"
+
+services:
+  gpt2giga-prod:
+    build:
+      args:
+        INSTALL_EXTRAS: "[phoenix]"
+    environment:
+      <<: *gpt2giga-phoenix-env
+    depends_on:
+      phoenix:
+        condition: service_healthy
+
+  gpt2giga-dev:
+    build:
+      args:
+        INSTALL_EXTRAS: "[phoenix]"
+    environment:
+      <<: *gpt2giga-phoenix-env
+    depends_on:
+      phoenix:
+        condition: service_healthy
+
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    profiles: ["phoenix"]
+    restart: unless-stopped
+    environment:
+      PHOENIX_WORKING_DIR: "/mnt/data"
+    ports:
+      - "127.0.0.1:${PHOENIX_PORT:-6006}:6006"
+      - "127.0.0.1:${PHOENIX_GRPC_PORT:-4317}:4317"
+    volumes:
+      - gpt2giga-phoenix-data:/mnt/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:6006', timeout=2).read()\"",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  gpt2giga-phoenix-data:

@@ -225,6 +225,23 @@ class RecordingTrafficSink:
         return None
 
 
+class RecordingObservabilitySink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, name, attributes=None, *, context=None):
+        self.events.append(
+            {
+                "name": name,
+                "attributes": attributes or {},
+                "context": context,
+            }
+        )
+
+    async def flush(self):
+        return None
+
+
 def test_rquid_middleware_emits_traffic_event_for_completed_request():
     test_app = FastAPI()
     sink = RecordingTrafficSink()
@@ -254,6 +271,32 @@ def test_rquid_middleware_emits_traffic_event_for_completed_request():
     assert event.api_key_hash.startswith("sha256:")
     assert event.metadata["lifecycle"] == "request_completed"
     assert event.latency_ms >= 0
+
+
+def test_rquid_middleware_emits_observability_event_for_completed_request():
+    test_app = FastAPI()
+    sink = RecordingObservabilitySink()
+    test_app.state.observability_sink = sink
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v1/models")
+    async def models():
+        return {"data": []}
+
+    client = TestClient(test_app)
+    response = client.get("/v1/models", headers={"x-trace-id": "trace-1"})
+
+    assert response.status_code == 200
+    assert [event["name"] for event in sink.events] == [
+        "gpt2giga.request",
+        "provider.gigachat.request",
+    ]
+    event = sink.events[0]
+    assert event["context"].trace_id == "trace-1"
+    assert event["attributes"]["trace_id"] == "trace-1"
+    assert event["attributes"]["request_id"] == response.headers["x-request-id"]
+    assert event["attributes"]["status_code"] == 200
+    assert event["attributes"]["metadata"]["lifecycle"] == "request_completed"
 
 
 def test_rquid_middleware_emits_traffic_event_for_validation_error():

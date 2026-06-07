@@ -1,4 +1,5 @@
 import json
+import os
 import warnings
 from functools import cached_property
 from typing import Annotated, Literal, Optional
@@ -23,6 +24,7 @@ from gpt2giga.constants import (
 from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
 
 TrafficLogSinkName = Literal["noop", "jsonl", "postgres", "opensearch"]
+ObservabilityBackendName = Literal["noop", "phoenix"]
 
 
 class ProxySettings(BaseSettings):
@@ -220,7 +222,40 @@ class ProxySettings(BaseSettings):
     )
     observability_enabled: bool = Field(
         default=False,
-        description="Enable future OpenTelemetry/OpenInference observability hooks.",
+        description="Enable OpenTelemetry/OpenInference observability hooks.",
+    )
+    observability_backend: ObservabilityBackendName = Field(
+        default="phoenix",
+        description="Observability backend: phoenix enables the optional Phoenix/OTel sink.",
+    )
+    phoenix_collector_endpoint: str = Field(
+        default_factory=lambda: os.getenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:4317"
+        ),
+        description="Phoenix OTLP collector endpoint.",
+    )
+    phoenix_project_name: str = Field(
+        default_factory=lambda: os.getenv("PHOENIX_PROJECT_NAME", "gpt2giga"),
+        description="Phoenix project name for exported traces.",
+    )
+    phoenix_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("PHOENIX_API_KEY") or None,
+        description="Phoenix API key for hosted or protected collectors.",
+        repr=False,
+    )
+    observability_sample_rate: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of requests to trace when observability is enabled.",
+    )
+    observability_capture_content: bool = Field(
+        default=False,
+        description="Capture prompt/response content in observability spans.",
+    )
+    observability_redaction_enabled: bool = Field(
+        default=True,
+        description="Redact sensitive content before adding observability attributes.",
     )
     ui_enabled: bool = Field(
         default=False,
@@ -308,6 +343,7 @@ class ProxySettings(BaseSettings):
         "responses_api_mode",
         "normalization_mode",
         "traffic_log_sink",
+        "observability_backend",
         mode="before",
     )
     @classmethod

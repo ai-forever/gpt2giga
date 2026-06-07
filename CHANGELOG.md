@@ -37,6 +37,12 @@
 - **Traffic log CSV export**: добавлен `GET /_admin/logs/export.csv` для выгрузки summary-колонок traffic logs без stored request/response body payloads.
 - **Traffic log replay**: добавлен выключенный по умолчанию `GPT2GIGA_REPLAY_ENABLED` и protected endpoint `POST /_admin/logs/{id}/replay`, который повторно редактирует captured body, не переиспользует stored credentials и помечает replay metadata.
 - **Manual traffic log redaction**: добавлен protected endpoint `POST /_admin/logs/{id}/redact` для ручной очистки stored request/response payload columns.
+- **Phoenix observability extra**: добавлен optional extra `phoenix` с Arize Phoenix/OpenTelemetry/OpenInference зависимостями для будущего opt-in observability backend без изменения базовой установки.
+- **Phoenix observability settings**: добавлены настройки Phoenix/OpenTelemetry observability backend, collector endpoint, project name, API key, sample rate, content capture и redaction; observability и content capture выключены по умолчанию.
+- **Phoenix/OpenTelemetry observability sink**: добавлен optional Phoenix OTLP sink с lazy imports, safe fallback на noop без extra `phoenix`, sample-rate control, attribute redaction и content-capture guard.
+- **Trace/log linkage**: traffic log events сохраняют `trace_id`/optional `span_id`, а Phoenix spans получают matching gateway identifiers as attributes; README описывает поиск trace по `trace_id`.
+- **Phoenix compose profile**: добавлен opt-in `compose/phoenix.yaml` для локального Arize Phoenix collector/UI и сборки gpt2giga с optional extra `[phoenix]`.
+- **Request lifecycle observability**: `RquidMiddleware` best-effort эмитит `gpt2giga.request`, `provider.gigachat.request` и streaming `stream.emit` spans через configured observability sink; ошибки sink-а изолированы от API request path.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.

@@ -264,6 +264,20 @@ docker compose --env-file .env \
 
 Для production создайте index template/data stream заранее через `gpt2giga.storage.opensearch.build_traffic_log_index_template()` или `install_traffic_log_index_template()`. Template маппит `created_at`/`@timestamp` как `date`, `request_id`, `trace_id`, `model`, `provider` как `keyword`, `status_code` как `integer`, а `metadata` как `object`.
 
+#### Запуск Docker Compose с Phoenix observability
+
+Phoenix observability выключена по умолчанию. Для локальной проверки используйте override [`compose/phoenix.yaml`](./compose/phoenix.yaml):
+
+```sh
+docker compose --env-file .env \
+  -f compose/base.yaml -f compose/phoenix.yaml \
+  --profile DEV --profile phoenix up -d --build
+```
+
+Профиль собирает gpt2giga с optional extra `[phoenix]`, включает `GPT2GIGA_OBSERVABILITY_ENABLED=True`, запускает `arizephoenix/phoenix:latest` и настраивает `PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317`. Phoenix UI доступен локально на `http://localhost:${PHOENIX_PORT:-6006}`, OTLP gRPC collector — на `127.0.0.1:${PHOENIX_GRPC_PORT:-4317}`.
+
+Content capture остается выключенным через `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=False`; включайте его только после утверждения redaction/retention policy.
+
 ### Запуск в Docker с Traefik
 
 В репозитории есть готовый стек `Traefik + несколько инстансов gpt2giga` в файле [`compose/traefik.yaml`](./compose/traefik.yaml):
@@ -467,7 +481,14 @@ gpt2giga \
 - `GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS='[]'` — JSON-массив дополнительных case-insensitive ключей для redaction перед traffic log storage;
 - `GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS="30"` — сколько дней хранить Postgres traffic logs перед batch purge по `created_at`;
 - `GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS="3600"` — интервал best-effort background purge job для Postgres traffic logs;
-- `GPT2GIGA_OBSERVABILITY_ENABLED="False"` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию выключено;
+- `GPT2GIGA_OBSERVABILITY_ENABLED="False"` — включить OpenTelemetry/OpenInference observability hooks. По умолчанию выключено;
+- `GPT2GIGA_OBSERVABILITY_BACKEND="phoenix"` — backend observability: сейчас планируется Phoenix/OpenTelemetry sink;
+- `PHOENIX_COLLECTOR_ENDPOINT="http://localhost:4317"` — OTLP endpoint Phoenix collector; можно переопределить также через `GPT2GIGA_PHOENIX_COLLECTOR_ENDPOINT`;
+- `PHOENIX_PROJECT_NAME="gpt2giga"` — имя Phoenix project; можно переопределить также через `GPT2GIGA_PHOENIX_PROJECT_NAME`;
+- `PHOENIX_API_KEY` — optional API key для hosted/protected Phoenix collector; можно переопределить также через `GPT2GIGA_PHOENIX_API_KEY`;
+- `GPT2GIGA_OBSERVABILITY_SAMPLE_RATE="1.0"` — доля запросов, для которых создаются traces при включенной observability;
+- `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT="False"` — отправлять prompt/response content в observability attributes. По умолчанию выключено;
+- `GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED="True"` — редактировать sensitive content перед observability export;
 - `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
 - `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
 - `GPT2GIGA_ADMIN_API_ENABLED="False"` — включить protected admin endpoints `/_admin/*`. По умолчанию выключено, включая PROD;
@@ -549,6 +570,15 @@ GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS=[]
 GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS=30
 GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS=3600
 GPT2GIGA_OBSERVABILITY_ENABLED=False
+GPT2GIGA_OBSERVABILITY_BACKEND=phoenix
+PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
+PHOENIX_PROJECT_NAME=gpt2giga
+# PHOENIX_API_KEY=
+# PHOENIX_PORT=6006
+# PHOENIX_GRPC_PORT=4317
+GPT2GIGA_OBSERVABILITY_SAMPLE_RATE=1.0
+GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=False
+GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 GPT2GIGA_UI_ENABLED=False
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
 GPT2GIGA_ADMIN_API_ENABLED=False
@@ -556,7 +586,13 @@ GPT2GIGA_ADMIN_API_ENABLED=False
 GPT2GIGA_REPLAY_ENABLED=False
 ```
 
-`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization, observability hooks и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. OpenSearch traffic logs являются optional mirror: используйте `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch` и extra `opensearch`; Bulk writer делает короткий retry with backoff, а ошибки OpenSearch изолируются от API request path. Dead-letter storage пока не включен: при недоступном OpenSearch events после retry отбрасываются и Postgres остается source of truth. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
+`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. OpenSearch traffic logs являются optional mirror: используйте `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch` и extra `opensearch`; Bulk writer делает короткий retry with backoff, а ошибки OpenSearch изолируются от API request path. Dead-letter storage пока не включен: при недоступном OpenSearch events после retry отбрасываются и Postgres остается source of truth. Phoenix/OpenTelemetry observability является opt-in через extra `phoenix` и `GPT2GIGA_OBSERVABILITY_ENABLED=True`; content capture выключен по умолчанию. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
+
+#### Phoenix observability
+
+Phoenix/OpenTelemetry observability выключена по умолчанию. Для локальной проверки установите пакет с optional extra `phoenix`, задайте `GPT2GIGA_OBSERVABILITY_ENABLED=True`, `GPT2GIGA_OBSERVABILITY_BACKEND=phoenix`, `PHOENIX_COLLECTOR_ENDPOINT` и `PHOENIX_PROJECT_NAME`.
+
+Traffic logs и Phoenix spans связываются через gateway identifiers. `TrafficLogEvent` сохраняет `trace_id` и, если он доступен во входном `x-span-id`, `span_id`; Phoenix spans `gpt2giga.request`, `provider.gigachat.request` и streaming `stream.emit` получают те же значения как attributes `trace_id`, `span_id`, `request_id`, `route`, `protocol` и `model_requested`. Чтобы расследовать запрос, найдите запись в `GET /_admin/logs?trace_id=<trace_id>` или в Postgres, затем откройте Phoenix и отфильтруйте spans по attribute `trace_id=<trace_id>`. OTel internal trace id может отличаться от gateway `trace_id`, поэтому в этом релизе стабильная связь — именно span attribute `trace_id`.
 
 #### Admin traffic logs API
 

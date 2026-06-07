@@ -26,6 +26,16 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_OPENSEARCH_BULK_SIZE", raising=False)
     monkeypatch.delenv("GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_BACKEND", raising=False)
+    monkeypatch.delenv("GPT2GIGA_PHOENIX_COLLECTOR_ENDPOINT", raising=False)
+    monkeypatch.delenv("GPT2GIGA_PHOENIX_PROJECT_NAME", raising=False)
+    monkeypatch.delenv("GPT2GIGA_PHOENIX_API_KEY", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_SAMPLE_RATE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT", raising=False)
+    monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED", raising=False)
+    monkeypatch.delenv("PHOENIX_COLLECTOR_ENDPOINT", raising=False)
+    monkeypatch.delenv("PHOENIX_PROJECT_NAME", raising=False)
+    monkeypatch.delenv("PHOENIX_API_KEY", raising=False)
     monkeypatch.delenv("GPT2GIGA_UI_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_ADMIN_API_ENABLED", raising=False)
@@ -62,6 +72,13 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.opensearch_bulk_size == 500
     assert s.opensearch_flush_interval_ms == 2000
     assert s.observability_enabled is False
+    assert s.observability_backend == "phoenix"
+    assert s.phoenix_collector_endpoint == "http://localhost:4317"
+    assert s.phoenix_project_name == "gpt2giga"
+    assert s.phoenix_api_key is None
+    assert s.observability_sample_rate == 1.0
+    assert s.observability_capture_content is False
+    assert s.observability_redaction_enabled is True
     assert s.ui_enabled is False
     assert s.debug_translate_enabled is False
     assert s.admin_api_enabled is False
@@ -230,6 +247,13 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_OPENSEARCH_BULK_SIZE", "25")
     monkeypatch.setenv("GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS", "789")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_BACKEND", " PHOENIX ")
+    monkeypatch.setenv("GPT2GIGA_PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix:4317")
+    monkeypatch.setenv("GPT2GIGA_PHOENIX_PROJECT_NAME", "gpt2giga-dev")
+    monkeypatch.setenv("GPT2GIGA_PHOENIX_API_KEY", "phoenix-secret")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SAMPLE_RATE", "0.25")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT", "true")
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED", "false")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_ADMIN_API_ENABLED", "true")
@@ -265,6 +289,13 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.opensearch_bulk_size == 25
     assert s.opensearch_flush_interval_ms == 789
     assert s.observability_enabled is True
+    assert s.observability_backend == "phoenix"
+    assert s.phoenix_collector_endpoint == "http://phoenix:4317"
+    assert s.phoenix_project_name == "gpt2giga-dev"
+    assert s.phoenix_api_key == "phoenix-secret"
+    assert s.observability_sample_rate == 0.25
+    assert s.observability_capture_content is True
+    assert s.observability_redaction_enabled is False
     assert s.ui_enabled is True
     assert s.debug_translate_enabled is True
     assert s.admin_api_enabled is True
@@ -288,6 +319,31 @@ def test_proxy_settings_traffic_log_sinks_from_json_env(monkeypatch):
 
 def test_proxy_settings_invalid_traffic_log_sinks(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINKS", "postgres,unsupported")
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
+def test_proxy_settings_phoenix_env_fallback(monkeypatch):
+    monkeypatch.setenv("PHOENIX_COLLECTOR_ENDPOINT", "http://phoenix-env:4317")
+    monkeypatch.setenv("PHOENIX_PROJECT_NAME", "env-project")
+    monkeypatch.setenv("PHOENIX_API_KEY", "env-secret")
+
+    s = ProxySettings()
+
+    assert s.phoenix_collector_endpoint == "http://phoenix-env:4317"
+    assert s.phoenix_project_name == "env-project"
+    assert s.phoenix_api_key == "env-secret"
+
+
+def test_proxy_settings_invalid_observability_backend(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_BACKEND", "unsupported")
+    with pytest.raises(Exception):
+        ProxySettings()
+
+
+@pytest.mark.parametrize("sample_rate", ["-0.1", "1.1"])
+def test_proxy_settings_invalid_observability_sample_rate(monkeypatch, sample_rate):
+    monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_SAMPLE_RATE", sample_rate)
     with pytest.raises(Exception):
         ProxySettings()
 
@@ -363,3 +419,11 @@ def test_opensearch_credentials_hidden_from_repr():
     assert "search-secret" not in text
     assert "opensearch_username=" not in text
     assert "opensearch_password=" not in text
+
+
+def test_phoenix_api_key_hidden_from_repr():
+    """Phoenix API key value must not appear in ProxySettings repr."""
+    s = ProxySettings(phoenix_api_key="phoenix-secret")
+    text = repr(s)
+    assert "phoenix-secret" not in text
+    assert "phoenix_api_key=" not in text

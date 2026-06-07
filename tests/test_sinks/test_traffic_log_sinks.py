@@ -23,6 +23,7 @@ def test_traffic_log_event_is_json_serializable():
     event = TrafficLogEvent(
         request_id="req-1",
         trace_id="trace-1",
+        span_id="span-1",
         protocol="openai",
         route="/v1/chat/completions",
         method="POST",
@@ -34,6 +35,7 @@ def test_traffic_log_event_is_json_serializable():
 
     assert payload["request_id"] == "req-1"
     assert payload["trace_id"] == "trace-1"
+    assert payload["span_id"] == "span-1"
     assert isinstance(payload["id"], str)
     assert isinstance(payload["created_at"], str)
     assert "status_code" not in payload
