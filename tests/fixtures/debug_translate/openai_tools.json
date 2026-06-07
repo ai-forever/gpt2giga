@@ -1,0 +1,33 @@
+{
+  "model": "GigaChat",
+  "messages": [
+    {
+      "role": "user",
+      "content": "lookup weather"
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "lookup_weather",
+        "description": "Lookup weather by city.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "city": {
+              "type": "string"
+            }
+          },
+          "required": ["city"]
+        }
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "function",
+    "function": {
+      "name": "lookup_weather"
+    }
+  }
+}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -154,16 +154,35 @@ class NormalizedResponse(NormalizedBaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+NormalizedStreamEventType = Literal[
+    "message_start",
+    "content_delta",
+    "reasoning_delta",
+    "tool_call_start",
+    "tool_call_delta",
+    "usage",
+    "message_end",
+    "error",
+    "heartbeat",
+]
+
+
 class NormalizedStreamEvent(NormalizedBaseModel):
     """Represent one canonical stream event."""
 
-    type: str
+    type: NormalizedStreamEventType
+    id: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    model: Optional[str] = None
     sequence: Optional[int] = None
     choice_index: int = 0
     message: Optional[NormalizedMessage] = None
     delta: Optional[NormalizedMessage] = None
+    content_delta: Optional[str] = None
+    reasoning_delta: Optional[str] = None
     tool_call: Optional[NormalizedToolCall] = None
     usage: Optional[NormalizedUsage] = None
     error: Optional[NormalizedError] = None
     finish_reason: Optional[str] = None
+    heartbeat: Optional[dict[str, Any]] = None
     metadata: dict[str, Any] = Field(default_factory=dict)

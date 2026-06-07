@@ -126,11 +126,45 @@ def test_chat_completions_normalization_on_uses_non_stream_normalized_path():
     assert app.state.request_transformer.chat_calls
 
 
-def test_chat_completions_normalization_on_skips_streaming_path():
+def test_chat_completions_normalization_on_uses_streaming_normalized_path():
     app = make_app()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(normalization_mode="on", gigachat_api_mode="v1")
     )
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "chat.completion.chunk" in body
+    assert "data: [DONE]" in body
+    assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            legacy_chat_fallback=True,
+            gigachat_api_mode="v1",
+        )
+    )
+
+    class BrokenAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            raise RuntimeError("normalized failed")
+
+    app.state.openai_protocol_adapter = BrokenAdapter()
     client = TestClient(app)
 
     with client.stream(

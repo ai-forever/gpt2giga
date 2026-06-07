@@ -146,6 +146,11 @@ class ProxySettings(BaseSettings):
         default=False,
         description="Enable future debug translation endpoints.",
     )
+    admin_api_key: Optional[str] = Field(
+        default=None,
+        description="Admin API key for protected debug/admin endpoints.",
+        repr=False,
+    )
     max_request_body_bytes: int = Field(
         default=DEFAULT_MAX_REQUEST_BODY_BYTES,
         description="Глобальный лимит размера HTTP-тела запроса в байтах (до парсинга JSON)",

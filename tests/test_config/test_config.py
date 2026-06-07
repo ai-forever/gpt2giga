@@ -17,6 +17,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_UI_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_ADMIN_API_KEY", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS", raising=False)
     monkeypatch.delenv("GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT", raising=False)
@@ -39,6 +40,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.observability_enabled is False
     assert s.ui_enabled is False
     assert s.debug_translate_enabled is False
+    assert s.admin_api_key is None
     assert s.max_audio_file_size_bytes == 35 * 1024 * 1024
     assert s.max_image_file_size_bytes == 15 * 1024 * 1024
     assert s.max_text_file_size_bytes == 40 * 1024 * 1024
@@ -183,6 +185,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_ADMIN_API_KEY", "admin-secret")
 
     s = ProxySettings()
 
@@ -195,6 +198,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.observability_enabled is True
     assert s.ui_enabled is True
     assert s.debug_translate_enabled is True
+    assert s.admin_api_key == "admin-secret"
 
 
 def test_proxy_settings_invalid_traffic_log_sink(monkeypatch):
@@ -253,3 +257,11 @@ def test_api_key_hidden_from_model_dump_exclude():
     dumped = s.model_dump(exclude={"api_key"})
     assert "api_key" not in dumped
     assert "super-secret-key-12345" not in str(dumped)
+
+
+def test_admin_api_key_hidden_from_repr():
+    """admin_api_key value must not appear in ProxySettings repr."""
+    s = ProxySettings(admin_api_key="admin-secret-12345")
+    text = repr(s)
+    assert "admin-secret-12345" not in text
+    assert "admin_api_key=" not in text

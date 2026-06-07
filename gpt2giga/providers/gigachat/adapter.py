@@ -2,28 +2,38 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import asyncio
+from collections.abc import AsyncGenerator, Mapping
+from types import SimpleNamespace
 from typing import Any
+
+import gigachat
 
 from gpt2giga.common.gigachat_options import gigachat_request_options
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
+    ModelConcurrencyTimeoutError,
     resolve_gigachat_model,
 )
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.core.context import RequestContext, update_request_context
 from gpt2giga.models.config import ProxyConfig
-from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
+from gpt2giga.protocol.response import (
+    adapt_v2_chunk_to_v1_shape,
+    adapt_v2_completion_to_v1_shape,
+)
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedChoice,
     NormalizedContentPart,
     NormalizedMessage,
     NormalizedResponse,
+    NormalizedStreamEvent,
     NormalizedTool,
     NormalizedToolCall,
     NormalizedUsage,
 )
+from gpt2giga.providers.gigachat.streaming import GigaChatNormalizedStreamMapper
 
 
 class GigaChatProviderAdapter:
@@ -39,12 +49,14 @@ class GigaChatProviderAdapter:
         giga_client: Any,
         model_limiter: ModelConcurrencyLimiter,
         request_options: Any = None,
+        response_processor: Any = None,
     ) -> None:
         self.config = config
         self.request_transformer = request_transformer
         self.giga_client = giga_client
         self.model_limiter = model_limiter
         self.request_options = request_options
+        self.response_processor = response_processor
 
     async def complete(
         self,
@@ -67,6 +79,40 @@ class GigaChatProviderAdapter:
         if mode == "v2":
             return await self._chat_v2(payload, request, context=context)
         return await self._chat_v1(payload, request, context=context)
+
+    async def stream_chat(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        context: RequestContext | None = None,
+        is_disconnected: Any = None,
+        logger: Any = None,
+    ) -> AsyncGenerator[NormalizedStreamEvent, None]:
+        """Execute a streaming normalized chat request."""
+        if self.response_processor is None:
+            raise RuntimeError("response_processor is required for streaming")
+
+        payload = normalized_chat_to_openai_payload(request)
+        mode = getattr(self.config.proxy_settings, "gigachat_api_mode", "v1")
+        if mode == "v2":
+            async for event in self._stream_chat_v2(
+                payload,
+                request,
+                context=context,
+                is_disconnected=is_disconnected,
+                logger=logger,
+            ):
+                yield event
+            return
+
+        async for event in self._stream_chat_v1(
+            payload,
+            request,
+            context=context,
+            is_disconnected=is_disconnected,
+            logger=logger,
+        ):
+            yield event
 
     async def _chat_v1(
         self,
@@ -116,6 +162,138 @@ class GigaChatProviderAdapter:
             _ModelDumpWrapper(adapted),
             request=request,
             context=context,
+        )
+
+    async def _stream_chat_v1(
+        self,
+        payload: dict[str, Any],
+        request: NormalizedChatRequest,
+        *,
+        context: RequestContext | None,
+        is_disconnected: Any,
+        logger: Any,
+    ):
+        async with gigachat_request_options(self.giga_client, self.request_options):
+            chat_payload = await self.request_transformer.prepare_chat_completion(
+                payload,
+                self.giga_client,
+            )
+        effective_model = resolve_gigachat_model(chat_payload, self.config)
+        update_request_context(model_effective=effective_model)
+        mapper = self._stream_mapper(request, context)
+        yield mapper.message_start()
+
+        try:
+            async with self.model_limiter.limit(effective_model, provider="openai"):
+                async with gigachat_request_options(
+                    self.giga_client,
+                    self.request_options,
+                ):
+                    async for chunk in self.giga_client.astream(chat_payload):
+                        if await _is_disconnected(is_disconnected):
+                            _log_disconnect(logger, context)
+                            break
+                        yield mapper.chunk_to_event(chunk)
+
+            for event in mapper.flush_reasoning_events():
+                yield event
+        except ModelConcurrencyTimeoutError as exc:
+            yield mapper.error_event(
+                message=str(exc),
+                error_type="rate_limit_error",
+                code="model_concurrency_limit",
+            )
+        except gigachat.exceptions.GigaChatException as exc:
+            _log_stream_error(logger, context, exc)
+            yield mapper.error_event(
+                message=str(exc),
+                error_type=type(exc).__name__,
+                code="stream_error",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _log_stream_error(logger, context, exc)
+            yield mapper.error_event(
+                message="Stream interrupted",
+                raw_message="Stream interrupted",
+                error_type=type(exc).__name__,
+                code="internal_error",
+            )
+
+    async def _stream_chat_v2(
+        self,
+        payload: dict[str, Any],
+        request: NormalizedChatRequest,
+        *,
+        context: RequestContext | None,
+        is_disconnected: Any,
+        logger: Any,
+    ):
+        async with gigachat_request_options(self.giga_client, self.request_options):
+            chat_payload = await self.request_transformer.prepare_chat_completion_v2(
+                payload,
+                self.giga_client,
+            )
+        effective_model = resolve_gigachat_model(chat_payload, self.config)
+        update_request_context(model_effective=effective_model)
+        mapper = self._stream_mapper(request, context)
+        yield mapper.message_start()
+
+        try:
+            async with self.model_limiter.limit(effective_model, provider="openai"):
+                async with gigachat_request_options(
+                    self.giga_client,
+                    self.request_options,
+                ):
+                    async for chunk in self.giga_client.achat.stream(chat_payload):
+                        if await _is_disconnected(is_disconnected):
+                            _log_disconnect(logger, context)
+                            break
+                        adapted = adapt_v2_chunk_to_v1_shape(
+                            chunk,
+                            default_model=request.model or effective_model,
+                        )
+                        yield mapper.chunk_to_event(
+                            SimpleNamespace(model_dump=lambda: adapted)
+                        )
+
+            for event in mapper.flush_reasoning_events():
+                yield event
+        except ModelConcurrencyTimeoutError as exc:
+            yield mapper.error_event(
+                message=str(exc),
+                error_type="rate_limit_error",
+                code="model_concurrency_limit",
+            )
+        except gigachat.exceptions.GigaChatException as exc:
+            _log_stream_error(logger, context, exc)
+            yield mapper.error_event(
+                message=str(exc),
+                error_type=type(exc).__name__,
+                code="stream_error",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _log_stream_error(logger, context, exc)
+            yield mapper.error_event(
+                message="Stream interrupted",
+                raw_message="Stream interrupted",
+                error_type=type(exc).__name__,
+                code="internal_error",
+            )
+
+    def _stream_mapper(
+        self,
+        request: NormalizedChatRequest,
+        context: RequestContext | None,
+    ) -> GigaChatNormalizedStreamMapper:
+        return GigaChatNormalizedStreamMapper(
+            response_processor=self.response_processor,
+            requested_model=request.model or "unknown",
+            response_id=context.request_id if context is not None else "stream",
+            request_data=normalized_chat_to_openai_payload(request),
         )
 
 
@@ -399,3 +577,35 @@ class _ModelDumpWrapper:
 
     def model_dump(self) -> dict[str, Any]:
         return self._data
+
+
+async def _is_disconnected(is_disconnected: Any) -> bool:
+    if is_disconnected is None:
+        return False
+    result = is_disconnected()
+    if hasattr(result, "__await__"):
+        result = await result
+    return bool(result)
+
+
+def _log_disconnect(logger: Any, context: RequestContext | None) -> None:
+    if logger is None:
+        return
+    request_id = context.request_id if context is not None else None
+    logger.bind(request_id=request_id).info(
+        "Client disconnected during normalized streaming"
+    )
+
+
+def _log_stream_error(
+    logger: Any,
+    context: RequestContext | None,
+    exc: BaseException,
+) -> None:
+    if logger is None:
+        return
+    request_id = context.request_id if context is not None else None
+    logger.bind(
+        request_id=request_id,
+        error_type=type(exc).__name__,
+    ).error("Normalized streaming error")

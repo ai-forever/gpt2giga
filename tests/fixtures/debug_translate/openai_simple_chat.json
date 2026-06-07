@@ -1,0 +1,9 @@
+{
+  "model": "GigaChat",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello"
+    }
+  ]
+}

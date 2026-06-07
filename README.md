@@ -334,12 +334,13 @@ client.messages.create(
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
 - `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
 - `--proxy.experimental-normalized-layer <true/false>` — включить экспериментальную подготовку normalized layer. По умолчанию `False`;
-- `--proxy.normalization-mode <off/shadow/on>` — режим normalized layer. По умолчанию `off`; `shadow` строит normalized-представление OpenAI Chat параллельно с legacy path и не меняет ответ клиента; `on` переводит OpenAI Chat non-stream на экспериментальный normalized path;
+- `--proxy.normalization-mode <off/shadow/on>` — режим normalized layer. По умолчанию `off`; `shadow` строит normalized-представление OpenAI Chat параллельно с legacy path и не меняет ответ клиента; `on` переводит OpenAI Chat на экспериментальный normalized path;
 - `--proxy.legacy-chat-fallback <true/false>` — разрешить fallback на legacy chat path во время модульной миграции. По умолчанию `True`;
 - `--proxy.traffic-log-enabled <true/false>` — включить будущие traffic log events. По умолчанию `False`;
 - `--proxy.observability-enabled <true/false>` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию `False`;
 - `--proxy.ui-enabled <true/false>` — включить будущий встроенный UI. По умолчанию `False`;
 - `--proxy.debug-translate-enabled <true/false>` — включить будущие debug translation endpoints. По умолчанию `False`;
+- `--proxy.admin-api-key <secret>` — admin key для protected debug/admin endpoints. Не передавайте секрет через CLI в production; используйте env или `.env`;
 - `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat-2-Max":5}'`;
 - `--proxy.model-max-connections-default <INT>` — fallback per-model лимит для моделей, которых нет в `--proxy.model-max-connections`;
 - `--proxy.model-max-connections-acquire-timeout <FLOAT>` — сколько секунд ждать свободный model slot; `0` означает fail-fast, отсутствие значения — ждать без локального timeout;
@@ -417,7 +418,7 @@ gpt2giga \
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
 - `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
 - `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER="False"` — включить экспериментальную подготовку normalized layer. По умолчанию выключено;
-- `GPT2GIGA_NORMALIZATION_MODE="off"` — режим normalized layer: `off`, `shadow` или `on`. По умолчанию `off`; `shadow` включает best-effort OpenAI Chat normalization diagnostics без изменения legacy response path; `on` переводит OpenAI Chat non-stream на экспериментальный normalized path;
+- `GPT2GIGA_NORMALIZATION_MODE="off"` — режим normalized layer: `off`, `shadow` или `on`. По умолчанию `off`; `shadow` включает best-effort OpenAI Chat normalization diagnostics без изменения legacy response path; `on` переводит OpenAI Chat на экспериментальный normalized path;
 - `GPT2GIGA_LEGACY_CHAT_FALLBACK="True"` — разрешить fallback на legacy chat path во время модульной миграции;
 - `GPT2GIGA_TRAFFIC_LOG_ENABLED="False"` — включить будущие traffic log events. По умолчанию выключено;
 - `GPT2GIGA_TRAFFIC_LOG_SINK="noop"` — backend traffic logs: `noop` или `jsonl`. По умолчанию `noop`;
@@ -425,6 +426,7 @@ gpt2giga \
 - `GPT2GIGA_OBSERVABILITY_ENABLED="False"` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию выключено;
 - `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
 - `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
+- `GPT2GIGA_ADMIN_API_KEY="<secret>"` — admin key для protected debug/admin endpoints. Требуется для `/_debug/translate/*`, если они включены;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS='{}'` — JSON-словарь per-model лимитов одновременных upstream model-call внутри gpt2giga;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` — fallback per-model лимит для моделей, которых нет в `GPT2GIGA_MODEL_MAX_CONNECTIONS`. По умолчанию не задан;
 - `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT` — сколько секунд ждать свободный model slot. По умолчанию не задано, `0` означает fail-fast;
@@ -481,9 +483,21 @@ GPT2GIGA_TRAFFIC_LOG_JSONL_PATH=traffic_logs.jsonl
 GPT2GIGA_OBSERVABILITY_ENABLED=False
 GPT2GIGA_UI_ENABLED=False
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
+# GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 ```
 
-`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions non-stream на экспериментальный normalized path: request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter. Streaming, Anthropic normalization, observability hooks, UI и debug translation endpoints остаются scope следующих релизов roadmap. Если normalized path падает и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
+`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization, observability hooks и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
+
+#### Debug translate API
+
+Debug translate endpoints выключены по умолчанию и не являются публичным production API. Для локальной отладки или admin-сценариев задайте `GPT2GIGA_DEBUG_TRANSLATE_ENABLED=True` и `GPT2GIGA_ADMIN_API_KEY`. Доступ защищен заголовком `x-admin-api-key: <secret>` или `Authorization: Bearer <secret>`. Если флаг выключен, routes не монтируются и возвращают `404`; если флаг включен, но admin key не задан или передан неверно, возвращается `403`.
+
+Доступные endpoints:
+
+- `POST /_debug/translate/openai-to-normalized`
+- `POST /_debug/translate/anthropic-to-normalized`
+- `POST /_debug/translate/normalized-to-gigachat`
+- `POST /_debug/translate/gigachat-to-openai`
 
 #### Per-model max connections
 

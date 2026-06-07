@@ -105,6 +105,11 @@ def test_normalized_response_and_stream_event_are_json_serializable():
     json.dumps(event_payload)
 
 
+def test_normalized_stream_event_rejects_unknown_type():
+    with pytest.raises(ValidationError):
+        NormalizedStreamEvent(type="unknown")
+
+
 def test_normalized_embedding_request_supports_provider_metadata():
     request = NormalizedEmbeddingRequest(
         model="EmbeddingsGigaR",

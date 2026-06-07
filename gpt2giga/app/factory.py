@@ -12,6 +12,7 @@ from gpt2giga.app.settings import (
     load_app_config,
     validate_app_config,
 )
+from gpt2giga.api.admin import router as admin_router
 from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.openai import router as openai_router
 from gpt2giga.auth import verify_api_key
@@ -113,6 +114,8 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     )
     app.include_router(litellm_router, dependencies=api_dependencies)
     app.include_router(system_router)
+    if config.proxy_settings.debug_translate_enabled:
+        app.include_router(admin_router)
     if not prod_mode:
         app.include_router(logs_api_router, dependencies=api_dependencies)
         app.include_router(logs_router, dependencies=api_dependencies)

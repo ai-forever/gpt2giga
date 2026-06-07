@@ -1,0 +1,25 @@
+{
+  "model": "GigaChat",
+  "max_tokens": 128,
+  "messages": [
+    {
+      "role": "user",
+      "content": "lookup weather"
+    }
+  ],
+  "tools": [
+    {
+      "name": "lookup_weather",
+      "description": "Lookup weather by city.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": ["city"]
+      }
+    }
+  ]
+}
