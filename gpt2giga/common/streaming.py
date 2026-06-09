@@ -26,7 +26,7 @@ from gpt2giga.common.model_concurrency import (
     resolve_gigachat_model,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
-from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import (
     GIGACHAT_PROVIDER_METADATA_KEY,
@@ -952,26 +952,34 @@ async def stream_responses_generator(
                             functions_state_id = delta.get("functions_state_id")
 
                         if function_call_data is None:
-                            tool_name = map_tool_name_from_gigachat(
-                                delta_function_call.get("name", "")
+                            tool_name, namespace = split_gigachat_tool_name(
+                                delta_function_call.get("name", ""),
+                                request_tools=(
+                                    request_data.get("tools") if request_data else None
+                                ),
                             )
                             function_call_data = {
                                 "name": tool_name,
                                 "arguments": "",
                             }
+                            if namespace:
+                                function_call_data["namespace"] = namespace
+                            item = {
+                                "id": fc_id,
+                                "type": "function_call",
+                                "status": "in_progress",
+                                "call_id": f"call_{response_id}",
+                                "name": function_call_data["name"],
+                                "arguments": "",
+                            }
+                            if namespace:
+                                item["namespace"] = namespace
                             yield sse_event(
                                 "response.output_item.added",
                                 {
                                     "type": "response.output_item.added",
                                     "output_index": 0,
-                                    "item": {
-                                        "id": fc_id,
-                                        "type": "function_call",
-                                        "status": "in_progress",
-                                        "call_id": f"call_{response_id}",
-                                        "name": function_call_data["name"],
-                                        "arguments": "",
-                                    },
+                                    "item": item,
                                     "sequence_number": sequence_number,
                                 },
                             )
@@ -979,9 +987,15 @@ async def stream_responses_generator(
                             output_item_added = True
 
                         if delta_function_call.get("name"):
-                            function_call_data["name"] = map_tool_name_from_gigachat(
-                                delta_function_call["name"]
+                            tool_name, namespace = split_gigachat_tool_name(
+                                delta_function_call["name"],
+                                request_tools=(
+                                    request_data.get("tools") if request_data else None
+                                ),
                             )
+                            function_call_data["name"] = tool_name
+                            if namespace:
+                                function_call_data["namespace"] = namespace
 
                         args = delta_function_call.get("arguments")
                         if args is not None:
@@ -1094,34 +1108,28 @@ async def stream_responses_generator(
             )
             sequence_number += 1
 
+            done_item = {
+                "id": fc_id,
+                "type": "function_call",
+                "status": "completed",
+                "call_id": f"call_{response_id}",
+                "name": function_call_data["name"],
+                "arguments": function_call_data["arguments"],
+            }
+            if function_call_data.get("namespace"):
+                done_item["namespace"] = function_call_data["namespace"]
             yield sse_event(
                 "response.output_item.done",
                 {
                     "type": "response.output_item.done",
                     "output_index": 0,
-                    "item": {
-                        "id": fc_id,
-                        "type": "function_call",
-                        "status": "completed",
-                        "call_id": f"call_{response_id}",
-                        "name": function_call_data["name"],
-                        "arguments": function_call_data["arguments"],
-                    },
+                    "item": done_item,
                     "sequence_number": sequence_number,
                 },
             )
             sequence_number += 1
 
-            final_output = [
-                {
-                    "id": fc_id,
-                    "type": "function_call",
-                    "status": "completed",
-                    "call_id": f"call_{response_id}",
-                    "name": function_call_data["name"],
-                    "arguments": function_call_data["arguments"],
-                }
-            ]
+            final_output = [done_item]
             yield sse_event(
                 "response.completed",
                 {
@@ -1352,6 +1360,8 @@ def _stream_called_tool_item(
     }
     if tools_state_id:
         item["tools_state_id"] = tools_state_id
+    if function_call_data.get("namespace"):
+        item["namespace"] = function_call_data["namespace"]
     return item
 
 

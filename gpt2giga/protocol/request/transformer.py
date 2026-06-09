@@ -13,7 +13,6 @@ from gigachat.models import (
     MessagesRole,
 )
 
-from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
@@ -26,6 +25,7 @@ from gpt2giga.common.message_utils import (
 )
 from gpt2giga.common.tools import (
     build_gigachat_builtin_tool_payload,
+    iter_function_tool_payloads,
     map_tool_name_to_gigachat,
 )
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
@@ -431,13 +431,29 @@ class RequestTransformer:
         elif extra_body is not None and additional_fields is None:
             transformed["additional_fields"] = extra_body
 
+        disable_reasoning = getattr(
+            self.config.proxy_settings, "disable_reasoning", False
+        )
         reasoning = transformed.pop("reasoning", None)
-        if isinstance(reasoning, dict):
+        if disable_reasoning:
+            transformed.pop("reasoning_effort", None)
+            additional_fields = transformed.get("additional_fields")
+            if isinstance(additional_fields, dict):
+                additional_fields = self._strip_reasoning_payload_fields(
+                    additional_fields
+                )
+                if additional_fields:
+                    transformed["additional_fields"] = additional_fields
+                else:
+                    transformed.pop("additional_fields", None)
+        elif isinstance(reasoning, dict):
             effort = reasoning.get("effort")
             if effort is not None:
                 transformed["reasoning_effort"] = effort
 
-        if getattr(self.config.proxy_settings, "enable_reasoning", False):
+        if not disable_reasoning and getattr(
+            self.config.proxy_settings, "enable_reasoning", False
+        ):
             transformed.setdefault("reasoning_effort", "high")
 
         gpt_model = data.get("model", None)
@@ -461,10 +477,12 @@ class RequestTransformer:
             transformed["max_tokens"] = default_max_tokens
 
         if "functions" not in transformed and "tools" in transformed:
-            functions = []
-            for tool in transformed["tools"]:
-                if tool["type"] == "function":
-                    functions.append(tool.get("function", tool))
+            functions = list(
+                iter_function_tool_payloads(
+                    {"tools": transformed["tools"]},
+                    require_parameters=False,
+                )
+            )
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
@@ -526,6 +544,11 @@ class RequestTransformer:
         transformed: Dict, schema: Dict, strict: Optional[bool]
     ) -> None:
         """Applies JSON schema through GigaChat native response_format."""
+        schema = (
+            normalize_json_schema(resolve_schema_refs(schema))
+            if isinstance(schema, dict)
+            else {}
+        )
         response_format = {"type": "json_schema", "schema": schema}
         if strict is not None:
             response_format["strict"] = strict
@@ -541,11 +564,43 @@ class RequestTransformer:
     def _responses_builtin_tools_enabled(self) -> bool:
         return self.config.proxy_settings.resolve_responses_api_mode() == "v2"
 
+    @staticmethod
+    def _strip_reasoning_payload_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+        stripped = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"reasoning", "reasoning_effort"}
+        }
+        model_options = stripped.get("model_options")
+        if isinstance(model_options, dict):
+            model_options = {
+                key: value
+                for key, value in model_options.items()
+                if key not in {"reasoning", "reasoning_effort"}
+            }
+            if model_options:
+                stripped["model_options"] = model_options
+            else:
+                stripped.pop("model_options", None)
+        return stripped
+
+    def _chat_builtin_tools_enabled(self) -> bool:
+        return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
+
     def transform_chat_parameters(self, data: Dict) -> Dict:
         """Transforms chat parameters (Chat Completions API)."""
-        data = sanitize_openai_chat_parameters(data)
+        builtin_tools_enabled = self._chat_builtin_tools_enabled()
+        data = sanitize_openai_chat_parameters(
+            data,
+            allow_builtin_tools=builtin_tools_enabled,
+            allow_namespace_tools=builtin_tools_enabled,
+        )
         data = self._map_chat_token_limit(data)
         transformed = self._transform_common_parameters(data)
+        if builtin_tools_enabled:
+            builtin_tools = self._build_v2_builtin_tool_payloads(data.get("tools"))
+            if builtin_tools:
+                transformed["_gpt2giga_builtin_tools"] = builtin_tools
 
         response_format: dict | None = transformed.pop("response_format", None)
         if response_format:
@@ -580,12 +635,7 @@ class RequestTransformer:
 
         for conflict_param in ("max_tokens", "max_output_tokens"):
             if transformed.get(conflict_param) is not None:
-                raise ClientCompatibilityError(
-                    "`max_completion_tokens` cannot be combined with "
-                    f"`{conflict_param}`.",
-                    provider="openai",
-                    param="max_completion_tokens",
-                )
+                return transformed
 
         transformed["max_tokens"] = max_completion_tokens
         return transformed
@@ -1065,9 +1115,12 @@ class RequestTransformer:
                 continue
             seen_names.add(mapped_name)
 
+            parameters = self._normalize_v2_function_schema(
+                function_payload.get("parameters") or {}
+            )
             spec_payload = {
                 "name": mapped_name,
-                "parameters": function_payload.get("parameters") or {},
+                "parameters": parameters,
             }
             for field_name in (
                 "description",
@@ -1094,6 +1147,12 @@ class RequestTransformer:
             )
         )
         return tools
+
+    @staticmethod
+    def _normalize_v2_function_schema(schema: Any) -> dict[str, Any]:
+        if not isinstance(schema, dict):
+            return {}
+        return normalize_json_schema(resolve_schema_refs(schema))
 
     @staticmethod
     def _dump_mapping(value: Any) -> Dict[str, Any]:

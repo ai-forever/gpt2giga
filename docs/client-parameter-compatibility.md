@@ -17,7 +17,7 @@ SDK OpenAI и Anthropic в gpt2giga. Он отражает текущую стр
 |---|---|
 | `supported` | Параметр влияет на запрос или ответ и покрыт тестами. |
 | `accepted_ignored` | Параметр принимается для совместимости с SDK, но не отправляется upstream. |
-| `rejected` | Параметр нельзя корректно эмулировать, поэтому возвращается совместимая ошибка `400`. |
+| `rejected` | Запрос имеет неисполняемую форму, например отсутствует обязательный `input` или `extra_body` не является объектом. Optional client feature-флаги не используют этот статус. |
 | `not_applicable` | Опция относится к клиентской настройке транспорта, а не к серверному параметру тела запроса. |
 
 ## Транспортные опции SDK
@@ -68,35 +68,41 @@ SDK OpenAI и Anthropic обычно объединяют `extra_body` с исх
 unknown top-level поля, которые появляются после разворачивания `extra_body`
 клиентом, обрабатываются так же.
 
-Известные unsupported параметры клиентов по-прежнему отклоняются, если отправлены
-как top-level поля: например `logprobs`, `audio`, `container` или `mcp_servers`.
-Исключение: `previous_response_id` поддерживается для OpenAI Responses в GigaChat
-v2 mode и маппится в `storage.thread_id`; в Responses v1 mode он отклоняется.
+Известные unsupported optional параметры клиентов принимаются и игнорируются, если
+отправлены как top-level поля: например `logprobs`, `audio`, `container` или
+`mcp_servers`. `previous_response_id` поддерживается для OpenAI Responses в
+GigaChat v2 mode и маппится в `storage.thread_id`; в Responses v1 mode он
+принимается и игнорируется.
 Если такой же ключ явно положить внутрь literal `extra_body`, gpt2giga передаст
 его в `additional_fields`, а итоговую поддержку определит GigaChat upstream.
 
-OpenAI Embeddings отклоняет `extra_body`; на данный момент для embeddings нет
-разрешенных полей, специфичных для GigaChat.
+OpenAI Embeddings принимает и игнорирует `extra_body`, неизвестные top-level
+поля и `dimensions`; на данный момент для embeddings нет разрешенных полей,
+специфичных для GigaChat.
 
 ## Параметры тела OpenAI
 
 | Эндпоинт | Поддерживается |
 |---|---|
-| Chat Completions | `model`, `messages`, `stream`, `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, функциональные `tools`, `functions`, `function_call`, поддерживаемый `tool_choice`, `response_format`, `reasoning`, `reasoning_effort`, `extra_body` passthrough |
+| Chat Completions | `model`, `messages`, `stream`, `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, функциональные `tools`, `functions`, `function_call`, поддерживаемый `tool_choice`, built-in tools в GigaChat v2 mode (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`), `response_format`, `reasoning`, `reasoning_effort`, `extra_body` passthrough |
 | Responses | `model`, `input`, `instructions`, `stream`, `temperature`, `top_p`, `max_output_tokens`, функциональные `tools`, built-in tools в GigaChat v2 mode (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`; нормализованные output items и stream progress events сейчас строятся для `web_search*` и `image_generation` / `image_generate`), поддерживаемый `tool_choice`, `text.format`, `response_format`, `reasoning`, `reasoning_effort`, `extra_body` passthrough |
 | Embeddings | `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query` |
 | Models | `GET /models`, `GET /models/{model}` |
+
+При `GPT2GIGA_DISABLE_REASONING=True` прокси принимает `reasoning` и
+`reasoning_effort`, но не передает их в upstream payload к GigaChat.
 
 Поля метаданных OpenAI, такие как `user`, `metadata`, `service_tier`,
 `safety_identifier`, `seed`, `prompt_cache_key` и `prompt_cache_retention`,
 принимаются и игнорируются там, где они классифицированы.
 
-Неподдерживаемые параметры OpenAI возвращают `400`, если присутствуют со
-значимыми значениями. Примеры: `logprobs`, `top_logprobs`, `logit_bias`,
-аудиовывод, `prediction`, `web_search_options`, встроенные инструменты вне
-Responses API в GigaChat v2 mode, `n > 1`, `parallel_tool_calls=true`,
-сохраненные запросы completions, `conversation`, а также `previous_response_id`
-в Responses v1 mode.
+Неподдерживаемые optional параметры OpenAI принимаются и игнорируются. Примеры:
+`logprobs`, `top_logprobs`, `logit_bias`, аудиовывод, `prediction`,
+`web_search_options`, built-in tools вне GigaChat v2 mode, `n > 1`,
+`parallel_tool_calls=true`, сохраненные запросы completions, `conversation`, а
+также `previous_response_id` в Responses v1 mode. `/chat/completions` v1
+остаётся поддержанным compatibility route, но новые tool/built-in-tool
+возможности развиваются для GigaChat `v2/chat/completions`.
 
 ## Параметры тела Anthropic
 
@@ -109,11 +115,11 @@ Responses API в GigaChat v2 mode, `n > 1`, `parallel_tool_calls=true`,
 Anthropic `metadata`, `service_tier`, `top_k`, beta-заголовки и `betas`
 принимаются и игнорируются там, где они классифицированы.
 
-Неподдерживаемые параметры или возможности Anthropic возвращают `400`. Примеры:
-`container`, `context_management`, `mcp_servers`, серверные инструменты,
-веб-поиск, выполнение кода, управление компьютером, блоки содержимого
-document/file, загрузки в container, блоки результатов поиска, citations, а
-также входные блоки `thinking`/`redacted_thinking`.
+Неподдерживаемые optional параметры или возможности Anthropic принимаются и
+игнорируются. Примеры: `container`, `context_management`, `mcp_servers`,
+серверные инструменты, веб-поиск, выполнение кода, управление компьютером,
+блоки содержимого document/file, загрузки в container, блоки результатов
+поиска, citations, а также входные блоки `thinking`/`redacted_thinking`.
 
 Код Anthropic Message Batches существует, но публичный роутер не подключается,
 пока в GigaChat SDK или backend не появится поддержка batch-операций.
