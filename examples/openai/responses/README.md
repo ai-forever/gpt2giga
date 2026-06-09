@@ -25,6 +25,7 @@ uv run python examples/openai/responses/single_prompt.py
 ## Файлы
 
 - `single_prompt.py`: минимальный пример
+- `stateful.py`: stateful Responses через `store` и `previous_response_id` (нужен Responses v2)
 - `reasoning.py`: reasoning в стиле Responses API
 - `with_instructions.py`: instructions/system
 - `function_calling.py`: tool use / function calling
