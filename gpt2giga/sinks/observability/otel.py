@@ -119,8 +119,18 @@ def build_otel_attributes(
                 "method": context.method,
                 "model_requested": context.model_requested,
                 "model_effective": context.model_effective,
+                "caller.name": context.caller_name,
+                "caller.category": context.caller_category,
+                "caller.client_family": context.caller_client_family,
+                "caller.sdk": context.caller_sdk,
+                "caller.agent": context.caller_agent,
+                "caller.ui": context.caller_ui,
+                "caller.user_agent": context.caller_user_agent,
+                "caller.agent_id": context.caller_agent_id,
             }
         )
+        if context.annotations:
+            payload["annotations"] = context.annotations
     payload.update(dict(attributes or {}))
 
     if redaction_enabled:

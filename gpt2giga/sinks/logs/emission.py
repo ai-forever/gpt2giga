@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,6 +26,15 @@ def build_request_traffic_event(
 ) -> TrafficLogEvent:
     """Build one safe traffic log event from request context."""
     merged_metadata = dict(context.metadata)
+    if context.annotations:
+        existing_annotations = merged_metadata.get("annotations")
+        annotations = (
+            dict(existing_annotations)
+            if isinstance(existing_annotations, Mapping)
+            else {}
+        )
+        annotations.update(context.annotations)
+        merged_metadata["annotations"] = annotations
     merged_metadata["lifecycle"] = lifecycle
     if metadata:
         merged_metadata.update(metadata)

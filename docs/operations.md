@@ -193,4 +193,21 @@ GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 
 Traffic logs и Phoenix spans связываются через gateway identifiers: `request_id`, `trace_id`, protocol, route, model metadata.
 
+Phoenix spans также получают безопасную caller-классификацию из входящих
+headers:
+
+- `caller.name`: например `swagger-ui`, `redoc-ui`, `openai-python`,
+  `anthropic-compatible`, `claude-code`, `codex`, `qwen-code`, `browser`;
+- `caller.category`: `ui`, `sdk`, `agent`, `browser`, `http_client` или
+  `unknown`;
+- `caller.client_family`: `openai` или `anthropic`, когда это можно вывести из
+  SDK headers или `User-Agent`;
+- `caller.sdk`, `caller.agent`, `caller.ui`: более точные подтипы, когда они
+  известны.
+
+Подробный объект дублируется в `annotations.caller`, чтобы в Phoenix можно было
+открыть structured context без включения payload capture. Для Swagger UI
+источник определяется по `Referer: .../docs`, для ReDoc — по `.../redoc`; raw
+prompt/response content в annotations не добавляется.
+
 Термины и design constraints описаны в [Logging and Observability Architecture](./architecture/logging-and-observability.md).

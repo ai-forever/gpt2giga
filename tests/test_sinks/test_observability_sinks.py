@@ -100,6 +100,12 @@ def test_build_otel_attributes_adds_context_redacts_and_drops_content():
         route="/v1/chat/completions",
         method="POST",
         started_at=datetime.now(timezone.utc),
+        caller_name="codex",
+        caller_category="agent",
+        caller_client_family="openai",
+        caller_agent="codex",
+        caller_user_agent="codex-cli/0.1",
+        annotations={"caller": {"name": "codex", "category": "agent"}},
         model_requested="GigaChat",
     )
 
@@ -116,6 +122,12 @@ def test_build_otel_attributes_adds_context_redacts_and_drops_content():
     assert attributes["request_id"] == "req-1"
     assert attributes["trace_id"] == "trace-1"
     assert attributes["route"] == "/v1/chat/completions"
+    assert attributes["caller.name"] == "codex"
+    assert attributes["caller.agent"] == "codex"
+    assert attributes["caller.client_family"] == "openai"
+    assert attributes["annotations"] == (
+        '{"caller": {"category": "agent", "name": "codex"}}'
+    )
     assert attributes["status_code"] == 200
     assert attributes["authorization"] == "***"
     assert "request_body" not in attributes

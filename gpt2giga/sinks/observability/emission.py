@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from collections.abc import Mapping
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
@@ -121,7 +122,7 @@ def traffic_event_to_observability_attributes(
     is_streaming: bool = False,
 ) -> dict[str, Any]:
     """Map safe traffic event fields to span attributes."""
-    return {
+    attributes = {
         "request_id": event.request_id,
         "trace_id": event.trace_id,
         "span_id": event.span_id,
@@ -141,6 +142,13 @@ def traffic_event_to_observability_attributes(
         "error_type": event.error_type,
         "metadata": event.metadata,
     }
+    annotations = event.metadata.get("annotations")
+    if isinstance(annotations, Mapping):
+        attributes["annotations"] = annotations
+        caller = annotations.get("caller")
+        if isinstance(caller, Mapping):
+            attributes.update(_caller_observability_attributes(caller))
+    return attributes
 
 
 def _stream_lifecycle_events(
@@ -156,3 +164,21 @@ def _stream_lifecycle_events(
     else:
         return []
     return [{"name": name, "attributes": attributes}]
+
+
+def _caller_observability_attributes(caller: Mapping[str, Any]) -> dict[str, Any]:
+    allowed_keys = {
+        "name",
+        "category",
+        "client_family",
+        "sdk",
+        "agent",
+        "ui",
+        "user_agent",
+        "agent_id",
+    }
+    return {
+        f"caller.{key}": value
+        for key, value in caller.items()
+        if key in allowed_keys and value is not None
+    }

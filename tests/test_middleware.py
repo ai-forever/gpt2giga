@@ -169,6 +169,11 @@ def test_rquid_middleware_sets_request_context_and_header():
             "protocol": context.protocol,
             "route": context.route,
             "method": context.method,
+            "caller_name": context.caller_name,
+            "caller_category": context.caller_category,
+            "caller_sdk": context.caller_sdk,
+            "caller_client_family": context.caller_client_family,
+            "annotations": context.annotations,
             "client_ip_hash": context.client_ip_hash,
             "api_key_hash": context.api_key_hash,
         }
@@ -179,6 +184,7 @@ def test_rquid_middleware_sets_request_context_and_header():
         headers={
             "Authorization": "Bearer local-secret",
             "x-trace-id": "trace-123",
+            "user-agent": "OpenAI/Python 1.2.3",
         },
     )
 
@@ -189,6 +195,11 @@ def test_rquid_middleware_sets_request_context_and_header():
     assert data["protocol"] == "anthropic"
     assert data["route"] == "/v1/messages"
     assert data["method"] == "GET"
+    assert data["caller_name"] == "openai-python"
+    assert data["caller_category"] == "sdk"
+    assert data["caller_sdk"] == "openai-python"
+    assert data["caller_client_family"] == "openai"
+    assert data["annotations"]["caller"]["sdk"] == "openai-python"
     assert data["client_ip_hash"].startswith("sha256:")
     assert data["api_key_hash"].startswith("sha256:")
     assert "local-secret" not in data["api_key_hash"]
@@ -299,7 +310,10 @@ def test_rquid_middleware_emits_observability_event_for_completed_request():
         return {"data": []}
 
     client = TestClient(test_app)
-    response = client.get("/v1/models", headers={"x-trace-id": "trace-1"})
+    response = client.get(
+        "/v1/models",
+        headers={"x-trace-id": "trace-1", "user-agent": "claude-code/1.0"},
+    )
 
     assert response.status_code == 200
     assert [event["name"] for event in sink.events] == [
@@ -311,6 +325,11 @@ def test_rquid_middleware_emits_observability_event_for_completed_request():
     assert event["attributes"]["trace_id"] == "trace-1"
     assert event["attributes"]["request_id"] == response.headers["x-request-id"]
     assert event["attributes"]["status_code"] == 200
+    assert event["attributes"]["caller.name"] == "claude-code"
+    assert event["attributes"]["caller.category"] == "agent"
+    assert event["attributes"]["caller.agent"] == "claude-code"
+    assert event["attributes"]["caller.client_family"] == "anthropic"
+    assert event["attributes"]["annotations"]["caller"]["agent"] == "claude-code"
     assert event["attributes"]["metadata"]["lifecycle"] == "request_completed"
 
 

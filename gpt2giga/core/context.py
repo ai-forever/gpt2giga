@@ -9,6 +9,8 @@ from typing import Any, Optional
 
 from starlette.requests import Request
 
+from gpt2giga.core.caller import infer_request_caller
+
 
 @dataclass
 class RequestContext:
@@ -23,8 +25,17 @@ class RequestContext:
     started_at: datetime
     client_ip_hash: Optional[str] = None
     api_key_hash: Optional[str] = None
+    caller_name: Optional[str] = None
+    caller_category: Optional[str] = None
+    caller_client_family: Optional[str] = None
+    caller_sdk: Optional[str] = None
+    caller_agent: Optional[str] = None
+    caller_ui: Optional[str] = None
+    caller_user_agent: Optional[str] = None
+    caller_agent_id: Optional[str] = None
     model_requested: Optional[str] = None
     model_effective: Optional[str] = None
+    annotations: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -36,6 +47,7 @@ request_context_var: ContextVar[Optional[RequestContext]] = ContextVar(
 
 def build_request_context(request: Request, *, request_id: str) -> RequestContext:
     """Build a safe request context from HTTP request metadata."""
+    caller = infer_request_caller(request.headers)
     return RequestContext(
         request_id=request_id,
         trace_id=_header_or_new_id(request, "x-trace-id"),
@@ -46,6 +58,15 @@ def build_request_context(request: Request, *, request_id: str) -> RequestContex
         started_at=datetime.now(timezone.utc),
         client_ip_hash=_hash_value(_client_ip(request)),
         api_key_hash=_hash_value(_api_key_value(request)),
+        caller_name=caller.name,
+        caller_category=caller.category,
+        caller_client_family=caller.client_family,
+        caller_sdk=caller.sdk,
+        caller_agent=caller.agent,
+        caller_ui=caller.ui,
+        caller_user_agent=caller.user_agent,
+        caller_agent_id=caller.agent_id,
+        annotations=caller.to_annotations(),
     )
 
 
