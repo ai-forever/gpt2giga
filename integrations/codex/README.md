@@ -21,7 +21,7 @@
 ```ini
 GIGACHAT_CREDENTIALS=<ваш_ключ_авторизации>
 GIGACHAT_SCOPE=GIGACHAT_API_PERS
-GIGACHAT_MODEL=GigaChat-2-Max
+GIGACHAT_MODEL=GigaChat-3-Ultra
 GPT2GIGA_ENABLE_API_KEY_AUTH=True
 GPT2GIGA_API_KEY=<ваш_api_ключ>
 ```
@@ -48,14 +48,16 @@ gpt2giga
 Добавьте следующее содержимое:
 
 ```toml
-model = "GigaChat-2-Max"
-
+model = "GigaChat-3-Ultra"
 model_provider = "gpt2giga"
+model_reasoning_effort = "none"
 
 [model_providers.gpt2giga]
 name = "gpt2giga"
-base_url = "http://localhost:8090"
+base_url = "http://localhost:8090/v1"
 env_key = "GPT2GIGA_API_KEY"
+wire_api = "responses"
+supports_websockets = false
 ```
 
 ### Переменная окружения
@@ -81,14 +83,16 @@ Codex будет отправлять запросы через `gpt2giga` в Gi
 Если `gpt2giga` развёрнут на удалённом сервере (например, за nginx с TLS), укажите адрес сервера в `config.toml`:
 
 ```toml
-model = "GigaChat-2-Max"
-
+model = "GigaChat-3-Ultra"
 model_provider = "gpt2giga"
+model_reasoning_effort = "none"
 
 [model_providers.gpt2giga]
 name = "gpt2giga"
-base_url = "https://ваш-сервер.example.com/"
+base_url = "https://ваш-сервер.example.com/v1"
 env_key = "GPT2GIGA_API_KEY"
+wire_api = "responses"
+supports_websockets = false
 ```
 
 Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
@@ -109,15 +113,17 @@ trust_level = "trusted"
 ## 5. Пример полного `config.toml`
 
 ```toml
-model = "GigaChat-2-Max"
-
+model = "GigaChat-3-Ultra"
 model_provider = "gpt2giga"
+model_reasoning_effort = "none"
 
 [model_providers.gpt2giga]
 name = "gpt2giga"
-base_url = "https://ваш-сервер.example.com/"
-#base_url = "http://localhost:8090"
+base_url = "https://ваш-сервер.example.com/v1"
+#base_url = "http://localhost:8090/v1"
 env_key = "GPT2GIGA_API_KEY"
+wire_api = "responses"
+supports_websockets = false
 
 [projects."/Users/USER/code_projects/MY_PROJECT"]
 trust_level = "trusted"
@@ -129,9 +135,9 @@ trust_level = "trusted"
 
 | Модель GigaChat  | Описание                                        |
 |------------------|-------------------------------------------------|
-| `GigaChat-2-Max` | Максимальная версия — рекомендована для агентов |
-| `GigaChat-2-Pro` | Промежуточная версия                            |
-| `GigaChat-2`     | Базовая версия                                  |
+| `GigaChat-3-Ultra` | Максимальная версия — рекомендована для агентов |
+| `GigaChat-2-Max`   | Предыдущее поколение максимальной версии        |
+| `GigaChat-2-Pro`   | Промежуточная версия                            |
 
 ---
 
