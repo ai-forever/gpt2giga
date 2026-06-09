@@ -30,6 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GigaChat provider namespace**: moved GigaChat SDK client creation/shutdown and request-scoped token handoff under `gpt2giga.providers.gigachat`; environment/settings parsing and public proxy behavior are unchanged.
 - **Extension sink lifecycle**: the app factory now creates traffic/observability sinks in `app.state`, and lifecycle shutdown performs best-effort flushes; sink failures are isolated from the API request path.
 - **Internal docs alignment**: package-level AGENTS notes were updated for the new app factory/lifecycle/provider layout and the retained `gpt2giga.api_server` entrypoint facade.
+## [0.1.8a2] - 2026-06-09
+
+### Added
+- **Disable reasoning**: added `GPT2GIGA_DISABLE_REASONING` / `--proxy.disable-reasoning` to remove `reasoning` and `reasoning_effort` from upstream payloads entirely, including explicit client parameters and `extra_body` passthrough; the setting suppresses `GPT2GIGA_ENABLE_REASONING`
+
+### Changed
+- **Parameter compatibility**: known unsupported optional OpenAI/Anthropic client parameters are now accepted and ignored for SDK compatibility instead of rejected, and README, OpenAPI specs, and the compatibility matrix now document this behavior
+- **Codex provider docs**: updated the Codex integration guide for the current provider config
+- **Version and lock file**: updated the project version to `0.1.8a2` and refreshed `uv.lock` with current dependency markers and dependency updates
+
+### Fixed
+- **Codex Responses tools**: fixed support for Codex-style tool declarations in OpenAI Responses, including namespace/input-schema forms and correct streaming output handling
+- **JSON Schema normalization**: schemas for GigaChat validators are normalized more consistently, including arrays without typed `items`
+- **Chat Completions tool metadata**: OpenAI Chat Completions now preserves called-tool metadata in non-streaming and streaming responses
 
 ## [0.1.8a1] - 2026-06-06
 
@@ -327,6 +341,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+[0.1.8a2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a1...v0.1.8a2
+[0.1.8a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.7...v0.1.8a1
+[0.1.7]: https://github.com/ai-forever/gpt2giga/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/ai-forever/gpt2giga/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4.post1...v0.1.5
 [0.1.4.post1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.4...v0.1.4.post1

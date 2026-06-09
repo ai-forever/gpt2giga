@@ -7,6 +7,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_HOST", raising=False)
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
     monkeypatch.delenv("GPT2GIGA_ENABLE_REASONING", raising=False)
+    monkeypatch.delenv("GPT2GIGA_DISABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_RESPONSES_API_MODE", raising=False)
@@ -58,6 +59,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert isinstance(s.log_level, str)
     assert s.pass_model is True
     assert s.enable_reasoning is False
+    assert s.disable_reasoning is False
     assert s.structured_output_mode == "function_call"
     assert s.gigachat_api_mode == "v1"
     assert s.responses_api_mode == "inherit"
@@ -188,6 +190,12 @@ def test_proxy_settings_bool_cast_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_USE_HTTPS", "true")
     s = ProxySettings()
     assert s.use_https is True
+
+
+def test_proxy_settings_disable_reasoning_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_DISABLE_REASONING", "true")
+    s = ProxySettings()
+    assert s.disable_reasoning is True
 
 
 def test_proxy_settings_structured_output_mode_from_env(monkeypatch):

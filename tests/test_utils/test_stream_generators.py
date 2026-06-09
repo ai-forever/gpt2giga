@@ -625,6 +625,97 @@ async def test_stream_responses_v2_generator_builtin_tool_outputs():
 
 
 @pytest.mark.asyncio
+async def test_stream_responses_v2_generator_emits_source_annotation_event():
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "inline_data": {
+                                    "sources": {
+                                        "1": {
+                                            "url": "https://example.test/source",
+                                            "title": "Example Source",
+                                        }
+                                    }
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "Answer. "}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "[sources=[1]]"}],
+                    }
+                ]
+            }
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={
+            "model": "gpt-x",
+            "input": "Find and cite",
+            "tools": [{"type": "web_search"}],
+        },
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        return parts[0].replace("event: ", ""), json.loads(
+            parts[1].replace("data: ", "")
+        )
+
+    events = [parse_sse(line) for line in lines]
+    annotation_events = [
+        data
+        for event_type, data in events
+        if event_type == "response.output_text.annotation.added"
+    ]
+    completed = [
+        data for event_type, data in events if event_type == "response.completed"
+    ][-1]
+    message = next(
+        item for item in completed["response"]["output"] if item["type"] == "message"
+    )
+    content = message["content"][0]
+
+    assert len(annotation_events) == 1
+    annotation = annotation_events[0]["annotation"]
+    assert annotation_events[0]["annotation_index"] == 0
+    assert annotation["type"] == "url_citation"
+    assert annotation["start_index"] == len("Answer. ")
+    assert annotation["url"] == "https://example.test/source"
+    assert annotation["title"] == "Example Source"
+    assert content["annotations"] == [annotation]
+    assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
+
+
+@pytest.mark.asyncio
 async def test_stream_responses_v2_generator_emits_builtin_tool_progress_events():
     import json
 
@@ -1156,6 +1247,53 @@ class FakeClientFunctionCall:
         return gen()
 
 
+class FakeClientNamespacedFunctionCall:
+    """Client that returns a flattened namespaced function call."""
+
+    def astream(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {
+                                "role": "assistant",
+                                "content": None,
+                                "function_call": {
+                                    "name": "mcp__playwright__browser_navigate",
+                                    "arguments": {
+                                        "url": "http://localhost:8090",
+                                    },
+                                },
+                                "functions_state_id": "state_123",
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {},
+                            "finish_reason": "function_call",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
 class FakeClientFunctionCallStreamed:
     """Client that returns function call with arguments streamed across multiple chunks"""
 
@@ -1330,6 +1468,66 @@ async def test_stream_responses_generator_function_call():
             "name": "get_weather",
             "arguments": {"location": "Moscow"},
             "tools_state_id": "state_123",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_function_call_restores_namespace():
+    req = FakeRequest(FakeClientNamespacedFunctionCall())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    request_tools = [
+        {
+            "type": "namespace",
+            "name": "mcp__playwright",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "browser_navigate",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"url": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+    ]
+
+    async for line in stream_responses_generator(
+        req,
+        chat,
+        response_id="fc_test",
+        request_data={"tools": request_tools},
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    event_type, data = parse_sse(lines[2])
+    assert event_type == "response.output_item.added"
+    assert data["item"]["name"] == "browser_navigate"
+    assert data["item"]["namespace"] == "mcp__playwright"
+
+    event_type, data = parse_sse(lines[5])
+    assert event_type == "response.output_item.done"
+    assert data["item"]["name"] == "browser_navigate"
+    assert data["item"]["namespace"] == "mcp__playwright"
+
+    event_type, data = parse_sse(lines[6])
+    assert event_type == "response.completed"
+    assert data["response"]["output"][0]["namespace"] == "mcp__playwright"
+    assert json.loads(data["response"]["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "name": "browser_navigate",
+            "arguments": {"url": "http://localhost:8090"},
+            "tools_state_id": "state_123",
+            "namespace": "mcp__playwright",
         }
     ]
 

@@ -71,6 +71,13 @@ class ProxySettings(BaseSettings):
             "в payload к GigaChat, если клиент не указал reasoning_effort явно"
         ),
     )
+    disable_reasoning: bool = Field(
+        default=False,
+        description=(
+            "Отключить передачу reasoning в GigaChat: удаляет reasoning и "
+            "reasoning_effort из upstream payload и подавляет enable_reasoning"
+        ),
+    )
     default_max_tokens: Optional[PositiveInt] = Field(
         default=DEFAULT_MAX_TOKENS,
         description=(

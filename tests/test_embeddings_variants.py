@@ -2,7 +2,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from gpt2giga.models.config import ProxyConfig
@@ -86,7 +86,7 @@ def test_embeddings_pass_model_falls_back_to_configured(monkeypatch):
     assert resp.json()["model"] == app.state.config.proxy_settings.embeddings
 
 
-def test_embeddings_endpoint_rejects_extra_body():
+def test_embeddings_endpoint_ignores_extra_body():
     app = make_app(pass_model=True)
     client = TestClient(app)
     resp = client.post(
@@ -98,21 +98,23 @@ def test_embeddings_endpoint_rejects_extra_body():
         },
     )
 
-    assert resp.status_code == 400
-    assert resp.json()["detail"]["error"]["param"] == "extra_body"
-    assert app.state.gigachat_client.embedding_calls == []
+    assert resp.status_code == 200
+    assert app.state.gigachat_client.embedding_calls == [
+        {"texts": ["hello"], "model": "Embeddings-2"}
+    ]
 
 
 @pytest.mark.asyncio
-async def test_transform_embedding_body_rejects_extra_body():
-    with pytest.raises(HTTPException) as exc_info:
-        await transform_embedding_body(
-            {"input": "hello", "extra_body": {"custom_flag": "on"}},
-            "EmbeddingsGigaR",
-        )
+async def test_transform_embedding_body_ignores_extra_body():
+    transformed = await transform_embedding_body(
+        {"input": "hello", "extra_body": {"custom_flag": "on"}},
+        "EmbeddingsGigaR",
+    )
 
-    assert getattr(exc_info.value, "status_code", None) == 400
-    assert exc_info.value.detail["error"]["param"] == "extra_body"
+    assert transformed == {
+        "input": ["hello"],
+        "model": "EmbeddingsGigaR",
+    }
 
 
 @pytest.mark.asyncio
@@ -159,6 +161,28 @@ def test_embeddings_accepts_matching_dimensions_for_passed_model(model, dimensio
     assert resp.json()["model"] == model
 
 
+def test_embeddings_ignores_optional_compatibility_params():
+    app = make_app(pass_model=True)
+    client = TestClient(app)
+    resp = client.post(
+        "/embeddings",
+        json={
+            "model": "Embeddings-2",
+            "input": "hello",
+            "dimensions": 128,
+            "encoding_format": "json",
+            "custom_flag": "on",
+            "extra_body": {"custom_flag": "on"},
+        },
+    )
+
+    assert resp.status_code == 200
+    assert app.state.gigachat_client.embedding_calls[-1] == {
+        "texts": ["hello"],
+        "model": "Embeddings-2",
+    }
+
+
 @pytest.mark.parametrize(
     ("body", "param"),
     [
@@ -169,16 +193,6 @@ def test_embeddings_accepts_matching_dimensions_for_passed_model(model, dimensio
         ({"input": ["hello", [1, 2, 3]]}, "input"),
         ({"input": [1, "2"]}, "input"),
         ({"input": [[1], ["2"]]}, "input"),
-        ({"input": "hello", "encoding_format": "json"}, "encoding_format"),
-        ({"input": "hello", "dimensions": 128}, "dimensions"),
-        ({"input": "hello", "dimensions": 0}, "dimensions"),
-        ({"input": "hello", "dimensions": "1024"}, "dimensions"),
-        ({"input": "hello", "extra_body": {"custom_flag": "on"}}, "extra_body"),
-        ({"input": "hello", "custom_flag": "on"}, "custom_flag"),
-        (
-            {"input": "hello", "model": "UnknownEmbeddings", "dimensions": 1024},
-            "dimensions",
-        ),
     ],
 )
 def test_embeddings_rejects_invalid_openai_requests(body, param):

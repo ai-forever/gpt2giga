@@ -187,13 +187,30 @@ async def test_openai_adapter_async_entrypoint_matches_chat_converter():
 def test_openai_adapter_reuses_chat_compatibility_policy():
     adapter = OpenAIProtocolAdapter()
 
+    normalized = adapter.chat_to_normalized(
+        {
+            "model": "GigaChat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "n": 2,
+            "parallel_tool_calls": True,
+        }
+    )
+
+    payload = normalized.to_json_dict()
+    assert "n" not in payload["raw_extensions"]
+    assert "parallel_tool_calls" not in payload["raw_extensions"]
+
+
+def test_openai_adapter_reuses_chat_compatibility_policy_errors():
+    adapter = OpenAIProtocolAdapter()
+
     with pytest.raises(ClientCompatibilityError) as exc_info:
         adapter.chat_to_normalized(
             {
                 "model": "GigaChat",
                 "messages": [{"role": "user", "content": "hello"}],
-                "n": 2,
+                "extra_body": ["not", "an", "object"],
             }
         )
 
-    assert exc_info.value.param == "n"
+    assert exc_info.value.param == "extra_body"

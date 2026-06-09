@@ -1,12 +1,16 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+from gigachat.models import Function
+
 from gpt2giga.common.gigachat_auth import (
     create_gigachat_client_for_request,
     pass_token_to_gigachat,
 )
-from gpt2giga.common.tools import convert_tool_to_giga_functions
-from gigachat.models import Function
+from gpt2giga.common.tools import (
+    convert_tool_to_giga_functions,
+    split_gigachat_tool_name,
+)
 
 
 def test_pass_token_giga_user():
@@ -137,3 +141,34 @@ def test_convert_tool_to_giga_functions_functions_format():
     funcs = convert_tool_to_giga_functions(data)
     assert len(funcs) == 1
     assert funcs[0].name == "func2"
+
+
+def test_convert_tool_to_giga_functions_namespace_tools():
+    data = {
+        "tools": [
+            {
+                "type": "namespace",
+                "name": "mcp__playwright",
+                "tools": [
+                    {
+                        "type": "function",
+                        "name": "browser_navigate",
+                        "description": "Navigate",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"url": {"type": "string"}},
+                        },
+                    }
+                ],
+            }
+        ]
+    }
+
+    funcs = convert_tool_to_giga_functions(data)
+
+    assert len(funcs) == 1
+    assert funcs[0].name == "mcp__playwright__browser_navigate"
+    assert split_gigachat_tool_name(
+        funcs[0].name,
+        request_tools=data["tools"],
+    ) == ("browser_navigate", "mcp__playwright")
