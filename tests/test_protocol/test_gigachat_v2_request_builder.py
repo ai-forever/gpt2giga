@@ -214,6 +214,28 @@ async def test_prepare_chat_completion_v2_maps_native_structured_output_and_reas
 
 
 @pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_disable_reasoning_omits_model_option():
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            enable_reasoning=True,
+            disable_reasoning=True,
+        )
+    )
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "hello"}],
+            "reasoning_effort": "high",
+        }
+    )
+
+    assert request.model_options is None
+    assert "reasoning" not in request.model_dump(exclude_none=True)
+
+
+@pytest.mark.asyncio
 async def test_prepare_chat_completion_v2_respects_pass_model_false():
     cfg = ProxyConfig(proxy=ProxySettings(pass_model=False))
     rt = RequestTransformer(cfg, logger=logger)

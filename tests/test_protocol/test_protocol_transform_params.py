@@ -14,6 +14,7 @@ from gpt2giga.protocol.request.params import (
 def _clear_pass_model_env(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_PASS_MODEL", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEFAULT_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("GPT2GIGA_DISABLE_REASONING", raising=False)
 
 
 def test_transform_chat_parameters_temperature_and_top_p():
@@ -351,6 +352,22 @@ def test_enable_reasoning_does_not_override_explicit_reasoning_effort():
     assert out.get("reasoning_effort") == "low"
 
 
+def test_disable_reasoning_removes_explicit_and_default_reasoning():
+    cfg = ProxyConfig(
+        proxy=ProxySettings(enable_reasoning=True, disable_reasoning=True)
+    )
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters(
+        {
+            "model": "gpt-x",
+            "reasoning": {"effort": "high"},
+            "reasoning_effort": "low",
+        }
+    )
+    assert "reasoning" not in out
+    assert "reasoning_effort" not in out
+
+
 def test_transform_responses_parameters_maps_reasoning_object_to_reasoning_effort():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -359,6 +376,43 @@ def test_transform_responses_parameters_maps_reasoning_object_to_reasoning_effor
     )
     assert out.get("reasoning_effort") == "high"
     assert "reasoning" not in out
+
+
+def test_disable_reasoning_removes_responses_reasoning_object():
+    cfg = ProxyConfig(proxy=ProxySettings(disable_reasoning=True))
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_responses_parameters(
+        {"model": "gpt-x", "reasoning": {"effort": "high"}}
+    )
+    assert "reasoning" not in out
+    assert "reasoning_effort" not in out
+
+
+def test_disable_reasoning_strips_reasoning_from_additional_fields():
+    cfg = ProxyConfig(proxy=ProxySettings(disable_reasoning=True))
+    rt = RequestTransformer(cfg, logger=logger)
+    out = rt.transform_chat_parameters(
+        {
+            "model": "gpt-x",
+            "extra_body": {
+                "model_options": {
+                    "reasoning": {"effort": "high"},
+                    "top_p": 0.2,
+                },
+                "profanity_check": False,
+                "reasoning": {"effort": "high"},
+            },
+            "additional_fields": {
+                "reasoning_effort": "low",
+                "storage": True,
+            },
+        }
+    )
+    assert out.get("additional_fields") == {
+        "model_options": {"top_p": 0.2},
+        "profanity_check": False,
+        "storage": True,
+    }
 
 
 def test_apply_json_schema_as_function():

@@ -431,13 +431,29 @@ class RequestTransformer:
         elif extra_body is not None and additional_fields is None:
             transformed["additional_fields"] = extra_body
 
+        disable_reasoning = getattr(
+            self.config.proxy_settings, "disable_reasoning", False
+        )
         reasoning = transformed.pop("reasoning", None)
-        if isinstance(reasoning, dict):
+        if disable_reasoning:
+            transformed.pop("reasoning_effort", None)
+            additional_fields = transformed.get("additional_fields")
+            if isinstance(additional_fields, dict):
+                additional_fields = self._strip_reasoning_payload_fields(
+                    additional_fields
+                )
+                if additional_fields:
+                    transformed["additional_fields"] = additional_fields
+                else:
+                    transformed.pop("additional_fields", None)
+        elif isinstance(reasoning, dict):
             effort = reasoning.get("effort")
             if effort is not None:
                 transformed["reasoning_effort"] = effort
 
-        if getattr(self.config.proxy_settings, "enable_reasoning", False):
+        if not disable_reasoning and getattr(
+            self.config.proxy_settings, "enable_reasoning", False
+        ):
             transformed.setdefault("reasoning_effort", "high")
 
         gpt_model = data.get("model", None)
@@ -547,6 +563,26 @@ class RequestTransformer:
 
     def _responses_builtin_tools_enabled(self) -> bool:
         return self.config.proxy_settings.resolve_responses_api_mode() == "v2"
+
+    @staticmethod
+    def _strip_reasoning_payload_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
+        stripped = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"reasoning", "reasoning_effort"}
+        }
+        model_options = stripped.get("model_options")
+        if isinstance(model_options, dict):
+            model_options = {
+                key: value
+                for key, value in model_options.items()
+                if key not in {"reasoning", "reasoning_effort"}
+            }
+            if model_options:
+                stripped["model_options"] = model_options
+            else:
+                stripped.pop("model_options", None)
+        return stripped
 
     def _chat_builtin_tools_enabled(self) -> bool:
         return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"

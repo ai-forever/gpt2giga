@@ -332,6 +332,7 @@ client.messages.create(
 - `--proxy.embeddings <EMBED_MODEL>` — модель для создания эмбеддингов по умолчанию. Игнорируется при `--proxy.pass-model true`, если клиент указал `model` в запросе. По умолчанию `EmbeddingsGigaR`;
 - `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
 - `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
+- `--proxy.disable-reasoning <true/false>` — полностью отключить передачу reasoning в GigaChat: удаляет `reasoning`/`reasoning_effort` из payload, включая явные параметры клиента и `extra_body` passthrough;
 - `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
 - `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat-2-Max":5}'`;
 - `--proxy.model-max-connections-default <INT>` — fallback per-model лимит для моделей, которых нет в `--proxy.model-max-connections`;
@@ -405,6 +406,7 @@ gpt2giga \
 - `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов по умолчанию. При `GPT2GIGA_PASS_MODEL=True` используется модель из запроса клиента (с fallback на это значение).
 - `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
 - `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
+- `GPT2GIGA_DISABLE_REASONING="False"` — полностью отключить передачу reasoning в GigaChat: удаляет `reasoning`/`reasoning_effort` из payload, включая явные параметры клиента и `extra_body` passthrough;
 - `GPT2GIGA_DEFAULT_MAX_TOKENS` — опциональный default `max_tokens`. По умолчанию не задан, и gpt2giga не добавляет `max_tokens` к GigaChat-запросу, если клиент сам не передал лимит;
 - `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
 - `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
