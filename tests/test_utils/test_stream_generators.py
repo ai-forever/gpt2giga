@@ -626,8 +626,6 @@ async def test_stream_responses_v2_generator_builtin_tool_outputs():
 
 @pytest.mark.asyncio
 async def test_stream_responses_v2_generator_emits_source_annotation_event():
-    import json
-
     chunks = [
         ChatCompletionChunk.model_validate(
             {
