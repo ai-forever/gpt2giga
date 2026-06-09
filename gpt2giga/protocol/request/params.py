@@ -19,6 +19,7 @@ OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS = frozenset(
 OPENAI_ACCEPTED_IGNORED_PARAMS = frozenset(
     {
         "frequency_penalty",
+        "include",
         "metadata",
         "presence_penalty",
         "prompt_cache_key",
@@ -72,7 +73,6 @@ OPENAI_REJECTED_PARAMS = {
     "audio": "Audio output is not supported; only text responses are supported.",
     "background": "Background responses are not supported.",
     "conversation": "Stateful Responses conversations are not supported.",
-    "include": "Responses include expansions are not supported.",
     "logit_bias": "Token logit bias is not supported by GigaChat.",
     "logprobs": "Log probabilities are not supported by GigaChat.",
     "max_tool_calls": "Limiting tool call count is not supported.",
@@ -119,7 +119,12 @@ def sanitize_openai_responses_parameters(
     )
     _normalize_gigachat_extra_fields(sanitized)
     _apply_tool_choice_policy(sanitized, allow_builtin_tools=allow_builtin_tools)
-    _validate_tools(sanitized.get("tools"), allow_builtin_tools=allow_builtin_tools)
+    _validate_tools(
+        sanitized.get("tools"),
+        allow_builtin_tools=allow_builtin_tools,
+        allow_namespace_tools=True,
+        allow_function_like_tools=True,
+    )
     return sanitized
 
 
@@ -341,7 +346,13 @@ def _tool_choice_error_message(*, allow_builtin_tools: bool = False) -> str:
     return "Only `auto`, `none`, and forced function tool choices are supported."
 
 
-def _validate_tools(tools: Any, *, allow_builtin_tools: bool = False) -> None:
+def _validate_tools(
+    tools: Any,
+    *,
+    allow_builtin_tools: bool = False,
+    allow_namespace_tools: bool = False,
+    allow_function_like_tools: bool = False,
+) -> None:
     if tools is None:
         return
     if not isinstance(tools, list):
@@ -350,6 +361,16 @@ def _validate_tools(tools: Any, *, allow_builtin_tools: bool = False) -> None:
         if not isinstance(tool, Mapping):
             _raise_openai_param_error("tools", f"`tools[{index}]` must be an object.")
         tool_type = tool.get("type")
+        if tool_type is None and allow_function_like_tools:
+            _validate_function_like_tool(tool, f"`tools[{index}]`")
+            continue
+        if tool_type == "namespace" and allow_namespace_tools:
+            _validate_namespace_tool(
+                tool,
+                index,
+                allow_function_like_tools=allow_function_like_tools,
+            )
+            continue
         if tool_type != "function" and not (
             allow_builtin_tools
             and normalize_gigachat_builtin_tool_type(tool_type) is not None
@@ -364,6 +385,60 @@ def _validate_tools(tools: Any, *, allow_builtin_tools: bool = False) -> None:
                 "tools",
                 message,
             )
+
+
+def _validate_namespace_tool(
+    tool: Mapping[str, Any],
+    index: int,
+    *,
+    allow_function_like_tools: bool = False,
+) -> None:
+    name = tool.get("name")
+    if not isinstance(name, str) or not name:
+        _raise_openai_param_error(
+            "tools",
+            f"`tools[{index}].name` must be a non-empty string.",
+        )
+
+    nested_tools = tool.get("tools")
+    if not isinstance(nested_tools, list):
+        _raise_openai_param_error(
+            "tools",
+            f"`tools[{index}].tools` must be an array.",
+        )
+
+    for nested_index, nested_tool in enumerate(nested_tools):
+        if not isinstance(nested_tool, Mapping):
+            _raise_openai_param_error(
+                "tools",
+                f"`tools[{index}].tools[{nested_index}]` must be an object.",
+            )
+        nested_type = nested_tool.get("type")
+        if nested_type is None and allow_function_like_tools:
+            _validate_function_like_tool(
+                nested_tool,
+                f"`tools[{index}].tools[{nested_index}]`",
+            )
+            continue
+        if nested_type != "function":
+            _raise_openai_param_error(
+                "tools",
+                "Only function tools are supported inside namespace tools.",
+            )
+
+
+def _validate_function_like_tool(tool: Mapping[str, Any], label: str) -> None:
+    name = tool.get("name")
+    if not isinstance(name, str) or not name:
+        _raise_openai_param_error(
+            "tools",
+            f"{label}.name must be a non-empty string.",
+        )
+    if "parameters" not in tool and "input_schema" not in tool:
+        _raise_openai_param_error(
+            "tools",
+            f"{label} must include `parameters` or `input_schema`.",
+        )
 
 
 def _raise_openai_param_error(param: str, message: str) -> None:

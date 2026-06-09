@@ -391,6 +391,41 @@ async def test_prepare_response_v2_maps_responses_builtin_tools():
 
 
 @pytest.mark.asyncio
+async def test_prepare_response_v2_flattens_namespace_tools():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "Open the browser.",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__playwright",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "browser_navigate",
+                            "description": "Navigate to a URL.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"url": {"type": "string"}},
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.name == "mcp__playwright__browser_navigate"
+    assert spec.description == "Navigate to a URL."
+    assert spec.parameters["properties"]["url"]["type"] == "string"
+
+
+@pytest.mark.asyncio
 async def test_prepare_chat_completion_v2_maps_additional_fields():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

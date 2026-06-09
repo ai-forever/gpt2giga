@@ -1156,6 +1156,53 @@ class FakeClientFunctionCall:
         return gen()
 
 
+class FakeClientNamespacedFunctionCall:
+    """Client that returns a flattened namespaced function call."""
+
+    def astream(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {
+                                "role": "assistant",
+                                "content": None,
+                                "function_call": {
+                                    "name": "mcp__playwright__browser_navigate",
+                                    "arguments": {
+                                        "url": "http://localhost:8090",
+                                    },
+                                },
+                                "functions_state_id": "state_123",
+                            },
+                            "finish_reason": None,
+                        }
+                    ],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [
+                        {
+                            "delta": {},
+                            "finish_reason": "function_call",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 5,
+                        "total_tokens": 15,
+                    },
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
 class FakeClientFunctionCallStreamed:
     """Client that returns function call with arguments streamed across multiple chunks"""
 
@@ -1330,6 +1377,66 @@ async def test_stream_responses_generator_function_call():
             "name": "get_weather",
             "arguments": {"location": "Moscow"},
             "tools_state_id": "state_123",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stream_responses_generator_function_call_restores_namespace():
+    req = FakeRequest(FakeClientNamespacedFunctionCall())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    request_tools = [
+        {
+            "type": "namespace",
+            "name": "mcp__playwright",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "browser_navigate",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"url": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+    ]
+
+    async for line in stream_responses_generator(
+        req,
+        chat,
+        response_id="fc_test",
+        request_data={"tools": request_tools},
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        event_type = parts[0].replace("event: ", "")
+        data = json.loads(parts[1].replace("data: ", ""))
+        return event_type, data
+
+    event_type, data = parse_sse(lines[2])
+    assert event_type == "response.output_item.added"
+    assert data["item"]["name"] == "browser_navigate"
+    assert data["item"]["namespace"] == "mcp__playwright"
+
+    event_type, data = parse_sse(lines[5])
+    assert event_type == "response.output_item.done"
+    assert data["item"]["name"] == "browser_navigate"
+    assert data["item"]["namespace"] == "mcp__playwright"
+
+    event_type, data = parse_sse(lines[6])
+    assert event_type == "response.completed"
+    assert data["response"]["output"][0]["namespace"] == "mcp__playwright"
+    assert json.loads(data["response"]["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "name": "browser_navigate",
+            "arguments": {"url": "http://localhost:8090"},
+            "tools_state_id": "state_123",
+            "namespace": "mcp__playwright",
         }
     ]
 

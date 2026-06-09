@@ -18,7 +18,7 @@ from gpt2giga.common.reasoning import (
     extract_reasoning_from_content,
     merge_reasoning_text,
 )
-from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.common.tools import map_tool_name_from_gigachat, split_gigachat_tool_name
 from gpt2giga.protocol.response.gigachat_v2_adapter import (
     GIGACHAT_PROVIDER_METADATA_KEY,
 )
@@ -101,7 +101,10 @@ class ResponseProcessor:
                 )
             )
             called_tools.extend(
-                self._extract_called_tool_items_from_response(giga_dict)
+                self._extract_called_tool_items_from_response(
+                    giga_dict,
+                    request_tools=(request_data or {}).get("tools"),
+                )
             )
             response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
@@ -163,13 +166,20 @@ class ResponseProcessor:
                 )
             )
             called_tools.extend(
-                self._extract_called_tool_items_from_response(giga_dict)
+                self._extract_called_tool_items_from_response(
+                    giga_dict,
+                    request_tools=data.get("tools"),
+                )
             )
             response_metadata.update(self._called_tools_metadata(called_tools))
         response_metadata.update(provider_metadata)
 
         for choice in giga_dict["choices"]:
-            self._process_choice_responses(choice, response_id)
+            self._process_choice_responses(
+                choice,
+                response_id,
+                request_tools=data.get("tools"),
+            )
 
         response_text = {"format": {"type": "text"}}
         if text_param and isinstance(text_param, dict):
@@ -889,7 +899,11 @@ class ResponseProcessor:
         return state_id
 
     def _process_choice_responses(
-        self, choice: Dict, response_id: str, is_stream: bool = False
+        self,
+        choice: Dict,
+        response_id: str,
+        is_stream: bool = False,
+        request_tools: Any = None,
     ):
         """Обрабатывает отдельный choice (Responses API)."""
         message_key = "delta" if is_stream else "message"
@@ -908,9 +922,18 @@ class ResponseProcessor:
             )
 
             if message.get("role") == "assistant" and message.get("function_call"):
-                self._process_function_call_responses(message, response_id)
+                self._process_function_call_responses(
+                    message,
+                    response_id,
+                    request_tools=request_tools,
+                )
 
-    def _process_function_call_responses(self, message: Dict, response_id: str):
+    def _process_function_call_responses(
+        self,
+        message: Dict,
+        response_id: str,
+        request_tools: Any = None,
+    ):
         """Обрабатывает function call (Responses API)."""
         try:
             arguments = json.dumps(
@@ -918,14 +941,21 @@ class ResponseProcessor:
                 ensure_ascii=False,
             )
             state_id = self._backend_state_id_from_message(message) or response_id
-            message["output"] = ResponseFunctionToolCall(
+            tool_name, namespace = split_gigachat_tool_name(
+                message["function_call"]["name"],
+                request_tools=request_tools,
+            )
+            output = ResponseFunctionToolCall(
                 arguments=arguments,
                 call_id=state_id,
-                name=map_tool_name_from_gigachat(message["function_call"]["name"]),
+                name=tool_name,
                 id=f"fc_{state_id}",
                 status="completed",
                 type="function_call",
             ).model_dump()
+            if namespace:
+                output["namespace"] = namespace
+            message["output"] = output
 
         except Exception as e:
             self.logger.error(f"Error processing function call: {e}")
@@ -986,6 +1016,8 @@ class ResponseProcessor:
     def _extract_called_tool_items_from_response(
         cls,
         data: Mapping[str, Any],
+        *,
+        request_tools: Any = None,
     ) -> list[dict[str, Any]]:
         choices = data.get("choices")
         if not isinstance(choices, list):
@@ -1005,14 +1037,20 @@ class ResponseProcessor:
             if not isinstance(name, str) or not name:
                 continue
 
+            tool_name, namespace = split_gigachat_tool_name(
+                name,
+                request_tools=request_tools,
+            )
             item: dict[str, Any] = {
                 "index": len(called_tools),
                 "choice_index": choice_index,
-                "name": map_tool_name_from_gigachat(name),
+                "name": tool_name,
                 "arguments": cls._normalize_called_tool_arguments(
                     function_call.get("arguments", {})
                 ),
             }
+            if namespace:
+                item["namespace"] = namespace
             role = message.get("role")
             if isinstance(role, str) and role:
                 item["role"] = role
@@ -1049,6 +1087,9 @@ class ResponseProcessor:
                     raw_item.get("arguments", {})
                 ),
             }
+            namespace = cls._normalize_metadata_string(raw_item.get("namespace"))
+            if namespace:
+                item["namespace"] = namespace
             call_id = cls._normalize_metadata_string(raw_item.get("call_id"))
             if call_id:
                 item["call_id"] = call_id
@@ -1152,6 +1193,11 @@ class ResponseProcessor:
                 function.get("arguments", {})
             ),
         }
+        namespace = cls._normalize_metadata_string(
+            tool_call.get("namespace") or function.get("namespace")
+        )
+        if namespace:
+            item["namespace"] = namespace
         if tool_call_index is not None:
             item["tool_call_index"] = tool_call_index
         if content_index is not None:
@@ -1222,6 +1268,7 @@ class ResponseProcessor:
         return json.dumps(
             {
                 "name": item.get("name"),
+                "namespace": item.get("namespace"),
                 "arguments": item.get("arguments"),
                 "call_id": item.get("call_id"),
                 "tools_state_id": item.get("tools_state_id"),

@@ -448,7 +448,9 @@ def test_openai_parameter_classifier_marks_known_states():
     assert classify_openai_chat_parameter("logprobs") == ClientParamStatus.REJECTED
     assert classify_openai_chat_parameter("custom_flag") == ClientParamStatus.SUPPORTED
     assert classify_openai_responses_parameter("input") == ClientParamStatus.SUPPORTED
-    assert classify_openai_responses_parameter("include") == ClientParamStatus.REJECTED
+    assert classify_openai_responses_parameter("include") == (
+        ClientParamStatus.ACCEPTED_IGNORED
+    )
     assert classify_openai_responses_parameter("previous_response_id") == (
         ClientParamStatus.REJECTED
     )
@@ -528,6 +530,88 @@ def test_transform_chat_parameters_rejects_builtin_tools():
     assert "Only function tools" in exc_info.value.message
 
 
+def test_transform_chat_parameters_rejects_namespace_tools():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        rt.transform_chat_parameters(
+            {
+                "model": "gpt-x",
+                "tools": [
+                    {
+                        "type": "namespace",
+                        "name": "mcp__playwright",
+                        "tools": [
+                            {
+                                "type": "function",
+                                "name": "browser_navigate",
+                                "parameters": {"type": "object"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+    assert exc_info.value.param == "tools"
+    assert "Only function tools" in exc_info.value.message
+
+
+def test_transform_responses_parameters_accepts_namespace_tools():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "open",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__playwright",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "browser_navigate",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert out["functions"][0]["name"] == "mcp__playwright__browser_navigate"
+
+
+def test_transform_responses_parameters_accepts_input_schema_tools():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "run",
+            "tools": [
+                {
+                    "name": "Bash",
+                    "description": "Run shell command.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {"command": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+    )
+
+    assert out["functions"][0]["name"] == "Bash"
+    assert out["functions"][0]["parameters"]["properties"]["command"]["type"] == (
+        "string"
+    )
+
+
 def test_transform_chat_parameters_applies_tool_choice_policy():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -596,7 +680,7 @@ def test_transform_responses_parameters_allows_stateful_params_in_v2_mode():
     assert out["store"] is True
 
 
-@pytest.mark.parametrize("param", ["include", "max_tool_calls", "truncation"])
+@pytest.mark.parametrize("param", ["max_tool_calls", "truncation"])
 def test_transform_responses_parameters_rejects_unsupported_controls(param):
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -606,11 +690,26 @@ def test_transform_responses_parameters_rejects_unsupported_controls(param):
             {
                 "model": "gpt-x",
                 "input": "hello",
-                param: ["foo"] if param == "include" else "auto",
+                param: "auto",
             }
         )
 
     assert exc_info.value.param == param
+
+
+def test_transform_responses_parameters_ignores_include():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "include": ["reasoning.encrypted_content"],
+        }
+    )
+
+    assert "include" not in out
 
 
 def test_transform_responses_parameters_text_json_schema():

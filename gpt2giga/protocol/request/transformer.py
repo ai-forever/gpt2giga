@@ -26,6 +26,7 @@ from gpt2giga.common.message_utils import (
 )
 from gpt2giga.common.tools import (
     build_gigachat_builtin_tool_payload,
+    iter_function_tool_payloads,
     map_tool_name_to_gigachat,
 )
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
@@ -461,10 +462,12 @@ class RequestTransformer:
             transformed["max_tokens"] = default_max_tokens
 
         if "functions" not in transformed and "tools" in transformed:
-            functions = []
-            for tool in transformed["tools"]:
-                if tool["type"] == "function":
-                    functions.append(tool.get("function", tool))
+            functions = list(
+                iter_function_tool_payloads(
+                    {"tools": transformed["tools"]},
+                    require_parameters=False,
+                )
+            )
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
