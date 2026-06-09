@@ -3,8 +3,8 @@
 ## Project Snapshot
 
 - **Repo type:** Single Python package with examples, docs, CI workflows, and deployment assets
-- **What:** FastAPI proxy that translates OpenAI and Anthropic-compatible requests into GigaChat API calls
-- **Stack:** Python 3.10–3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE, Docker
+- **What:** FastAPI compatibility gateway that translates OpenAI and Anthropic-shaped requests into GigaChat calls
+- **Stack:** Python 3.10-3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE, Docker, optional Postgres/OpenSearch/Phoenix backends
 - **Tooling:** `uv`, Ruff, pytest, Docker, GitHub Actions
 - **Hierarchy:** Subfolders with their own `AGENTS.md` override this file
 
@@ -37,6 +37,7 @@ uv run pre-commit install
 - **Async-first:** Endpoint handlers and upstream GigaChat interactions are async.
 - **Imports:** stdlib → third-party → local (`gpt2giga.*`), using absolute imports.
 - **Docstrings:** Google style, imperative mood, concise.
+- **Architecture fit:** Keep route aggregation, protocol translation, upstream providers, and sink/storage concerns in their existing layers.
 - **PR checklist:** Follow `.github/PULL_REQUEST_TEMPLATE.md`.
 
 ## Security & Secrets
@@ -44,15 +45,18 @@ uv run pre-commit install
 - **Never commit secrets** such as `.env`, credentials, API keys, or local cert/key material.
 - Proxy settings use the `GPT2GIGA_` prefix; GigaChat SDK settings use `GIGACHAT_`.
 - `MODE=PROD` requires an API key and disables `/docs`, `/redoc`, `/openapi.json`, and `/logs*`.
+- Admin/debug endpoints are opt-in and must be protected with `GPT2GIGA_ADMIN_API_KEY`.
+- Traffic-log, observability, and content-capture features must preserve redaction defaults and avoid storing secrets by accident.
 - Prefer `.env` or environment variables for secrets; do not pass secrets via CLI flags.
 
 ## Repo Map
 
 | Path | Purpose | Notes |
 |---|---|---|
-| `gpt2giga/` | Main application package | Routers, protocol transforms, config, middleware |
-| `tests/` | Test suite | Mirrors source areas and router/protocol behavior |
-| `examples/` | Runnable SDK examples | OpenAI chat/responses/files/batches, Anthropic, embeddings, agents |
+| `gpt2giga/` | Main application package | App factory, API aggregation, routers, protocols, providers, sinks |
+| `tests/` | Test suite | Mirrors app, router, protocol, sink, and compatibility behavior |
+| `examples/` | Runnable SDK examples | OpenAI chat/responses/embeddings/models, Anthropic, agents; files/batches examples are prepared but not mounted |
+| `docs/` | User documentation | Compatibility, configuration, deployment, operations, integrations |
 | `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
@@ -64,19 +68,27 @@ uv run pre-commit install
 
 ## Current Architecture Notes
 
-- OpenAI-compatible endpoints live in `gpt2giga/routers/openai/`.
-- Anthropic-compatible endpoints live in `gpt2giga/routers/anthropic/`.
+- `gpt2giga/app/factory.py` is the FastAPI composition root: middleware, auth dependencies, metrics, public routers, and admin/debug routers are mounted there.
+- OpenAI and Anthropic public API aggregators live in `gpt2giga/api/openai/` and `gpt2giga/api/anthropic/`; concrete route handlers still live under `gpt2giga/routers/openai/` and `gpt2giga/routers/anthropic/`.
 - LiteLLM-compatible model-info endpoints live in `gpt2giga/routers/litellm/`.
-- Shared request/response translation lives in `gpt2giga/protocol/`.
-- Shared HTTP helpers live in `gpt2giga/common/`.
-- Request/app-scoped stores for files and batches live in `gpt2giga/app_state.py`.
+- System health routes live in `gpt2giga/routers/system_router.py`; Prometheus metrics are mounted from `gpt2giga/api/system/metrics.py` when enabled.
+- Runtime `/logs*` routes live in `gpt2giga/routers/logs_router.py` and are disabled in `PROD`.
+- Admin traffic-log and debug translation routes live in `gpt2giga/api/admin/` and are opt-in.
+- Legacy request/response translation lives in `gpt2giga/protocol/`; experimental normalized adapters and diagnostics live in `gpt2giga/protocols/`.
+- Shared HTTP, schema, streaming, auth, and utility helpers live in `gpt2giga/common/`.
+- GigaChat upstream integration lives in `gpt2giga/providers/gigachat/`.
+- Traffic logs, metrics, and observability sinks live in `gpt2giga/sinks/`; Postgres/OpenSearch storage helpers live in `gpt2giga/storage/`.
+- Files and batch router code exists, but OpenAI Files/Batches and Anthropic Message Batches are intentionally not mounted until the upstream SDK/backend can execute them end-to-end.
 - OpenAPI schema builders live in `gpt2giga/openapi_specs/`.
 
 ## Quick Find Commands
 
 ```bash
+# Find every AGENTS.md, including hidden/local directories
+find . -name AGENTS.md -not -path './.git/*' -print | sort
+
 # Find route handlers
-rg -n "@router\.(get|post|delete)" gpt2giga/routers
+rg -n "@router\.(get|post|delete|put|patch)" gpt2giga/api gpt2giga/routers
 
 # Find config/env settings
 rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
@@ -84,11 +96,11 @@ rg -n "GPT2GIGA_|GIGACHAT_" .env.example gpt2giga/models/config.py
 # Find middleware classes
 rg -n "class .*Middleware" gpt2giga/middlewares
 
-# Find batch/file support
-rg -n "batch|file" gpt2giga/routers gpt2giga/protocol gpt2giga/app_state.py
+# Find admin, traffic log, metrics, and observability wiring
+rg -n "admin|traffic_log|metrics|observability|debug_translate" gpt2giga docs .env.example
 
 # Find tests for a feature
-rg -n "batch|file|anthropic|responses" tests
+rg -n "batch|file|anthropic|responses|traffic|metrics|normalized" tests
 
 # Find workflow usage of scripts
 rg -n "scripts/" .github/workflows

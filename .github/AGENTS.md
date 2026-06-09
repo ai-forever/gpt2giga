@@ -14,13 +14,15 @@ uv run ruff format --check .
 uv run pytest tests/ --cov=. --cov-fail-under=80
 ```
 
+CI currently runs Ruff check and pytest coverage; the local Definition of Done is stricter because it also includes `ruff format --check`.
+
 ## Workflow Map
 
 | File | Purpose |
 |---|---|
 | `.github/workflows/ci.yaml` | Ruff + pytest across Python `3.10`–`3.14`, uploads coverage, regenerates badge |
 | `.github/workflows/docker_image.yaml` | Publishes Docker Hub images for Python `3.10`–`3.14` |
-| `.github/workflows/publish-ghcr.yml` | Publishes GHCR images for Python `3.10`–`3.14`; `latest` tracks Python `3.13` |
+| `.github/workflows/publish-ghcr.yml` | Publishes GHCR images for Python `3.10`–`3.14`; `latest` and unqualified version tags track Python `3.13` |
 | `.github/workflows/publish-pypi.yml` | Builds with `uv` and publishes to PyPI on release |
 | `.github/workflows/codeflash.yaml` | Runs Codeflash optimization on PRs touching `gpt2giga/**` |
 | `.github/workflows/stale-issues.yaml` | Marks inactive issues as stale and closes them after a grace period |
@@ -36,7 +38,9 @@ uv run pytest tests/ --cov=. --cov-fail-under=80
 | `.github/labeler.yml` | Path-to-label mapping used by the PR labeler workflow |
 | `.github/release-drafter.yml` | Release note categories and templates for Release Drafter |
 | `.github/PULL_REQUEST_TEMPLATE.md` | PR checklist |
+| `.github/PULL_REQUEST_TEMPLATE/ru.md` | Russian PR checklist |
 | `.github/ISSUE_TEMPLATE/bug_report.md` | Bug report template |
+| `.github/ISSUE_TEMPLATE/bug_report.ru.md` | Russian bug report template |
 
 ## Patterns & Conventions
 
@@ -47,6 +51,9 @@ uv run pytest tests/ --cov=. --cov-fail-under=80
 - `publish-pypi.yml` validates that the release tag matches `pyproject.toml` version; keep that contract intact.
 - `codeflash.yaml` currently uses `pip` and `poetry`, unlike the rest of the repo's `uv`-first tooling. Treat that as intentional unless you are updating the workflow itself.
 - `actions/labeler` expects labels referenced in `.github/labeler.yml` to exist in the repository settings; this repo does not auto-create them.
+- `docker_image.yaml` and `publish-ghcr.yml` both build multi-arch images for Python `3.10`-`3.14`; keep Docker tag semantics aligned when changing either workflow.
+- PR templates still contain legacy `make lint` / `make mypy` / `make test` checklist text. If editing templates, prefer the real `uv run ruff ...` and `uv run pytest ...` commands unless Makefile targets are added.
+- Keep English and Russian templates structurally aligned when updating issue or PR wording.
 
 ## Quick Find Commands
 
@@ -59,6 +66,12 @@ rg -n "tags:|IMAGE_NAME|VERSION" .github/workflows
 
 # Find coverage badge wiring
 rg -n "coverage.json|generate_badge|coverage.svg" .github/workflows
+
+# Find workflow action versions
+rg -n "uses:" .github/workflows
+
+# Find template command/checklist drift
+rg -n "make lint|make mypy|make test|uv run" .github
 ```
 
 ## Common Gotchas
@@ -66,6 +79,8 @@ rg -n "coverage.json|generate_badge|coverage.svg" .github/workflows
 - `ci.yaml` downloads the `coverage-3.12` artifact to generate the badge; if artifact naming changes, update both steps.
 - `docker_image.yaml` and `publish-ghcr.yml` both build multi-arch images; keep version tagging consistent with `pyproject.toml`.
 - `publish-pypi.yml` clears `dist/` before build, so release packaging assumptions should not rely on checked-in artifacts.
+- `docker-smoke.yaml` builds with Python `3.13` and verifies `/health` on `127.0.0.1:18090`; keep that check lightweight and credential-free.
+- `nightly-smoke.yaml` runs `tests/test_api_server/test_ci_smoke.py`; avoid turning it into a full integration suite.
 
 ## Pre-PR Check
 
