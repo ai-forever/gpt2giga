@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import random
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
 
 from gpt2giga.core.context import RequestContext
@@ -65,15 +66,25 @@ class OpenTelemetryObservabilitySink:
         if not self._should_sample():
             return
 
+        ended_at = datetime.now(timezone.utc)
         span_attributes = build_otel_attributes(
             attributes,
             context=context,
             capture_content=self.capture_content,
             redaction_enabled=self.redaction_enabled,
         )
-        with self.tracer.start_as_current_span(name) as span:
+        if context is not None:
+            latency_ms = _elapsed_ms(context.started_at, ended_at)
+            if latency_ms is not None:
+                span_attributes.setdefault("latency_ms", latency_ms)
+        failed, description = _infer_span_status(span_attributes)
+        span_attributes.setdefault("status", "failed" if failed else "ok")
+        span_attributes.setdefault("otel.status_code", "ERROR" if failed else "OK")
+        start_time = _datetime_to_unix_nano(context.started_at if context else None)
+        with _start_span(self.tracer, name, start_time=start_time) as span:
             for key, value in span_attributes.items():
                 span.set_attribute(key, value)
+            _set_span_status(span, failed=failed, description=description)
             for event in events or ():
                 event_name = str(event.get("name", "event"))
                 event_attributes = build_otel_attributes(
@@ -168,3 +179,85 @@ def _coerce_otel_attribute_value(value: Any) -> Any:
 def _event_attributes(event: Mapping[str, Any]) -> Mapping[str, Any]:
     attributes = event.get("attributes")
     return attributes if isinstance(attributes, Mapping) else {}
+
+
+def _start_span(tracer: Any, name: str, *, start_time: int | None) -> Any:
+    if start_time is None:
+        return tracer.start_as_current_span(name)
+    try:
+        return tracer.start_as_current_span(name, start_time=start_time)
+    except TypeError:
+        return tracer.start_as_current_span(name)
+
+
+def _datetime_to_unix_nano(value: datetime | None) -> int | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.timestamp() * 1_000_000_000)
+
+
+def _elapsed_ms(started_at: datetime, ended_at: datetime) -> float | None:
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    value = (ended_at - started_at).total_seconds() * 1000
+    if value < 0:
+        return None
+    return value
+
+
+def _infer_span_status(attributes: Mapping[str, Any]) -> tuple[bool, str | None]:
+    status = attributes.get("status")
+    if isinstance(status, str):
+        normalized = status.lower()
+        if normalized in {"failed", "failure", "error", "errored"}:
+            return True, _status_description(attributes)
+        if normalized in {"ok", "success", "succeeded"}:
+            return False, None
+
+    status_code = attributes.get("status_code")
+    if isinstance(status_code, str):
+        try:
+            status_code = int(status_code)
+        except ValueError:
+            status_code = None
+    if isinstance(status_code, int) and status_code >= 400:
+        return True, _status_description(attributes) or f"HTTP {status_code}"
+
+    if attributes.get("error_type") or attributes.get("error.type"):
+        return True, _status_description(attributes)
+    if attributes.get("error_message") or attributes.get("error.message"):
+        return True, _status_description(attributes)
+
+    return False, None
+
+
+def _status_description(attributes: Mapping[str, Any]) -> str | None:
+    for key in ("error_message", "error.message", "error_type", "error.type"):
+        value = attributes.get(key)
+        if value is not None:
+            return str(value)
+    return None
+
+
+def _set_span_status(
+    span: Any,
+    *,
+    failed: bool,
+    description: str | None,
+) -> None:
+    set_status = getattr(span, "set_status", None)
+    if set_status is None:
+        return
+
+    try:
+        from opentelemetry.trace import Status, StatusCode
+
+        status_code = StatusCode.ERROR if failed else StatusCode.OK
+        set_status(Status(status_code, description if failed else None))
+    except Exception:
+        try:
+            set_status("ERROR" if failed else "OK")
+        except Exception:
+            return

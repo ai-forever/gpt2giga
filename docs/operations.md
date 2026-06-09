@@ -193,9 +193,28 @@ GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 
 Traffic logs и Phoenix spans связываются через gateway identifiers:
 `request_id`, `trace_id`, protocol, route, model metadata. Для LLM routes
-Phoenix получает один root span `llm.chat.completion`; streaming milestones
-прикрепляются к нему как span events. Для non-LLM routes используется один
-lifecycle span `gpt2giga.request`.
+Phoenix получает один root span `llm.chat.completion` для Chat Completions,
+Responses API и Anthropic Messages; streaming milestones прикрепляются к нему
+как span events. Для non-LLM routes используется один lifecycle span
+`gpt2giga.request`.
+
+OpenTelemetry span start time берётся из gateway `RequestContext.started_at`,
+поэтому Phoenix `Latency` отражает полное время request/stream, а не только
+время финальной отправки observability span. То же значение дополнительно
+пишется в атрибут `latency_ms`.
+
+LLM spans выставляют явный OpenTelemetry status (`OK` или `ERROR`) и дублируют
+его в безопасных атрибутах `status` / `llm.response.status`. Token usage
+пишется как OpenInference-поля `llm.token_count.*` и как gateway aliases
+`input_tokens`, `output_tokens`, `total_tokens`.
+
+Tool visibility по умолчанию безопасная: Phoenix получает `llm.tools.count`,
+`llm.tools.names`, `llm.tool_calls.count`, `llm.tool_calls.names`, а также
+события `llm.tool_call` без аргументов. Аргументы tool calls и полные схемы
+tools пишутся только при двойном opt-in:
+`GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True` и
+`GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=True`; перед отправкой они проходят
+redaction.
 
 Phoenix spans также получают безопасную caller-классификацию из входящих
 headers:

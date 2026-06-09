@@ -47,6 +47,7 @@ from gpt2giga.sinks.observability.llm import (
     CHAT_COMPLETION_SPAN_NAME,
     build_llm_chat_completion_attributes,
     build_stream_span_events,
+    build_tool_call_span_events,
 )
 
 router = APIRouter(tags=["OpenAI"])
@@ -436,6 +437,10 @@ async def _emit_chat_completion_observability(
 ) -> None:
     if settings is None:
         settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+    span_events = list(events or [])
+    span_events.extend(
+        build_tool_call_span_events(normalized_response, settings=settings)
+    )
     await emit_observability_event(
         getattr(state, "observability_sink", None),
         CHAT_COMPLETION_SPAN_NAME,
@@ -445,7 +450,7 @@ async def _emit_chat_completion_observability(
             settings=settings,
         ),
         context=context,
-        events=events,
+        events=span_events or None,
         logger=getattr(state, "logger", None),
     )
     if context is not None:

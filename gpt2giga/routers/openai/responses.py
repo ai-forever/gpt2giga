@@ -17,6 +17,7 @@ from gpt2giga.common.streaming import (
     stream_responses_generator,
     stream_responses_v2_generator,
 )
+from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import responses_openapi_extra
 from gpt2giga.protocol.response import (
@@ -25,6 +26,10 @@ from gpt2giga.protocol.response import (
     hydrate_v2_image_files,
 )
 from gpt2giga.routers.openai.helpers import populate_giga_functions
+from gpt2giga.sinks.observability.responses import (
+    emit_openai_response_observability,
+    observe_openai_response_stream,
+)
 
 router = APIRouter(tags=["OpenAI"])
 
@@ -50,6 +55,7 @@ async def responses(request: Request):
                 data, giga_client
             )
         effective_model = resolve_gigachat_model(chat_request, state.config)
+        update_request_context(model_effective=effective_model)
         if stream:
             acquired_model_limit = model_limiter.limit(
                 effective_model,
@@ -57,16 +63,21 @@ async def responses(request: Request):
             )
             await acquired_model_limit.__aenter__()
             return StreamingResponse(
-                stream_responses_v2_generator(
-                    request,
-                    chat_request,
-                    current_rquid,
-                    giga_client,
-                    request_data=data,
-                    request_options=request_options,
-                    model_limiter=model_limiter,
-                    effective_model=effective_model,
-                    acquired_model_limit=acquired_model_limit,
+                observe_openai_response_stream(
+                    state,
+                    stream_responses_v2_generator(
+                        request,
+                        chat_request,
+                        current_rquid,
+                        giga_client,
+                        request_data=data,
+                        request_options=request_options,
+                        model_limiter=model_limiter,
+                        effective_model=effective_model,
+                        acquired_model_limit=acquired_model_limit,
+                    ),
+                    request_payload=data,
+                    context=get_request_context(),
                 ),
                 media_type="text/event-stream",
             )
@@ -84,25 +95,40 @@ async def responses(request: Request):
                 getattr(state, "logger", None),
             )
         response_id = extract_v2_thread_id(response) or current_rquid
-        return state.response_processor.process_response_api(
+        result = state.response_processor.process_response_api(
             data,
             SimpleNamespace(model_dump=lambda: adapted),
             data["model"],
             response_id,
         )
+        await emit_openai_response_observability(
+            state,
+            data,
+            result,
+            context=get_request_context(),
+        )
+        return result
 
     async with gigachat_request_options(giga_client, request_options):
         chat_messages = await state.request_transformer.prepare_response(
             data, giga_client
         )
     effective_model = resolve_gigachat_model(chat_messages, state.config)
+    update_request_context(model_effective=effective_model)
     if not stream:
         async with model_limiter.limit(effective_model, provider="openai"):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat(chat_messages)
-        return state.response_processor.process_response_api(
+        result = state.response_processor.process_response_api(
             data, response, data["model"], current_rquid
         )
+        await emit_openai_response_observability(
+            state,
+            data,
+            result,
+            context=get_request_context(),
+        )
+        return result
 
     acquired_model_limit = model_limiter.limit(
         effective_model,
@@ -110,16 +136,21 @@ async def responses(request: Request):
     )
     await acquired_model_limit.__aenter__()
     return StreamingResponse(
-        stream_responses_generator(
-            request,
-            chat_messages,
-            current_rquid,
-            giga_client,
-            request_data=data,
-            request_options=request_options,
-            model_limiter=model_limiter,
-            effective_model=effective_model,
-            acquired_model_limit=acquired_model_limit,
+        observe_openai_response_stream(
+            state,
+            stream_responses_generator(
+                request,
+                chat_messages,
+                current_rquid,
+                giga_client,
+                request_data=data,
+                request_options=request_options,
+                model_limiter=model_limiter,
+                effective_model=effective_model,
+                acquired_model_limit=acquired_model_limit,
+            ),
+            request_payload=data,
+            context=get_request_context(),
         ),
         media_type="text/event-stream",
     )

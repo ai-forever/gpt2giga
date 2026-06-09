@@ -1,5 +1,7 @@
+import json
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone
 
 from gpt2giga.core.context import RequestContext
 from gpt2giga.core.interfaces import ObservabilitySink
@@ -24,12 +26,14 @@ from gpt2giga.sinks.observability.llm import (
     build_llm_request_attributes,
     build_llm_response_attributes,
     build_stream_span_events,
+    build_tool_call_span_events,
 )
 from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 from gpt2giga.sinks.observability.otel import (
     OpenTelemetryObservabilitySink,
     build_otel_attributes,
 )
+from gpt2giga.sinks.observability.responses import OpenAIResponseStreamObserver
 
 
 def capture_off_settings() -> ProxySettings:
@@ -174,6 +178,39 @@ def test_build_llm_request_attributes_default_omits_raw_content():
     assert "llm.tools" not in attributes
 
 
+def test_build_llm_request_attributes_includes_mcp_tool_names_from_extensions():
+    request = NormalizedChatRequest(
+        model="GigaChat",
+        messages=[
+            NormalizedMessage(
+                role="user",
+                content="secret prompt",
+                raw_extensions={
+                    "additional_kwargs": {
+                        "mcp_tools": [
+                            {
+                                "name": "bitrix-search",
+                                "description": "Search Bitrix docs",
+                                "input_schema": {
+                                    "type": "object",
+                                    "properties": {"query": {"type": "string"}},
+                                },
+                            }
+                        ]
+                    }
+                },
+            )
+        ],
+    )
+
+    attributes = build_llm_request_attributes(request, settings=capture_off_settings())
+
+    assert attributes["llm.tools.count"] == 1
+    assert attributes["llm.tools.names"] == ["bitrix-search"]
+    assert "secret prompt" not in str(attributes)
+    assert "llm.tools" not in attributes
+
+
 def test_build_llm_request_attributes_respects_capture_redaction_and_limit():
     request = NormalizedChatRequest(
         model="GigaChat",
@@ -242,12 +279,18 @@ def test_build_llm_response_attributes_maps_usage_finish_and_safe_payloads():
     )
 
     assert default_attributes["llm.finish_reason"] == "tool_calls"
+    assert default_attributes["status"] == "ok"
+    assert default_attributes["llm.response.status"] == "ok"
     assert default_attributes["llm.response.metadata"] == (
         '{"gigachat_x_request_id": "rq-1"}'
     )
     assert default_attributes["llm.token_count.prompt"] == 3
     assert default_attributes["llm.token_count.completion"] == 5
     assert default_attributes["llm.token_count.total"] == 8
+    assert default_attributes["input_tokens"] == 3
+    assert default_attributes["output_tokens"] == 5
+    assert default_attributes["total_tokens"] == 8
+    assert default_attributes["llm.tool_calls.names"] == ["lookup"]
     assert "private answer" not in str(default_attributes)
     assert "llm.output_messages" not in default_attributes
     assert "llm.tool_calls" not in default_attributes
@@ -264,6 +307,64 @@ def test_build_llm_response_attributes_maps_usage_finish_and_safe_payloads():
     assert "private answer" in captured_attributes["llm.output_messages"]
     assert '"password": "***"' in captured_attributes["llm.tool_calls"]
     assert "secret" not in captured_attributes["llm.tool_calls"]
+
+
+def test_build_llm_response_attributes_maps_called_tools_metadata_safely():
+    response = NormalizedResponse(
+        model="GigaChat",
+        provider="gigachat",
+        metadata={
+            "gigachat_called_tools": json.dumps(
+                [
+                    {
+                        "name": "shell",
+                        "arguments": {"password": "secret"},
+                        "status": "ok",
+                    }
+                ]
+            )
+        },
+        usage=NormalizedUsage(input_tokens=7, output_tokens=11, total_tokens=18),
+    )
+
+    default_attributes = build_llm_response_attributes(
+        response,
+        settings=capture_off_settings(),
+    )
+    default_events = build_tool_call_span_events(
+        response,
+        settings=capture_off_settings(),
+    )
+
+    assert default_attributes["llm.tool_calls.count"] == 1
+    assert default_attributes["llm.tool_calls.names"] == ["shell"]
+    assert default_attributes["total_tokens"] == 18
+    assert "password" not in default_attributes["llm.response.metadata"]
+    assert "secret" not in json.dumps(default_attributes)
+    assert default_events[0]["name"] == "llm.tool_call"
+    assert default_events[0]["attributes"]["llm.tool_call.name"] == "shell"
+    assert "llm.tool_calls" not in default_events[0]["attributes"]
+
+    captured_attributes = build_llm_response_attributes(
+        response,
+        settings=ProxySettings(
+            observability_capture_content=True,
+            observability_capture_tool_args=True,
+        ),
+    )
+    captured_events = build_tool_call_span_events(
+        response,
+        settings=ProxySettings(
+            observability_capture_content=True,
+            observability_capture_tool_args=True,
+        ),
+    )
+
+    assert '"password": "***"' in captured_attributes["llm.tool_calls"]
+    assert "secret" not in captured_attributes["llm.tool_calls"]
+    assert '"password": "***"' in captured_attributes["llm.response.metadata"]
+    assert "secret" not in captured_attributes["llm.response.metadata"]
+    assert '"password": "***"' in captured_events[0]["attributes"]["llm.tool_calls"]
 
 
 def test_build_stream_span_events_maps_safe_events_and_capture_policy():
@@ -314,18 +415,58 @@ def test_build_stream_span_events_maps_safe_events_and_capture_policy():
     assert "secret" not in tool_events[0]["attributes"]["llm.tool_calls"]
 
 
+def test_openai_response_stream_observer_synthesizes_failed_response_after_error():
+    observer = OpenAIResponseStreamObserver(settings=capture_off_settings())
+    observer.observe_payload(
+        "response.created",
+        {
+            "type": "response.created",
+            "response": {
+                "id": "resp_1",
+                "object": "response",
+                "status": "in_progress",
+                "model": "GigaChat",
+                "output": [],
+            },
+        },
+    )
+    observer.observe_payload(
+        "error",
+        {
+            "type": "error",
+            "code": "stream_error",
+            "message": "boom",
+            "sequence_number": 2,
+        },
+    )
+
+    response = observer.to_response_payload({"model": "GigaChat"})
+    event_names = [event["name"] for event in observer.events]
+
+    assert response["id"] == "resp_1"
+    assert response["status"] == "failed"
+    assert response["error"]["message"] == "boom"
+    assert "stream.start" in event_names
+    assert "stream.error" in event_names
+
+
 @pytest.mark.asyncio
 async def test_otel_sink_records_span_and_flushes_provider():
     class FakeSpan:
-        def __init__(self):
+        def __init__(self, *, start_time=None):
             self.attributes = {}
             self.events = []
+            self.start_time = start_time
+            self.status = None
 
         def set_attribute(self, key, value):
             self.attributes[key] = value
 
         def add_event(self, name, attributes=None):
             self.events.append((name, attributes or {}))
+
+        def set_status(self, status):
+            self.status = status
 
     class SpanContext:
         def __init__(self, span):
@@ -341,8 +482,8 @@ async def test_otel_sink_records_span_and_flushes_provider():
         def __init__(self):
             self.spans = []
 
-        def start_as_current_span(self, name):
-            span = FakeSpan()
+        def start_as_current_span(self, name, start_time=None):
+            span = FakeSpan(start_time=start_time)
             span.name = name
             self.spans.append(span)
             return SpanContext(span)
@@ -361,10 +502,21 @@ async def test_otel_sink_records_span_and_flushes_provider():
         tracer_provider=provider,
         sample_rate=1.0,
     )
+    started_at = datetime.now(timezone.utc) - timedelta(milliseconds=250)
+    context = RequestContext(
+        request_id="req-1",
+        trace_id="trace-1",
+        span_id="span-1",
+        protocol="openai",
+        route="/v1/responses",
+        method="POST",
+        started_at=started_at,
+    )
 
     await sink.emit(
         "gpt2giga.request",
         {"status_code": 200},
+        context=context,
         events=[
             {
                 "name": "stream.first_token",
@@ -376,9 +528,60 @@ async def test_otel_sink_records_span_and_flushes_provider():
 
     assert len(tracer.spans) == 1
     assert tracer.spans[0].name == "gpt2giga.request"
+    assert tracer.spans[0].start_time == int(started_at.timestamp() * 1_000_000_000)
+    assert tracer.spans[0].attributes["request_id"] == "req-1"
     assert tracer.spans[0].attributes["status_code"] == 200
+    assert tracer.spans[0].attributes["latency_ms"] >= 200
+    assert tracer.spans[0].attributes["status"] == "ok"
+    assert tracer.spans[0].attributes["otel.status_code"] == "OK"
+    assert "OK" in str(tracer.spans[0].status)
     assert tracer.spans[0].events == [("stream.first_token", {})]
     assert provider.flushed is True
+
+
+@pytest.mark.asyncio
+async def test_otel_sink_marks_failed_span_status():
+    class FakeSpan:
+        def __init__(self):
+            self.attributes = {}
+            self.status = None
+
+        def set_attribute(self, key, value):
+            self.attributes[key] = value
+
+        def set_status(self, status):
+            self.status = status
+
+    class SpanContext:
+        def __init__(self, span):
+            self.span = span
+
+        def __enter__(self):
+            return self.span
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeTracer:
+        def __init__(self):
+            self.spans = []
+
+        def start_as_current_span(self, name):
+            span = FakeSpan()
+            self.spans.append(span)
+            return SpanContext(span)
+
+    tracer = FakeTracer()
+    sink = OpenTelemetryObservabilitySink(tracer=tracer, sample_rate=1.0)
+
+    await sink.emit(
+        "gpt2giga.request",
+        {"status_code": 500, "error_type": "RuntimeError"},
+    )
+
+    assert tracer.spans[0].attributes["status"] == "failed"
+    assert tracer.spans[0].attributes["otel.status_code"] == "ERROR"
+    assert "ERROR" in str(tracer.spans[0].status)
 
 
 @pytest.mark.asyncio

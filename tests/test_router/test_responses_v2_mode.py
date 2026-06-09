@@ -107,6 +107,17 @@ class FakeRequestTransformer:
         return {"contract": "responses-v2"}
 
 
+class RecordingObservabilitySink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, name, attributes=None, *, context=None, events=None):
+        self.events.append((name, attributes or {}, context, list(events or [])))
+
+    async def flush(self):
+        return None
+
+
 def make_app(gigachat_api_mode: str, responses_api_mode: str):
     app = FastAPI()
     app.include_router(router)
@@ -188,6 +199,53 @@ def test_responses_v2_non_stream_returns_openai_response_object():
     assert body["usage"]["output_tokens"] == 3
 
 
+def test_responses_v1_non_stream_emits_phoenix_llm_span():
+    app = make_app("v1", "inherit")
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            gigachat_api_mode="v1",
+            responses_api_mode="inherit",
+            observability_capture_content=True,
+            observability_capture_messages=True,
+            observability_capture_responses=True,
+        ),
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        json={
+            "model": "gpt-x",
+            "input": "hi",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "lookup",
+                    "parameters": {"type": "object"},
+                }
+            ],
+        },
+    )
+
+    emitted = {
+        name: (attributes, events)
+        for name, attributes, _context, events in app.state.observability_sink.events
+    }
+    attributes, events = emitted["llm.chat.completion"]
+
+    assert response.status_code == 200
+    assert attributes["llm.operation"] == "responses"
+    assert attributes["llm.streaming"] is False
+    assert attributes["status"] == "ok"
+    assert attributes["llm.tools.count"] == 1
+    assert attributes["llm.tools.names"] == ["lookup"]
+    assert attributes["total_tokens"] == 2
+    assert "hi" in attributes["input.value"]
+    assert "ok-v1" in attributes["output.value"]
+    assert events == []
+
+
 def test_responses_v2_uses_thread_id_as_response_id():
     app = make_app("v2", "inherit")
     app.state.gigachat_client.achat.thread_id = "thread_1"
@@ -230,6 +288,50 @@ def test_responses_v2_stream_uses_primary_stream():
     assert app.state.gigachat_client.achat.stream_calls == [
         {"contract": "responses-v2"}
     ]
+
+
+def test_responses_v2_stream_emits_phoenix_llm_span():
+    app = make_app("v2", "inherit")
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            gigachat_api_mode="v2",
+            responses_api_mode="inherit",
+            observability_capture_content=True,
+            observability_capture_messages=True,
+            observability_capture_responses=True,
+        ),
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/responses",
+        json={
+            "model": "gpt-x",
+            "input": "hi",
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    emitted = {
+        name: (attributes, events)
+        for name, attributes, _context, events in app.state.observability_sink.events
+    }
+    attributes, events = emitted["llm.chat.completion"]
+    event_names = [event["name"] for event in events]
+
+    assert response.status_code == 200
+    assert "event: response.completed" in body
+    assert attributes["llm.operation"] == "responses"
+    assert attributes["llm.streaming"] is True
+    assert attributes["status"] == "ok"
+    assert "hi" in attributes["input.value"]
+    assert "ok-stream" in attributes["output.value"]
+    assert "stream.start" in event_names
+    assert "stream.first_token" in event_names
+    assert "stream.completed" in event_names
 
 
 def test_responses_v2_stream_uses_thread_id_as_response_id():
