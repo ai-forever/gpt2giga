@@ -52,8 +52,10 @@ services:
     healthcheck:
       test:
         [
-          "CMD-SHELL",
-          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:6006', timeout=2).read()\"",
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:6006', timeout=2).read()",
         ]
       interval: 15s
       timeout: 5s
