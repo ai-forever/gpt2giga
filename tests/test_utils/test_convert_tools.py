@@ -58,6 +58,21 @@ def test_normalize_json_schema_preserves_existing_properties():
     assert result["properties"]["foo"] == {"type": "string"}
 
 
+def test_normalize_json_schema_removes_unsupported_format():
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "format": "uri"},
+            "created": {"type": "string", "format": "date-time"},
+        },
+    }
+
+    result = normalize_json_schema(schema)
+
+    assert "format" not in result["properties"]["url"]
+    assert result["properties"]["created"]["format"] == "date-time"
+
+
 def test_normalize_json_schema_removes_null_from_anyof():
     """Тест: удаляет type: null из anyOf и разворачивает единственный оставшийся тип"""
     schema = {

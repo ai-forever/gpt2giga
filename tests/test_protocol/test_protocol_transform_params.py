@@ -413,7 +413,7 @@ def test_transform_chat_parameters_json_schema_native_response_format():
     out = rt.transform_chat_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object"},
+        "schema": {"type": "object", "properties": {}},
         "strict": True,
     }
     assert "functions" not in out
@@ -434,7 +434,7 @@ def test_transform_chat_parameters_native_keeps_user_tools_as_functions():
     out = rt.transform_chat_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object"},
+        "schema": {"type": "object", "properties": {}},
     }
     assert out["functions"] == [{"name": "sum"}]
     assert "function_call" not in out
@@ -743,7 +743,7 @@ def test_transform_responses_parameters_text_json_schema_native():
     out = rt.transform_responses_parameters(data)
     assert out["response_format"] == {
         "type": "json_schema",
-        "schema": {"type": "object"},
+        "schema": {"type": "object", "properties": {}},
         "strict": True,
     }
     assert "functions" not in out

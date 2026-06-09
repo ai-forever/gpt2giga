@@ -1,3 +1,6 @@
+_GIGACHAT_ALLOWED_SCHEMA_FORMATS = frozenset({"date", "date-time", "time"})
+
+
 def resolve_schema_refs(schema: dict) -> dict:
     """Resolve $ref references and anyOf/oneOf in JSON schema.
 
@@ -63,6 +66,8 @@ def normalize_json_schema(schema: dict) -> dict:
       Удаляем null варианты и упрощаем схему.
     - JSON Schema также поддерживает type: ['string', 'null'] для nullable типов.
       Преобразуем в одиночный тип (первый не-null).
+    - GigaChat принимает только форматы date/date-time/time. Остальные format
+      значения удаляем.
     """
     if not isinstance(schema, dict):
         return schema
@@ -76,6 +81,9 @@ def normalize_json_schema(schema: dict) -> dict:
             result["type"] = non_null_types[0]
         elif result["type"]:
             result["type"] = result["type"][0]
+
+    if "format" in result and result["format"] not in _GIGACHAT_ALLOWED_SCHEMA_FORMATS:
+        result.pop("format", None)
 
     # Обрабатываем anyOf, oneOf - GigaChat SDK не поддерживает эти конструкции
     for key in ("anyOf", "oneOf"):

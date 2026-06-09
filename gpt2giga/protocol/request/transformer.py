@@ -528,6 +528,11 @@ class RequestTransformer:
         transformed: Dict, schema: Dict, strict: Optional[bool]
     ) -> None:
         """Applies JSON schema through GigaChat native response_format."""
+        schema = (
+            normalize_json_schema(resolve_schema_refs(schema))
+            if isinstance(schema, dict)
+            else {}
+        )
         response_format = {"type": "json_schema", "schema": schema}
         if strict is not None:
             response_format["strict"] = strict
@@ -1074,9 +1079,12 @@ class RequestTransformer:
                 continue
             seen_names.add(mapped_name)
 
+            parameters = self._normalize_v2_function_schema(
+                function_payload.get("parameters") or {}
+            )
             spec_payload = {
                 "name": mapped_name,
-                "parameters": function_payload.get("parameters") or {},
+                "parameters": parameters,
             }
             for field_name in (
                 "description",
@@ -1103,6 +1111,12 @@ class RequestTransformer:
             )
         )
         return tools
+
+    @staticmethod
+    def _normalize_v2_function_schema(schema: Any) -> dict[str, Any]:
+        if not isinstance(schema, dict):
+            return {}
+        return normalize_json_schema(resolve_schema_refs(schema))
 
     @staticmethod
     def _dump_mapping(value: Any) -> Dict[str, Any]:

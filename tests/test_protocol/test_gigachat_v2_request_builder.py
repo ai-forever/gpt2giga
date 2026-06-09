@@ -7,6 +7,9 @@ from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer
+from gpt2giga.protocol.anthropic.request import (
+    _build_openai_data_from_anthropic_request,
+)
 
 
 @pytest.mark.asyncio
@@ -73,6 +76,49 @@ async def test_prepare_chat_completion_v2_maps_tools_and_forced_function_call():
 
 
 @pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_normalizes_anthropic_nested_tool_schema():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    openai_data = _build_openai_data_from_anthropic_request(
+        {
+            "model": "claude-x",
+            "messages": [{"role": "user", "content": "inspect"}],
+            "tools": [
+                {
+                    "name": "read_result",
+                    "description": "Read a tool result.",
+                    "input_schema": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string",
+                                "format": "uri",
+                                "description": "Target URL.",
+                            },
+                            "annotations": {
+                                "type": "object",
+                                "description": "Optional annotations.",
+                            },
+                        },
+                    },
+                }
+            ],
+        },
+        logger,
+    )
+
+    request = await rt.prepare_chat_completion_v2(openai_data)
+
+    spec = request.tools[0].functions.specifications[0]
+    url = spec.parameters["properties"]["url"]
+    annotations = spec.parameters["properties"]["annotations"]
+    assert url["type"] == "string"
+    assert "format" not in url
+    assert annotations["type"] == "object"
+    assert annotations["properties"] == {}
+
+
+@pytest.mark.asyncio
 async def test_prepare_chat_completion_v2_maps_builtin_tools_in_v2_mode():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)
@@ -125,7 +171,10 @@ async def test_prepare_chat_completion_v2_maps_native_structured_output_and_reas
 
     assert request.model_options.reasoning.effort == "high"
     assert request.model_options.response_format.type == "json_schema"
-    assert request.model_options.response_format.schema_ == {"type": "object"}
+    assert request.model_options.response_format.schema_ == {
+        "type": "object",
+        "properties": {},
+    }
     assert request.model_options.response_format.strict is True
     assert request.tools is None
 
