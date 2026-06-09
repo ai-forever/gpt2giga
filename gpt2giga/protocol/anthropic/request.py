@@ -97,6 +97,8 @@ def _convert_anthropic_messages_to_openai(
                 openai_messages.append({"role": "system", "content": "\n".join(texts)})
 
     for msg in messages:
+        if not isinstance(msg, dict):
+            continue
         role = msg.get("role", "user")
         content = msg.get("content", "")
 
@@ -130,11 +132,14 @@ def _convert_assistant_blocks(
     tool_uses: List[Dict] = []
 
     for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
         block_type = block.get("type")
         if block_type == "text":
             text_parts.append(block.get("text", ""))
         elif block_type == "tool_use":
-            tool_uses.append(block)
+            if block.get("name"):
+                tool_uses.append(block)
 
     if tool_uses:
         tool_calls = [
@@ -174,15 +179,17 @@ def _convert_user_blocks(
     has_images = False
 
     for block in content_blocks:
+        if not isinstance(block, dict):
+            continue
         block_type = block.get("type")
         if block_type == "text":
             text = block.get("text", "")
             text_parts.append(text)
             openai_content_parts.append({"type": "text", "text": text})
         elif block_type == "image":
-            has_images = True
             source = block.get("source", {})
             if source.get("type") == "base64":
+                has_images = True
                 media_type = source.get("media_type", "image/png")
                 data = source.get("data", "")
                 openai_content_parts.append(
@@ -192,6 +199,7 @@ def _convert_user_blocks(
                     }
                 )
             elif source.get("type") == "url":
+                has_images = True
                 openai_content_parts.append(
                     {
                         "type": "image_url",
@@ -225,6 +233,8 @@ def _convert_user_blocks(
         openai_messages.append({"role": "user", "content": openai_content_parts})
     elif text_parts:
         openai_messages.append({"role": "user", "content": "\n".join(text_parts)})
+    elif not tool_results:
+        openai_messages.append({"role": "user", "content": ""})
 
 
 def _build_openai_data_from_anthropic_request(
@@ -276,7 +286,9 @@ def _build_openai_data_from_anthropic_request(
     if tool_choice and isinstance(tool_choice, dict):
         tool_choice_type = tool_choice.get("type")
         if tool_choice_type == "tool":
-            openai_data["function_call"] = {"name": tool_choice.get("name")}
+            tool_name = tool_choice.get("name")
+            if tool_name:
+                openai_data["function_call"] = {"name": tool_name}
         elif tool_choice_type == "none":
             openai_data.pop("tools", None)
             openai_data.pop("functions", None)

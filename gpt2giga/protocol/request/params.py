@@ -18,16 +18,31 @@ OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS = frozenset(
 
 OPENAI_ACCEPTED_IGNORED_PARAMS = frozenset(
     {
+        "audio",
+        "background",
+        "conversation",
         "frequency_penalty",
         "include",
+        "logit_bias",
+        "logprobs",
+        "max_tool_calls",
         "metadata",
+        "modalities",
+        "n",
+        "parallel_tool_calls",
+        "prediction",
         "presence_penalty",
+        "previous_response_id",
         "prompt_cache_key",
         "prompt_cache_retention",
         "safety_identifier",
         "seed",
         "service_tier",
+        "store",
+        "top_logprobs",
+        "truncation",
         "user",
+        "web_search_options",
     }
 )
 
@@ -69,20 +84,6 @@ OPENAI_RESPONSES_SUPPORTED_PARAMS = OPENAI_COMMON_SUPPORTED_PARAMS | frozenset(
     }
 )
 
-OPENAI_REJECTED_PARAMS = {
-    "audio": "Audio output is not supported; only text responses are supported.",
-    "background": "Background responses are not supported.",
-    "conversation": "Stateful Responses conversations are not supported.",
-    "logit_bias": "Token logit bias is not supported by GigaChat.",
-    "logprobs": "Log probabilities are not supported by GigaChat.",
-    "max_tool_calls": "Limiting tool call count is not supported.",
-    "prediction": "Predicted outputs are not supported.",
-    "previous_response_id": "Stateful Responses continuation is not supported.",
-    "top_logprobs": "Log probabilities are not supported by GigaChat.",
-    "truncation": "Responses truncation controls are not supported.",
-    "web_search_options": "OpenAI web search options are not supported.",
-}
-
 
 def classify_openai_chat_parameter(name: str) -> ClientParamStatus:
     """Classify a Chat Completions request parameter."""
@@ -94,13 +95,24 @@ def classify_openai_responses_parameter(name: str) -> ClientParamStatus:
     return _classify_openai_parameter(name, OPENAI_RESPONSES_SUPPORTED_PARAMS)
 
 
-def sanitize_openai_chat_parameters(data: Mapping[str, Any]) -> dict[str, Any]:
+def sanitize_openai_chat_parameters(
+    data: Mapping[str, Any],
+    *,
+    allow_builtin_tools: bool = False,
+    allow_namespace_tools: bool = False,
+) -> dict[str, Any]:
     """Return a sanitized Chat Completions payload or raise compatibility errors."""
     sanitized = dict(data)
     _sanitize_openai_payload(sanitized, OPENAI_CHAT_SUPPORTED_PARAMS)
     _normalize_gigachat_extra_fields(sanitized)
-    _apply_tool_choice_policy(sanitized)
-    _validate_tools(sanitized.get("tools"))
+    _sanitize_tools(
+        sanitized,
+        allow_builtin_tools=allow_builtin_tools,
+        allow_namespace_tools=allow_namespace_tools,
+        allow_function_like_tools=allow_namespace_tools,
+    )
+    _sanitize_functions(sanitized)
+    _apply_tool_choice_policy(sanitized, allow_builtin_tools=allow_builtin_tools)
     return sanitized
 
 
@@ -118,13 +130,14 @@ def sanitize_openai_responses_parameters(
         allow_stateful_responses=allow_stateful,
     )
     _normalize_gigachat_extra_fields(sanitized)
-    _apply_tool_choice_policy(sanitized, allow_builtin_tools=allow_builtin_tools)
-    _validate_tools(
-        sanitized.get("tools"),
+    _sanitize_tools(
+        sanitized,
         allow_builtin_tools=allow_builtin_tools,
         allow_namespace_tools=True,
         allow_function_like_tools=True,
     )
+    _sanitize_functions(sanitized)
+    _apply_tool_choice_policy(sanitized, allow_builtin_tools=allow_builtin_tools)
     return sanitized
 
 
@@ -135,13 +148,6 @@ def _classify_openai_parameter(
         return ClientParamStatus.SUPPORTED
     if name in OPENAI_ACCEPTED_IGNORED_PARAMS:
         return ClientParamStatus.ACCEPTED_IGNORED
-    if name in OPENAI_REJECTED_PARAMS or name in {
-        "modalities",
-        "n",
-        "parallel_tool_calls",
-        "store",
-    }:
-        return ClientParamStatus.REJECTED
     return ClientParamStatus.SUPPORTED
 
 
@@ -175,34 +181,14 @@ def _sanitize_openai_payload(
     extra_fields: dict[str, Any] = {}
     for name in list(data):
         if name in OPENAI_ACCEPTED_IGNORED_PARAMS:
+            if name == "previous_response_id" and allow_stateful_responses:
+                if data.get(name) is None:
+                    data.pop(name, None)
+                continue
+            if name == "store" and allow_stateful_responses:
+                _sanitize_store(data, allow_true=True)
+                continue
             data.pop(name, None)
-            continue
-
-        if name == "previous_response_id" and allow_stateful_responses:
-            if data.get(name) is None:
-                data.pop(name, None)
-            continue
-
-        if name in OPENAI_REJECTED_PARAMS:
-            value = data.pop(name, None)
-            if value is not None:
-                _raise_openai_param_error(name, OPENAI_REJECTED_PARAMS[name])
-            continue
-
-        if name == "store":
-            _sanitize_store(data, allow_true=allow_stateful_responses)
-            continue
-
-        if name == "n":
-            _sanitize_n(data)
-            continue
-
-        if name == "modalities":
-            _sanitize_modalities(data)
-            continue
-
-        if name == "parallel_tool_calls":
-            _sanitize_parallel_tool_calls(data)
             continue
 
         if name in supported_params or name in OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS:
@@ -221,49 +207,12 @@ def _sanitize_store(data: dict[str, Any], *, allow_true: bool = False) -> None:
             return
         if isinstance(value, bool):
             return
-        _raise_openai_param_error(
-            "store",
-            "`store` must be a boolean.",
-        )
+        data.pop("store", None)
+        return
 
     value = data.pop("store", None)
     if value is True:
-        _raise_openai_param_error(
-            "store",
-            "Stored completions are not supported.",
-        )
-
-
-def _sanitize_n(data: dict[str, Any]) -> None:
-    value = data.pop("n", None)
-    if value is None:
         return
-    if isinstance(value, bool) or value != 1:
-        _raise_openai_param_error(
-            "n",
-            "Multiple completion choices are not supported; use `n=1`.",
-        )
-
-
-def _sanitize_modalities(data: dict[str, Any]) -> None:
-    value = data.pop("modalities", None)
-    if value is None:
-        return
-    if isinstance(value, list) and set(value) == {"text"}:
-        return
-    _raise_openai_param_error(
-        "modalities",
-        "Only text output is supported; audio modalities are not supported.",
-    )
-
-
-def _sanitize_parallel_tool_calls(data: dict[str, Any]) -> None:
-    value = data.pop("parallel_tool_calls", None)
-    if value is True:
-        _raise_openai_param_error(
-            "parallel_tool_calls",
-            "Parallel tool calls are not supported by GigaChat.",
-        )
 
 
 def _normalize_gigachat_extra_fields(data: dict[str, Any]) -> None:
@@ -327,118 +276,121 @@ def _apply_tool_choice_policy(
                 "tool_name": builtin_tool_name,
             }
             return
-        _raise_openai_param_error(
-            "tool_choice",
-            _tool_choice_error_message(allow_builtin_tools=allow_builtin_tools),
-        )
-    _raise_openai_param_error(
-        "tool_choice",
-        _tool_choice_error_message(allow_builtin_tools=allow_builtin_tools),
-    )
+        return
 
 
-def _tool_choice_error_message(*, allow_builtin_tools: bool = False) -> str:
-    if allow_builtin_tools:
-        return (
-            "Only `auto`, `none`, forced function tool choices, and supported "
-            "GigaChat built-in tool choices are supported."
-        )
-    return "Only `auto`, `none`, and forced function tool choices are supported."
-
-
-def _validate_tools(
-    tools: Any,
+def _sanitize_tools(
+    data: dict[str, Any],
     *,
     allow_builtin_tools: bool = False,
     allow_namespace_tools: bool = False,
     allow_function_like_tools: bool = False,
 ) -> None:
+    tools = data.get("tools")
     if tools is None:
         return
     if not isinstance(tools, list):
-        _raise_openai_param_error("tools", "`tools` must be an array.")
-    for index, tool in enumerate(tools):
+        data.pop("tools", None)
+        return
+
+    sanitized_tools = []
+    for tool in tools:
         if not isinstance(tool, Mapping):
-            _raise_openai_param_error("tools", f"`tools[{index}]` must be an object.")
+            continue
         tool_type = tool.get("type")
         if tool_type is None and allow_function_like_tools:
-            _validate_function_like_tool(tool, f"`tools[{index}]`")
+            if _is_function_like_tool(tool):
+                sanitized_tools.append(dict(tool))
             continue
         if tool_type == "namespace" and allow_namespace_tools:
-            _validate_namespace_tool(
+            namespace_tool = _sanitize_namespace_tool(
                 tool,
-                index,
                 allow_function_like_tools=allow_function_like_tools,
             )
+            if namespace_tool:
+                sanitized_tools.append(namespace_tool)
             continue
-        if tool_type != "function" and not (
-            allow_builtin_tools
-            and normalize_gigachat_builtin_tool_type(tool_type) is not None
-        ):
-            message = "Only function tools are supported."
+        if normalize_gigachat_builtin_tool_type(tool_type) is not None:
             if allow_builtin_tools:
-                message = (
-                    "Only function tools and supported GigaChat built-in tools "
-                    "are supported."
-                )
-            _raise_openai_param_error(
-                "tools",
-                message,
-            )
+                sanitized_tools.append(dict(tool))
+            continue
+        if tool_type == "function" and _is_function_tool(tool):
+            sanitized_tools.append(dict(tool))
+
+    if sanitized_tools:
+        data["tools"] = sanitized_tools
+    else:
+        data.pop("tools", None)
 
 
-def _validate_namespace_tool(
+def _sanitize_namespace_tool(
     tool: Mapping[str, Any],
-    index: int,
     *,
     allow_function_like_tools: bool = False,
-) -> None:
+) -> dict[str, Any] | None:
     name = tool.get("name")
     if not isinstance(name, str) or not name:
-        _raise_openai_param_error(
-            "tools",
-            f"`tools[{index}].name` must be a non-empty string.",
-        )
+        return None
 
     nested_tools = tool.get("tools")
     if not isinstance(nested_tools, list):
-        _raise_openai_param_error(
-            "tools",
-            f"`tools[{index}].tools` must be an array.",
-        )
+        return None
 
-    for nested_index, nested_tool in enumerate(nested_tools):
+    sanitized_nested_tools = []
+    for nested_tool in nested_tools:
         if not isinstance(nested_tool, Mapping):
-            _raise_openai_param_error(
-                "tools",
-                f"`tools[{index}].tools[{nested_index}]` must be an object.",
-            )
+            continue
         nested_type = nested_tool.get("type")
         if nested_type is None and allow_function_like_tools:
-            _validate_function_like_tool(
-                nested_tool,
-                f"`tools[{index}].tools[{nested_index}]`",
-            )
+            if _is_function_like_tool(nested_tool):
+                sanitized_nested_tools.append(dict(nested_tool))
             continue
-        if nested_type != "function":
-            _raise_openai_param_error(
-                "tools",
-                "Only function tools are supported inside namespace tools.",
-            )
+        if nested_type == "function" and _is_function_tool(nested_tool):
+            sanitized_nested_tools.append(dict(nested_tool))
+
+    if not sanitized_nested_tools:
+        return None
+
+    sanitized_tool = dict(tool)
+    sanitized_tool["tools"] = sanitized_nested_tools
+    return sanitized_tool
 
 
-def _validate_function_like_tool(tool: Mapping[str, Any], label: str) -> None:
+def _sanitize_functions(data: dict[str, Any]) -> None:
+    functions = data.get("functions")
+    if functions is None:
+        return
+    if not isinstance(functions, list):
+        data.pop("functions", None)
+        return
+
+    sanitized_functions = [
+        dict(function)
+        for function in functions
+        if isinstance(function, Mapping) and _is_non_empty_string(function.get("name"))
+    ]
+    if sanitized_functions:
+        data["functions"] = sanitized_functions
+    else:
+        data.pop("functions", None)
+
+
+def _is_function_tool(tool: Mapping[str, Any]) -> bool:
+    function = tool.get("function")
+    if isinstance(function, Mapping):
+        return _is_non_empty_string(function.get("name"))
+    return _is_function_like_tool(tool)
+
+
+def _is_function_like_tool(tool: Mapping[str, Any]) -> bool:
     name = tool.get("name")
-    if not isinstance(name, str) or not name:
-        _raise_openai_param_error(
-            "tools",
-            f"{label}.name must be a non-empty string.",
-        )
-    if "parameters" not in tool and "input_schema" not in tool:
-        _raise_openai_param_error(
-            "tools",
-            f"{label} must include `parameters` or `input_schema`.",
-        )
+    if not _is_non_empty_string(name):
+        return False
+    return "parameters" in tool or "input_schema" in tool
+
+
+def _is_non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value)
 
 
 def _raise_openai_param_error(param: str, message: str) -> None:

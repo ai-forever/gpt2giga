@@ -136,13 +136,13 @@ sequenceDiagram
 
 При ответе `429` OpenAI SDK по умолчанию повторяет запросы: `max_retries=2`, то есть один клиентский вызов может отправить до трёх HTTP-запросов в gpt2giga. Чтобы отключить эти клиентские повторы, передайте `max_retries=0` при создании `OpenAI`/`AsyncOpenAI` клиента.
 
-`extra_headers` и HTTP headers переносятся в request-scoped contextvars SDK GigaChat для безопасных служебных заголовков: `x-request-id`, `x-session-id`, `x-service-id`, `x-operation-id`, `x-client-id`, `x-trace-id`, `x-agent-id`. Прочие безопасные пользовательские заголовки идут через `custom_headers_cvar`; `Authorization`, `x-api-key`, transport headers, `x-stainless-*`, `openai-*` и `anthropic-*` заблокированы. `extra_query` по умолчанию не прокидывает произвольные query-параметры upstream. Неподдержанные body-параметры возвращают совместимую ошибку `400`.
+`extra_headers` и HTTP headers переносятся в request-scoped contextvars SDK GigaChat для безопасных служебных заголовков: `x-request-id`, `x-session-id`, `x-service-id`, `x-operation-id`, `x-client-id`, `x-trace-id`, `x-agent-id`. Прочие безопасные пользовательские заголовки идут через `custom_headers_cvar`; `Authorization`, `x-api-key`, cookies, transport headers, `x-stainless-*`, `openai-*` и `anthropic-*` заблокированы. `extra_query` по умолчанию не прокидывает произвольные query-параметры upstream. Неподдержанные optional body-параметры принимаются и игнорируются, чтобы не ломать SDK-клиенты.
 
 `extra_body` для Chat Completions, Responses и Anthropic Messages переносится в GigaChat `additional_fields` целиком, включая SDK-style поля, которые клиент разворачивает в top-level JSON:
 
-- OpenAI Embeddings не поддерживает `extra_body`; используйте только `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query`.
-- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` возвращают `400`. Built-in tools принимаются для Responses API в режиме GigaChat v2 (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); нормализованные OpenAI Responses output items и stream progress events сейчас строятся для `web_search*` и `image_generation` / `image_generate`.
-- Для Anthropic Messages unsupported параметры и блоки вроде `container`, `context_management`, `mcp_servers`, server tools, `document`, `file`, `container_upload`, `search_result`, `thinking`/`redacted_thinking` во входном контенте возвращают `400`.
+- OpenAI Embeddings принимает и игнорирует `extra_body`, неизвестные top-level поля и `dimensions`; исполняемыми остаются `input`, `model`, `encoding_format=base64`, `extra_headers`, `extra_query`.
+- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` принимаются и игнорируются. Built-in tools поддерживаются на GigaChat v2 surface (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); для `/responses` v2 также строятся нормализованные Responses output items и stream progress events для `web_search*` и `image_generation` / `image_generate`. `/chat/completions` v1 остаётся поддержанным compatibility route, но новые tool/built-in-tool возможности развиваются для GigaChat v2 mode.
+- Для Anthropic Messages unsupported параметры и блоки вроде `container`, `context_management`, `mcp_servers`, server tools, `document`, `file`, `container_upload`, `search_result`, `thinking`/`redacted_thinking` во входном контенте принимаются и игнорируются.
 
 OpenAI SDK:
 
@@ -172,14 +172,14 @@ client.messages.create(
 )
 ```
 
-Пример ожидаемой ошибки:
+Пример игнорируемого compatibility-поля:
 
 ```python
 client.messages.create(
     model="GigaChat-2-Max",
     max_tokens=256,
     messages=[{"role": "user", "content": "Привет"}],
-    extra_body={"mcp_servers": []},  # 400: MCP server tools are not supported
+    extra_body={"mcp_servers": []},  # accepted, ignored
 )
 ```
 
@@ -445,7 +445,7 @@ GPT2GIGA_GIGACHAT_API_MODE=v2
 | `v1` | `v2` | `v1` | `v2` |
 | `v2` | `v1` | `v2` | `v1` |
 
-Режим `v2` меняет только backend-вызовы к GigaChat (`achat.create` / `achat.stream`); внешние OpenAI-compatible маршруты и URL `/v1/...` остаются прежними.
+Режим `v2` меняет только backend-вызовы к GigaChat (`achat.create` / `achat.stream`); внешние OpenAI-compatible маршруты и URL `/v1/...` остаются прежними. `/chat/completions` v1 поддерживается для совместимости, но новые tool/built-in-tool возможности ориентированы на GigaChat `v2/chat/completions`.
 
 > Для maintainers: эта реализация целится в `gigachat==0.2.2a1` и не является переносом pre-release/1.0.0 архитектуры из PR #123.
 

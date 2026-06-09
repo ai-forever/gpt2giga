@@ -142,21 +142,20 @@ def test_transform_responses_parameters_accepts_flat_forced_function_tool_choice
     assert out["function_call"] == {"name": "lookup"}
 
 
-def test_transform_responses_parameters_rejects_builtin_tools_in_v1_mode():
+def test_transform_responses_parameters_ignores_builtin_tools_in_v1_mode():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_responses_parameters(
-            {
-                "model": "gpt-x",
-                "input": "search",
-                "tools": [{"type": "web_search"}],
-            }
-        )
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "search",
+            "tools": [{"type": "web_search"}],
+        }
+    )
 
-    assert exc_info.value.param == "tools"
-    assert "Only function tools" in exc_info.value.message
+    assert "tools" not in out
+    assert "functions" not in out
 
 
 def test_transform_responses_parameters_accepts_builtin_tools_in_v2_mode():
@@ -287,20 +286,22 @@ def test_transform_chat_parameters_maps_max_completion_tokens():
 
 
 @pytest.mark.parametrize("conflict_param", ["max_tokens", "max_output_tokens"])
-def test_transform_chat_parameters_rejects_token_limit_conflicts(conflict_param):
+def test_transform_chat_parameters_ignores_conflicting_max_completion_tokens(
+    conflict_param,
+):
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_chat_parameters(
-            {
-                "model": "gpt-x",
-                "max_completion_tokens": 128,
-                conflict_param: 64,
-            }
-        )
+    out = rt.transform_chat_parameters(
+        {
+            "model": "gpt-x",
+            "max_completion_tokens": 128,
+            conflict_param: 64,
+        }
+    )
 
-    assert exc_info.value.param == "max_completion_tokens"
+    assert out["max_tokens"] == 64
+    assert "max_completion_tokens" not in out
 
 
 def test_transform_common_parameters_drops_extra_headers_and_extra_query():
@@ -445,14 +446,16 @@ def test_openai_parameter_classifier_marks_known_states():
     assert classify_openai_chat_parameter("profanity_check") == (
         ClientParamStatus.SUPPORTED
     )
-    assert classify_openai_chat_parameter("logprobs") == ClientParamStatus.REJECTED
+    assert classify_openai_chat_parameter("logprobs") == (
+        ClientParamStatus.ACCEPTED_IGNORED
+    )
     assert classify_openai_chat_parameter("custom_flag") == ClientParamStatus.SUPPORTED
     assert classify_openai_responses_parameter("input") == ClientParamStatus.SUPPORTED
     assert classify_openai_responses_parameter("include") == (
         ClientParamStatus.ACCEPTED_IGNORED
     )
     assert classify_openai_responses_parameter("previous_response_id") == (
-        ClientParamStatus.REJECTED
+        ClientParamStatus.ACCEPTED_IGNORED
     )
 
 
@@ -469,16 +472,13 @@ def test_openai_parameter_classifier_marks_known_states():
         ({"web_search_options": {"search_context_size": "low"}}, "web_search_options"),
     ],
 )
-def test_transform_chat_parameters_rejects_unsupported_openai_params(body, param):
+def test_transform_chat_parameters_ignores_unsupported_openai_params(body, param):
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_chat_parameters({"model": "gpt-x", **body})
+    out = rt.transform_chat_parameters({"model": "gpt-x", **body})
 
-    assert exc_info.value.provider == "openai"
-    assert exc_info.value.param == param
-    assert exc_info.value.status_code == 400
+    assert param not in out
 
 
 def test_transform_chat_parameters_ignores_metadata_params_and_n_one():
@@ -507,55 +507,52 @@ def test_transform_chat_parameters_ignores_metadata_params_and_n_one():
     assert "parallel_tool_calls" not in out
 
 
-def test_transform_chat_parameters_rejects_store_true():
+def test_transform_chat_parameters_ignores_store_true():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_chat_parameters({"model": "gpt-x", "store": True})
+    out = rt.transform_chat_parameters({"model": "gpt-x", "store": True})
 
-    assert exc_info.value.param == "store"
+    assert "store" not in out
 
 
-def test_transform_chat_parameters_rejects_builtin_tools():
+def test_transform_chat_parameters_ignores_builtin_tools_in_v1_mode():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_chat_parameters(
-            {"model": "gpt-x", "tools": [{"type": "web_search"}]}
-        )
+    out = rt.transform_chat_parameters(
+        {"model": "gpt-x", "tools": [{"type": "web_search"}]}
+    )
 
-    assert exc_info.value.param == "tools"
-    assert "Only function tools" in exc_info.value.message
+    assert "tools" not in out
+    assert "functions" not in out
 
 
-def test_transform_chat_parameters_rejects_namespace_tools():
+def test_transform_chat_parameters_ignores_namespace_tools_in_v1_mode():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_chat_parameters(
-            {
-                "model": "gpt-x",
-                "tools": [
-                    {
-                        "type": "namespace",
-                        "name": "mcp__playwright",
-                        "tools": [
-                            {
-                                "type": "function",
-                                "name": "browser_navigate",
-                                "parameters": {"type": "object"},
-                            }
-                        ],
-                    }
-                ],
-            }
-        )
+    out = rt.transform_chat_parameters(
+        {
+            "model": "gpt-x",
+            "tools": [
+                {
+                    "type": "namespace",
+                    "name": "mcp__playwright",
+                    "tools": [
+                        {
+                            "type": "function",
+                            "name": "browser_navigate",
+                            "parameters": {"type": "object"},
+                        }
+                    ],
+                }
+            ],
+        }
+    )
 
-    assert exc_info.value.param == "tools"
-    assert "Only function tools" in exc_info.value.message
+    assert "tools" not in out
+    assert "functions" not in out
 
 
 def test_transform_responses_parameters_accepts_namespace_tools():
@@ -646,20 +643,19 @@ def test_transform_chat_parameters_applies_tool_choice_policy():
     assert "functions" not in none
 
 
-def test_transform_responses_parameters_rejects_stateful_params():
+def test_transform_responses_parameters_ignores_stateful_params_in_v1_mode():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_responses_parameters(
-            {
-                "model": "gpt-x",
-                "input": "hello",
-                "previous_response_id": "resp_1",
-            }
-        )
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            "previous_response_id": "resp_1",
+        }
+    )
 
-    assert exc_info.value.param == "previous_response_id"
+    assert "previous_response_id" not in out
 
 
 def test_transform_responses_parameters_allows_stateful_params_in_v2_mode():
@@ -681,20 +677,19 @@ def test_transform_responses_parameters_allows_stateful_params_in_v2_mode():
 
 
 @pytest.mark.parametrize("param", ["max_tool_calls", "truncation"])
-def test_transform_responses_parameters_rejects_unsupported_controls(param):
+def test_transform_responses_parameters_ignores_unsupported_controls(param):
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        rt.transform_responses_parameters(
-            {
-                "model": "gpt-x",
-                "input": "hello",
-                param: "auto",
-            }
-        )
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "hello",
+            param: "auto",
+        }
+    )
 
-    assert exc_info.value.param == param
+    assert param not in out
 
 
 def test_transform_responses_parameters_ignores_include():

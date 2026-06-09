@@ -73,6 +73,32 @@ async def test_prepare_chat_completion_v2_maps_tools_and_forced_function_call():
 
 
 @pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_maps_builtin_tools_in_v2_mode():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion_v2(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "search"}],
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                }
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert request.tools[0].web_search.indexes == ["web"]
+    assert request.tools[0].web_search.flags == ["trusted"]
+    assert request.tool_config.mode == "tool"
+    assert request.tool_config.tool_name == "web_search"
+
+
+@pytest.mark.asyncio
 async def test_prepare_chat_completion_v2_maps_native_structured_output_and_reasoning():
     cfg = ProxyConfig(
         proxy=ProxySettings(

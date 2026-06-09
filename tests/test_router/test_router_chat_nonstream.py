@@ -211,7 +211,7 @@ def test_chat_completions_v1_stream_preserves_called_tools_from_request():
     ]
 
 
-def test_chat_completions_rejects_unsupported_param_with_openai_error():
+def test_chat_completions_ignores_unsupported_param():
     app = make_app_with_real_transformer()
     client = TestClient(app)
     payload = {
@@ -222,12 +222,11 @@ def test_chat_completions_rejects_unsupported_param_with_openai_error():
 
     resp = client.post("/chat/completions", json=payload)
 
-    assert resp.status_code == 400
-    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
-    assert resp.json()["detail"]["error"]["param"] == "logprobs"
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["message"]["content"] == "ok"
 
 
-def test_chat_completions_rejects_malformed_tools_with_openai_error():
+def test_chat_completions_ignores_malformed_tools():
     app = make_app_with_real_transformer()
     client = TestClient(app)
     payload = {
@@ -238,18 +237,14 @@ def test_chat_completions_rejects_malformed_tools_with_openai_error():
 
     resp = client.post("/chat/completions", json=payload)
 
-    assert resp.status_code == 400
-    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
-    assert resp.json()["detail"]["error"]["param"] == "tools"
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["message"]["content"] == "ok"
 
 
 @pytest.mark.parametrize(
-    ("tool_payload", "param"),
+    "tool_payload",
     [
-        (
-            {"functions": [{"parameters": {"type": "object", "properties": {}}}]},
-            "functions",
-        ),
+        {"functions": [{"parameters": {"type": "object", "properties": {}}}]},
         (
             {
                 "tools": [
@@ -260,12 +255,11 @@ def test_chat_completions_rejects_malformed_tools_with_openai_error():
                         },
                     }
                 ]
-            },
-            "tools",
+            }
         ),
     ],
 )
-def test_chat_completions_rejects_tool_definitions_without_name(tool_payload, param):
+def test_chat_completions_ignores_tool_definitions_without_name(tool_payload):
     app = make_app_with_real_transformer()
     client = TestClient(app)
     payload = {
@@ -276,9 +270,8 @@ def test_chat_completions_rejects_tool_definitions_without_name(tool_payload, pa
 
     resp = client.post("/chat/completions", json=payload)
 
-    assert resp.status_code == 400
-    assert resp.json()["detail"]["error"]["type"] == "invalid_request_error"
-    assert resp.json()["detail"]["error"]["param"] == param
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["message"]["content"] == "ok"
 
 
 def test_chat_completions_non_stream_response_api():

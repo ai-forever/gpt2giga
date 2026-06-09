@@ -1,8 +1,7 @@
 import json
 
 import httpx
-import pytest
-from anthropic import Anthropic, BadRequestError
+from anthropic import Anthropic
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
@@ -236,17 +235,16 @@ def test_anthropic_sdk_custom_extra_body_reaches_additional_fields():
     }
 
 
-def test_anthropic_sdk_rejected_unsupported_beta_feature():
+def test_anthropic_sdk_ignores_unsupported_beta_feature():
     app = _make_app()
     client = _make_anthropic_client(app)
 
-    with pytest.raises(BadRequestError) as exc_info:
-        client.messages.create(
-            model="GigaChat",
-            max_tokens=16,
-            messages=[{"role": "user", "content": "hello"}],
-            extra_body={"mcp_servers": [{"type": "url", "url": "https://mcp.test"}]},
-        )
+    message = client.messages.create(
+        model="GigaChat",
+        max_tokens=16,
+        messages=[{"role": "user", "content": "hello"}],
+        extra_body={"mcp_servers": [{"type": "url", "url": "https://mcp.test"}]},
+    )
 
-    assert exc_info.value.status_code == 400
-    assert "MCP server tools are not supported" in str(exc_info.value)
+    assert message.content[0].text == "ok"
+    assert "mcp_servers" not in app.state.gigachat_client.chat_payloads[-1]

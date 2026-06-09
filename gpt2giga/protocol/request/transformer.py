@@ -13,7 +13,6 @@ from gigachat.models import (
     MessagesRole,
 )
 
-from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
@@ -544,11 +543,23 @@ class RequestTransformer:
     def _responses_builtin_tools_enabled(self) -> bool:
         return self.config.proxy_settings.resolve_responses_api_mode() == "v2"
 
+    def _chat_builtin_tools_enabled(self) -> bool:
+        return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
+
     def transform_chat_parameters(self, data: Dict) -> Dict:
         """Transforms chat parameters (Chat Completions API)."""
-        data = sanitize_openai_chat_parameters(data)
+        builtin_tools_enabled = self._chat_builtin_tools_enabled()
+        data = sanitize_openai_chat_parameters(
+            data,
+            allow_builtin_tools=builtin_tools_enabled,
+            allow_namespace_tools=builtin_tools_enabled,
+        )
         data = self._map_chat_token_limit(data)
         transformed = self._transform_common_parameters(data)
+        if builtin_tools_enabled:
+            builtin_tools = self._build_v2_builtin_tool_payloads(data.get("tools"))
+            if builtin_tools:
+                transformed["_gpt2giga_builtin_tools"] = builtin_tools
 
         response_format: dict | None = transformed.pop("response_format", None)
         if response_format:
@@ -583,12 +594,7 @@ class RequestTransformer:
 
         for conflict_param in ("max_tokens", "max_output_tokens"):
             if transformed.get(conflict_param) is not None:
-                raise ClientCompatibilityError(
-                    "`max_completion_tokens` cannot be combined with "
-                    f"`{conflict_param}`.",
-                    provider="openai",
-                    param="max_completion_tokens",
-                )
+                return transformed
 
         transformed["max_tokens"] = max_completion_tokens
         return transformed

@@ -3,7 +3,6 @@ from typing import Any
 
 from gigachat.models import Function, FunctionParameters
 
-from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
 
 _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
@@ -158,19 +157,11 @@ def iter_function_tool_payloads(data: dict, *, require_parameters: bool = True):
     if tools is None:
         return
     if not isinstance(tools, list):
-        raise ClientCompatibilityError(
-            f"`{source}` must be an array.",
-            provider="openai",
-            param=source,
-        )
+        return
 
     for index, tool in enumerate(tools):
         if not isinstance(tool, Mapping):
-            raise ClientCompatibilityError(
-                f"`{source}[{index}]` must be an object.",
-                provider="openai",
-                param=source,
-            )
+            continue
         if normalize_gigachat_builtin_tool_type(tool.get("type")) is not None:
             continue
         if tool.get("type") == "namespace":
@@ -183,16 +174,15 @@ def iter_function_tool_payloads(data: dict, *, require_parameters: bool = True):
             continue
 
         if "function" in tool and not isinstance(tool["function"], Mapping):
-            raise ClientCompatibilityError(
-                f"`{source}[{index}].function` must be an object.",
-                provider="openai",
-                param=source,
-            )
+            continue
         function = _function_tool_payload(tool, require_parameters=require_parameters)
         if function is None:
             continue
         function = dict(function)
-        function["name"] = _require_tool_name(function, source, index)
+        name = _optional_tool_name(function)
+        if name is None:
+            continue
+        function["name"] = name
         yield function
 
 
@@ -203,23 +193,16 @@ def _iter_namespace_function_payloads(
     *,
     require_parameters: bool = True,
 ):
-    namespace = _require_tool_name(tool, source, index)
+    namespace = _optional_tool_name(tool)
+    if namespace is None:
+        return
     nested_tools = tool.get("tools")
     if not isinstance(nested_tools, list):
-        raise ClientCompatibilityError(
-            f"`{source}[{index}].tools` must be an array.",
-            provider="openai",
-            param=source,
-        )
+        return
 
-    nested_source = f"{source}[{index}].tools"
-    for nested_index, nested_tool in enumerate(nested_tools):
+    for nested_tool in nested_tools:
         if not isinstance(nested_tool, Mapping):
-            raise ClientCompatibilityError(
-                f"`{nested_source}[{nested_index}]` must be an object.",
-                provider="openai",
-                param=source,
-            )
+            continue
         function = _function_tool_payload(
             nested_tool,
             require_parameters=require_parameters,
@@ -227,7 +210,9 @@ def _iter_namespace_function_payloads(
         if function is None:
             continue
         function = dict(function)
-        function_name = _require_tool_name(function, nested_source, nested_index)
+        function_name = _optional_tool_name(function)
+        if function_name is None:
+            continue
         function["name"] = map_namespaced_tool_name_to_gigachat(
             namespace,
             function_name,
@@ -266,14 +251,10 @@ def _tool_source(data: dict) -> tuple[str, Any]:
     return "functions", data.get("functions", [])
 
 
-def _require_tool_name(definition: Mapping, source: str, index: int) -> str:
+def _optional_tool_name(definition: Mapping) -> str | None:
     name = definition.get("name")
     if not isinstance(name, str) or not name:
-        raise ClientCompatibilityError(
-            f"`{source}[{index}].name` must be a non-empty string.",
-            provider="openai",
-            param=source,
-        )
+        return None
     return name
 
 
