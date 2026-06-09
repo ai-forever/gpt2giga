@@ -310,7 +310,9 @@ def test_chat_completions_normalization_on_without_fallback_returns_error():
 def test_chat_completions_shadow_mode_adapter_error_does_not_break_legacy_response():
     calls = []
     app = make_app()
-    app.state.config = ProxyConfig(proxy=ProxySettings(normalization_mode="shadow"))
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="shadow", gigachat_api_mode="v1")
+    )
 
     class BrokenShadowAdapter:
         async def to_normalized(self, payload, *, context=None):
@@ -336,7 +338,9 @@ def test_chat_completions_shadow_mode_adapter_error_does_not_break_legacy_respon
 def test_chat_completions_normalization_off_does_not_call_shadow_adapter():
     calls = []
     app = make_app()
-    app.state.config = ProxyConfig(proxy=ProxySettings(normalization_mode="off"))
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="off", gigachat_api_mode="v1")
+    )
 
     class RecordingShadowAdapter:
         async def to_normalized(self, payload, *, context=None):
@@ -356,7 +360,9 @@ def test_chat_completions_normalization_off_does_not_call_shadow_adapter():
 
 def test_chat_completions_shadow_mode_records_shape_diagnostic_without_raw_prompt():
     app = make_app()
-    app.state.config = ProxyConfig(proxy=ProxySettings(normalization_mode="shadow"))
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="shadow", gigachat_api_mode="v1")
+    )
     client = TestClient(app)
 
     resp = client.post(

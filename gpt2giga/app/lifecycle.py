@@ -21,6 +21,7 @@ from gpt2giga.sinks.logs.retention import (
     start_traffic_log_retention_task,
     stop_traffic_log_retention_task,
 )
+from gpt2giga.sinks.metrics.factory import create_metrics_sink, flush_metrics_sink
 from gpt2giga.sinks.observability.factory import (
     create_observability_sink,
     flush_observability_sink,
@@ -51,6 +52,8 @@ async def lifespan(app: FastAPI):
         app.state.observability_sink = create_observability_sink(
             config.proxy_settings, logger=logger
         )
+    if not hasattr(app.state, "metrics_sink"):
+        app.state.metrics_sink = create_metrics_sink(config.proxy_settings)
     app.state.traffic_log_retention_task = start_traffic_log_retention_task(
         config.proxy_settings,
         app.state.traffic_log_query_store,
@@ -83,6 +86,7 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Application shutdown initiated")
+    await flush_metrics_sink(getattr(app.state, "metrics_sink", None), logger=logger)
     await flush_observability_sink(
         getattr(app.state, "observability_sink", None), logger=logger
     )

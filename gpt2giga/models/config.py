@@ -273,6 +273,14 @@ class ProxySettings(BaseSettings):
         default=True,
         description="Redact sensitive content before adding observability attributes.",
     )
+    metrics_enabled: bool = Field(
+        default=False,
+        description="Enable Prometheus-compatible runtime metrics endpoint.",
+    )
+    metrics_path: str = Field(
+        default="/metrics",
+        description="HTTP path for the Prometheus-compatible metrics endpoint.",
+    )
     ui_enabled: bool = Field(
         default=False,
         description="Enable future built-in debugging and playground UI.",
@@ -389,6 +397,18 @@ class ProxySettings(BaseSettings):
                 for item in value
             ]
         return value
+
+    @field_validator("metrics_path", mode="before")
+    @classmethod
+    def normalize_metrics_path(cls, value):
+        if not isinstance(value, str):
+            return value
+        path = value.strip()
+        if not path:
+            return "/metrics"
+        if not path.startswith("/"):
+            path = f"/{path}"
+        return path.rstrip("/") or "/metrics"
 
     def resolve_responses_api_mode(self) -> Literal["v1", "v2"]:
         """Return the effective GigaChat backend mode for `/responses`."""

@@ -57,8 +57,9 @@ same redaction rules as traffic logs.
 
 ## Metrics
 
-Metrics are aggregate counters, gauges, and histograms for operational health.
-They are expected to power a future `/metrics` endpoint or exporter.
+Metrics are aggregate counters and histograms for operational health. They are
+disabled by default and can be exposed through the Prometheus-compatible
+`/metrics` endpoint with `GPT2GIGA_METRICS_ENABLED=True`.
 
 Metrics should describe aggregate behavior such as:
 
@@ -71,3 +72,9 @@ Metrics should describe aggregate behavior such as:
 Metrics must not include prompt or response content. Labels should avoid high
 cardinality raw identifiers; use bounded protocol, route, status, and model
 values where possible.
+
+The metrics endpoint follows the same API-key policy as public API routes. In
+`PROD` it requires `GPT2GIGA_API_KEY`; in `DEV` it is open only when global
+API-key auth is disabled. It exports baseline service series for request counts,
+request/upstream latency, upstream errors, token totals, stream disconnects, and
+traffic-log queue drops.

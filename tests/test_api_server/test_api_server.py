@@ -7,6 +7,7 @@ from gpt2giga.common.app_meta import check_port_available
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.metrics.noop import NoopMetricsSink
 from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 
 
@@ -105,6 +106,7 @@ def test_app_factory_creates_default_extension_sinks():
 
     assert isinstance(app.state.traffic_log_sink, NoopTrafficLogSink)
     assert isinstance(app.state.observability_sink, NoopObservabilitySink)
+    assert isinstance(app.state.metrics_sink, NoopMetricsSink)
 
 
 def test_app_factory_creates_openai_protocol_adapter():

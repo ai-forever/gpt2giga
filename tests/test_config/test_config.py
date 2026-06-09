@@ -37,6 +37,8 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH", raising=False)
     monkeypatch.delenv("GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_METRICS_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_METRICS_PATH", raising=False)
     monkeypatch.delenv("PHOENIX_COLLECTOR_ENDPOINT", raising=False)
     monkeypatch.delenv("PHOENIX_PROJECT_NAME", raising=False)
     monkeypatch.delenv("PHOENIX_API_KEY", raising=False)
@@ -87,6 +89,8 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.observability_capture_responses is False
     assert s.observability_max_content_length == 8000
     assert s.observability_redaction_enabled is True
+    assert s.metrics_enabled is False
+    assert s.metrics_path == "/metrics"
     assert s.ui_enabled is False
     assert s.debug_translate_enabled is False
     assert s.admin_api_enabled is False
@@ -266,6 +270,8 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES", "true")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH", "512")
     monkeypatch.setenv("GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED", "false")
+    monkeypatch.setenv("GPT2GIGA_METRICS_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_METRICS_PATH", "internal/metrics/")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_ADMIN_API_ENABLED", "true")
@@ -312,6 +318,8 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.observability_capture_responses is True
     assert s.observability_max_content_length == 512
     assert s.observability_redaction_enabled is False
+    assert s.metrics_enabled is True
+    assert s.metrics_path == "/internal/metrics"
     assert s.ui_enabled is True
     assert s.debug_translate_enabled is True
     assert s.admin_api_enabled is True

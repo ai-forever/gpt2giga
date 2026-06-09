@@ -15,6 +15,7 @@ from gpt2giga.app.settings import (
 from gpt2giga.api.admin import debug_router, logs_router as admin_logs_router
 from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.openai import router as openai_router
+from gpt2giga.api.system.metrics import mount_metrics_endpoint
 from gpt2giga.auth import verify_api_key
 from gpt2giga.common.app_meta import get_app_version
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
@@ -28,6 +29,7 @@ from gpt2giga.routers.logs_router import logs_api_router, logs_router
 from gpt2giga.routers.system_router import system_router
 from gpt2giga.sinks.logs.factory import create_traffic_log_sink
 from gpt2giga.sinks.logs.query import create_traffic_log_query_store
+from gpt2giga.sinks.metrics.factory import create_metrics_sink
 from gpt2giga.sinks.observability.factory import create_observability_sink
 
 
@@ -56,6 +58,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         config.proxy_settings
     )
     app.state.observability_sink = create_observability_sink(config.proxy_settings)
+    app.state.metrics_sink = create_metrics_sink(config.proxy_settings)
 
     app.add_middleware(
         CORSMiddleware,
@@ -96,6 +99,12 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         return RedirectResponse(url="/docs")
 
     api_dependencies = [Depends(verify_api_key)] if auth_required else []
+    if config.proxy_settings.metrics_enabled:
+        mount_metrics_endpoint(
+            app,
+            path=config.proxy_settings.metrics_path,
+            dependencies=api_dependencies,
+        )
     app.include_router(openai_router, dependencies=api_dependencies)
     app.include_router(
         openai_router,

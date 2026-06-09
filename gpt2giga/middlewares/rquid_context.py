@@ -11,6 +11,10 @@ from gpt2giga.sinks.logs.emission import (
     is_streaming_content_type,
     wrap_traffic_log_body_iterator,
 )
+from gpt2giga.sinks.metrics.emission import (
+    emit_request_metrics,
+    wrap_metrics_body_iterator,
+)
 from gpt2giga.sinks.observability.emission import (
     emit_request_observability_event,
     wrap_observability_body_iterator,
@@ -53,6 +57,15 @@ class RquidMiddleware(BaseHTTPMiddleware):
                 error_type=type(exc).__name__,
                 error_message=str(exc),
             )
+            await emit_request_metrics(
+                getattr(request.app.state, "metrics_sink", None),
+                request_context,
+                status_code=500,
+                lifecycle="request_error",
+                logger=getattr(request.app.state, "logger", None),
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
             raise
         finally:
             rquid_context.reset(token)
@@ -61,19 +74,27 @@ class RquidMiddleware(BaseHTTPMiddleware):
         response.headers["X-Request-ID"] = rquid
         sink = getattr(request.app.state, "traffic_log_sink", None)
         observability_sink = getattr(request.app.state, "observability_sink", None)
+        metrics_sink = getattr(request.app.state, "metrics_sink", None)
         content_type = response.headers.get("content-type")
         is_streaming = is_streaming_content_type(content_type)
         if hasattr(response, "body_iterator"):
-            response.body_iterator = wrap_observability_body_iterator(
-                wrap_traffic_log_body_iterator(
-                    response.body_iterator,
-                    sink=sink,
+            response.body_iterator = wrap_metrics_body_iterator(
+                wrap_observability_body_iterator(
+                    wrap_traffic_log_body_iterator(
+                        response.body_iterator,
+                        sink=sink,
+                        context=request_context,
+                        status_code=response.status_code,
+                        is_streaming=is_streaming,
+                        logger=getattr(request.app.state, "logger", None),
+                    ),
+                    sink=observability_sink,
                     context=request_context,
                     status_code=response.status_code,
                     is_streaming=is_streaming,
                     logger=getattr(request.app.state, "logger", None),
                 ),
-                sink=observability_sink,
+                sink=metrics_sink,
                 context=request_context,
                 status_code=response.status_code,
                 is_streaming=is_streaming,
@@ -89,6 +110,13 @@ class RquidMiddleware(BaseHTTPMiddleware):
             )
             await emit_request_observability_event(
                 observability_sink,
+                request_context,
+                status_code=response.status_code,
+                lifecycle="request_completed",
+                logger=getattr(request.app.state, "logger", None),
+            )
+            await emit_request_metrics(
+                metrics_sink,
                 request_context,
                 status_code=response.status_code,
                 lifecycle="request_completed",

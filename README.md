@@ -493,6 +493,8 @@ gpt2giga \
 - `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES="False"` — отправлять normalized model response content в LLM span attributes; требует `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True`;
 - `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH="8000"` — максимальная длина одного сериализованного content attribute перед truncation;
 - `GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED="True"` — редактировать sensitive content перед observability export;
+- `GPT2GIGA_METRICS_ENABLED="False"` — включить Prometheus-compatible endpoint с aggregate runtime metrics. По умолчанию выключено;
+- `GPT2GIGA_METRICS_PATH="/metrics"` — HTTP path для metrics endpoint при `GPT2GIGA_METRICS_ENABLED=True`;
 - `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
 - `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
 - `GPT2GIGA_ADMIN_API_ENABLED="False"` — включить protected admin endpoints `/_admin/*`. По умолчанию выключено, включая PROD;
@@ -587,6 +589,8 @@ GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=False
 GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=False
 GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH=8000
 GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
+GPT2GIGA_METRICS_ENABLED=False
+GPT2GIGA_METRICS_PATH=/metrics
 GPT2GIGA_UI_ENABLED=False
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
 GPT2GIGA_ADMIN_API_ENABLED=False
@@ -594,7 +598,7 @@ GPT2GIGA_ADMIN_API_ENABLED=False
 GPT2GIGA_REPLAY_ENABLED=False
 ```
 
-`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. OpenSearch traffic logs являются optional mirror: используйте `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch` и extra `opensearch`; Bulk writer делает короткий retry with backoff, а ошибки OpenSearch изолируются от API request path. Dead-letter storage пока не включен: при недоступном OpenSearch events после retry отбрасываются и Postgres остается source of truth. Phoenix/OpenTelemetry observability является opt-in через extra `phoenix` и `GPT2GIGA_OBSERVABILITY_ENABLED=True`; content capture выключен по умолчанию. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
+`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. OpenSearch traffic logs являются optional mirror: используйте `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch` и extra `opensearch`; Bulk writer делает короткий retry with backoff, а ошибки OpenSearch изолируются от API request path. Dead-letter storage пока не включен: при недоступном OpenSearch events после retry отбрасываются и Postgres остается source of truth. Phoenix/OpenTelemetry observability является opt-in через extra `phoenix` и `GPT2GIGA_OBSERVABILITY_ENABLED=True`; content capture выключен по умолчанию. Prometheus-compatible metrics endpoint также выключен по умолчанию и монтируется только при `GPT2GIGA_METRICS_ENABLED=True`. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
 
 #### Phoenix observability
 
@@ -605,6 +609,42 @@ LLM payload attributes требуют двойного opt-in: включите 
 В normalized OpenAI Chat path дополнительно эмитятся LLM spans `protocol.normalize.request` и `protocol.normalize.response` с OpenInference-style metadata: model, provider, operation, token usage, finish reason, tool counts/names и streaming status. Для `stream=true` normalized path добавляет OTel span events `stream.start`, `stream.first_token`, `stream.tool_call_delta`, `stream.completed` и `stream.error`; raw deltas попадают в attributes только при включенном `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=True`.
 
 Traffic logs и Phoenix spans связываются через gateway identifiers. `TrafficLogEvent` сохраняет `trace_id` и, если он доступен во входном `x-span-id`, `span_id`; Phoenix spans `gpt2giga.request`, `provider.gigachat.request` и streaming `stream.emit` получают те же значения как attributes `trace_id`, `span_id`, `request_id`, `route`, `protocol` и `model_requested`. Чтобы расследовать запрос, найдите запись в `GET /_admin/logs?trace_id=<trace_id>` или в Postgres, затем откройте Phoenix и отфильтруйте spans по attribute `trace_id=<trace_id>`. OTel internal trace id может отличаться от gateway `trace_id`, поэтому в этом релизе стабильная связь — именно span attribute `trace_id`.
+
+#### Prometheus metrics
+
+Prometheus-compatible metrics выключены по умолчанию. Для локальной проверки задайте:
+
+```dotenv
+GPT2GIGA_METRICS_ENABLED=True
+GPT2GIGA_METRICS_PATH=/metrics
+```
+
+Если `GPT2GIGA_METRICS_ENABLED=False`, endpoint не монтируется и возвращает `404`. Если endpoint включен, он использует ту же API-key policy, что и публичные API routes: в `PROD` доступ требует `GPT2GIGA_API_KEY`, а в `DEV` endpoint открыт только когда `GPT2GIGA_ENABLE_API_KEY_AUTH=False`. При включенной auth передавайте `Authorization: Bearer <GPT2GIGA_API_KEY>` или `x-api-key`.
+
+Метрики не содержат prompt/response content, API keys, request ids, trace ids или raw payloads. Labels ограничены bounded operational fields вроде protocol, route, method, status, lifecycle, provider и model.
+
+Минимальный Prometheus scrape:
+
+```yaml
+scrape_configs:
+  - job_name: gpt2giga
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["localhost:8090"]
+```
+
+Если API-key auth включена:
+
+```yaml
+scrape_configs:
+  - job_name: gpt2giga
+    metrics_path: /metrics
+    bearer_token: "<GPT2GIGA_API_KEY>"
+    static_configs:
+      - targets: ["localhost:8090"]
+```
+
+Экспортируются baseline series: `gpt2giga_requests_total`, `gpt2giga_request_duration_seconds`, `gpt2giga_upstream_duration_seconds`, `gpt2giga_upstream_errors_total`, `gpt2giga_tokens_input_total`, `gpt2giga_tokens_output_total`, `gpt2giga_stream_disconnects_total`, `gpt2giga_traffic_log_dropped_total`.
 
 #### Admin traffic logs API
 

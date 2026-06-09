@@ -46,6 +46,7 @@
 - **Rich observability content controls**: добавлены default-off flags `GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES`, `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS`, `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES` и `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH` для safe opt-in LLM span payload attributes.
 - **OpenInference-style LLM spans**: normalized OpenAI Chat path эмитит `protocol.normalize.request` и `protocol.normalize.response` spans с model/provider/usage/finish/tool metadata и opt-in redacted payload attributes.
 - **Streaming observability span events**: normalized streaming path добавляет OTel span events `stream.start`, `stream.first_token`, `stream.tool_call_delta`, `stream.completed` и `stream.error`; generic streaming lifecycle дополнительно отмечает `stream.completed`/`stream.aborted`.
+- **Prometheus metrics baseline**: добавлен выключенный по умолчанию `GPT2GIGA_METRICS_ENABLED`, configurable `GPT2GIGA_METRICS_PATH`, in-process Prometheus-compatible sink и endpoint для aggregate service metrics без prompt/response content, request ids или secrets.
 
 ### Изменено
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.

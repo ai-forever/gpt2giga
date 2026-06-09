@@ -242,6 +242,21 @@ class RecordingObservabilitySink:
         return None
 
 
+class RecordingMetricsSink:
+    def __init__(self):
+        self.counters = []
+        self.observations = []
+
+    async def increment(self, name, value=1, attributes=None):
+        self.counters.append((name, value, attributes or {}))
+
+    async def observe(self, name, value, attributes=None):
+        self.observations.append((name, value, attributes or {}))
+
+    async def flush(self):
+        return None
+
+
 def test_rquid_middleware_emits_traffic_event_for_completed_request():
     test_app = FastAPI()
     sink = RecordingTrafficSink()
@@ -297,6 +312,41 @@ def test_rquid_middleware_emits_observability_event_for_completed_request():
     assert event["attributes"]["request_id"] == response.headers["x-request-id"]
     assert event["attributes"]["status_code"] == 200
     assert event["attributes"]["metadata"]["lifecycle"] == "request_completed"
+
+
+def test_rquid_middleware_emits_metrics_for_completed_request():
+    test_app = FastAPI()
+    sink = RecordingMetricsSink()
+    test_app.state.metrics_sink = sink
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v1/models")
+    async def models():
+        return {"data": []}
+
+    client = TestClient(test_app)
+    response = client.get("/v1/models")
+
+    assert response.status_code == 200
+    assert sink.counters == [
+        (
+            "gpt2giga_requests_total",
+            1,
+            {
+                "protocol": "openai",
+                "route": "/v1/models",
+                "method": "GET",
+                "status_code": 200,
+                "lifecycle": "request_completed",
+                "provider": "gigachat",
+            },
+        )
+    ]
+    assert len(sink.observations) == 1
+    name, value, attributes = sink.observations[0]
+    assert name == "gpt2giga_request_duration_seconds"
+    assert value >= 0
+    assert attributes["route"] == "/v1/models"
 
 
 def test_rquid_middleware_emits_traffic_event_for_validation_error():
