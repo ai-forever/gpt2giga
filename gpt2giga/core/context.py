@@ -13,6 +13,7 @@ from starlette.requests import Request
 from gpt2giga.core.caller import infer_request_caller
 
 _FINGERPRINT_KEY = secrets.token_bytes(32)
+_FINGERPRINT_ITERATIONS = 100_000
 
 
 @dataclass
@@ -60,8 +61,8 @@ def build_request_context(request: Request, *, request_id: str) -> RequestContex
         route=request.url.path,
         method=request.method,
         started_at=datetime.now(timezone.utc),
-        client_ip_hash=_hash_value(_client_ip(request)),
-        api_key_hash=_hash_value(_api_key_value(request)),
+        client_ip_hash=fingerprint_sensitive_value(_client_ip(request)),
+        api_key_hash=fingerprint_sensitive_value(_api_key_value(request)),
         caller_name=caller.name,
         caller_category=caller.category,
         caller_client_family=caller.client_family,
@@ -144,12 +145,15 @@ def _api_key_value(request: Request) -> Optional[str]:
     return None
 
 
-def _hash_value(value: Optional[str]) -> Optional[str]:
+def fingerprint_sensitive_value(value: Optional[str]) -> Optional[str]:
+    """Return a request-correlation fingerprint without storing raw secrets."""
     if not value:
         return None
-    digest = hashlib.blake2b(
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
         value.encode("utf-8"),
-        digest_size=8,
-        key=_FINGERPRINT_KEY,
-    ).hexdigest()
-    return f"keyed-blake2b:{digest}"
+        _FINGERPRINT_KEY,
+        _FINGERPRINT_ITERATIONS,
+        dklen=8,
+    ).hex()
+    return f"pbkdf2-sha256:{digest}"

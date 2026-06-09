@@ -1,7 +1,6 @@
 """Anthropic streaming helpers."""
 
 import json
-import traceback
 import uuid
 from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Dict, Optional
@@ -363,10 +362,9 @@ async def _stream_anthropic_generator(
             },
         )
     except Exception as exc:
-        traceback_text = traceback.format_exc()
         if logger:
             logger.error(
-                f"[{rquid}] Unexpected streaming error: {type(exc).__name__}: {exc}\n{traceback_text}"
+                f"[{rquid}] Unexpected streaming error: {type(exc).__name__}: {exc}"
             )
         yield sse(
             "error",

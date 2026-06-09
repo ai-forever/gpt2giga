@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping
 from copy import deepcopy
@@ -13,7 +12,11 @@ from typing import Any, Literal
 
 from starlette.requests import Request
 
-from gpt2giga.core.context import get_request_context, update_request_context
+from gpt2giga.core.context import (
+    fingerprint_sensitive_value,
+    get_request_context,
+    update_request_context,
+)
 from gpt2giga.models.config import ProxySettings
 
 
@@ -503,8 +506,7 @@ def _conversation_namespace(request: Request) -> str:
     if context is not None and context.api_key_hash:
         return context.api_key_hash
     raw_key = _request_api_key(request) or "anonymous"
-    digest = hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
-    return f"sha256:{digest[:16]}"
+    return fingerprint_sensitive_value(raw_key) or "anonymous"
 
 
 def _request_api_key(request: Request) -> str | None:

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import time
-import traceback
 from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Optional
 
@@ -158,11 +157,8 @@ async def stream_chat_completion_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        tb = traceback.format_exc()
         if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
-            )
+            logger.error(f"[{rquid}] Unexpected streaming error: {error_type}: {e}")
         error_response = {
             "error": {
                 "message": "Stream interrupted",
@@ -296,11 +292,8 @@ async def stream_chat_completion_v2_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        tb = traceback.format_exc()
         if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
-            )
+            logger.error(f"[{rquid}] Unexpected streaming error: {error_type}: {e}")
         error_response = {
             "error": {
                 "message": "Stream interrupted",
@@ -1365,11 +1358,8 @@ async def stream_responses_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        tb = traceback.format_exc()
         if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
-            )
+            logger.error(f"[{rquid}] Unexpected streaming error: {error_type}: {e}")
         error_response = {
             "type": "error",
             "code": "internal_error",
