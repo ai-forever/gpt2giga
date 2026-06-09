@@ -521,6 +521,10 @@ def _builtin_tool_has_stream_result(
     return bool(ResponseProcessor._extract_sources(inline_data))
 
 
+def _annotation_key(annotation: dict[str, Any]) -> str:
+    return json.dumps(annotation, ensure_ascii=False, sort_keys=True, default=str)
+
+
 async def stream_responses_generator(
     request: Request,
     chat_messages: Chat,
@@ -659,6 +663,8 @@ async def stream_responses_generator(
         }
         builtin_tool_streams: dict[str, dict[str, Any]] = {}
         builtin_tool_stream_order: list[str] = []
+        emitted_annotation_keys: set[str] = set()
+        emitted_annotation_count = 0
         text_output_index = 0
 
         def emit_sequenced_event(event_type: str, data: dict[str, Any]) -> str:
@@ -854,6 +860,40 @@ async def stream_responses_generator(
                 state["item_done"] = True
             return events
 
+        def emit_url_annotation_events(
+            *,
+            include_unreferenced: bool,
+        ) -> list[str]:
+            nonlocal emitted_annotation_count
+            if not output_item_added or not full_text:
+                return []
+
+            annotations = ResponseProcessor._create_url_annotations(
+                full_text,
+                builtin_message_metadata["inline_data"],
+                include_unreferenced=include_unreferenced,
+            )
+            events = []
+            for annotation in annotations:
+                annotation_key = _annotation_key(annotation)
+                if annotation_key in emitted_annotation_keys:
+                    continue
+                emitted_annotation_keys.add(annotation_key)
+                events.append(
+                    emit_sequenced_event(
+                        "response.output_text.annotation.added",
+                        {
+                            "item_id": msg_id,
+                            "output_index": text_output_index,
+                            "content_index": 0,
+                            "annotation_index": emitted_annotation_count,
+                            "annotation": annotation,
+                        },
+                    )
+                )
+                emitted_annotation_count += 1
+            return events
+
         async def iterate_chunks_with_optional_prefetch():
             stream = aio_enumerate(giga_client.astream(chat_messages))
             if not response_id_from_stream_metadata:
@@ -944,6 +984,8 @@ async def stream_responses_generator(
                     ):
                         yield event
                     for event in emit_builtin_tool_result_events():
+                        yield event
+                    for event in emit_url_annotation_events(include_unreferenced=False):
                         yield event
 
                     if delta_function_call:
@@ -1069,6 +1111,10 @@ async def stream_responses_generator(
                             },
                         )
                         sequence_number += 1
+                        for event in emit_url_annotation_events(
+                            include_unreferenced=False
+                        ):
+                            yield event
 
         if acquired_model_limit is not None:
             async for event in emit_upstream_events():
@@ -1203,6 +1249,9 @@ async def stream_responses_generator(
                         },
                     )
                     sequence_number += 1
+
+                for event in emit_url_annotation_events(include_unreferenced=True):
+                    yield event
 
                 yield sse_event(
                     "response.output_text.done",

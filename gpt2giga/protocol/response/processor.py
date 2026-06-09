@@ -460,7 +460,12 @@ class ResponseProcessor:
         return normalized_sources
 
     @staticmethod
-    def _create_url_annotations(text: Any, inline_data: Mapping[str, Any]) -> list:
+    def _create_url_annotations(
+        text: Any,
+        inline_data: Mapping[str, Any],
+        *,
+        include_unreferenced: bool = True,
+    ) -> list:
         if not isinstance(text, str) or not text:
             return []
 
@@ -489,16 +494,17 @@ class ResponseProcessor:
                 )
                 annotated_sources.add(source_id)
 
-        for source_id, source in sources.items():
-            if source_id in annotated_sources or not source.get("url"):
-                continue
-            annotations.append(
-                ResponseProcessor._create_url_annotation(
-                    source,
-                    start_index=len(text),
-                    end_index=len(text),
+        if include_unreferenced:
+            for source_id, source in sources.items():
+                if source_id in annotated_sources or not source.get("url"):
+                    continue
+                annotations.append(
+                    ResponseProcessor._create_url_annotation(
+                        source,
+                        start_index=len(text),
+                        end_index=len(text),
+                    )
                 )
-            )
 
         return annotations
 

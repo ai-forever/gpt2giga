@@ -625,6 +625,99 @@ async def test_stream_responses_v2_generator_builtin_tool_outputs():
 
 
 @pytest.mark.asyncio
+async def test_stream_responses_v2_generator_emits_source_annotation_event():
+    import json
+
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "inline_data": {
+                                    "sources": {
+                                        "1": {
+                                            "url": "https://example.test/source",
+                                            "title": "Example Source",
+                                        }
+                                    }
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "Answer. "}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "[sources=[1]]"}],
+                    }
+                ]
+            }
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    lines = []
+
+    async for line in stream_responses_v2_generator(
+        req,
+        {"contract": "v2"},
+        response_id="resp-v2",
+        request_data={
+            "model": "gpt-x",
+            "input": "Find and cite",
+            "tools": [{"type": "web_search"}],
+        },
+    ):
+        lines.append(line)
+
+    def parse_sse(line):
+        parts = line.strip().split("\n")
+        return parts[0].replace("event: ", ""), json.loads(
+            parts[1].replace("data: ", "")
+        )
+
+    events = [parse_sse(line) for line in lines]
+    annotation_events = [
+        data
+        for event_type, data in events
+        if event_type == "response.output_text.annotation.added"
+    ]
+    completed = [
+        data for event_type, data in events if event_type == "response.completed"
+    ][-1]
+    message = next(
+        item for item in completed["response"]["output"] if item["type"] == "message"
+    )
+    content = message["content"][0]
+
+    assert len(annotation_events) == 1
+    annotation = annotation_events[0]["annotation"]
+    assert annotation_events[0]["annotation_index"] == 0
+    assert annotation["type"] == "url_citation"
+    assert annotation["start_index"] == len("Answer. ")
+    assert annotation["url"] == "https://example.test/source"
+    assert annotation["title"] == "Example Source"
+    assert content["annotations"] == [annotation]
+    assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
+
+
+@pytest.mark.asyncio
 async def test_stream_responses_v2_generator_emits_builtin_tool_progress_events():
     import json
 
