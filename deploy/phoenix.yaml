@@ -2,7 +2,7 @@
 #
 # Usage:
 #   docker compose --env-file .env \
-#     -f compose/base.yaml -f compose/phoenix.yaml \
+#     -f deploy/base.yaml -f deploy/phoenix.yaml \
 #     --profile DEV --profile phoenix up -d --build
 
 x-gpt2giga-phoenix-env: &gpt2giga-phoenix-env

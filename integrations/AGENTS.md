@@ -19,7 +19,7 @@
 | `integrations/xcode/README.md` | Xcode setup |
 | `integrations/nginx/README.md` | nginx reverse-proxy guide |
 | `integrations/nginx/gpt2giga.conf` | nginx TLS config sample |
-| `integrations/nginx/gpt2giga-compose.conf` | nginx HTTP config used by `compose/nginx.yaml` |
+| `integrations/nginx/gpt2giga-compose.conf` | nginx HTTP config used by `deploy/nginx.yaml` |
 | `integrations/nginx/cloud.png` | nginx guide asset |
 
 ## Patterns & Conventions

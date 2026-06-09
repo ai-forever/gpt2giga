@@ -1,4 +1,4 @@
-# Утилита для проксирования OpenAI/Anthropic-запросов в GigaChat
+# gpt2giga
 
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/ai-forever/gpt2giga/ci.yaml?&style=flat-square)](https://github.com/ai-forever/gpt2giga/actions/workflows/ci.yaml)
 [![GitHub License](https://img.shields.io/github/license/ai-forever/gpt2giga?style=flat-square)](https://opensource.org/licenses/MIT)
@@ -9,914 +9,165 @@
 
 ![Coverage](./badges/coverage.svg)
 
-## Содержание
-1. [Описание](#описание)
-2. [Возможности gpt2giga](#возможности-gpt2giga)
-3. [Начало работы](#начало-работы)
-   1. [Запуск в Docker](#запуск-в-docker)
-   2. [Запуск в Docker с Traefik](#запуск-в-docker-с-traefik)
-   3. [Локальный запуск](#локальный-запуск)
-4. [Примеры](#примеры)
-5. [Параметры](#изменение-параметров-gpt2giga)
-   1. [Аргументы командной строки](#аргументы-командной-строки)
-   2. [Переменные окружения](#переменные-окружения)
-6. [Авторизация с помощью заголовка](#авторизация-с-помощью-заголовка)
-7. [Использование HTTPS](#использование-https)
-8. [Использование API ключа](#использование-api-ключа)
-9. [Системные эндпоинты](#системные-эндпоинты)
-10. [Совместимые приложения](#совместимые-приложения)
-11. [Вклад и PR-шаблоны](#вклад-и-pr-шаблоны)
+`gpt2giga` — FastAPI-прокси, который принимает OpenAI-совместимые и Anthropic-совместимые запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic API, а реальный backend должен быть GigaChat.
 
+Локальный адрес по умолчанию: `http://localhost:8090`.
 
-## Описание
-Утилита gpt2giga — это прокси-сервер, который перенаправляет запросы, отправленные в OpenAI API или Anthropic Messages API, в GigaChat API.
+## Зачем Нужен
 
-При старте утилиты запускается HTTP-сервер, адрес которого нужно использовать вместо адреса OpenAI API (например, `https://api.openai.com/v1/`) или Anthropic API (например, `https://api.anthropic.com/v1/`), заданного в вашем приложении.
-Утилита обработает запрос и перенаправит его заданной [модели GigaChat](https://developers.sber.ru/docs/ru/gigachat/models).
-После получения ответа модели, она передаст его в приложение в формате исходного API (OpenAI или Anthropic).
+GigaChat не является drop-in заменой OpenAI или Anthropic API. Прямое подключение существующих SDK часто ломается на формате запросов, streaming-событиях, tool schemas, model discovery, авторизации и optional-параметрах клиентов.
 
-Утилита работает как с запросами на генерацию, так и с запросами на создание эмбеддингов (эндпоинты `/embeddings` или `/v1/embeddings`).
+`gpt2giga` закрывает практические несовместимости:
 
-Общая схема работы gpt2giga:
+- переводит OpenAI Chat Completions, OpenAI Responses, OpenAI Embeddings и Anthropic Messages в вызовы GigaChat;
+- маппит tools/function calling, structured output, изображения, reasoning flags и SSE streaming там, где GigaChat поддерживает базовую возможность;
+- принимает и безопасно игнорирует optional-поля OpenAI/Anthropic, которые SDK присылают, но GigaChat не понимает;
+- фильтрует транспортные SDK headers, клиентские API keys, cookies и другие небезопасные метаданные перед upstream;
+- отделяет клиентскую API-key авторизацию прокси от GigaChat credentials;
+- отдаёт список моделей в OpenAI-, Anthropic- и LiteLLM-совместимом виде;
+- держит batch/file routes отключёнными, пока их нельзя выполнить end-to-end через GigaChat SDK/backend.
 
-```mermaid
-sequenceDiagram
-    participant YourApp as Приложение
-    participant gpt2giga
-    participant GigaChat as GigaChat API
+Подробная матрица поддержки и список реальных ограничений вынесены в [API Compatibility](./docs/api-compatibility.md).
 
-    YourApp->>gpt2giga: OpenAI / Anthropic запрос
-    gpt2giga->>GigaChat: Запрос формата GigaChat API
-    GigaChat->>gpt2giga: Ответ формата GigaChat API
-    gpt2giga->>YourApp: OpenAI / Anthropic ответ
+## Быстрый Старт
+
+Создайте `.env` из шаблона и заполните GigaChat credentials:
+
+```sh
+cp .env.example .env
 ```
 
-## Возможности gpt2giga
+Запуск через Docker Compose:
 
-С помощью gpt2giga вы можете:
+```sh
+docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
+```
 
-- использовать OpenAI-совместимые и Anthropic-совместимые клиенты поверх GigaChat без переписывания основного клиентского кода;
-- работать через **OpenAI Chat Completions API** и **OpenAI Responses API**;
-- использовать **Anthropic Messages API**, включая стриминг, tool use и extended thinking;
-- вызывать функции и инструменты через API, включая передачу аргументов в OpenAI- и Anthropic-совместимом формате;
-- использовать structured outputs для получения JSON-ответов;
-- обрабатывать ответы модели в потоковом режиме с помощью `stream=true`;
-- создавать эмбеддинги через `/embeddings` и `/v1/embeddings`;
-- использовать подготовленные OpenAI-совместимые **Files API** и **Batches API** после появления полного batch API в GigaChat SDK/backend;
-- использовать подготовленный **Anthropic Message Batches API** после появления batch methods в GigaChat SDK;
-- получать список моделей и информацию о конкретной модели через OpenAI- и Anthropic-совместимый **Models API**;
-- использовать LiteLLM-совместимый эндпоинт `/model/info` для клиентов и автодополнения моделей;
-- работать с несколькими клиентами и множеством запросов в асинхронном режиме;
-- настраивать прокси через `.env`, переменные окружения и аргументы командной строки;
-- включать логирование, HTTPS и API-key авторизацию для локальной разработки и production-сценариев.
+Или локальный запуск:
 
-### Поддерживаемые API routes
+```sh
+uv tool install gpt2giga
+gpt2giga
+```
 
-Ниже перечислены основные route-группы официальных OpenAI и Anthropic API и отмечено, что из этого поддерживается в gpt2giga. Все смонтированные маршруты в gpt2giga доступны как без префикса, так и с префиксом `/v1`, например `/chat/completions` и `/v1/chat/completions`.
-
-#### OpenAI API
-
-| Route / группа | Официальный OpenAI API | В gpt2giga | Что поддерживается |
-|---|---|---|---|
-| `POST /chat/completions` | Да | Да | Основной чатовый эндпоинт, включая `stream=true`, tools/function calling, structured outputs, работу с вложениями |
-| `GET /models` | Да | Да | Список доступных моделей GigaChat в OpenAI-совместимом виде |
-| `GET /models/{model}` | Да | Да | Информация по конкретной модели |
-| `POST /embeddings` | Да | Да | Создание эмбеддингов через модель из запроса или настроек прокси |
-| `POST /responses` | Да | Да | OpenAI Responses API для новых клиентов |
-| `POST /files` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
-| `GET /files` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
-| `GET /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
-| `DELETE /files/{file_id}` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
-| `GET /files/{file_id}/content` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: files отключены вместе с batches, пока в `gigachat==0.2.1` нет полного batch API |
-| `POST /batches` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: в `gigachat==0.2.1` нет полного набора batch methods |
-| `GET /batches` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: в `gigachat==0.2.1` нет полного набора batch methods |
-| `GET /batches/{batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но не смонтирован: в `gigachat==0.2.1` нет полного набора batch methods |
-| `POST /batches/{batch_id}/cancel` | Да | Временно отключено | Не смонтирован: в текущем `gigachat==0.2.1` нет полного набора batch methods, включая cancel |
-| `GET/POST /chat/completions` stored-completions routes | Да | Нет | Маршруты для хранения, выборки и обновления сохранённых chat completions не реализованы |
-| `POST /completions` | Да | Нет | Legacy Completions API не реализован |
-| `POST /images*` | Да | Нет | Генерация и редактирование изображений не реализованы |
-| `POST /audio*` | Да | Нет | Speech / transcription / translation не реализованы |
-| `POST /moderations` | Да | Нет | Moderations API не реализован |
-| `POST /uploads*` | Да | Нет | Uploads API не реализован |
-| `POST /fine_tuning*` | Да | Нет | Fine-tuning API не реализован |
-| `POST /assistants*`, `POST /threads*`, `POST /runs*` | Да | Нет | Assistants/Threads/Runs API не реализованы |
-| `POST /vector_stores*` | Да | Нет | Vector Stores API не реализован |
-| `Realtime API` | Да | Нет | Realtime/WebSocket API не реализован |
-
-#### Anthropic API
-
-| Route / группа | Официальный Anthropic API | В gpt2giga | Что поддерживается |
-|---|---|---|---|
-| `GET /models` | Да | Да | Список моделей в Anthropic-совместимом виде для запросов с Anthropic SDK headers |
-| `GET /models/{model_id}` | Да | Да | Информация о модели в Anthropic-совместимом виде для запросов с Anthropic SDK headers |
-| `POST /messages` | Да | Да | Основной Messages API, включая стриминг |
-| `POST /messages/count_tokens` | Да | Да | Подсчёт токенов для Messages API |
-| `POST /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
-| `GET /messages/batches` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
-| `GET /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
-| `GET /messages/batches/{message_batch_id}/results` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
-| `POST /messages/batches/{message_batch_id}/cancel` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
-| `DELETE /messages/batches/{message_batch_id}` | Да | Временно отключено | Router-модуль подготовлен, но публичный маршрут не смонтирован: в текущем `gigachat==0.2.1` нет batch methods |
-| Files API beta | Да | Нет | Anthropic file upload/download/delete routes не реализованы |
-| Skills API beta | Да | Нет | Anthropic Skills API не реализован |
-| Agents API beta | Да | Нет | Anthropic Agents API не реализован |
-| Sessions / Environments / Admin API beta | Да | Нет | Управляемые beta/API группы Anthropic не реализованы |
-
-### Коротко по покрытию
-
-- **OpenAI:** поддерживается основной рабочий набор для прокси-сценариев: `models`, `chat/completions`, `responses`, `embeddings`; router-модули `files` и `batches` подготовлены, но временно не смонтированы, потому что в `gigachat==0.2.1` отсутствует полный batch API.
-- **Anthropic:** поддерживается `Models API`, `Messages API` и `count_tokens`; router-модуль `Message Batches API` подготовлен, но временно не смонтирован.
-- **Не цель проекта:** полная реализация всех route официальных OpenAI/Anthropic API, включая fine-tuning, images, audio, vector stores, assistants и realtime.
-
-### Совместимость SDK и политика `extra_*`
-
-Подробная таблица совместимости параметров вынесена в [`docs/client-parameter-compatibility.md`](./docs/client-parameter-compatibility.md).
-
-Клиентские настройки SDK вроде `base_url`, `api_key`, `timeout`, retry-настроек, `http_client` и proxy/transport остаются на стороне клиента. Сервер не трактует их как body-параметры и не прокидывает пользовательские `Authorization`, `x-api-key`, cookies, transport headers, `x-stainless-*`, `openai-*` или `anthropic-*` во внешний GigaChat upstream.
-
-При ответе `429` OpenAI SDK по умолчанию повторяет запросы: `max_retries=2`, то есть один клиентский вызов может отправить до трёх HTTP-запросов в gpt2giga. Чтобы отключить эти клиентские повторы, передайте `max_retries=0` при создании `OpenAI`/`AsyncOpenAI` клиента.
-
-`extra_headers` и HTTP headers переносятся в request-scoped contextvars SDK GigaChat для безопасных служебных заголовков: `x-request-id`, `x-session-id`, `x-service-id`, `x-operation-id`, `x-client-id`, `x-trace-id`, `x-agent-id`. Прочие безопасные пользовательские заголовки идут через `custom_headers_cvar`; `Authorization`, `x-api-key`, cookies, transport headers, `x-stainless-*`, `openai-*` и `anthropic-*` заблокированы. `extra_query` по умолчанию не прокидывает произвольные query-параметры upstream. Неподдержанные optional body-параметры принимаются и игнорируются, чтобы не ломать SDK-клиенты.
-
-`extra_body` для Chat Completions, Responses и Anthropic Messages переносится в GigaChat `additional_fields` целиком, включая SDK-style поля, которые клиент разворачивает в top-level JSON:
-
-- OpenAI Embeddings принимает и игнорирует `extra_body`, неизвестные top-level поля и `dimensions`; исполняемыми остаются `input`, `model`, `encoding_format=base64`, `extra_headers`, `extra_query`.
-- Для OpenAI Chat/Responses unsupported параметры вроде `logprobs`, `top_logprobs`, `audio`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true` принимаются и игнорируются. Built-in tools поддерживаются на GigaChat v2 surface (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); для `/responses` v2 также строятся нормализованные Responses output items и stream progress events для `web_search*` и `image_generation` / `image_generate`. `/chat/completions` v1 остаётся поддержанным compatibility route, но новые tool/built-in-tool возможности развиваются для GigaChat v2 mode.
-- Для Anthropic Messages unsupported параметры и блоки вроде `container`, `context_management`, `mcp_servers`, server tools, `document`, `file`, `container_upload`, `search_result`, `thinking`/`redacted_thinking` во входном контенте принимаются и игнорируются.
-
-OpenAI SDK:
+Минимальный OpenAI SDK вызов:
 
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8090/v1", api_key="local-key")
+client = OpenAI(base_url="http://localhost:8090/v1", api_key="<GPT2GIGA_API_KEY>")
 
-client.chat.completions.create(
+response = client.chat.completions.create(
     model="GigaChat-2-Max",
     messages=[{"role": "user", "content": "Привет"}],
-    extra_body={"profanity_check": False},
 )
+print(response.choices[0].message.content)
 ```
 
-Anthropic SDK:
+Минимальный Anthropic SDK вызов:
 
 ```python
 from anthropic import Anthropic
 
-client = Anthropic(base_url="http://localhost:8090", api_key="local-key")
+client = Anthropic(base_url="http://localhost:8090", api_key="<GPT2GIGA_API_KEY>")
 
-client.messages.create(
+response = client.messages.create(
     model="GigaChat-2-Max",
     max_tokens=256,
     messages=[{"role": "user", "content": "Привет"}],
 )
+print(response.content[0].text)
 ```
 
-Пример игнорируемого compatibility-поля:
+Больше вариантов запуска — в [Quickstart](./docs/quickstart.md).
 
-```python
-client.messages.create(
-    model="GigaChat-2-Max",
-    max_tokens=256,
-    messages=[{"role": "user", "content": "Привет"}],
-    extra_body={"mcp_servers": []},  # accepted, ignored
-)
-```
+## Документация
 
-## Начало работы
+| Тема | Документ |
+|---|---|
+| Быстрый запуск и первые запросы | [docs/quickstart.md](./docs/quickstart.md) |
+| Что поддерживается, отключено или намеренно игнорируется | [docs/api-compatibility.md](./docs/api-compatibility.md) |
+| Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
+| Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
+| Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
+| Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
+| Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
+| Runnable-примеры | [examples/README.md](./examples/README.md) |
 
-Утилиту можно запустить как в контейнере, с помощью Docker, так и локально.
+## Текущая API-Поверхность
 
-### Запуск в Docker
+Смонтированные routes доступны и в корне, и под `/v1`, например `/chat/completions` и `/v1/chat/completions`.
 
-1. Переименуйте файл [`.env.example`](./.env.example) в `.env`.
+Поддерживается:
 
-   ```sh
-   cp .env.example .env
-   ```
+- OpenAI-compatible `GET /models`, `GET /models/{model}`, `POST /chat/completions`, `POST /responses`, `POST /embeddings`;
+- Anthropic-compatible `POST /messages`, `POST /messages/count_tokens`, а также Anthropic-shaped model responses для model-вызовов Anthropic SDK;
+- LiteLLM-compatible `GET /model/info`;
+- системные endpoints `GET /health` и `GET|POST /ping`.
 
-2. В файле `.env` укажите данные для авторизации в GigaChat API.
+Отключено до появления нужных batch methods в GigaChat SDK/backend:
 
-   GigaChat API поддерживает различные способы авторизации, которые отличаются в зависимости от типа вашей учетной записи. Пример с `Authorization key`.
+- OpenAI-compatible Files API и Batches API;
+- Anthropic Message Batches API.
 
-    ```dotenv
-    GPT2GIGA_MODE=PROD
-    GPT2GIGA_HOST=0.0.0.0
-    GPT2GIGA_PORT=8090
-    GPT2GIGA_ENABLE_API_KEY_AUTH=True
-    GPT2GIGA_API_KEY="<your_strong_api_key>"
-    GIGACHAT_CREDENTIALS="<your_gigachat_credentials>"
-    GIGACHAT_SCOPE=<your_api_scope>
-    GIGACHAT_MODEL=GigaChat-2-Max
-    GIGACHAT_VERIFY_SSL_CERTS=True
-    ```
+Сейчас не является целью проекта:
 
-3. (Опционально) Используйте образ/сборку с нужной версией Python (3.10–3.14).
+- полная OpenAI parity для audio, image generation/editing, fine-tuning, assistants, threads, runs, vector stores, uploads, moderations, realtime;
+- полная Anthropic parity для Files beta, Skills beta, Agents beta, Sessions, Environments или Admin API.
 
-   Все Docker Compose-стеки лежат в папке `compose/`. В `compose/base.yaml` по умолчанию задан `image: ghcr.io/ai-forever/gpt2giga:latest` и `build.args.PYTHON_VERSION`. При необходимости:
-   - обновите `build.args.PYTHON_VERSION` (если собираете образ локально);
-   - или замените `image:` на нужный тег из реестра.
+## Деплой
 
-   ```sh
-   PYTHON_VERSION=3.10
-   docker pull gigateam/gpt2giga:python${PYTHON_VERSION}
-   docker pull ghcr.io/ai-forever/gpt2giga:py${PYTHON_VERSION}
-   ```
-
-   Доступные теги смотрите в реестрах: [Docker Hub](https://hub.docker.com/r/gigateam/gpt2giga) и [GHCR](https://github.com/ai-forever/gpt2giga/pkgs/container/gpt2giga).
-
-4. Запустите контейнер с помощью Docker Compose:
-
-   - PROD:
-     ```sh
-     docker compose --env-file .env -f compose/base.yaml --profile PROD up -d
-     ```
-   - DEV:
-     ```sh
-     docker compose --env-file .env -f compose/base.yaml --profile DEV up -d
-     ```
-
-   > В профиле `PROD` порт по умолчанию пробрасывается только на `127.0.0.1` (см. `compose/base.yaml`). Для доступа извне используйте reverse proxy (nginx/Traefik/Caddy) или измените bind-адрес в `ports:`.
-
-#### Запуск Docker Compose с Postgres traffic logs
-
-Postgres traffic logs выключены по умолчанию. Для локальной проверки durable backend используйте override [`compose/postgres.yaml`](./compose/postgres.yaml). Он добавляет сервис `postgres`, включает `GPT2GIGA_TRAFFIC_LOG_SINK=postgres` и собирает образ gpt2giga с optional extra `[postgres]`.
+Docker Compose manifests лежат в [deploy/](./deploy/):
 
 ```sh
-docker compose --env-file .env \
-  -f compose/base.yaml -f compose/postgres.yaml \
-  --profile DEV --profile postgres up -d --build
+docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
+docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-По умолчанию Postgres доступен только на `127.0.0.1:${GPT2GIGA_POSTGRES_PORT:-5432}`. Для production задайте сильный `GPT2GIGA_POSTGRES_PASSWORD` и не включайте `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT`, пока не утверждена политика хранения и redaction.
-
-#### Запуск Docker Compose с OpenSearch mirror
-
-OpenSearch traffic logs являются optional search/index mirror, а не source of truth. Для локальной проверки используйте OpenSearch вместе с Postgres override:
-
-```sh
-docker compose --env-file .env \
-  -f compose/base.yaml -f compose/postgres.yaml -f compose/opensearch.yaml \
-  --profile DEV --profile postgres --profile opensearch up -d --build
-```
-
-Профиль включает `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch`, собирает образ с optional extras `[postgres,opensearch]` и запускает single-node OpenSearch на `127.0.0.1:${GPT2GIGA_OPENSEARCH_PORT:-9200}`. Postgres остается durable source of truth; OpenSearch можно удалить или пересоздать без изменения gateway API.
-
-Для production создайте index template/data stream заранее через `gpt2giga.storage.opensearch.build_traffic_log_index_template()` или `install_traffic_log_index_template()`. Template маппит `created_at`/`@timestamp` как `date`, `request_id`, `trace_id`, `model`, `provider` как `keyword`, `status_code` как `integer`, а `metadata` как `object`.
-
-#### Запуск Docker Compose с Phoenix observability
-
-Phoenix observability выключена по умолчанию. Для локальной проверки используйте override [`compose/phoenix.yaml`](./compose/phoenix.yaml):
-
-```sh
-docker compose --env-file .env \
-  -f compose/base.yaml -f compose/phoenix.yaml \
-  --profile DEV --profile phoenix up -d --build
-```
-
-Профиль собирает gpt2giga с optional extra `[phoenix]`, включает `GPT2GIGA_OBSERVABILITY_ENABLED=True`, запускает `arizephoenix/phoenix:latest` и настраивает `PHOENIX_COLLECTOR_ENDPOINT=http://phoenix:4317`. Phoenix UI доступен локально на `http://localhost:${PHOENIX_PORT:-6006}`, OTLP gRPC collector — на `127.0.0.1:${PHOENIX_GRPC_PORT:-4317}`.
-
-Content capture остается выключенным через `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=False`; включайте его только после утверждения redaction/retention policy.
-
-### Запуск в Docker с Traefik
-
-В репозитории есть готовый стек `Traefik + несколько инстансов gpt2giga` в файле [`compose/traefik.yaml`](./compose/traefik.yaml):
-- `gpt2giga` (модель по умолчанию `GigaChat`) → `http://localhost:8090`
-- `gpt2giga-pro` (модель по умолчанию `GigaChat-Pro`) → `http://localhost:8091`
-- `gpt2giga-max` (модель по умолчанию `GigaChat-Max`) → `http://localhost:8092`
-- Traefik Dashboard → `http://localhost:8080/dashboard/`
-
-1. Запустите стек:
-
-   ```sh
-   docker compose --env-file .env -f compose/traefik.yaml up -d
-   ```
-
-> Важно: роутинг в Traefik в этой конфигурации завязан на HTTP `Host` (см. `traefik/rules.yml`). Если вы обращаетесь по IP (например, `127.0.0.1`), задайте `HOST=127.0.0.1` или отправляйте корректный заголовок `Host:`.
-
-### Локальный запуск
-
-Для управления зависимостями и запуска проекта рекомендуется использовать [uv](https://github.com/astral-sh/uv).
-
-1. Установите `gpt2giga`:
-
-   С помощью `uv`:
-   ```sh
-   uv tool install gpt2giga
-   # или uv add gpt2giga
-   ```
-
-   Или используя `pip`:
-   ```sh
-   pip install gpt2giga
-   ```
-
-   Вы также можете использовать исходники:
-
-   ```sh
-   pip install git+https://github.com/ai-forever/gpt2giga.git
-   ```
-
-   После установки пакета вы сможете использовать команду `gpt2giga`, которая позволяет запускать и настраивать прокси-сервер.
-
-2. Переименуйте файл [`.env.example`](./.env.example) в `.env` и сохраните его в корне своего проекта:
-
-   ```sh
-   cp .env.example .env
-   ```
-
-3. В файле `.env` укажите данные для авторизации в GigaChat API.
-
-   GigaChat API поддерживает различные способы авторизации, которые отличаются в зависимости от типа вашей учетной записи.
-
-   > Кроме переменных gpt2giga в `.env` можно указать переменные окружения, которые поддерживает [python-библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения).
-
-
-4. В терминале выполните команду `gpt2giga`.
-
-Запустится прокси-сервер, по умолчанию доступный по адресу `localhost:8090` (если не задан `GPT2GIGA_PORT` или `--proxy.port`).
-Адрес и порт сервера, а также другие параметры, можно настроить с помощью аргументов командной строки или переменных окружения.
-Документация FastAPI доступна по адресу `http://localhost:<PORT>/docs`.
-
-## Примеры
-
-Подробные runnable-примеры вынесены в папку [`examples/`](./examples/).
-
-- OpenAI Python SDK:
-  - Chat Completions API: [`examples/openai/chat_completions/README.md`](examples/openai/chat_completions/README.md)
-  - Responses API: [`examples/openai/responses/README.md`](examples/openai/responses/README.md)
-  - Files / Batches / embeddings / models: [`examples/README.md`](./examples/README.md)
-- Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./examples/anthropic/README.md)
-- Индекс всех примеров: [`examples/README.md`](./examples/README.md)
-
-## Изменение параметров gpt2giga
-
-Вы можете изменять параметры работы утилиты с помощью аргументов командной строки или переменных окружения.
-
-### Аргументы командной строки
-
-Полный список параметров смотрите в `gpt2giga --help`.
-
-> **⚠️ Безопасность:** Не передавайте секреты (`--proxy.api-key`, `--gigachat.credentials`, `--gigachat.password`, `--gigachat.access-token`, `--gigachat.key-file-password`) через аргументы командной строки — они видны всем пользователям через `ps aux`. Используйте переменные окружения или `.env` файл (см. раздел ниже).
-Утилита поддерживает аргументы 2 типов (настройки прокси и настройки GigaChat):
-- `--env-path <PATH>` — путь до файла с переменными окружения `.env`. По умолчанию ищется `.env` в текущей директории.
-
-- `--proxy [JSON]` — set proxy from JSON string (по умолчанию `{}`);
-- `--proxy.host <HOST>` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
-- `--proxy.port <PORT>` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
-- `--proxy.use-https <true/false>` — использовать ли HTTPS. По умолчанию `False`;
-- `--proxy.https-key-file <PATH>` — Путь до key файла для https. По умолчанию `None`;
-- `--proxy.https-cert-file <PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `--proxy.pass-model <true/false>` — передавать в GigaChat API модель, которую указал клиент в поле `model` (для чата и эмбеддингов);
-- `--proxy.pass-token <true/false>` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API. С помощью него можно настраивать передачу ключей в GigaChat через `OPENAI_API_KEY`;
-- `--proxy.embeddings <EMBED_MODEL>` — модель для создания эмбеддингов по умолчанию. Игнорируется при `--proxy.pass-model true`, если клиент указал `model` в запросе. По умолчанию `EmbeddingsGigaR`;
-- `--proxy.enable-images <true/false>` — включить/выключить передачу изображений в формате OpenAI в GigaChat API (по умолчанию `True`);
-- `--proxy.enable-reasoning <true/false>` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
-- `--proxy.disable-reasoning <true/false>` — полностью отключить передачу reasoning в GigaChat: удаляет `reasoning`/`reasoning_effort` из payload, включая явные параметры клиента и `extra_body` passthrough;
-- `--proxy.structured-output-mode <function_call/native>` — режим structured output: совместимый fallback через function calling или нативное `response_format` GigaChat SDK 0.2.1+;
-- `--proxy.experimental-normalized-layer <true/false>` — включить экспериментальную подготовку normalized layer. По умолчанию `False`;
-- `--proxy.normalization-mode <off/shadow/on>` — режим normalized layer. По умолчанию `off`; `shadow` строит normalized-представление OpenAI Chat параллельно с legacy path и не меняет ответ клиента; `on` переводит OpenAI Chat на экспериментальный normalized path;
-- `--proxy.legacy-chat-fallback <true/false>` — разрешить fallback на legacy chat path во время модульной миграции. По умолчанию `True`;
-- `--proxy.traffic-log-enabled <true/false>` — включить будущие traffic log events. По умолчанию `False`;
-- `--proxy.observability-enabled <true/false>` — включить будущие OpenTelemetry/OpenInference hooks. По умолчанию `False`;
-- `--proxy.ui-enabled <true/false>` — включить будущий встроенный UI. По умолчанию `False`;
-- `--proxy.debug-translate-enabled <true/false>` — включить будущие debug translation endpoints. По умолчанию `False`;
-- `--proxy.admin-api-enabled <true/false>` — включить protected admin endpoints `/_admin/*`. По умолчанию `False`;
-- `--proxy.admin-api-key <secret>` — admin key для protected debug/admin endpoints. Не передавайте секрет через CLI в production; используйте env или `.env`;
-- `--proxy.model-max-connections <JSON>` — per-model лимиты одновременных upstream model-call внутри gpt2giga, например `'{"GigaChat-2-Max":5}'`;
-- `--proxy.model-max-connections-default <INT>` — fallback per-model лимит для моделей, которых нет в `--proxy.model-max-connections`;
-- `--proxy.model-max-connections-acquire-timeout <FLOAT>` — сколько секунд ждать свободный model slot; `0` означает fail-fast, отсутствие значения — ждать без локального timeout;
-- `--proxy.log-level` — уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`;
-- `--proxy.log-filename` — имя лог файла. По умолчанию `gpt2giga.log`;
-- `--proxy.log-max-size` — максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB);
-- `--proxy.enable-api-key-auth` — нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`;
-- `--proxy.api-key` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
-
-> **⚠️ Безопасность:** Не передавайте секреты (`--proxy.api-key`, `--proxy.admin-api-key`, `--gigachat.credentials`, `--gigachat.password`, `--gigachat.access-token`, `--gigachat.key-file-password`) через аргументы командной строки — они видны всем пользователям через `ps aux`. Используйте переменные окружения или `.env` файл (см. раздел ниже).
-
-Далее идут стандартные настройки из библиотеки GigaChat:
-- `--gigachat [JSON]` — set gigachat from JSON string (по умолчанию `{}`);
-- `--gigachat.base-url <BASE_URL>` — базовый URL для GigaChat API. По умолчанию берется значение переменной `GIGACHAT_BASE_URL` или поля `BASE_URL` внутри пакета;
-- `--gigachat.auth-url <AUTH_URL>` — базовый URL для Auth GigaChat API. По умолчанию берется значение переменной `GIGACHAT_AUTH_URL` или поля `AUTH_URL` внутри пакета;
-- `--gigachat.credentials <CREDENTIALS>` — credentials (ключ/данные авторизации) для GigaChat;
-- `--gigachat.scope <GIGACHAT_SCOPE>` — Скоуп гигачат (API_CORP, API_PERS...);
-- `--gigachat.user <GIGACHAT_USER>` — Вариант авторизации через user/password;
-- `--gigachat.password <GIGACHAT_PASSWORD>` — Вариант авторизации через user/password;
-- `--gigachat.access-token <ACCESS_TOKEN>` — JWE токен;
-- `--gigachat.model <MODEL>` — модель для запросов в GigaChat. По умолчанию `GIGACHAT_MODEL`;
-- `--gigachat.profanity-check <True/False>` — Параметр цензуры. По умолчанию `None`;
-- `--gigachat.timeout <TIMEOUT>` — таймаут для запросов к GigaChat API. По умолчанию `30` секунд;
-- `--gigachat.verify-ssl-certs <True/False>` — проверять сертификаты SSL (по умолчанию `True`);
-- `--gigachat.ssl-context` — Пользовательский SSL контекст;
-- `--gigachat.ca-bundle-file <PATH>` — Путь к CA bundle файлу для проверки TLS сертификатов;
-- `--gigachat.cert-file <PATH>` — Путь к файлу клиентского сертификата;
-- `--gigachat.key-file <PATH>` — Путь к файлу приватного ключа клиента;
-- `--gigachat.key-file-password <PASSWORD>` — Пароль для зашифрованного файла приватного ключа;
-- `--gigachat.flags <FLAGS>` — Дополнительные флаги для управления поведением клиента;
-- `--gigachat.max-connections <INT>` — Максимальное количество одновременных подключений к GigaChat API;
-- `--gigachat.max-retries <INT>` — Максимальное количество попыток повтора для временных ошибок. По умолчанию `0` (отключено);
-- `--gigachat.retry-backoff-factor <FLOAT>` — Множитель задержки для повторных попыток. По умолчанию `0.5`;
-- `--gigachat.retry-on-status-codes <INT,INT...>` — HTTP коды статуса, вызывающие повторную попытку. По умолчанию `(429, 500, 502, 503, 504)`;
-- `--gigachat.token-expiry-buffer-ms <INT>` — Буфер времени (мс) до истечения токена для запуска обновления. По умолчанию `60000` (60 секунд).
-#### Пример запуска утилиты с заданными параметрами
-
-Для запуска прокси-сервера с заданным адресом и портом выполните команду:
-
-```sh
-gpt2giga \
-    --proxy.host 127.0.0.1 \
-    --proxy.port 8080 \
-    --proxy.pass-model true \
-    --proxy.pass-token true \
-    --gigachat.base-url https://gigachat.devices.sberbank.ru/api/v1 \
-    --gigachat.model GigaChat-2-Max \
-    --gigachat.timeout 300 \
-    --proxy.embeddings EmbeddingsGigaR
-```
-
-### Переменные окружения
-
-Для настройки параметров утилиты также можно использовать переменные окружения, заданные в файле `.env`.
-
-У настроек прокси префикс `GPT2GIGA_`, у настроек GigaChat: `GIGACHAT_`
-
-Список доступных переменных:
-
-- `GPT2GIGA_HOST="localhost"` — хост, на котором запускается прокси-сервер. По умолчанию `localhost`;
-- `GPT2GIGA_MODE="DEV"` — режим запуска (`DEV` или `PROD`). В `PROD` отключаются `/docs`, `/redoc`, `/openapi.json`;
-  в `PROD` также обязательно требуется `GPT2GIGA_API_KEY`, отключаются `/logs`, `/logs/stream`, `/logs/html`;
-  и автоматически ужесточается CORS (нет wildcard `*`, `allow_credentials=False`);
-- `GPT2GIGA_PORT="8090"` — порт, на котором запускается прокси-сервер. По умолчанию `8090`;
-- `GPT2GIGA_USE_HTTPS="False"` — Использовать ли https. По умолчанию `False`;
-- `GPT2GIGA_HTTPS_KEY_FILE=<PATH>` — Путь до key файла для https. По умолчанию `None`;
-- `GPT2GIGA_HTTPS_CERT_FILE=<PATH>` — Путь до cert файла https. По умолчанию `None`;
-- `GPT2GIGA_PASS_MODEL="True"` — передавать ли модель, указанную в запросе, непосредственно в GigaChat (для чата и эмбеддингов);
-- `GPT2GIGA_PASS_TOKEN="False"` — передавать токен, полученный в заголовке `Authorization`, в GigaChat API;
-- `GPT2GIGA_EMBEDDINGS="EmbeddingsGigaR"` — модель для создания эмбеддингов по умолчанию. При `GPT2GIGA_PASS_MODEL=True` используется модель из запроса клиента (с fallback на это значение).
-- `GPT2GIGA_ENABLE_IMAGES="True"` — флаг, который включает передачу изображений в формате OpenAI в GigaChat API;
-- `GPT2GIGA_ENABLE_REASONING="False"` — включить reasoning по умолчанию (добавляет `reasoning_effort="high"` в payload к GigaChat, если клиент не указал `reasoning_effort` явно);
-- `GPT2GIGA_DISABLE_REASONING="False"` — полностью отключить передачу reasoning в GigaChat: удаляет `reasoning`/`reasoning_effort` из payload, включая явные параметры клиента и `extra_body` passthrough;
-- `GPT2GIGA_DEFAULT_MAX_TOKENS` — опциональный default `max_tokens`. По умолчанию не задан, и gpt2giga не добавляет `max_tokens` к GigaChat-запросу, если клиент сам не передал лимит;
-- `GPT2GIGA_STRUCTURED_OUTPUT_MODE="function_call"` — режим structured output: `function_call` сохраняет совместимый fallback через function calling, `native` передает JSON Schema в нативное поле `response_format` GigaChat SDK 0.2.1+ (требует поддержки модели/API);
-- `GPT2GIGA_GIGACHAT_API_MODE="v1"` — backend contract для chat-like запросов к GigaChat: `v1` использует root compatibility methods `achat`/`astream`, `v2` использует primary `v2/chat/completions` surface `achat.create`/`achat.stream`;
-- `GPT2GIGA_RESPONSES_API_MODE="inherit"` — backend contract для OpenAI `/responses`: `inherit` использует `GPT2GIGA_GIGACHAT_API_MODE`, `v1` или `v2` переопределяют только `/responses`;
-- `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER="False"` — включить экспериментальную подготовку normalized layer. По умолчанию выключено;
-- `GPT2GIGA_NORMALIZATION_MODE="off"` — режим normalized layer: `off`, `shadow` или `on`. По умолчанию `off`; `shadow` включает best-effort OpenAI Chat normalization diagnostics без изменения legacy response path; `on` переводит OpenAI Chat на экспериментальный normalized path;
-- `GPT2GIGA_LEGACY_CHAT_FALLBACK="True"` — разрешить fallback на legacy chat path во время модульной миграции;
-- `GPT2GIGA_TRAFFIC_LOG_ENABLED="False"` — включить будущие traffic log events. По умолчанию выключено;
-- `GPT2GIGA_TRAFFIC_LOG_SINK="noop"` — backend traffic logs: `noop`, `jsonl`, `postgres` или `opensearch`. По умолчанию `noop`;
-- `GPT2GIGA_TRAFFIC_LOG_SINKS` — optional ordered mirror list, например `postgres,opensearch`; если список пуст, используется `GPT2GIGA_TRAFFIC_LOG_SINK`;
-- `GPT2GIGA_TRAFFIC_LOG_JSONL_PATH="traffic_logs.jsonl"` — путь к локальному JSONL-файлу при `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`;
-- `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN` — Postgres DSN для opt-in backend `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`;
-- `GPT2GIGA_OPENSEARCH_URL="http://localhost:9200"` — OpenSearch URL для opt-in mirror backend;
-- `GPT2GIGA_OPENSEARCH_USERNAME` / `GPT2GIGA_OPENSEARCH_PASSWORD` — optional OpenSearch credentials;
-- `GPT2GIGA_OPENSEARCH_INDEX="gpt2giga-traffic"` — OpenSearch index/data stream name;
-- `GPT2GIGA_OPENSEARCH_DATA_STREAM="True"` — использовать Bulk `create` operations для data stream mode; `False` использует plain index mode;
-- `GPT2GIGA_OPENSEARCH_BULK_SIZE="500"` — максимальный размер OpenSearch bulk batch;
-- `GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS="2000"` — best-effort flush interval для OpenSearch queue;
-- `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT="False"` — сохранять redacted request/response bodies в future traffic logs. По умолчанию выключено;
-- `GPT2GIGA_TRAFFIC_LOG_QUEUE_SIZE="10000"` — размер background queue для durable traffic log writer;
-- `GPT2GIGA_TRAFFIC_LOG_BATCH_SIZE="500"` — максимальный размер batch-записи в durable backend;
-- `GPT2GIGA_TRAFFIC_LOG_FLUSH_INTERVAL_MS="2000"` — best-effort flush interval для background writer;
-- `GPT2GIGA_TRAFFIC_LOG_DROP_ON_BACKPRESSURE="True"` — при заполненной queue сбрасывать traffic log events вместо блокировки API request path;
-- `GPT2GIGA_TRAFFIC_LOG_REDACT_SENSITIVE="True"` — редактировать sensitive keys и token-like строки перед будущей durable traffic log storage. По умолчанию включено;
-- `GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS='[]'` — JSON-массив дополнительных case-insensitive ключей для redaction перед traffic log storage;
-- `GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS="30"` — сколько дней хранить Postgres traffic logs перед batch purge по `created_at`;
-- `GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS="3600"` — интервал best-effort background purge job для Postgres traffic logs;
-- `GPT2GIGA_OBSERVABILITY_ENABLED="False"` — включить OpenTelemetry/OpenInference observability hooks. По умолчанию выключено;
-- `GPT2GIGA_OBSERVABILITY_BACKEND="phoenix"` — backend observability: сейчас планируется Phoenix/OpenTelemetry sink;
-- `PHOENIX_COLLECTOR_ENDPOINT="http://localhost:4317"` — OTLP endpoint Phoenix collector; можно переопределить также через `GPT2GIGA_PHOENIX_COLLECTOR_ENDPOINT`;
-- `PHOENIX_PROJECT_NAME="gpt2giga"` — имя Phoenix project; можно переопределить также через `GPT2GIGA_PHOENIX_PROJECT_NAME`;
-- `PHOENIX_API_KEY` — optional API key для hosted/protected Phoenix collector; можно переопределить также через `GPT2GIGA_PHOENIX_API_KEY`;
-- `GPT2GIGA_OBSERVABILITY_SAMPLE_RATE="1.0"` — доля запросов, для которых создаются traces при включенной observability;
-- `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT="False"` — master-флаг для отправки prompt/response/tool content в observability attributes. По умолчанию выключено;
-- `GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES="False"` — отправлять normalized input messages в LLM span attributes; требует `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True`;
-- `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS="False"` — отправлять tool schemas и tool call arguments в LLM span attributes; требует `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True`;
-- `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES="False"` — отправлять normalized model response content в LLM span attributes; требует `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True`;
-- `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH="8000"` — максимальная длина одного сериализованного content attribute перед truncation;
-- `GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED="True"` — редактировать sensitive content перед observability export;
-- `GPT2GIGA_METRICS_ENABLED="False"` — включить Prometheus-compatible endpoint с aggregate runtime metrics. По умолчанию выключено;
-- `GPT2GIGA_METRICS_PATH="/metrics"` — HTTP path для metrics endpoint при `GPT2GIGA_METRICS_ENABLED=True`;
-- `GPT2GIGA_UI_ENABLED="False"` — включить будущий встроенный UI. По умолчанию выключено;
-- `GPT2GIGA_DEBUG_TRANSLATE_ENABLED="False"` — включить будущие debug translation endpoints. По умолчанию выключено;
-- `GPT2GIGA_ADMIN_API_ENABLED="False"` — включить protected admin endpoints `/_admin/*`. По умолчанию выключено, включая PROD;
-- `GPT2GIGA_ADMIN_API_KEY="<secret>"` — admin key для protected debug/admin endpoints. Требуется для `/_debug/translate/*` и `/_admin/*`, если они включены;
-- `GPT2GIGA_REPLAY_ENABLED="False"` — включить protected replay endpoint `POST /_admin/logs/{id}/replay`. По умолчанию выключено;
-- `GPT2GIGA_MODEL_MAX_CONNECTIONS='{}'` — JSON-словарь per-model лимитов одновременных upstream model-call внутри gpt2giga;
-- `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` — fallback per-model лимит для моделей, которых нет в `GPT2GIGA_MODEL_MAX_CONNECTIONS`. По умолчанию не задан;
-- `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT` — сколько секунд ждать свободный model slot. По умолчанию не задано, `0` означает fail-fast;
-- `GPT2GIGA_LOG_LEVEL="INFO"` — Уровень логов `{CRITICAL,ERROR,WARNING,INFO,DEBUG}`. По умолчанию `INFO`
-- `GPT2GIGA_LOG_FILENAME="gpt2giga.log"` — Имя лог файла. По умолчанию `gpt2giga.log`
-- `GPT2GIGA_LOG_MAX_SIZE="10*1024*1024"` Максимальный размер файла в байтах. По умолчанию `10 * 1024 * 1024` (10 MB)
-- `GPT2GIGA_ENABLE_API_KEY_AUTH="False"` — Нужно ли закрыть доступ к эндпоинтам (требовать API-ключ). По умолчанию `False`
-- `GPT2GIGA_API_KEY=""` — API ключ для защиты эндпоинтов (если enable_api_key_auth=True).
-- `GPT2GIGA_CORS_ALLOW_ORIGINS='["*"]'` — список разрешенных Origin (JSON массив);
-- `GPT2GIGA_CORS_ALLOW_METHODS='["*"]'` — список разрешенных HTTP-методов (JSON массив);
-- `GPT2GIGA_CORS_ALLOW_HEADERS='["*"]'` — список разрешенных заголовков (JSON массив).
-
-#### Режим backend API GigaChat
-
-По умолчанию gpt2giga сохраняет прежний контракт GigaChat SDK через root compatibility methods `achat`/`astream`:
+Production mode требует API key и отключает `/docs`, `/redoc`, `/openapi.json` и `/logs*`:
 
 ```dotenv
-GPT2GIGA_GIGACHAT_API_MODE=v1
-GPT2GIGA_RESPONSES_API_MODE=inherit
-```
-
-Чтобы переключить chat-like запросы на primary `v2/chat/completions` surface из `gigachat==0.2.2a1`, задайте:
-
-```dotenv
-GPT2GIGA_GIGACHAT_API_MODE=v2
-```
-
-`GPT2GIGA_RESPONSES_API_MODE` управляет только OpenAI `/responses`:
-
-| `GPT2GIGA_GIGACHAT_API_MODE` | `GPT2GIGA_RESPONSES_API_MODE` | `/chat/completions` | `/responses` |
-|---|---|---|---|
-| `v1` | `inherit` | `v1` | `v1` |
-| `v2` | `inherit` | `v2` | `v2` |
-| `v1` | `v2` | `v1` | `v2` |
-| `v2` | `v1` | `v2` | `v1` |
-
-Режим `v2` меняет только backend-вызовы к GigaChat (`achat.create` / `achat.stream`); внешние OpenAI-compatible маршруты и URL `/v1/...` остаются прежними. `/chat/completions` v1 поддерживается для совместимости, но новые tool/built-in-tool возможности ориентированы на GigaChat `v2/chat/completions`.
-
-> Для maintainers: эта реализация целится в `gigachat==0.2.2a1` и не является переносом pre-release/1.0.0 архитектуры из PR #123.
-
-> **Breaking change в 0.1.6:** `GPT2GIGA_PASS_MODEL` по умолчанию `True`. Если клиент отправляет OpenAI/Anthropic-имя модели, оно будет передано в GigaChat. Чтобы всегда использовать модель из `GIGACHAT_MODEL` / настроек прокси, задайте `GPT2GIGA_PASS_MODEL=False`.
-
-#### Экспериментальные modular flags
-
-Флаги modular roadmap добавлены заранее и по умолчанию не меняют runtime behavior:
-
-```dotenv
-GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER=False
-GPT2GIGA_NORMALIZATION_MODE=off
-GPT2GIGA_LEGACY_CHAT_FALLBACK=True
-GPT2GIGA_TRAFFIC_LOG_ENABLED=False
-GPT2GIGA_TRAFFIC_LOG_SINK=noop
-# GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch
-GPT2GIGA_TRAFFIC_LOG_JSONL_PATH=traffic_logs.jsonl
-# GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2giga
-# GPT2GIGA_POSTGRES_DB=gpt2giga
-# GPT2GIGA_POSTGRES_USER=gpt2giga
-# GPT2GIGA_POSTGRES_PASSWORD="<strong-postgres-password>"
-# GPT2GIGA_POSTGRES_PORT=5432
-# GPT2GIGA_OPENSEARCH_URL=http://localhost:9200
-# GPT2GIGA_OPENSEARCH_USERNAME=
-# GPT2GIGA_OPENSEARCH_PASSWORD=
-# GPT2GIGA_OPENSEARCH_INDEX=gpt2giga-traffic
-# GPT2GIGA_OPENSEARCH_DATA_STREAM=True
-# GPT2GIGA_OPENSEARCH_BULK_SIZE=500
-# GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS=2000
-GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT=False
-GPT2GIGA_TRAFFIC_LOG_QUEUE_SIZE=10000
-GPT2GIGA_TRAFFIC_LOG_BATCH_SIZE=500
-GPT2GIGA_TRAFFIC_LOG_FLUSH_INTERVAL_MS=2000
-GPT2GIGA_TRAFFIC_LOG_DROP_ON_BACKPRESSURE=True
-GPT2GIGA_TRAFFIC_LOG_REDACT_SENSITIVE=True
-GPT2GIGA_TRAFFIC_LOG_REDACT_EXTRA_KEYS=[]
-GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS=30
-GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS=3600
-GPT2GIGA_OBSERVABILITY_ENABLED=False
-GPT2GIGA_OBSERVABILITY_BACKEND=phoenix
-PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
-PHOENIX_PROJECT_NAME=gpt2giga
-# PHOENIX_API_KEY=
-# PHOENIX_PORT=6006
-# PHOENIX_GRPC_PORT=4317
-GPT2GIGA_OBSERVABILITY_SAMPLE_RATE=1.0
-GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=False
-GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES=False
-GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=False
-GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=False
-GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH=8000
-GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
-GPT2GIGA_METRICS_ENABLED=False
-GPT2GIGA_METRICS_PATH=/metrics
-GPT2GIGA_UI_ENABLED=False
-GPT2GIGA_DEBUG_TRANSLATE_ENABLED=False
-GPT2GIGA_ADMIN_API_ENABLED=False
-# GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
-GPT2GIGA_REPLAY_ENABLED=False
-```
-
-`off` сохраняет текущий legacy path. `shadow` для OpenAI Chat Completions строит normalized-представление параллельно, записывает только shape-only diagnostic events (`request_id`, `route`, `normalization_status`, shape hash, warnings/errors) и не меняет ответ клиента; ошибки shadow translation не ломают запрос. `on` переводит OpenAI Chat Completions на экспериментальный normalized path: non-stream request маппится в `NormalizedChatRequest`, выполняется через GigaChat provider adapter и возвращается через normalized-to-OpenAI response adapter, а `stream=true` проходит через canonical normalized stream events и OpenAI-compatible SSE mapper. Anthropic normalization и UI остаются scope следующих релизов roadmap. Если normalized path падает до старта ответа и `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`, запрос безопасно возвращается на legacy path без логирования raw prompt/response content. Traffic logging остается выключенным, пока `GPT2GIGA_TRAFFIC_LOG_ENABLED=False`; для локальной JSONL-проверки задайте `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`. Postgres traffic logs являются opt-in durable backend: используйте `GPT2GIGA_TRAFFIC_LOG_SINK=postgres`, задайте `GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN`, установите пакет с extra `postgres`, а writer будет работать через background queue; при заполнении queue по умолчанию events сбрасываются, чтобы не блокировать API request path. OpenSearch traffic logs являются optional mirror: используйте `GPT2GIGA_TRAFFIC_LOG_SINKS=postgres,opensearch` и extra `opensearch`; Bulk writer делает короткий retry with backoff, а ошибки OpenSearch изолируются от API request path. Dead-letter storage пока не включен: при недоступном OpenSearch events после retry отбрасываются и Postgres остается source of truth. Phoenix/OpenTelemetry observability является opt-in через extra `phoenix` и `GPT2GIGA_OBSERVABILITY_ENABLED=True`; content capture выключен по умолчанию. Prometheus-compatible metrics endpoint также выключен по умолчанию и монтируется только при `GPT2GIGA_METRICS_ENABLED=True`. Admin traffic logs query API также выключен по умолчанию; чтобы читать durable logs, задайте `GPT2GIGA_ADMIN_API_ENABLED=True`, `GPT2GIGA_ADMIN_API_KEY` и Postgres DSN.
-
-#### Phoenix observability
-
-Phoenix/OpenTelemetry observability выключена по умолчанию. Для локальной проверки установите пакет с optional extra `phoenix`, задайте `GPT2GIGA_OBSERVABILITY_ENABLED=True`, `GPT2GIGA_OBSERVABILITY_BACKEND=phoenix`, `PHOENIX_COLLECTOR_ENDPOINT` и `PHOENIX_PROJECT_NAME`.
-
-LLM payload attributes требуют двойного opt-in: включите `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True` и только нужный payload-флаг (`GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES`, `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS`, `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES`). Значения ограничиваются `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH`, а redaction остается включенной через `GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True`.
-
-В normalized OpenAI Chat path дополнительно эмитятся LLM spans `protocol.normalize.request` и `protocol.normalize.response` с OpenInference-style metadata: model, provider, operation, token usage, finish reason, tool counts/names и streaming status. Для `stream=true` normalized path добавляет OTel span events `stream.start`, `stream.first_token`, `stream.tool_call_delta`, `stream.completed` и `stream.error`; raw deltas попадают в attributes только при включенном `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=True`.
-
-Traffic logs и Phoenix spans связываются через gateway identifiers. `TrafficLogEvent` сохраняет `trace_id` и, если он доступен во входном `x-span-id`, `span_id`; Phoenix spans `gpt2giga.request`, `provider.gigachat.request` и streaming `stream.emit` получают те же значения как attributes `trace_id`, `span_id`, `request_id`, `route`, `protocol` и `model_requested`. Чтобы расследовать запрос, найдите запись в `GET /_admin/logs?trace_id=<trace_id>` или в Postgres, затем откройте Phoenix и отфильтруйте spans по attribute `trace_id=<trace_id>`. OTel internal trace id может отличаться от gateway `trace_id`, поэтому в этом релизе стабильная связь — именно span attribute `trace_id`.
-
-#### Prometheus metrics
-
-Prometheus-compatible metrics выключены по умолчанию. Для локальной проверки задайте:
-
-```dotenv
-GPT2GIGA_METRICS_ENABLED=True
-GPT2GIGA_METRICS_PATH=/metrics
-```
-
-Если `GPT2GIGA_METRICS_ENABLED=False`, endpoint не монтируется и возвращает `404`. Если endpoint включен, он использует ту же API-key policy, что и публичные API routes: в `PROD` доступ требует `GPT2GIGA_API_KEY`, а в `DEV` endpoint открыт только когда `GPT2GIGA_ENABLE_API_KEY_AUTH=False`. При включенной auth передавайте `Authorization: Bearer <GPT2GIGA_API_KEY>` или `x-api-key`.
-
-Метрики не содержат prompt/response content, API keys, request ids, trace ids или raw payloads. Labels ограничены bounded operational fields вроде protocol, route, method, status, lifecycle, provider и model.
-
-Минимальный Prometheus scrape:
-
-```yaml
-scrape_configs:
-  - job_name: gpt2giga
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["localhost:8090"]
-```
-
-Если API-key auth включена:
-
-```yaml
-scrape_configs:
-  - job_name: gpt2giga
-    metrics_path: /metrics
-    bearer_token: "<GPT2GIGA_API_KEY>"
-    static_configs:
-      - targets: ["localhost:8090"]
-```
-
-Экспортируются baseline series: `gpt2giga_requests_total`, `gpt2giga_request_duration_seconds`, `gpt2giga_upstream_duration_seconds`, `gpt2giga_upstream_errors_total`, `gpt2giga_tokens_input_total`, `gpt2giga_tokens_output_total`, `gpt2giga_stream_disconnects_total`, `gpt2giga_traffic_log_dropped_total`.
-
-#### Admin traffic logs API
-
-Protected admin traffic logs endpoints выключены по умолчанию, включая PROD. Для чтения Postgres traffic logs задайте:
-
-```dotenv
-GPT2GIGA_ADMIN_API_ENABLED=True
-GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
-GPT2GIGA_TRAFFIC_LOG_SINK=postgres
-GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2giga
-```
-
-Доступ защищен заголовком `x-admin-api-key: <secret>` или `Authorization: Bearer <secret>`. Если `GPT2GIGA_ADMIN_API_ENABLED=False`, endpoints не монтируются и возвращают `404`; если admin key не задан или неверный, возвращается `403`.
-
-Доступные endpoints:
-
-- `GET /_admin/logs` — список событий с фильтрами `from`, `to`, `protocol`, `route`, `model`, `status_code`, `has_error`, `request_id`, `trace_id`, `api_key_hash`, `limit`, `cursor`;
-- `GET /_admin/logs/{id}` — summary одной записи;
-- `GET /_admin/logs/{id}/request` — stored redacted request headers/body, если capture включен;
-- `GET /_admin/logs/{id}/response` — stored redacted response body, если capture включен;
-- `GET /_admin/logs/tail` — последние записи;
-- `GET /_admin/logs/export.ndjson` — NDJSON export одной страницы;
-- `GET /_admin/logs/export.csv` — CSV export summary-колонок без stored request/response body payloads;
-- `POST /_admin/logs/retention/purge` — dry-run или execute batch purge записей старше retention cutoff. По умолчанию `dry_run=true`; для удаления нужно явно передать `dry_run=false`;
-- `POST /_admin/logs/{id}/replay` — replay captured POST request через локальный gateway app, если `GPT2GIGA_REPLAY_ENABLED=True`. Stored headers не переиспользуются, payload проходит redaction повторно, а body получает `metadata.gpt2giga_replay`;
-- `POST /_admin/logs/{id}/redact` — manual redaction stored payload columns. Без тела очищает `request_headers`, `request_body` и `response_body`; для частичного удаления передайте `{"fields":["request_body"]}`.
-
-Content capture остается выключенным по умолчанию через `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT=False`; request/response endpoints вернут `null` для body, если payload capture не включен. Все payloads, которые сохраняются в durable traffic logs, проходят redaction перед записью.
-
-#### Debug translate API
-
-Debug translate endpoints выключены по умолчанию и не являются публичным production API. Для локальной отладки или admin-сценариев задайте `GPT2GIGA_DEBUG_TRANSLATE_ENABLED=True` и `GPT2GIGA_ADMIN_API_KEY`. Доступ защищен заголовком `x-admin-api-key: <secret>` или `Authorization: Bearer <secret>`. Если флаг выключен, routes не монтируются и возвращают `404`; если флаг включен, но admin key не задан или передан неверно, возвращается `403`.
-
-Основной endpoint:
-
-- `POST /_debug/translate`
-
-Тело запроса:
-
-```json
-{
-  "from": "openai",
-  "to": "anthropic",
-  "payload": {}
-}
-```
-
-Поддерживаемые форматы: `openai`, `anthropic`, `normalized`, `gigachat`. Request payloads можно переводить из `openai`, `anthropic` и `normalized` в `openai`, `anthropic`, `normalized` или текущую GigaChat request-форму. `gigachat` сейчас трактуется как response shape и поддерживает перевод в `normalized` или `openai`; неподдержанные пары возвращают `400`. Ответ возвращает итоговую форму в поле `payload` и, если трансляция шла через промежуточные представления, добавляет `intermediate`.
-
-Совместимые shortcut-endpoints:
-
-- `POST /_debug/translate/openai-to-normalized`
-- `POST /_debug/translate/anthropic-to-normalized`
-- `POST /_debug/translate/normalized-to-gigachat`
-- `POST /_debug/translate/gigachat-to-openai`
-
-#### Per-model max connections
-
-`GIGACHAT_MAX_CONNECTIONS` остаётся глобальным лимитом HTTP/SDK подключений к GigaChat. Дополнительно можно включить локальный in-process limiter в gpt2giga, который ограничивает число одновременных upstream model-call отдельно для каждой effective GigaChat модели.
-
-Пример:
-
-```dotenv
-GIGACHAT_MAX_CONNECTIONS=7
-GPT2GIGA_MODEL_MAX_CONNECTIONS='{"GigaChat-2-Max":5}'
-GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=30
-```
-
-В этом примере общий SDK/HTTP cap равен `7`, но `GigaChat-2-Max` получает максимум пять одновременных upstream model-call.
-
-То же через CLI:
-
-```sh
-gpt2giga \
-    --gigachat.max-connections 7 \
-    --proxy.model-max-connections '{"GigaChat-2-Max":5}' \
-    --proxy.model-max-connections-acquire-timeout 30
-```
-
-Семантика:
-
-- если `GPT2GIGA_MODEL_MAX_CONNECTIONS` пустой и `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` не задан, limiter выключен и поведение не меняется;
-- если модель есть в `GPT2GIGA_MODEL_MAX_CONNECTIONS`, используется её explicit limit;
-- если модели нет в словаре, но задан `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT`, этот limit применяется отдельно к каждой такой модели;
-- `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT=0` возвращает локальный `429` сразу, положительное значение ждёт указанное число секунд, отсутствие значения ждёт без локального timeout;
-- streaming slot удерживается до завершения upstream stream или закрытия генератора клиентом;
-- backend GigaChat всё равно может вернуть собственный `429` по другим причинам.
-
-Ограничения:
-
-- limiter локальный для одного процесса gpt2giga. Несколько workers, контейнеров или pods умножают effective limit: `effective_limit = per_process_model_limit * workers * pods`. Например, `{"GigaChat-2-Max":5}` при двух workers в каждом из трёх pods даёт до `5 * 2 * 3 = 30` одновременных upstream-вызовов этой модели;
-- при `GPT2GIGA_PASS_TOKEN=True` разные credentials делят один per-model pool внутри процесса;
-- limiter применяется только к model-call endpoint-ам: Chat Completions, Responses, Embeddings, Anthropic Messages и `messages/count_tokens`. Model list/info endpoints не лимитируются.
-
-При локальном timeout-е limiter возвращает `429` с кодом `model_concurrency_limit` и пишет warning log event `model_concurrency_timeout` с `provider`, `model` и `limit`.
-
-Также можно использовать переменные, которые поддерживает [библиотека GigaChat](https://github.com/ai-forever/gigachat#настройка-переменных-окружения):
-- `GIGACHAT_BASE_URL="https://gigachat.devices.sberbank.ru/api/v1"` — базовый URL GigaChat;
-- `GIGACHAT_MODEL="GigaChat-2-Max"` — модель GigaChat API, которая будет обрабатывать запросы по умолчанию;
-- `GIGACHAT_USER` и `GIGACHAT_PASSWORD` — для авторизации с помощью с помощью логина и пароля;
-- `GIGACHAT_CREDENTIALS` и `GIGACHAT_SCOPE` — для авторизации с помощью ключа авторизации;
-- `GIGACHAT_ACCESS_TOKEN` — для авторизации с помощью токена доступа, полученного в обмен на ключ;
-- `GIGACHAT_CA_BUNDLE_FILE` - путь к файлу сертификата корневого центра сертификации;
-- `GIGACHAT_CERT_FILE` - путь к клиентскому сертификату;
-- `GIGACHAT_KEY_FILE` - путь к закрытому ключу;
-- `GIGACHAT_KEY_FILE_PASSWORD` - пароль от закрытого ключа;
-- `GIGACHAT_VERIFY_SSL_CERTS` — для того, чтобы проверять SSL сертификаты, по умолчанию `True`;
-- `GIGACHAT_MAX_CONNECTIONS` - Максимальное количество одновременных подключений к GigaChat API;
-- `GIGACHAT_MAX_RETRIES` - Максимальное количество попыток повтора для временных ошибок. По умолчанию `0` (отключено);
-- `GIGACHAT_RETRY_BACKOFF_FACTOR` - Множитель задержки для повторных попыток. По умолчанию `0.5`;
-- `GIGACHAT_TOKEN_EXPIRY_BUFFER_MS` - Буфер времени (мс) до истечения токена для запуска обновления. По умолчанию `60000` (60 секунд).
-
-После запуска сервер будет перенаправлять все запросы, адресованные OpenAI API, в GigaChat API.
-
-## Авторизация с помощью заголовка
-
-Утилита может авторизовать запросы в GigaChat API с помощью данных, полученных в заголовке `Authorization`.
-
-Для этого запустите gpt2giga с аргументом `--proxy.pass-token true` или задайте переменную окружения `GPT2GIGA_PASS_TOKEN=True`.
-Поддерживается авторизация с помощью ключа, токена доступа и логина и пароля.
-
-Возможные варианты содержимого заголовка `Authorization`:
-
-- `giga-cred-<credentials>:<scope>` — авторизация с помощью ключа. Вместо `<scope>` нужно указать версию API, к которой будут выполняться запросы. [Подробнее о ключе авторизации и версии API](https://github.com/ai-forever/gigachat?tab=readme-ov-file#параметры-объекта-gigachat).
-- `giga-auth-<access_token>` — при авторизации с помощью токена доступа. Токен доступа получается в обмен на ключ авторизации и действителен в течение 30 минут.
-- `giga-user-<user>:<password>` — при авторизации с помощью логина и пароля.
-
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8090", api_key="giga-cred-<credentials>:<scope>")
-
-completion = client.chat.completions.create(
-    model="gpt-5",
-    messages=[
-        {"role": "user", "content": "Кто ты?"},
-    ],
-)
-```
-
-## Использование HTTPS
-
-Утилита может использоваться с протоколом HTTPS, пример генерации сертификатов:
-```bash
-openssl req -x509 -nodes -days 365   -newkey rsa:4096   -keyout key.pem   -out cert.pem   -subj "/CN=localhost"   -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
-```
-```dotenv
-GPT2GIGA_USE_HTTPS=True
-GPT2GIGA_HTTPS_KEY_FILE="Path to key.pem"
-GPT2GIGA_HTTPS_CERT_FILE="Path to cert.pem"
-```
-После этого укажите пути к сертификатам в переменных окружения или CLI-аргументах и включите HTTPS.
-
-Альтернатива: разместите `gpt2giga` за reverse proxy с TLS-терминацией:
-- пример стека с Traefik: [`compose/traefik.yaml`](./compose/traefik.yaml) и правила в `traefik/` (при необходимости добавьте ACME/сертификаты под свой домен).
-
-## Использование API ключа
-```dotenv
+GPT2GIGA_MODE=PROD
 GPT2GIGA_ENABLE_API_KEY_AUTH=True
-GPT2GIGA_API_KEY=123
+GPT2GIGA_API_KEY="<strong-random-secret>"
+GIGACHAT_VERIFY_SSL_CERTS=True
 ```
 
-После этого, в сервисе будет добавлена авторизация по токену. Возможны разные варианты выполнения запросов, например:
-Авторизация по запросу:
-```bash
-curl -L http://localhost:8090/models?x-api-key=123
-```
-Авторизация по заголовкам:
-```bash
-curl -H "x-api-key:123" -L http://localhost:8090/models
-```
-Авторизация через Bearer:
-```bash
- curl -H "Authorization: Bearer 123" -L http://localhost:8090/models
-```
-```python
-from openai import OpenAI
+Compose profiles, reverse proxies, TLS и hardening описаны в [Deployment](./docs/deployment.md).
 
-client = OpenAI(base_url="http://localhost:8090", api_key="123")
+## Структура Репозитория
 
-completion = client.chat.completions.create(
-    model="gpt-5",
-    messages=[
-        {"role": "user", "content": "Кто ты?"},
-    ],
-)
-```
-## Системные эндпоинты
-- `GET /health`
-- `GET | POST /ping`
-- `GET /logs/{last_n_lines}` - получение последних N строчек из логов;
-- `GET /logs/stream` - SSE стриминг логов;
-- `GET /logs/html` - HTML страница для удобства просмотра стрима логов
+| Path | Назначение |
+|---|---|
+| `gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
+| `tests/` | Unit, router, protocol, sink и integration tests |
+| `examples/` | Runnable OpenAI, Anthropic, embeddings, files/batches, agents examples |
+| `docs/` | Пользовательская документация и architecture notes |
+| `integrations/` | Editor/agent/reverse-proxy integration guides |
+| `deploy/` | Docker Compose deployment manifests |
+| `traefik/` | Traefik config для `deploy/traefik.yaml` |
+| `.github/` | CI, release, Docker publish, PR/issue templates |
 
-При использовании можно зайти на страницу: `http://localhost:8090/logs/html` и:
-1. Если используется API ключ [Использование API ключа](#использование-api-ключа), то введите ваш `GPT2GIGA_API_KEY`
-2. Иначе, введите любой символ
+## Разработка
 
-После этого, воспользуйтесь утилитой и будут выведены логи.
+Установить зависимости:
 
-> **⚠️ Безопасность:** Эндпоинты `/logs*` предназначены только для разработки. В `PROD` режиме (`GPT2GIGA_MODE=PROD`) они автоматически отключены. Не открывайте log-эндпоинты наружу без аутентификации.
-## Production hardening checklist
-
-Перед развертыванием gpt2giga в production-среде убедитесь, что выполнены следующие шаги:
-
-### Обязательные
-
-- [ ] **Режим PROD**: установите `GPT2GIGA_MODE=PROD`. В этом режиме автоматически отключаются `/docs`, `/redoc`, `/openapi.json` и все `/logs*`-эндпоинты; CORS ужесточается (нет wildcard `*`, `allow_credentials=False`).
-- [ ] **API key аутентификация**: установите `GPT2GIGA_ENABLE_API_KEY_AUTH=True` и задайте надёжный `GPT2GIGA_API_KEY` (минимум 32 символа, случайная строка).
-- [ ] **TLS-сертификаты GigaChat**: установите `GIGACHAT_VERIFY_SSL_CERTS=True`. Не отключайте проверку SSL в production.
-- [ ] **HTTPS**: включите `GPT2GIGA_USE_HTTPS=True` и укажите пути к TLS-сертификатам (`GPT2GIGA_HTTPS_KEY_FILE`, `GPT2GIGA_HTTPS_CERT_FILE`), либо разместите прокси за reverse proxy (nginx, Caddy, Traefik) с TLS-терминацией.
-- [ ] **CORS origins**: ограничьте `GPT2GIGA_CORS_ALLOW_ORIGINS` конкретными доменами вместо `["*"]`.
-- [ ] **Секреты**: храните `GIGACHAT_CREDENTIALS`, `GPT2GIGA_API_KEY` и другие секреты в переменных окружения или secrets manager.
-- [ ] **Не передавайте секреты через CLI**: используйте `.env` или переменные окружения вместо `--proxy.api-key` и `--gigachat.credentials` (аргументы видны в `ps aux`).
-
-### Рекомендуемые
-
-- [ ] **Reverse proxy**: разместите gpt2giga за reverse proxy (nginx, Caddy и др.) для rate limiting, TLS-терминации и дополнительной фильтрации.
-- [ ] **Уровень логов**: установите `GPT2GIGA_LOG_LEVEL=WARNING` или `INFO` (не `DEBUG`) для production — уровень `DEBUG` может содержать чувствительные данные в логах.
-- [ ] **Network isolation**: запускайте gpt2giga в изолированной сети, чтобы исключить доступ к внутренним сервисам через SSRF.
-- [ ] **Мониторинг**: настройте мониторинг `/health` и `/ping` эндпоинтов.
-- [ ] **Ротация секретов**: регулярно обновляйте `GPT2GIGA_API_KEY` и `GIGACHAT_CREDENTIALS`.
-
-## Совместимые приложения
-
-Таблица содержит приложения, проверенные на совместную работу с gpt2giga.
-
-
-| Название агента/фреймворка | URL                                                | Описание                                                                                                                                    |
-|----------------------------|----------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| OpenCode                   | https://opencode.ai/                               | AI-агент с открытым исходным кодом                                                                                                          |
-| KiloCode                   | https://kilo.ai/                                   | AI-агент для написания кода, доступен в JetBrains/VSCode                                                                                    |
-| OpenHands                  | https://openhands.dev/                             | AI-ассистент для разработки.<br /> Подробнее о запуске и настройке OpenHands для работы с gpt2giga — в [README](./integrations/openhands/README.md) |
-| Zed                        | https://zed.dev/                                   | AI-ассистент                                                                                                                                |
-| Cline                      | https://cline.bot/                                 | AI-ассистент разработчика                                                                                                                   |
-| OpenAI Codex               | https://github.com/openai/codex                    | CLI-агент от OpenAI.<br /> Подробнее о запуске и настройке Codex для работы с gpt2giga — в [README](./integrations/codex/README.md)         |
-| Aider                      | https://aider.chat/                                | AI-ассистент для написания приложений.<br /> Подробнее о запуске и настройке Aider для работы с gpt2giga — в [README](./integrations/aider/README.md) |
-| Langflow                   | https://github.com/langflow-ai/langflow            | Low/No-code платформа для создания агентов                                                                                                  |
-| DeepAgentsCLI              | https://github.com/langchain-ai/deepagents         | Deep Agents — это платформа для работы с агентами, построенная на основе langchain и langgraph                                              |
-| CrewAI                     | https://github.com/crewAIInc/crewAI                | Фреймворк для оркестрации агентов                                                                                                           |
-| Qwen Agent                 | https://github.com/QwenLM/Qwen-Agent               | Фреймворк                                                                                                                                   |
-| PydanticAI                 | https://github.com/pydantic/pydantic-ai            | GenAI Agent Framework, the Pydantic way                                                                                                     |
-| Camel                      | https://github.com/camel-ai/camel                  | Мультиагентный фреймворк                                                                                                                    |
-| smolagents                 | https://github.com/huggingface/smolagents          | Фреймворк от hf                                                                                                                             |
-| Openclaw                   | https://openclaw.ai/                               | Personal AI assistant                                                                                                                       |
-| Claude Code                | https://code.claude.com/docs/en/overview           | CLI-агент от Anthropic.<br /> Подробнее о запуске и настройке Claude Code для работы с gpt2giga — в [README](./integrations/claude-code/README.md) |
-| OpenAI Agents SDK          | https://github.com/openai/openai-agents-python     | SDK для создания агентов с function calling и handoffs. Пример использования — в [examples/openai_agents.py](./examples/openai_agents.py)   |
-| Anthropic SDK              | https://github.com/anthropics/anthropic-sdk-python | Официальный Python SDK для Anthropic API. Примеры использования — в [examples/anthropic/](./examples/anthropic/)                            |
-| Cursor                     | https://cursor.com/                                | Редактор с ИИ и агентом для программирования.<br /> Подробнее о запуске и настройке Cursor для работы с gpt2giga — в [README](./integrations/cursor/README.md) |
-| Qwen Code                  | https://github.com/QwenLM/qwen-code                | CLI-агент для написания кода.<br /> Подробнее о запуске и настройке Qwen Code для работы с gpt2giga — в [README](./integrations/qwen-code/README.md) |
-| Xcode                      | https://developer.apple.com/xcode/                 | Coding Intelligence и внешние агентные инструменты Apple.<br /> Подробнее о подключении Xcode к gpt2giga — в [README](./integrations/xcode/README.md) |
-
-## Вклад и PR-шаблоны
-
-Основной PR-шаблон по умолчанию находится в [`.github/PULL_REQUEST_TEMPLATE.md`](./.github/PULL_REQUEST_TEMPLATE.md).
-Русскоязычный вариант расположен в [`.github/PULL_REQUEST_TEMPLATE/ru.md`](./.github/PULL_REQUEST_TEMPLATE/ru.md).
-
-Чтобы открыть pull request с русским шаблоном, используйте параметр GitHub `template=ru.md` в URL сравнения веток:
-
-```text
-https://github.com/ai-forever/gpt2giga/compare/main...your-branch?quick_pull=1&template=ru.md
+```sh
+uv sync --all-extras --dev
 ```
 
-Замените `your-branch` на имя вашей ветки. Если базовая ветка отличается от `main`, замените и ее в URL.
+Запустить сервис:
 
-## История изменений
+```sh
+uv run gpt2giga
+```
 
-Подробная информация об изменениях в каждой версии доступна в файле [CHANGELOG.md](CHANGELOG.md) или [CHANGELOG_en.md](CHANGELOG_en.md).
+Проверки перед PR:
 
-## Лицензия
+```sh
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
+```
 
-Проект распространяется под лицензией MIT.
-Подробная информация — в файле [LICENSE](LICENSE).
+Используйте Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`) и сверяйтесь с `.github/PULL_REQUEST_TEMPLATE.md`.

@@ -2,7 +2,7 @@
 #
 # Usage:
 #   docker compose --env-file .env \
-#     -f compose/base.yaml -f compose/postgres.yaml -f compose/opensearch.yaml \
+#     -f deploy/base.yaml -f deploy/postgres.yaml -f deploy/opensearch.yaml \
 #     --profile DEV --profile postgres --profile opensearch up -d --build
 
 x-gpt2giga-opensearch-env: &gpt2giga-opensearch-env

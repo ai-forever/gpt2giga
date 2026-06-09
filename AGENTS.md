@@ -56,11 +56,11 @@ uv run pre-commit install
 | `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
-| `traefik/` | Traefik config | Used by `compose/traefik.yaml` |
+| `traefik/` | Traefik config | Used by `deploy/traefik.yaml` |
 | `badges/` | Generated assets | Coverage badge written by CI |
 | `Dockerfile` | Container build | `uv build`-based package install |
 | `Dockerfile.mitmproxy` | Debug container image | mitmproxy/SSE debugging support |
-| `compose/` | Docker Compose manifests | `base`, `traefik`, `observability`, and related stacks |
+| `deploy/` | Docker Compose manifests | `base`, `traefik`, `observability`, and related stacks |
 
 ## Current Architecture Notes
 
@@ -111,4 +111,4 @@ uv run pytest tests/ --cov=. --cov-fail-under=80
 
 - Default local server address is `http://localhost:8090`.
 - Docker Compose uses `.env` and supports `DEV` and `PROD` profiles.
-- The repo also includes Traefik and observability compose variants; keep docs/config references aligned with those files when changing deployment behavior.
+- The repo also includes Traefik and observability Docker Compose variants in `deploy/`; keep docs/config references aligned with those files when changing deployment behavior.

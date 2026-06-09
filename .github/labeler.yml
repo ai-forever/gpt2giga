@@ -30,7 +30,7 @@ docker:
           - 'Dockerfile'
           - 'Dockerfile.mitmproxy'
           - '.dockerignore'
-          - 'compose/**'
+          - 'deploy/**'
           - 'traefik/**'
 
 ci:
@@ -46,6 +46,7 @@ docs:
   - changed-files:
       - any-glob-to-any-file:
           - 'README.md'
+          - 'docs/**'
           - 'integrations/**'
           - 'examples/**/*.md'
           - '.github/PULL_REQUEST_TEMPLATE.md'

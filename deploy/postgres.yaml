@@ -2,7 +2,7 @@
 #
 # Usage:
 #   docker compose --env-file .env \
-#     -f compose/base.yaml -f compose/postgres.yaml \
+#     -f deploy/base.yaml -f deploy/postgres.yaml \
 #     --profile DEV --profile postgres up -d --build
 
 x-gpt2giga-postgres-env: &gpt2giga-postgres-env

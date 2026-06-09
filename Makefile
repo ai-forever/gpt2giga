@@ -1,12 +1,12 @@
-# Docker Compose targets for all compose files
+# Docker Compose targets for deploy files
 
 .PHONY: compose-prod compose-dev compose-down observe-prod observe-prod-up observe-dev observe-down traefik traefik-up traefik-down
 
 COMPOSE_ENV_FILE = .env
 DOCKER_COMPOSE = docker compose --env-file $(COMPOSE_ENV_FILE)
 
-# --- compose/base.yaml (базовый gpt2giga) ---
-COMPOSE_BASE = compose/base.yaml
+# --- deploy/base.yaml (базовый gpt2giga) ---
+COMPOSE_BASE = deploy/base.yaml
 
 compose-prod:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_BASE) --profile PROD up
@@ -23,8 +23,8 @@ compose-dev-d:
 compose-down:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_BASE) --profile PROD --profile DEV down
 
-# --- compose/observability.yaml (gpt2giga + mitmproxy) ---
-COMPOSE_OBSERVE = compose/observability.yaml
+# --- deploy/observability.yaml (gpt2giga + mitmproxy) ---
+COMPOSE_OBSERVE = deploy/observability.yaml
 
 observe-prod:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_OBSERVE) --profile PROD up
@@ -41,8 +41,8 @@ observe-dev-d:
 observe-down:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_OBSERVE) --profile PROD --profile DEV down
 
-# --- compose/traefik.yaml (gpt2giga + traefik) ---
-COMPOSE_TRAEFIK = compose/traefik.yaml
+# --- deploy/traefik.yaml (gpt2giga + traefik) ---
+COMPOSE_TRAEFIK = deploy/traefik.yaml
 
 traefik:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_TRAEFIK) up
@@ -54,7 +54,7 @@ traefik-down:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_TRAEFIK) down
 
 
-COMPOSE_OBSERVE_MULTIPLE = compose/observe-multiple.yaml
+COMPOSE_OBSERVE_MULTIPLE = deploy/observe-multiple.yaml
 
 observe-multiple:
 	$(DOCKER_COMPOSE) -f $(COMPOSE_OBSERVE_MULTIPLE) up
