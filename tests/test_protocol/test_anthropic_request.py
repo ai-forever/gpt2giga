@@ -1,7 +1,7 @@
 import pytest
 from loguru import logger
 
-from gpt2giga.common.client_params import ClientCompatibilityError, ClientParamStatus
+from gpt2giga.common.client_params import ClientParamStatus
 from gpt2giga.protocol.anthropic.params import classify_anthropic_messages_parameter
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
@@ -35,7 +35,7 @@ def test_anthropic_messages_parameter_classifier_marks_known_states():
         ClientParamStatus.SUPPORTED
     )
     assert classify_anthropic_messages_parameter("container") == (
-        ClientParamStatus.REJECTED
+        ClientParamStatus.ACCEPTED_IGNORED
     )
     assert classify_anthropic_messages_parameter("custom_flag") == (
         ClientParamStatus.SUPPORTED
@@ -70,18 +70,17 @@ def test_build_openai_data_from_anthropic_request_ignores_metadata():
 
 
 @pytest.mark.parametrize("param", ["container", "context_management", "mcp_servers"])
-def test_build_openai_data_from_anthropic_request_rejects_stateful_params(param):
+def test_build_openai_data_from_anthropic_request_ignores_stateful_params(param):
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
         param: {"enabled": True},
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.provider == "anthropic"
-    assert exc_info.value.param == param
+    assert param not in openai_data
+    assert "extra_body" not in openai_data
 
 
 def test_build_openai_data_from_anthropic_request_normalizes_sdk_style_extra_body():
@@ -133,17 +132,17 @@ def test_build_openai_data_from_anthropic_request_accepts_tool_choice_auto():
     assert "tool_choice" not in openai_data
 
 
-def test_build_openai_data_from_anthropic_request_rejects_tool_choice_any():
+def test_build_openai_data_from_anthropic_request_ignores_tool_choice_any():
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
         "tool_choice": {"type": "any"},
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.param == "tool_choice"
+    assert "tool_choice" not in openai_data
+    assert "function_call" not in openai_data
 
 
 @pytest.mark.parametrize(
@@ -154,7 +153,7 @@ def test_build_openai_data_from_anthropic_request_rejects_tool_choice_any():
         {"type": "tool", "name": None},
     ],
 )
-def test_build_openai_data_from_anthropic_request_rejects_forced_tool_without_name(
+def test_build_openai_data_from_anthropic_request_ignores_forced_tool_without_name(
     tool_choice,
 ):
     data = {
@@ -163,24 +162,22 @@ def test_build_openai_data_from_anthropic_request_rejects_forced_tool_without_na
         "tool_choice": tool_choice,
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.provider == "anthropic"
-    assert exc_info.value.param == "tool_choice"
+    assert "function_call" not in openai_data
 
 
-def test_build_openai_data_from_anthropic_request_rejects_server_tools():
+def test_build_openai_data_from_anthropic_request_ignores_server_tools():
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
         "tools": [{"type": "web_search_20250305", "name": "web_search"}],
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.param == "tools"
+    assert "tools" not in openai_data
+    assert "functions" not in openai_data
 
 
 @pytest.mark.parametrize(
@@ -188,10 +185,9 @@ def test_build_openai_data_from_anthropic_request_rejects_server_tools():
     [
         {"name": "", "input_schema": {"type": "object"}},
         {"name": None, "input_schema": {"type": "object"}},
-        {"name": "sum", "input_schema": "bad"},
     ],
 )
-def test_build_openai_data_from_anthropic_request_rejects_invalid_function_tools(
+def test_build_openai_data_from_anthropic_request_ignores_nameless_function_tools(
     tool,
 ):
     data = {
@@ -200,11 +196,25 @@ def test_build_openai_data_from_anthropic_request_rejects_invalid_function_tools
         "tools": [tool],
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.provider == "anthropic"
-    assert exc_info.value.param == "tools"
+    assert "tools" not in openai_data
+    assert "functions" not in openai_data
+
+
+def test_build_openai_data_from_anthropic_request_defaults_bad_tool_schema():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [{"name": "sum", "input_schema": "bad"}],
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    assert openai_data["tools"][0]["function"]["parameters"] == {
+        "type": "object",
+        "properties": {},
+    }
 
 
 def test_build_openai_data_from_anthropic_request_keeps_function_tools():
@@ -241,7 +251,7 @@ def test_build_openai_data_from_anthropic_request_keeps_function_tools():
         "container_upload",
     ],
 )
-def test_build_openai_data_from_anthropic_request_rejects_unsupported_content_blocks(
+def test_build_openai_data_from_anthropic_request_ignores_unsupported_content_blocks(
     block_type,
 ):
     data = {
@@ -254,15 +264,12 @@ def test_build_openai_data_from_anthropic_request_rejects_unsupported_content_bl
         ],
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.provider == "anthropic"
-    assert block_type in exc_info.value.message
-    assert "Supported request content blocks" in exc_info.value.message
+    assert openai_data["messages"] == [{"role": "user", "content": ""}]
 
 
-def test_build_openai_data_from_anthropic_request_rejects_text_citations():
+def test_build_openai_data_from_anthropic_request_ignores_text_citations():
     data = {
         "model": "claude-x",
         "messages": [
@@ -279,14 +286,12 @@ def test_build_openai_data_from_anthropic_request_rejects_text_citations():
         ],
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.param == "messages[0].content[0].citations"
-    assert "citations" in exc_info.value.message
+    assert openai_data["messages"] == [{"role": "user", "content": "quoted"}]
 
 
-def test_build_openai_data_from_anthropic_request_rejects_image_file_source():
+def test_build_openai_data_from_anthropic_request_ignores_image_file_source():
     data = {
         "model": "claude-x",
         "messages": [
@@ -302,15 +307,12 @@ def test_build_openai_data_from_anthropic_request_rejects_image_file_source():
         ],
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.param == "messages[0].content[0].source.type"
-    assert "base64" in exc_info.value.message
-    assert "url" in exc_info.value.message
+    assert openai_data["messages"] == [{"role": "user", "content": ""}]
 
 
-def test_build_openai_data_from_anthropic_request_rejects_nested_tool_result_blocks():
+def test_build_openai_data_from_anthropic_request_ignores_nested_tool_result_blocks():
     data = {
         "model": "claude-x",
         "messages": [
@@ -333,22 +335,19 @@ def test_build_openai_data_from_anthropic_request_rejects_nested_tool_result_blo
         ],
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.param == "messages[1].content[0].content[0]"
-    assert "search_result" in exc_info.value.message
+    assert openai_data["messages"][1]["role"] == "tool"
+    assert openai_data["messages"][1]["content"] == "{}"
 
 
-def test_build_openai_data_from_anthropic_request_rejects_unsupported_system_block():
+def test_build_openai_data_from_anthropic_request_ignores_unsupported_system_block():
     data = {
         "model": "claude-x",
         "system": [{"type": "document", "source": {"type": "text", "data": "doc"}}],
         "messages": [{"role": "user", "content": "hi"}],
     }
 
-    with pytest.raises(ClientCompatibilityError) as exc_info:
-        _build_openai_data_from_anthropic_request(data, logger)
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert exc_info.value.param == "system[0]"
-    assert "document" in exc_info.value.message
+    assert openai_data["messages"] == [{"role": "user", "content": "hi"}]

@@ -29,10 +29,10 @@ def test_openapi_openai_documents_client_parameter_policy():
     assert "extra_headers" in chat_properties
     assert "extra_query" in chat_properties
     assert (
-        "Rejected: log probabilities are not supported."
+        "Accepted but ignored: log probabilities are not supported."
         in (chat_properties["logprobs"]["description"])
     )
-    assert "Known unsupported optional parameters may be rejected" in (
+    assert "Known unsupported optional parameters are accepted but ignored" in (
         _request_body_description(chat_extra)
     )
 
@@ -44,9 +44,10 @@ def test_openapi_openai_documents_embeddings_and_responses_policy():
     responses_properties = _full_schema(responses_extra)["properties"]
 
     assert (
-        "Rejected for embeddings" in embeddings_properties["extra_body"]["description"]
+        "Accepted but ignored for embeddings"
+        in embeddings_properties["extra_body"]["description"]
     )
-    assert "`extra_body` and unknown top-level fields are rejected" in (
+    assert "`dimensions`, `extra_body`, and unknown top-level compatibility fields" in (
         _request_body_description(embeddings_extra)
     )
     assert "previous_response_id" in responses_properties
@@ -67,9 +68,10 @@ def test_openapi_anthropic_documents_client_parameter_policy():
     assert "extra_query" in messages_properties
     assert "metadata" in messages_properties
     assert "mcp_servers" in messages_properties
-    assert "document/file/container/search/thinking input blocks are rejected" in (
+    assert "document/file/container/search/thinking input blocks" in (
         _request_body_description(messages_extra)
     )
+    assert "are accepted but ignored" in _request_body_description(messages_extra)
 
 
 def test_openapi_anthropic_documents_count_tokens_and_disabled_batches_policy():

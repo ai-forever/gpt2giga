@@ -614,6 +614,67 @@ def test_response_processor_native_so_preserves_responses_tool_call():
     ]
 
 
+def test_response_processor_responses_tool_call_restores_namespace():
+    rp = ResponseProcessor(logger, structured_output_mode="native")
+    tools = [
+        {
+            "type": "namespace",
+            "name": "mcp__playwright",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "browser_navigate",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"url": {"type": "string"}},
+                    },
+                }
+            ],
+        }
+    ]
+    giga_resp = MockResponse(
+        {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": None,
+                        "function_call": {
+                            "name": "mcp__playwright__browser_navigate",
+                            "arguments": {"url": "http://localhost:8090"},
+                        },
+                        "functions_state_id": "state-1",
+                    },
+                    "finish_reason": "function_call",
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
+
+    out = rp.process_response_api(
+        {"model": "gpt-x", "input": "open", "tools": tools},
+        giga_resp,
+        gpt_model="gpt-x",
+        response_id="resp-1",
+    )
+
+    assert out["output"][0]["type"] == "function_call"
+    assert out["output"][0]["name"] == "browser_navigate"
+    assert out["output"][0]["namespace"] == "mcp__playwright"
+    assert json.loads(out["metadata"]["gigachat_called_tools"]) == [
+        {
+            "index": 0,
+            "choice_index": 0,
+            "name": "browser_navigate",
+            "namespace": "mcp__playwright",
+            "arguments": {"url": "http://localhost:8090"},
+            "role": "assistant",
+            "tools_state_id": "state-1",
+        }
+    ]
+
+
 def test_response_processor_responses_metadata_includes_input_called_tools():
     rp = ResponseProcessor(logger)
     giga_resp = MockResponse(

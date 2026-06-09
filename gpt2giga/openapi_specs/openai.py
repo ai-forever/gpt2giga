@@ -6,12 +6,12 @@ from gpt2giga.openapi_specs.common import _request_body_oneof
 
 OPENAI_ADDITIONAL_PROPERTIES_NOTE = (
     "Additional properties are shown for SDK `extra_body` compatibility; known "
-    "unsupported parameters may be rejected with a 400 OpenAI-compatible error."
+    "unsupported optional parameters are accepted but ignored."
 )
 GIGACHAT_EXTRA_BODY_DESCRIPTION = (
     "Object moved to GigaChat `additional_fields`; SDK-style unknown top-level "
     "fields are treated the same way. Known unsupported client parameters are "
-    "still rejected when sent as top-level fields."
+    "accepted but ignored when sent as top-level fields."
 )
 SAFE_EXTRA_HEADERS_DESCRIPTION = (
     "Client SDK extra headers. Safe GigaChat context headers (`x-request-id`, "
@@ -112,7 +112,7 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
                 "type": "integer",
                 "description": (
                     "OpenAI Chat Completions output-token limit. Mapped to "
-                    "`max_tokens`; rejected if it conflicts with `max_tokens`."
+                    "`max_tokens`; ignored if it conflicts with `max_tokens`."
                 ),
             },
             "max_output_tokens": {
@@ -133,7 +133,11 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
             },
             "tools": {
                 "type": "array",
-                "description": "OpenAI tools format (type=function).",
+                "description": (
+                    "OpenAI tools format. Function tools are supported; GigaChat "
+                    "built-in tools are available only in GigaChat v2 chat mode. "
+                    "Unsupported tool entries are accepted but ignored."
+                ),
                 "items": {"type": "object", "additionalProperties": True},
             },
             "functions": {
@@ -179,20 +183,20 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
             },
             "logprobs": {
                 "type": "boolean",
-                "description": "Rejected: log probabilities are not supported.",
+                "description": "Accepted but ignored: log probabilities are not supported.",
             },
             "top_logprobs": {
                 "type": "integer",
-                "description": "Rejected: log probabilities are not supported.",
+                "description": "Accepted but ignored: log probabilities are not supported.",
             },
             "audio": {
                 "type": "object",
-                "description": "Rejected: audio output is not supported.",
+                "description": "Accepted but ignored: audio output is not supported.",
                 "additionalProperties": True,
             },
             "prediction": {
                 "type": "object",
-                "description": "Rejected: predicted outputs are not supported.",
+                "description": "Accepted but ignored: predicted outputs are not supported.",
                 "additionalProperties": True,
             },
         },
@@ -257,7 +261,9 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
         "- `extra_body` objects and SDK-style unknown top-level fields are moved "
         "to GigaChat `additional_fields`.\n"
-        "- Known unsupported optional parameters may be rejected with `400`."
+        "- Known unsupported optional parameters are accepted but ignored.\n"
+        "- New tool/built-in-tool development targets GigaChat v2 chat mode; "
+        "v1 chat remains supported but is not being extended."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -309,15 +315,14 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
             **minimal_schema["properties"],
             "encoding_format": {
                 "type": "string",
-                "description": "Embedding vector format.",
+                "description": "Embedding vector format; unknown values are ignored.",
                 "enum": ["float", "base64"],
             },
             "dimensions": {
                 "type": "integer",
                 "description": (
-                    "Accepted when it matches the native GigaChat embedding model "
-                    "dimension: Embeddings/Embeddings-2=1024, "
-                    "GigaEmbeddings-3B-2025-09=2048, EmbeddingsGigaR=2560."
+                    "OpenAI embeddings dimensions option; accepted but ignored "
+                    "because GigaChat returns the native model dimension."
                 ),
             },
             "user": {
@@ -326,7 +331,7 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
             },
             "extra_body": {
                 "type": "object",
-                "description": "Rejected for embeddings; no GigaChat embeddings extras are allowlisted.",
+                "description": "Accepted but ignored for embeddings.",
                 "additionalProperties": True,
             },
             "extra_headers": {
@@ -350,9 +355,8 @@ def embeddings_openapi_extra() -> Dict[str, Any]:
         "extension; the proxy then uses `GPT2GIGA_EMBEDDINGS`.\n"
         "- Token-id inputs (`List[int]` / `List[List[int]]`) require a model "
         "known to `tiktoken` for decoding.\n"
-        "- `dimensions` is a strict compatibility check: accepted only when it "
-        "matches the native dimension of the resolved GigaChat embedding model.\n"
-        "- `extra_body` and unknown top-level fields are rejected for embeddings."
+        "- `dimensions`, `extra_body`, and unknown top-level compatibility fields "
+        "are accepted but ignored for embeddings."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -453,21 +457,24 @@ def responses_openapi_extra() -> Dict[str, Any]:
                 "type": "string",
                 "description": (
                     "Supported in Responses v2 mode: maps to GigaChat "
-                    "`storage.thread_id`; rejected in Responses v1 mode."
+                    "`storage.thread_id`; accepted but ignored in Responses v1 mode."
                 ),
             },
             "conversation": {
                 "type": "object",
-                "description": "Rejected: stateful Responses conversations are not supported.",
+                "description": "Accepted but ignored: stateful Responses conversations are not supported.",
                 "additionalProperties": True,
             },
             "background": {
                 "type": "boolean",
-                "description": "Rejected: background responses are not supported.",
+                "description": "Accepted but ignored: background responses are not supported.",
             },
             "include": {
                 "type": "array",
-                "description": "Rejected: Responses include expansions are not supported.",
+                "description": (
+                    "Accepted but ignored: Responses include expansions are not "
+                    "supported by GigaChat."
+                ),
                 "items": {"type": "string"},
             },
         },
@@ -512,10 +519,11 @@ def responses_openapi_extra() -> Dict[str, Any]:
         "**Notes**:\n"
         "- `stream=true` returns an SSE stream (`text/event-stream`).\n"
         "- In Responses v2 mode, `previous_response_id` maps to GigaChat "
-        "`storage.thread_id`; `conversation` is not supported.\n"
+        "`storage.thread_id`; in Responses v1 mode it is accepted but ignored. "
+        "`conversation` is accepted but ignored.\n"
         "- `extra_body` objects and SDK-style unknown top-level fields are moved "
         "to GigaChat `additional_fields`.\n"
-        "- Known unsupported optional parameters may be rejected with `400`."
+        "- Known unsupported optional parameters are accepted but ignored."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,

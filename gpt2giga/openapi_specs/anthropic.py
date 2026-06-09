@@ -6,12 +6,12 @@ from gpt2giga.openapi_specs.common import _request_body_oneof
 
 ANTHROPIC_ADDITIONAL_PROPERTIES_NOTE = (
     "Additional properties are shown for Anthropic SDK `extra_body` compatibility; "
-    "known unsupported parameters may be rejected with a 400 Anthropic-compatible error."
+    "known unsupported optional parameters are accepted but ignored."
 )
 ANTHROPIC_EXTRA_BODY_DESCRIPTION = (
     "Object moved to GigaChat `additional_fields`; SDK-style unknown top-level "
     "fields are treated the same way. Known unsupported client parameters are "
-    "still rejected when sent as top-level fields."
+    "accepted but ignored when sent as top-level fields."
 )
 ANTHROPIC_EXTRA_HEADERS_DESCRIPTION = (
     "Client SDK extra headers. Safe GigaChat context headers (`x-request-id`, "
@@ -87,7 +87,7 @@ def anthropic_count_tokens_openapi_extra() -> Dict[str, Any]:
         "- Returns `{input_tokens: <count>}` without creating a message.\n"
         "- Tool definitions are included in the token count if provided.\n"
         "- Generation-only options and `extra_body` are accepted but ignored for "
-        "counting; unsupported content blocks are rejected."
+        "counting; unsupported content blocks are accepted but ignored."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -214,16 +214,16 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
             },
             "container": {
                 "type": "string",
-                "description": "Rejected: Anthropic containers are not supported.",
+                "description": "Accepted but ignored: Anthropic containers are not supported.",
             },
             "context_management": {
                 "type": "object",
-                "description": "Rejected: stateful context management is not supported.",
+                "description": "Accepted but ignored: stateful context management is not supported.",
                 "additionalProperties": True,
             },
             "mcp_servers": {
                 "type": "array",
-                "description": "Rejected: MCP server tools are not supported.",
+                "description": "Accepted but ignored: MCP server tools are not supported.",
                 "items": {"type": "object", "additionalProperties": True},
             },
         },
@@ -235,13 +235,13 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
         "**Notes**:\n"
         "- `stream=true` returns Anthropic-style SSE events.\n"
         "- `tool_choice.type` supports `auto`, `none`, and forced `tool`; "
-        "`any` is rejected.\n"
+        "unknown values are accepted but ignored.\n"
         "- Supported request content blocks are `text`, `image`, `tool_use`, "
         "and `tool_result`; document/file/container/search/thinking input blocks "
-        "are rejected.\n"
+        "are accepted but ignored.\n"
         "- `extra_body` objects and SDK-style unknown top-level fields are moved "
         "to GigaChat `additional_fields`.\n"
-        "- Known unsupported optional parameters may be rejected with `400`."
+        "- Known unsupported optional parameters are accepted but ignored."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,

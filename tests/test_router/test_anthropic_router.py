@@ -3,12 +3,10 @@
 import base64
 import json
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
-from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.anthropic.request import (
@@ -732,25 +730,23 @@ class TestConvertAnthropicMessagesToOpenai:
         assert isinstance(content, list)
         assert content[0]["image_url"]["url"] == "https://example.com/img.png"
 
-    def test_rejects_unsupported_document_block(self):
-        with pytest.raises(ClientCompatibilityError) as exc_info:
-            _convert_anthropic_messages_to_openai(
-                None,
-                [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "document",
-                                "source": {"type": "text", "data": "doc"},
-                            }
-                        ],
-                    }
-                ],
-            )
+    def test_ignores_unsupported_document_block(self):
+        result = _convert_anthropic_messages_to_openai(
+            None,
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {"type": "text", "data": "doc"},
+                        }
+                    ],
+                }
+            ],
+        )
 
-        assert exc_info.value.param == "messages[0].content[0]"
-        assert "document" in exc_info.value.message
+        assert result == [{"role": "user", "content": ""}]
 
     def test_assistant_tool_use(self):
         result = _convert_anthropic_messages_to_openai(
@@ -1125,7 +1121,7 @@ class TestBuildAnthropicResponse:
 
 
 class TestMessagesEndpoint:
-    def test_rejects_unsupported_container_param(self):
+    def test_ignores_unsupported_container_param(self):
         app = make_app()
         client = TestClient(app)
         payload = {
@@ -1137,12 +1133,10 @@ class TestMessagesEndpoint:
 
         resp = client.post("/messages", json=payload)
 
-        assert resp.status_code == 400
-        assert resp.json()["type"] == "error"
-        assert resp.json()["error"]["type"] == "invalid_request_error"
-        assert "containers" in resp.json()["error"]["message"]
+        assert resp.status_code == 200
+        assert resp.json()["content"][0]["text"] == "Hello!"
 
-    def test_rejects_unsupported_document_content_block(self):
+    def test_ignores_unsupported_document_content_block(self):
         app = make_app()
         client = TestClient(app)
         payload = {
@@ -1163,11 +1157,8 @@ class TestMessagesEndpoint:
 
         resp = client.post("/messages", json=payload)
 
-        assert resp.status_code == 400
-        assert resp.json()["type"] == "error"
-        assert resp.json()["error"]["type"] == "invalid_request_error"
-        assert "document" in resp.json()["error"]["message"]
-        assert "Supported request content blocks" in resp.json()["error"]["message"]
+        assert resp.status_code == 200
+        assert resp.json()["content"][0]["text"] == "Hello!"
 
     def test_non_stream_basic(self):
         app = make_app()
@@ -1927,7 +1918,7 @@ class TestCountTokensEndpoint:
         assert resp.json()["input_tokens"] == 2
         assert giga.token_inputs == ["Hello world"]
 
-    def test_count_rejects_unsupported_document_block(self):
+    def test_count_ignores_unsupported_document_block(self):
         app = make_app()
         client = TestClient(app)
         payload = {
@@ -1947,10 +1938,8 @@ class TestCountTokensEndpoint:
 
         resp = client.post("/messages/count_tokens", json=payload)
 
-        assert resp.status_code == 400
-        assert resp.json()["type"] == "error"
-        assert resp.json()["error"]["type"] == "invalid_request_error"
-        assert "document" in resp.json()["error"]["message"]
+        assert resp.status_code == 200
+        assert resp.json()["input_tokens"] == 0
 
     def test_count_accepts_custom_extra_body_key(self):
         app = make_app()

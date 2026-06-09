@@ -33,6 +33,23 @@ def test_normalize_json_schema_array_items():
     assert result["items"] == {"type": "object", "properties": {}}
 
 
+def test_normalize_json_schema_array_items_without_type():
+    """Test: defaults any[] item schemas to a concrete GigaChat type."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "excludedBodyParts": {
+                "type": "array",
+                "items": {},
+            },
+        },
+    }
+
+    result = normalize_json_schema(schema)
+
+    assert result["properties"]["excludedBodyParts"]["items"]["type"] == "string"
+
+
 def test_normalize_json_schema_anyof():
     """Тест: anyOf разворачивается в первый тип (GigaChat SDK не поддерживает anyOf)"""
     schema = {
@@ -56,6 +73,21 @@ def test_normalize_json_schema_preserves_existing_properties():
     }
     result = normalize_json_schema(schema)
     assert result["properties"]["foo"] == {"type": "string"}
+
+
+def test_normalize_json_schema_removes_unsupported_format():
+    schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "format": "uri"},
+            "created": {"type": "string", "format": "date-time"},
+        },
+    }
+
+    result = normalize_json_schema(schema)
+
+    assert "format" not in result["properties"]["url"]
+    assert result["properties"]["created"]["format"] == "date-time"
 
 
 def test_normalize_json_schema_removes_null_from_anyof():

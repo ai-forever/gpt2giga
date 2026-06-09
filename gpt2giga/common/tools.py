@@ -3,7 +3,6 @@ from typing import Any
 
 from gigachat.models import Function, FunctionParameters
 
-from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
 
 _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
@@ -22,6 +21,7 @@ _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES = {
     "url_content_extraction": "url_content_extraction",
 }
 _GIGACHAT_WEB_SEARCH_TOOL_PREFIX = "web_search"
+_NAMESPACE_TOOL_SEPARATOR = "__"
 
 
 def map_tool_name_to_gigachat(name: str) -> str:
@@ -46,6 +46,35 @@ def map_tool_name_from_gigachat(name: str) -> str:
         Name to return to the client (may be unchanged).
     """
     return _RESERVED_GIGACHAT_TOOL_NAME_MAP_REVERSE.get(name, name)
+
+
+def map_namespaced_tool_name_to_gigachat(namespace: str, name: str) -> str:
+    """Map a Responses namespace tool name to a flat GigaChat function name."""
+    separator = (
+        ""
+        if namespace.endswith(_NAMESPACE_TOOL_SEPARATOR)
+        else (_NAMESPACE_TOOL_SEPARATOR)
+    )
+    return map_tool_name_to_gigachat(f"{namespace}{separator}{name}")
+
+
+def split_gigachat_tool_name(
+    name: str,
+    *,
+    request_tools: Any = None,
+) -> tuple[str, str | None]:
+    """Return client-visible tool name and optional Responses namespace."""
+    namespace_tools = build_namespaced_tool_name_map(request_tools)
+    if name in namespace_tools:
+        namespace, tool_name = namespace_tools[name]
+        return tool_name, namespace
+
+    visible_name = map_tool_name_from_gigachat(name)
+    if visible_name in namespace_tools:
+        namespace, tool_name = namespace_tools[visible_name]
+        return tool_name, namespace
+
+    return visible_name, None
 
 
 def normalize_gigachat_builtin_tool_type(tool_type: Any) -> str | None:
@@ -86,6 +115,132 @@ def build_gigachat_builtin_tool_payload(tool: Mapping[str, Any]) -> dict[str, An
     return {field_name: config}
 
 
+def build_namespaced_tool_name_map(
+    tools: Any,
+) -> dict[str, tuple[str, str]]:
+    """Build a GigaChat function-name map for Responses namespace tools."""
+    if not isinstance(tools, list):
+        return {}
+
+    name_map: dict[str, tuple[str, str]] = {}
+    for tool in tools:
+        if not isinstance(tool, Mapping) or tool.get("type") != "namespace":
+            continue
+        namespace = tool.get("name")
+        nested_tools = tool.get("tools")
+        if not isinstance(namespace, str) or not namespace:
+            continue
+        if not isinstance(nested_tools, list):
+            continue
+
+        for nested_tool in nested_tools:
+            if not isinstance(nested_tool, Mapping):
+                continue
+            function = _function_tool_payload(
+                nested_tool,
+                require_parameters=False,
+            )
+            if function is None:
+                continue
+            name = function.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            mapped_name = map_namespaced_tool_name_to_gigachat(namespace, name)
+            name_map[mapped_name] = (namespace, name)
+
+    return name_map
+
+
+def iter_function_tool_payloads(data: dict, *, require_parameters: bool = True):
+    """Yield flat function definitions from OpenAI function and namespace tools."""
+    source, tools = _tool_source(data)
+    if tools is None:
+        return
+    if not isinstance(tools, list):
+        return
+
+    for index, tool in enumerate(tools):
+        if not isinstance(tool, Mapping):
+            continue
+        if normalize_gigachat_builtin_tool_type(tool.get("type")) is not None:
+            continue
+        if tool.get("type") == "namespace":
+            yield from _iter_namespace_function_payloads(
+                tool,
+                source,
+                index,
+                require_parameters=require_parameters,
+            )
+            continue
+
+        if "function" in tool and not isinstance(tool["function"], Mapping):
+            continue
+        function = _function_tool_payload(tool, require_parameters=require_parameters)
+        if function is None:
+            continue
+        function = dict(function)
+        name = _optional_tool_name(function)
+        if name is None:
+            continue
+        function["name"] = name
+        yield function
+
+
+def _iter_namespace_function_payloads(
+    tool: Mapping[str, Any],
+    source: str,
+    index: int,
+    *,
+    require_parameters: bool = True,
+):
+    namespace = _optional_tool_name(tool)
+    if namespace is None:
+        return
+    nested_tools = tool.get("tools")
+    if not isinstance(nested_tools, list):
+        return
+
+    for nested_tool in nested_tools:
+        if not isinstance(nested_tool, Mapping):
+            continue
+        function = _function_tool_payload(
+            nested_tool,
+            require_parameters=require_parameters,
+        )
+        if function is None:
+            continue
+        function = dict(function)
+        function_name = _optional_tool_name(function)
+        if function_name is None:
+            continue
+        function["name"] = map_namespaced_tool_name_to_gigachat(
+            namespace,
+            function_name,
+        )
+        yield function
+
+
+def _function_tool_payload(
+    tool: Mapping[str, Any],
+    *,
+    require_parameters: bool = True,
+) -> Mapping[str, Any] | None:
+    if "function" in tool:
+        function = tool["function"]
+        if not isinstance(function, Mapping):
+            return None
+        if require_parameters and "parameters" not in function:
+            return None
+        return function
+    if "input_schema" in tool:
+        function = dict(tool)
+        function["parameters"] = function["input_schema"]
+        return function
+    if not require_parameters or "parameters" in tool:
+        return tool
+    return None
+
+
 def _tool_source(data: dict) -> tuple[str, Any]:
     if "tools" in data:
         tools = data.get("tools")
@@ -96,70 +251,24 @@ def _tool_source(data: dict) -> tuple[str, Any]:
     return "functions", data.get("functions", [])
 
 
-def _require_tool_name(definition: Mapping, source: str, index: int) -> str:
+def _optional_tool_name(definition: Mapping) -> str | None:
     name = definition.get("name")
     if not isinstance(name, str) or not name:
-        raise ClientCompatibilityError(
-            f"`{source}[{index}].name` must be a non-empty string.",
-            provider="openai",
-            param=source,
-        )
+        return None
     return name
 
 
 def convert_tool_to_giga_functions(data: dict):
     functions = []
-    source, tools = _tool_source(data)
-    if tools is None:
-        return functions
-    if not isinstance(tools, list):
-        raise ClientCompatibilityError(
-            f"`{source}` must be an array.",
-            provider="openai",
-            param=source,
-        )
 
-    for index, tool in enumerate(tools):
-        if not isinstance(tool, Mapping):
-            raise ClientCompatibilityError(
-                f"`{source}[{index}]` must be an object.",
-                provider="openai",
-                param=source,
-            )
-        if normalize_gigachat_builtin_tool_type(tool.get("type")) is not None:
-            continue
-        if "function" in tool:
-            function = tool["function"]
-            if not isinstance(function, Mapping):
-                raise ClientCompatibilityError(
-                    f"`{source}[{index}].function` must be an object.",
-                    provider="openai",
-                    param=source,
-                )
-            if "parameters" not in function:
-                # Skip tools without parameters (e.g., custom/freeform tools)
-                continue
-            # Resolve $ref/$defs references as GigaChat doesn't support them
-            resolved_params = resolve_schema_refs(function["parameters"])
-            normalized_params = normalize_json_schema(resolved_params)
-            giga_function = Function(
-                name=map_tool_name_to_gigachat(
-                    _require_tool_name(function, source, index)
-                ),
-                description=function.get("description", ""),
-                parameters=FunctionParameters(**normalized_params),
-            )
-        elif "parameters" in tool:
-            # Resolve $ref/$defs references as GigaChat doesn't support them
-            resolved_params = resolve_schema_refs(tool["parameters"])
-            normalized_params = normalize_json_schema(resolved_params)
-            giga_function = Function(
-                name=map_tool_name_to_gigachat(_require_tool_name(tool, source, index)),
-                description=tool.get("description", ""),
-                parameters=FunctionParameters(**normalized_params),
-            )
-        else:
-            # Skip tools without parameters (e.g., custom/freeform tools like apply_patch)
-            continue
+    for function in iter_function_tool_payloads(data):
+        # Resolve $ref/$defs references as GigaChat doesn't support them
+        resolved_params = resolve_schema_refs(function["parameters"])
+        normalized_params = normalize_json_schema(resolved_params)
+        giga_function = Function(
+            name=map_tool_name_to_gigachat(function["name"]),
+            description=function.get("description", ""),
+            parameters=FunctionParameters(**normalized_params),
+        )
         functions.append(giga_function)
     return functions
