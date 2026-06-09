@@ -200,8 +200,8 @@ def test_rquid_middleware_sets_request_context_and_header():
     assert data["caller_sdk"] == "openai-python"
     assert data["caller_client_family"] == "openai"
     assert data["annotations"]["caller"]["sdk"] == "openai-python"
-    assert data["client_ip_hash"].startswith("hmac-sha256:")
-    assert data["api_key_hash"].startswith("hmac-sha256:")
+    assert data["client_ip_hash"].startswith("keyed-blake2b:")
+    assert data["api_key_hash"].startswith("keyed-blake2b:")
     assert "local-secret" not in data["api_key_hash"]
 
 
@@ -294,7 +294,7 @@ def test_rquid_middleware_emits_traffic_event_for_completed_request():
     assert event.method == "GET"
     assert event.status_code == 200
     assert event.provider == "gigachat"
-    assert event.api_key_hash.startswith("hmac-sha256:")
+    assert event.api_key_hash.startswith("keyed-blake2b:")
     assert event.metadata["lifecycle"] == "request_completed"
     assert event.latency_ms >= 0
 

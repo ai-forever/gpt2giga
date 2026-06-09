@@ -1,6 +1,6 @@
 """Request-scoped context for internal routing and future observability."""
 
-import hmac
+import hashlib
 import secrets
 import uuid
 from contextvars import ContextVar
@@ -147,5 +147,9 @@ def _api_key_value(request: Request) -> Optional[str]:
 def _hash_value(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
-    digest = hmac.digest(_FINGERPRINT_KEY, value.encode("utf-8"), "sha256").hex()
-    return f"hmac-sha256:{digest[:16]}"
+    digest = hashlib.blake2b(
+        value.encode("utf-8"),
+        digest_size=8,
+        key=_FINGERPRINT_KEY,
+    ).hexdigest()
+    return f"keyed-blake2b:{digest}"
