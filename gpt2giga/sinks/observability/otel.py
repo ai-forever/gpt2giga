@@ -142,6 +142,9 @@ def build_otel_attributes(
         )
         if context.annotations:
             payload["annotations"] = context.annotations
+        if context.metadata:
+            payload["metadata"] = context.metadata
+            _apply_context_metadata_attributes(payload, context.metadata)
     payload.update(dict(attributes or {}))
 
     if redaction_enabled:
@@ -179,6 +182,31 @@ def _coerce_otel_attribute_value(value: Any) -> Any:
 def _event_attributes(event: Mapping[str, Any]) -> Mapping[str, Any]:
     attributes = event.get("attributes")
     return attributes if isinstance(attributes, Mapping) else {}
+
+
+def _apply_context_metadata_attributes(
+    payload: dict[str, Any],
+    metadata: Mapping[str, Any],
+) -> None:
+    conversation_id = metadata.get("conversation_id")
+    if isinstance(conversation_id, str) and conversation_id:
+        payload.setdefault("session.id", conversation_id)
+        payload.setdefault("conversation.id", conversation_id)
+
+    field_map = {
+        "conversation_save_id": "conversation.save_id",
+        "conversation_stitched": "conversation.stitched",
+        "conversation_divergent": "conversation.divergent",
+        "conversation_forked": "conversation.forked",
+        "conversation_history_messages": "conversation.history_messages",
+        "conversation_revision": "conversation.revision",
+        "conversation_saved_messages": "conversation.saved_messages",
+        "conversation_saved_revision": "conversation.saved_revision",
+    }
+    for source, target in field_map.items():
+        value = metadata.get(source)
+        if value is not None:
+            payload.setdefault(target, value)
 
 
 def _start_span(tracer: Any, name: str, *, start_time: int | None) -> Any:

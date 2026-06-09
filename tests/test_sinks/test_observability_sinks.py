@@ -144,6 +144,38 @@ def test_build_otel_attributes_adds_context_redacts_and_drops_content():
     assert attributes["metadata"] == '{"nested": true}'
 
 
+def test_build_otel_attributes_maps_conversation_metadata_for_phoenix_sessions():
+    context = RequestContext(
+        request_id="req-1",
+        trace_id="trace-1",
+        span_id="span-1",
+        protocol="openai",
+        route="/v1/chat/completions",
+        method="POST",
+        started_at=datetime.now(timezone.utc),
+        metadata={
+            "conversation_id": "conv-1",
+            "conversation_save_id": "conv-1",
+            "conversation_stitched": True,
+            "conversation_history_messages": 2,
+            "conversation_revision": 1,
+            "conversation_saved_messages": 4,
+            "conversation_saved_revision": 2,
+        },
+    )
+
+    attributes = build_otel_attributes({}, context=context)
+
+    assert attributes["session.id"] == "conv-1"
+    assert attributes["conversation.id"] == "conv-1"
+    assert attributes["conversation.save_id"] == "conv-1"
+    assert attributes["conversation.stitched"] is True
+    assert attributes["conversation.history_messages"] == 2
+    assert attributes["conversation.revision"] == 1
+    assert attributes["conversation.saved_messages"] == 4
+    assert attributes["conversation.saved_revision"] == 2
+
+
 def test_build_llm_request_attributes_default_omits_raw_content():
     request = NormalizedChatRequest(
         model="GigaChat",

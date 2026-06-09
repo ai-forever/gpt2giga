@@ -67,6 +67,11 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.experimental_normalized_layer is False
     assert s.normalization_mode == "off"
     assert s.legacy_chat_fallback is True
+    assert s.conversation_stitching_enabled is False
+    assert s.conversation_ttl_seconds == 3600
+    assert s.conversation_max_messages == 40
+    assert s.conversation_use_session_id is False
+    assert s.conversation_on_divergence == "client_wins"
     assert s.traffic_log_enabled is False
     assert s.traffic_log_sink == "noop"
     assert s.traffic_log_sinks == []
@@ -242,6 +247,11 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER", "true")
     monkeypatch.setenv("GPT2GIGA_NORMALIZATION_MODE", " SHADOW ")
     monkeypatch.setenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", "false")
+    monkeypatch.setenv("GPT2GIGA_CONVERSATION_STITCHING_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_CONVERSATION_TTL_SECONDS", "90")
+    monkeypatch.setenv("GPT2GIGA_CONVERSATION_MAX_MESSAGES", "8")
+    monkeypatch.setenv("GPT2GIGA_CONVERSATION_USE_SESSION_ID", "true")
+    monkeypatch.setenv("GPT2GIGA_CONVERSATION_ON_DIVERGENCE", " FORK ")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINK", " JSONL ")
     monkeypatch.setenv("GPT2GIGA_TRAFFIC_LOG_SINKS", "postgres, opensearch")
@@ -291,6 +301,11 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.experimental_normalized_layer is True
     assert s.normalization_mode == "shadow"
     assert s.legacy_chat_fallback is False
+    assert s.conversation_stitching_enabled is True
+    assert s.conversation_ttl_seconds == 90
+    assert s.conversation_max_messages == 8
+    assert s.conversation_use_session_id is True
+    assert s.conversation_on_divergence == "fork"
     assert s.traffic_log_enabled is True
     assert s.traffic_log_sink == "jsonl"
     assert s.traffic_log_sinks == ["postgres", "opensearch"]

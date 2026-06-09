@@ -134,6 +134,36 @@ class ProxySettings(BaseSettings):
         default=True,
         description="Allow legacy chat path fallback while modular migration is experimental.",
     )
+    conversation_stitching_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable opt-in local conversation stitching for stateless chat-like "
+            "requests carrying a stable conversation identifier."
+        ),
+    )
+    conversation_ttl_seconds: PositiveInt = Field(
+        default=3_600,
+        description="Seconds to retain idle in-memory stitched conversation state.",
+    )
+    conversation_max_messages: PositiveInt = Field(
+        default=40,
+        description="Maximum messages retained and sent for one stitched conversation.",
+    )
+    conversation_use_session_id: bool = Field(
+        default=False,
+        description=(
+            "Allow x-session-id to act as a conversation key when no explicit "
+            "conversation identifier is present."
+        ),
+    )
+    conversation_on_divergence: Literal["client_wins", "fork"] = Field(
+        default="client_wins",
+        description=(
+            "Conflict policy when incoming history does not overlap stored history: "
+            "client_wins replaces state after success, fork stores under an internal "
+            "revision-suffixed conversation id."
+        ),
+    )
     traffic_log_enabled: bool = Field(
         default=False,
         description="Enable future traffic log event emission.",
@@ -373,6 +403,7 @@ class ProxySettings(BaseSettings):
         "gigachat_api_mode",
         "responses_api_mode",
         "normalization_mode",
+        "conversation_on_divergence",
         "traffic_log_sink",
         "observability_backend",
         mode="before",

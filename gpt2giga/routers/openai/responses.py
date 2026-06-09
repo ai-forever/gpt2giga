@@ -6,6 +6,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.conversation import (
+    commit_responses_response,
+    stitch_responses_payload,
+    stitch_responses_stream,
+)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
@@ -47,6 +52,7 @@ async def responses(request: Request):
     model_limiter = get_model_concurrency_limiter(request)
     settings = state.config.proxy_settings
     mode = settings.resolve_responses_api_mode()
+    conversation_turn = await stitch_responses_payload(request, data, mode=mode)
 
     populate_giga_functions(data, getattr(state, "logger", None))
     if mode == "v2":
@@ -101,6 +107,7 @@ async def responses(request: Request):
             data["model"],
             response_id,
         )
+        await commit_responses_response(request, conversation_turn, result)
         await emit_openai_response_observability(
             state,
             data,
@@ -122,6 +129,7 @@ async def responses(request: Request):
         result = state.response_processor.process_response_api(
             data, response, data["model"], current_rquid
         )
+        await commit_responses_response(request, conversation_turn, result)
         await emit_openai_response_observability(
             state,
             data,
@@ -135,20 +143,21 @@ async def responses(request: Request):
         provider="openai",
     )
     await acquired_model_limit.__aenter__()
+    stream = stream_responses_generator(
+        request,
+        chat_messages,
+        current_rquid,
+        giga_client,
+        request_data=data,
+        request_options=request_options,
+        model_limiter=model_limiter,
+        effective_model=effective_model,
+        acquired_model_limit=acquired_model_limit,
+    )
     return StreamingResponse(
         observe_openai_response_stream(
             state,
-            stream_responses_generator(
-                request,
-                chat_messages,
-                current_rquid,
-                giga_client,
-                request_data=data,
-                request_options=request_options,
-                model_limiter=model_limiter,
-                effective_model=effective_model,
-                acquired_model_limit=acquired_model_limit,
-            ),
+            stitch_responses_stream(request, conversation_turn, stream),
             request_payload=data,
             context=get_request_context(),
         ),

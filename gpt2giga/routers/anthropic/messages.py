@@ -6,6 +6,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.conversation import (
+    commit_anthropic_response,
+    stitch_anthropic_stream,
+    stitch_chat_payload,
+)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
@@ -87,6 +92,15 @@ async def messages(request: Request):
 
     model = data.get("model", "unknown")
     openai_data: Dict = _build_openai_data_from_anthropic_request(data, state.logger)
+    if "conversation" in data:
+        openai_data["conversation"] = data["conversation"]
+    if "metadata" in data:
+        openai_data["metadata"] = data["metadata"]
+    conversation_turn = await stitch_chat_payload(
+        request,
+        openai_data,
+        protocol="anthropic",
+    )
     structured_output_fallback = (
         _is_anthropic_structured_output_request(data)
         and state.config.proxy_settings.structured_output_mode == "function_call"
@@ -116,6 +130,7 @@ async def messages(request: Request):
                 logger=state.logger,
                 mode=state.config.proxy_settings.mode,
             )
+            await commit_anthropic_response(request, conversation_turn, result)
             await emit_anthropic_message_observability(
                 state,
                 openai_data,
@@ -127,16 +142,20 @@ async def messages(request: Request):
         return StreamingResponse(
             observe_anthropic_message_stream(
                 state,
-                _stream_anthropic_v2_generator(
+                stitch_anthropic_stream(
                     request,
-                    model,
-                    chat_request,
-                    current_rquid,
-                    giga_client,
-                    is_structured_output=structured_output_fallback,
-                    request_options=request_options,
-                    model_limiter=model_limiter,
-                    effective_model=effective_model,
+                    conversation_turn,
+                    _stream_anthropic_v2_generator(
+                        request,
+                        model,
+                        chat_request,
+                        current_rquid,
+                        giga_client,
+                        is_structured_output=structured_output_fallback,
+                        request_options=request_options,
+                        model_limiter=model_limiter,
+                        effective_model=effective_model,
+                    ),
                 ),
                 request_payload=openai_data,
                 context=get_request_context(),
@@ -164,6 +183,7 @@ async def messages(request: Request):
             logger=state.logger,
             mode=state.config.proxy_settings.mode,
         )
+        await commit_anthropic_response(request, conversation_turn, result)
         await emit_anthropic_message_observability(
             state,
             openai_data,
@@ -175,16 +195,20 @@ async def messages(request: Request):
     return StreamingResponse(
         observe_anthropic_message_stream(
             state,
-            _stream_anthropic_generator(
+            stitch_anthropic_stream(
                 request,
-                model,
-                chat_messages,
-                current_rquid,
-                giga_client,
-                is_structured_output=structured_output_fallback,
-                request_options=request_options,
-                model_limiter=model_limiter,
-                effective_model=effective_model,
+                conversation_turn,
+                _stream_anthropic_generator(
+                    request,
+                    model,
+                    chat_messages,
+                    current_rquid,
+                    giga_client,
+                    is_structured_output=structured_output_fallback,
+                    request_options=request_options,
+                    model_limiter=model_limiter,
+                    effective_model=effective_model,
+                ),
             ),
             request_payload=openai_data,
             context=get_request_context(),

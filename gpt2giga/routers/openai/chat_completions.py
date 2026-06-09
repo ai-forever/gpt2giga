@@ -11,6 +11,11 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.conversation import (
+    commit_chat_completion_response,
+    stitch_chat_completion_stream,
+    stitch_chat_payload,
+)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
@@ -58,6 +63,7 @@ router = APIRouter(tags=["OpenAI"])
 async def chat_completions(request: Request):
     """Create a chat completion."""
     data = await read_request_json(request)
+    conversation_turn = await stitch_chat_payload(request, data, protocol="openai")
     request_data = deepcopy(data)
     request_options = extract_gigachat_request_options(request, data)
     stream = data.get("stream", False)
@@ -73,6 +79,7 @@ async def chat_completions(request: Request):
         request_options,
         giga_client,
         model_limiter,
+        conversation_turn,
     )
     if normalized_response is not None:
         return normalized_response
@@ -83,6 +90,7 @@ async def chat_completions(request: Request):
         request_options,
         giga_client,
         model_limiter,
+        conversation_turn,
     )
     if normalized_stream_response is not None:
         return normalized_stream_response
@@ -102,21 +110,22 @@ async def chat_completions(request: Request):
                 provider="openai",
             )
             await acquired_model_limit.__aenter__()
+            stream = stream_chat_completion_v2_generator(
+                request,
+                data["model"],
+                chat_request,
+                current_rquid,
+                giga_client,
+                request_options,
+                request_data=request_data,
+                model_limiter=model_limiter,
+                effective_model=effective_model,
+                acquired_model_limit=acquired_model_limit,
+            )
             return StreamingResponse(
                 _observe_chat_completion_stream(
                     state,
-                    stream_chat_completion_v2_generator(
-                        request,
-                        data["model"],
-                        chat_request,
-                        current_rquid,
-                        giga_client,
-                        request_options,
-                        request_data=request_data,
-                        model_limiter=model_limiter,
-                        effective_model=effective_model,
-                        acquired_model_limit=acquired_model_limit,
-                    ),
+                    stitch_chat_completion_stream(request, conversation_turn, stream),
                     request_payload=request_data,
                     context=get_request_context(),
                 ),
@@ -135,6 +144,7 @@ async def chat_completions(request: Request):
             current_rquid,
             request_data=request_data,
         )
+        await commit_chat_completion_response(request, conversation_turn, result)
         await _emit_legacy_chat_completion_observability(
             state,
             request_data,
@@ -156,6 +166,7 @@ async def chat_completions(request: Request):
         result = state.response_processor.process_response(
             response, data["model"], current_rquid, request_data=request_data
         )
+        await commit_chat_completion_response(request, conversation_turn, result)
         await _emit_legacy_chat_completion_observability(
             state,
             request_data,
@@ -166,21 +177,22 @@ async def chat_completions(request: Request):
 
     acquired_model_limit = model_limiter.limit(effective_model, provider="openai")
     await acquired_model_limit.__aenter__()
+    stream = stream_chat_completion_generator(
+        request,
+        data["model"],
+        chat_messages,
+        current_rquid,
+        giga_client,
+        request_options,
+        request_data=request_data,
+        model_limiter=model_limiter,
+        effective_model=effective_model,
+        acquired_model_limit=acquired_model_limit,
+    )
     return StreamingResponse(
         _observe_chat_completion_stream(
             state,
-            stream_chat_completion_generator(
-                request,
-                data["model"],
-                chat_messages,
-                current_rquid,
-                giga_client,
-                request_options,
-                request_data=request_data,
-                model_limiter=model_limiter,
-                effective_model=effective_model,
-                acquired_model_limit=acquired_model_limit,
-            ),
+            stitch_chat_completion_stream(request, conversation_turn, stream),
             request_payload=request_data,
             context=get_request_context(),
         ),
@@ -194,6 +206,7 @@ async def _try_normalized_non_stream_chat(
     request_options,
     giga_client,
     model_limiter,
+    conversation_turn,
 ) -> dict | None:
     state = request.app.state
     settings = getattr(getattr(state, "config", None), "proxy_settings", None)
@@ -222,17 +235,23 @@ async def _try_normalized_non_stream_chat(
             normalized_request,
             context=context,
         )
+        openai_response = normalized_chat_response_to_openai(
+            normalized_response,
+            requested_model=payload["model"],
+            context=context,
+        )
+        await commit_chat_completion_response(
+            request,
+            conversation_turn,
+            openai_response,
+        )
         await _emit_chat_completion_observability(
             state,
             normalized_request,
             normalized_response,
             context=context,
         )
-        return normalized_chat_response_to_openai(
-            normalized_response,
-            requested_model=payload["model"],
-            context=context,
-        )
+        return openai_response
     except Exception as exc:
         if not settings.legacy_chat_fallback:
             raise
@@ -253,6 +272,7 @@ async def _try_normalized_stream_chat(
     request_options,
     giga_client,
     model_limiter,
+    conversation_turn,
 ) -> StreamingResponse | None:
     state = request.app.state
     settings = getattr(getattr(state, "config", None), "proxy_settings", None)
@@ -312,10 +332,15 @@ async def _try_normalized_stream_chat(
                     yield sse
             yield normalized_stream_done_sse()
 
+        body_iterator = stitch_chat_completion_stream(
+            request,
+            conversation_turn,
+            emit_stream(),
+        )
         return StreamingResponse(
             _observe_chat_completion_stream(
                 state,
-                emit_stream(),
+                body_iterator,
                 request_payload=payload,
                 context=context,
                 normalized_request=normalized_request,

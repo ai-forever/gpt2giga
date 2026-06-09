@@ -18,6 +18,7 @@ from gpt2giga.api.openai import router as openai_router
 from gpt2giga.api.system.metrics import mount_metrics_endpoint
 from gpt2giga.auth import verify_api_key
 from gpt2giga.common.app_meta import get_app_version
+from gpt2giga.common.conversation import MemoryConversationStore
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
 from gpt2giga.middlewares.request_validation import RequestValidationMiddleware
@@ -54,6 +55,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     app.state.config = config
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.traffic_log_sink = create_traffic_log_sink(config.proxy_settings)
+    app.state.conversation_store = MemoryConversationStore()
     app.state.traffic_log_query_store = create_traffic_log_query_store(
         config.proxy_settings
     )
