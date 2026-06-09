@@ -1,4 +1,4 @@
-# Quickstart
+# Быстрый старт
 
 Этот документ помогает быстро запустить OpenAI/Anthropic-compatible прокси к GigaChat.
 
@@ -9,7 +9,7 @@
 - Docker с Compose plugin для контейнерного запуска.
 - GigaChat credentials и scope для нужного аккаунта.
 
-## Настройка Credentials
+## Настройка credentials
 
 Создайте локальный env-файл:
 
@@ -32,21 +32,21 @@ GIGACHAT_MODEL=GigaChat-2-Max
 
 Настройки GigaChat SDK используют префикс `GIGACHAT_`. Настройки прокси используют префикс `GPT2GIGA_`.
 
-## Запуск Через Docker Compose
+## Запуск через Docker Compose
 
-Development profile:
+DEV profile:
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-Production profile:
+PROD profile:
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
 ```
 
-В `PROD` compose-файл по умолчанию bind-ит сервис только на `127.0.0.1`. Для внешнего доступа поставьте nginx, Traefik, Caddy или другой reverse proxy.
+В `PROD` compose-файл по умолчанию привязывает service только к `127.0.0.1`. Для внешнего доступа поставьте nginx, Traefik, Caddy или другой reverse proxy.
 
 Проверка:
 
@@ -54,7 +54,7 @@ docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
 curl http://localhost:8090/health
 ```
 
-## Локальный Запуск
+## Локальный запуск
 
 Установить как tool:
 
@@ -101,7 +101,7 @@ message = client.messages.create(
 print(message.content[0].text)
 ```
 
-## Per-Request GigaChat Auth
+## GigaChat auth для каждого request
 
 Если клиент должен передавать GigaChat auth через `Authorization`, включите:
 
@@ -115,7 +115,7 @@ GPT2GIGA_PASS_TOKEN=True
 - `giga-auth-<access_token>` для готового access token;
 - `giga-user-<user>:<password>` для user/password auth.
 
-Для общих deployment-сценариев предпочтительнее серверные `GIGACHAT_*` credentials. Включайте `GPT2GIGA_PASS_TOKEN=True`, только если нужны client-specific upstream credentials.
+Для типовых deployment-сценариев предпочтительнее серверные `GIGACHAT_*` credentials. Включайте `GPT2GIGA_PASS_TOKEN=True`, только если нужны client-specific upstream credentials.
 
 ## Примеры
 

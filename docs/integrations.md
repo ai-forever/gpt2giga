@@ -1,4 +1,4 @@
-# Integrations
+# Интеграции
 
 `gpt2giga` рассчитан на клиентов, которые умеют указывать custom base URL для OpenAI-compatible или Anthropic-compatible SDK.
 
@@ -18,7 +18,7 @@ http://localhost:8090
 
 Если `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, используйте `GPT2GIGA_API_KEY` как client API key.
 
-## Runnable Examples
+## Запускаемые примеры
 
 - OpenAI examples: [examples/openai/](../examples/openai/)
 - OpenAI Chat Completions: [examples/openai/chat_completions/README.md](../examples/openai/chat_completions/README.md)
@@ -26,9 +26,9 @@ http://localhost:8090
 - Anthropic examples: [examples/anthropic/README.md](../examples/anthropic/README.md)
 - OpenAI Agents SDK: [examples/openai_agents.py](../examples/openai_agents.py)
 
-## Integration Guides
+## Гайды по интеграциям
 
-| Tool / client | Guide |
+| Tool / client | Гайд |
 |---|---|
 | OpenHands | [integrations/openhands/README.md](../integrations/openhands/README.md) |
 | OpenAI Codex | [integrations/codex/README.md](../integrations/codex/README.md) |
@@ -39,9 +39,9 @@ http://localhost:8090
 | Xcode | [integrations/xcode/README.md](../integrations/xcode/README.md) |
 | nginx reverse proxy | [integrations/nginx/README.md](../integrations/nginx/README.md) |
 
-## Проверенные Apps И Frameworks
+## Проверенные apps и frameworks
 
-| Name | URL | Notes |
+| Название | URL | Примечание |
 |---|---|---|
 | OpenCode | https://opencode.ai/ | Open-source coding agent. |
 | KiloCode | https://kilo.ai/ | Coding agent для JetBrains/VS Code. |
@@ -59,8 +59,8 @@ http://localhost:8090
 | smolagents | https://github.com/huggingface/smolagents | Hugging Face agent framework. |
 | Openclaw | https://openclaw.ai/ | Personal AI assistant. |
 | Claude Code | https://code.claude.com/docs/en/overview | Anthropic CLI coding agent. |
-| OpenAI Agents SDK | https://github.com/openai/openai-agents-python | Agent SDK with function calling and handoffs. |
-| Anthropic SDK | https://github.com/anthropics/anthropic-sdk-python | Official Anthropic Python SDK. |
+| OpenAI Agents SDK | https://github.com/openai/openai-agents-python | Agent SDK с function calling и handoffs. |
+| Anthropic SDK | https://github.com/anthropics/anthropic-sdk-python | Официальный Anthropic Python SDK. |
 | Cursor | https://cursor.com/ | AI editor. |
 | Qwen Code | https://github.com/QwenLM/qwen-code | CLI coding agent. |
-| Xcode | https://developer.apple.com/xcode/ | Apple Coding Intelligence and external agent tooling. |
+| Xcode | https://developer.apple.com/xcode/ | Apple Coding Intelligence и external agent tooling. |

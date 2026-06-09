@@ -1,4 +1,4 @@
-# Configuration
+# Конфигурация
 
 `gpt2giga` читает две группы настроек:
 
@@ -7,7 +7,7 @@
 
 Секреты храните в `.env`, переменных окружения или secrets manager. Не передавайте credentials через CLI flags в production: аргументы процесса могут быть видны через `ps`.
 
-## Источники Настроек
+## Источники настроек
 
 CLI принимает явный env-файл:
 
@@ -31,30 +31,30 @@ gpt2giga \
 gpt2giga --help
 ```
 
-Copy-paste env template: [.env.example](../.env.example).
+Env template для копирования: [.env.example](../.env.example).
 
-## Основные Proxy Settings
+## Основные proxy settings
 
-| Variable | Default | Назначение |
+| Переменная | Default | Назначение |
 |---|---:|---|
 | `GPT2GIGA_MODE` | `DEV` | `DEV` или `PROD`. `PROD` отключает `/docs`, `/redoc`, `/openapi.json` и `/logs*`. |
 | `GPT2GIGA_HOST` | `localhost` | Host локального сервера. |
 | `GPT2GIGA_PORT` | `8090` | Port локального сервера. |
 | `GPT2GIGA_ENABLE_API_KEY_AUTH` | `False` | Требовать proxy API-key auth для публичных API routes. В `PROD` обязательно. |
 | `GPT2GIGA_API_KEY` | empty | Proxy API key. Для общих окружений используйте сильное случайное значение. |
-| `GPT2GIGA_PASS_MODEL` | `True` | Передавать `model` из запроса в GigaChat. Set `False`, чтобы всегда использовать configured GigaChat model. |
+| `GPT2GIGA_PASS_MODEL` | `True` | Передавать `model` из запроса в GigaChat. Поставьте `False`, чтобы всегда использовать настроенную GigaChat model. |
 | `GPT2GIGA_PASS_TOKEN` | `False` | Разбирать client `Authorization` как GigaChat credentials для per-request upstream auth. |
 | `GPT2GIGA_EMBEDDINGS` | `EmbeddingsGigaR` | Default embeddings model, если model из запроса не используется. |
 | `GPT2GIGA_MAX_REQUEST_BODY_BYTES` | `10485760` | Максимальный размер HTTP request body. |
 | `GPT2GIGA_LOG_LEVEL` | `INFO` | Runtime log level. В production избегайте `DEBUG`. |
 
-## GigaChat Settings
+## GigaChat settings
 
 Частые upstream settings:
 
-| Variable | Назначение |
+| Переменная | Назначение |
 |---|---|
-| `GIGACHAT_CREDENTIALS` | Authorization key credentials. |
+| `GIGACHAT_CREDENTIALS` | Credentials authorization key. |
 | `GIGACHAT_SCOPE` | GigaChat API scope. |
 | `GIGACHAT_USER` / `GIGACHAT_PASSWORD` | Альтернативная user/password auth. |
 | `GIGACHAT_ACCESS_TOKEN` | Альтернативная auth через готовый access token. |
@@ -66,7 +66,7 @@ Copy-paste env template: [.env.example](../.env.example).
 
 GigaChat также поддерживает TLS client certificate settings: `GIGACHAT_CA_BUNDLE_FILE`, `GIGACHAT_CERT_FILE`, `GIGACHAT_KEY_FILE`, `GIGACHAT_KEY_FILE_PASSWORD`.
 
-## Reasoning И Structured Output
+## Reasoning и structured output
 
 Reasoning:
 
@@ -86,10 +86,10 @@ GPT2GIGA_STRUCTURED_OUTPUT_MODE=function_call
 
 Значения:
 
-- `function_call`: compatible fallback через function calling;
+- `function_call`: compatibility fallback через function calling;
 - `native`: передаёт JSON Schema через GigaChat `response_format`, если model/API это поддерживает.
 
-## Backend API Mode
+## Backend API mode
 
 ```dotenv
 GPT2GIGA_GIGACHAT_API_MODE=v1
@@ -105,7 +105,7 @@ GPT2GIGA_RESPONSES_API_MODE=inherit
 
 Внешние OpenAI-compatible URLs не меняются. Эти flags управляют только внутренним способом вызова GigaChat.
 
-## Normalized Layer Flags
+## Normalized layer flags
 
 Экспериментальные flags, которые по умолчанию сохраняют legacy behavior:
 
@@ -119,7 +119,7 @@ GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 - `shadow`: строит normalized diagnostics рядом с legacy OpenAI Chat handling без изменения client responses;
 - `on`: переводит OpenAI Chat на normalized path, с legacy fallback до старта ответа, если fallback включён.
 
-## Per-Model Concurrency
+## Per-model concurrency
 
 `GIGACHAT_MAX_CONNECTIONS` — global SDK/HTTP cap. Прокси также умеет ограничивать concurrent upstream model calls по effective model:
 

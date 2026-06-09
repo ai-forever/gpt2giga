@@ -1,8 +1,8 @@
-# Operations
+# Операции
 
 Документ описывает runtime logs, traffic logs, metrics, observability и admin/debug endpoints.
 
-## System Endpoints
+## System endpoints
 
 Всегда смонтированы:
 
@@ -19,7 +19,7 @@
 
 ## Runtime Logs
 
-Runtime logs — process logs. Они пишутся в stdout и настроенный log file.
+Runtime logs — это process logs. Они пишутся в stdout и настроенный log file.
 
 Частые настройки:
 
@@ -51,7 +51,7 @@ GPT2GIGA_METRICS_PATH=/metrics
 
 Метрики не содержат prompt/response content, API keys, request ids, trace ids или raw payloads. Labels ограничены bounded operational fields: protocol, route, method, status, lifecycle, provider, model.
 
-Baseline series:
+Базовые series:
 
 - `gpt2giga_requests_total`
 - `gpt2giga_request_duration_seconds`
@@ -64,7 +64,7 @@ Baseline series:
 
 ## Traffic Logs
 
-Traffic logs — structured records request/response traffic. По умолчанию выключены:
+Traffic logs — это structured records для request/response traffic. По умолчанию выключены:
 
 ```dotenv
 GPT2GIGA_TRAFFIC_LOG_ENABLED=False
@@ -79,7 +79,7 @@ GPT2GIGA_TRAFFIC_LOG_SINK=jsonl
 GPT2GIGA_TRAFFIC_LOG_JSONL_PATH=traffic_logs.jsonl
 ```
 
-Postgres durable backend:
+Durable backend в Postgres:
 
 ```dotenv
 GPT2GIGA_TRAFFIC_LOG_ENABLED=True
@@ -122,7 +122,7 @@ GPT2GIGA_TRAFFIC_LOG_SINK=postgres
 GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2giga
 ```
 
-Auth header options:
+Варианты auth headers:
 
 - `x-admin-api-key: <secret>`
 - `Authorization: Bearer <secret>`
@@ -159,7 +159,7 @@ GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 
 - `POST /_debug/translate`
 
-Shortcut endpoints:
+Короткие endpoints:
 
 - `POST /_debug/translate/openai-to-normalized`
 - `POST /_debug/translate/anthropic-to-normalized`
@@ -233,4 +233,4 @@ headers:
 источник определяется по `Referer: .../docs`, для ReDoc — по `.../redoc`; raw
 prompt/response content в annotations не добавляется.
 
-Термины и design constraints описаны в [Logging and Observability Architecture](./architecture/logging-and-observability.md).
+Термины и design constraints описаны в [архитектуре logging и observability](./architecture/logging-and-observability.md).
