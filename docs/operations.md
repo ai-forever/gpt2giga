@@ -191,7 +191,11 @@ GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=True
 GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 ```
 
-Traffic logs и Phoenix spans связываются через gateway identifiers: `request_id`, `trace_id`, protocol, route, model metadata.
+Traffic logs и Phoenix spans связываются через gateway identifiers:
+`request_id`, `trace_id`, protocol, route, model metadata. Для LLM routes
+Phoenix получает один root span `llm.chat.completion`; streaming milestones
+прикрепляются к нему как span events. Для non-LLM routes используется один
+lifecycle span `gpt2giga.request`.
 
 Phoenix spans также получают безопасную caller-классификацию из входящих
 headers:

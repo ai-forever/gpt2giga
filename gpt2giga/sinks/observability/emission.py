@@ -13,8 +13,6 @@ from gpt2giga.sinks.logs.models import TrafficLogEvent
 from gpt2giga.sinks.observability.factory import emit_observability_event
 
 REQUEST_SPAN_NAME = "gpt2giga.request"
-PROVIDER_SPAN_NAME = "provider.gigachat.request"
-STREAM_SPAN_NAME = "stream.emit"
 
 
 async def emit_request_observability_event(
@@ -29,8 +27,10 @@ async def emit_request_observability_event(
     metadata: dict[str, Any] | None = None,
     is_streaming: bool = False,
 ) -> None:
-    """Emit request lifecycle observability spans best effort."""
+    """Emit one request lifecycle observability span best effort."""
     if sink is None:
+        return
+    if _should_skip_request_lifecycle_span(context, lifecycle):
         return
     event = build_request_traffic_event(
         context,
@@ -48,25 +48,11 @@ async def emit_request_observability_event(
         REQUEST_SPAN_NAME,
         attributes,
         context=context,
+        events=_stream_lifecycle_events(lifecycle, attributes)
+        if is_streaming
+        else None,
         logger=logger,
     )
-    if event.provider:
-        await emit_observability_event(
-            sink,
-            PROVIDER_SPAN_NAME,
-            attributes,
-            context=context,
-            logger=logger,
-        )
-    if is_streaming:
-        await emit_observability_event(
-            sink,
-            STREAM_SPAN_NAME,
-            attributes,
-            context=context,
-            events=_stream_lifecycle_events(lifecycle, attributes),
-            logger=logger,
-        )
 
 
 async def wrap_observability_body_iterator(
@@ -164,6 +150,15 @@ def _stream_lifecycle_events(
     else:
         return []
     return [{"name": name, "attributes": attributes}]
+
+
+def _should_skip_request_lifecycle_span(
+    context: RequestContext,
+    lifecycle: str,
+) -> bool:
+    if not context.llm_observability_emitted:
+        return False
+    return lifecycle in {"request_completed", "streaming_completed"}
 
 
 def _caller_observability_attributes(caller: Mapping[str, Any]) -> dict[str, Any]:

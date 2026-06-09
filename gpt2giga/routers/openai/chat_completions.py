@@ -45,12 +45,7 @@ from gpt2giga.routers.openai.helpers import populate_giga_functions
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
     CHAT_COMPLETION_SPAN_NAME,
-    NORMALIZE_REQUEST_SPAN_NAME,
-    NORMALIZE_RESPONSE_SPAN_NAME,
-    STREAM_SPAN_NAME,
     build_llm_chat_completion_attributes,
-    build_llm_request_attributes,
-    build_llm_response_attributes,
     build_stream_span_events,
 )
 
@@ -215,11 +210,6 @@ async def _try_normalized_non_stream_chat(
             payload,
             context=context,
         )
-        await _emit_normalized_request_observability(
-            state,
-            normalized_request,
-            context=context,
-        )
         provider_adapter = GigaChatProviderAdapter(
             config=state.config,
             request_transformer=state.request_transformer,
@@ -229,11 +219,6 @@ async def _try_normalized_non_stream_chat(
         )
         normalized_response = await provider_adapter.chat(
             normalized_request,
-            context=context,
-        )
-        await _emit_normalized_response_observability(
-            state,
-            normalized_response,
             context=context,
         )
         await _emit_chat_completion_observability(
@@ -284,11 +269,6 @@ async def _try_normalized_stream_chat(
             payload,
             context=context,
         )
-        await _emit_normalized_request_observability(
-            state,
-            normalized_request,
-            context=context,
-        )
         provider_adapter = GigaChatProviderAdapter(
             config=state.config,
             request_transformer=state.request_transformer,
@@ -298,6 +278,7 @@ async def _try_normalized_stream_chat(
             response_processor=state.response_processor,
         )
         response_id = context.request_id if context is not None else rquid_context.get()
+        stream_span_events: list[dict[str, Any]] = []
 
         async def emit_stream():
             seen_content_delta = False
@@ -318,14 +299,7 @@ async def _try_normalized_stream_chat(
                     first_content_delta=first_content_delta,
                 )
                 if span_events:
-                    await emit_observability_event(
-                        getattr(state, "observability_sink", None),
-                        STREAM_SPAN_NAME,
-                        span_events[0]["attributes"],
-                        context=context,
-                        events=span_events,
-                        logger=getattr(state, "logger", None),
-                    )
+                    stream_span_events.extend(span_events)
                 if event.type == "content_delta" and event.content_delta:
                     seen_content_delta = True
                 sse = normalized_stream_event_to_openai_sse(
@@ -344,6 +318,7 @@ async def _try_normalized_stream_chat(
                 request_payload=payload,
                 context=context,
                 normalized_request=normalized_request,
+                stream_span_events=stream_span_events,
             ),
             media_type="text/event-stream",
         )
@@ -361,38 +336,6 @@ async def _try_normalized_stream_chat(
         return None
 
 
-async def _emit_normalized_request_observability(
-    state,
-    normalized_request,
-    *,
-    context,
-) -> None:
-    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
-    await emit_observability_event(
-        getattr(state, "observability_sink", None),
-        NORMALIZE_REQUEST_SPAN_NAME,
-        build_llm_request_attributes(normalized_request, settings=settings),
-        context=context,
-        logger=getattr(state, "logger", None),
-    )
-
-
-async def _emit_normalized_response_observability(
-    state,
-    normalized_response,
-    *,
-    context,
-) -> None:
-    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
-    await emit_observability_event(
-        getattr(state, "observability_sink", None),
-        NORMALIZE_RESPONSE_SPAN_NAME,
-        build_llm_response_attributes(normalized_response, settings=settings),
-        context=context,
-        logger=getattr(state, "logger", None),
-    )
-
-
 async def _observe_chat_completion_stream(
     state,
     body_iterator: AsyncIterator[str],
@@ -400,6 +343,7 @@ async def _observe_chat_completion_stream(
     request_payload: Mapping[str, Any],
     context,
     normalized_request=None,
+    stream_span_events: list[dict[str, Any]] | None = None,
 ) -> AsyncIterator[str]:
     sink = getattr(state, "observability_sink", None)
     if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
@@ -436,6 +380,7 @@ async def _observe_chat_completion_stream(
         normalized_request,
         observer.to_normalized_response(),
         context=context,
+        events=stream_span_events,
     )
 
 
@@ -487,6 +432,7 @@ async def _emit_chat_completion_observability(
     *,
     context,
     settings=None,
+    events: list[dict[str, Any]] | None = None,
 ) -> None:
     if settings is None:
         settings = getattr(getattr(state, "config", None), "proxy_settings", None)
@@ -499,8 +445,11 @@ async def _emit_chat_completion_observability(
             settings=settings,
         ),
         context=context,
+        events=events,
         logger=getattr(state, "logger", None),
     )
+    if context is not None:
+        context.llm_observability_emitted = True
 
 
 class _ChatCompletionStreamObserver:

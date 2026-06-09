@@ -35,6 +35,7 @@ class RequestContext:
     caller_agent_id: Optional[str] = None
     model_requested: Optional[str] = None
     model_effective: Optional[str] = None
+    llm_observability_emitted: bool = False
     annotations: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 

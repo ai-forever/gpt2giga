@@ -316,10 +316,7 @@ def test_rquid_middleware_emits_observability_event_for_completed_request():
     )
 
     assert response.status_code == 200
-    assert [event["name"] for event in sink.events] == [
-        "gpt2giga.request",
-        "provider.gigachat.request",
-    ]
+    assert [event["name"] for event in sink.events] == ["gpt2giga.request"]
     event = sink.events[0]
     assert event["context"].trace_id == "trace-1"
     assert event["attributes"]["trace_id"] == "trace-1"
@@ -331,6 +328,25 @@ def test_rquid_middleware_emits_observability_event_for_completed_request():
     assert event["attributes"]["caller.client_family"] == "anthropic"
     assert event["attributes"]["annotations"]["caller"]["agent"] == "claude-code"
     assert event["attributes"]["metadata"]["lifecycle"] == "request_completed"
+
+
+def test_rquid_middleware_skips_lifecycle_observability_when_llm_span_exists():
+    test_app = FastAPI()
+    sink = RecordingObservabilitySink()
+    test_app.state.observability_sink = sink
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v1/chat/completions")
+    async def chat():
+        context = get_request_context()
+        context.llm_observability_emitted = True
+        return {"data": []}
+
+    client = TestClient(test_app)
+    response = client.get("/v1/chat/completions")
+
+    assert response.status_code == 200
+    assert sink.events == []
 
 
 def test_rquid_middleware_emits_metrics_for_completed_request():

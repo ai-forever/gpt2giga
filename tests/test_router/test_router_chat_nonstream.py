@@ -296,10 +296,9 @@ def test_chat_completions_normalization_on_emits_safe_llm_observability_spans():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    assert "protocol.normalize.request" in emitted
-    assert "protocol.normalize.response" in emitted
-    assert emitted["protocol.normalize.request"]["llm.input_messages.count"] == 1
-    assert emitted["protocol.normalize.response"]["llm.finish_reason"] == "tool_calls"
+    assert list(emitted) == ["llm.chat.completion"]
+    assert emitted["llm.chat.completion"]["llm.input_messages.count"] == 1
+    assert emitted["llm.chat.completion"]["llm.finish_reason"] == "tool_calls"
     assert "secret prompt" not in json.dumps(emitted)
 
 
@@ -355,7 +354,7 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     event_names = [
         event["name"]
         for name, _attributes, _context, events in app.state.observability_sink.events
-        if name == "stream.emit"
+        if name == "llm.chat.completion"
         for event in events
     ]
     emitted = {
@@ -367,6 +366,7 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     assert "data: [DONE]" in body
     assert "stream.start" in event_names
     assert "stream.completed" in event_names
+    assert "stream.emit" not in emitted
     assert "llm.chat.completion" in emitted
     assert "hi" in emitted["llm.chat.completion"]["input.value"]
 
