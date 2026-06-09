@@ -45,6 +45,12 @@ def capture_off_settings() -> ProxySettings:
     )
 
 
+def assert_span_status_code(status: object, expected: str) -> None:
+    status_code = getattr(status, "status_code", status)
+    status_name = getattr(status_code, "name", None)
+    assert (status_name or str(status_code)) == expected
+
+
 @pytest.mark.asyncio
 async def test_noop_observability_sink_implements_contract():
     sink = NoopObservabilitySink()
@@ -534,7 +540,7 @@ async def test_otel_sink_records_span_and_flushes_provider():
     assert tracer.spans[0].attributes["latency_ms"] >= 200
     assert tracer.spans[0].attributes["status"] == "ok"
     assert tracer.spans[0].attributes["otel.status_code"] == "OK"
-    assert "OK" in str(tracer.spans[0].status)
+    assert_span_status_code(tracer.spans[0].status, "OK")
     assert tracer.spans[0].events == [("stream.first_token", {})]
     assert provider.flushed is True
 
@@ -581,7 +587,7 @@ async def test_otel_sink_marks_failed_span_status():
 
     assert tracer.spans[0].attributes["status"] == "failed"
     assert tracer.spans[0].attributes["otel.status_code"] == "ERROR"
-    assert "ERROR" in str(tracer.spans[0].status)
+    assert_span_status_code(tracer.spans[0].status, "ERROR")
 
 
 @pytest.mark.asyncio
