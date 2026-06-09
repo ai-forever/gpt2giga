@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
 
+from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.protocol.anthropic.request import (
@@ -23,6 +24,7 @@ from gpt2giga.protocol.anthropic.response import (
     _build_anthropic_response,
     _map_stop_reason,
 )
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.routers.anthropic import router
 from gpt2giga.routers.anthropic.batches import router as message_batches_router
 
@@ -475,12 +477,24 @@ class FakeRequestTransformer:
         }
 
 
+class RecordingObservabilitySink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, name, attributes=None, *, context=None, events=None):
+        self.events.append((name, attributes or {}, context, list(events or [])))
+
+    async def flush(self):
+        return None
+
+
 def make_app(gigachat=None):
     app = FastAPI()
     app.include_router(router)
     app.state.gigachat_client = gigachat or FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
+    app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(structured_output_mode="function_call")
     )
@@ -1176,6 +1190,51 @@ class TestMessagesEndpoint:
         assert body["content"][0]["type"] == "text"
         assert body["stop_reason"] == "end_turn"
 
+    def test_non_stream_emits_single_phoenix_llm_span(self):
+        app = make_app()
+        app.state.config = ProxyConfig(
+            proxy=ProxySettings(
+                structured_output_mode="function_call",
+                observability_capture_content=True,
+                observability_capture_messages=True,
+                observability_capture_responses=True,
+            )
+        )
+        app.state.observability_sink = RecordingObservabilitySink()
+        app.add_middleware(RquidMiddleware)
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post(
+            "/messages",
+            json=payload,
+            headers={
+                "anthropic-version": "2023-06-01",
+                "user-agent": "anthropic-python/0.1",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert [event[0] for event in app.state.observability_sink.events] == [
+            "llm.chat.completion"
+        ]
+        name, attributes, context, events = app.state.observability_sink.events[0]
+        assert name == "llm.chat.completion"
+        assert context.protocol == "anthropic"
+        assert context.caller_client_family == "anthropic"
+        assert context.caller_sdk == "anthropic-python"
+        assert events == []
+        assert "Hello" in attributes["input.value"]
+        assert "Hello!" in attributes["output.value"]
+        assert attributes["llm.finish_reason"] == "stop"
+        assert attributes["llm.token_count.prompt"] == 10
+        assert attributes["llm.token_count.completion"] == 5
+        assert attributes["llm.token_count.total"] == 15
+
     def test_non_stream_with_system(self):
         app = make_app()
         client = TestClient(app)
@@ -1649,6 +1708,50 @@ class TestMessagesEndpoint:
                 assert b["index"] == 0
             elif b["content_block"]["type"] == "text":
                 assert b["index"] == 1
+
+    def test_stream_emits_single_phoenix_llm_span_with_stream_events(self):
+        app = make_app()
+        app.state.config = ProxyConfig(
+            proxy=ProxySettings(
+                structured_output_mode="function_call",
+                observability_capture_content=True,
+                observability_capture_messages=True,
+                observability_capture_responses=True,
+            )
+        )
+        app.state.observability_sink = RecordingObservabilitySink()
+        app.add_middleware(RquidMiddleware)
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post(
+            "/messages",
+            json=payload,
+            headers={
+                "anthropic-version": "2023-06-01",
+                "user-agent": "anthropic-python/0.1",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert [event[0] for event in app.state.observability_sink.events] == [
+            "llm.chat.completion"
+        ]
+        _name, attributes, context, events = app.state.observability_sink.events[0]
+        event_names = [event["name"] for event in events]
+        assert context.protocol == "anthropic"
+        assert context.caller_sdk == "anthropic-python"
+        assert "stream.start" in event_names
+        assert "stream.first_token" in event_names
+        assert "stream.completed" in event_names
+        assert "Hello" in attributes["input.value"]
+        assert "Hello!" in attributes["output.value"]
+        assert attributes["llm.token_count.completion"] == 2
 
     def test_stream_extracts_think_tags(self):
         app = make_app(FakeGigachatThinkTags())
