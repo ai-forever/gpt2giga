@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga"
-version = "0.1.8a1"
+version = "0.1.8a2"
 description = "Утилита для проксирования OpenAI и Anthropic запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
@@ -54,14 +54,6 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod"
 ]
-[tool.codeflash]
-# All paths are relative to this pyproject.toml's directory.
-module-root = "gpt2giga"
-tests-root = "tests"
-test-framework = "pytest"
-ignore-paths = []
-disable-telemetry = true
-formatter-cmds = ["black $file"]
 [dependency-groups]
 dev = [
     "black (>=26.3.1,<27.0.0)",
