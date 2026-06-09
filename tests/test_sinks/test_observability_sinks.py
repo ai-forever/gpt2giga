@@ -32,6 +32,15 @@ from gpt2giga.sinks.observability.otel import (
 )
 
 
+def capture_off_settings() -> ProxySettings:
+    return ProxySettings(
+        observability_capture_content=False,
+        observability_capture_messages=False,
+        observability_capture_tool_args=False,
+        observability_capture_responses=False,
+    )
+
+
 @pytest.mark.asyncio
 async def test_noop_observability_sink_implements_contract():
     sink = NoopObservabilitySink()
@@ -139,7 +148,7 @@ def test_build_llm_request_attributes_default_omits_raw_content():
         generation_config=NormalizedGenerationConfig(temperature=0.2),
     )
 
-    attributes = build_llm_request_attributes(request, settings=ProxySettings())
+    attributes = build_llm_request_attributes(request, settings=capture_off_settings())
     serialized = str(attributes)
 
     assert attributes["openinference.span.kind"] == "LLM"
@@ -197,6 +206,7 @@ def test_build_llm_response_attributes_maps_usage_finish_and_safe_payloads():
     response = NormalizedResponse(
         model="GigaChat",
         provider="gigachat",
+        metadata={"gigachat_x_request_id": "rq-1"},
         choices=[
             NormalizedChoice(
                 finish_reason="tool_calls",
@@ -216,10 +226,13 @@ def test_build_llm_response_attributes_maps_usage_finish_and_safe_payloads():
     )
     default_attributes = build_llm_response_attributes(
         response,
-        settings=ProxySettings(),
+        settings=capture_off_settings(),
     )
 
     assert default_attributes["llm.finish_reason"] == "tool_calls"
+    assert default_attributes["llm.response.metadata"] == (
+        '{"gigachat_x_request_id": "rq-1"}'
+    )
     assert default_attributes["llm.token_count.prompt"] == 3
     assert default_attributes["llm.token_count.completion"] == 5
     assert default_attributes["llm.token_count.total"] == 8
@@ -250,7 +263,7 @@ def test_build_stream_span_events_maps_safe_events_and_capture_policy():
     )
     default_events = build_stream_span_events(
         content_event,
-        settings=ProxySettings(),
+        settings=capture_off_settings(),
         first_content_delta=True,
     )
 

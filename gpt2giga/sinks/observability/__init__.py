@@ -11,9 +11,11 @@ from gpt2giga.sinks.observability.factory import (
     flush_observability_sink,
 )
 from gpt2giga.sinks.observability.llm import (
+    CHAT_COMPLETION_SPAN_NAME,
     NORMALIZE_REQUEST_SPAN_NAME,
     NORMALIZE_RESPONSE_SPAN_NAME,
     STREAM_SPAN_NAME,
+    build_llm_chat_completion_attributes,
     build_llm_request_attributes,
     build_llm_response_attributes,
     build_stream_event_attributes,
@@ -29,10 +31,12 @@ from gpt2giga.sinks.observability.phoenix import create_phoenix_observability_si
 __all__ = [
     "NoopObservabilitySink",
     "OpenTelemetryObservabilitySink",
+    "CHAT_COMPLETION_SPAN_NAME",
     "NORMALIZE_REQUEST_SPAN_NAME",
     "NORMALIZE_RESPONSE_SPAN_NAME",
     "STREAM_SPAN_NAME",
     "build_otel_attributes",
+    "build_llm_chat_completion_attributes",
     "build_llm_request_attributes",
     "build_llm_response_attributes",
     "build_stream_event_attributes",

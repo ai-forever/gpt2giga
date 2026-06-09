@@ -19,6 +19,7 @@ from gpt2giga.protocols.normalized import (
 
 NORMALIZE_REQUEST_SPAN_NAME = "protocol.normalize.request"
 NORMALIZE_RESPONSE_SPAN_NAME = "protocol.normalize.response"
+CHAT_COMPLETION_SPAN_NAME = "llm.chat.completion"
 STREAM_SPAN_NAME = "stream.emit"
 OPENINFERENCE_SPAN_KIND = "LLM"
 
@@ -124,6 +125,10 @@ def build_llm_response_attributes(
         "llm.output_messages.count": len(messages),
         "llm.tool_calls.count": len(tool_calls),
     }
+    if response.id is not None:
+        attrs["llm.response.id"] = response.id
+    if response.metadata:
+        attrs["llm.response.metadata"] = _json_attribute(response.metadata, policy)
     if finish_reasons:
         attrs["llm.finish_reasons"] = finish_reasons
         attrs["llm.finish_reason"] = finish_reasons[0]
@@ -164,6 +169,20 @@ def build_llm_response_attributes(
             ],
             policy,
         )
+    return attrs
+
+
+def build_llm_chat_completion_attributes(
+    request: NormalizedChatRequest,
+    response: NormalizedResponse,
+    *,
+    settings: ProxySettings | None = None,
+) -> dict[str, Any]:
+    """Map a complete non-streaming chat exchange to one LLM span."""
+    attrs = build_llm_request_attributes(request, settings=settings)
+    attrs.update(build_llm_response_attributes(response, settings=settings))
+    attrs["llm.operation"] = request.operation
+    attrs["llm.request.type"] = "chat"
     return attrs
 
 
