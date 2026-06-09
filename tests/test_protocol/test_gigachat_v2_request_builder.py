@@ -119,6 +119,40 @@ async def test_prepare_chat_completion_v2_normalizes_anthropic_nested_tool_schem
 
 
 @pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_defaults_untyped_array_items():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion_v2(
+        {
+            "model": "giga",
+            "messages": [{"role": "user", "content": "select"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "select_subject",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "excludedBodyParts": {
+                                    "type": "array",
+                                    "items": {},
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    spec = request.tools[0].functions.specifications[0]
+    excluded_body_parts = spec.parameters["properties"]["excludedBodyParts"]
+    assert excluded_body_parts["items"]["type"] == "string"
+
+
+@pytest.mark.asyncio
 async def test_prepare_chat_completion_v2_maps_builtin_tools_in_v2_mode():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)

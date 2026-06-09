@@ -1,6 +1,27 @@
 _GIGACHAT_ALLOWED_SCHEMA_FORMATS = frozenset({"date", "date-time", "time"})
 
 
+def _infer_missing_type(schema: dict) -> str:
+    if "properties" in schema or "additionalProperties" in schema:
+        return "object"
+    if "items" in schema:
+        return "array"
+
+    enum = schema.get("enum")
+    if isinstance(enum, list):
+        for item in enum:
+            if isinstance(item, str):
+                return "string"
+            if isinstance(item, bool):
+                return "boolean"
+            if isinstance(item, int):
+                return "integer"
+            if isinstance(item, float):
+                return "number"
+
+    return "string"
+
+
 def resolve_schema_refs(schema: dict) -> dict:
     """Resolve $ref references and anyOf/oneOf in JSON schema.
 
@@ -126,7 +147,16 @@ def normalize_json_schema(schema: dict) -> dict:
         if isinstance(result["items"], dict):
             result["items"] = normalize_json_schema(result["items"])
         elif isinstance(result["items"], list):
-            result["items"] = [normalize_json_schema(item) for item in result["items"]]
+            normalized_items = [normalize_json_schema(item) for item in result["items"]]
+            result["items"] = normalized_items[0] if normalized_items else {}
+
+    if schema_type == "array":
+        items = result.get("items")
+        if not isinstance(items, dict):
+            result["items"] = {"type": "string"}
+        elif "type" not in items:
+            result["items"] = dict(items)
+            result["items"]["type"] = _infer_missing_type(result["items"])
 
     # Обрабатываем additionalProperties если это схема
     if "additionalProperties" in result and isinstance(
