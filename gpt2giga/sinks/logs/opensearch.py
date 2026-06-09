@@ -80,7 +80,7 @@ class OpenSearchTrafficLogSink:
             return
         result = close()
         if inspect.isawaitable(result):
-            await result
+            await asyncio.shield(result)
 
     async def _get_client(self) -> Any:
         if self._client is None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -217,7 +217,7 @@ async def _translate_payload(
             requested_model=requested_model,
         )
 
-    _raise_unsupported_pair(source, target)
+    return _raise_unsupported_pair(source, target)
 
 
 async def _translate_normalized_request_to_target(
@@ -255,7 +255,7 @@ async def _translate_normalized_request_to_target(
                 **intermediate,
             },
         }
-    _raise_unsupported_pair("normalized", target)
+    return _raise_unsupported_pair("normalized", target)
 
 
 def _translate_gigachat_response_to_target(
@@ -295,7 +295,7 @@ def _translate_gigachat_response_to_target(
             "payload": openai_payload,
             "intermediate": {"normalized": normalized.to_json_dict()},
         }
-    _raise_unsupported_pair("gigachat", target)
+    return _raise_unsupported_pair("gigachat", target)
 
 
 async def _openai_payload_to_normalized(
@@ -533,7 +533,7 @@ def _read_format(envelope: dict[str, Any], field_name: str) -> str:
     return normalized
 
 
-def _raise_unsupported_pair(source: str, target: str) -> None:
+def _raise_unsupported_pair(source: str, target: str) -> NoReturn:
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"Unsupported translation pair: {source} -> {target}",

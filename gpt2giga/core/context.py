@@ -1,6 +1,7 @@
 """Request-scoped context for internal routing and future observability."""
 
-import hashlib
+import hmac
+import secrets
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -10,6 +11,8 @@ from typing import Any, Optional
 from starlette.requests import Request
 
 from gpt2giga.core.caller import infer_request_caller
+
+_FINGERPRINT_KEY = secrets.token_bytes(32)
 
 
 @dataclass
@@ -144,5 +147,5 @@ def _api_key_value(request: Request) -> Optional[str]:
 def _hash_value(value: Optional[str]) -> Optional[str]:
     if not value:
         return None
-    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-    return f"sha256:{digest[:16]}"
+    digest = hmac.digest(_FINGERPRINT_KEY, value.encode("utf-8"), "sha256").hex()
+    return f"hmac-sha256:{digest[:16]}"
