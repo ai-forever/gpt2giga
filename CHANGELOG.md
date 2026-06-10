@@ -13,11 +13,13 @@
 ### Изменено
 - **Совместимость параметров**: известные unsupported optional параметры OpenAI/Anthropic клиентов теперь принимаются и игнорируются для SDK-совместимости вместо отклонения, а README, OpenAPI specs и матрица совместимости обновлены под это поведение
 - **Codex provider docs**: инструкция интеграции Codex обновлена под актуальный provider config
+- **Claude Code docs**: инструкция интеграции Claude Code отмечена как проверенная с `Claude Code v2.1.170`
 - **Версия и lock-файл**: версия проекта обновлена до `0.1.8a2`, а `uv.lock` пересобран с актуальными dependency markers и обновлениями зависимостей
 
 ### Исправлено
 - **Codex Responses tools**: исправлена поддержка Codex-style tool declarations в OpenAI Responses, включая namespace/input-schema формы и корректную обработку streaming output
 - **JSON Schema normalization**: схемы для GigaChat validators нормализуются стабильнее, включая массивы без typed `items`
+- **Claude Code tool schemas**: tool-схемы с вложенными свойствами без явного `type` теперь дополняются валидным объектным типом и `properties`, что предотвращает `422` от GigaChat
 - **Chat Completions tool metadata**: OpenAI Chat Completions теперь сохраняет metadata о вызванных инструментах в non-streaming и streaming ответах
 
 ## [0.1.8a1] - 2026-06-06
