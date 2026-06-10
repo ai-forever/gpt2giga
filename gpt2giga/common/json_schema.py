@@ -1,7 +1,7 @@
 _GIGACHAT_ALLOWED_SCHEMA_FORMATS = frozenset({"date", "date-time", "time"})
 
 
-def _infer_missing_type(schema: dict) -> str:
+def _infer_missing_type(schema: dict, *, default: str = "string") -> str:
     if "properties" in schema or "additionalProperties" in schema:
         return "object"
     if "items" in schema:
@@ -19,7 +19,20 @@ def _infer_missing_type(schema: dict) -> str:
             if isinstance(item, float):
                 return "number"
 
-    return "string"
+    return default
+
+
+def _ensure_object_properties(schema: dict) -> None:
+    if schema.get("type") == "object" and "properties" not in schema:
+        schema["properties"] = {}
+
+
+def _ensure_concrete_property_schema(schema: dict) -> dict:
+    if "type" not in schema:
+        schema = dict(schema)
+        schema["type"] = _infer_missing_type(schema, default="object")
+    _ensure_object_properties(schema)
+    return schema
 
 
 def resolve_schema_refs(schema: dict) -> dict:
@@ -132,15 +145,17 @@ def normalize_json_schema(schema: dict) -> dict:
 
     # Если это объект без properties, добавляем пустые properties
     schema_type = result.get("type")
-    if schema_type == "object" and "properties" not in result:
-        result["properties"] = {}
+    _ensure_object_properties(result)
 
     # Рекурсивно обрабатываем properties
     if "properties" in result and isinstance(result["properties"], dict):
-        result["properties"] = {
-            key: normalize_json_schema(value)
-            for key, value in result["properties"].items()
-        }
+        normalized_properties = {}
+        for key, value in result["properties"].items():
+            normalized_value = normalize_json_schema(value)
+            if isinstance(normalized_value, dict):
+                normalized_value = _ensure_concrete_property_schema(normalized_value)
+            normalized_properties[key] = normalized_value
+        result["properties"] = normalized_properties
 
     # Обрабатываем items для массивов
     if "items" in result:
@@ -157,6 +172,7 @@ def normalize_json_schema(schema: dict) -> dict:
         elif "type" not in items:
             result["items"] = dict(items)
             result["items"]["type"] = _infer_missing_type(result["items"])
+            _ensure_object_properties(result["items"])
 
     # Обрабатываем additionalProperties если это схема
     if "additionalProperties" in result and isinstance(

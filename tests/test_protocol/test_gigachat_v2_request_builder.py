@@ -153,6 +153,47 @@ async def test_prepare_chat_completion_v2_defaults_untyped_array_items():
 
 
 @pytest.mark.asyncio
+async def test_prepare_chat_completion_v2_defaults_untyped_tool_properties():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion_v2(
+        {
+            "model": "giga",
+            "messages": [{"role": "user", "content": "run workflow"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "Workflow",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "args": {
+                                    "description": (
+                                        "Optional input value exposed to the script "
+                                        "as the global args, verbatim."
+                                    ),
+                                },
+                                "scriptPath": {
+                                    "description": "Path to a workflow script file.",
+                                    "type": "string",
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    spec = request.tools[0].functions.specifications[0]
+    args = spec.parameters["properties"]["args"]
+    assert args["type"] == "object"
+    assert args["properties"] == {}
+
+
+@pytest.mark.asyncio
 async def test_prepare_chat_completion_v2_maps_builtin_tools_in_v2_mode():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)
