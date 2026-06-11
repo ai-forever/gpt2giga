@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+## [0.2.0a2] - 2026-06-11
+
+### Исправлено
+- **GigaChat v2 profanity filter mapping**: `profanity_check` теперь маппится в обратный GigaChat `disable_filter` для `v2/chat/completions`, включая request-level `extra_body`/SDK-style поля и дефолт `GIGACHAT_PROFANITY_CHECK`; явный `disable_filter` сохраняет приоритет.
+
 ## [0.2.0a1] - 2026-06-11
 
 ### Breaking changes
