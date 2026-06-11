@@ -11,6 +11,7 @@ from gpt2giga.core.redaction import redact_traffic_payload
 from gpt2giga.models.config import ProxySettings
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
+    NormalizedEmbeddingRequest,
     NormalizedMessage,
     NormalizedResponse,
     NormalizedStreamEvent,
@@ -20,9 +21,13 @@ from gpt2giga.protocols.normalized import (
 
 NORMALIZE_REQUEST_SPAN_NAME = "protocol.normalize.request"
 NORMALIZE_RESPONSE_SPAN_NAME = "protocol.normalize.response"
-CHAT_COMPLETION_SPAN_NAME = "llm.chat.completion"
+CHAT_COMPLETION_SPAN_NAME = "ChatCompletion"
+RESPONSES_SPAN_NAME = "Responses"
+MESSAGES_SPAN_NAME = "Messages"
+EMBEDDINGS_SPAN_NAME = "Embeddings"
 STREAM_SPAN_NAME = "stream.emit"
 OPENINFERENCE_SPAN_KIND = "LLM"
+OPENINFERENCE_EMBEDDING_SPAN_KIND = "EMBEDDING"
 
 
 @dataclass(frozen=True)
@@ -198,6 +203,54 @@ def build_llm_chat_completion_attributes(
     attrs["llm.operation"] = request.operation
     attrs["llm.request.type"] = "chat"
     return attrs
+
+
+def build_llm_embeddings_attributes(
+    request: NormalizedEmbeddingRequest,
+    response: Mapping[str, Any],
+    *,
+    settings: ProxySettings | None = None,
+) -> dict[str, Any]:
+    """Map an embeddings exchange to safe OpenInference-style attributes."""
+    policy = LLMContentPolicy.from_settings(settings)
+    data = response.get("data")
+    usage = response.get("usage")
+    metadata = response.get("metadata")
+    model = _string_or_none(response.get("model")) or request.model
+    attrs: dict[str, Any] = {
+        "openinference.span.kind": OPENINFERENCE_EMBEDDING_SPAN_KIND,
+        "embedding.model_name": model,
+        "embedding.provider": "gigachat",
+        "embedding.operation": request.operation,
+        "embedding.input.count": _input_item_count(request.input),
+        "embedding.output.count": len(data) if isinstance(data, list) else 0,
+        "embedding.encoding_format": request.encoding_format,
+        "embedding.dimensions": request.dimensions,
+        "llm.model_name": model,
+        "llm.provider": "gigachat",
+        "llm.operation": request.operation,
+        "llm.request.type": "embeddings",
+        "status": "ok",
+    }
+    if request.user is not None:
+        attrs["user"] = request.user
+    if isinstance(usage, Mapping):
+        prompt_tokens = usage.get("prompt_tokens")
+        total_tokens = usage.get("total_tokens")
+        attrs.update(
+            {
+                "llm.token_count.prompt": prompt_tokens,
+                "llm.token_count.total": total_tokens,
+                "input_tokens": prompt_tokens,
+                "total_tokens": total_tokens,
+            }
+        )
+    if isinstance(metadata, Mapping) and metadata:
+        attrs["llm.response.metadata"] = _json_attribute(
+            _metadata_payload(metadata, policy),
+            policy,
+        )
+    return {key: value for key, value in attrs.items() if value is not None}
 
 
 def build_stream_span_events(
@@ -548,6 +601,12 @@ def _string_or_none(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _input_item_count(value: Any) -> int:
+    if isinstance(value, list):
+        return len(value)
+    return 0 if value is None else 1
 
 
 def _stream_span_event_name(

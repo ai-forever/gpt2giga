@@ -193,10 +193,11 @@ GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 
 Traffic logs и Phoenix spans связываются через gateway identifiers:
 `request_id`, `trace_id`, protocol, route, model metadata. Для LLM routes
-Phoenix получает один root span `llm.chat.completion` для Chat Completions,
-Responses API и Anthropic Messages; streaming milestones прикрепляются к нему
-как span events. Для non-LLM routes используется один lifecycle span
-`gpt2giga.request`.
+Phoenix получает один root span на формат: `ChatCompletion` для Chat
+Completions, `Responses` для Responses API, `Messages` для Anthropic Messages
+и `Embeddings` для OpenAI Embeddings. Streaming milestones прикрепляются к
+соответствующему root span как span events. Для non-LLM routes используется
+один lifecycle span `gpt2giga.request`.
 
 OpenTelemetry span start time берётся из gateway `RequestContext.started_at`,
 поэтому Phoenix `Latency` отражает полное время request/stream, а не только

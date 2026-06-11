@@ -153,7 +153,7 @@ def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    attributes = emitted["llm.chat.completion"]
+    attributes = emitted["ChatCompletion"]
     assert "secret prompt" in attributes["input.value"]
     assert "ok" in attributes["output.value"]
     assert attributes["llm.response.metadata"] == (
@@ -227,7 +227,7 @@ def test_chat_completions_legacy_stream_emits_phoenix_input_output_span():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    attributes = emitted["llm.chat.completion"]
+    attributes = emitted["ChatCompletion"]
 
     assert response.status_code == 200
     assert "data: [DONE]" in body
@@ -296,9 +296,9 @@ def test_chat_completions_normalization_on_emits_safe_llm_observability_spans():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    assert list(emitted) == ["llm.chat.completion"]
-    assert emitted["llm.chat.completion"]["llm.input_messages.count"] == 1
-    assert emitted["llm.chat.completion"]["llm.finish_reason"] == "tool_calls"
+    assert list(emitted) == ["ChatCompletion"]
+    assert emitted["ChatCompletion"]["llm.input_messages.count"] == 1
+    assert emitted["ChatCompletion"]["llm.finish_reason"] == "tool_calls"
     assert "secret prompt" not in json.dumps(emitted)
 
 
@@ -354,7 +354,7 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     event_names = [
         event["name"]
         for name, _attributes, _context, events in app.state.observability_sink.events
-        if name == "llm.chat.completion"
+        if name == "ChatCompletion"
         for event in events
     ]
     emitted = {
@@ -367,8 +367,8 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     assert "stream.start" in event_names
     assert "stream.completed" in event_names
     assert "stream.emit" not in emitted
-    assert "llm.chat.completion" in emitted
-    assert "hi" in emitted["llm.chat.completion"]["input.value"]
+    assert "ChatCompletion" in emitted
+    assert "hi" in emitted["ChatCompletion"]["input.value"]
 
 
 def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():

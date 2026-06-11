@@ -1,3 +1,4 @@
+import json
 import sys
 from types import SimpleNamespace
 
@@ -80,6 +81,17 @@ class FakeRequestTransformer:
 
     async def prepare_response(self, data, giga_client=None):
         return {"model": data.get("model", "giga")}
+
+
+class RecordingObservabilitySink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, name, attributes=None, *, context=None, events=None):
+        self.events.append((name, attributes or {}, context, list(events or [])))
+
+    async def flush(self):
+        return None
 
 
 def make_app(monkeypatch=None):
@@ -168,3 +180,38 @@ def test_embeddings_with_token_ids(monkeypatch):
     assert (
         "data" in body and body["model"] == app.state.config.proxy_settings.embeddings
     )
+
+
+def test_embeddings_emits_embeddings_observability_span():
+    app = make_app()
+    app.state.config.proxy_settings.pass_model = True
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/embeddings",
+        json={
+            "model": "Embeddings-2",
+            "input": ["hello", "world"],
+            "dimensions": 1024,
+            "encoding_format": "base64",
+            "user": "user-1",
+        },
+    )
+
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+    attributes = emitted["Embeddings"]
+
+    assert resp.status_code == 200
+    assert attributes["openinference.span.kind"] == "EMBEDDING"
+    assert attributes["embedding.model_name"] == "Embeddings-2"
+    assert attributes["embedding.input.count"] == 2
+    assert attributes["embedding.output.count"] == 1
+    assert attributes["embedding.dimensions"] == 1024
+    assert attributes["embedding.encoding_format"] == "base64"
+    assert attributes["llm.operation"] == "embeddings"
+    assert "hello" not in json.dumps(attributes)
+    assert "0.1" not in json.dumps(attributes)

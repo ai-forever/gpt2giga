@@ -16,7 +16,7 @@ from gpt2giga.protocols.normalized import (
 )
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
-    CHAT_COMPLETION_SPAN_NAME,
+    MESSAGES_SPAN_NAME,
     OPENINFERENCE_SPAN_KIND,
     build_llm_chat_completion_attributes,
     build_tool_call_span_events,
@@ -60,7 +60,7 @@ async def emit_anthropic_message_observability(
     )
     await emit_observability_event(
         sink,
-        CHAT_COMPLETION_SPAN_NAME,
+        MESSAGES_SPAN_NAME,
         build_llm_chat_completion_attributes(
             normalized_request,
             normalized_response,

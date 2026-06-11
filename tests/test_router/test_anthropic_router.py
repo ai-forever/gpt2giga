@@ -1220,10 +1220,10 @@ class TestMessagesEndpoint:
 
         assert resp.status_code == 200
         assert [event[0] for event in app.state.observability_sink.events] == [
-            "llm.chat.completion"
+            "Messages"
         ]
         name, attributes, context, events = app.state.observability_sink.events[0]
-        assert name == "llm.chat.completion"
+        assert name == "Messages"
         assert context.protocol == "anthropic"
         assert context.caller_client_family == "anthropic"
         assert context.caller_sdk == "anthropic-python"
@@ -1740,7 +1740,7 @@ class TestMessagesEndpoint:
 
         assert resp.status_code == 200
         assert [event[0] for event in app.state.observability_sink.events] == [
-            "llm.chat.completion"
+            "Messages"
         ]
         _name, attributes, context, events = app.state.observability_sink.events[0]
         event_names = [event["name"] for event in events]
