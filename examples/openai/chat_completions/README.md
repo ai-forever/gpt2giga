@@ -8,7 +8,7 @@
 2. Запустите любой пример:
 
 ```bash
-uv run python examples/openai/chat_completions/chat_completion.py
+uv run python examples/openai/chat_completions/basic/chat_completion.py
 ```
 
 ## Про `base_url`
@@ -23,11 +23,11 @@ uv run python examples/openai/chat_completions/chat_completion.py
 
 ## Файлы
 
-- `chat_completion.py`: базовый streaming
-- `per_model_max_connections_async.py`: async-проверка per-model max connections
-- `chat_reasoning.py`: reasoning/chain-of-thought режимы (если поддерживаются моделью)
-- `function_calling.py`: tool use / function calling
-- `structured_output.py`, `structured_output_nested.py`: Structured Outputs
-- `json_schema.py`: JSON Schema
-- `image_url.py`, `base64_image.py`: изображения
-- `documents.py`: документы/вложения
+- `basic/chat_completion.py`: базовый streaming
+- `concurrency/per_model_max_connections_async.py`: async-проверка per-model max connections
+- `reasoning/chat_reasoning.py`: reasoning/chain-of-thought режимы (если поддерживаются моделью)
+- `tools/function_calling.py`: tool use / function calling
+- `structured_outputs/structured_output.py`, `structured_outputs/structured_output_nested.py`: Structured Outputs
+- `structured_outputs/json_schema.py`: JSON Schema
+- `multimodal/image_url.py`, `multimodal/base64_image.py`: изображения
+- `files/documents.py`: документы/вложения

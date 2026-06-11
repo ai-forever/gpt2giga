@@ -3,13 +3,7 @@ openai:
       - any-glob-to-any-file:
           - 'gpt2giga/routers/openai/**'
           - 'gpt2giga/openapi_specs/openai.py'
-          - 'examples/openai/chat_completions/**'
-          - 'examples/openai/responses/**'
-          - 'examples/openai/models.py'
-          - 'examples/openai/files.py'
-          - 'examples/openai/batches.py'
-          - 'examples/openai/embeddings.py'
-          - 'examples/openai_agents.py'
+          - 'examples/openai/**'
           - 'examples/weather_agent.py'
 
 anthropic:

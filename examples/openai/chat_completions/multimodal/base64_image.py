@@ -1,16 +1,16 @@
 import base64
+from pathlib import Path
 
 from openai import OpenAI
 
 client = OpenAI(base_url="http://localhost:8090", api_key="0")
 
 
-def encode_image(image_path):
-    with open(image_path, "rb") as image_file:
-        return base64.b64encode(image_file.read()).decode("utf-8")
+def encode_image(image_path: Path) -> str:
+    return base64.b64encode(image_path.read_bytes()).decode("utf-8")
 
 
-image_path = "../../../image.png"
+image_path = Path(__file__).resolve().parents[3] / "image.png"
 
 # Getting the base64 string
 base64_image = encode_image(image_path)

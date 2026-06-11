@@ -1,18 +1,18 @@
 """Anthropic Messages API example with base64-encoded image."""
 
 import base64
+from pathlib import Path
 
 from anthropic import Anthropic
 
 client = Anthropic(base_url="http://localhost:8090/v1", api_key="any-key")
 
 
-def encode_image(image_path: str) -> str:
-    with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+def encode_image(image_path: Path) -> str:
+    return base64.b64encode(image_path.read_bytes()).decode("utf-8")
 
 
-image_path = "../../image.png"
+image_path = Path(__file__).resolve().parents[3] / "image.png"
 base64_image = encode_image(image_path)
 
 message = client.messages.create(

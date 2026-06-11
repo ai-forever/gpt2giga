@@ -1,14 +1,15 @@
 import base64
+from pathlib import Path
+
 from openai import OpenAI
 
 
-def encode_file(file_path):
-    with open(file_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+def encode_file(file_path: Path) -> str:
+    return base64.b64encode(file_path.read_bytes()).decode("utf-8")
 
 
 client = OpenAI(base_url="http://localhost:8090", api_key="0")
-file_path = "../../../Day_2_v6.pdf"
+file_path = Path(__file__).resolve().parents[3] / "Day_2_v6.pdf"
 
 # Getting the base64 string
 base64_pdf = encode_file(file_path)

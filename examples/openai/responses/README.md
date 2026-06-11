@@ -8,7 +8,7 @@
 2. Запустите любой пример:
 
 ```bash
-uv run python examples/openai/responses/single_prompt.py
+uv run python examples/openai/responses/basic/single_prompt.py
 ```
 
 ## Про `base_url`
@@ -24,12 +24,13 @@ uv run python examples/openai/responses/single_prompt.py
 
 ## Файлы
 
-- `single_prompt.py`: минимальный пример
-- `stateful.py`: stateful Responses через `store` и `previous_response_id` (нужен Responses v2)
-- `reasoning.py`: reasoning в стиле Responses API
-- `with_instructions.py`: instructions/system
-- `function_calling.py`: tool use / function calling
-- `multiple_tool_calls.py`: несколько tool calls в одном сценарии
-- `structured_output.py`, `structured_output_nested.py`: Structured Outputs
-- `json_schema.py`: JSON Schema
-- `image_url.py`, `base64_image.py`: изображения
+- `basic/single_prompt.py`: минимальный пример
+- `basic/stateful.py`: stateful Responses через `store` и `previous_response_id` (нужен Responses v2)
+- `basic/with_instructions.py`: instructions/system
+- `reasoning/reasoning.py`: reasoning в стиле Responses API
+- `tools/function_calling.py`: tool use / function calling
+- `tools/multiple_tool_calls.py`: несколько tool calls в одном сценарии
+- `tools/gigachat_tools/`: GigaChat-specific built-in tools passthrough
+- `structured_outputs/structured_output.py`, `structured_outputs/structured_output_nested.py`: Structured Outputs
+- `structured_outputs/json_schema.py`: JSON Schema
+- `multimodal/image_url.py`, `multimodal/base64_image.py`: изображения

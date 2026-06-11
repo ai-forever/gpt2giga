@@ -8,7 +8,7 @@ Start the proxy in another terminal with a visible fail-fast limit:
 
 Then run:
 
-    uv run python examples/openai/chat_completions/per_model_max_connections_async.py
+    uv run python examples/openai/chat_completions/concurrency/per_model_max_connections_async.py
 
 Expected result: the holder stream occupies the single model slot, and the
 contender requests receive HTTP 429 with code=model_concurrency_limit.

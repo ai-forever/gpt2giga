@@ -33,24 +33,25 @@ Anthropic SDK не входит в обязательные зависимост
 ## Запуск
 
 ```bash
-uv run python examples/anthropic/messages.py
-uv run python examples/anthropic/messages_stream.py
-uv run python examples/anthropic/structured_output.py
-uv run python examples/anthropic/structured_output_stream.py
-uv run python examples/anthropic/message_batches.py
-uv run python examples/anthropic/structured_output_batches.py
+uv run python examples/anthropic/messages/basic/messages.py
+uv run python examples/anthropic/messages/basic/messages_stream.py
+uv run python examples/anthropic/messages/structured_outputs/structured_output.py
+uv run python examples/anthropic/messages/structured_outputs/structured_output_stream.py
+uv run python examples/anthropic/message_batches/basic.py
+uv run python examples/anthropic/message_batches/structured_output.py
 ```
 
 ## Что есть в папке
 
-- `messages.py`: базовый запрос (не стрим)
-- `messages_stream.py`: streaming
-- `structured_output.py`: structured output (`output_config.format`)
-- `structured_output_stream.py`: streaming structured output
-- `structured_output_batches.py`: structured output в Message Batches API
-- `message_batches.py`: Message Batches API
-- `multi_turn.py`: многоходовый диалог
-- `system_prompt.py`: системный промпт
-- `function_calling.py`: tool use / function calling
-- `reasoning.py`: extended thinking (`thinking`) → `reasoning_effort`
-- `image_url.py`, `base64_image.py`: изображения (URL и base64)
+- `messages/basic/messages.py`: базовый запрос (не стрим)
+- `messages/basic/messages_stream.py`: streaming
+- `messages/basic/multi_turn.py`: многоходовый диалог
+- `messages/basic/system_prompt.py`: системный промпт
+- `messages/tools/function_calling.py`: tool use / function calling
+- `messages/reasoning/reasoning.py`: extended thinking (`thinking`) → `reasoning_effort`
+- `messages/structured_outputs/structured_output.py`: structured output (`output_config.format`)
+- `messages/structured_outputs/structured_output_stream.py`: streaming structured output
+- `messages/multimodal/image_url.py`, `messages/multimodal/base64_image.py`: изображения (URL и base64)
+- `message_batches/basic.py`: Message Batches API
+- `message_batches/structured_output.py`: structured output в Message Batches API
+- `count_tokens/basic.py`: Count Tokens API

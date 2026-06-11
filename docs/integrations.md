@@ -24,7 +24,7 @@ http://localhost:8090
 - OpenAI Chat Completions: [examples/openai/chat_completions/README.md](../examples/openai/chat_completions/README.md)
 - OpenAI Responses: [examples/openai/responses/README.md](../examples/openai/responses/README.md)
 - Anthropic examples: [examples/anthropic/README.md](../examples/anthropic/README.md)
-- OpenAI Agents SDK: [examples/openai_agents.py](../examples/openai_agents.py)
+- OpenAI Agents SDK: [examples/openai/agents/weather_handoff.py](../examples/openai/agents/weather_handoff.py)
 
 ## Гайды по интеграциям
 
