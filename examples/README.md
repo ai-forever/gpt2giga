@@ -15,39 +15,43 @@
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./anthropic/README.md)
 
+## Логика папок
+
+Примеры сгруппированы сначала по SDK/API (`openai`, `anthropic`, `chat_completions`, `responses`, `messages`), а внутри — по capability: `basic`, `tools`, `batches`, `files`, `multimodal`, `structured_outputs`, `reasoning`, `concurrency`.
+
 ## Запуск примеров (из корня репозитория)
 
 ```bash
 # Chat Completions
-uv run python examples/openai/chat_completions/chat_completion.py
+uv run python examples/openai/chat_completions/basic/chat_completion.py
 
 # Embeddings API
-uv run python examples/openai/embeddings.py
+uv run python examples/openai/embeddings/basic.py
 
 # Responses API
-uv run python examples/openai/responses/single_prompt.py
+uv run python examples/openai/responses/basic/single_prompt.py
 
 # Anthropic Messages API
-uv run python examples/anthropic/messages.py
+uv run python examples/anthropic/messages/basic/messages.py
 
 # Anthropic structured output
-uv run python examples/anthropic/structured_output.py
+uv run python examples/anthropic/messages/structured_outputs/structured_output.py
 
 # Additional Responses API examples
-uv run python examples/openai/responses/function_calling.py
+uv run python examples/openai/responses/tools/function_calling.py
 ```
 
 Files API, OpenAI Batches API и Anthropic Message Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
 
 ## Дополнительно
 
-- `examples/openai/embeddings.py`: эмбеддинги (`/embeddings` или `/v1/embeddings`)
-- `examples/openai/models.py`: список моделей
-- `examples/openai/files.py`: OpenAI Files API (router подготовлен, но временно не смонтирован)
-- `examples/openai/batches.py`: OpenAI Batches API (router подготовлен, но временно не смонтирован)
-- `examples/anthropic/structured_output.py`: Anthropic Messages structured output
-- `examples/anthropic/structured_output_stream.py`: Anthropic streaming structured output
-- `examples/anthropic/structured_output_batches.py`: Anthropic Message Batches structured output
-- `examples/anthropic/message_batches.py`: Anthropic Message Batches API (router подготовлен, но временно не смонтирован)
-- `examples/openai/responses/function_calling.py`: function calling через Responses API
-- `examples/openai_agents.py`: интеграция с OpenAI Agents SDK (потребуются доп. зависимости, см. `examples/AGENTS.md`)
+- `examples/openai/embeddings/basic.py`: эмбеддинги (`/embeddings` или `/v1/embeddings`)
+- `examples/openai/models/basic.py`: список моделей
+- `examples/openai/files/basic.py`: OpenAI Files API (router подготовлен, но временно не смонтирован)
+- `examples/openai/batches/basic.py`: OpenAI Batches API (router подготовлен, но временно не смонтирован)
+- `examples/anthropic/messages/structured_outputs/structured_output.py`: Anthropic Messages structured output
+- `examples/anthropic/messages/structured_outputs/structured_output_stream.py`: Anthropic streaming structured output
+- `examples/anthropic/message_batches/structured_output.py`: Anthropic Message Batches structured output
+- `examples/anthropic/message_batches/basic.py`: Anthropic Message Batches API (router подготовлен, но временно не смонтирован)
+- `examples/openai/responses/tools/function_calling.py`: function calling через Responses API
+- `examples/openai/agents/weather_handoff.py`: интеграция с OpenAI Agents SDK (потребуются доп. зависимости, см. `examples/AGENTS.md`)

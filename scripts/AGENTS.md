@@ -4,6 +4,7 @@
 
 - **What:** Small helper scripts for CI and local debugging
 - **Current contents:** Coverage badge generation and mitmproxy SSE capture
+- **Runtime role:** Not imported by the application package; keep scripts standalone
 
 ## Files
 
@@ -28,6 +29,8 @@ mitmproxy -s scripts/sse_event.py
 - Prefer stdlib-only implementations unless there is a strong reason not to.
 - Scripts used by CI must stay non-interactive.
 - If workflow behavior depends on a script, update the matching workflow in `.github/workflows/` in the same change.
+- Do not add application runtime dependencies just for scripts; use optional/debug tooling where appropriate.
+- Keep generated outputs deterministic when a script writes checked-in artifacts such as `badges/coverage.svg`.
 
 ## Quick Find Commands
 
@@ -37,12 +40,16 @@ rg -n "scripts/" .github/workflows
 
 # Find badge output references
 rg -n "coverage.svg|generate_badge" .github/workflows README.md
+
+# Find mitmproxy/debug references
+rg -n "mitmproxy|sse_event" .github deploy docs scripts
 ```
 
 ## Common Gotchas
 
 - `generate_badge.py` takes a numeric percentage, not a path to `coverage.json`; keep docs/workflows aligned with how CI calls it.
-- `sse_event.py` depends on `mitmproxy` objects but `mitmproxy` is not a core project dependency; treat it as an optional debugging helper.
+- `ci.yaml` extracts `.totals.percent_covered` from `coverage.json` before calling `generate_badge.py`.
+- `sse_event.py` depends on `mitmproxy` objects but `mitmproxy` is not a core project dependency; treat it as an optional debugging helper and avoid importing it from package code.
 
 ## Pre-PR Check
 

@@ -1,6 +1,6 @@
 [project]
 name = "gpt2giga"
-version = "0.1.8a3"
+version = "0.2.0a1"
 description = "Утилита для проксирования OpenAI и Anthropic запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
@@ -25,6 +25,22 @@ dependencies = [
 
 [project.scripts]
 gpt2giga = "gpt2giga:run"
+
+[project.optional-dependencies]
+postgres = [
+    "asyncpg>=0.30.0,<1",
+    "sqlalchemy[asyncio]>=2.0.0,<3",
+    "alembic>=1.17.0,<2",
+]
+opensearch = [
+    "opensearch-py>=2.8.0,<3",
+]
+phoenix = [
+    "arize-phoenix-otel>=0.1,<1",
+    "opentelemetry-sdk>=1.28.0,<2",
+    "opentelemetry-exporter-otlp>=1.28.0,<2",
+    "openinference-semantic-conventions>=0.1,<1",
+]
 
 [build-system]
 requires = ["hatchling"]
