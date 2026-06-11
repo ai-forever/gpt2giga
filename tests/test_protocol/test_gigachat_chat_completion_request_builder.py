@@ -13,11 +13,11 @@ from gpt2giga.protocol.anthropic.request import (
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_builds_primary_request():
+async def test_prepare_chat_completion_builds_chat_completion_request():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "hello"}],
@@ -39,11 +39,11 @@ async def test_prepare_chat_completion_v2_builds_primary_request():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_maps_tools_and_forced_function_call():
+async def test_prepare_chat_completion_maps_tools_and_forced_function_call():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "search"}],
@@ -76,7 +76,7 @@ async def test_prepare_chat_completion_v2_maps_tools_and_forced_function_call():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_normalizes_anthropic_nested_tool_schema():
+async def test_prepare_chat_completion_normalizes_anthropic_nested_tool_schema():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
     openai_data = _build_openai_data_from_anthropic_request(
@@ -107,7 +107,7 @@ async def test_prepare_chat_completion_v2_normalizes_anthropic_nested_tool_schem
         logger,
     )
 
-    request = await rt.prepare_chat_completion_v2(openai_data)
+    request = await rt.prepare_chat_completion(openai_data)
 
     spec = request.tools[0].functions.specifications[0]
     url = spec.parameters["properties"]["url"]
@@ -119,11 +119,11 @@ async def test_prepare_chat_completion_v2_normalizes_anthropic_nested_tool_schem
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_defaults_untyped_array_items():
+async def test_prepare_chat_completion_defaults_untyped_array_items():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "giga",
             "messages": [{"role": "user", "content": "select"}],
@@ -153,11 +153,11 @@ async def test_prepare_chat_completion_v2_defaults_untyped_array_items():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_defaults_untyped_tool_properties():
+async def test_prepare_chat_completion_defaults_untyped_tool_properties():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "giga",
             "messages": [{"role": "user", "content": "run workflow"}],
@@ -194,11 +194,11 @@ async def test_prepare_chat_completion_v2_defaults_untyped_tool_properties():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_maps_builtin_tools_in_v2_mode():
+async def test_prepare_chat_completion_maps_builtin_tools_in_v2_mode():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "search"}],
@@ -220,7 +220,43 @@ async def test_prepare_chat_completion_v2_maps_builtin_tools_in_v2_mode():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_maps_native_structured_output_and_reasoning():
+async def test_prepare_chat_completion_enables_builtin_tools_when_default_mode_is_v1():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "search"}],
+            "tools": [{"type": "web_search_preview"}],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert request.tools[0].web_search is not None
+    assert request.tool_config.tool_name == "web_search"
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_disables_builtin_tools_when_default_mode_is_v2():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "search"}],
+            "tools": [{"type": "web_search_preview"}],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert "_gpt2giga_builtin_tools" not in request
+    assert "tools" not in request
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_maps_native_structured_output_and_reasoning():
     cfg = ProxyConfig(
         proxy=ProxySettings(
             enable_reasoning=True,
@@ -229,7 +265,7 @@ async def test_prepare_chat_completion_v2_maps_native_structured_output_and_reas
     )
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "return json"}],
@@ -255,7 +291,7 @@ async def test_prepare_chat_completion_v2_maps_native_structured_output_and_reas
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_disable_reasoning_omits_model_option():
+async def test_prepare_chat_completion_disable_reasoning_omits_model_option():
     cfg = ProxyConfig(
         proxy=ProxySettings(
             enable_reasoning=True,
@@ -264,7 +300,7 @@ async def test_prepare_chat_completion_v2_disable_reasoning_omits_model_option()
     )
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "hello"}],
@@ -277,11 +313,11 @@ async def test_prepare_chat_completion_v2_disable_reasoning_omits_model_option()
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_respects_pass_model_false():
+async def test_prepare_chat_completion_respects_pass_model_false():
     cfg = ProxyConfig(proxy=ProxySettings(pass_model=False))
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "openai-model",
             "messages": [{"role": "user", "content": "hello"}],
@@ -292,14 +328,14 @@ async def test_prepare_chat_completion_v2_respects_pass_model_false():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_prod_logging_omits_payload():
+async def test_prepare_chat_completion_prod_logging_omits_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
     mock_logger.bind.return_value = mock_bound_logger
     cfg = ProxyConfig(proxy=ProxySettings(mode="PROD"))
     rt = RequestTransformer(cfg, logger=mock_logger)
 
-    await rt.prepare_chat_completion_v2(
+    await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "secret payload"}],
@@ -307,19 +343,19 @@ async def test_prepare_chat_completion_v2_prod_logging_omits_payload():
     )
 
     mock_bound_logger.debug.assert_called_with(
-        "Sending v2 request to GigaChat API (payload omitted in PROD)"
+        "Sending chat completion request to GigaChat API (payload omitted in PROD)"
     )
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_dev_logging_includes_full_payload():
+async def test_prepare_chat_completion_dev_logging_includes_full_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
     mock_logger.bind.return_value = mock_bound_logger
     cfg = ProxyConfig(proxy=ProxySettings(mode="DEV"))
     rt = RequestTransformer(cfg, logger=mock_logger)
 
-    await rt.prepare_chat_completion_v2(
+    await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "hello"}],
@@ -327,18 +363,20 @@ async def test_prepare_chat_completion_v2_dev_logging_includes_full_payload():
     )
 
     bind_kwargs = mock_logger.bind.call_args.kwargs
-    assert bind_kwargs["event"] == "gigachat_request_v2"
+    assert bind_kwargs["event"] == "gigachat_chat_completion_request"
     assert bind_kwargs["payload"]["model"] == "GigaChat-2-Max"
     assert bind_kwargs["payload"]["messages"][0]["content"][0]["text"] == "hello"
-    mock_bound_logger.debug.assert_called_with("Sending v2 request to GigaChat API")
+    mock_bound_logger.debug.assert_called_with(
+        "Sending chat completion request to GigaChat API"
+    )
 
 
 @pytest.mark.asyncio
-async def test_prepare_response_v2_builds_primary_request_from_responses_input():
+async def test_prepare_response_chat_completion_builds_chat_completion_request_from_responses_input():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_response_v2(
+    request = await rt.prepare_response_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "instructions": "be concise",
@@ -357,11 +395,11 @@ async def test_prepare_response_v2_builds_primary_request_from_responses_input()
 
 
 @pytest.mark.asyncio
-async def test_prepare_response_v2_sends_storage_when_store_true():
+async def test_prepare_response_chat_completion_sends_storage_when_store_true():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_response_v2(
+    request = await rt.prepare_response_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "input": "hello",
@@ -374,11 +412,11 @@ async def test_prepare_response_v2_sends_storage_when_store_true():
 
 
 @pytest.mark.asyncio
-async def test_prepare_response_v2_omits_storage_when_store_false():
+async def test_prepare_response_chat_completion_omits_storage_when_store_false():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_response_v2(
+    request = await rt.prepare_response_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "input": "hello",
@@ -391,11 +429,11 @@ async def test_prepare_response_v2_omits_storage_when_store_false():
 
 
 @pytest.mark.asyncio
-async def test_prepare_response_v2_maps_previous_response_id_to_storage_thread_id():
+async def test_prepare_response_chat_completion_maps_previous_response_id_to_storage_thread_id():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_response_v2(
+    request = await rt.prepare_response_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "input": "hello",
@@ -410,11 +448,11 @@ async def test_prepare_response_v2_maps_previous_response_id_to_storage_thread_i
 
 
 @pytest.mark.asyncio
-async def test_prepare_response_v2_maps_function_call_output():
+async def test_prepare_response_chat_completion_maps_function_call_output():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_response_v2(
+    request = await rt.prepare_response_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "input": [
@@ -440,7 +478,7 @@ async def test_prepare_response_v2_maps_function_call_output():
 
 
 @pytest.mark.asyncio
-async def test_prepare_response_v2_replays_function_call_with_tools_state_id():
+async def test_prepare_response_chat_completion_replays_function_call_with_tools_state_id():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
@@ -455,7 +493,7 @@ async def test_prepare_response_v2_replays_function_call_with_tools_state_id():
         },
     }
 
-    request = await rt.prepare_response_v2(
+    request = await rt.prepare_response_chat_completion(
         {
             "model": "GigaChat-3-Ultra",
             "instructions": "Respond only with a horoscope generated by a tool.",
@@ -514,11 +552,11 @@ async def test_prepare_response_v2_replays_function_call_with_tools_state_id():
 
 
 @pytest.mark.asyncio
-async def test_prepare_response_v2_maps_responses_builtin_tools():
+async def test_prepare_response_chat_completion_maps_responses_builtin_tools():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_response_v2(
+    request = await rt.prepare_response_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "input": "Find current sources and then calculate a summary.",
@@ -563,11 +601,11 @@ async def test_prepare_response_v2_maps_responses_builtin_tools():
 
 
 @pytest.mark.asyncio
-async def test_prepare_response_v2_flattens_namespace_tools():
+async def test_prepare_response_chat_completion_flattens_namespace_tools():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_response_v2(
+    request = await rt.prepare_response_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "input": "Open the browser.",
@@ -598,11 +636,11 @@ async def test_prepare_response_v2_flattens_namespace_tools():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_maps_additional_fields():
+async def test_prepare_chat_completion_maps_additional_fields():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [{"role": "user", "content": "hello"}],
@@ -620,7 +658,7 @@ async def test_prepare_chat_completion_v2_maps_additional_fields():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_reuses_attachment_uploads():
+async def test_prepare_chat_completion_reuses_attachment_uploads():
     class AttachmentProcessor:
         async def upload_file_with_meta(self, *_args, **_kwargs):
             return SimpleNamespace(
@@ -637,7 +675,7 @@ async def test_prepare_chat_completion_v2_reuses_attachment_uploads():
         attachment_processor=AttachmentProcessor(),
     )
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [
@@ -659,11 +697,11 @@ async def test_prepare_chat_completion_v2_reuses_attachment_uploads():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_maps_tool_call_result_history():
+async def test_prepare_chat_completion_maps_tool_call_result_history():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [
@@ -721,11 +759,11 @@ async def test_prepare_chat_completion_v2_maps_tool_call_result_history():
 
 
 @pytest.mark.asyncio
-async def test_prepare_chat_completion_v2_repairs_legacy_empty_tool_result():
+async def test_prepare_chat_completion_repairs_legacy_empty_tool_result():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
 
-    request = await rt.prepare_chat_completion_v2(
+    request = await rt.prepare_chat_completion(
         {
             "model": "GigaChat-2-Max",
             "messages": [

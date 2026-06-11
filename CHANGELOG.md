@@ -76,7 +76,7 @@
 ## [0.1.8a1] - 2026-06-06
 
 ### Добавлено
-- **GigaChat v2 backend mode**: добавлены `GPT2GIGA_GIGACHAT_API_MODE` и `GPT2GIGA_RESPONSES_API_MODE` для переключения chat-like upstream-вызовов на primary `v2/chat/completions` surface GigaChat SDK 0.2.2a1; внешний OpenAI/Anthropic-compatible контракт и URL остаются прежними
+- **GigaChat v2 backend mode**: добавлены `GPT2GIGA_GIGACHAT_API_MODE` и `GPT2GIGA_RESPONSES_API_MODE` для переключения chat-like upstream-вызовов на GigaChat chat-completion contract (`v2/chat/completions` в SDK 0.2.2a1); внешний OpenAI/Anthropic-compatible контракт и URL остаются прежними
 - **Responses built-in tools в v2 mode**: добавлена поддержка встроенных GigaChat-инструментов для OpenAI Responses API (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); нормализованные output items, stream progress events, file/inline metadata и гидратация изображений реализованы для `web_search*` и `image_generation` / `image_generate`
 - **Per-model max connections**: добавлены локальные in-process лимиты одновременных upstream model-call по effective GigaChat model через `GPT2GIGA_MODEL_MAX_CONNECTIONS`, `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` и `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT`, а также соответствующие CLI-флаги
 - **Debug payload logs**: добавлены non-PROD DEBUG-логи payload'ов для upstream-запросов и обработанных ответов GigaChat; в PROD payload'ы не пишутся

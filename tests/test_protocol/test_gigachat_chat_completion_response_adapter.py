@@ -7,20 +7,20 @@ from gigachat.models.chat_completions import ChatCompletionChunk
 from loguru import logger
 from openai.types.responses.response import Response
 
-from gpt2giga.protocol.response.gigachat_v2_adapter import (
-    adapt_v2_chunk_to_v1_shape,
-    adapt_v2_completion_to_v1_shape,
-    adapt_v2_usage,
-    extract_v2_assistant_text,
-    extract_v2_function_call,
-    hydrate_v2_image_files,
-    extract_v2_reasoning_text,
-    extract_v2_thread_id,
+from gpt2giga.protocol.response.gigachat_chat_completion_adapter import (
+    adapt_chat_completion_chunk_to_chat_chunk_shape,
+    adapt_chat_completion_to_chat_shape,
+    adapt_chat_completion_usage,
+    extract_chat_completion_assistant_text,
+    extract_chat_completion_function_call,
+    hydrate_chat_completion_image_files,
+    extract_chat_completion_reasoning_text,
+    extract_chat_completion_thread_id,
 )
 from gpt2giga.protocol.response.processor import ResponseProcessor
 
 
-def test_adapt_v2_completion_text_to_v1_shape():
+def test_adapt_chat_completion_text_to_chat_shape():
     response = ChatCompletionResponse.model_validate(
         {
             "model": "GigaChat-2-Max",
@@ -40,7 +40,7 @@ def test_adapt_v2_completion_text_to_v1_shape():
         }
     )
 
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
 
     assert adapted["model"] == "GigaChat-2-Max"
     assert adapted["choices"][0]["message"]["content"] == "Hello"
@@ -53,7 +53,7 @@ def test_adapt_v2_completion_text_to_v1_shape():
     }
 
 
-def test_adapt_v2_completion_preserves_thread_id():
+def test_adapt_chat_completion_preserves_thread_id():
     response = ChatCompletionResponse.model_validate(
         {
             "thread_id": "thread_1",
@@ -66,13 +66,13 @@ def test_adapt_v2_completion_preserves_thread_id():
         }
     )
 
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
 
-    assert extract_v2_thread_id(response) == "thread_1"
+    assert extract_chat_completion_thread_id(response) == "thread_1"
     assert adapted["thread_id"] == "thread_1"
 
 
-def test_adapted_v2_response_preserves_provider_state_ids_in_responses_metadata():
+def test_adapted_chat_completion_response_preserves_provider_state_ids_in_responses_metadata():
     response = ChatCompletionResponse.model_validate(
         {
             "thread_id": "thread_1",
@@ -96,7 +96,7 @@ def test_adapted_v2_response_preserves_provider_state_ids_in_responses_metadata(
             "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
         }
     )
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
 
     processor = ResponseProcessor(logger=logger)
     processed = processor.process_response_api(
@@ -142,7 +142,7 @@ def test_adapted_v2_response_preserves_provider_state_ids_in_responses_metadata(
     assert parsed.metadata["gigachat_thread_id"] == "thread_1"
 
 
-def test_adapted_v2_text_response_preserves_called_tools_from_responses_input():
+def test_adapted_chat_completion_text_response_preserves_called_tools_from_responses_input():
     response = ChatCompletionResponse.model_validate(
         {
             "thread_id": "thread_1",
@@ -158,7 +158,7 @@ def test_adapted_v2_text_response_preserves_called_tools_from_responses_input():
             "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
         }
     )
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
 
     processor = ResponseProcessor(logger=logger)
     processed = processor.process_response_api(
@@ -205,7 +205,7 @@ def test_adapted_v2_text_response_preserves_called_tools_from_responses_input():
     )
 
 
-def test_adapt_v2_completion_preserves_x_headers_for_response_metadata():
+def test_adapt_chat_completion_preserves_x_headers_for_response_metadata():
     response = ChatCompletionResponse.model_validate(
         {
             "x_headers": {
@@ -222,7 +222,7 @@ def test_adapt_v2_completion_preserves_x_headers_for_response_metadata():
         }
     )
 
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
     processed = ResponseProcessor(logger=logger).process_response(
         SimpleNamespace(model_dump=lambda: adapted),
         gpt_model="gpt-x",
@@ -235,7 +235,7 @@ def test_adapt_v2_completion_preserves_x_headers_for_response_metadata():
     }
 
 
-def test_adapt_v2_completion_reasoning_role_to_v1_reasoning_content():
+def test_adapt_chat_completion_reasoning_role_to_chat_reasoning_content():
     response = ChatCompletionResponse.model_validate(
         {
             "model": "GigaChat-2-Max",
@@ -254,17 +254,20 @@ def test_adapt_v2_completion_reasoning_role_to_v1_reasoning_content():
         }
     )
 
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
     message = adapted["choices"][0]["message"]
 
     assert message["role"] == "assistant"
     assert message["content"] == "Paris"
     assert message["reasoning_content"] == "This is a simple geography fact."
-    assert extract_v2_assistant_text(response) == "Paris"
-    assert extract_v2_reasoning_text(response) == "This is a simple geography fact."
+    assert extract_chat_completion_assistant_text(response) == "Paris"
+    assert (
+        extract_chat_completion_reasoning_text(response)
+        == "This is a simple geography fact."
+    )
 
 
-def test_adapt_v2_completion_function_call_to_v1_shape():
+def test_adapt_chat_completion_function_call_to_chat_shape():
     response = ChatCompletionResponse.model_validate(
         {
             "messages": [
@@ -281,7 +284,7 @@ def test_adapt_v2_completion_function_call_to_v1_shape():
         }
     )
 
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
     message = adapted["choices"][0]["message"]
 
     assert adapted["model"] == "fallback"
@@ -295,7 +298,7 @@ def test_adapt_v2_completion_function_call_to_v1_shape():
     assert adapted["usage"]["total_tokens"] == 1
 
 
-def test_adapted_v2_completion_can_flow_through_response_processor():
+def test_adapted_chat_completion_completion_can_flow_through_response_processor():
     response = ChatCompletionResponse.model_validate(
         {
             "messages": [
@@ -307,7 +310,7 @@ def test_adapted_v2_completion_can_flow_through_response_processor():
             "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
         }
     )
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
 
     processor = ResponseProcessor(logger=logger)
     processed = processor.process_response(
@@ -322,7 +325,7 @@ def test_adapted_v2_completion_can_flow_through_response_processor():
     assert processed["usage"]["completion_tokens"] == 2
 
 
-def test_adapted_v2_reasoning_flows_through_response_processors():
+def test_adapted_chat_completion_reasoning_flows_through_response_processors():
     response = ChatCompletionResponse.model_validate(
         {
             "messages": [
@@ -338,7 +341,7 @@ def test_adapted_v2_reasoning_flows_through_response_processors():
             "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
         }
     )
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
 
     processor = ResponseProcessor(logger=logger)
     chat = processor.process_response(
@@ -366,7 +369,7 @@ def test_adapted_v2_reasoning_flows_through_response_processors():
 
 
 @pytest.mark.asyncio
-async def test_adapted_v2_builtin_tool_outputs_flow_through_responses_processor():
+async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_responses_processor():
     class FakeImageClient:
         async def aget_image(self, file_id):
             assert file_id == "image-file-1"
@@ -407,8 +410,8 @@ async def test_adapted_v2_builtin_tool_outputs_flow_through_responses_processor(
             "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
         }
     )
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
-    await hydrate_v2_image_files(adapted, FakeImageClient())
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
+    await hydrate_chat_completion_image_files(adapted, FakeImageClient())
 
     processor = ResponseProcessor(logger=logger)
     processed = processor.process_response_api(
@@ -456,7 +459,7 @@ async def test_adapted_v2_builtin_tool_outputs_flow_through_responses_processor(
     )
 
 
-def test_adapted_v2_function_call_unmaps_reserved_tool_name_through_processor():
+def test_adapted_chat_completion_function_call_unmaps_reserved_tool_name_through_processor():
     response = ChatCompletionResponse.model_validate(
         {
             "messages": [
@@ -472,7 +475,7 @@ def test_adapted_v2_function_call_unmaps_reserved_tool_name_through_processor():
             "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
         }
     )
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
 
     processor = ResponseProcessor(logger=logger)
     processed = processor.process_response(
@@ -490,7 +493,7 @@ def test_adapted_v2_function_call_unmaps_reserved_tool_name_through_processor():
     )
 
 
-def test_adapted_v2_function_call_preserves_state_as_tool_call_id():
+def test_adapted_chat_completion_function_call_preserves_state_as_tool_call_id():
     response = ChatCompletionResponse.model_validate(
         {
             "messages": [
@@ -510,7 +513,7 @@ def test_adapted_v2_function_call_preserves_state_as_tool_call_id():
             "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
         }
     )
-    adapted = adapt_v2_completion_to_v1_shape(response, default_model="fallback")
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
 
     processor = ResponseProcessor(logger=logger)
     processed = processor.process_response(
@@ -524,7 +527,7 @@ def test_adapted_v2_function_call_preserves_state_as_tool_call_id():
     assert tool_call["function"]["name"] == "write_file"
 
 
-def test_extract_v2_function_call_from_content_part():
+def test_extract_chat_completion_function_call_from_content_part():
     message = {
         "role": "assistant",
         "content": [
@@ -537,13 +540,13 @@ def test_extract_v2_function_call_from_content_part():
         ],
     }
 
-    assert extract_v2_function_call(message) == {
+    assert extract_chat_completion_function_call(message) == {
         "name": "lookup",
         "arguments": {"id": 1},
     }
 
 
-def test_extract_v2_assistant_text_selects_assistant_message():
+def test_extract_chat_completion_assistant_text_selects_assistant_message():
     response = {
         "messages": [
             {"role": "user", "content": [{"text": "ignored"}]},
@@ -551,10 +554,10 @@ def test_extract_v2_assistant_text_selects_assistant_message():
         ]
     }
 
-    assert extract_v2_assistant_text(response) == "used"
+    assert extract_chat_completion_assistant_text(response) == "used"
 
 
-def test_adapt_v2_chunk_text_to_v1_shape():
+def test_adapt_chat_completion_chunk_text_to_chat_shape():
     chunk = ChatCompletionChunk.model_validate(
         {
             "model": "GigaChat-2-Max",
@@ -567,7 +570,9 @@ def test_adapt_v2_chunk_text_to_v1_shape():
         }
     )
 
-    adapted = adapt_v2_chunk_to_v1_shape(chunk, default_model="fallback")
+    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        chunk, default_model="fallback"
+    )
 
     assert adapted["model"] == "GigaChat-2-Max"
     assert adapted["choices"][0]["delta"] == {
@@ -578,7 +583,7 @@ def test_adapt_v2_chunk_text_to_v1_shape():
     assert adapted["usage"] is None
 
 
-def test_adapt_v2_chunk_reasoning_role_to_v1_delta_reasoning_content():
+def test_adapt_chat_completion_chunk_reasoning_role_to_chat_delta_reasoning_content():
     chunk = ChatCompletionChunk.model_validate(
         {
             "messages": [
@@ -590,7 +595,9 @@ def test_adapt_v2_chunk_reasoning_role_to_v1_delta_reasoning_content():
         }
     )
 
-    adapted = adapt_v2_chunk_to_v1_shape(chunk, default_model="fallback")
+    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        chunk, default_model="fallback"
+    )
     delta = adapted["choices"][0]["delta"]
 
     assert delta["role"] == "assistant"
@@ -598,7 +605,7 @@ def test_adapt_v2_chunk_reasoning_role_to_v1_delta_reasoning_content():
     assert delta["reasoning_content"] == "Think first."
 
 
-def test_adapt_v2_chunk_usage_only_does_not_fail():
+def test_adapt_chat_completion_chunk_usage_only_does_not_fail():
     chunk = ChatCompletionChunk.model_validate(
         {
             "usage": {
@@ -609,7 +616,9 @@ def test_adapt_v2_chunk_usage_only_does_not_fail():
         }
     )
 
-    adapted = adapt_v2_chunk_to_v1_shape(chunk, default_model="fallback")
+    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        chunk, default_model="fallback"
+    )
 
     assert adapted["choices"][0]["delta"] == {"content": ""}
     assert adapted["choices"][0]["finish_reason"] is None
@@ -617,5 +626,5 @@ def test_adapt_v2_chunk_usage_only_does_not_fail():
     assert adapted["usage"]["completion_tokens"] == 5
 
 
-def test_adapt_v2_usage_returns_none_for_missing_usage():
-    assert adapt_v2_usage(None) is None
+def test_adapt_chat_completion_usage_returns_none_for_missing_usage():
+    assert adapt_chat_completion_usage(None) is None

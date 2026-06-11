@@ -40,8 +40,8 @@ from gpt2giga.protocol.request.params import (
 class RequestTransformer:
     """Transformer for converting OpenAI requests to GigaChat format."""
 
-    _V2_REQUEST_FIELDS = set(ChatCompletionRequest.model_fields)
-    _V2_MODEL_OPTION_FIELDS = set(ChatModelOptions.model_fields)
+    _CHAT_COMPLETION_REQUEST_FIELDS = set(ChatCompletionRequest.model_fields)
+    _CHAT_COMPLETION_MODEL_OPTION_FIELDS = set(ChatModelOptions.model_fields)
 
     def __init__(
         self,
@@ -561,7 +561,7 @@ class RequestTransformer:
             "function_call",
         )
 
-    def _responses_builtin_tools_enabled(self) -> bool:
+    def _responses_chat_completion_tools_enabled_by_default(self) -> bool:
         return self.config.proxy_settings.resolve_responses_api_mode() == "v2"
 
     @staticmethod
@@ -584,12 +584,18 @@ class RequestTransformer:
                 stripped.pop("model_options", None)
         return stripped
 
-    def _chat_builtin_tools_enabled(self) -> bool:
+    def _chat_completion_tools_enabled_by_default(self) -> bool:
         return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
 
-    def transform_chat_parameters(self, data: Dict) -> Dict:
+    def transform_chat_parameters(
+        self, data: Dict, *, allow_builtin_tools: Optional[bool] = None
+    ) -> Dict:
         """Transforms chat parameters (Chat Completions API)."""
-        builtin_tools_enabled = self._chat_builtin_tools_enabled()
+        builtin_tools_enabled = (
+            self._chat_completion_tools_enabled_by_default()
+            if allow_builtin_tools is None
+            else allow_builtin_tools
+        )
         data = sanitize_openai_chat_parameters(
             data,
             allow_builtin_tools=builtin_tools_enabled,
@@ -598,7 +604,9 @@ class RequestTransformer:
         data = self._map_chat_token_limit(data)
         transformed = self._transform_common_parameters(data)
         if builtin_tools_enabled:
-            builtin_tools = self._build_v2_builtin_tool_payloads(data.get("tools"))
+            builtin_tools = self._build_chat_completion_builtin_tool_payloads(
+                data.get("tools")
+            )
             if builtin_tools:
                 transformed["_gpt2giga_builtin_tools"] = builtin_tools
 
@@ -645,7 +653,7 @@ class RequestTransformer:
     ) -> Dict:
         """Transforms responses parameters (Responses API)."""
         builtin_tools_enabled = (
-            self._responses_builtin_tools_enabled()
+            self._responses_chat_completion_tools_enabled_by_default()
             if allow_builtin_tools is None
             else allow_builtin_tools
         )
@@ -656,7 +664,9 @@ class RequestTransformer:
         )
         transformed = self._transform_common_parameters(data)
         if builtin_tools_enabled:
-            builtin_tools = self._build_v2_builtin_tool_payloads(data.get("tools"))
+            builtin_tools = self._build_chat_completion_builtin_tool_payloads(
+                data.get("tools")
+            )
             if builtin_tools:
                 transformed["_gpt2giga_builtin_tools"] = builtin_tools
 
@@ -807,7 +817,7 @@ class RequestTransformer:
 
         return None
 
-    async def _finalize_transformation(
+    async def _finalize_chat_transformation(
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
         """Common logic for message transformation and logging."""
@@ -840,16 +850,19 @@ class RequestTransformer:
 
         return transformed_data
 
-    async def _finalize_transformation_v2(
+    async def _finalize_chat_completion_transformation(
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None
     ) -> ChatCompletionRequest:
-        """Build a primary v2 chat completions request."""
+        """Build a GigaChat chat completion request."""
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
 
-        messages = self._build_v2_messages(transformed_data["messages"])
-        request_payload = self._build_v2_request_payload(transformed_data, messages)
+        messages = self._build_chat_completion_messages(transformed_data["messages"])
+        request_payload = self._build_chat_completion_request_payload(
+            transformed_data,
+            messages,
+        )
         chat_request = ChatCompletionRequest.model_validate(request_payload)
 
         msg_count = len(chat_request.messages)
@@ -857,8 +870,8 @@ class RequestTransformer:
         log_debug_payload(
             self.logger,
             self.config,
-            event="gigachat_request_v2",
-            message="Sending v2 request to GigaChat API",
+            event="gigachat_chat_completion_request",
+            message="Sending chat completion request to GigaChat API",
             payload_key="payload",
             payload=chat_request,
             exclude_none=True,
@@ -868,13 +881,18 @@ class RequestTransformer:
 
         return chat_request
 
-    def _build_v2_messages(self, messages: List[Dict]) -> List[ChatMessage]:
+    def _build_chat_completion_messages(
+        self,
+        messages: List[Dict],
+    ) -> List[ChatMessage]:
         return [
-            ChatMessage.model_validate(self._build_v2_message_payload(message))
+            ChatMessage.model_validate(
+                self._build_chat_completion_message_payload(message)
+            )
             for message in messages
         ]
 
-    def _build_v2_message_payload(self, message: Dict) -> Dict[str, Any]:
+    def _build_chat_completion_message_payload(self, message: Dict) -> Dict[str, Any]:
         role = str(message.get("role", "user"))
         is_function_result = role in {"function", "tool"}
         payload_role = "tool" if is_function_result else role
@@ -945,7 +963,7 @@ class RequestTransformer:
                 return content
         return content
 
-    def _build_v2_request_payload(
+    def _build_chat_completion_request_payload(
         self, transformed_data: Dict[str, Any], messages: List[ChatMessage]
     ) -> Dict[str, Any]:
         request_payload: Dict[str, Any] = {"messages": messages}
@@ -963,26 +981,26 @@ class RequestTransformer:
         if reasoning_effort is not None:
             model_options["reasoning"] = {"effort": reasoning_effort}
 
-        tools = self._build_v2_tools(
+        tools = self._build_chat_completion_tools(
             transformed_data.get("functions"),
             transformed_data.get("_gpt2giga_builtin_tools"),
         )
         if tools:
             request_payload["tools"] = tools
 
-        tool_config = self._build_v2_tool_config(
+        tool_config = self._build_chat_completion_tool_config(
             transformed_data.get("function_call"),
             transformed_data.get("_gpt2giga_tool_config"),
         )
         if tool_config:
             request_payload["tool_config"] = tool_config
 
-        self._apply_v2_additional_fields(
+        self._apply_chat_completion_additional_fields(
             transformed_data.get("additional_fields"),
             request_payload,
             model_options,
         )
-        storage = self._build_v2_storage(
+        storage = self._build_chat_completion_storage(
             transformed_data,
             existing_storage=request_payload.get("storage"),
         )
@@ -991,7 +1009,7 @@ class RequestTransformer:
         else:
             request_payload.pop("storage", None)
 
-        if self._v2_storage_has_thread_id(storage):
+        if self._chat_completion_storage_has_thread_id(storage):
             request_payload.pop("model", None)
 
         if model_options:
@@ -1000,7 +1018,7 @@ class RequestTransformer:
         return request_payload
 
     @classmethod
-    def _build_v2_storage(
+    def _build_chat_completion_storage(
         cls,
         transformed_data: Dict[str, Any],
         *,
@@ -1027,7 +1045,7 @@ class RequestTransformer:
         return storage
 
     @staticmethod
-    def _v2_storage_has_thread_id(storage: Any) -> bool:
+    def _chat_completion_storage_has_thread_id(storage: Any) -> bool:
         if isinstance(storage, dict):
             thread_id = storage.get("thread_id")
             return isinstance(thread_id, str) and bool(thread_id)
@@ -1044,7 +1062,7 @@ class RequestTransformer:
             return response_id.removeprefix("resp_") or None
         return response_id
 
-    def _apply_v2_additional_fields(
+    def _apply_chat_completion_additional_fields(
         self,
         additional_fields: Any,
         request_payload: Dict[str, Any],
@@ -1054,14 +1072,17 @@ class RequestTransformer:
             return
 
         for key, value in additional_fields.items():
-            if key in self._V2_MODEL_OPTION_FIELDS:
+            if key in self._CHAT_COMPLETION_MODEL_OPTION_FIELDS:
                 model_options.setdefault(key, value)
-            elif key in self._V2_REQUEST_FIELDS:
+            elif key in self._CHAT_COMPLETION_REQUEST_FIELDS:
                 request_payload.setdefault(key, value)
             else:
                 request_payload.setdefault(key, value)
 
-    def _build_v2_builtin_tool_payloads(self, tools: Any) -> list[dict[str, Any]]:
+    def _build_chat_completion_builtin_tool_payloads(
+        self,
+        tools: Any,
+    ) -> list[dict[str, Any]]:
         if not isinstance(tools, list) or not tools:
             return []
 
@@ -1084,7 +1105,7 @@ class RequestTransformer:
 
         return builtin_tools
 
-    def _build_v2_tools(
+    def _build_chat_completion_tools(
         self, functions: Any, builtin_tools: Any = None
     ) -> list[ChatTool]:
         tools: list[ChatTool] = []
@@ -1115,7 +1136,7 @@ class RequestTransformer:
                 continue
             seen_names.add(mapped_name)
 
-            parameters = self._normalize_v2_function_schema(
+            parameters = self._normalize_chat_completion_function_schema(
                 function_payload.get("parameters") or {}
             )
             spec_payload = {
@@ -1149,7 +1170,7 @@ class RequestTransformer:
         return tools
 
     @staticmethod
-    def _normalize_v2_function_schema(schema: Any) -> dict[str, Any]:
+    def _normalize_chat_completion_function_schema(schema: Any) -> dict[str, Any]:
         if not isinstance(schema, dict):
             return {}
         return normalize_json_schema(resolve_schema_refs(schema))
@@ -1162,7 +1183,7 @@ class RequestTransformer:
             return value.model_dump(exclude_none=True, by_alias=True)
         return {}
 
-    def _build_v2_tool_config(
+    def _build_chat_completion_tool_config(
         self, function_call: Any, builtin_tool_config: Any = None
     ) -> dict[str, str]:
         if not isinstance(function_call, dict):
@@ -1177,50 +1198,47 @@ class RequestTransformer:
             "function_name": map_tool_name_to_gigachat(name),
         }
 
+    async def prepare_chat(
+        self, data: dict, giga_client: Optional[GigaChat] = None
+    ) -> Dict[str, Any]:
+        """Prepare a legacy GigaChat chat request."""
+        transformed_data = self.transform_chat_parameters(
+            data, allow_builtin_tools=False
+        )
+        return await self._finalize_chat_transformation(transformed_data, giga_client)
+
     async def prepare_chat_completion(
         self, data: dict, giga_client: Optional[GigaChat] = None
-    ) -> Dict[str, Any]:
-        """Prepares request for Chat Completions API."""
-        transformed_data = self.transform_chat_parameters(data)
-        return await self._finalize_transformation(transformed_data, giga_client)
-
-    async def prepare_chat_completion_v2(
-        self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> ChatCompletionRequest:
-        """Prepares primary v2 request for Chat Completions API."""
-        transformed_data = self.transform_chat_parameters(data)
-        return await self._finalize_transformation_v2(transformed_data, giga_client)
+        """Prepare a GigaChat chat completion request."""
+        transformed_data = self.transform_chat_parameters(
+            data, allow_builtin_tools=True
+        )
+        return await self._finalize_chat_completion_transformation(
+            transformed_data,
+            giga_client,
+        )
 
-    async def prepare_response(
+    async def prepare_response_chat(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> Dict[str, Any]:
-        """Prepares request for Responses API."""
+        """Prepare a Responses API request for the legacy GigaChat chat path."""
         transformed_data = self.transform_responses_parameters(
             data, allow_builtin_tools=False
         )
         transformed_data["messages"] = self.transform_response_format(transformed_data)
-        return await self._finalize_transformation(transformed_data, giga_client)
+        return await self._finalize_chat_transformation(transformed_data, giga_client)
 
-    async def prepare_response_v2(
+    async def prepare_response_chat_completion(
         self, data: dict, giga_client: Optional[GigaChat] = None
     ) -> ChatCompletionRequest:
-        """Prepares primary v2 request for Responses API."""
+        """Prepare a Responses API request for the GigaChat chat completion path."""
         transformed_data = self.transform_responses_parameters(
             data, allow_builtin_tools=True
         )
         transformed_data["_gpt2giga_responses_api"] = True
         transformed_data["messages"] = self.transform_response_format(transformed_data)
-        return await self._finalize_transformation_v2(transformed_data, giga_client)
-
-    # Backward-compatible API (used by older tests / integrations)
-    async def send_to_gigachat(
-        self, data: dict, giga_client: Optional[GigaChat] = None
-    ) -> Dict[str, Any]:
-        """Backward-compatible alias for Chat Completions payload preparation."""
-        return await self.prepare_chat_completion(data, giga_client)
-
-    async def send_to_gigachat_responses(
-        self, data: dict, giga_client: Optional[GigaChat] = None
-    ) -> Dict[str, Any]:
-        """Backward-compatible alias for Responses API payload preparation."""
-        return await self.prepare_response(data, giga_client)
+        return await self._finalize_chat_completion_transformation(
+            transformed_data,
+            giga_client,
+        )

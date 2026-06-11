@@ -65,7 +65,7 @@ rg -n "files|batches|not mounted|не смонт" integrations docs examples
 ## Common Gotchas
 
 - `integrations/aider/.env.example` is checked in; keep it template-only and align broader config guidance with the repo-root `.env.example`.
-- `gpt2giga` supports both root and `/v1` mounted API routes for OpenAI and Anthropic-compatible endpoints; docs should only require `/v1` when the client tooling needs it.
+- `gpt2giga` supports root, `/v1`, and `/v2` mounted API routes for OpenAI and Anthropic-compatible endpoints; docs should only require a versioned prefix when the client tooling needs an explicit backend contract.
 - This folder should not become a dumping ground for ad hoc experiments; keep runnable examples in `examples/`.
 - Reverse-proxy guides should keep `Host`, `X-Forwarded-*`, and path-prefix behavior aligned with `PathNormalizationMiddleware`.
 

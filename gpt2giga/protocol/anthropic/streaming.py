@@ -22,7 +22,7 @@ from gpt2giga.common.model_concurrency import (
 from gpt2giga.common.reasoning import ReasoningContentParser
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
-from gpt2giga.protocol.response import adapt_v2_chunk_to_v1_shape
+from gpt2giga.protocol.response import adapt_chat_completion_chunk_to_chat_chunk_shape
 
 
 async def _stream_anthropic_generator(
@@ -378,7 +378,7 @@ async def _stream_anthropic_generator(
         )
 
 
-class _V2AnthropicStreamClient:
+class _ChatCompletionAnthropicStreamClient:
     def __init__(
         self,
         giga_client: GigaChat,
@@ -396,7 +396,7 @@ class _V2AnthropicStreamClient:
                 self._request_options,
             ):
                 async for chunk in self._giga_client.achat.stream(chat_request):
-                    adapted = adapt_v2_chunk_to_v1_shape(
+                    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
                         chunk,
                         default_model=self._model,
                     )
@@ -405,7 +405,7 @@ class _V2AnthropicStreamClient:
         return gen()
 
 
-async def _stream_anthropic_v2_generator(
+async def _stream_anthropic_chat_completion_generator(
     request: Request,
     model: str,
     chat_request: Any,
@@ -417,8 +417,12 @@ async def _stream_anthropic_v2_generator(
     model_limiter: Optional[ModelConcurrencyLimiter] = None,
     effective_model: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
-    """SSE generator for Anthropic Messages backed by GigaChat v2 streaming."""
-    adapter_client = _V2AnthropicStreamClient(giga_client, model, request_options)
+    """SSE generator for Anthropic Messages backed by chat completion streaming."""
+    adapter_client = _ChatCompletionAnthropicStreamClient(
+        giga_client,
+        model,
+        request_options,
+    )
     async for event in _stream_anthropic_generator(
         request,
         model,

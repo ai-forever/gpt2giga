@@ -153,14 +153,12 @@ async def transform_batch_input_file(
             )
 
         if target.kind == "chat":
-            transformed_body = await request_transformer.prepare_chat_completion(
-                body, giga_client
-            )
+            transformed_body = await request_transformer.prepare_chat(body, giga_client)
             batch_model = _resolve_batch_model(body, giga_client)
             if batch_model and "model" not in transformed_body:
                 transformed_body["model"] = batch_model
         elif target.kind == "responses":
-            transformed_body = await request_transformer.prepare_response(
+            transformed_body = await request_transformer.prepare_response_chat(
                 body, giga_client
             )
             batch_model = _resolve_batch_model(body, giga_client)

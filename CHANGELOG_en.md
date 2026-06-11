@@ -50,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.8a1] - 2026-06-06
 
 ### Added
-- **GigaChat v2 backend mode**: added `GPT2GIGA_GIGACHAT_API_MODE` and `GPT2GIGA_RESPONSES_API_MODE` to switch chat-like upstream calls to the primary `v2/chat/completions` surface in GigaChat SDK 0.2.2a1 while keeping the external OpenAI/Anthropic-compatible contract and URLs unchanged
+- **GigaChat v2 backend mode**: added `GPT2GIGA_GIGACHAT_API_MODE` and `GPT2GIGA_RESPONSES_API_MODE` to switch chat-like upstream calls to the GigaChat chat-completion contract (`v2/chat/completions` in SDK 0.2.2a1) while keeping the external OpenAI/Anthropic-compatible contract and URLs unchanged
 - **Responses built-in tools in v2 mode**: added support for GigaChat built-in tools in OpenAI Responses API (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); normalized output items, stream progress events, file/inline metadata, and image hydration are implemented for `web_search*` and `image_generation` / `image_generate`
 - **Per-model max connections**: added local in-process limits for concurrent upstream model calls by effective GigaChat model via `GPT2GIGA_MODEL_MAX_CONNECTIONS`, `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT`, and `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT`, plus matching CLI flags
 - **Debug payload logs**: added non-PROD DEBUG payload logs for upstream GigaChat requests and processed responses; payloads are omitted in PROD

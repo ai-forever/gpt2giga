@@ -27,7 +27,7 @@ async def test_request_transformer_collapse_messages():
         {"role": "user", "content": "world"},
     ]
     data = {"messages": messages}
-    chat = await rt.send_to_gigachat(data)
+    chat = await rt.prepare_chat(data)
     # После collapse два подряд user должны склеиться
     # chat is now a dict
     assert len(chat["messages"]) == 1
@@ -58,7 +58,7 @@ async def test_request_transformer_tools_to_functions():
         ],
         "messages": [{"role": "user", "content": "hi"}],
     }
-    chat = await rt.send_to_gigachat(data)
+    chat = await rt.prepare_chat(data)
     # chat is dict
     assert chat.get("functions") and len(chat["functions"]) == 1
 
@@ -71,7 +71,7 @@ async def test_request_transformer_dev_debug_logging_includes_full_payload():
     cfg = ProxyConfig(proxy=ProxySettings(mode="DEV"))
     rt = RequestTransformer(cfg, mock_logger)
 
-    await rt.send_to_gigachat(
+    await rt.prepare_chat(
         {"model": "GigaChat", "messages": [{"role": "user", "content": "hello"}]}
     )
 
@@ -386,7 +386,7 @@ def test_response_processor_chat_metadata_includes_input_tool_calls():
     ]
 
 
-def test_response_processor_chat_metadata_includes_v2_content_function_calls():
+def test_response_processor_chat_metadata_includes_chat_completion_content_function_calls():
     rp = ResponseProcessor(logger)
     giga_resp = MockResponse(
         {

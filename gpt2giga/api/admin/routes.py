@@ -118,12 +118,12 @@ async def normalized_to_gigachat(request: Request):
     mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
     giga_client = getattr(state, "gigachat_client", None)
     if mode == "v2":
-        gigachat_payload = await state.request_transformer.prepare_chat_completion_v2(
+        gigachat_payload = await state.request_transformer.prepare_chat_completion(
             dict(openai_payload),
             giga_client,
         )
     else:
-        gigachat_payload = await state.request_transformer.prepare_chat_completion(
+        gigachat_payload = await state.request_transformer.prepare_chat(
             dict(openai_payload),
             giga_client,
         )
@@ -325,12 +325,12 @@ async def _normalized_chat_to_gigachat_payload(
     mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
     giga_client = getattr(state, "gigachat_client", None)
     if mode == "v2":
-        gigachat_payload = await state.request_transformer.prepare_chat_completion_v2(
+        gigachat_payload = await state.request_transformer.prepare_chat_completion(
             dict(openai_payload),
             giga_client,
         )
     else:
-        gigachat_payload = await state.request_transformer.prepare_chat_completion(
+        gigachat_payload = await state.request_transformer.prepare_chat(
             dict(openai_payload),
             giga_client,
         )
