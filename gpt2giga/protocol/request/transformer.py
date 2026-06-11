@@ -1000,6 +1000,7 @@ class RequestTransformer:
             request_payload,
             model_options,
         )
+        self._apply_chat_completion_profanity_check_default(request_payload)
         storage = self._build_chat_completion_storage(
             transformed_data,
             existing_storage=request_payload.get("storage"),
@@ -1071,13 +1072,42 @@ class RequestTransformer:
         if not isinstance(additional_fields, dict):
             return
 
+        explicit_disable_filter = (
+            "disable_filter" in additional_fields or "disable_filter" in request_payload
+        )
         for key, value in additional_fields.items():
+            if key == "profanity_check":
+                disable_filter = self._disable_filter_from_profanity_check(value)
+                if disable_filter is not None and not explicit_disable_filter:
+                    request_payload["disable_filter"] = disable_filter
+                continue
             if key in self._CHAT_COMPLETION_MODEL_OPTION_FIELDS:
                 model_options.setdefault(key, value)
             elif key in self._CHAT_COMPLETION_REQUEST_FIELDS:
                 request_payload.setdefault(key, value)
             else:
                 request_payload.setdefault(key, value)
+
+    def _apply_chat_completion_profanity_check_default(
+        self, request_payload: Dict[str, Any]
+    ) -> None:
+        if "disable_filter" in request_payload:
+            return
+
+        profanity_check = getattr(
+            self.config.gigachat_settings,
+            "profanity_check",
+            None,
+        )
+        disable_filter = self._disable_filter_from_profanity_check(profanity_check)
+        if disable_filter is not None:
+            request_payload["disable_filter"] = disable_filter
+
+    @staticmethod
+    def _disable_filter_from_profanity_check(value: Any) -> Optional[bool]:
+        if isinstance(value, bool):
+            return not value
+        return None
 
     def _build_chat_completion_builtin_tool_payloads(
         self,

@@ -658,6 +658,73 @@ async def test_prepare_chat_completion_maps_additional_fields():
 
 
 @pytest.mark.asyncio
+async def test_prepare_chat_completion_maps_profanity_check_to_disable_filter():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "hello"}],
+            "extra_body": {"profanity_check": False},
+        }
+    )
+
+    assert request.disable_filter is True
+    assert "profanity_check" not in request.model_dump(exclude_none=True)
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_maps_gigachat_profanity_check_default():
+    cfg = ProxyConfig(gigachat={"profanity_check": True})
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "hello"}],
+        }
+    )
+
+    assert request.disable_filter is False
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_request_profanity_check_overrides_default():
+    cfg = ProxyConfig(gigachat={"profanity_check": True})
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "hello"}],
+            "extra_body": {"profanity_check": False},
+        }
+    )
+
+    assert request.disable_filter is True
+
+
+@pytest.mark.asyncio
+async def test_prepare_chat_completion_explicit_disable_filter_overrides_profanity_check():
+    cfg = ProxyConfig(gigachat={"profanity_check": True})
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "hello"}],
+            "extra_body": {
+                "profanity_check": False,
+                "disable_filter": False,
+            },
+        }
+    )
+
+    assert request.disable_filter is False
+
+
+@pytest.mark.asyncio
 async def test_prepare_chat_completion_reuses_attachment_uploads():
     class AttachmentProcessor:
         async def upload_file_with_meta(self, *_args, **_kwargs):
