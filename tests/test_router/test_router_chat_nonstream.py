@@ -121,6 +121,9 @@ def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
     class FakeGigachatWithHeaders(FakeGigachat):
         async def achat(self, chat):
             response = await super().achat(chat)
+            response.data["choices"][0]["message"]["reasoning_content"] = (
+                "hidden reasoning"
+            )
             response.data["x_headers"] = {
                 "x-request-id": "rq-1",
                 "x-session-id": "session-1",
@@ -157,6 +160,8 @@ def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
     assert attributes["gpt2giga.api_format"] == "chat_completions"
     assert "secret prompt" in attributes["input.value"]
     assert "ok" in attributes["output.value"]
+    assert "hidden reasoning" in attributes["output.value"]
+    assert "reasoning_content" in attributes["output.value"]
     assert attributes["llm.response.metadata"] == (
         '{"gigachat_x_request_id": "rq-1", "gigachat_x_session_id": "session-1"}'
     )

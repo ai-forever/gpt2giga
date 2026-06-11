@@ -1611,6 +1611,37 @@ class TestMessagesEndpoint:
         # Second block should be text
         assert body["content"][1]["type"] == "text"
 
+    def test_non_stream_phoenix_span_includes_thinking_block(self):
+        app = make_app(FakeGigachatReasoning())
+        app.state.config = ProxyConfig(
+            proxy=ProxySettings(
+                structured_output_mode="function_call",
+                observability_capture_content=True,
+                observability_capture_messages=True,
+                observability_capture_responses=True,
+            )
+        )
+        app.state.observability_sink = RecordingObservabilitySink()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 16000,
+            "thinking": {"type": "enabled", "budget_tokens": 10000},
+            "messages": [{"role": "user", "content": "What is 6*7?"}],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 200
+        emitted = {
+            name: attributes
+            for name, attributes, _context, _events in app.state.observability_sink.events
+        }
+        attributes = emitted["Messages"]
+        assert attributes["gpt2giga.api_format"] == "messages"
+        assert "1021" in attributes["output.value"]
+        assert "reasoning_content" in attributes["output.value"]
+
     def test_non_stream_extracts_think_tags(self):
         app = make_app(FakeGigachatThinkTags())
         client = TestClient(app)

@@ -304,6 +304,7 @@ def test_build_llm_response_attributes_maps_usage_finish_and_safe_payloads():
                 message=NormalizedMessage(
                     role="assistant",
                     content="private answer",
+                    raw_extensions={"reasoning_content": "private reasoning"},
                     tool_calls=[
                         NormalizedToolCall(
                             name="lookup",
@@ -334,6 +335,7 @@ def test_build_llm_response_attributes_maps_usage_finish_and_safe_payloads():
     assert default_attributes["total_tokens"] == 8
     assert default_attributes["llm.tool_calls.names"] == ["lookup"]
     assert "private answer" not in str(default_attributes)
+    assert "private reasoning" not in str(default_attributes)
     assert "llm.output_messages" not in default_attributes
     assert "llm.tool_calls" not in default_attributes
 
@@ -347,6 +349,8 @@ def test_build_llm_response_attributes_maps_usage_finish_and_safe_payloads():
     )
 
     assert "private answer" in captured_attributes["llm.output_messages"]
+    assert "private reasoning" in captured_attributes["llm.output_messages"]
+    assert "reasoning_content" in captured_attributes["llm.output_messages"]
     assert '"password": "***"' in captured_attributes["llm.tool_calls"]
     assert "secret" not in captured_attributes["llm.tool_calls"]
 

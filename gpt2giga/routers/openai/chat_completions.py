@@ -678,6 +678,20 @@ def _openai_message_to_normalized_message(value: Any) -> NormalizedMessage | Non
             for tool_call in value.get("tool_calls") or []
             if isinstance(tool_call, Mapping)
         ],
+        raw_extensions={
+            key: item
+            for key, item in value.items()
+            if key
+            not in {
+                "role",
+                "content",
+                "name",
+                "tool_call_id",
+                "tool_calls",
+                "function_call",
+                "refusal",
+            }
+        },
     )
 
 

@@ -85,6 +85,13 @@ class FakeAChatResource:
         return gen()
 
 
+class FakeAChatResourceWithReasoning(FakeAChatResource):
+    async def __call__(self, payload):
+        response = await super().__call__(payload)
+        response.data["choices"][0]["message"]["reasoning_content"] = "reasoning-v1"
+        return response
+
+
 class FakeGigachat:
     def __init__(self):
         self.achat = FakeAChatResource()
@@ -201,6 +208,7 @@ def test_responses_v2_non_stream_returns_openai_response_object():
 
 def test_responses_v1_non_stream_emits_phoenix_llm_span():
     app = make_app("v1", "inherit")
+    app.state.gigachat_client.achat = FakeAChatResourceWithReasoning()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(
             gigachat_api_mode="v1",
@@ -244,6 +252,8 @@ def test_responses_v1_non_stream_emits_phoenix_llm_span():
     assert attributes["total_tokens"] == 2
     assert "hi" in attributes["input.value"]
     assert "ok-v1" in attributes["output.value"]
+    assert "reasoning-v1" in attributes["output.value"]
+    assert "reasoning_content" in attributes["output.value"]
     assert events == []
 
 
