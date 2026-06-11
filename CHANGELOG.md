@@ -7,7 +7,7 @@
 
 ## [Unreleased]
 
-Планируется к выпуску как `0.2.0`.
+## [0.2.0a1] - 2026-06-11
 
 ### Breaking changes
 - **Внутренний GigaChat transformer API**: старые compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2` и модуль `gigachat_v2_adapter` заменены на явные `chat` / `chat_completion` имена; внешние OpenAI/Anthropic-compatible endpoints не меняются.
@@ -18,8 +18,11 @@
 - **Modular roadmap safety baseline**: начата подготовка release-дисциплины для `v0.2.0` с правилами semantic versioning и release checklist.
 - **Modular feature flags**: добавлены выключенные по умолчанию `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED` и `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
 - **RequestContext**: добавлен внутренний request-scoped context с `request_id`, `trace_id`, protocol/route metadata и безопасными hash-полями для будущих traffic logs/observability без изменения публичного API.
+- **Caller metadata**: добавлено безопасное определение caller-а по headers/user-agent для `swagger`, `redoc`, OpenAI/Anthropic SDK, Codex, Claude Code и Qwen Code; metadata используется в traces, traffic logs и observability annotations.
+- **Conversation stitching**: добавлено выключенное по умолчанию in-memory stitching состояние для Chat Completions, OpenAI Responses v1 и Anthropic Messages по stable conversation id или `x-session-id`, с TTL, лимитом сообщений и стратегией divergence.
 - **Golden compatibility fixtures**: добавлены fixtures и тесты для OpenAI chat/tool/structured/streaming/embeddings и Anthropic messages/streaming shapes на mocked upstream.
 - **Logging terminology**: добавлен architecture doc, разделяющий runtime logs, future traffic logs, observability traces и metrics.
+- **Normalized/provider architecture docs**: добавлены architecture guides для normalized messages и добавления новых providers с требованиями к protocol adapters, provider adapters, observability, metrics и traffic logs.
 - **Modular package skeleton**: добавлены пустые namespace-пакеты `gpt2giga.api`, `gpt2giga.app`, `gpt2giga.protocols`, `gpt2giga.providers` и `gpt2giga.sinks` для поэтапной миграции без изменения текущего runtime wiring.
 - **Extension interfaces**: добавлены внутренние `ProtocolAdapter`, `ProviderAdapter`, `TrafficLogSink`, `TrafficLogQueryStore`, `ObservabilitySink` и `MetricsSink` для будущих backend/provider/storage расширений без тяжелых зависимостей.
 - **Traffic log event and sinks**: добавлена storage-independent модель `TrafficLogEvent`, noop traffic sink по умолчанию и opt-in JSONL sink для локальной проверки через `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
@@ -36,10 +39,10 @@
 - **Traffic log redaction**: добавлен `gpt2giga.core.redaction` с default-on redaction для durable traffic logs, включая nested dict/list payloads, cookies, auth/API keys, token-like strings и configurable extra keys.
 - **Postgres traffic log writer**: добавлены opt-in `postgres` traffic sink, lazy asyncpg writer и background queue с batch writes, best-effort flush и default drop-on-backpressure policy, чтобы storage failures не ломали API request path.
 - **Traffic event emission**: `RquidMiddleware` теперь эмитит safe traffic events для completed requests, validation errors, unhandled errors и stream completion/abort через configured sink; default noop path сохраняет публичное API behavior.
-- **Postgres compose profile**: добавлен `compose/postgres.yaml` для локального Postgres traffic log backend и Dockerfile build arg `INSTALL_EXTRAS` для сборки образа с optional extra `[postgres]`.
+- **Postgres deploy profile**: добавлен `deploy/postgres.yaml` для локального Postgres traffic log backend и Dockerfile build arg `INSTALL_EXTRAS` для сборки образа с optional extra `[postgres]`.
 - **Admin traffic logs API**: добавлены opt-in protected endpoints `/_admin/logs*` для list/get/request/response/tail/NDJSON export Postgres traffic logs с pagination, filters и admin-key auth; routes выключены по умолчанию.
 - **OpenSearch traffic log extra**: добавлен optional extra `opensearch` с `opensearch-py` для будущего opt-in search mirror backend без изменения базовой установки.
-- **OpenSearch traffic log mirror**: добавлены настройки `GPT2GIGA_TRAFFIC_LOG_SINKS`, `GPT2GIGA_OPENSEARCH_*`, OpenSearch bulk writer с retry/backoff, composite sink для `postgres,opensearch`, index template helper и `compose/opensearch.yaml`.
+- **OpenSearch traffic log mirror**: добавлены настройки `GPT2GIGA_TRAFFIC_LOG_SINKS`, `GPT2GIGA_OPENSEARCH_*`, OpenSearch bulk writer с retry/backoff, composite sink для `postgres,opensearch`, index template helper и `deploy/opensearch.yaml`.
 - **Traffic log retention**: добавлены настройки `GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS` и `GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS`, best-effort Postgres retention job и protected admin dry-run/execute purge command `POST /_admin/logs/retention/purge`.
 - **Traffic log CSV export**: добавлен `GET /_admin/logs/export.csv` для выгрузки summary-колонок traffic logs без stored request/response body payloads.
 - **Traffic log replay**: добавлен выключенный по умолчанию `GPT2GIGA_REPLAY_ENABLED` и protected endpoint `POST /_admin/logs/{id}/replay`, который повторно редактирует captured body, не переиспользует stored credentials и помечает replay metadata.
@@ -48,16 +51,21 @@
 - **Phoenix observability settings**: добавлены настройки Phoenix/OpenTelemetry observability backend, collector endpoint, project name, API key, sample rate, content capture и redaction; observability и content capture выключены по умолчанию.
 - **Phoenix/OpenTelemetry observability sink**: добавлен optional Phoenix OTLP sink с lazy imports, safe fallback на noop без extra `phoenix`, sample-rate control, attribute redaction и content-capture guard.
 - **Trace/log linkage**: traffic log events сохраняют `trace_id`/optional `span_id`, а Phoenix spans получают matching gateway identifiers as attributes; README описывает поиск trace по `trace_id`.
-- **Phoenix compose profile**: добавлен opt-in `compose/phoenix.yaml` для локального Arize Phoenix collector/UI и сборки gpt2giga с optional extra `[phoenix]`.
+- **Phoenix deploy profile**: добавлен opt-in `deploy/phoenix.yaml` для локального Arize Phoenix collector/UI и сборки gpt2giga с optional extra `[phoenix]`.
 - **Request lifecycle observability**: `RquidMiddleware` best-effort эмитит `gpt2giga.request`, `provider.gigachat.request` и streaming `stream.emit` spans через configured observability sink; ошибки sink-а изолированы от API request path.
 - **Rich observability content controls**: добавлены default-off flags `GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES`, `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS`, `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES` и `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH` для safe opt-in LLM span payload attributes.
 - **OpenInference-style LLM spans**: normalized OpenAI Chat path эмитит `protocol.normalize.request` и `protocol.normalize.response` spans с model/provider/usage/finish/tool metadata и opt-in redacted payload attributes.
+- **API-format LLM spans**: Phoenix/OpenTelemetry observability теперь эмитит отдельные LLM spans `ChatCompletion`, `Responses`, `Messages` и `Embeddings` с bounded attribute `gpt2giga.api_format` и caller annotations.
 - **Streaming observability span events**: normalized streaming path добавляет OTel span events `stream.start`, `stream.first_token`, `stream.tool_call_delta`, `stream.completed` и `stream.error`; generic streaming lifecycle дополнительно отмечает `stream.completed`/`stream.aborted`.
 - **Prometheus metrics baseline**: добавлен выключенный по умолчанию `GPT2GIGA_METRICS_ENABLED`, configurable `GPT2GIGA_METRICS_PATH`, in-process Prometheus-compatible sink и endpoint для aggregate service metrics без prompt/response content, request ids или secrets.
+- **Deploy Makefile commands**: добавлены Makefile targets для `deploy/base.yaml`, Phoenix, mitmproxy, observability, Traefik и multi-instance compose-профилей.
 
 ### Изменено
 - **GigaChat backend naming**: внутренний upstream path теперь называется `chat` для legacy GigaChat calls и `chat_completion` для GigaChat `v2/chat/completions`; `_v2`-суффиксы убраны из transformer, response adapter, streaming helpers и tests.
 - **Versioned client docs**: README, integration guides, examples и `.env.example` уточняют выбор `base_url="http://localhost:8090/v1"` или `base_url="http://localhost:8090/v2"` для явного backend contract.
+- **Docs layout**: README сокращен до overview/quick links, а подробные материалы разнесены по `docs/quickstart.md`, `docs/configuration.md`, `docs/api-compatibility.md`, `docs/deployment.md`, `docs/operations.md` и `docs/integrations.md`.
+- **Deployment layout**: Docker Compose manifests перенесены из `compose/` в `deploy/`, добавлен `deploy/README.md`, а README, docs, Makefile и CI ссылки выровнены под новую структуру.
+- **Examples layout**: runnable OpenAI/Anthropic examples сгруппированы по capability (`basic`, `tools`, `reasoning`, `structured_outputs`, `multimodal`, `files`, `concurrency`, `agents`) с обновленными README и assets.
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.
 - **OpenAI API namespace**: OpenAI-compatible router aggregator добавлен в `gpt2giga.api.openai.routes`, а app factory подключает OpenAI routes через новый modular namespace без изменения публичных paths и response shapes.
 - **Anthropic API namespace**: Anthropic-compatible router aggregator добавлен в `gpt2giga.api.anthropic.routes`, а app factory подключает Anthropic routes через новый modular namespace без изменения публичных paths, headers behavior и response shapes.
@@ -65,6 +73,25 @@
 - **Extension sink lifecycle**: app factory создает traffic/observability sinks в `app.state`, а lifecycle делает best-effort flush на shutdown; ошибки sink-ов изолированы от API request path.
 - **Request context protocol inference**: уточнено определение LiteLLM route до точного `/model/info`, чтобы OpenAI `/models` traffic events не классифицировались как LiteLLM.
 - **Internal docs alignment**: package-level AGENTS notes обновлены под новый app factory/lifecycle/provider layout и сохраненный `gpt2giga.api_server` entrypoint facade.
+
+### Исправлено
+- **Request fingerprints**: fingerprint-ы API key/client IP теперь строятся через keyed PBKDF2 вместо plain SHA-256, чтобы traffic logs и observability не хранили guessable hashes.
+- **Traffic-log content capture**: redacted request headers/body и non-stream response body сохраняются только при opt-in `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT=True`, с лимитом размера и redaction до durable storage.
+- **Traffic-log query/replay**: query store корректно использует Postgres в composite `postgres,opensearch` setups, а replay добавляет proxy API key для PROD/API-key protected targets.
+- **Traffic-log deploy hardening**: Phoenix deploy profile снова оставляет content capture выключенным по умолчанию, Postgres profile монтирует SQL migration init script, а deploy profile tests покрывают конфигурацию.
+- **Phoenix span payloads**: OpenAI/Anthropic/Responses spans включают reasoning/thinking content в redacted payload attributes при включенном content capture.
+- **Protocol inference**: request context корректно классифицирует `/v2/messages` как Anthropic и `/v2/model/info` как LiteLLM.
+- **Release review regressions**: закрыты найденные на review ошибки admin logs retention/redaction/replay и lifecycle shutdown guards.
+
+## [0.1.8a3] - 2026-06-10
+
+### Изменено
+- **Claude Code docs**: инструкция интеграции Claude Code отмечена как проверенная с `Claude Code v2.1.170`
+- **Версия и lock-файл**: версия проекта обновлена до `0.1.8a3`, а `uv.lock` пересобран с актуальными dependency markers
+
+### Исправлено
+- **Claude Code tool schemas**: tool-схемы с вложенными свойствами без явного `type` теперь дополняются валидным объектным типом и `properties`, что предотвращает `422` от GigaChat
+
 ## [0.1.8a2] - 2026-06-09
 
 ### Добавлено
@@ -73,13 +100,11 @@
 ### Изменено
 - **Совместимость параметров**: известные unsupported optional параметры OpenAI/Anthropic клиентов теперь принимаются и игнорируются для SDK-совместимости вместо отклонения, а README, OpenAPI specs и матрица совместимости обновлены под это поведение
 - **Codex provider docs**: инструкция интеграции Codex обновлена под актуальный provider config
-- **Claude Code docs**: инструкция интеграции Claude Code отмечена как проверенная с `Claude Code v2.1.170`
 - **Версия и lock-файл**: версия проекта обновлена до `0.1.8a2`, а `uv.lock` пересобран с актуальными dependency markers и обновлениями зависимостей
 
 ### Исправлено
 - **Codex Responses tools**: исправлена поддержка Codex-style tool declarations в OpenAI Responses, включая namespace/input-schema формы и корректную обработку streaming output
 - **JSON Schema normalization**: схемы для GigaChat validators нормализуются стабильнее, включая массивы без typed `items`
-- **Claude Code tool schemas**: tool-схемы с вложенными свойствами без явного `type` теперь дополняются валидным объектным типом и `properties`, что предотвращает `422` от GigaChat
 - **Chat Completions tool metadata**: OpenAI Chat Completions теперь сохраняет metadata о вызванных инструментах в non-streaming и streaming ответах
 
 ## [0.1.8a1] - 2026-06-06
@@ -375,6 +400,9 @@
 
 ---
 
+[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...HEAD
+[0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a3...v0.2.0a1
+[0.1.8a3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a2...v0.1.8a3
 [0.1.8a2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a1...v0.1.8a2
 [0.1.8a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.7...v0.1.8a1
 [0.1.7]: https://github.com/ai-forever/gpt2giga/compare/v0.1.6...v0.1.7
