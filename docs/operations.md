@@ -168,6 +168,9 @@ GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 
 Поддерживаемые payload families: `openai`, `anthropic`, `normalized`, `gigachat`, в зависимости от направления.
 
+Как эти форматы проходят через внутренний normalized contract, описано в
+[Normalized messages architecture](./architecture/normalized-messages.md).
+
 ## Phoenix / OpenTelemetry
 
 Phoenix observability выключена по умолчанию:
@@ -241,3 +244,5 @@ headers:
 prompt/response content в annotations не добавляется.
 
 Термины и design constraints описаны в [архитектуре logging и observability](./architecture/logging-and-observability.md).
+Checklist для добавления новых providers/protocols и связанных observability
+изменений: [How to add a provider or protocol](./architecture/how-to-add-provider.md).

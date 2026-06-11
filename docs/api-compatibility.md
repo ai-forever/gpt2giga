@@ -72,6 +72,9 @@
 
 Справочник по каждому parameter: [Совместимость параметров клиентов](./client-parameter-compatibility.md).
 
+Внутренний normalized слой, который отделяет public protocol formats от
+provider execution, описан в [Normalized messages architecture](./architecture/normalized-messages.md).
+
 ## Backend modes
 
 По умолчанию используется GigaChat root compatibility methods:

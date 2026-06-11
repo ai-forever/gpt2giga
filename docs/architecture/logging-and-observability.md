@@ -22,9 +22,9 @@ Runtime logs не должны содержать raw API keys, credentials, coo
 
 ## Traffic Logs
 
-Traffic logs — это будущие structured records для LLM request/response traffic.
-Они отделены от runtime logs и предназначены для controlled storage sinks:
-JSONL, Postgres или OpenSearch.
+Traffic logs — это structured records для LLM request/response traffic. Они
+отделены от runtime logs и предназначены для controlled storage sinks: JSONL,
+Postgres или OpenSearch.
 
 Traffic logs могут содержать:
 
@@ -40,8 +40,8 @@ cookies, credentials и local certificate material никогда не долж�
 
 ## Observability
 
-Observability включает traces, spans и metrics, которые будут отправляться через
-будущие OpenTelemetry/OpenInference integrations. Arize Phoenix — планируемый
+Observability включает traces, spans и metrics, которые отправляются через
+OpenTelemetry/OpenInference-compatible integrations. Arize Phoenix — optional
 destination, а не замена runtime logs или traffic logs.
 
 Observability events должны использовать request context fields для correlation:
@@ -54,6 +54,14 @@ Observability events должны использовать request context field
 
 Prompt и response capture для observability должны быть opt-in и следовать тем
 же redaction rules, что и traffic logs.
+
+LLM-specific observability строится вокруг normalized request/response models,
+где это возможно: Chat Completions использует `NormalizedChatRequest` и
+`NormalizedResponse`, Responses и Anthropic helpers приводят public payloads к
+chat-like normalized representation для spans, а streaming milestones могут
+строиться из `NormalizedStreamEvent`. Это позволяет добавлять новый
+protocol/provider без копирования всей OpenInference/Phoenix mapping logic.
+Подробности: [Normalized messages architecture](./normalized-messages.md).
 
 ## Metrics
 

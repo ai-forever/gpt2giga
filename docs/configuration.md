@@ -119,6 +119,8 @@ GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 - `shadow`: строит normalized diagnostics рядом с legacy OpenAI Chat handling без изменения client responses;
 - `on`: переводит OpenAI Chat на normalized path, с legacy fallback до старта ответа, если fallback включён.
 
+Подробное описание моделей и текущих execution paths: [Normalized messages architecture](./architecture/normalized-messages.md).
+
 ## Per-model concurrency
 
 `GIGACHAT_MAX_CONNECTIONS` — global SDK/HTTP cap. Прокси также умеет ограничивать concurrent upstream model calls по effective model:
