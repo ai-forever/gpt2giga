@@ -26,6 +26,7 @@ from gpt2giga.common.streaming import (
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import responses_openapi_extra
+from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_RESPONSES
 from gpt2giga.protocol.response import (
     adapt_chat_completion_to_chat_shape,
     extract_chat_completion_thread_id,
@@ -37,7 +38,7 @@ from gpt2giga.sinks.observability.responses import (
     observe_openai_response_stream,
 )
 
-router = APIRouter(tags=["OpenAI"])
+router = APIRouter(tags=[OPENAPI_TAG_OPENAI_RESPONSES])
 
 
 @router.post("/responses", openapi_extra=responses_openapi_extra())

@@ -14,8 +14,9 @@ from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
+from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_MODELS
 
-router = APIRouter(tags=["OpenAI"])
+router = APIRouter(tags=[OPENAPI_TAG_OPENAI_MODELS])
 
 
 def _is_anthropic_models_request(request: Request) -> bool:

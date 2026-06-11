@@ -12,6 +12,7 @@ from gpt2giga.common.gigachat_options import (
 )
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.openapi_specs.openai import batches_openapi_extra
+from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_BATCHES
 from gpt2giga.protocol.batches import (
     build_openai_batch_object,
     get_batch_target,
@@ -19,7 +20,7 @@ from gpt2giga.protocol.batches import (
 )
 from gpt2giga.routers.openai.helpers import _paginate_items
 
-router = APIRouter(tags=["OpenAI"])
+router = APIRouter(tags=[OPENAPI_TAG_OPENAI_BATCHES])
 
 
 @router.post("/batches", openapi_extra=batches_openapi_extra())

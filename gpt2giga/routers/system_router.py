@@ -2,8 +2,9 @@ from fastapi import APIRouter
 from starlette.responses import Response
 
 from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.openapi_tags import OPENAPI_TAG_SYSTEM_HEALTH
 
-system_router = APIRouter(tags=["System"])
+system_router = APIRouter(tags=[OPENAPI_TAG_SYSTEM_HEALTH])
 
 
 @system_router.get("/health", response_class=Response)

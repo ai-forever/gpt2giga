@@ -12,6 +12,7 @@ from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.openapi_specs.openai import embeddings_openapi_extra
+from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_EMBEDDINGS
 from gpt2giga.protocol.embeddings import (
     apply_embedding_encoding_format,
     normalize_embedding_response,
@@ -21,7 +22,7 @@ from gpt2giga.sinks.observability.embeddings import (
     emit_openai_embeddings_observability,
 )
 
-router = APIRouter(tags=["OpenAI"])
+router = APIRouter(tags=[OPENAPI_TAG_OPENAI_EMBEDDINGS])
 
 
 @router.post("/embeddings", openapi_extra=embeddings_openapi_extra())
