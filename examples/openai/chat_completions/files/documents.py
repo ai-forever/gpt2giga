@@ -9,7 +9,7 @@ def encode_file(file_path: Path) -> str:
 
 
 client = OpenAI(base_url="http://localhost:8090", api_key="0")
-file_path = Path(__file__).resolve().parents[3] / "Day_2_v6.pdf"
+file_path = Path("sample.pdf")
 
 # Getting the base64 string
 base64_pdf = encode_file(file_path)
@@ -21,12 +21,12 @@ completion = client.chat.completions.create(
             "content": [
                 {
                     "type": "text",
-                    "text": "Create a comprehensive summary of this pdf, Tools and tool calling",
+                    "text": "Create a comprehensive summary of this pdf.",
                 },
                 {
                     "type": "file",
                     "file": {
-                        "filename": "Day_2_v6.pdf",
+                        "filename": "sample.pdf",
                         "file_data": f"data:application/pdf;base64,{base64_pdf}",
                     },
                 },

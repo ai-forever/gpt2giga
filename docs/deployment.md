@@ -11,6 +11,7 @@ Docker Compose manifests лежат в [deploy/](../deploy/). Они испол�
 | [deploy/nginx.yaml](../deploy/nginx.yaml) | Минимальный nginx reverse-proxy compose stack. |
 | [deploy/observability.yaml](../deploy/observability.yaml) | gpt2giga с mitmproxy для отладки traffic. |
 | [deploy/observe-multiple.yaml](../deploy/observe-multiple.yaml) | Несколько gpt2giga instances за mitmproxy. |
+| [deploy/mitmproxy.yaml](../deploy/mitmproxy.yaml) | Optional mitmproxy overlay для `base.yaml`, Phoenix и других compose overlays. |
 | [deploy/postgres.yaml](../deploy/postgres.yaml) | Optional Postgres durable traffic-log backend. |
 | [deploy/opensearch.yaml](../deploy/opensearch.yaml) | Optional OpenSearch traffic-log mirror. |
 | [deploy/phoenix.yaml](../deploy/phoenix.yaml) | Optional Phoenix/OpenTelemetry observability stack. |
@@ -115,6 +116,24 @@ docker compose --env-file .env \
 Phoenix UI доступен на `http://localhost:${PHOENIX_PORT:-6006}`. OTLP gRPC collector доступен на `127.0.0.1:${PHOENIX_GRPC_PORT:-4317}`.
 
 Payload capture остаётся выключенным, пока вы явно не включите соответствующие observability capture flags.
+
+## Phoenix + mitmproxy
+
+Для одновременного Phoenix tracing и перехвата исходящего GigaChat traffic:
+
+```sh
+docker compose --env-file .env \
+  -f deploy/base.yaml -f deploy/phoenix.yaml -f deploy/mitmproxy.yaml \
+  --profile DEV --profile phoenix --profile mitmproxy up -d --build
+```
+
+То же через Makefile:
+
+```sh
+make phoenix-mitm-dev-d
+```
+
+mitmproxy UI доступен на `http://localhost:${MITMPROXY_WEB_PORT:-8081}`. Proxy port по умолчанию привязан к `127.0.0.1:${MITMPROXY_PORT:-8080}`.
 
 ## Checklist для production hardening
 
