@@ -10,11 +10,15 @@ from gpt2giga.common.gigachat_options import (
 )
 from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.request_json import read_request_json
+from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.openapi_specs.openai import embeddings_openapi_extra
 from gpt2giga.protocol.embeddings import (
     apply_embedding_encoding_format,
     normalize_embedding_response,
     transform_embedding_body,
+)
+from gpt2giga.sinks.observability.embeddings import (
+    emit_openai_embeddings_observability,
 )
 
 router = APIRouter(tags=["OpenAI"])
@@ -35,6 +39,7 @@ async def embeddings(request: Request):
         pass_model=proxy_settings.pass_model,
     )
     effective_model = transformed["model"]
+    update_request_context(model_effective=effective_model)
     log_debug_payload(
         getattr(request.app.state, "logger", None),
         request.app.state.config,
@@ -52,6 +57,13 @@ async def embeddings(request: Request):
             )
     normalized = normalize_embedding_response(response, model=effective_model)
     result = apply_embedding_encoding_format(normalized, data.get("encoding_format"))
+    await emit_openai_embeddings_observability(
+        request.app.state,
+        data,
+        transformed,
+        result,
+        context=get_request_context(),
+    )
     log_debug_payload(
         getattr(request.app.state, "logger", None),
         request.app.state.config,

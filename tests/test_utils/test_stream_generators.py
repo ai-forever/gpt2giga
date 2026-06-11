@@ -8,10 +8,10 @@ import pytest
 from gigachat.models.chat_completions import ChatCompletionChunk
 
 from gpt2giga.common.streaming import (
+    stream_chat_generator,
     stream_chat_completion_generator,
-    stream_chat_completion_v2_generator,
     stream_responses_generator,
-    stream_responses_v2_generator,
+    stream_responses_chat_completion_generator,
 )
 from gpt2giga.protocol import ResponseProcessor
 
@@ -186,11 +186,11 @@ class FakeRequest:
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_generator_exception_path():
+async def test_stream_chat_generator_exception_path():
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
+    async for line in stream_chat_generator(req, "1", chat, response_id="1"):
         lines.append(line)
     assert len(lines) == 2
     assert "Stream interrupted" in lines[0]
@@ -214,13 +214,13 @@ async def test_stream_responses_generator_exception_path():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_generator_gigachat_exception():
+async def test_stream_chat_generator_gigachat_exception():
     """Тест обработки GigaChatException с правильным типом ошибки"""
     logger = MagicMock()
     req = FakeRequest(FakeClientGigaChatError(), logger=logger)
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
+    async for line in stream_chat_generator(req, "1", chat, response_id="1"):
         lines.append(line)
     assert len(lines) == 2
     # Проверяем, что ошибка содержит тип и код
@@ -230,13 +230,13 @@ async def test_stream_chat_completion_generator_gigachat_exception():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_generator_preserves_input_called_tools():
+async def test_stream_chat_generator_preserves_input_called_tools():
     req = FakeRequest(FakeClientV1TerminalChunk())
     req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
     chat = SimpleNamespace(model="giga")
     lines = []
 
-    async for line in stream_chat_completion_generator(
+    async for line in stream_chat_generator(
         req,
         "gpt-x",
         chat,
@@ -288,7 +288,7 @@ async def test_stream_chat_completion_generator_preserves_input_called_tools():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_v2_generator_text_chunks():
+async def test_stream_chat_completion_generator_text_chunks():
     chunks = [
         ChatCompletionChunk.model_validate(
             {"messages": [{"role": "assistant", "content": [{"text": "A"}]}]}
@@ -300,7 +300,7 @@ async def test_stream_chat_completion_v2_generator_text_chunks():
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
-    async for line in stream_chat_completion_v2_generator(
+    async for line in stream_chat_completion_generator(
         req, "gpt-x", {"contract": "v2"}, response_id="v2"
     ):
         lines.append(line)
@@ -312,7 +312,7 @@ async def test_stream_chat_completion_v2_generator_text_chunks():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_v2_generator_reasoning_chunks():
+async def test_stream_chat_completion_generator_reasoning_chunks():
     chunks = [
         ChatCompletionChunk.model_validate(
             {"messages": [{"role": "reasoning", "content": [{"text": "Plan"}]}]}
@@ -324,7 +324,7 @@ async def test_stream_chat_completion_v2_generator_reasoning_chunks():
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
-    async for line in stream_chat_completion_v2_generator(
+    async for line in stream_chat_completion_generator(
         req, "gpt-x", {"contract": "v2"}, response_id="v2"
     ):
         lines.append(line)
@@ -337,7 +337,7 @@ async def test_stream_chat_completion_v2_generator_reasoning_chunks():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_v2_generator_usage_only_chunk():
+async def test_stream_chat_completion_generator_usage_only_chunk():
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -352,7 +352,7 @@ async def test_stream_chat_completion_v2_generator_usage_only_chunk():
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
-    async for line in stream_chat_completion_v2_generator(
+    async for line in stream_chat_completion_generator(
         req, "gpt-x", {"contract": "v2"}, response_id="v2"
     ):
         lines.append(line)
@@ -363,7 +363,7 @@ async def test_stream_chat_completion_v2_generator_usage_only_chunk():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_v2_generator_preserves_input_called_tools():
+async def test_stream_chat_completion_generator_preserves_input_called_tools():
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -386,7 +386,7 @@ async def test_stream_chat_completion_v2_generator_preserves_input_called_tools(
     req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
     lines = []
 
-    async for line in stream_chat_completion_v2_generator(
+    async for line in stream_chat_completion_generator(
         req,
         "gpt-x",
         {"contract": "v2"},
@@ -440,7 +440,7 @@ async def test_stream_chat_completion_v2_generator_preserves_input_called_tools(
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_v2_generator_gigachat_exception():
+async def test_stream_chat_completion_generator_gigachat_exception():
     logger = MagicMock()
     req = FakeRequest(
         FakeClientV2Stream(
@@ -450,7 +450,7 @@ async def test_stream_chat_completion_v2_generator_gigachat_exception():
     )
     lines = []
 
-    async for line in stream_chat_completion_v2_generator(
+    async for line in stream_chat_completion_generator(
         req, "gpt-x", {"contract": "v2"}, response_id="v2"
     ):
         lines.append(line)
@@ -462,10 +462,10 @@ async def test_stream_chat_completion_v2_generator_gigachat_exception():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_generator_propagates_cancellation():
+async def test_stream_chat_generator_propagates_cancellation():
     req = FakeRequest(FakeClientCancelled())
     chat = SimpleNamespace(model="giga")
-    gen = stream_chat_completion_generator(req, "1", chat, response_id="1")
+    gen = stream_chat_generator(req, "1", chat, response_id="1")
 
     with pytest.raises(asyncio.CancelledError):
         await anext(gen)
@@ -491,7 +491,7 @@ async def test_stream_responses_generator_gigachat_exception():
 
 
 @pytest.mark.asyncio
-async def test_stream_responses_v2_generator_text_and_usage():
+async def test_stream_responses_chat_completion_generator_text_and_usage():
     chunks = [
         ChatCompletionChunk.model_validate(
             {"messages": [{"role": "assistant", "content": [{"text": "Hi"}]}]}
@@ -509,7 +509,7 @@ async def test_stream_responses_v2_generator_text_and_usage():
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
-    async for line in stream_responses_v2_generator(
+    async for line in stream_responses_chat_completion_generator(
         req,
         {"contract": "v2"},
         response_id="resp-v2",
@@ -526,7 +526,7 @@ async def test_stream_responses_v2_generator_text_and_usage():
 
 
 @pytest.mark.asyncio
-async def test_stream_responses_v2_generator_builtin_tool_outputs():
+async def test_stream_responses_chat_completion_generator_builtin_tool_outputs():
     import json
 
     chunks = [
@@ -590,7 +590,7 @@ async def test_stream_responses_v2_generator_builtin_tool_outputs():
     )
     lines = []
 
-    async for line in stream_responses_v2_generator(
+    async for line in stream_responses_chat_completion_generator(
         req,
         {"contract": "v2"},
         response_id="resp-v2",
@@ -625,7 +625,7 @@ async def test_stream_responses_v2_generator_builtin_tool_outputs():
 
 
 @pytest.mark.asyncio
-async def test_stream_responses_v2_generator_emits_source_annotation_event():
+async def test_stream_responses_chat_completion_generator_emits_source_annotation_event():
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -672,7 +672,7 @@ async def test_stream_responses_v2_generator_emits_source_annotation_event():
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
-    async for line in stream_responses_v2_generator(
+    async for line in stream_responses_chat_completion_generator(
         req,
         {"contract": "v2"},
         response_id="resp-v2",
@@ -716,7 +716,7 @@ async def test_stream_responses_v2_generator_emits_source_annotation_event():
 
 
 @pytest.mark.asyncio
-async def test_stream_responses_v2_generator_emits_builtin_tool_progress_events():
+async def test_stream_responses_chat_completion_generator_emits_builtin_tool_progress_events():
     import json
 
     chunks = [
@@ -834,7 +834,7 @@ async def test_stream_responses_v2_generator_emits_builtin_tool_progress_events(
     )
     lines = []
 
-    async for line in stream_responses_v2_generator(
+    async for line in stream_responses_chat_completion_generator(
         req,
         {"contract": "v2"},
         response_id="resp-v2",
@@ -899,7 +899,7 @@ async def test_stream_responses_v2_generator_emits_builtin_tool_progress_events(
 
 
 @pytest.mark.asyncio
-async def test_stream_responses_v2_generator_maps_reasoning_role_to_output_item():
+async def test_stream_responses_chat_completion_generator_maps_reasoning_role_to_output_item():
     import json
 
     chunks = [
@@ -920,7 +920,7 @@ async def test_stream_responses_v2_generator_maps_reasoning_role_to_output_item(
     req = FakeRequest(FakeClientV2Stream(chunks=chunks))
     lines = []
 
-    async for line in stream_responses_v2_generator(
+    async for line in stream_responses_chat_completion_generator(
         req,
         {"contract": "v2"},
         response_id="resp-v2",
@@ -952,7 +952,7 @@ async def test_stream_responses_v2_generator_maps_reasoning_role_to_output_item(
 
 
 @pytest.mark.asyncio
-async def test_stream_responses_v2_generator_gigachat_exception():
+async def test_stream_responses_chat_completion_generator_gigachat_exception():
     logger = MagicMock()
     req = FakeRequest(
         FakeClientV2Stream(
@@ -962,7 +962,7 @@ async def test_stream_responses_v2_generator_gigachat_exception():
     )
     lines = []
 
-    async for line in stream_responses_v2_generator(
+    async for line in stream_responses_chat_completion_generator(
         req,
         {"contract": "v2"},
         response_id="resp-v2",
@@ -993,7 +993,7 @@ async def test_stream_responses_generator_propagates_cancellation():
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_completion_generator_success_with_disconnect():
+async def test_stream_chat_generator_success_with_disconnect():
     """Тест корректного завершения при отключении клиента"""
 
     class FakeClientWithChunks:
@@ -1029,7 +1029,7 @@ async def test_stream_chat_completion_generator_success_with_disconnect():
     req = DisconnectAfterFirstRequest(FakeClientWithChunks())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
+    async for line in stream_chat_generator(req, "1", chat, response_id="1"):
         lines.append(line)
     # Должен быть только 1 чанк данных + DONE
     assert len(lines) == 2
@@ -1044,7 +1044,7 @@ async def test_stream_chat_completion_error_response_format():
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
     lines = []
-    async for line in stream_chat_completion_generator(req, "1", chat, response_id="1"):
+    async for line in stream_chat_generator(req, "1", chat, response_id="1"):
         lines.append(line)
 
     # Парсим ошибку

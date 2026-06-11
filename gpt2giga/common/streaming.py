@@ -1,7 +1,6 @@
 import asyncio
 import json
 import time
-import traceback
 from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Optional
 
@@ -30,13 +29,13 @@ from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import (
     GIGACHAT_PROVIDER_METADATA_KEY,
-    adapt_v2_chunk_to_v1_shape,
-    hydrate_v2_image_files,
+    adapt_chat_completion_chunk_to_chat_chunk_shape,
+    hydrate_chat_completion_image_files,
 )
 from gpt2giga.protocol.response.processor import ResponseProcessor
 
 
-async def stream_chat_completion_generator(
+async def stream_chat_generator(
     request: Request,
     model: str,
     chat_messages: Chat,
@@ -158,11 +157,8 @@ async def stream_chat_completion_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        tb = traceback.format_exc()
         if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
-            )
+            logger.error(f"[{rquid}] Unexpected streaming error: {error_type}: {e}")
         error_response = {
             "error": {
                 "message": "Stream interrupted",
@@ -174,7 +170,7 @@ async def stream_chat_completion_generator(
         yield "data: [DONE]\n\n"
 
 
-async def stream_chat_completion_v2_generator(
+async def stream_chat_completion_generator(
     request: Request,
     model: str,
     chat_request: Any,
@@ -210,7 +206,10 @@ async def stream_chat_completion_v2_generator(
                                 f"[{rquid}] Client disconnected during streaming"
                             )
                         break
-                    adapted = adapt_v2_chunk_to_v1_shape(chunk, default_model=model)
+                    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+                        chunk,
+                        default_model=model,
+                    )
                     processed = (
                         request.app.state.response_processor.process_stream_chunk(
                             SimpleNamespace(model_dump=lambda: adapted),
@@ -296,11 +295,8 @@ async def stream_chat_completion_v2_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        tb = traceback.format_exc()
         if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
-            )
+            logger.error(f"[{rquid}] Unexpected streaming error: {error_type}: {e}")
         error_response = {
             "error": {
                 "message": "Stream interrupted",
@@ -312,7 +308,7 @@ async def stream_chat_completion_v2_generator(
         yield "data: [DONE]\n\n"
 
 
-class _V2ResponsesStreamClient:
+class _ChatCompletionResponsesStreamClient:
     def __init__(
         self,
         giga_client: GigaChat,
@@ -329,11 +325,14 @@ class _V2ResponsesStreamClient:
                 self._giga_client, self._request_options
             ):
                 async for chunk in self._giga_client.achat.stream(chat_request):
-                    adapted = adapt_v2_chunk_to_v1_shape(
+                    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
                         chunk,
                         default_model=self._model,
                     )
-                    await hydrate_v2_image_files(adapted, self._giga_client)
+                    await hydrate_chat_completion_image_files(
+                        adapted,
+                        self._giga_client,
+                    )
                     yield SimpleNamespace(model_dump=lambda adapted=adapted: adapted)
 
         return gen()
@@ -343,7 +342,7 @@ class _V2ResponsesStreamClient:
             return await self._giga_client.aget_image(file_id)
 
 
-async def stream_responses_v2_generator(
+async def stream_responses_chat_completion_generator(
     request: Request,
     chat_request: Any,
     response_id: str,
@@ -358,7 +357,11 @@ async def stream_responses_v2_generator(
     if giga_client is None:
         giga_client = get_gigachat_client(request)
     model = request_data.get("model", "unknown") if request_data else "unknown"
-    adapter_client = _V2ResponsesStreamClient(giga_client, model, request_options)
+    adapter_client = _ChatCompletionResponsesStreamClient(
+        giga_client,
+        model,
+        request_options,
+    )
 
     async for event in stream_responses_generator(
         request,
@@ -1365,11 +1368,8 @@ async def stream_responses_generator(
 
     except Exception as e:
         error_type = type(e).__name__
-        tb = traceback.format_exc()
         if logger:
-            logger.error(
-                f"[{rquid}] Unexpected streaming error: {error_type}: {e}\n{tb}"
-            )
+            logger.error(f"[{rquid}] Unexpected streaming error: {error_type}: {e}")
         error_response = {
             "type": "error",
             "code": "internal_error",

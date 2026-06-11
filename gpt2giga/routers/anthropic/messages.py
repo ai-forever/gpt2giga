@@ -6,6 +6,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.conversation import (
+    commit_anthropic_response,
+    stitch_anthropic_stream,
+    stitch_chat_payload,
+)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
@@ -13,6 +19,7 @@ from gpt2giga.common.gigachat_options import (
 )
 from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
+from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.anthropic import (
     anthropic_count_tokens_openapi_extra,
@@ -30,9 +37,13 @@ from gpt2giga.protocol.anthropic.request import (
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
 from gpt2giga.protocol.anthropic.streaming import (
     _stream_anthropic_generator,
-    _stream_anthropic_v2_generator,
+    _stream_anthropic_chat_completion_generator,
 )
-from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
+from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
+from gpt2giga.sinks.observability.anthropic import (
+    emit_anthropic_message_observability,
+    observe_anthropic_message_stream,
+)
 
 router = APIRouter(tags=["Anthropic"])
 
@@ -82,27 +93,37 @@ async def messages(request: Request):
 
     model = data.get("model", "unknown")
     openai_data: Dict = _build_openai_data_from_anthropic_request(data, state.logger)
+    if "conversation" in data:
+        openai_data["conversation"] = data["conversation"]
+    if "metadata" in data:
+        openai_data["metadata"] = data["metadata"]
+    conversation_turn = await stitch_chat_payload(
+        request,
+        openai_data,
+        protocol="anthropic",
+    )
     structured_output_fallback = (
         _is_anthropic_structured_output_request(data)
         and state.config.proxy_settings.structured_output_mode == "function_call"
     )
-    mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
+    mode = resolve_gigachat_api_mode(request)
 
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
-            chat_request = await state.request_transformer.prepare_chat_completion_v2(
+            chat_request = await state.request_transformer.prepare_chat_completion(
                 openai_data, giga_client
             )
         effective_model = resolve_gigachat_model(chat_request, state.config)
+        update_request_context(model_effective=effective_model)
         if not stream:
             async with model_limiter.limit(effective_model, provider="anthropic"):
                 async with gigachat_request_options(giga_client, request_options):
                     response = await giga_client.achat.create(chat_request)
-            giga_dict = adapt_v2_completion_to_v1_shape(
+            giga_dict = adapt_chat_completion_to_chat_shape(
                 response,
                 default_model=model,
             )
-            return _build_anthropic_response(
+            result = _build_anthropic_response(
                 giga_dict,
                 model,
                 current_rquid,
@@ -110,34 +131,52 @@ async def messages(request: Request):
                 logger=state.logger,
                 mode=state.config.proxy_settings.mode,
             )
+            await commit_anthropic_response(request, conversation_turn, result)
+            await emit_anthropic_message_observability(
+                state,
+                openai_data,
+                result,
+                context=get_request_context(),
+            )
+            return result
 
         return StreamingResponse(
-            _stream_anthropic_v2_generator(
-                request,
-                model,
-                chat_request,
-                current_rquid,
-                giga_client,
-                is_structured_output=structured_output_fallback,
-                request_options=request_options,
-                model_limiter=model_limiter,
-                effective_model=effective_model,
+            observe_anthropic_message_stream(
+                state,
+                stitch_anthropic_stream(
+                    request,
+                    conversation_turn,
+                    _stream_anthropic_chat_completion_generator(
+                        request,
+                        model,
+                        chat_request,
+                        current_rquid,
+                        giga_client,
+                        is_structured_output=structured_output_fallback,
+                        request_options=request_options,
+                        model_limiter=model_limiter,
+                        effective_model=effective_model,
+                    ),
+                ),
+                request_payload=openai_data,
+                context=get_request_context(),
             ),
             media_type="text/event-stream",
         )
 
     async with gigachat_request_options(giga_client, request_options):
-        chat_messages = await state.request_transformer.prepare_chat_completion(
+        chat_messages = await state.request_transformer.prepare_chat(
             openai_data, giga_client
         )
     effective_model = resolve_gigachat_model(chat_messages, state.config)
+    update_request_context(model_effective=effective_model)
 
     if not stream:
         async with model_limiter.limit(effective_model, provider="anthropic"):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat(chat_messages)
         giga_dict = response.model_dump()
-        return _build_anthropic_response(
+        result = _build_anthropic_response(
             giga_dict,
             model,
             current_rquid,
@@ -145,18 +184,35 @@ async def messages(request: Request):
             logger=state.logger,
             mode=state.config.proxy_settings.mode,
         )
+        await commit_anthropic_response(request, conversation_turn, result)
+        await emit_anthropic_message_observability(
+            state,
+            openai_data,
+            result,
+            context=get_request_context(),
+        )
+        return result
 
     return StreamingResponse(
-        _stream_anthropic_generator(
-            request,
-            model,
-            chat_messages,
-            current_rquid,
-            giga_client,
-            is_structured_output=structured_output_fallback,
-            request_options=request_options,
-            model_limiter=model_limiter,
-            effective_model=effective_model,
+        observe_anthropic_message_stream(
+            state,
+            stitch_anthropic_stream(
+                request,
+                conversation_turn,
+                _stream_anthropic_generator(
+                    request,
+                    model,
+                    chat_messages,
+                    current_rquid,
+                    giga_client,
+                    is_structured_output=structured_output_fallback,
+                    request_options=request_options,
+                    model_limiter=model_limiter,
+                    effective_model=effective_model,
+                ),
+            ),
+            request_payload=openai_data,
+            context=get_request_context(),
         ),
         media_type="text/event-stream",
     )

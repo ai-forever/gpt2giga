@@ -5,6 +5,66 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
+Планируется к выпуску как `0.2.0`.
+
+### Breaking changes
+- **Внутренний GigaChat transformer API**: старые compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2` и модуль `gigachat_v2_adapter` заменены на явные `chat` / `chat_completion` имена; внешние OpenAI/Anthropic-compatible endpoints не меняются.
+
+### Добавлено
+- **Явные GigaChat API mode routes**: публичные OpenAI/Anthropic/LiteLLM-compatible routes теперь доступны в корне, под `/v1` и под `/v2`; root routes следуют `GPT2GIGA_GIGACHAT_API_MODE` / `GPT2GIGA_RESPONSES_API_MODE`, `/v1` принудительно выбирает legacy chat contract, `/v2` - GigaChat chat-completion contract.
+- **Configuration reference**: расширен `docs/configuration.md` с quick profiles, форматами env values, security/auth notes, backend API modes, observability, metrics, traffic-log и storage настройками.
+- **Modular roadmap safety baseline**: начата подготовка release-дисциплины для `v0.2.0` с правилами semantic versioning и release checklist.
+- **Modular feature flags**: добавлены выключенные по умолчанию `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED` и `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
+- **RequestContext**: добавлен внутренний request-scoped context с `request_id`, `trace_id`, protocol/route metadata и безопасными hash-полями для будущих traffic logs/observability без изменения публичного API.
+- **Golden compatibility fixtures**: добавлены fixtures и тесты для OpenAI chat/tool/structured/streaming/embeddings и Anthropic messages/streaming shapes на mocked upstream.
+- **Logging terminology**: добавлен architecture doc, разделяющий runtime logs, future traffic logs, observability traces и metrics.
+- **Modular package skeleton**: добавлены пустые namespace-пакеты `gpt2giga.api`, `gpt2giga.app`, `gpt2giga.protocols`, `gpt2giga.providers` и `gpt2giga.sinks` для поэтапной миграции без изменения текущего runtime wiring.
+- **Extension interfaces**: добавлены внутренние `ProtocolAdapter`, `ProviderAdapter`, `TrafficLogSink`, `TrafficLogQueryStore`, `ObservabilitySink` и `MetricsSink` для будущих backend/provider/storage расширений без тяжелых зависимостей.
+- **Traffic log event and sinks**: добавлена storage-independent модель `TrafficLogEvent`, noop traffic sink по умолчанию и opt-in JSONL sink для локальной проверки через `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` и `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
+- **Observability noop sink**: добавлен noop observability sink и безопасные helper-функции для будущих trace events.
+- **Normalized schemas**: добавлены внутренние JSON-сериализуемые модели normalized layer для chat, embeddings, response, usage, error и stream events с `raw_extensions` и provider metadata.
+- **OpenAI normalized adapter**: добавлен внутренний OpenAI Chat Completions -> `NormalizedChatRequest` adapter для shadow mode с покрытием messages, model, generation params, tools, tool_choice, response_format и metadata.
+- **Normalized shadow mode**: OpenAI Chat route теперь может запускать normalized adapter в best-effort shadow mode при `GPT2GIGA_NORMALIZATION_MODE=shadow`; ошибки shadow translation не ломают legacy request path.
+- **Shadow diagnostics**: добавлены safe diagnostic events для normalized shadow mode с `normalization_status`, `route`, `request_id`, shape hash, warnings и errors без записи raw prompt/response content.
+- **Normalized OpenAI Chat path**: при `GPT2GIGA_NORMALIZATION_MODE=on` OpenAI Chat Completions non-stream проходит через `NormalizedChatRequest`, GigaChat provider adapter и normalized-to-OpenAI response adapter; `GPT2GIGA_LEGACY_CHAT_FALLBACK=True` сохраняет fallback на legacy path без записи raw prompt/response content.
+- **Normalized streaming**: при `GPT2GIGA_NORMALIZATION_MODE=on` OpenAI Chat Completions `stream=true` проходит через canonical normalized stream events, GigaChat stream adapter и OpenAI-compatible SSE mapper; legacy stream path остается default при `off`/`shadow`.
+- **Debug translate API**: добавлены protected endpoints `/_debug/translate/*` для просмотра OpenAI/Anthropic/normalized/GigaChat преобразований; routes выключены по умолчанию и требуют `GPT2GIGA_ADMIN_API_KEY` при включении.
+- **Postgres traffic log extra**: добавлен optional extra `postgres` с `asyncpg`, `sqlalchemy[asyncio]` и `alembic` для будущего opt-in storage backend без изменения базовой установки.
+- **Postgres traffic log schema**: добавлена packaged SQL migration для таблицы `gpt2giga_traffic_logs` с request/trace/model/error/token metadata, redacted payload JSONB columns и индексами для query/admin use cases.
+- **Traffic log redaction**: добавлен `gpt2giga.core.redaction` с default-on redaction для durable traffic logs, включая nested dict/list payloads, cookies, auth/API keys, token-like strings и configurable extra keys.
+- **Postgres traffic log writer**: добавлены opt-in `postgres` traffic sink, lazy asyncpg writer и background queue с batch writes, best-effort flush и default drop-on-backpressure policy, чтобы storage failures не ломали API request path.
+- **Traffic event emission**: `RquidMiddleware` теперь эмитит safe traffic events для completed requests, validation errors, unhandled errors и stream completion/abort через configured sink; default noop path сохраняет публичное API behavior.
+- **Postgres compose profile**: добавлен `compose/postgres.yaml` для локального Postgres traffic log backend и Dockerfile build arg `INSTALL_EXTRAS` для сборки образа с optional extra `[postgres]`.
+- **Admin traffic logs API**: добавлены opt-in protected endpoints `/_admin/logs*` для list/get/request/response/tail/NDJSON export Postgres traffic logs с pagination, filters и admin-key auth; routes выключены по умолчанию.
+- **OpenSearch traffic log extra**: добавлен optional extra `opensearch` с `opensearch-py` для будущего opt-in search mirror backend без изменения базовой установки.
+- **OpenSearch traffic log mirror**: добавлены настройки `GPT2GIGA_TRAFFIC_LOG_SINKS`, `GPT2GIGA_OPENSEARCH_*`, OpenSearch bulk writer с retry/backoff, composite sink для `postgres,opensearch`, index template helper и `compose/opensearch.yaml`.
+- **Traffic log retention**: добавлены настройки `GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS` и `GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS`, best-effort Postgres retention job и protected admin dry-run/execute purge command `POST /_admin/logs/retention/purge`.
+- **Traffic log CSV export**: добавлен `GET /_admin/logs/export.csv` для выгрузки summary-колонок traffic logs без stored request/response body payloads.
+- **Traffic log replay**: добавлен выключенный по умолчанию `GPT2GIGA_REPLAY_ENABLED` и protected endpoint `POST /_admin/logs/{id}/replay`, который повторно редактирует captured body, не переиспользует stored credentials и помечает replay metadata.
+- **Manual traffic log redaction**: добавлен protected endpoint `POST /_admin/logs/{id}/redact` для ручной очистки stored request/response payload columns.
+- **Phoenix observability extra**: добавлен optional extra `phoenix` с Arize Phoenix/OpenTelemetry/OpenInference зависимостями для будущего opt-in observability backend без изменения базовой установки.
+- **Phoenix observability settings**: добавлены настройки Phoenix/OpenTelemetry observability backend, collector endpoint, project name, API key, sample rate, content capture и redaction; observability и content capture выключены по умолчанию.
+- **Phoenix/OpenTelemetry observability sink**: добавлен optional Phoenix OTLP sink с lazy imports, safe fallback на noop без extra `phoenix`, sample-rate control, attribute redaction и content-capture guard.
+- **Trace/log linkage**: traffic log events сохраняют `trace_id`/optional `span_id`, а Phoenix spans получают matching gateway identifiers as attributes; README описывает поиск trace по `trace_id`.
+- **Phoenix compose profile**: добавлен opt-in `compose/phoenix.yaml` для локального Arize Phoenix collector/UI и сборки gpt2giga с optional extra `[phoenix]`.
+- **Request lifecycle observability**: `RquidMiddleware` best-effort эмитит `gpt2giga.request`, `provider.gigachat.request` и streaming `stream.emit` spans через configured observability sink; ошибки sink-а изолированы от API request path.
+- **Rich observability content controls**: добавлены default-off flags `GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES`, `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS`, `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES` и `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH` для safe opt-in LLM span payload attributes.
+- **OpenInference-style LLM spans**: normalized OpenAI Chat path эмитит `protocol.normalize.request` и `protocol.normalize.response` spans с model/provider/usage/finish/tool metadata и opt-in redacted payload attributes.
+- **Streaming observability span events**: normalized streaming path добавляет OTel span events `stream.start`, `stream.first_token`, `stream.tool_call_delta`, `stream.completed` и `stream.error`; generic streaming lifecycle дополнительно отмечает `stream.completed`/`stream.aborted`.
+- **Prometheus metrics baseline**: добавлен выключенный по умолчанию `GPT2GIGA_METRICS_ENABLED`, configurable `GPT2GIGA_METRICS_PATH`, in-process Prometheus-compatible sink и endpoint для aggregate service metrics без prompt/response content, request ids или secrets.
+
+### Изменено
+- **GigaChat backend naming**: внутренний upstream path теперь называется `chat` для legacy GigaChat calls и `chat_completion` для GigaChat `v2/chat/completions`; `_v2`-суффиксы убраны из transformer, response adapter, streaming helpers и tests.
+- **Versioned client docs**: README, integration guides, examples и `.env.example` уточняют выбор `base_url="http://localhost:8090/v1"` или `base_url="http://localhost:8090/v2"` для явного backend contract.
+- **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.
+- **OpenAI API namespace**: OpenAI-compatible router aggregator добавлен в `gpt2giga.api.openai.routes`, а app factory подключает OpenAI routes через новый modular namespace без изменения публичных paths и response shapes.
+- **Anthropic API namespace**: Anthropic-compatible router aggregator добавлен в `gpt2giga.api.anthropic.routes`, а app factory подключает Anthropic routes через новый modular namespace без изменения публичных paths, headers behavior и response shapes.
+- **GigaChat provider namespace**: создание/закрытие GigaChat SDK client и request-scoped token handoff вынесены в `gpt2giga.providers.gigachat`, при этом env/settings parsing и публичное proxy behavior не изменены.
+- **Extension sink lifecycle**: app factory создает traffic/observability sinks в `app.state`, а lifecycle делает best-effort flush на shutdown; ошибки sink-ов изолированы от API request path.
+- **Request context protocol inference**: уточнено определение LiteLLM route до точного `/model/info`, чтобы OpenAI `/models` traffic events не классифицировались как LiteLLM.
+- **Internal docs alignment**: package-level AGENTS notes обновлены под новый app factory/lifecycle/provider layout и сохраненный `gpt2giga.api_server` entrypoint facade.
 ## [0.1.8a2] - 2026-06-09
 
 ### Добавлено
@@ -25,7 +85,7 @@
 ## [0.1.8a1] - 2026-06-06
 
 ### Добавлено
-- **GigaChat v2 backend mode**: добавлены `GPT2GIGA_GIGACHAT_API_MODE` и `GPT2GIGA_RESPONSES_API_MODE` для переключения chat-like upstream-вызовов на primary `v2/chat/completions` surface GigaChat SDK 0.2.2a1; внешний OpenAI/Anthropic-compatible контракт и URL остаются прежними
+- **GigaChat v2 backend mode**: добавлены `GPT2GIGA_GIGACHAT_API_MODE` и `GPT2GIGA_RESPONSES_API_MODE` для переключения chat-like upstream-вызовов на GigaChat chat-completion contract (`v2/chat/completions` в SDK 0.2.2a1); внешний OpenAI/Anthropic-compatible контракт и URL остаются прежними
 - **Responses built-in tools в v2 mode**: добавлена поддержка встроенных GigaChat-инструментов для OpenAI Responses API (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); нормализованные output items, stream progress events, file/inline metadata и гидратация изображений реализованы для `web_search*` и `image_generation` / `image_generate`
 - **Per-model max connections**: добавлены локальные in-process лимиты одновременных upstream model-call по effective GigaChat model через `GPT2GIGA_MODEL_MAX_CONNECTIONS`, `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` и `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT`, а также соответствующие CLI-флаги
 - **Debug payload logs**: добавлены non-PROD DEBUG-логи payload'ов для upstream-запросов и обработанных ответов GigaChat; в PROD payload'ы не пишутся

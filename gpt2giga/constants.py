@@ -71,6 +71,10 @@ SENSITIVE_KEYS = frozenset(
         "api_key",
         "api-key",
         "x-api-key",
+        "admin_api_key",
+        "x-admin-api-key",
+        "opensearch_password",
+        "phoenix_api_key",
         "token",
         "access_token",
         "refresh_token",
@@ -104,6 +108,9 @@ _BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
 _SENSITIVE_CLI_ARGS = frozenset(
     {
         "--proxy.api-key",
+        "--proxy.admin-api-key",
+        "--proxy.opensearch-password",
+        "--proxy.phoenix-api-key",
         "--gigachat.credentials",
         "--gigachat.password",
         "--gigachat.access-token",

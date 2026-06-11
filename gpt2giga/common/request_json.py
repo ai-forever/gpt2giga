@@ -4,6 +4,8 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from gpt2giga.common.debug_logging import log_debug_payload
+from gpt2giga.core.context import update_request_context
+from gpt2giga.sinks.logs.emission import capture_traffic_request_body
 
 
 async def read_request_json(request: Request) -> dict:
@@ -54,6 +56,8 @@ async def read_request_json(request: Request) -> dict:
                 }
             },
         )
+    update_request_context(model_requested=data.get("model"))
+    capture_traffic_request_body(request, data)
     state = request.app.state
     log_debug_payload(
         getattr(state, "logger", None),

@@ -1,0 +1,66 @@
+# Optional OpenSearch traffic-log mirror profile.
+#
+# Usage:
+#   docker compose --env-file .env \
+#     -f deploy/base.yaml -f deploy/postgres.yaml -f deploy/opensearch.yaml \
+#     --profile DEV --profile postgres --profile opensearch up -d --build
+
+x-gpt2giga-opensearch-env: &gpt2giga-opensearch-env
+  GPT2GIGA_TRAFFIC_LOG_ENABLED: "True"
+  GPT2GIGA_TRAFFIC_LOG_SINKS: "postgres,opensearch"
+  GPT2GIGA_OPENSEARCH_URL: "http://opensearch:9200"
+  GPT2GIGA_OPENSEARCH_INDEX: "${GPT2GIGA_OPENSEARCH_INDEX:-gpt2giga-traffic}"
+  GPT2GIGA_OPENSEARCH_DATA_STREAM: "${GPT2GIGA_OPENSEARCH_DATA_STREAM:-True}"
+  GPT2GIGA_OPENSEARCH_BULK_SIZE: "${GPT2GIGA_OPENSEARCH_BULK_SIZE:-500}"
+  GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS: "${GPT2GIGA_OPENSEARCH_FLUSH_INTERVAL_MS:-2000}"
+
+services:
+  gpt2giga-prod:
+    build:
+      args:
+        INSTALL_EXTRAS: "[postgres,opensearch]"
+    environment:
+      <<: *gpt2giga-opensearch-env
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  gpt2giga-dev:
+    build:
+      args:
+        INSTALL_EXTRAS: "[postgres,opensearch]"
+    environment:
+      <<: *gpt2giga-opensearch-env
+    depends_on:
+      opensearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  opensearch:
+    image: opensearchproject/opensearch:2
+    profiles: ["opensearch"]
+    restart: unless-stopped
+    environment:
+      discovery.type: "single-node"
+      plugins.security.disabled: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:${GPT2GIGA_OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - gpt2giga-opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsS http://localhost:9200/_cluster/health >/dev/null || exit 1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  gpt2giga-opensearch-data:

@@ -1,0 +1,56 @@
+# Optional mitmproxy debug overlay.
+#
+# Usage:
+#   docker compose --env-file .env \
+#     -f deploy/base.yaml -f deploy/mitmproxy.yaml \
+#     --profile DEV --profile mitmproxy up -d --build
+#
+# With Phoenix:
+#   docker compose --env-file .env \
+#     -f deploy/base.yaml -f deploy/phoenix.yaml -f deploy/mitmproxy.yaml \
+#     --profile DEV --profile phoenix --profile mitmproxy up -d --build
+
+x-gpt2giga-mitmproxy-env: &gpt2giga-mitmproxy-env
+  HTTP_PROXY: "http://mitmproxy:8080"
+  HTTPS_PROXY: "http://mitmproxy:8080"
+  NO_PROXY: "phoenix,localhost,127.0.0.1"
+  no_proxy: "phoenix,localhost,127.0.0.1"
+
+services:
+  gpt2giga-prod:
+    environment:
+      <<: *gpt2giga-mitmproxy-env
+    depends_on:
+      mitmproxy:
+        condition: service_started
+
+  gpt2giga-dev:
+    environment:
+      <<: *gpt2giga-mitmproxy-env
+    depends_on:
+      mitmproxy:
+        condition: service_started
+
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest
+    profiles: ["mitmproxy"]
+    restart: always
+    container_name: mitmproxy
+    volumes:
+      - ~/.mitmproxy:/home/mitmproxy/.mitmproxy
+      - ../scripts/sse_event.py:/app/sse_event.py:ro
+    command: >
+      mitmweb
+      --web-host 0.0.0.0
+      --web-port 8081
+      --ssl-insecure
+      --set web_password=${MITMPROXY_PASSWORD:-}
+      --set connection_strategy=lazy
+      --set http2=false
+      --set anticomp=true
+      -s /app/sse_event.py
+    ports:
+      - "127.0.0.1:${MITMPROXY_PORT:-8080}:8080"
+      - "127.0.0.1:${MITMPROXY_WEB_PORT:-8081}:8081"
+    stdin_open: true
+    tty: true

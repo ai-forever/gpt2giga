@@ -55,7 +55,7 @@ class FakeGigaChat:
 
 
 class FakeRequestTransformer:
-    async def prepare_chat_completion(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None):
         return {
             "model": data.get("model", "giga"),
             "messages": data.get("messages", []),
@@ -74,7 +74,10 @@ def make_app(monkeypatch):
             gigachat_api_mode="v1",
         )
     )
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: FakeGigaChat())
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
     return create_app(config=config)
 
 

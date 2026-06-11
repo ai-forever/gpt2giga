@@ -7,6 +7,7 @@ import pytest
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.routers.openai import router
 
 
@@ -58,11 +59,28 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
-    async def prepare_chat_completion(self, data, giga_client=None):
+    def __init__(self):
+        self.chat_calls = []
+        self.response_calls = []
+
+    async def prepare_chat(self, data, giga_client=None):
+        self.chat_calls.append((data, giga_client))
         return {"model": data.get("model", "giga")}
 
-    async def prepare_response(self, data, giga_client=None):
+    async def prepare_response_chat(self, data, giga_client=None):
+        self.response_calls.append((data, giga_client))
         return {"model": data.get("model", "giga")}
+
+
+class RecordingObservabilitySink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, name, attributes=None, *, context=None, events=None):
+        self.events.append((name, attributes or {}, context, list(events or [])))
+
+    async def flush(self):
+        return None
 
 
 def make_app():
@@ -71,6 +89,7 @@ def make_app():
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
+    app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     return app
 
@@ -96,6 +115,429 @@ def test_chat_completions_non_stream_basic():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
+
+
+def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
+    class FakeGigachatWithHeaders(FakeGigachat):
+        async def achat(self, chat):
+            response = await super().achat(chat)
+            response.data["choices"][0]["message"]["reasoning_content"] = (
+                "hidden reasoning"
+            )
+            response.data["x_headers"] = {
+                "x-request-id": "rq-1",
+                "x-session-id": "session-1",
+            }
+            return response
+
+    app = make_app()
+    app.state.gigachat_client = FakeGigachatWithHeaders()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            gigachat_api_mode="v1",
+            observability_capture_content=True,
+            observability_capture_messages=True,
+            observability_capture_responses=True,
+        )
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "secret prompt"}],
+        },
+    )
+
+    assert response.status_code == 200
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+    attributes = emitted["ChatCompletion"]
+    assert attributes["gpt2giga.api_format"] == "chat_completions"
+    assert "secret prompt" in attributes["input.value"]
+    assert "ok" in attributes["output.value"]
+    assert "hidden reasoning" in attributes["output.value"]
+    assert "reasoning_content" in attributes["output.value"]
+    assert attributes["llm.response.metadata"] == (
+        '{"gigachat_x_request_id": "rq-1", "gigachat_x_session_id": "session-1"}'
+    )
+
+
+def test_chat_completions_legacy_stream_emits_phoenix_input_output_span():
+    class FakeGigachatStreamingWithHeaders(FakeGigachat):
+        def astream(self, chat):
+            async def gen():
+                yield MockResponse(
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "role": "assistant",
+                                    "content": "Hel",
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                        "usage": None,
+                        "x_headers": {"x-request-id": "rq-stream"},
+                    }
+                )
+                yield MockResponse(
+                    {
+                        "choices": [
+                            {
+                                "delta": {"content": "lo"},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": 2,
+                            "completion_tokens": 3,
+                            "total_tokens": 5,
+                        },
+                        "x_headers": {"x-session-id": "session-stream"},
+                    }
+                )
+
+            return gen()
+
+    app = make_app()
+    app.state.gigachat_client = FakeGigachatStreamingWithHeaders()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            gigachat_api_mode="v1",
+            observability_capture_content=True,
+            observability_capture_messages=True,
+            observability_capture_responses=True,
+        )
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "secret prompt"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+    attributes = emitted["ChatCompletion"]
+
+    assert response.status_code == 200
+    assert attributes["gpt2giga.api_format"] == "chat_completions"
+    assert "data: [DONE]" in body
+    assert "secret prompt" in attributes["input.value"]
+    assert "Hello" in attributes["output.value"]
+    assert attributes["llm.finish_reason"] == "stop"
+    assert attributes["llm.token_count.total"] == 5
+    assert attributes["llm.response.metadata"] == (
+        '{"gigachat_x_request_id": "rq-stream", '
+        '"gigachat_x_session_id": "session-stream"}'
+    )
+
+
+def test_chat_completions_normalization_on_uses_non_stream_normalized_path():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            gigachat_api_mode="v1",
+            observability_capture_content=False,
+            observability_capture_messages=False,
+            observability_capture_tool_args=False,
+            observability_capture_responses=False,
+        )
+    )
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    body = resp.json()
+    assert resp.status_code == 200
+    assert body["object"] == "chat.completion"
+    assert body["model"] == "gpt-x"
+    assert body["choices"][0]["message"]["content"] == "ok"
+    assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_emits_safe_llm_observability_spans():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            gigachat_api_mode="v1",
+            observability_capture_content=False,
+            observability_capture_messages=False,
+            observability_capture_tool_args=False,
+            observability_capture_responses=False,
+        )
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "secret prompt"}],
+        },
+    )
+
+    assert response.status_code == 200
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+    assert list(emitted) == ["ChatCompletion"]
+    assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
+    assert emitted["ChatCompletion"]["llm.input_messages.count"] == 1
+    assert emitted["ChatCompletion"]["llm.finish_reason"] == "tool_calls"
+    assert "secret prompt" not in json.dumps(emitted)
+
+
+def test_chat_completions_normalization_on_uses_streaming_normalized_path():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="on", gigachat_api_mode="v1")
+    )
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "chat.completion.chunk" in body
+    assert "data: [DONE]" in body
+    assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_emits_stream_span_events():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            gigachat_api_mode="v1",
+            observability_capture_content=True,
+            observability_capture_messages=True,
+            observability_capture_responses=True,
+        )
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    event_names = [
+        event["name"]
+        for name, _attributes, _context, events in app.state.observability_sink.events
+        if name == "ChatCompletion"
+        for event in events
+    ]
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in body
+    assert "stream.start" in event_names
+    assert "stream.completed" in event_names
+    assert "stream.emit" not in emitted
+    assert "ChatCompletion" in emitted
+    assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
+    assert "hi" in emitted["ChatCompletion"]["input.value"]
+
+
+def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            legacy_chat_fallback=True,
+            gigachat_api_mode="v1",
+        )
+    )
+
+    class BrokenAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            raise RuntimeError("normalized failed")
+
+    app.state.openai_protocol_adapter = BrokenAdapter()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in body
+    assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_falls_back_to_legacy_when_enabled():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            legacy_chat_fallback=True,
+            gigachat_api_mode="v1",
+        )
+    )
+
+    class BrokenAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            raise RuntimeError("normalized failed")
+
+    app.state.openai_protocol_adapter = BrokenAdapter()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["object"] == "chat.completion"
+    assert app.state.request_transformer.chat_calls
+
+
+def test_chat_completions_normalization_on_without_fallback_returns_error():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            legacy_chat_fallback=False,
+            gigachat_api_mode="v1",
+        )
+    )
+
+    class BrokenAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            raise RuntimeError("normalized failed")
+
+    app.state.openai_protocol_adapter = BrokenAdapter()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 500
+    assert resp.json()["error"]["type"] == "server_error"
+
+
+def test_chat_completions_shadow_mode_adapter_error_does_not_break_legacy_response():
+    calls = []
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="shadow", gigachat_api_mode="v1")
+    )
+
+    class BrokenShadowAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            calls.append((payload, context))
+            raise RuntimeError("shadow failed")
+
+    app.state.openai_protocol_adapter = BrokenShadowAdapter()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["object"] == "chat.completion"
+    assert len(calls) == 1
+    event = app.state.normalization_shadow_events[-1]
+    assert event.normalization_status == "error"
+    assert event.errors == ["RuntimeError"]
+
+
+def test_chat_completions_normalization_off_does_not_call_shadow_adapter():
+    calls = []
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="off", gigachat_api_mode="v1")
+    )
+
+    class RecordingShadowAdapter:
+        async def to_normalized(self, payload, *, context=None):
+            calls.append(payload)
+
+    app.state.openai_protocol_adapter = RecordingShadowAdapter()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={"model": "gpt-x", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert resp.status_code == 200
+    assert calls == []
+
+
+def test_chat_completions_shadow_mode_records_shape_diagnostic_without_raw_prompt():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(normalization_mode="shadow", gigachat_api_mode="v1")
+    )
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "secret prompt"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    event = app.state.normalization_shadow_events[-1]
+    payload = event.to_json_dict()
+    assert payload["normalization_status"] == "ok"
+    assert payload["normalized_shape_hash"].startswith("sha256:")
+    assert "secret prompt" not in json.dumps(payload)
 
 
 def test_chat_completions_v1_non_stream_preserves_called_tools_from_request():

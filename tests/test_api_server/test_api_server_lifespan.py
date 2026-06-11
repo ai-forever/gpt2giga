@@ -28,7 +28,9 @@ def test_app_lifespan_initializes_state(monkeypatch):
             pass
 
     # Подменяем клиента GigaChat при старте lifespan
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: Dummy())
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client", lambda settings: Dummy()
+    )
 
     with TestClient(app) as client:
         resp = client.get("/health")
@@ -51,7 +53,10 @@ def test_lifespan_closes_gigachat_client(monkeypatch):
         async def aclose(self):
             closed.append(True)
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", lambda **kw: DummyWithClose())
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: DummyWithClose(),
+    )
 
     app = create_app()
     with TestClient(app):
@@ -71,10 +76,40 @@ def test_lifespan_handles_aclose_error(monkeypatch):
             raise RuntimeError("close failed")
 
     monkeypatch.setattr(
-        "gpt2giga.api_server.GigaChat", lambda **kw: DummyWithBrokenClose()
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: DummyWithBrokenClose(),
     )
 
     app = create_app()
     with TestClient(app):
         TestClient(app).get("/health")
         # App should still work even if close will fail later
+
+
+def test_lifespan_flushes_extension_sinks(monkeypatch):
+    flushed = []
+
+    class DummyClient:
+        async def aclose(self):
+            pass
+
+    class DummySink:
+        def __init__(self, name):
+            self.name = name
+
+        async def flush(self):
+            flushed.append(self.name)
+
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: DummyClient(),
+    )
+
+    app = create_app()
+    app.state.traffic_log_sink = DummySink("traffic")
+    app.state.observability_sink = DummySink("observability")
+
+    with TestClient(app):
+        pass
+
+    assert flushed == ["observability", "traffic"]

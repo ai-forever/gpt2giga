@@ -2,8 +2,17 @@ from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
 
 from gpt2giga.api_server import create_app
+from gpt2giga.app.factory import create_app as create_modular_app
 from gpt2giga.common.app_meta import check_port_available
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
+from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
+from gpt2giga.sinks.metrics.noop import NoopMetricsSink
+from gpt2giga.sinks.observability.noop import NoopObservabilitySink
+
+
+def test_legacy_create_app_facade_uses_modular_factory():
+    assert create_app is create_modular_app
 
 
 def test_root_redirect():
@@ -30,12 +39,35 @@ def test_v1_prefix_router_is_registered(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
 
     with TestClient(create_app()) as client:
         # Используем контекстный менеджер, чтобы lifespan сработал и инициализировал state
         response = client.get("/v1/models")
         # Должен быть 200, 401, 500, но не 404 (404 значит роутер не подключен)
+        assert response.status_code != 404
+
+
+def test_v2_prefix_router_is_registered(monkeypatch):
+    class FakeGigaChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aget_models(self):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(data=[], object_="list")
+
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.get("/v2/models")
         assert response.status_code != 404
 
 
@@ -49,7 +81,10 @@ def test_v1_litellm_router_is_registered(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
 
     with TestClient(create_app()) as client:
         response = client.get("/v1/model/info")
@@ -68,7 +103,10 @@ def test_v1_models_no_307_redirect(monkeypatch):
 
             return SimpleNamespace(data=[], object_="list")
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
 
     with TestClient(create_app()) as client:
         response = client.get("/v1/models", follow_redirects=False)
@@ -81,6 +119,55 @@ def test_redirect_slashes_disabled():
     """FastAPI app must be created with redirect_slashes=False."""
     app = create_app()
     assert app.router.redirect_slashes is False
+
+
+def test_app_factory_creates_default_extension_sinks():
+    app = create_app()
+
+    assert isinstance(app.state.traffic_log_sink, NoopTrafficLogSink)
+    assert isinstance(app.state.observability_sink, NoopObservabilitySink)
+    assert isinstance(app.state.metrics_sink, NoopMetricsSink)
+
+
+def test_app_factory_creates_openai_protocol_adapter():
+    app = create_app()
+
+    assert isinstance(app.state.openai_protocol_adapter, OpenAIProtocolAdapter)
+
+
+def test_app_with_unavailable_postgres_traffic_sink_still_serves_requests(
+    monkeypatch,
+):
+    class FakeGigaChat:
+        async def aclose(self):
+            return None
+
+    async def broken_pool(self):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
+    monkeypatch.setattr(
+        "gpt2giga.sinks.logs.postgres.PostgresTrafficLogSink._create_pool",
+        broken_pool,
+    )
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                traffic_log_enabled=True,
+                traffic_log_sink="postgres",
+                traffic_log_postgres_dsn="postgresql://user:pass@127.0.0.1:1/gpt2giga",
+                traffic_log_flush_interval_ms=10,
+            )
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
 
 
 def test_docs_disabled_in_prod_mode():
@@ -130,7 +217,10 @@ def test_non_prod_logs_endpoints_require_api_key_when_enabled(tmp_path, monkeypa
         async def aclose(self):
             return None
 
-    monkeypatch.setattr("gpt2giga.api_server.GigaChat", FakeGigaChat)
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
 
     log_file = tmp_path / "gpt2giga.log"
     log_file.write_text("INFO: log line\n")

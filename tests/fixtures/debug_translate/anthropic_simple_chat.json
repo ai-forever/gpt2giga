@@ -1,0 +1,11 @@
+{
+  "model": "GigaChat",
+  "max_tokens": 128,
+  "system": "Be concise.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello"
+    }
+  ]
+}

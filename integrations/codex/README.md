@@ -63,7 +63,7 @@ model_reasoning_effort = "none"
 
 [model_providers.gpt2giga]
 name = "gpt2giga"
-base_url = "http://localhost:8090/v1"
+base_url = "http://localhost:8090/v2"
 env_key = "GPT2GIGA_API_KEY"
 wire_api = "responses"
 supports_websockets = false
@@ -72,7 +72,7 @@ supports_websockets = false
 Ключевые настройки:
 
 - `model` — имя модели, которое будет отображаться и передаваться в Codex.
-- `base_url` — OpenAI-совместимый адрес `gpt2giga`; для Codex указывайте путь с `/v1`.
+- `base_url` — OpenAI-совместимый адрес `gpt2giga`; для Codex с built-in tools указывайте путь с `/v2`.
 - `env_key` — имя переменной окружения, из которой Codex берёт API-ключ.
 - `wire_api = "responses"` — использовать OpenAI Responses API, который поддерживается `gpt2giga`.
 
@@ -137,7 +137,7 @@ model_reasoning_effort = "none"
 
 [model_providers.gpt2giga]
 name = "gpt2giga"
-base_url = "https://ваш-сервер.example.com/v1"
+base_url = "https://ваш-сервер.example.com/v2"
 env_key = "GPT2GIGA_API_KEY"
 wire_api = "responses"
 supports_websockets = false
@@ -167,8 +167,8 @@ model_reasoning_effort = "none"
 
 [model_providers.gpt2giga]
 name = "gpt2giga"
-base_url = "http://localhost:8090/v1"
-# base_url = "https://ваш-сервер.example.com/v1"
+base_url = "http://localhost:8090/v2"
+# base_url = "https://ваш-сервер.example.com/v2"
 env_key = "GPT2GIGA_API_KEY"
 wire_api = "responses"
 supports_websockets = false

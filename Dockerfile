@@ -16,6 +16,7 @@ RUN uv build --wheel
 
 
 FROM python:${PYTHON_VERSION}-slim AS runtime
+ARG INSTALL_EXTRAS=""
 
 WORKDIR /app
 
@@ -29,7 +30,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY --from=builder /app/dist/*.whl /tmp/
 
 RUN python -m venv "$VIRTUAL_ENV" \
-    && pip install --no-cache-dir /tmp/*.whl \
+    && wheel_path="$(find /tmp -maxdepth 1 -name '*.whl' -print -quit)" \
+    && pip install --no-cache-dir "${wheel_path}${INSTALL_EXTRAS}" \
     && rm -rf /tmp/*.whl \
     && find "$VIRTUAL_ENV" -type d -name "__pycache__" -prune -exec rm -rf '{}' + \
     && find "$VIRTUAL_ENV" -type f -name "*.pyc" -delete \

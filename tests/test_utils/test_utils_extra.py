@@ -77,7 +77,7 @@ def test_create_gigachat_client_for_request_giga_auth_uses_constructor():
         }
     )
     with MagicMock() as mock_giga_class:
-        from gpt2giga.common import gigachat_auth
+        from gpt2giga.providers.gigachat import auth as gigachat_auth
 
         orig = gigachat_auth.GigaChat
         gigachat_auth.GigaChat = mock_giga_class

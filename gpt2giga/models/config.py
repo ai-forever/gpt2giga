@@ -1,6 +1,8 @@
+import json
+import os
 import warnings
 from functools import cached_property
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
 from pydantic import (
@@ -10,7 +12,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from gpt2giga.constants import (
     DEFAULT_MAX_AUDIO_FILE_SIZE_BYTES,
@@ -20,6 +22,9 @@ from gpt2giga.constants import (
     DEFAULT_MAX_TOKENS,
 )
 from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
+
+TrafficLogSinkName = Literal["noop", "jsonl", "postgres", "opensearch"]
+ObservabilityBackendName = Literal["noop", "phoenix"]
 
 
 class ProxySettings(BaseSettings):
@@ -104,7 +109,7 @@ class ProxySettings(BaseSettings):
         default="v1",
         description=(
             "Backend contract for GigaChat chat-like requests: v1 uses "
-            "root compatibility methods, v2 uses primary chat resource methods"
+            "legacy chat methods, v2 uses chat completion resource methods"
         ),
     )
     responses_api_mode: Literal["inherit", "v1", "v2"] = Field(
@@ -113,6 +118,226 @@ class ProxySettings(BaseSettings):
             "Backend contract for OpenAI /responses: inherit follows "
             "gigachat_api_mode, v1/v2 override only /responses"
         ),
+    )
+    experimental_normalized_layer: bool = Field(
+        default=False,
+        description="Enable experimental normalized protocol layer wiring.",
+    )
+    normalization_mode: Literal["off", "shadow", "on"] = Field(
+        default="off",
+        description=(
+            "Normalized layer execution mode: off disables it, shadow records "
+            "parallel translation only, on uses normalized execution."
+        ),
+    )
+    legacy_chat_fallback: bool = Field(
+        default=True,
+        description="Allow legacy chat path fallback while modular migration is experimental.",
+    )
+    conversation_stitching_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable opt-in local conversation stitching for stateless chat-like "
+            "requests carrying a stable conversation identifier."
+        ),
+    )
+    conversation_ttl_seconds: PositiveInt = Field(
+        default=3_600,
+        description="Seconds to retain idle in-memory stitched conversation state.",
+    )
+    conversation_max_messages: PositiveInt = Field(
+        default=40,
+        description="Maximum messages retained and sent for one stitched conversation.",
+    )
+    conversation_use_session_id: bool = Field(
+        default=False,
+        description=(
+            "Allow x-session-id to act as a conversation key when no explicit "
+            "conversation identifier is present."
+        ),
+    )
+    conversation_on_divergence: Literal["client_wins", "fork"] = Field(
+        default="client_wins",
+        description=(
+            "Conflict policy when incoming history does not overlap stored history: "
+            "client_wins replaces state after success, fork stores under an internal "
+            "revision-suffixed conversation id."
+        ),
+    )
+    traffic_log_enabled: bool = Field(
+        default=False,
+        description="Enable future traffic log event emission.",
+    )
+    traffic_log_sink: TrafficLogSinkName = Field(
+        default="noop",
+        description=(
+            "Traffic log sink backend: noop disables storage, jsonl writes local JSONL, "
+            "postgres writes to optional Postgres storage, opensearch writes to optional search mirror."
+        ),
+    )
+    traffic_log_sinks: Annotated[list[TrafficLogSinkName], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "Optional ordered traffic log sink list for mirror setups, e.g. "
+            "['postgres', 'opensearch']. Empty list preserves traffic_log_sink."
+        ),
+    )
+    traffic_log_jsonl_path: str = Field(
+        default="traffic_logs.jsonl",
+        description="Path to local JSONL traffic log file when traffic_log_sink=jsonl.",
+    )
+    traffic_log_postgres_dsn: Optional[str] = Field(
+        default=None,
+        description="Postgres DSN for traffic log storage when traffic_log_sink=postgres.",
+        repr=False,
+    )
+    traffic_log_capture_content: bool = Field(
+        default=False,
+        description="Capture redacted request/response bodies in traffic logs.",
+    )
+    traffic_log_queue_size: PositiveInt = Field(
+        default=10_000,
+        description="Maximum queued traffic log events before applying backpressure policy.",
+    )
+    traffic_log_batch_size: PositiveInt = Field(
+        default=500,
+        description="Maximum traffic log events written per storage batch.",
+    )
+    traffic_log_flush_interval_ms: PositiveInt = Field(
+        default=2_000,
+        description="Best-effort traffic log flush interval in milliseconds.",
+    )
+    traffic_log_drop_on_backpressure: bool = Field(
+        default=True,
+        description="Drop traffic log events instead of blocking when the queue is full.",
+    )
+    traffic_log_redact_sensitive: bool = Field(
+        default=True,
+        description="Redact sensitive keys and token-like strings before traffic log storage.",
+    )
+    traffic_log_redact_extra_keys: list[str] = Field(
+        default_factory=list,
+        description="Additional case-insensitive keys to redact before traffic log storage.",
+    )
+    traffic_log_retention_days: PositiveInt = Field(
+        default=30,
+        description="Number of days to retain Postgres traffic logs before purge.",
+    )
+    traffic_log_purge_interval_seconds: PositiveInt = Field(
+        default=3_600,
+        description="Seconds between best-effort traffic log retention purge runs.",
+    )
+    opensearch_url: str = Field(
+        default="http://localhost:9200",
+        description="OpenSearch URL for the optional traffic log search mirror.",
+    )
+    opensearch_username: Optional[str] = Field(
+        default=None,
+        description="OpenSearch username for the optional traffic log search mirror.",
+        repr=False,
+    )
+    opensearch_password: Optional[str] = Field(
+        default=None,
+        description="OpenSearch password for the optional traffic log search mirror.",
+        repr=False,
+    )
+    opensearch_index: str = Field(
+        default="gpt2giga-traffic",
+        description="OpenSearch index or data stream name for traffic log mirror events.",
+    )
+    opensearch_data_stream: bool = Field(
+        default=True,
+        description="Use OpenSearch data stream bulk create operations for traffic logs.",
+    )
+    opensearch_bulk_size: PositiveInt = Field(
+        default=500,
+        description="Maximum number of traffic log events per OpenSearch bulk request.",
+    )
+    opensearch_flush_interval_ms: PositiveInt = Field(
+        default=2_000,
+        description="Best-effort OpenSearch traffic log flush interval in milliseconds.",
+    )
+    observability_enabled: bool = Field(
+        default=False,
+        description="Enable OpenTelemetry/OpenInference observability hooks.",
+    )
+    observability_backend: ObservabilityBackendName = Field(
+        default="phoenix",
+        description="Observability backend: phoenix enables the optional Phoenix/OTel sink.",
+    )
+    phoenix_collector_endpoint: str = Field(
+        default_factory=lambda: os.getenv(
+            "PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:4317"
+        ),
+        description="Phoenix OTLP collector endpoint.",
+    )
+    phoenix_project_name: str = Field(
+        default_factory=lambda: os.getenv("PHOENIX_PROJECT_NAME", "gpt2giga"),
+        description="Phoenix project name for exported traces.",
+    )
+    phoenix_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("PHOENIX_API_KEY") or None,
+        description="Phoenix API key for hosted or protected collectors.",
+        repr=False,
+    )
+    observability_sample_rate: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Fraction of requests to trace when observability is enabled.",
+    )
+    observability_capture_content: bool = Field(
+        default=False,
+        description="Capture prompt/response content in observability spans.",
+    )
+    observability_capture_messages: bool = Field(
+        default=False,
+        description="Capture normalized input messages in observability spans.",
+    )
+    observability_capture_tool_args: bool = Field(
+        default=False,
+        description="Capture tool schemas and tool call arguments in observability spans.",
+    )
+    observability_capture_responses: bool = Field(
+        default=False,
+        description="Capture normalized model response content in observability spans.",
+    )
+    observability_max_content_length: PositiveInt = Field(
+        default=8_000,
+        description="Maximum serialized content length for one observability attribute.",
+    )
+    observability_redaction_enabled: bool = Field(
+        default=True,
+        description="Redact sensitive content before adding observability attributes.",
+    )
+    metrics_enabled: bool = Field(
+        default=False,
+        description="Enable Prometheus-compatible runtime metrics endpoint.",
+    )
+    metrics_path: str = Field(
+        default="/metrics",
+        description="HTTP path for the Prometheus-compatible metrics endpoint.",
+    )
+    ui_enabled: bool = Field(
+        default=False,
+        description="Enable future built-in debugging and playground UI.",
+    )
+    debug_translate_enabled: bool = Field(
+        default=False,
+        description="Enable future debug translation endpoints.",
+    )
+    admin_api_enabled: bool = Field(
+        default=False,
+        description="Enable protected admin API endpoints.",
+    )
+    admin_api_key: Optional[str] = Field(
+        default=None,
+        description="Admin API key for protected debug/admin endpoints.",
+        repr=False,
+    )
+    replay_enabled: bool = Field(
+        default=False,
+        description="Enable protected admin traffic-log request replay endpoint.",
     )
     max_request_body_bytes: int = Field(
         default=DEFAULT_MAX_REQUEST_BODY_BYTES,
@@ -174,7 +399,15 @@ class ProxySettings(BaseSettings):
             return value.strip().lower()
         return value
 
-    @field_validator("gigachat_api_mode", "responses_api_mode", mode="before")
+    @field_validator(
+        "gigachat_api_mode",
+        "responses_api_mode",
+        "normalization_mode",
+        "conversation_on_divergence",
+        "traffic_log_sink",
+        "observability_backend",
+        mode="before",
+    )
     @classmethod
     def normalize_api_modes(cls, value, info):
         if isinstance(value, str):
@@ -183,6 +416,37 @@ class ProxySettings(BaseSettings):
                 return "inherit"
             return normalized
         return value
+
+    @field_validator("traffic_log_sinks", mode="before")
+    @classmethod
+    def normalize_traffic_log_sinks(cls, value):
+        if value in (None, ""):
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            if text.startswith("["):
+                return json.loads(text)
+            return [item.strip().lower() for item in text.split(",") if item.strip()]
+        if isinstance(value, list):
+            return [
+                item.strip().lower() if isinstance(item, str) else item
+                for item in value
+            ]
+        return value
+
+    @field_validator("metrics_path", mode="before")
+    @classmethod
+    def normalize_metrics_path(cls, value):
+        if not isinstance(value, str):
+            return value
+        path = value.strip()
+        if not path:
+            return "/metrics"
+        if not path.startswith("/"):
+            path = f"/{path}"
+        return path.rstrip("/") or "/metrics"
 
     def resolve_responses_api_mode(self) -> Literal["v1", "v2"]:
         """Return the effective GigaChat backend mode for `/responses`."""

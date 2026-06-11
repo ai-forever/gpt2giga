@@ -5,6 +5,40 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Planned for release as `0.2.0`.
+
+### Breaking Changes
+- **Internal GigaChat transformer API**: the old compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2`, and the `gigachat_v2_adapter` module were replaced with explicit `chat` / `chat_completion` names; external OpenAI/Anthropic-compatible endpoints are unchanged.
+
+### Added
+- **Explicit GigaChat API mode routes**: public OpenAI/Anthropic/LiteLLM-compatible routes are now available at root, `/v1`, and `/v2`; root routes follow `GPT2GIGA_GIGACHAT_API_MODE` / `GPT2GIGA_RESPONSES_API_MODE`, `/v1` forces the legacy chat contract, and `/v2` forces the GigaChat chat-completion contract.
+- **Configuration reference**: expanded `docs/configuration.md` with quick profiles, env value formats, security/auth notes, backend API modes, observability, metrics, traffic-log, and storage settings.
+- **Modular roadmap safety baseline**: started the `v0.2.0` release discipline with semantic versioning rules and a release checklist.
+- **Modular feature flags**: added default-safe `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED`, and `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
+- **RequestContext**: added an internal request-scoped context with `request_id`, `trace_id`, protocol/route metadata, and safe hash fields for future traffic logs and observability without changing the public API.
+- **Golden compatibility fixtures**: added mocked-upstream fixtures and tests for OpenAI chat/tool/structured/streaming/embeddings and Anthropic messages/streaming response shapes.
+- **Logging terminology**: added an architecture document that separates runtime logs, future traffic logs, observability traces, and metrics.
+- **Modular package skeleton**: added empty namespace packages under `gpt2giga.api`, `gpt2giga.app`, `gpt2giga.protocols`, `gpt2giga.providers`, and `gpt2giga.sinks` for staged migration without changing current runtime wiring.
+- **Extension interfaces**: added internal `ProtocolAdapter`, `ProviderAdapter`, `TrafficLogSink`, `TrafficLogQueryStore`, `ObservabilitySink`, and `MetricsSink` contracts for future backend/provider/storage extensions without heavy dependencies.
+- **Traffic log event and sinks**: added the storage-independent `TrafficLogEvent` model, a default noop traffic sink, and an opt-in JSONL sink for local validation through `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` and `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
+- **Observability noop sink**: added a noop observability sink and safe helper functions for future trace events.
+- **Normalized schemas**: added internal JSON-serializable normalized-layer models for chat, embeddings, responses, usage, errors, and stream events with `raw_extensions` and provider metadata.
+- **OpenAI normalized adapter**: added an internal OpenAI Chat Completions to `NormalizedChatRequest` adapter for shadow mode, covering messages, model, generation parameters, tools, tool choice, response format, and metadata.
+- **Normalized shadow mode**: OpenAI Chat routes can now run the normalized adapter in best-effort shadow mode when `GPT2GIGA_NORMALIZATION_MODE=shadow`; shadow translation errors do not break the legacy request path.
+- **Shadow diagnostics**: added safe diagnostic events for normalized shadow mode with `normalization_status`, `route`, `request_id`, shape hash, warnings, and errors without recording raw prompt/response content.
+- **Normalized OpenAI Chat path**: when `GPT2GIGA_NORMALIZATION_MODE=on`, OpenAI Chat Completions non-stream runs through `NormalizedChatRequest`, the GigaChat provider adapter, and the normalized-to-OpenAI response adapter; `GPT2GIGA_LEGACY_CHAT_FALLBACK=True` keeps fallback to the legacy path without recording raw prompt/response content.
+
+### Changed
+- **GigaChat backend naming**: the internal upstream path is now named `chat` for legacy GigaChat calls and `chat_completion` for GigaChat `v2/chat/completions`; `_v2` suffixes were removed from the transformer, response adapter, streaming helpers, and tests.
+- **Versioned client docs**: README, integration guides, examples, and `.env.example` now clarify using `base_url="http://localhost:8090/v1"` or `base_url="http://localhost:8090/v2"` to choose an explicit backend contract.
+- **App factory split**: FastAPI app creation, lifecycle startup/shutdown, and app settings loading moved to `gpt2giga.app.factory`, `gpt2giga.app.lifecycle`, and `gpt2giga.app.settings`; `gpt2giga.api_server` remains a compatible facade for `create_app` and `run`.
+- **OpenAI API namespace**: added the OpenAI-compatible router aggregator under `gpt2giga.api.openai.routes`, and the app factory now mounts OpenAI routes through the new modular namespace without changing public paths or response shapes.
+- **Anthropic API namespace**: added the Anthropic-compatible router aggregator under `gpt2giga.api.anthropic.routes`, and the app factory now mounts Anthropic routes through the new modular namespace without changing public paths, header behavior, or response shapes.
+- **GigaChat provider namespace**: moved GigaChat SDK client creation/shutdown and request-scoped token handoff under `gpt2giga.providers.gigachat`; environment/settings parsing and public proxy behavior are unchanged.
+- **Extension sink lifecycle**: the app factory now creates traffic/observability sinks in `app.state`, and lifecycle shutdown performs best-effort flushes; sink failures are isolated from the API request path.
+- **Internal docs alignment**: package-level AGENTS notes were updated for the new app factory/lifecycle/provider layout and the retained `gpt2giga.api_server` entrypoint facade.
 ## [0.1.8a2] - 2026-06-09
 
 ### Added
@@ -25,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.8a1] - 2026-06-06
 
 ### Added
-- **GigaChat v2 backend mode**: added `GPT2GIGA_GIGACHAT_API_MODE` and `GPT2GIGA_RESPONSES_API_MODE` to switch chat-like upstream calls to the primary `v2/chat/completions` surface in GigaChat SDK 0.2.2a1 while keeping the external OpenAI/Anthropic-compatible contract and URLs unchanged
+- **GigaChat v2 backend mode**: added `GPT2GIGA_GIGACHAT_API_MODE` and `GPT2GIGA_RESPONSES_API_MODE` to switch chat-like upstream calls to the GigaChat chat-completion contract (`v2/chat/completions` in SDK 0.2.2a1) while keeping the external OpenAI/Anthropic-compatible contract and URLs unchanged
 - **Responses built-in tools in v2 mode**: added support for GigaChat built-in tools in OpenAI Responses API (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); normalized output items, stream progress events, file/inline metadata, and image hydration are implemented for `web_search*` and `image_generation` / `image_generate`
 - **Per-model max connections**: added local in-process limits for concurrent upstream model calls by effective GigaChat model via `GPT2GIGA_MODEL_MAX_CONNECTIONS`, `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT`, and `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT`, plus matching CLI flags
 - **Debug payload logs**: added non-PROD DEBUG payload logs for upstream GigaChat requests and processed responses; payloads are omitted in PROD
