@@ -50,7 +50,7 @@
 - Print or stream visible output so users can confirm behavior quickly.
 - Keep comments short and focused on what the example demonstrates.
 - Keep file/batch examples clearly marked as prepared but currently not runnable against the mounted public API.
-- Keep base URLs aligned with local defaults: OpenAI examples usually use `http://localhost:8090/v1`, while Anthropic examples can use `http://localhost:8090`.
+- Keep base URLs aligned with local defaults: OpenAI examples may use `http://localhost:8090`, `http://localhost:8090/v1`, or `http://localhost:8090/v2` depending on whether they need env-selected, explicit v1, or explicit v2 behavior; Anthropic examples can use `http://localhost:8090` unless they need an explicit backend contract.
 
 ## Setup & Run
 

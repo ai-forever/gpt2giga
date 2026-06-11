@@ -7,14 +7,14 @@ from gpt2giga.common.tools import map_tool_name_from_gigachat
 GIGACHAT_PROVIDER_METADATA_KEY = "_gpt2giga_provider_metadata"
 
 
-def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dict:
-    """Adapt a primary v2 completion response to the legacy internal shape."""
+def adapt_chat_completion_to_chat_shape(response: Any, *, default_model: str) -> dict:
+    """Adapt a GigaChat chat completion response to the legacy chat shape."""
     response_data = _dump_model(response)
     message = _select_message(response_data)
-    function_call = extract_v2_function_call(message)
-    text = extract_v2_assistant_text(message)
-    reasoning_text = extract_v2_reasoning_text(response_data)
-    metadata = extract_v2_message_metadata(response_data)
+    function_call = extract_chat_completion_function_call(message)
+    text = extract_chat_completion_assistant_text(message)
+    reasoning_text = extract_chat_completion_reasoning_text(response_data)
+    metadata = extract_chat_completion_message_metadata(response_data)
 
     message_payload: dict[str, Any] = {
         "role": _adapt_role(message.get("role")),
@@ -31,7 +31,7 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
 
     result = {
         "model": response_data.get("model") or default_model,
-        "thread_id": extract_v2_thread_id(response_data),
+        "thread_id": extract_chat_completion_thread_id(response_data),
         "choices": [
             {
                 "message": message_payload,
@@ -43,21 +43,25 @@ def adapt_v2_completion_to_v1_shape(response: Any, *, default_model: str) -> dic
                 ),
             }
         ],
-        "usage": adapt_v2_usage(response_data.get("usage")),
+        "usage": adapt_chat_completion_usage(response_data.get("usage")),
     }
     _copy_provider_metadata(result, response_data)
     _copy_x_headers(result, response_data)
     return result
 
 
-def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
-    """Adapt a primary v2 stream chunk to the legacy internal chunk shape."""
+def adapt_chat_completion_chunk_to_chat_chunk_shape(
+    chunk: Any,
+    *,
+    default_model: str,
+) -> dict:
+    """Adapt a GigaChat chat completion stream chunk to the legacy chat shape."""
     chunk_data = _dump_model(chunk)
     message = _select_message(chunk_data)
-    function_call = extract_v2_function_call(message)
-    text = extract_v2_assistant_text(message)
-    reasoning_text = extract_v2_reasoning_text(chunk_data)
-    metadata = extract_v2_message_metadata(chunk_data)
+    function_call = extract_chat_completion_function_call(message)
+    text = extract_chat_completion_assistant_text(message)
+    reasoning_text = extract_chat_completion_reasoning_text(chunk_data)
+    metadata = extract_chat_completion_message_metadata(chunk_data)
 
     delta: dict[str, Any] = {"content": text}
     delta.update(metadata)
@@ -71,7 +75,7 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
 
     result = {
         "model": chunk_data.get("model") or default_model,
-        "thread_id": extract_v2_thread_id(chunk_data),
+        "thread_id": extract_chat_completion_thread_id(chunk_data),
         "choices": [
             {
                 "delta": delta,
@@ -83,15 +87,15 @@ def adapt_v2_chunk_to_v1_shape(chunk: Any, *, default_model: str) -> dict:
                 ),
             }
         ],
-        "usage": adapt_v2_usage(chunk_data.get("usage")),
+        "usage": adapt_chat_completion_usage(chunk_data.get("usage")),
     }
     _copy_provider_metadata(result, chunk_data)
     _copy_x_headers(result, chunk_data)
     return result
 
 
-def extract_v2_assistant_text(message_or_response: Any) -> str:
-    """Extract assistant text content from a v2 message, response, or chunk."""
+def extract_chat_completion_assistant_text(message_or_response: Any) -> str:
+    """Extract assistant text content from a chat completion message."""
     data = _dump_model(message_or_response)
     message = _select_message(data)
     role = message.get("role")
@@ -101,8 +105,8 @@ def extract_v2_assistant_text(message_or_response: Any) -> str:
     return _extract_text_content(message)
 
 
-def extract_v2_reasoning_text(message_or_response: Any) -> str:
-    """Extract reasoning text content from v2 reasoning messages."""
+def extract_chat_completion_reasoning_text(message_or_response: Any) -> str:
+    """Extract reasoning text content from chat completion reasoning messages."""
     data = _dump_model(message_or_response)
     messages = data.get("messages")
     if not isinstance(messages, list):
@@ -122,8 +126,8 @@ def extract_v2_reasoning_text(message_or_response: Any) -> str:
     return "".join(text_parts)
 
 
-def extract_v2_function_call(message_or_response: Any) -> Optional[dict]:
-    """Extract the first function call from a v2 message, response, or chunk."""
+def extract_chat_completion_function_call(message_or_response: Any) -> Optional[dict]:
+    """Extract the first function call from a chat completion message."""
     data = _dump_model(message_or_response)
     message = _select_message(data)
 
@@ -143,8 +147,10 @@ def extract_v2_function_call(message_or_response: Any) -> Optional[dict]:
     return None
 
 
-def extract_v2_message_metadata(message_or_response: Any) -> dict[str, Any]:
-    """Extract v2 built-in tool metadata from a message, response, or chunk."""
+def extract_chat_completion_message_metadata(
+    message_or_response: Any,
+) -> dict[str, Any]:
+    """Extract chat completion built-in tool metadata."""
     data = _dump_model(message_or_response)
     message = _select_message(data)
 
@@ -180,8 +186,8 @@ def extract_v2_message_metadata(message_or_response: Any) -> dict[str, Any]:
     return metadata
 
 
-def extract_v2_thread_id(response_or_chunk: Any) -> Optional[str]:
-    """Extract a v2 storage thread identifier."""
+def extract_chat_completion_thread_id(response_or_chunk: Any) -> Optional[str]:
+    """Extract a chat completion storage thread identifier."""
     data = _dump_model(response_or_chunk)
     thread_id = data.get("thread_id")
     if isinstance(thread_id, str) and thread_id:
@@ -189,8 +195,8 @@ def extract_v2_thread_id(response_or_chunk: Any) -> Optional[str]:
     return None
 
 
-def extract_v2_provider_metadata(response_or_chunk: Any) -> dict[str, str]:
-    """Extract GigaChat v2 state identifiers for OpenAI metadata."""
+def extract_chat_completion_provider_metadata(response_or_chunk: Any) -> dict[str, str]:
+    """Extract GigaChat chat completion state identifiers for OpenAI metadata."""
     data = _dump_model(response_or_chunk)
     message = _select_message(data)
     metadata: dict[str, str] = {}
@@ -230,10 +236,10 @@ def extract_v2_provider_metadata(response_or_chunk: Any) -> dict[str, str]:
     return metadata
 
 
-async def hydrate_v2_image_files(
+async def hydrate_chat_completion_image_files(
     adapted_response: dict, giga_client: Any, logger: Any = None
 ) -> None:
-    """Fetch base64 image payloads for v2 image file references in-place."""
+    """Fetch base64 image payloads for chat completion image file references."""
     if not hasattr(giga_client, "aget_image"):
         return
 
@@ -271,8 +277,8 @@ async def hydrate_v2_image_files(
                         )
 
 
-def adapt_v2_usage(usage: Any) -> Optional[dict]:
-    """Map primary v2 token usage to the legacy internal usage shape."""
+def adapt_chat_completion_usage(usage: Any) -> Optional[dict]:
+    """Map chat completion token usage to the legacy chat usage shape."""
     usage_data = _dump_model(usage)
     if not usage_data:
         return None
@@ -311,7 +317,7 @@ def _copy_x_headers(target: dict[str, Any], source: dict[str, Any]) -> None:
 
 
 def _copy_provider_metadata(target: dict[str, Any], source: dict[str, Any]) -> None:
-    metadata = extract_v2_provider_metadata(source)
+    metadata = extract_chat_completion_provider_metadata(source)
     if metadata:
         target[GIGACHAT_PROVIDER_METADATA_KEY] = metadata
 

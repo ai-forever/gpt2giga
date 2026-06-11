@@ -86,6 +86,10 @@ completion = client.chat.completions.create(
 print(completion.choices[0].message.content)
 ```
 
+Для явного выбора GigaChat backend contract используйте
+`http://localhost:8090/v1` или `http://localhost:8090/v2` как `base_url`.
+`http://localhost:8090` следует `GPT2GIGA_GIGACHAT_API_MODE`.
+
 ## Anthropic SDK
 
 ```python

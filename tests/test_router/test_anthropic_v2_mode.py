@@ -24,15 +24,15 @@ class MockResponse:
 
 class FakeAChatResource:
     def __init__(self):
-        self.v1_calls = []
-        self.v2_calls = []
+        self.chat_calls = []
+        self.chat_completion_calls = []
         self.stream_calls = []
         self.active_create_calls = 0
         self.max_active_create_calls = 0
         self.release_create: asyncio.Event | None = None
 
     async def __call__(self, payload):
-        self.v1_calls.append(payload)
+        self.chat_calls.append(payload)
         return MockResponse(
             {
                 "choices": [
@@ -50,7 +50,7 @@ class FakeAChatResource:
         )
 
     async def create(self, payload):
-        self.v2_calls.append(payload)
+        self.chat_completion_calls.append(payload)
         self.active_create_calls += 1
         self.max_active_create_calls = max(
             self.max_active_create_calls,
@@ -109,15 +109,15 @@ class FakeGigachat:
 
 class FakeRequestTransformer:
     def __init__(self):
-        self.v1_calls = []
-        self.v2_calls = []
+        self.chat_calls = []
+        self.chat_completion_calls = []
 
-    async def prepare_chat_completion(self, data, giga_client=None):
-        self.v1_calls.append((data, giga_client))
+    async def prepare_chat(self, data, giga_client=None):
+        self.chat_calls.append((data, giga_client))
         return {"contract": "anthropic-v1"}
 
-    async def prepare_chat_completion_v2(self, data, giga_client=None):
-        self.v2_calls.append((data, giga_client))
+    async def prepare_chat_completion(self, data, giga_client=None):
+        self.chat_completion_calls.append((data, giga_client))
         return {"contract": "anthropic-v2"}
 
 
@@ -155,13 +155,13 @@ def test_anthropic_messages_v1_mode_uses_root_achat():
 
     assert response.status_code == 200
     assert response.json()["content"][0]["text"] == "ok-v1"
-    assert app.state.request_transformer.v1_calls
-    assert not app.state.request_transformer.v2_calls
-    assert app.state.gigachat_client.achat.v1_calls == [{"contract": "anthropic-v1"}]
-    assert app.state.gigachat_client.achat.v2_calls == []
+    assert app.state.request_transformer.chat_calls
+    assert not app.state.request_transformer.chat_completion_calls
+    assert app.state.gigachat_client.achat.chat_calls == [{"contract": "anthropic-v1"}]
+    assert app.state.gigachat_client.achat.chat_completion_calls == []
 
 
-def test_anthropic_messages_v2_mode_uses_primary_create():
+def test_anthropic_messages_v2_mode_uses_chat_completion_create():
     app = make_app("v2")
     client = TestClient(app)
 
@@ -180,19 +180,21 @@ def test_anthropic_messages_v2_mode_uses_primary_create():
     assert body["content"][0]["text"] == "ok-v2"
     assert body["usage"]["input_tokens"] == 2
     assert body["usage"]["output_tokens"] == 3
-    assert not app.state.request_transformer.v1_calls
-    assert app.state.request_transformer.v2_calls
-    assert app.state.gigachat_client.achat.v1_calls == []
-    assert app.state.gigachat_client.achat.v2_calls == [{"contract": "anthropic-v2"}]
+    assert not app.state.request_transformer.chat_calls
+    assert app.state.request_transformer.chat_completion_calls
+    assert app.state.gigachat_client.achat.chat_calls == []
+    assert app.state.gigachat_client.achat.chat_completion_calls == [
+        {"contract": "anthropic-v2"}
+    ]
 
 
-async def _wait_for_v2_transformer_calls(app, count: int) -> None:
-    while len(app.state.request_transformer.v2_calls) < count:
+async def _wait_for_chat_completion_transformer_calls(app, count: int) -> None:
+    while len(app.state.request_transformer.chat_completion_calls) < count:
         await asyncio.sleep(0)
 
 
-async def _wait_for_v2_create_calls(app, count: int) -> None:
-    while len(app.state.gigachat_client.achat.v2_calls) < count:
+async def _wait_for_chat_completion_create_calls(app, count: int) -> None:
+    while len(app.state.gigachat_client.achat.chat_completion_calls) < count:
         await asyncio.sleep(0)
 
 
@@ -218,11 +220,11 @@ async def test_anthropic_messages_v2_mode_serializes_same_upstream_model():
         base_url="http://testserver",
     ) as client:
         first = asyncio.create_task(_post_anthropic_message(client))
-        await _wait_for_v2_create_calls(app, 1)
+        await _wait_for_chat_completion_create_calls(app, 1)
         second = asyncio.create_task(_post_anthropic_message(client))
-        await _wait_for_v2_transformer_calls(app, 2)
+        await _wait_for_chat_completion_transformer_calls(app, 2)
 
-        assert len(app.state.gigachat_client.achat.v2_calls) == 1
+        assert len(app.state.gigachat_client.achat.chat_completion_calls) == 1
         assert app.state.gigachat_client.achat.active_create_calls == 1
 
         app.state.gigachat_client.achat.release_create.set()
@@ -233,7 +235,7 @@ async def test_anthropic_messages_v2_mode_serializes_same_upstream_model():
     assert app.state.gigachat_client.achat.max_active_create_calls == 1
 
 
-def test_anthropic_messages_v2_stream_uses_primary_stream():
+def test_anthropic_messages_v2_stream_uses_chat_completion_stream():
     app = make_app("v2")
     client = TestClient(app)
 
@@ -252,10 +254,10 @@ def test_anthropic_messages_v2_stream_uses_primary_stream():
     assert response.status_code == 200
     assert "event: content_block_delta" in body
     assert "ok-stream" in body
-    assert not app.state.request_transformer.v1_calls
-    assert app.state.request_transformer.v2_calls
-    assert app.state.gigachat_client.achat.v1_calls == []
-    assert app.state.gigachat_client.achat.v2_calls == []
+    assert not app.state.request_transformer.chat_calls
+    assert app.state.request_transformer.chat_completion_calls
+    assert app.state.gigachat_client.achat.chat_calls == []
+    assert app.state.gigachat_client.achat.chat_completion_calls == []
     assert app.state.gigachat_client.achat.stream_calls == [
         {"contract": "anthropic-v2"}
     ]

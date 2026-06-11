@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.api_mode import resolve_responses_api_mode
 from gpt2giga.common.conversation import (
     commit_responses_response,
     stitch_responses_payload,
@@ -20,15 +21,15 @@ from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
     stream_responses_generator,
-    stream_responses_v2_generator,
+    stream_responses_chat_completion_generator,
 )
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import responses_openapi_extra
 from gpt2giga.protocol.response import (
-    adapt_v2_completion_to_v1_shape,
-    extract_v2_thread_id,
-    hydrate_v2_image_files,
+    adapt_chat_completion_to_chat_shape,
+    extract_chat_completion_thread_id,
+    hydrate_chat_completion_image_files,
 )
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 from gpt2giga.sinks.observability.responses import (
@@ -50,15 +51,16 @@ async def responses(request: Request):
     state = request.app.state
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
-    settings = state.config.proxy_settings
-    mode = settings.resolve_responses_api_mode()
+    mode = resolve_responses_api_mode(request)
     conversation_turn = await stitch_responses_payload(request, data, mode=mode)
 
     populate_giga_functions(data, getattr(state, "logger", None))
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
-            chat_request = await state.request_transformer.prepare_response_v2(
-                data, giga_client
+            chat_request = (
+                await state.request_transformer.prepare_response_chat_completion(
+                    data, giga_client
+                )
             )
         effective_model = resolve_gigachat_model(chat_request, state.config)
         update_request_context(model_effective=effective_model)
@@ -71,7 +73,7 @@ async def responses(request: Request):
             return StreamingResponse(
                 observe_openai_response_stream(
                     state,
-                    stream_responses_v2_generator(
+                    stream_responses_chat_completion_generator(
                         request,
                         chat_request,
                         current_rquid,
@@ -90,17 +92,17 @@ async def responses(request: Request):
         async with model_limiter.limit(effective_model, provider="openai"):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat.create(chat_request)
-        adapted = adapt_v2_completion_to_v1_shape(
+        adapted = adapt_chat_completion_to_chat_shape(
             response,
             default_model=data["model"],
         )
         async with gigachat_request_options(giga_client, request_options):
-            await hydrate_v2_image_files(
+            await hydrate_chat_completion_image_files(
                 adapted,
                 giga_client,
                 getattr(state, "logger", None),
             )
-        response_id = extract_v2_thread_id(response) or current_rquid
+        response_id = extract_chat_completion_thread_id(response) or current_rquid
         result = state.response_processor.process_response_api(
             data,
             SimpleNamespace(model_dump=lambda: adapted),
@@ -117,7 +119,7 @@ async def responses(request: Request):
         return result
 
     async with gigachat_request_options(giga_client, request_options):
-        chat_messages = await state.request_transformer.prepare_response(
+        chat_messages = await state.request_transformer.prepare_response_chat(
             data, giga_client
         )
     effective_model = resolve_gigachat_model(chat_messages, state.config)

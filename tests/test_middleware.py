@@ -90,6 +90,23 @@ def test_path_norm_collapses_duplicate_v1_prefix():
     assert client.post("/proxy/v1/v1/messages", json={}).status_code == 200
 
 
+def test_path_norm_collapses_duplicate_v2_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["v2", "chat"],
+    )
+
+    @test_app.post("/v2/chat/completions")
+    def create_chat_completion():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+
+    assert client.post("/v2/v2/chat/completions", json={}).status_code == 200
+    assert client.post("/proxy/v2/v2/chat/completions", json={}).status_code == 200
+
+
 def test_pass_token_middleware(monkeypatch):
     test_app = FastAPI()
     test_app.add_middleware(PassTokenMiddleware)

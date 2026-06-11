@@ -101,7 +101,7 @@ async def test_transformer_merges_messages():
         ]
     }
 
-    chat = await transformer.prepare_chat_completion(data)
+    chat = await transformer.prepare_chat(data)
     assert len(chat.messages) == 1
 ```
 

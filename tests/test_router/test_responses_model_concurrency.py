@@ -64,10 +64,10 @@ class RecordingTransformer:
         self.prepared_count = 0
         self.second_prepared = asyncio.Event()
 
-    async def prepare_chat_completion(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None):
         return {"model": data.get("model", "GigaChat"), "messages": []}
 
-    async def prepare_response(self, data, giga_client=None):
+    async def prepare_response_chat(self, data, giga_client=None):
         self.prepared_count += 1
         if self.prepared_count == 2:
             self.second_prepared.set()

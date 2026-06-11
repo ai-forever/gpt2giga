@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
     stitch_anthropic_stream,
@@ -36,9 +37,9 @@ from gpt2giga.protocol.anthropic.request import (
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
 from gpt2giga.protocol.anthropic.streaming import (
     _stream_anthropic_generator,
-    _stream_anthropic_v2_generator,
+    _stream_anthropic_chat_completion_generator,
 )
-from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
+from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
 from gpt2giga.sinks.observability.anthropic import (
     emit_anthropic_message_observability,
     observe_anthropic_message_stream,
@@ -105,11 +106,11 @@ async def messages(request: Request):
         _is_anthropic_structured_output_request(data)
         and state.config.proxy_settings.structured_output_mode == "function_call"
     )
-    mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
+    mode = resolve_gigachat_api_mode(request)
 
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
-            chat_request = await state.request_transformer.prepare_chat_completion_v2(
+            chat_request = await state.request_transformer.prepare_chat_completion(
                 openai_data, giga_client
             )
         effective_model = resolve_gigachat_model(chat_request, state.config)
@@ -118,7 +119,7 @@ async def messages(request: Request):
             async with model_limiter.limit(effective_model, provider="anthropic"):
                 async with gigachat_request_options(giga_client, request_options):
                     response = await giga_client.achat.create(chat_request)
-            giga_dict = adapt_v2_completion_to_v1_shape(
+            giga_dict = adapt_chat_completion_to_chat_shape(
                 response,
                 default_model=model,
             )
@@ -145,7 +146,7 @@ async def messages(request: Request):
                 stitch_anthropic_stream(
                     request,
                     conversation_turn,
-                    _stream_anthropic_v2_generator(
+                    _stream_anthropic_chat_completion_generator(
                         request,
                         model,
                         chat_request,
@@ -164,7 +165,7 @@ async def messages(request: Request):
         )
 
     async with gigachat_request_options(giga_client, request_options):
-        chat_messages = await state.request_transformer.prepare_chat_completion(
+        chat_messages = await state.request_transformer.prepare_chat(
             openai_data, giga_client
         )
     effective_model = resolve_gigachat_model(chat_messages, state.config)

@@ -80,8 +80,10 @@ Client SDK
 | `routers/system_router.py` | `/health`, `/ping` |
 | `routers/logs_router.py` | `/logs/{last_n_lines}`, `/logs/stream`, `/logs/html` |
 
-- OpenAI and Anthropic routers are mounted both at root and `/v1`.
-- LiteLLM model-info routes are mounted both at root and `/v1`.
+- OpenAI and Anthropic routers are mounted at root, `/v1`, and `/v2`; root
+  follows env API mode, while `/v1` and `/v2` force the matching GigaChat
+  backend contract for that request.
+- LiteLLM model-info routes are mounted at root, `/v1`, and `/v2`.
 - System routes are root-only.
 - Log routes are disabled in `PROD`.
 - Admin/debug routes are root-only and require admin-key verification.
@@ -92,7 +94,7 @@ Client SDK
 |---|---|
 | `protocol/request/transformer.py` | OpenAI-style payload → GigaChat chat payload |
 | `protocol/response/processor.py` | GigaChat response → OpenAI-style response |
-| `protocol/response/gigachat_v2_adapter.py` | GigaChat v2 response adaptation |
+| `protocol/response/gigachat_chat_completion_adapter.py` | GigaChat chat completion response adaptation |
 | `protocol/attachment/attachments.py` | Image/audio/text attachment handling and cleanup |
 | `protocol/batches.py` | Batch target mapping and JSONL transformations |
 | `protocol/embeddings.py` | Embeddings input/result mapping helpers |
@@ -177,7 +179,7 @@ rg -n "traffic_log|metrics|observability|admin_api|debug_translate|replay" gpt2g
 
 - Files and batch metadata helpers still exist in `app_state.py`, but public Files/Batches routers are not mounted in the current API surface.
 - `MODE=PROD` implicitly requires an API key and disables docs/log routes.
-- `PathNormalizationMiddleware` supports both root and `/v1` style paths; endpoint changes should preserve that behavior unless intentionally breaking it.
+- `PathNormalizationMiddleware` supports root, `/v1`, and `/v2` style paths; endpoint changes should preserve that behavior unless intentionally breaking it.
 - `PassTokenMiddleware` only applies when `proxy.pass_token` is enabled.
 - `traffic_log_capture_content` and observability payload capture are opt-in and must remain redaction-aware.
 - Per-model concurrency limits are process-local; multi-worker deployments multiply effective capacity.

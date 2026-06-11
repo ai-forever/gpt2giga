@@ -17,6 +17,7 @@ from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.openai import router as openai_router
 from gpt2giga.api.system.metrics import mount_metrics_endpoint
 from gpt2giga.auth import verify_api_key
+from gpt2giga.common.api_mode import force_gigachat_api_mode
 from gpt2giga.common.app_meta import get_app_version
 from gpt2giga.common.conversation import MemoryConversationStore
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
@@ -75,6 +76,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         PathNormalizationMiddleware,
         valid_roots=[
             "v1",
+            "v2",
             "chat",
             "models",
             "embeddings",
@@ -101,6 +103,14 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         return RedirectResponse(url="/docs")
 
     api_dependencies = [Depends(verify_api_key)] if auth_required else []
+    v1_dependencies = [
+        *api_dependencies,
+        Depends(force_gigachat_api_mode("v1")),
+    ]
+    v2_dependencies = [
+        *api_dependencies,
+        Depends(force_gigachat_api_mode("v2")),
+    ]
     if config.proxy_settings.metrics_enabled:
         mount_metrics_endpoint(
             app,
@@ -112,20 +122,38 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         openai_router,
         prefix="/v1",
         tags=["V1"],
-        dependencies=api_dependencies,
+        dependencies=v1_dependencies,
+    )
+    app.include_router(
+        openai_router,
+        prefix="/v2",
+        tags=["V2"],
+        dependencies=v2_dependencies,
     )
     app.include_router(
         anthropic_router,
         prefix="/v1",
         tags=["V1 Anthropic"],
-        dependencies=api_dependencies,
+        dependencies=v1_dependencies,
+    )
+    app.include_router(
+        anthropic_router,
+        prefix="/v2",
+        tags=["V2 Anthropic"],
+        dependencies=v2_dependencies,
     )
     app.include_router(anthropic_router, dependencies=api_dependencies)
     app.include_router(
         litellm_router,
         prefix="/v1",
         tags=["V1 LiteLLM"],
-        dependencies=api_dependencies,
+        dependencies=v1_dependencies,
+    )
+    app.include_router(
+        litellm_router,
+        prefix="/v2",
+        tags=["V2 LiteLLM"],
+        dependencies=v2_dependencies,
     )
     app.include_router(litellm_router, dependencies=api_dependencies)
     app.include_router(system_router)

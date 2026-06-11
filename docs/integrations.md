@@ -10,6 +10,12 @@ OpenAI-compatible clients обычно используют:
 http://localhost:8090/v1
 ```
 
+Для GigaChat v2 features можно явно указать:
+
+```text
+http://localhost:8090/v2
+```
+
 Anthropic-compatible clients обычно используют:
 
 ```text

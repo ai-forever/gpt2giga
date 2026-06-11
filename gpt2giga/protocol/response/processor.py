@@ -19,7 +19,7 @@ from gpt2giga.common.reasoning import (
     merge_reasoning_text,
 )
 from gpt2giga.common.tools import map_tool_name_from_gigachat, split_gigachat_tool_name
-from gpt2giga.protocol.response.gigachat_v2_adapter import (
+from gpt2giga.protocol.response.gigachat_chat_completion_adapter import (
     GIGACHAT_PROVIDER_METADATA_KEY,
 )
 

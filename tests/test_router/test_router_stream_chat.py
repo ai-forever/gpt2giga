@@ -18,11 +18,11 @@ class FakeGigachat:
 
 
 class FakeRequestTransformer:
-    async def prepare_chat_completion(self, data):
+    async def prepare_chat(self, data):
         # имитируем наличие tools для ветки is_tool_call
         return {"model": data.get("model", "giga"), "tools": data.get("tools")}
 
-    async def prepare_response(self, data):
+    async def prepare_response_chat(self, data):
         return {"model": data.get("model", "giga"), "tools": data.get("tools")}
 
 

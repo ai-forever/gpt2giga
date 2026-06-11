@@ -109,7 +109,7 @@ class ProxySettings(BaseSettings):
         default="v1",
         description=(
             "Backend contract for GigaChat chat-like requests: v1 uses "
-            "root compatibility methods, v2 uses primary chat resource methods"
+            "legacy chat methods, v2 uses chat completion resource methods"
         ),
     )
     responses_api_mode: Literal["inherit", "v1", "v2"] = Field(

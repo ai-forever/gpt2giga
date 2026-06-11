@@ -65,7 +65,7 @@ class RecordingTransformer:
         self.prepared_count = 0
         self.second_prepared = asyncio.Event()
 
-    async def prepare_chat_completion(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None):
         self.prepared_count += 1
         if self.prepared_count == 2:
             self.second_prepared.set()
@@ -73,7 +73,7 @@ class RecordingTransformer:
             return {"messages": []}
         return {"model": data.get("model", "GigaChat"), "messages": []}
 
-    async def prepare_response(self, data, giga_client=None):
+    async def prepare_response_chat(self, data, giga_client=None):
         return {"model": data.get("model", "GigaChat"), "messages": []}
 
 
@@ -257,14 +257,14 @@ async def test_chat_completions_pass_model_false_uses_effective_model() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_chat_completion_holds_slot_until_generator_closes() -> None:
-    from gpt2giga.common.streaming import stream_chat_completion_generator
+    from gpt2giga.common.streaming import stream_chat_generator
 
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
     client = StreamingGigachat()
     request = FakeStreamRequest(client, limiter)
     chat = SimpleNamespace(model="GigaChat")
 
-    generator = stream_chat_completion_generator(
+    generator = stream_chat_generator(
         request,
         "client-model",
         chat,
@@ -286,7 +286,7 @@ async def test_stream_chat_completion_holds_slot_until_generator_closes() -> Non
 
 @pytest.mark.asyncio
 async def test_stream_chat_completion_timeout_does_not_call_upstream() -> None:
-    from gpt2giga.common.streaming import stream_chat_completion_generator
+    from gpt2giga.common.streaming import stream_chat_generator
 
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
     client = StreamingGigachat()
@@ -296,7 +296,7 @@ async def test_stream_chat_completion_timeout_does_not_call_upstream() -> None:
     async with limiter.limit("GigaChat"):
         lines = [
             line
-            async for line in stream_chat_completion_generator(
+            async for line in stream_chat_generator(
                 request,
                 "client-model",
                 chat,

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.conversation import (
     commit_chat_completion_response,
     stitch_chat_completion_stream,
@@ -24,13 +25,13 @@ from gpt2giga.common.gigachat_options import (
 from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
+    stream_chat_generator,
     stream_chat_completion_generator,
-    stream_chat_completion_v2_generator,
 )
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import chat_completions_openapi_extra
-from gpt2giga.protocol.response import adapt_v2_completion_to_v1_shape
+from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
 from gpt2giga.protocols.openai import (
     normalized_chat_response_to_openai,
     normalized_stream_done_sse,
@@ -71,7 +72,7 @@ async def chat_completions(request: Request):
     state = request.app.state
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
-    mode = getattr(state.config.proxy_settings, "gigachat_api_mode", "v1")
+    mode = resolve_gigachat_api_mode(request)
 
     normalized_response = await _try_normalized_non_stream_chat(
         request,
@@ -99,7 +100,7 @@ async def chat_completions(request: Request):
     populate_giga_functions(data, getattr(state, "logger", None))
     if mode == "v2":
         async with gigachat_request_options(giga_client, request_options):
-            chat_request = await state.request_transformer.prepare_chat_completion_v2(
+            chat_request = await state.request_transformer.prepare_chat_completion(
                 data, giga_client
             )
         effective_model = resolve_gigachat_model(chat_request, state.config)
@@ -110,7 +111,7 @@ async def chat_completions(request: Request):
                 provider="openai",
             )
             await acquired_model_limit.__aenter__()
-            stream = stream_chat_completion_v2_generator(
+            stream = stream_chat_completion_generator(
                 request,
                 data["model"],
                 chat_request,
@@ -134,7 +135,7 @@ async def chat_completions(request: Request):
         async with model_limiter.limit(effective_model, provider="openai"):
             async with gigachat_request_options(giga_client, request_options):
                 response = await giga_client.achat.create(chat_request)
-        adapted = adapt_v2_completion_to_v1_shape(
+        adapted = adapt_chat_completion_to_chat_shape(
             response,
             default_model=data["model"],
         )
@@ -154,9 +155,7 @@ async def chat_completions(request: Request):
         return result
 
     async with gigachat_request_options(giga_client, request_options):
-        chat_messages = await state.request_transformer.prepare_chat_completion(
-            data, giga_client
-        )
+        chat_messages = await state.request_transformer.prepare_chat(data, giga_client)
     effective_model = resolve_gigachat_model(chat_messages, state.config)
     update_request_context(model_effective=effective_model)
     if not stream:
@@ -177,7 +176,7 @@ async def chat_completions(request: Request):
 
     acquired_model_limit = model_limiter.limit(effective_model, provider="openai")
     await acquired_model_limit.__aenter__()
-    stream = stream_chat_completion_generator(
+    stream = stream_chat_generator(
         request,
         data["model"],
         chat_messages,
@@ -230,6 +229,7 @@ async def _try_normalized_non_stream_chat(
             giga_client=giga_client,
             model_limiter=model_limiter,
             request_options=request_options,
+            api_mode=resolve_gigachat_api_mode(request),
         )
         normalized_response = await provider_adapter.chat(
             normalized_request,
@@ -297,6 +297,7 @@ async def _try_normalized_stream_chat(
             model_limiter=model_limiter,
             request_options=request_options,
             response_processor=state.response_processor,
+            api_mode=resolve_gigachat_api_mode(request),
         )
         response_id = context.request_id if context is not None else rquid_context.get()
         stream_span_events: list[dict[str, Any]] = []

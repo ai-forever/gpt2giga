@@ -51,6 +51,26 @@ def test_v1_prefix_router_is_registered(monkeypatch):
         assert response.status_code != 404
 
 
+def test_v2_prefix_router_is_registered(monkeypatch):
+    class FakeGigaChat:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aget_models(self):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(data=[], object_="list")
+
+    monkeypatch.setattr(
+        "gpt2giga.app.lifecycle.create_gigachat_client",
+        lambda settings: FakeGigaChat(),
+    )
+
+    with TestClient(create_app()) as client:
+        response = client.get("/v2/models")
+        assert response.status_code != 404
+
+
 def test_v1_litellm_router_is_registered(monkeypatch):
     class FakeGigaChat:
         def __init__(self, *args, **kwargs):

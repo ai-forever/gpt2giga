@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Mapping
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import gigachat
 
@@ -19,8 +19,8 @@ from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.core.context import RequestContext, update_request_context
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.response import (
-    adapt_v2_chunk_to_v1_shape,
-    adapt_v2_completion_to_v1_shape,
+    adapt_chat_completion_chunk_to_chat_chunk_shape,
+    adapt_chat_completion_to_chat_shape,
 )
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
@@ -50,6 +50,7 @@ class GigaChatProviderAdapter:
         model_limiter: ModelConcurrencyLimiter,
         request_options: Any = None,
         response_processor: Any = None,
+        api_mode: Literal["v1", "v2"] | None = None,
     ) -> None:
         self.config = config
         self.request_transformer = request_transformer
@@ -57,6 +58,7 @@ class GigaChatProviderAdapter:
         self.model_limiter = model_limiter
         self.request_options = request_options
         self.response_processor = response_processor
+        self.api_mode = api_mode
 
     async def complete(
         self,
@@ -75,10 +77,10 @@ class GigaChatProviderAdapter:
     ) -> NormalizedResponse:
         """Execute a non-streaming normalized chat request."""
         payload = normalized_chat_to_openai_payload(request)
-        mode = getattr(self.config.proxy_settings, "gigachat_api_mode", "v1")
+        mode = self._resolve_api_mode()
         if mode == "v2":
-            return await self._chat_v2(payload, request, context=context)
-        return await self._chat_v1(payload, request, context=context)
+            return await self._chat_completion(payload, request, context=context)
+        return await self._chat(payload, request, context=context)
 
     async def stream_chat(
         self,
@@ -93,9 +95,9 @@ class GigaChatProviderAdapter:
             raise RuntimeError("response_processor is required for streaming")
 
         payload = normalized_chat_to_openai_payload(request)
-        mode = getattr(self.config.proxy_settings, "gigachat_api_mode", "v1")
+        mode = self._resolve_api_mode()
         if mode == "v2":
-            async for event in self._stream_chat_v2(
+            async for event in self._stream_chat_completion(
                 payload,
                 request,
                 context=context,
@@ -105,7 +107,7 @@ class GigaChatProviderAdapter:
                 yield event
             return
 
-        async for event in self._stream_chat_v1(
+        async for event in self._stream_chat(
             payload,
             request,
             context=context,
@@ -114,7 +116,12 @@ class GigaChatProviderAdapter:
         ):
             yield event
 
-    async def _chat_v1(
+    def _resolve_api_mode(self) -> Literal["v1", "v2"]:
+        return self.api_mode or getattr(
+            self.config.proxy_settings, "gigachat_api_mode", "v1"
+        )
+
+    async def _chat(
         self,
         payload: dict[str, Any],
         request: NormalizedChatRequest,
@@ -122,7 +129,7 @@ class GigaChatProviderAdapter:
         context: RequestContext | None,
     ) -> NormalizedResponse:
         async with gigachat_request_options(self.giga_client, self.request_options):
-            chat_payload = await self.request_transformer.prepare_chat_completion(
+            chat_payload = await self.request_transformer.prepare_chat(
                 payload,
                 self.giga_client,
             )
@@ -137,7 +144,7 @@ class GigaChatProviderAdapter:
             context=context,
         )
 
-    async def _chat_v2(
+    async def _chat_completion(
         self,
         payload: dict[str, Any],
         request: NormalizedChatRequest,
@@ -145,7 +152,7 @@ class GigaChatProviderAdapter:
         context: RequestContext | None,
     ) -> NormalizedResponse:
         async with gigachat_request_options(self.giga_client, self.request_options):
-            chat_payload = await self.request_transformer.prepare_chat_completion_v2(
+            chat_payload = await self.request_transformer.prepare_chat_completion(
                 payload,
                 self.giga_client,
             )
@@ -154,7 +161,7 @@ class GigaChatProviderAdapter:
         async with self.model_limiter.limit(effective_model, provider="openai"):
             async with gigachat_request_options(self.giga_client, self.request_options):
                 response = await self.giga_client.achat.create(chat_payload)
-        adapted = adapt_v2_completion_to_v1_shape(
+        adapted = adapt_chat_completion_to_chat_shape(
             response,
             default_model=request.model or effective_model,
         )
@@ -164,7 +171,7 @@ class GigaChatProviderAdapter:
             context=context,
         )
 
-    async def _stream_chat_v1(
+    async def _stream_chat(
         self,
         payload: dict[str, Any],
         request: NormalizedChatRequest,
@@ -174,7 +181,7 @@ class GigaChatProviderAdapter:
         logger: Any,
     ):
         async with gigachat_request_options(self.giga_client, self.request_options):
-            chat_payload = await self.request_transformer.prepare_chat_completion(
+            chat_payload = await self.request_transformer.prepare_chat(
                 payload,
                 self.giga_client,
             )
@@ -221,7 +228,7 @@ class GigaChatProviderAdapter:
                 code="internal_error",
             )
 
-    async def _stream_chat_v2(
+    async def _stream_chat_completion(
         self,
         payload: dict[str, Any],
         request: NormalizedChatRequest,
@@ -231,7 +238,7 @@ class GigaChatProviderAdapter:
         logger: Any,
     ):
         async with gigachat_request_options(self.giga_client, self.request_options):
-            chat_payload = await self.request_transformer.prepare_chat_completion_v2(
+            chat_payload = await self.request_transformer.prepare_chat_completion(
                 payload,
                 self.giga_client,
             )
@@ -250,7 +257,7 @@ class GigaChatProviderAdapter:
                         if await _is_disconnected(is_disconnected):
                             _log_disconnect(logger, context)
                             break
-                        adapted = adapt_v2_chunk_to_v1_shape(
+                        adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
                             chunk,
                             default_model=request.model or effective_model,
                         )

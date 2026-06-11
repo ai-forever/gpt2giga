@@ -98,7 +98,10 @@ print(response.content[0].text)
 
 ## Текущая API-Поверхность
 
-Смонтированные routes доступны и в корне, и под `/v1`, например `/chat/completions` и `/v1/chat/completions`.
+Смонтированные routes доступны в корне и под versioned prefixes. Root routes
+используют `GPT2GIGA_GIGACHAT_API_MODE`, `/v1` принудительно выбирает GigaChat
+v1 contract, `/v2` принудительно выбирает GigaChat v2 contract. Например:
+`/chat/completions`, `/v1/chat/completions` и `/v2/chat/completions`.
 
 Поддерживается:
 
