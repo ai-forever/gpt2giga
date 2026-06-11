@@ -14,6 +14,7 @@ from gpt2giga.app.settings import (
 )
 from gpt2giga.api.admin import debug_router, logs_router as admin_logs_router
 from gpt2giga.api.anthropic import router as anthropic_router
+from gpt2giga.api.gemini import router as gemini_router
 from gpt2giga.api.openai import router as openai_router
 from gpt2giga.api.system.metrics import mount_metrics_endpoint
 from gpt2giga.auth import verify_api_key
@@ -27,6 +28,7 @@ from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.openapi_tags import build_openapi_tags_metadata
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
+from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.routers.litellm import router as litellm_router
 from gpt2giga.routers.logs_router import logs_api_router, logs_router
 from gpt2giga.routers.system_router import system_router
@@ -61,6 +63,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     )
     app.state.config = config
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
+    app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
     app.state.traffic_log_sink = create_traffic_log_sink(config.proxy_settings)
     app.state.conversation_store = MemoryConversationStore()
     app.state.traffic_log_query_store = create_traffic_log_query_store(
@@ -83,6 +86,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         valid_roots=[
             "v1",
             "v2",
+            "v1beta",
             "chat",
             "models",
             "embeddings",
@@ -145,6 +149,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         dependencies=v2_dependencies,
     )
     app.include_router(anthropic_router, dependencies=api_dependencies)
+    app.include_router(
+        gemini_router,
+        prefix="/v1beta",
+        dependencies=api_dependencies,
+    )
     app.include_router(
         litellm_router,
         prefix="/v1",

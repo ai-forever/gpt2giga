@@ -9,7 +9,7 @@
 
 ![Coverage](./badges/coverage.svg)
 
-`gpt2giga` — FastAPI-прокси, который принимает OpenAI-совместимые и Anthropic-совместимые запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic API, а реальный backend должен быть GigaChat.
+`gpt2giga` — FastAPI-прокси, который принимает OpenAI-, Anthropic- и Gemini-like запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный фреймворк или SDK умеет работать с OpenAI/Anthropic/Gemini API, а реальный backend должен быть GigaChat.
 
 Локальный адрес по умолчанию: `http://localhost:8090`.
 
@@ -19,12 +19,12 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 
 `gpt2giga` закрывает практические несовместимости:
 
-- переводит OpenAI Chat Completions, OpenAI Responses, OpenAI Embeddings и Anthropic Messages в вызовы GigaChat;
+- переводит OpenAI Chat Completions, OpenAI Responses, OpenAI Embeddings, Anthropic Messages и Gemini GenerateContent в вызовы GigaChat;
 - маппит tools/function calling, structured output, изображения, reasoning flags и SSE streaming там, где GigaChat поддерживает базовую возможность;
 - принимает и безопасно игнорирует optional-поля OpenAI/Anthropic, которые SDK присылают, но GigaChat не понимает;
 - фильтрует транспортные SDK headers, клиентские API keys, cookies и другие небезопасные метаданные перед upstream;
 - отделяет клиентскую API-key авторизацию прокси от GigaChat credentials;
-- отдаёт список моделей в OpenAI-, Anthropic- и LiteLLM-совместимом виде;
+- отдаёт список моделей в OpenAI-, Anthropic-, Gemini- и LiteLLM-совместимом виде;
 - держит batch/file routes отключёнными, пока их нельзя выполнить end-to-end через GigaChat SDK/backend.
 
 Подробная матрица поддержки и список реальных ограничений вынесены в [API Compatibility](./docs/api-compatibility.md).
@@ -107,6 +107,7 @@ v1 contract, `/v2` принудительно выбирает GigaChat v2 contr
 
 - OpenAI-compatible `GET /models`, `GET /models/{model}`, `POST /chat/completions`, `POST /responses`, `POST /embeddings`;
 - Anthropic-compatible `POST /messages`, `POST /messages/count_tokens`, а также Anthropic-shaped model responses для model-вызовов Anthropic SDK;
+- Gemini-compatible `/v1beta/models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens`, `:embedContent`, `:batchEmbedContents`, а также `/v1beta/models`;
 - LiteLLM-compatible `GET /model/info`;
 - системные endpoints `GET /health` и `GET|POST /ping`.
 
@@ -114,6 +115,7 @@ v1 contract, `/v2` принудительно выбирает GigaChat v2 contr
 
 - OpenAI-compatible Files API и Batches API;
 - Anthropic Message Batches API.
+- Gemini-compatible Files API и Batch GenerateContent API.
 
 Сейчас не является целью проекта:
 

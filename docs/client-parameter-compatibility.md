@@ -1,13 +1,16 @@
 # Совместимость параметров клиентов
 
 Этот документ служит публичным справочником совместимости параметров клиентских
-SDK OpenAI и Anthropic в gpt2giga. Он отражает текущую структуру исходного кода:
+SDK OpenAI, Anthropic и Gemini-like clients в gpt2giga. Он отражает текущую
+структуру исходного кода:
 
 - роутеры OpenAI: `gpt2giga/routers/openai/`
 - роутеры Anthropic: `gpt2giga/routers/anthropic/`
+- роутеры Gemini: `gpt2giga/routers/gemini/`
 - общие политики запросов: `gpt2giga/common/client_params.py`
 - классификация запросов OpenAI: `gpt2giga/protocol/request/params.py`
 - классификация запросов Anthropic: `gpt2giga/protocol/anthropic/params.py`
+- Gemini adapter: `gpt2giga/protocols/gemini/`
 
 Другие семейства клиентов в этой проверке совместимости не рассматриваются.
 
@@ -124,8 +127,30 @@ Anthropic `metadata`, `service_tier`, `top_k`, beta-заголовки и `betas
 Код Anthropic Message Batches существует, но публичный роутер не подключается,
 пока в GigaChat SDK или backend не появится поддержка batch-операций.
 
+## Параметры тела Gemini
+
+Gemini-like routes доступны под `/v1beta`, например
+`/v1beta/models/{model}:generateContent`.
+
+| Эндпоинт | Поддерживается |
+|---|---|
+| Generate Content | `contents`, `systemInstruction`, `generationConfig.temperature`, `generationConfig.topP`, `generationConfig.maxOutputTokens`, `generationConfig.stopSequences`, `generationConfig.seed`, `generationConfig.presencePenalty`, `generationConfig.frequencyPenalty`, function `tools.functionDeclarations`, базовый `toolConfig.functionCallingConfig`, text/image/file parts |
+| Stream Generate Content | Те же поля, что Generate Content; ответ отдаётся как Gemini `GenerateContentResponse` SSE chunks. |
+| Count Tokens | Текстовые части `contents`, `systemInstruction` и имена/описания function declarations. |
+| Embeddings | `content.parts[].text`, `requests[].content.parts[].text` для batch embeddings, `outputDimensionality` принимается как compatibility metadata. |
+| Models | `GET /v1beta/models`, `GET /v1beta/models/{model}` |
+
+Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store`,
+unsupported subfields `generationConfig` и non-function built-in tools
+принимаются и сохраняются в normalized extensions для диагностики, но не
+передаются в GigaChat как исполняемые параметры и не применяются прокси.
+
+Код Gemini Files и Batches существует, но публичный роутер не подключается,
+пока file/batch execution не будет проверен end-to-end.
+
 ## Область маршрутов
 
 Подключенные маршруты доступны и в корне, и под `/v1` через роутер приложения.
-Подготовленные, но отключенные маршруты OpenAI Files/Batches и Anthropic Message
-Batches намеренно исключены из схемы OpenAPI по умолчанию.
+Gemini-compatible маршруты доступны только под `/v1beta`.
+Подготовленные, но отключенные маршруты OpenAI Files/Batches, Anthropic Message
+Batches и Gemini Files/Batches намеренно исключены из схемы OpenAPI по умолчанию.

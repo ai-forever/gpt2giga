@@ -11,12 +11,13 @@
 | OpenAI Chat Completions JSON | У GigaChat другие форматы messages, tools, attachments и responses. | Конвертирует requests/responses, включая streaming chunks. |
 | OpenAI Responses API | У GigaChat нет такой же `/responses` route и schema для output items. | Принимает `/responses`, маппит input/instructions/tools и нормализует output items там, где это возможно. |
 | Anthropic Messages API | Anthropic content blocks, tool use, `system`, `max_tokens` и stream events не совпадают с GigaChat. | Конвертирует Anthropic payloads в GigaChat-compatible chat requests и маппит ответы обратно. |
+| Gemini GenerateContent API | Gemini `contents`/`parts`, candidates, function declarations, token counting и SSE chunks отличаются от OpenAI/Anthropic и GigaChat. | Принимает Gemini-like `/v1beta` requests, переводит их в normalized chat/embeddings requests и маппит ответы обратно в Gemini shape. |
 | SDK `extra_headers`, `extra_query`, `extra_body` | SDK могут прислать transport-поля или optional model-поля, которые GigaChat не принимает. | Фильтрует опасные headers, передаёт только разрешённые metadata, прокидывает GigaChat-specific `extra_body` и игнорирует известные unsupported optional fields. |
 | Streaming SSE | OpenAI и Anthropic SDK ждут свои event names и delta shapes. | Генерирует OpenAI/Anthropic-compatible SSE из GigaChat streaming responses. |
 | Tools и structured output | Function/tool schemas и JSON-schema controls отличаются между провайдерами и backend modes. | Маппит local tools/functions и даёт function-call fallback для structured outputs. |
 | Авторизация | OpenAI/Anthropic клиенты работают с API keys, а GigaChat требует другой credentials/scope механизм. | Разделяет proxy API-key auth и upstream GigaChat auth, при необходимости поддерживает per-request pass-through. |
 | Model discovery | GigaChat model responses не совпадают с OpenAI/Anthropic/LiteLLM shape. | Переупаковывает список и описание моделей под нужный клиент. |
-| OpenAI/Anthropic batch routes | У установленного GigaChat SDK/backend нет полного create/list/retrieve/cancel flow для batch APIs. | Держит Files/Batches routers отключёнными, пока они не смогут работать end-to-end. |
+| OpenAI/Anthropic/Gemini batch routes | У установленного GigaChat SDK/backend нет полного create/list/retrieve/cancel flow для batch APIs. | Держит Files/Batches routers отключёнными, пока они не смогут работать end-to-end. |
 
 ## Смонтированные routes
 
@@ -29,6 +30,7 @@ contract, `/v2` принудительно выбирает GigaChat v2 contract
 - `/chat/completions`, `/v1/chat/completions` и `/v2/chat/completions`
 - `/responses`, `/v1/responses` и `/v2/responses`
 - `/messages`, `/v1/messages` и `/v2/messages`
+- `/v1beta/models/{model}:generateContent`
 
 ## OpenAI-compatible routes
 
@@ -61,6 +63,23 @@ contract, `/v2` принудительно выбирает GigaChat v2 contract
 | Skills API beta | Не реализовано | Сейчас вне scope. |
 | Agents, Sessions, Environments, Admin beta APIs | Не реализовано | Сейчас вне scope. |
 
+## Gemini-compatible routes
+
+Gemini-like routes монтируются только под `/v1beta`, чтобы не конфликтовать с
+OpenAI/Anthropic root и `/v1` поверхностями.
+
+| Route / group | Статус | Комментарий |
+|---|---|---|
+| `GET /v1beta/models` | Поддерживается | Список GigaChat models в Gemini `models/*` форме. |
+| `GET /v1beta/models/{model}` | Поддерживается | Одна модель в Gemini `Model` форме. |
+| `POST /v1beta/models/{model}:generateContent` | Поддерживается | Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations и multimodal parts маппятся в normalized chat request. |
+| `POST /v1beta/models/{model}:streamGenerateContent` | Поддерживается | Возвращает `text/event-stream` с Gemini `GenerateContentResponse` chunks. |
+| `POST /v1beta/models/{model}:countTokens` | Поддерживается | Считает текстовые части contents/system/tools через GigaChat token counting. |
+| `POST /v1beta/models/{model}:embedContent` | Поддерживается | Возвращает Gemini `embedding.values`, используя GigaChat embeddings backend. |
+| `POST /v1beta/models/{model}:batchEmbedContents` | Поддерживается | Возвращает Gemini `embeddings[]`, используя GigaChat embeddings backend. |
+| `POST /v1beta/files`, `GET /v1beta/files*` | Отключено | Router-код подготовлен, но не смонтирован по умолчанию. |
+| `POST /v1beta/models/{model}:batchGenerateContent`, `GET /v1beta/batches*` | Отключено | Router-код подготовлен, но не смонтирован до end-to-end batch execution. |
+
 ## Политика совместимости
 
 `gpt2giga` намеренно принимает многие optional SDK fields, которые GigaChat не может исполнить. Это не даёт клиентам падать до того, как полезная часть запроса попадёт в модель.
@@ -69,6 +88,7 @@ contract, `/v2` принудительно выбирает GigaChat v2 contract
 
 - OpenAI metadata и tuning knobs: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
 - Anthropic optional fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, server tools, citations, unsupported document/file content blocks.
+- Gemini optional fields: `safetySettings`, `cachedContent`, `serviceTier`, unsupported `generationConfig` subfields and non-function built-in tools are accepted/preserved for diagnostics but are not enforced by GigaChat.
 
 Если поле намеренно игнорируется, оно не отправляется upstream как исполняемая GigaChat feature. Literal `extra_body` object может быть передан в GigaChat `additional_fields`; в таком случае поддержку определяет GigaChat API.
 

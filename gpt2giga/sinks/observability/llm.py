@@ -618,6 +618,8 @@ def _input_item_count(value: Any) -> int:
 def _chat_api_format(request: NormalizedChatRequest) -> str:
     if request.protocol == "anthropic":
         return "messages"
+    if request.protocol == "gemini":
+        return "generate_content"
     if request.operation == "responses":
         return "responses"
     return "chat_completions"

@@ -9,6 +9,9 @@ from gpt2giga.openapi_tags import (
     OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION,
     OPENAPI_TAG_ADMIN_TRAFFIC_LOGS,
     OPENAPI_TAG_ANTHROPIC_MESSAGES,
+    OPENAPI_TAG_GEMINI_EMBEDDINGS,
+    OPENAPI_TAG_GEMINI_GENERATE_CONTENT,
+    OPENAPI_TAG_GEMINI_MODELS,
     OPENAPI_TAG_LITELLM_MODEL_INFO,
     OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS,
     OPENAPI_TAG_OPENAI_EMBEDDINGS,
@@ -17,6 +20,7 @@ from gpt2giga.openapi_tags import (
     OPENAPI_TAG_SYSTEM_HEALTH,
     OPENAPI_TAG_SYSTEM_LOGS,
 )
+from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
 from gpt2giga.sinks.metrics.noop import NoopMetricsSink
@@ -147,6 +151,12 @@ def test_app_factory_creates_openai_protocol_adapter():
     assert isinstance(app.state.openai_protocol_adapter, OpenAIProtocolAdapter)
 
 
+def test_app_factory_creates_gemini_protocol_adapter():
+    app = create_app()
+
+    assert isinstance(app.state.gemini_protocol_adapter, GeminiProtocolAdapter)
+
+
 def test_app_with_unavailable_postgres_traffic_sink_still_serves_requests(
     monkeypatch,
 ):
@@ -209,6 +219,13 @@ def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
         ("post", "/v2/responses"): [OPENAPI_TAG_OPENAI_RESPONSES],
         ("post", "/embeddings"): [OPENAPI_TAG_OPENAI_EMBEDDINGS],
         ("get", "/models"): [OPENAPI_TAG_OPENAI_MODELS],
+        ("post", "/v1beta/models/{model}:generateContent"): [
+            OPENAPI_TAG_GEMINI_GENERATE_CONTENT
+        ],
+        ("post", "/v1beta/models/{model}:embedContent"): [
+            OPENAPI_TAG_GEMINI_EMBEDDINGS
+        ],
+        ("get", "/v1beta/models"): [OPENAPI_TAG_GEMINI_MODELS],
         ("post", "/messages"): [OPENAPI_TAG_ANTHROPIC_MESSAGES],
         ("post", "/v1/messages/count_tokens"): [OPENAPI_TAG_ANTHROPIC_MESSAGES],
         ("get", "/model/info"): [OPENAPI_TAG_LITELLM_MODEL_INFO],

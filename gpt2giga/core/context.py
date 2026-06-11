@@ -127,6 +127,8 @@ def _infer_protocol(path: str) -> str:
         or normalized.startswith("/messages")
     ):
         return "anthropic"
+    if normalized.startswith("/v1beta/"):
+        return "gemini"
     if normalized in {"/v1/model/info", "/v2/model/info", "/model/info"}:
         return "litellm"
     return "openai"

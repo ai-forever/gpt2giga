@@ -51,6 +51,7 @@ class GigaChatProviderAdapter:
         request_options: Any = None,
         response_processor: Any = None,
         api_mode: Literal["v1", "v2"] | None = None,
+        provider_label: str = "openai",
     ) -> None:
         self.config = config
         self.request_transformer = request_transformer
@@ -59,6 +60,7 @@ class GigaChatProviderAdapter:
         self.request_options = request_options
         self.response_processor = response_processor
         self.api_mode = api_mode
+        self.provider_label = provider_label
 
     async def complete(
         self,
@@ -135,7 +137,10 @@ class GigaChatProviderAdapter:
             )
         effective_model = resolve_gigachat_model(chat_payload, self.config)
         update_request_context(model_effective=effective_model)
-        async with self.model_limiter.limit(effective_model, provider="openai"):
+        async with self.model_limiter.limit(
+            effective_model,
+            provider=self.provider_label,
+        ):
             async with gigachat_request_options(self.giga_client, self.request_options):
                 response = await self.giga_client.achat(chat_payload)
         return gigachat_response_to_normalized(
@@ -158,7 +163,10 @@ class GigaChatProviderAdapter:
             )
         effective_model = resolve_gigachat_model(chat_payload, self.config)
         update_request_context(model_effective=effective_model)
-        async with self.model_limiter.limit(effective_model, provider="openai"):
+        async with self.model_limiter.limit(
+            effective_model,
+            provider=self.provider_label,
+        ):
             async with gigachat_request_options(self.giga_client, self.request_options):
                 response = await self.giga_client.achat.create(chat_payload)
         adapted = adapt_chat_completion_to_chat_shape(
@@ -191,7 +199,10 @@ class GigaChatProviderAdapter:
         yield mapper.message_start()
 
         try:
-            async with self.model_limiter.limit(effective_model, provider="openai"):
+            async with self.model_limiter.limit(
+                effective_model,
+                provider=self.provider_label,
+            ):
                 async with gigachat_request_options(
                     self.giga_client,
                     self.request_options,
@@ -248,7 +259,10 @@ class GigaChatProviderAdapter:
         yield mapper.message_start()
 
         try:
-            async with self.model_limiter.limit(effective_model, provider="openai"):
+            async with self.model_limiter.limit(
+                effective_model,
+                provider=self.provider_label,
+            ):
                 async with gigachat_request_options(
                     self.giga_client,
                     self.request_options,
@@ -338,7 +352,8 @@ def normalized_chat_to_openai_payload(
         if value is not None:
             payload[target] = value
 
-    payload.update(request.raw_extensions)
+    if request.protocol == "openai":
+        payload.update(request.raw_extensions)
     additional_fields = _gigachat_additional_fields(request.provider_metadata)
     if additional_fields:
         existing = payload.get("additional_fields")
