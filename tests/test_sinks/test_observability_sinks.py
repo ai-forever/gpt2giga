@@ -1,5 +1,6 @@
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -33,7 +34,10 @@ from gpt2giga.sinks.observability.otel import (
     OpenTelemetryObservabilitySink,
     build_otel_attributes,
 )
-from gpt2giga.sinks.observability.responses import OpenAIResponseStreamObserver
+from gpt2giga.sinks.observability.responses import (
+    OpenAIResponseStreamObserver,
+    emit_openai_response_observability,
+)
 
 
 def capture_off_settings() -> ProxySettings:
@@ -648,3 +652,47 @@ async def test_observability_safe_helpers_do_not_raise_on_sink_errors():
 
     await emit_observability_event(sink, "request.failed")
     await flush_observability_sink(sink)
+
+
+@pytest.mark.asyncio
+async def test_response_observability_uses_previous_response_id_as_session():
+    class RecordingSink:
+        def __init__(self):
+            self.events = []
+
+        async def emit(self, name, attributes=None, *, context=None, events=None):
+            self.events.append((name, attributes or {}, context, list(events or [])))
+
+        async def flush(self):
+            return None
+
+    sink = RecordingSink()
+    state = SimpleNamespace(
+        observability_sink=sink,
+        config=SimpleNamespace(proxy_settings=capture_off_settings()),
+        logger=None,
+    )
+
+    await emit_openai_response_observability(
+        state,
+        {
+            "model": "gpt-x",
+            "input": "hi",
+            "previous_response_id": "resp_thread_1",
+        },
+        {
+            "id": "resp_new",
+            "model": "gpt-x",
+            "status": "completed",
+            "output": [],
+            "usage": None,
+        },
+        context=None,
+    )
+
+    name, attributes, _context, events = sink.events[0]
+    assert name == "Responses"
+    assert attributes["gpt2giga.api_format"] == "responses"
+    assert attributes["session.id"] == "thread_1"
+    assert attributes["conversation.id"] == "thread_1"
+    assert events == []

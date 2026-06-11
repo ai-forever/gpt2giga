@@ -28,6 +28,7 @@ EMBEDDINGS_SPAN_NAME = "Embeddings"
 STREAM_SPAN_NAME = "stream.emit"
 OPENINFERENCE_SPAN_KIND = "LLM"
 OPENINFERENCE_EMBEDDING_SPAN_KIND = "EMBEDDING"
+GPT2GIGA_API_FORMAT_ATTRIBUTE = "gpt2giga.api_format"
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,7 @@ def build_llm_chat_completion_attributes(
     attrs.update(build_llm_response_attributes(response, settings=settings))
     attrs["llm.operation"] = request.operation
     attrs["llm.request.type"] = "chat"
+    attrs[GPT2GIGA_API_FORMAT_ATTRIBUTE] = _chat_api_format(request)
     return attrs
 
 
@@ -226,6 +228,7 @@ def build_llm_embeddings_attributes(
         "embedding.output.count": len(data) if isinstance(data, list) else 0,
         "embedding.encoding_format": request.encoding_format,
         "embedding.dimensions": request.dimensions,
+        GPT2GIGA_API_FORMAT_ATTRIBUTE: "embeddings",
         "llm.model_name": model,
         "llm.provider": "gigachat",
         "llm.operation": request.operation,
@@ -607,6 +610,14 @@ def _input_item_count(value: Any) -> int:
     if isinstance(value, list):
         return len(value)
     return 0 if value is None else 1
+
+
+def _chat_api_format(request: NormalizedChatRequest) -> str:
+    if request.protocol == "anthropic":
+        return "messages"
+    if request.operation == "responses":
+        return "responses"
+    return "chat_completions"
 
 
 def _stream_span_event_name(

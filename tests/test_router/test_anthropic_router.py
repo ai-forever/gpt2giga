@@ -1224,6 +1224,7 @@ class TestMessagesEndpoint:
         ]
         name, attributes, context, events = app.state.observability_sink.events[0]
         assert name == "Messages"
+        assert attributes["gpt2giga.api_format"] == "messages"
         assert context.protocol == "anthropic"
         assert context.caller_client_family == "anthropic"
         assert context.caller_sdk == "anthropic-python"
@@ -1744,6 +1745,7 @@ class TestMessagesEndpoint:
         ]
         _name, attributes, context, events = app.state.observability_sink.events[0]
         event_names = [event["name"] for event in events]
+        assert attributes["gpt2giga.api_format"] == "messages"
         assert context.protocol == "anthropic"
         assert context.caller_sdk == "anthropic-python"
         assert "stream.start" in event_names

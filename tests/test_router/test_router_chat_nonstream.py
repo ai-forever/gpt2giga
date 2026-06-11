@@ -154,6 +154,7 @@ def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
     attributes = emitted["ChatCompletion"]
+    assert attributes["gpt2giga.api_format"] == "chat_completions"
     assert "secret prompt" in attributes["input.value"]
     assert "ok" in attributes["output.value"]
     assert attributes["llm.response.metadata"] == (
@@ -230,6 +231,7 @@ def test_chat_completions_legacy_stream_emits_phoenix_input_output_span():
     attributes = emitted["ChatCompletion"]
 
     assert response.status_code == 200
+    assert attributes["gpt2giga.api_format"] == "chat_completions"
     assert "data: [DONE]" in body
     assert "secret prompt" in attributes["input.value"]
     assert "Hello" in attributes["output.value"]
@@ -297,6 +299,7 @@ def test_chat_completions_normalization_on_emits_safe_llm_observability_spans():
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
     assert list(emitted) == ["ChatCompletion"]
+    assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
     assert emitted["ChatCompletion"]["llm.input_messages.count"] == 1
     assert emitted["ChatCompletion"]["llm.finish_reason"] == "tool_calls"
     assert "secret prompt" not in json.dumps(emitted)
@@ -368,6 +371,7 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     assert "stream.completed" in event_names
     assert "stream.emit" not in emitted
     assert "ChatCompletion" in emitted
+    assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
     assert "hi" in emitted["ChatCompletion"]["input.value"]
 
 

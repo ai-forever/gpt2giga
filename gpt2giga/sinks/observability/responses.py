@@ -53,14 +53,16 @@ async def emit_openai_response_observability(
     span_events.extend(
         build_tool_call_span_events(normalized_response, settings=settings)
     )
+    attributes = build_llm_chat_completion_attributes(
+        normalized_request,
+        normalized_response,
+        settings=settings,
+    )
+    attributes.update(_responses_session_attributes(request_payload, response_payload))
     await emit_observability_event(
         sink,
         RESPONSES_SPAN_NAME,
-        build_llm_chat_completion_attributes(
-            normalized_request,
-            normalized_response,
-            settings=settings,
-        ),
+        attributes,
         context=context,
         events=span_events or None,
         logger=getattr(state, "logger", None),
@@ -173,6 +175,36 @@ def responses_payload_to_normalized_response(
         if isinstance(payload.get("metadata"), Mapping)
         else {},
     )
+
+
+def _responses_session_attributes(
+    request_payload: Mapping[str, Any],
+    response_payload: Mapping[str, Any],
+) -> dict[str, str]:
+    thread_id = _metadata_thread_id(
+        response_payload.get("metadata")
+    ) or _response_id_to_thread_id(request_payload.get("previous_response_id"))
+    if thread_id is None:
+        return {}
+    return {
+        "session.id": thread_id,
+        "conversation.id": thread_id,
+    }
+
+
+def _metadata_thread_id(value: Any) -> str | None:
+    if not isinstance(value, Mapping):
+        return None
+    return _string_or_none(value.get("gigachat_thread_id"))
+
+
+def _response_id_to_thread_id(value: Any) -> str | None:
+    response_id = _string_or_none(value)
+    if response_id is None:
+        return None
+    if response_id.startswith("resp_"):
+        return response_id.removeprefix("resp_") or None
+    return response_id
 
 
 class OpenAIResponseStreamObserver:

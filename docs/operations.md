@@ -199,6 +199,12 @@ Completions, `Responses` для Responses API, `Messages` для Anthropic Messa
 соответствующему root span как span events. Для non-LLM routes используется
 один lifecycle span `gpt2giga.request`.
 
+Для фильтрации и группировки по совместимому API-формату model spans получают
+атрибут `gpt2giga.api_format`: `chat_completions`, `responses`, `messages` или
+`embeddings`. Stateful Responses дополнительно получают `session.id` и
+`conversation.id` из GigaChat `thread_id`; если upstream thread id ещё не
+доступен, используется `previous_response_id` без префикса `resp_`.
+
 OpenTelemetry span start time берётся из gateway `RequestContext.started_at`,
 поэтому Phoenix `Latency` отражает полное время request/stream, а не только
 время финальной отправки observability span. То же значение дополнительно

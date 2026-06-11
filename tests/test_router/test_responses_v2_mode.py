@@ -235,6 +235,7 @@ def test_responses_v1_non_stream_emits_phoenix_llm_span():
     attributes, events = emitted["Responses"]
 
     assert response.status_code == 200
+    assert attributes["gpt2giga.api_format"] == "responses"
     assert attributes["llm.operation"] == "responses"
     assert attributes["llm.streaming"] is False
     assert attributes["status"] == "ok"
@@ -249,6 +250,7 @@ def test_responses_v1_non_stream_emits_phoenix_llm_span():
 def test_responses_v2_uses_thread_id_as_response_id():
     app = make_app("v2", "inherit")
     app.state.gigachat_client.achat.thread_id = "thread_1"
+    app.state.observability_sink = RecordingObservabilitySink()
     client = TestClient(app)
 
     response = client.post(
@@ -261,6 +263,13 @@ def test_responses_v2_uses_thread_id_as_response_id():
 
     assert response.status_code == 200
     assert response.json()["id"] == "resp_thread_1"
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+    assert emitted["Responses"]["gpt2giga.api_format"] == "responses"
+    assert emitted["Responses"]["session.id"] == "thread_1"
+    assert emitted["Responses"]["conversation.id"] == "thread_1"
 
 
 def test_responses_v2_stream_uses_primary_stream():
@@ -323,6 +332,7 @@ def test_responses_v2_stream_emits_phoenix_llm_span():
     event_names = [event["name"] for event in events]
 
     assert response.status_code == 200
+    assert attributes["gpt2giga.api_format"] == "responses"
     assert "event: response.completed" in body
     assert attributes["llm.operation"] == "responses"
     assert attributes["llm.streaming"] is True
@@ -337,6 +347,7 @@ def test_responses_v2_stream_emits_phoenix_llm_span():
 def test_responses_v2_stream_uses_thread_id_as_response_id():
     app = make_app("v2", "inherit")
     app.state.gigachat_client.achat.thread_id = "thread_1"
+    app.state.observability_sink = RecordingObservabilitySink()
     client = TestClient(app)
 
     with client.stream(
@@ -362,3 +373,9 @@ def test_responses_v2_stream_uses_thread_id_as_response_id():
     )
     assert payload["response"]["id"] == "resp_thread_1"
     assert payload["response"]["previous_response_id"] == "resp_previous"
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+    assert emitted["Responses"]["session.id"] == "thread_1"
+    assert emitted["Responses"]["conversation.id"] == "thread_1"
