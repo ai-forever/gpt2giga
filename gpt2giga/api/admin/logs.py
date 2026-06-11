@@ -565,7 +565,7 @@ async def _dispatch_replay_request(
         (b"x-gpt2giga-replay", b"true"),
     ]
     settings = request.app.state.config.proxy_settings
-    if settings.enable_api_key_auth and settings.api_key:
+    if (settings.enable_api_key_auth or settings.mode == "PROD") and settings.api_key:
         headers.append((b"authorization", f"Bearer {settings.api_key}".encode()))
 
     messages = [{"type": "http.request", "body": payload, "more_body": False}]

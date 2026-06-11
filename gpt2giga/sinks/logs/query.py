@@ -70,7 +70,8 @@ def create_traffic_log_query_store(
     logger: Any | None = None,
 ) -> TrafficLogQueryStore:
     """Create the configured traffic log query store."""
-    if settings.traffic_log_sink == "postgres" and settings.traffic_log_postgres_dsn:
+    configured_sinks = settings.traffic_log_sinks or [settings.traffic_log_sink]
+    if "postgres" in configured_sinks and settings.traffic_log_postgres_dsn:
         return PostgresTrafficLogQueryStore(
             settings.traffic_log_postgres_dsn,
             logger=logger,

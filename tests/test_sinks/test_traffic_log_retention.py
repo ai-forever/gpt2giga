@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 import pytest
 
 from gpt2giga.models.config import ProxySettings
+from gpt2giga.sinks.logs.postgres import PostgresTrafficLogQueryStore
+from gpt2giga.sinks.logs.query import create_traffic_log_query_store
 from gpt2giga.sinks.logs.retention import (
     purge_expired_traffic_logs,
     retention_cutoff,
@@ -33,6 +35,18 @@ def test_traffic_log_retention_enabled_only_for_postgres_logging():
             traffic_log_postgres_dsn="postgresql://example",
         )
     )
+
+
+def test_traffic_log_query_store_uses_postgres_from_mirror_sinks():
+    store = create_traffic_log_query_store(
+        ProxySettings(
+            traffic_log_enabled=True,
+            traffic_log_sinks=["postgres", "opensearch"],
+            traffic_log_postgres_dsn="postgresql://example",
+        )
+    )
+
+    assert isinstance(store, PostgresTrafficLogQueryStore)
 
 
 def test_retention_cutoff_uses_utc_window():

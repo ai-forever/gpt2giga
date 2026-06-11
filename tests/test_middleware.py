@@ -222,6 +222,24 @@ def test_rquid_middleware_sets_request_context_and_header():
     assert "local-secret" not in data["api_key_hash"]
 
 
+def test_rquid_middleware_infers_v2_protocols():
+    test_app = FastAPI()
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v2/messages")
+    async def anthropic_context():
+        return {"protocol": get_request_context().protocol}
+
+    @test_app.get("/v2/model/info")
+    async def litellm_context():
+        return {"protocol": get_request_context().protocol}
+
+    client = TestClient(test_app)
+
+    assert client.get("/v2/messages").json()["protocol"] == "anthropic"
+    assert client.get("/v2/model/info").json()["protocol"] == "litellm"
+
+
 def test_read_request_json_updates_request_context_model():
     test_app = FastAPI()
     test_app.add_middleware(RquidMiddleware)

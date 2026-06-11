@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 
 from gpt2giga.api.admin import logs_router
 from gpt2giga.app.factory import create_app
+from gpt2giga.auth import verify_api_key
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.sinks.logs.query import TrafficLogQueryUnavailable
 
@@ -388,6 +389,35 @@ def test_admin_logs_replay_dispatches_sanitized_request_with_metadata():
     assert metadata["tenant"] == "tenant-1"
     assert metadata["gpt2giga_replay"]["source_log_id"] == EVENT_ID
     assert metadata["gpt2giga_replay"]["source_request_id"] == "req-1"
+
+
+def test_admin_logs_replay_injects_api_key_when_prod_requires_auth():
+    replayed = []
+    app = FastAPI()
+    app.include_router(logs_router)
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            mode="PROD",
+            api_key="client-secret",
+            admin_api_enabled=True,
+            admin_api_key="secret",
+            replay_enabled=True,
+        )
+    )
+    app.state.traffic_log_query_store = FakeTrafficLogQueryStore([_record()])
+
+    @app.post("/v1/chat/completions", dependencies=[Depends(verify_api_key)])
+    async def replay_target(request: Request):
+        replayed.append(dict(request.headers))
+        return {"ok": True}
+
+    client = TestClient(app)
+
+    response = client.post(f"/_admin/logs/{EVENT_ID}/replay", headers=_headers())
+
+    assert response.status_code == 200
+    assert response.json()["response"]["status_code"] == 200
+    assert replayed[0]["authorization"] == "Bearer client-secret"
 
 
 def test_admin_logs_replay_rejects_admin_routes():
