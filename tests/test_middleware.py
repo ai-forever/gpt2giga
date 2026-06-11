@@ -11,6 +11,8 @@ from starlette.testclient import TestClient
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.core.context import RequestContext
 from gpt2giga.core.context import get_request_context
+from gpt2giga.models.config import ProxyConfig
+from gpt2giga.models.config import ProxySettings
 from gpt2giga.middlewares.rquid_context import RquidMiddleware
 from gpt2giga.middlewares.pass_token import PassTokenMiddleware
 from gpt2giga.middlewares.path_normalizer import PathNormalizationMiddleware
@@ -332,6 +334,57 @@ def test_rquid_middleware_emits_traffic_event_for_completed_request():
     assert event.api_key_hash.startswith("pbkdf2-sha256:")
     assert event.metadata["lifecycle"] == "request_completed"
     assert event.latency_ms >= 0
+
+
+def test_rquid_middleware_captures_redacted_traffic_payloads_when_enabled():
+    test_app = FastAPI()
+    sink = RecordingTrafficSink()
+    test_app.state.traffic_log_sink = sink
+    test_app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            traffic_log_capture_content=True,
+            traffic_log_redact_extra_keys=["custom_secret", "x-custom-secret"],
+        )
+    )
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.post("/chat/completions")
+    async def chat(request: Request):
+        data = await read_request_json(request)
+        return {
+            "ok": True,
+            "content": data["messages"][0]["content"],
+            "token": "response-secret",
+        }
+
+    client = TestClient(test_app)
+    response = client.post(
+        "/chat/completions",
+        headers={
+            "Authorization": "Bearer local-secret",
+            "x-custom-secret": "header-secret",
+        },
+        json={
+            "model": "GigaChat",
+            "api_key": "body-secret",
+            "custom_secret": "body-custom-secret",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(sink.events) == 1
+    event = sink.events[0]
+    assert event.request_headers_redacted["authorization"] == "***"
+    assert event.request_headers_redacted["x-custom-secret"] == "***"
+    assert event.request_body_redacted["api_key"] == "***"
+    assert event.request_body_redacted["custom_secret"] == "***"
+    assert event.request_body_redacted["messages"][0]["content"] == "hello"
+    assert event.response_body_redacted == {
+        "ok": True,
+        "content": "hello",
+        "token": "***",
+    }
 
 
 def test_rquid_middleware_emits_observability_event_for_completed_request():

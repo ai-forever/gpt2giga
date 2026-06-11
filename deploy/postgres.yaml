@@ -44,6 +44,8 @@ services:
       - "127.0.0.1:${GPT2GIGA_POSTGRES_PORT:-5432}:5432"
     volumes:
       - gpt2giga-postgres-data:/var/lib/postgresql/data
+      - ./postgres-init/001_apply_traffic_log_migration.sh:/docker-entrypoint-initdb.d/001_apply_traffic_log_migration.sh:ro
+      - ../gpt2giga/storage/postgres/migrations:/gpt2giga-migrations:ro
     healthcheck:
       test:
         [

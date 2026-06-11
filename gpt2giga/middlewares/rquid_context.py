@@ -7,6 +7,7 @@ from starlette.requests import Request
 from gpt2giga.core.context import build_request_context, request_context_var
 from gpt2giga.logger import logger, rquid_context
 from gpt2giga.sinks.logs.emission import (
+    capture_traffic_request_headers,
     emit_request_traffic_event,
     is_streaming_content_type,
     wrap_traffic_log_body_iterator,
@@ -28,6 +29,7 @@ class RquidMiddleware(BaseHTTPMiddleware):
         """
         rquid = str(uuid.uuid4())
         request_context = build_request_context(request, request_id=rquid)
+        capture_traffic_request_headers(request, request_context)
         token = rquid_context.set(rquid)
         context_token = request_context_var.set(request_context)
         request.state.request_context = request_context
@@ -75,6 +77,11 @@ class RquidMiddleware(BaseHTTPMiddleware):
         sink = getattr(request.app.state, "traffic_log_sink", None)
         observability_sink = getattr(request.app.state, "observability_sink", None)
         metrics_sink = getattr(request.app.state, "metrics_sink", None)
+        proxy_settings = getattr(
+            getattr(request.app.state, "config", None),
+            "proxy_settings",
+            None,
+        )
         content_type = response.headers.get("content-type")
         is_streaming = is_streaming_content_type(content_type)
         if hasattr(response, "body_iterator"):
@@ -86,6 +93,21 @@ class RquidMiddleware(BaseHTTPMiddleware):
                         context=request_context,
                         status_code=response.status_code,
                         is_streaming=is_streaming,
+                        capture_content=getattr(
+                            proxy_settings,
+                            "traffic_log_capture_content",
+                            False,
+                        ),
+                        redact_sensitive=getattr(
+                            proxy_settings,
+                            "traffic_log_redact_sensitive",
+                            True,
+                        ),
+                        redact_extra_keys=getattr(
+                            proxy_settings,
+                            "traffic_log_redact_extra_keys",
+                            None,
+                        ),
                         logger=getattr(request.app.state, "logger", None),
                     ),
                     sink=observability_sink,

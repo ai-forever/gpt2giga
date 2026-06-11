@@ -7,12 +7,16 @@ from collections.abc import AsyncIterator
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
+import json
 
 from gpt2giga.core.context import RequestContext
+from gpt2giga.core.context import get_request_context
+from gpt2giga.core.redaction import redact_traffic_payload
 from gpt2giga.sinks.logs.factory import emit_traffic_log
 from gpt2giga.sinks.logs.models import TrafficLogEvent
 
 STREAMING_CONTENT_TYPES = ("text/event-stream",)
+MAX_CAPTURED_RESPONSE_BODY_BYTES = 1_000_000
 
 
 def build_request_traffic_event(
@@ -58,6 +62,9 @@ def build_request_traffic_event(
         api_key_hash=context.api_key_hash,
         client_ip_hash=context.client_ip_hash,
         metadata=merged_metadata,
+        request_headers_redacted=context.request_headers_redacted,
+        request_body_redacted=context.request_body_redacted,
+        response_body_redacted=context.response_body_redacted,
     )
 
 
@@ -93,11 +100,26 @@ async def wrap_traffic_log_body_iterator(
     context: RequestContext,
     status_code: int,
     is_streaming: bool,
+    capture_content: bool = False,
+    redact_sensitive: bool = True,
+    redact_extra_keys: list[str] | None = None,
     logger: Any | None = None,
 ) -> AsyncIterator[Any]:
     """Emit request/stream traffic events after the response body is consumed."""
+    captured_chunks: list[bytes] = []
+    captured_size = 0
+    truncated = False
     try:
         async for chunk in body_iterator:
+            if capture_content and not is_streaming and not truncated:
+                chunk_bytes = _chunk_to_bytes(chunk)
+                if chunk_bytes is not None:
+                    remaining = MAX_CAPTURED_RESPONSE_BODY_BYTES - captured_size
+                    if remaining > 0:
+                        captured_chunks.append(chunk_bytes[:remaining])
+                        captured_size += min(len(chunk_bytes), remaining)
+                    if len(chunk_bytes) > remaining:
+                        truncated = True
             yield chunk
     except asyncio.CancelledError:
         await emit_request_traffic_event(
@@ -121,6 +143,13 @@ async def wrap_traffic_log_body_iterator(
         )
         raise
     else:
+        if capture_content and not is_streaming:
+            context.response_body_redacted = _decode_captured_body(
+                b"".join(captured_chunks),
+                truncated=truncated,
+                redact_sensitive=redact_sensitive,
+                redact_extra_keys=redact_extra_keys,
+            )
         await emit_request_traffic_event(
             sink,
             context,
@@ -136,6 +165,73 @@ def is_streaming_content_type(content_type: str | None) -> bool:
         return False
     normalized = content_type.split(";", 1)[0].strip().lower()
     return normalized in STREAMING_CONTENT_TYPES
+
+
+def capture_traffic_request_headers(request: Any, context: RequestContext) -> None:
+    """Capture redacted request headers when traffic-log content capture is enabled."""
+    settings = _proxy_settings(request)
+    if not getattr(settings, "traffic_log_capture_content", False):
+        return
+    context.request_headers_redacted = redact_traffic_payload(
+        dict(request.headers),
+        enabled=getattr(settings, "traffic_log_redact_sensitive", True),
+        extra_keys=getattr(settings, "traffic_log_redact_extra_keys", None),
+    )
+
+
+def capture_traffic_request_body(request: Any, payload: Mapping[str, Any]) -> None:
+    """Capture a redacted parsed JSON request body for traffic logs."""
+    settings = _proxy_settings(request)
+    if not getattr(settings, "traffic_log_capture_content", False):
+        return
+    context = get_request_context()
+    if context is None:
+        return
+    context.request_body_redacted = redact_traffic_payload(
+        dict(payload),
+        enabled=getattr(settings, "traffic_log_redact_sensitive", True),
+        extra_keys=getattr(settings, "traffic_log_redact_extra_keys", None),
+    )
+
+
+def _decode_captured_body(
+    body: bytes,
+    *,
+    truncated: bool,
+    redact_sensitive: bool,
+    redact_extra_keys: list[str] | None,
+) -> Any:
+    if not body:
+        return None
+    text = body.decode("utf-8", errors="replace")
+    try:
+        payload: Any = json.loads(text)
+    except json.JSONDecodeError:
+        payload = text
+    payload = redact_traffic_payload(
+        payload,
+        enabled=redact_sensitive,
+        extra_keys=redact_extra_keys,
+    )
+    if not truncated:
+        return payload
+    return {
+        "truncated": True,
+        "max_bytes": MAX_CAPTURED_RESPONSE_BODY_BYTES,
+        "body": payload,
+    }
+
+
+def _chunk_to_bytes(chunk: Any) -> bytes | None:
+    if isinstance(chunk, bytes):
+        return chunk
+    if isinstance(chunk, str):
+        return chunk.encode("utf-8")
+    return None
+
+
+def _proxy_settings(request: Any) -> Any:
+    return getattr(getattr(request.app.state, "config", None), "proxy_settings", None)
 
 
 def _latency_ms(started_at: datetime) -> float:

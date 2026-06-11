@@ -40,6 +40,9 @@ class RequestContext:
     model_requested: Optional[str] = None
     model_effective: Optional[str] = None
     llm_observability_emitted: bool = False
+    request_headers_redacted: Any | None = None
+    request_body_redacted: Any | None = None
+    response_body_redacted: Any | None = None
     annotations: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
