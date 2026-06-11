@@ -18,6 +18,7 @@ from gpt2giga.api.admin.access import verify_admin_key
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.core.interfaces import TrafficLogQueryStore
 from gpt2giga.core.redaction import redact_traffic_payload
+from gpt2giga.openapi_tags import OPENAPI_TAG_ADMIN_TRAFFIC_LOGS
 from gpt2giga.sinks.logs.query import TrafficLogQueryUnavailable
 from gpt2giga.sinks.logs.retention import (
     DEFAULT_RETENTION_BATCH_SIZE,
@@ -61,7 +62,7 @@ CSV_EXPORT_COLUMNS = [
 
 router = APIRouter(
     prefix="/_admin/logs",
-    tags=["Admin"],
+    tags=[OPENAPI_TAG_ADMIN_TRAFFIC_LOGS],
     dependencies=[Depends(verify_admin_key)],
 )
 

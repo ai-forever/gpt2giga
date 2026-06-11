@@ -8,10 +8,11 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse
 
 from gpt2giga.common import exceptions_handler, verify_logs_ip_allowlist
+from gpt2giga.openapi_tags import OPENAPI_TAG_SYSTEM_LOGS
 
-logs_api_router = APIRouter(tags=["System logs"])
+logs_api_router = APIRouter(tags=[OPENAPI_TAG_SYSTEM_LOGS])
 
-logs_router = APIRouter(tags=["HTML logs"])
+logs_router = APIRouter(tags=[OPENAPI_TAG_SYSTEM_LOGS])
 
 _LOG_VIEWER_HTML: str | None = None
 

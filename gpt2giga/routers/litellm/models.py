@@ -8,8 +8,9 @@ from gpt2giga.common.gigachat_options import (
     extract_gigachat_request_options,
     gigachat_request_options,
 )
+from gpt2giga.openapi_tags import OPENAPI_TAG_LITELLM_MODEL_INFO
 
-router = APIRouter(tags=["LiteLLM"])
+router = APIRouter(tags=[OPENAPI_TAG_LITELLM_MODEL_INFO])
 
 
 def _extract_model_id(model_info: object) -> str:

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from gpt2giga.api.admin.access import verify_admin_key
 from gpt2giga.common.exceptions import exceptions_handler
+from gpt2giga.openapi_tags import OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
@@ -34,7 +35,7 @@ SUPPORTED_TRANSLATE_FORMATS = frozenset(
 
 router = APIRouter(
     prefix="/_debug/translate",
-    tags=["Debug"],
+    tags=[OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION],
     dependencies=[Depends(verify_admin_key)],
 )
 

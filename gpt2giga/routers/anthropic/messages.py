@@ -25,6 +25,7 @@ from gpt2giga.openapi_specs.anthropic import (
     anthropic_count_tokens_openapi_extra,
     anthropic_messages_openapi_extra,
 )
+from gpt2giga.openapi_tags import OPENAPI_TAG_ANTHROPIC_MESSAGES
 from gpt2giga.protocol.anthropic.params import sanitize_anthropic_messages_parameters
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
@@ -45,7 +46,7 @@ from gpt2giga.sinks.observability.anthropic import (
     observe_anthropic_message_stream,
 )
 
-router = APIRouter(tags=["Anthropic"])
+router = APIRouter(tags=[OPENAPI_TAG_ANTHROPIC_MESSAGES])
 
 
 @router.post(

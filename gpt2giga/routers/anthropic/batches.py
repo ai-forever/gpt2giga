@@ -15,6 +15,7 @@ from gpt2giga.common.gigachat_options import (
 )
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.openapi_specs.anthropic import anthropic_message_batches_openapi_extra
+from gpt2giga.openapi_tags import OPENAPI_TAG_ANTHROPIC_MESSAGE_BATCHES
 from gpt2giga.protocol.batches import (
     extract_batch_result_body,
     get_batch_target,
@@ -30,7 +31,7 @@ from gpt2giga.protocol.anthropic.response import (
     _build_anthropic_response,
 )
 
-router = APIRouter(tags=["Anthropic"])
+router = APIRouter(tags=[OPENAPI_TAG_ANTHROPIC_MESSAGE_BATCHES])
 
 
 def _rfc3339_from_timestamp(timestamp: Optional[int]) -> Optional[str]:

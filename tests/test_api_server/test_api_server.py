@@ -5,6 +5,18 @@ from gpt2giga.api_server import create_app
 from gpt2giga.app.factory import create_app as create_modular_app
 from gpt2giga.common.app_meta import check_port_available
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.openapi_tags import (
+    OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION,
+    OPENAPI_TAG_ADMIN_TRAFFIC_LOGS,
+    OPENAPI_TAG_ANTHROPIC_MESSAGES,
+    OPENAPI_TAG_LITELLM_MODEL_INFO,
+    OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS,
+    OPENAPI_TAG_OPENAI_EMBEDDINGS,
+    OPENAPI_TAG_OPENAI_MODELS,
+    OPENAPI_TAG_OPENAI_RESPONSES,
+    OPENAPI_TAG_SYSTEM_HEALTH,
+    OPENAPI_TAG_SYSTEM_LOGS,
+)
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
 from gpt2giga.sinks.metrics.noop import NoopMetricsSink
@@ -176,6 +188,69 @@ def test_docs_disabled_in_prod_mode():
     client = TestClient(app)
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
+
+
+def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                mode="DEV",
+                admin_api_enabled=True,
+                debug_translate_enabled=True,
+                admin_api_key="admin",
+            )
+        )
+    )
+    schema = app.openapi()
+
+    expected_route_tags = {
+        ("post", "/chat/completions"): [OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS],
+        ("post", "/v1/chat/completions"): [OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS],
+        ("post", "/v2/responses"): [OPENAPI_TAG_OPENAI_RESPONSES],
+        ("post", "/embeddings"): [OPENAPI_TAG_OPENAI_EMBEDDINGS],
+        ("get", "/models"): [OPENAPI_TAG_OPENAI_MODELS],
+        ("post", "/messages"): [OPENAPI_TAG_ANTHROPIC_MESSAGES],
+        ("post", "/v1/messages/count_tokens"): [OPENAPI_TAG_ANTHROPIC_MESSAGES],
+        ("get", "/model/info"): [OPENAPI_TAG_LITELLM_MODEL_INFO],
+        ("get", "/health"): [OPENAPI_TAG_SYSTEM_HEALTH],
+        ("get", "/logs"): [OPENAPI_TAG_SYSTEM_LOGS],
+        ("get", "/logs/html"): [OPENAPI_TAG_SYSTEM_LOGS],
+        ("get", "/_admin/logs"): [OPENAPI_TAG_ADMIN_TRAFFIC_LOGS],
+        ("post", "/_debug/translate"): [OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION],
+    }
+    for (method, path), tags in expected_route_tags.items():
+        assert schema["paths"][path][method]["tags"] == tags
+
+    legacy_tags = {
+        "OpenAI",
+        "Anthropic",
+        "LiteLLM",
+        "V1",
+        "V2",
+        "V1 Anthropic",
+        "V2 Anthropic",
+        "V1 LiteLLM",
+        "V2 LiteLLM",
+        "System logs",
+        "HTML logs",
+        "Admin",
+        "Debug",
+    }
+    operation_tags = {
+        tag
+        for methods in schema["paths"].values()
+        for operation in methods.values()
+        for tag in operation.get("tags", [])
+    }
+
+    assert operation_tags.isdisjoint(legacy_tags)
+    assert {tag["name"] for tag in schema["tags"]} == operation_tags
+    assert all(" / " in tag for tag in operation_tags)
+    assert all(
+        len(operation.get("tags", [])) == 1
+        for methods in schema["paths"].values()
+        for operation in methods.values()
+    )
 
 
 def test_prod_mode_requires_api_key(monkeypatch):

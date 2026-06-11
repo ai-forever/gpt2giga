@@ -31,6 +31,7 @@ from gpt2giga.common.streaming import (
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import chat_completions_openapi_extra
+from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS
 from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
 from gpt2giga.protocols.openai import (
     normalized_chat_response_to_openai,
@@ -56,7 +57,7 @@ from gpt2giga.sinks.observability.llm import (
     build_tool_call_span_events,
 )
 
-router = APIRouter(tags=["OpenAI"])
+router = APIRouter(tags=[OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS])
 
 
 @router.post("/chat/completions", openapi_extra=chat_completions_openapi_extra())
