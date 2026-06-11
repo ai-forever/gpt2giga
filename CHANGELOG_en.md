@@ -38,11 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Parameter compatibility**: known unsupported optional OpenAI/Anthropic client parameters are now accepted and ignored for SDK compatibility instead of rejected, and README, OpenAPI specs, and the compatibility matrix now document this behavior
 - **Codex provider docs**: updated the Codex integration guide for the current provider config
+- **Claude Code docs**: marked the Claude Code integration guide as tested with `Claude Code v2.1.170`
 - **Version and lock file**: updated the project version to `0.1.8a2` and refreshed `uv.lock` with current dependency markers and dependency updates
 
 ### Fixed
 - **Codex Responses tools**: fixed support for Codex-style tool declarations in OpenAI Responses, including namespace/input-schema forms and correct streaming output handling
 - **JSON Schema normalization**: schemas for GigaChat validators are normalized more consistently, including arrays without typed `items`
+- **Claude Code tool schemas**: tool schemas with nested properties that omit explicit `type` now get a valid object type and `properties`, preventing GigaChat `422` errors
 - **Chat Completions tool metadata**: OpenAI Chat Completions now preserves called-tool metadata in non-streaming and streaming responses
 
 ## [0.1.8a1] - 2026-06-06

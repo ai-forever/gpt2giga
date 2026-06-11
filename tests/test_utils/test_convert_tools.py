@@ -50,6 +50,26 @@ def test_normalize_json_schema_array_items_without_type():
     assert result["properties"]["excludedBodyParts"]["items"]["type"] == "string"
 
 
+def test_normalize_json_schema_property_without_type():
+    """Test: defaults untyped property schemas to valid GigaChat objects."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "args": {
+                "description": "Optional input value exposed verbatim.",
+            },
+        },
+    }
+
+    result = normalize_json_schema(schema)
+
+    assert result["properties"]["args"] == {
+        "description": "Optional input value exposed verbatim.",
+        "type": "object",
+        "properties": {},
+    }
+
+
 def test_normalize_json_schema_anyof():
     """Тест: anyOf разворачивается в первый тип (GigaChat SDK не поддерживает anyOf)"""
     schema = {

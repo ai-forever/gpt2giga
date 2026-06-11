@@ -1,5 +1,7 @@
 # Интеграция Claude Code с GigaChat
 
+> **Проверено:** 10 июня 2026 — `Claude Code v2.1.170`
+
 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) — CLI-агент от Anthropic для написания кода. С помощью `gpt2giga` можно использовать модели GigaChat в Claude Code, направив запросы Anthropic Messages API через прокси-сервер.
 
 ## Подключение Claude Code к GigaChat
