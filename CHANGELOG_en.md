@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned for release as `0.2.0`.
+## [0.2.0a1] - 2026-06-11
 
 ### Breaking Changes
 - **Internal GigaChat transformer API**: the old compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2`, and the `gigachat_v2_adapter` module were replaced with explicit `chat` / `chat_completion` names; external OpenAI/Anthropic-compatible endpoints are unchanged.
@@ -18,8 +18,11 @@ Planned for release as `0.2.0`.
 - **Modular roadmap safety baseline**: started the `v0.2.0` release discipline with semantic versioning rules and a release checklist.
 - **Modular feature flags**: added default-safe `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED`, and `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
 - **RequestContext**: added an internal request-scoped context with `request_id`, `trace_id`, protocol/route metadata, and safe hash fields for future traffic logs and observability without changing the public API.
+- **Caller metadata**: added safe caller inference from headers/user-agent for `swagger`, `redoc`, OpenAI/Anthropic SDKs, Codex, Claude Code, and Qwen Code; metadata is used in traces, traffic logs, and observability annotations.
+- **Conversation stitching**: added default-off in-memory stitching state for Chat Completions, OpenAI Responses v1, and Anthropic Messages using a stable conversation id or `x-session-id`, with TTL, message limits, and a divergence strategy.
 - **Golden compatibility fixtures**: added mocked-upstream fixtures and tests for OpenAI chat/tool/structured/streaming/embeddings and Anthropic messages/streaming response shapes.
 - **Logging terminology**: added an architecture document that separates runtime logs, future traffic logs, observability traces, and metrics.
+- **Normalized/provider architecture docs**: added architecture guides for normalized messages and adding new providers, covering protocol adapters, provider adapters, observability, metrics, and traffic logs.
 - **Modular package skeleton**: added empty namespace packages under `gpt2giga.api`, `gpt2giga.app`, `gpt2giga.protocols`, `gpt2giga.providers`, and `gpt2giga.sinks` for staged migration without changing current runtime wiring.
 - **Extension interfaces**: added internal `ProtocolAdapter`, `ProviderAdapter`, `TrafficLogSink`, `TrafficLogQueryStore`, `ObservabilitySink`, and `MetricsSink` contracts for future backend/provider/storage extensions without heavy dependencies.
 - **Traffic log event and sinks**: added the storage-independent `TrafficLogEvent` model, a default noop traffic sink, and an opt-in JSONL sink for local validation through `GPT2GIGA_TRAFFIC_LOG_ENABLED=True` and `GPT2GIGA_TRAFFIC_LOG_SINK=jsonl`.
@@ -29,16 +32,66 @@ Planned for release as `0.2.0`.
 - **Normalized shadow mode**: OpenAI Chat routes can now run the normalized adapter in best-effort shadow mode when `GPT2GIGA_NORMALIZATION_MODE=shadow`; shadow translation errors do not break the legacy request path.
 - **Shadow diagnostics**: added safe diagnostic events for normalized shadow mode with `normalization_status`, `route`, `request_id`, shape hash, warnings, and errors without recording raw prompt/response content.
 - **Normalized OpenAI Chat path**: when `GPT2GIGA_NORMALIZATION_MODE=on`, OpenAI Chat Completions non-stream runs through `NormalizedChatRequest`, the GigaChat provider adapter, and the normalized-to-OpenAI response adapter; `GPT2GIGA_LEGACY_CHAT_FALLBACK=True` keeps fallback to the legacy path without recording raw prompt/response content.
+- **Normalized streaming**: when `GPT2GIGA_NORMALIZATION_MODE=on`, OpenAI Chat Completions `stream=true` runs through canonical normalized stream events, the GigaChat stream adapter, and the OpenAI-compatible SSE mapper; the legacy stream path remains the default for `off`/`shadow`.
+- **Debug translate API**: added protected `/_debug/translate/*` endpoints for inspecting OpenAI/Anthropic/normalized/GigaChat transformations; routes are disabled by default and require `GPT2GIGA_ADMIN_API_KEY` when enabled.
+- **Postgres traffic log extra**: added the optional `postgres` extra with `asyncpg`, `sqlalchemy[asyncio]`, and `alembic` for future opt-in storage backends without changing the base install.
+- **Postgres traffic log schema**: added a packaged SQL migration for the `gpt2giga_traffic_logs` table with request/trace/model/error/token metadata, redacted payload JSONB columns, and indexes for query/admin use cases.
+- **Traffic log redaction**: added `gpt2giga.core.redaction` with default-on durable traffic-log redaction, including nested dict/list payloads, cookies, auth/API keys, token-like strings, and configurable extra keys.
+- **Postgres traffic log writer**: added the opt-in `postgres` traffic sink, lazy asyncpg writer, and background queue with batch writes, best-effort flushes, and a default drop-on-backpressure policy so storage failures do not break the API request path.
+- **Traffic event emission**: `RquidMiddleware` now emits safe traffic events for completed requests, validation errors, unhandled errors, and stream completion/abort through the configured sink; the default noop path preserves public API behavior.
+- **Postgres deploy profile**: added `deploy/postgres.yaml` for a local Postgres traffic-log backend and Dockerfile `INSTALL_EXTRAS` build arg for images with the optional `[postgres]` extra.
+- **Admin traffic logs API**: added opt-in protected `/_admin/logs*` endpoints for list/get/request/response/tail/NDJSON export of Postgres traffic logs with pagination, filters, and admin-key auth; routes are disabled by default.
+- **OpenSearch traffic log extra**: added the optional `opensearch` extra with `opensearch-py` for a future opt-in search mirror backend without changing the base install.
+- **OpenSearch traffic log mirror**: added `GPT2GIGA_TRAFFIC_LOG_SINKS`, `GPT2GIGA_OPENSEARCH_*`, an OpenSearch bulk writer with retry/backoff, a composite sink for `postgres,opensearch`, an index template helper, and `deploy/opensearch.yaml`.
+- **Traffic log retention**: added `GPT2GIGA_TRAFFIC_LOG_RETENTION_DAYS` and `GPT2GIGA_TRAFFIC_LOG_PURGE_INTERVAL_SECONDS`, a best-effort Postgres retention job, and the protected admin dry-run/execute purge command `POST /_admin/logs/retention/purge`.
+- **Traffic log CSV export**: added `GET /_admin/logs/export.csv` to export traffic-log summary columns without stored request/response body payloads.
+- **Traffic log replay**: added default-off `GPT2GIGA_REPLAY_ENABLED` and the protected endpoint `POST /_admin/logs/{id}/replay`, which replays a redacted captured body, does not reuse stored credentials, and marks replay metadata.
+- **Manual traffic log redaction**: added protected `POST /_admin/logs/{id}/redact` for manually clearing stored request/response payload columns.
+- **Phoenix observability extra**: added the optional `phoenix` extra with Arize Phoenix/OpenTelemetry/OpenInference dependencies for a future opt-in observability backend without changing the base install.
+- **Phoenix observability settings**: added settings for the Phoenix/OpenTelemetry observability backend, collector endpoint, project name, API key, sample rate, content capture, and redaction; observability and content capture are disabled by default.
+- **Phoenix/OpenTelemetry observability sink**: added an optional Phoenix OTLP sink with lazy imports, safe fallback to noop without the `phoenix` extra, sample-rate control, attribute redaction, and a content-capture guard.
+- **Trace/log linkage**: traffic-log events store `trace_id`/optional `span_id`, and Phoenix spans receive matching gateway identifiers as attributes; README documents trace lookup by `trace_id`.
+- **Phoenix deploy profile**: added opt-in `deploy/phoenix.yaml` for a local Arize Phoenix collector/UI and building gpt2giga with the optional `[phoenix]` extra.
+- **Request lifecycle observability**: `RquidMiddleware` best-effort emits `gpt2giga.request`, `provider.gigachat.request`, and streaming `stream.emit` spans through the configured observability sink; sink errors are isolated from the API request path.
+- **Rich observability content controls**: added default-off `GPT2GIGA_OBSERVABILITY_CAPTURE_MESSAGES`, `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS`, `GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES`, and `GPT2GIGA_OBSERVABILITY_MAX_CONTENT_LENGTH` flags for safe opt-in LLM span payload attributes.
+- **OpenInference-style LLM spans**: the normalized OpenAI Chat path emits `protocol.normalize.request` and `protocol.normalize.response` spans with model/provider/usage/finish/tool metadata and opt-in redacted payload attributes.
+- **API-format LLM spans**: Phoenix/OpenTelemetry observability now emits distinct `ChatCompletion`, `Responses`, `Messages`, and `Embeddings` LLM spans with the bounded `gpt2giga.api_format` attribute and caller annotations.
+- **Streaming observability span events**: the normalized streaming path adds OTel span events `stream.start`, `stream.first_token`, `stream.tool_call_delta`, `stream.completed`, and `stream.error`; generic streaming lifecycle also marks `stream.completed`/`stream.aborted`.
+- **Prometheus metrics baseline**: added default-off `GPT2GIGA_METRICS_ENABLED`, configurable `GPT2GIGA_METRICS_PATH`, an in-process Prometheus-compatible sink, and an endpoint for aggregate service metrics without prompt/response content, request ids, or secrets.
+- **Deploy Makefile commands**: added Makefile targets for `deploy/base.yaml`, Phoenix, mitmproxy, observability, Traefik, and multi-instance compose profiles.
 
 ### Changed
 - **GigaChat backend naming**: the internal upstream path is now named `chat` for legacy GigaChat calls and `chat_completion` for GigaChat `v2/chat/completions`; `_v2` suffixes were removed from the transformer, response adapter, streaming helpers, and tests.
 - **Versioned client docs**: README, integration guides, examples, and `.env.example` now clarify using `base_url="http://localhost:8090/v1"` or `base_url="http://localhost:8090/v2"` to choose an explicit backend contract.
+- **Docs layout**: README was reduced to an overview and quick links, while detailed material moved to `docs/quickstart.md`, `docs/configuration.md`, `docs/api-compatibility.md`, `docs/deployment.md`, `docs/operations.md`, and `docs/integrations.md`.
+- **Deployment layout**: Docker Compose manifests moved from `compose/` to `deploy/`, `deploy/README.md` was added, and README, docs, Makefile, and CI links were aligned with the new structure.
+- **Examples layout**: runnable OpenAI/Anthropic examples were grouped by capability (`basic`, `tools`, `reasoning`, `structured_outputs`, `multimodal`, `files`, `concurrency`, `agents`) with updated READMEs and assets.
 - **App factory split**: FastAPI app creation, lifecycle startup/shutdown, and app settings loading moved to `gpt2giga.app.factory`, `gpt2giga.app.lifecycle`, and `gpt2giga.app.settings`; `gpt2giga.api_server` remains a compatible facade for `create_app` and `run`.
 - **OpenAI API namespace**: added the OpenAI-compatible router aggregator under `gpt2giga.api.openai.routes`, and the app factory now mounts OpenAI routes through the new modular namespace without changing public paths or response shapes.
 - **Anthropic API namespace**: added the Anthropic-compatible router aggregator under `gpt2giga.api.anthropic.routes`, and the app factory now mounts Anthropic routes through the new modular namespace without changing public paths, header behavior, or response shapes.
 - **GigaChat provider namespace**: moved GigaChat SDK client creation/shutdown and request-scoped token handoff under `gpt2giga.providers.gigachat`; environment/settings parsing and public proxy behavior are unchanged.
 - **Extension sink lifecycle**: the app factory now creates traffic/observability sinks in `app.state`, and lifecycle shutdown performs best-effort flushes; sink failures are isolated from the API request path.
+- **Request context protocol inference**: tightened LiteLLM route detection to the exact `/model/info` path so OpenAI `/models` traffic events are not classified as LiteLLM.
 - **Internal docs alignment**: package-level AGENTS notes were updated for the new app factory/lifecycle/provider layout and the retained `gpt2giga.api_server` entrypoint facade.
+
+### Fixed
+- **Request fingerprints**: API key/client IP fingerprints now use keyed PBKDF2 instead of plain SHA-256, so traffic logs and observability do not store guessable hashes.
+- **Traffic-log content capture**: redacted request headers/body and non-stream response bodies are stored only when `GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT=True`, with a size cap and redaction before durable storage.
+- **Traffic-log query/replay**: the query store now correctly uses Postgres in composite `postgres,opensearch` setups, and replay injects the proxy API key for PROD/API-key protected targets.
+- **Traffic-log deploy hardening**: the Phoenix deploy profile leaves content capture disabled by default again, the Postgres profile mounts the SQL migration init script, and deploy profile tests cover the configuration.
+- **Phoenix span payloads**: OpenAI/Anthropic/Responses spans include reasoning/thinking content in redacted payload attributes when content capture is enabled.
+- **Protocol inference**: request context now correctly classifies `/v2/messages` as Anthropic and `/v2/model/info` as LiteLLM.
+- **Release review regressions**: fixed review-found issues in admin logs retention/redaction/replay and lifecycle shutdown guards.
+
+## [0.1.8a3] - 2026-06-10
+
+### Changed
+- **Claude Code docs**: marked the Claude Code integration guide as tested with `Claude Code v2.1.170`
+- **Version and lock file**: updated the project version to `0.1.8a3` and refreshed `uv.lock` with current dependency markers
+
+### Fixed
+- **Claude Code tool schemas**: tool schemas with nested properties that omit explicit `type` now get a valid object type and `properties`, preventing GigaChat `422` errors
+
 ## [0.1.8a2] - 2026-06-09
 
 ### Added
@@ -47,13 +100,11 @@ Planned for release as `0.2.0`.
 ### Changed
 - **Parameter compatibility**: known unsupported optional OpenAI/Anthropic client parameters are now accepted and ignored for SDK compatibility instead of rejected, and README, OpenAPI specs, and the compatibility matrix now document this behavior
 - **Codex provider docs**: updated the Codex integration guide for the current provider config
-- **Claude Code docs**: marked the Claude Code integration guide as tested with `Claude Code v2.1.170`
 - **Version and lock file**: updated the project version to `0.1.8a2` and refreshed `uv.lock` with current dependency markers and dependency updates
 
 ### Fixed
 - **Codex Responses tools**: fixed support for Codex-style tool declarations in OpenAI Responses, including namespace/input-schema forms and correct streaming output handling
 - **JSON Schema normalization**: schemas for GigaChat validators are normalized more consistently, including arrays without typed `items`
-- **Claude Code tool schemas**: tool schemas with nested properties that omit explicit `type` now get a valid object type and `properties`, preventing GigaChat `422` errors
 - **Chat Completions tool metadata**: OpenAI Chat Completions now preserves called-tool metadata in non-streaming and streaming responses
 
 ## [0.1.8a1] - 2026-06-06
@@ -352,6 +403,9 @@ Planned for release as `0.2.0`.
 
 ---
 
+[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...HEAD
+[0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a3...v0.2.0a1
+[0.1.8a3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a2...v0.1.8a3
 [0.1.8a2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a1...v0.1.8a2
 [0.1.8a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.7...v0.1.8a1
 [0.1.7]: https://github.com/ai-forever/gpt2giga/compare/v0.1.6...v0.1.7
