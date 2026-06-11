@@ -15,10 +15,10 @@ FIXTURES_DIR = Path(__file__).parents[1] / "fixtures" / "debug_translate"
 
 
 class FakeRequestTransformer:
-    async def prepare_chat_completion(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None):
         return {"prepared": "v1", "payload": data}
 
-    async def prepare_chat_completion_v2(self, data, giga_client=None):
+    async def prepare_chat_completion(self, data, giga_client=None):
         return {"prepared": "v2", "payload": data}
 
 

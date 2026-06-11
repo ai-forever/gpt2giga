@@ -20,13 +20,15 @@
 
 ## Смонтированные routes
 
-Все публичные API routes доступны и в корне, и под `/v1`.
+Публичные API routes доступны в корне и под versioned prefixes. Root routes
+используют backend mode из env, `/v1` принудительно выбирает GigaChat v1
+contract, `/v2` принудительно выбирает GigaChat v2 contract.
 
 Примеры:
 
-- `/chat/completions` и `/v1/chat/completions`
-- `/responses` и `/v1/responses`
-- `/messages` и `/v1/messages`
+- `/chat/completions`, `/v1/chat/completions` и `/v2/chat/completions`
+- `/responses`, `/v1/responses` и `/v2/responses`
+- `/messages`, `/v1/messages` и `/v2/messages`
 
 ## OpenAI-compatible routes
 
@@ -84,6 +86,6 @@ GPT2GIGA_GIGACHAT_API_MODE=v1
 GPT2GIGA_RESPONSES_API_MODE=inherit
 ```
 
-Задайте `GPT2GIGA_GIGACHAT_API_MODE=v2`, чтобы использовать более новый GigaChat `v2/chat/completions` surface для chat-like запросов. Внешние OpenAI/Anthropic URLs не меняются.
+Задайте `GPT2GIGA_GIGACHAT_API_MODE=v2`, чтобы root routes использовали более новый GigaChat `v2/chat/completions` surface для chat-like запросов. Для явного выбора на уровне клиента используйте `base_url` с `/v1` или `/v2`.
 
-`/chat/completions` остаётся compatibility route. Новые built-in-tool возможности развиваются преимущественно вокруг GigaChat v2 mode.
+`/chat/completions` остаётся compatibility route и следует env. Новые built-in-tool возможности развиваются преимущественно вокруг GigaChat v2 mode, поэтому клиенты, которым они нужны, могут указывать `http://localhost:8090/v2`.

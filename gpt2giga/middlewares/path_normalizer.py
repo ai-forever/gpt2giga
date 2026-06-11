@@ -15,6 +15,7 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
         # Valid entrypoints
         self.valid_roots = valid_roots or [
             "v1",
+            "v2",
             "chat",
             "models",
             "embeddings",
@@ -47,8 +48,8 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
             normalized_segments = segments[index:]
             while (
                 len(normalized_segments) > 1
-                and normalized_segments[0] == "v1"
-                and normalized_segments[1] == "v1"
+                and normalized_segments[0] in {"v1", "v2"}
+                and normalized_segments[1] == normalized_segments[0]
             ):
                 normalized_segments.pop(1)
 

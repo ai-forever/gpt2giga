@@ -1,12 +1,13 @@
 import json
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from gigachat.models.chat_completions import ChatCompletionChunk
 from gigachat.models.chat_completions import ChatCompletionResponse
 from loguru import logger
 
+from gpt2giga.common.api_mode import force_gigachat_api_mode
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import ResponseProcessor
 from gpt2giga.routers.openai import router
@@ -22,13 +23,13 @@ class MockResponse:
 
 class FakeAChatResource:
     def __init__(self):
-        self.v1_calls = []
-        self.v2_calls = []
+        self.chat_calls = []
+        self.chat_completion_calls = []
         self.stream_calls = []
         self.thread_id = None
 
     async def __call__(self, payload):
-        self.v1_calls.append(payload)
+        self.chat_calls.append(payload)
         return MockResponse(
             {
                 "choices": [
@@ -46,7 +47,7 @@ class FakeAChatResource:
         )
 
     async def create(self, payload):
-        self.v2_calls.append(payload)
+        self.chat_completion_calls.append(payload)
         response_payload = {
             "model": "GigaChat-2-Max",
             "messages": [
@@ -99,18 +100,18 @@ class FakeGigachat:
 
 class FakeRequestTransformer:
     def __init__(self):
-        self.v1_calls = []
-        self.v2_calls = []
+        self.response_chat_calls = []
+        self.response_chat_completion_calls = []
 
-    async def prepare_chat_completion(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None):
         return {"contract": "chat-v1"}
 
-    async def prepare_response(self, data, giga_client=None):
-        self.v1_calls.append((data, giga_client))
+    async def prepare_response_chat(self, data, giga_client=None):
+        self.response_chat_calls.append((data, giga_client))
         return {"contract": "responses-v1"}
 
-    async def prepare_response_v2(self, data, giga_client=None):
-        self.v2_calls.append((data, giga_client))
+    async def prepare_response_chat_completion(self, data, giga_client=None):
+        self.response_chat_completion_calls.append((data, giga_client))
         return {"contract": "responses-v2"}
 
 
@@ -128,6 +129,32 @@ class RecordingObservabilitySink:
 def make_app(gigachat_api_mode: str, responses_api_mode: str):
     app = FastAPI()
     app.include_router(router)
+    configure_app_state(app, gigachat_api_mode, responses_api_mode)
+    return app
+
+
+def make_versioned_app(gigachat_api_mode: str, responses_api_mode: str):
+    app = FastAPI()
+    app.include_router(router)
+    app.include_router(
+        router,
+        prefix="/v1",
+        dependencies=[Depends(force_gigachat_api_mode("v1"))],
+    )
+    app.include_router(
+        router,
+        prefix="/v2",
+        dependencies=[Depends(force_gigachat_api_mode("v2"))],
+    )
+    configure_app_state(app, gigachat_api_mode, responses_api_mode)
+    return app
+
+
+def configure_app_state(
+    app: FastAPI,
+    gigachat_api_mode: str,
+    responses_api_mode: str,
+):
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.request_transformer = FakeRequestTransformer()
@@ -137,7 +164,6 @@ def make_app(gigachat_api_mode: str, responses_api_mode: str):
             responses_api_mode=responses_api_mode,
         ),
     )
-    return app
 
 
 @pytest.mark.parametrize(
@@ -167,20 +193,50 @@ def test_responses_api_mode_matrix(
 
     assert response.status_code == 200
     if expected_mode == "v1":
-        assert app.state.request_transformer.v1_calls
-        assert not app.state.request_transformer.v2_calls
-        assert app.state.gigachat_client.achat.v1_calls == [
+        assert app.state.request_transformer.response_chat_calls
+        assert not app.state.request_transformer.response_chat_completion_calls
+        assert app.state.gigachat_client.achat.chat_calls == [
             {"contract": "responses-v1"}
         ]
-        assert app.state.gigachat_client.achat.v2_calls == []
+        assert app.state.gigachat_client.achat.chat_completion_calls == []
         assert response.json()["output"][0]["content"][0]["text"] == "ok-v1"
     else:
-        assert not app.state.request_transformer.v1_calls
-        assert app.state.request_transformer.v2_calls
-        assert app.state.gigachat_client.achat.v1_calls == []
-        assert app.state.gigachat_client.achat.v2_calls == [
+        assert not app.state.request_transformer.response_chat_calls
+        assert app.state.request_transformer.response_chat_completion_calls
+        assert app.state.gigachat_client.achat.chat_calls == []
+        assert app.state.gigachat_client.achat.chat_completion_calls == [
             {"contract": "responses-v2"}
         ]
+        assert response.json()["output"][0]["content"][0]["text"] == "ok-v2"
+
+
+@pytest.mark.parametrize(
+    ("route", "expected_mode"),
+    [
+        ("/v1/responses", "v1"),
+        ("/v2/responses", "v2"),
+    ],
+)
+def test_responses_versioned_prefix_overrides_config(route, expected_mode):
+    app = make_versioned_app("v1", "v1" if expected_mode == "v2" else "v2")
+    client = TestClient(app)
+
+    response = client.post(
+        route,
+        json={
+            "model": "gpt-x",
+            "input": "hi",
+        },
+    )
+
+    assert response.status_code == 200
+    if expected_mode == "v1":
+        assert app.state.request_transformer.response_chat_calls
+        assert not app.state.request_transformer.response_chat_completion_calls
+        assert response.json()["output"][0]["content"][0]["text"] == "ok-v1"
+    else:
+        assert not app.state.request_transformer.response_chat_calls
+        assert app.state.request_transformer.response_chat_completion_calls
         assert response.json()["output"][0]["content"][0]["text"] == "ok-v2"
 
 
@@ -282,7 +338,7 @@ def test_responses_v2_uses_thread_id_as_response_id():
     assert emitted["Responses"]["conversation.id"] == "thread_1"
 
 
-def test_responses_v2_stream_uses_primary_stream():
+def test_responses_v2_stream_uses_chat_completion_stream():
     app = make_app("v2", "inherit")
     client = TestClient(app)
 
@@ -300,10 +356,10 @@ def test_responses_v2_stream_uses_primary_stream():
     assert response.status_code == 200
     assert "event: response.output_text.delta" in body
     assert "ok-stream" in body
-    assert not app.state.request_transformer.v1_calls
-    assert app.state.request_transformer.v2_calls
-    assert app.state.gigachat_client.achat.v1_calls == []
-    assert app.state.gigachat_client.achat.v2_calls == []
+    assert not app.state.request_transformer.response_chat_calls
+    assert app.state.request_transformer.response_chat_completion_calls
+    assert app.state.gigachat_client.achat.chat_calls == []
+    assert app.state.gigachat_client.achat.chat_completion_calls == []
     assert app.state.gigachat_client.achat.stream_calls == [
         {"contract": "responses-v2"}
     ]

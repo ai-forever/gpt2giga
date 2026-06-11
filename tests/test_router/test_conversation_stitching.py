@@ -21,18 +21,18 @@ class MockResponse:
 
 class FakeAChatResource:
     def __init__(self):
-        self.v1_calls = []
-        self.v2_calls = []
+        self.chat_calls = []
+        self.chat_completion_calls = []
 
     async def __call__(self, payload):
-        self.v1_calls.append(deepcopy(payload))
+        self.chat_calls.append(deepcopy(payload))
         return MockResponse(
             {
                 "choices": [
                     {
                         "message": {
                             "role": "assistant",
-                            "content": f"ok-{len(self.v1_calls)}",
+                            "content": f"ok-{len(self.chat_calls)}",
                         },
                         "finish_reason": "stop",
                     }
@@ -46,7 +46,7 @@ class FakeAChatResource:
         )
 
     async def create(self, payload):
-        self.v2_calls.append(deepcopy(payload))
+        self.chat_completion_calls.append(deepcopy(payload))
         return ChatCompletionResponse.model_validate(
             {
                 "model": "GigaChat-2-Max",
@@ -108,26 +108,26 @@ class FakeGigachat:
 class FakeRequestTransformer:
     def __init__(self):
         self.chat_calls = []
-        self.response_v1_calls = []
-        self.response_v2_calls = []
+        self.response_chat_calls = []
+        self.response_chat_completion_calls = []
 
-    async def prepare_chat_completion(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None):
         self.chat_calls.append(deepcopy(data))
         return {
             "model": data.get("model", "giga"),
             "messages": deepcopy(data.get("messages", [])),
         }
 
-    async def prepare_chat_completion_v2(self, data, giga_client=None):
+    async def prepare_chat_completion(self, data, giga_client=None):
         self.chat_calls.append(deepcopy(data))
         return {"contract": "chat-v2"}
 
-    async def prepare_response(self, data, giga_client=None):
-        self.response_v1_calls.append(deepcopy(data))
+    async def prepare_response_chat(self, data, giga_client=None):
+        self.response_chat_calls.append(deepcopy(data))
         return {"model": data.get("model", "giga"), "messages": []}
 
-    async def prepare_response_v2(self, data, giga_client=None):
-        self.response_v2_calls.append(deepcopy(data))
+    async def prepare_response_chat_completion(self, data, giga_client=None):
+        self.response_chat_completion_calls.append(deepcopy(data))
         return {"contract": "responses-v2"}
 
 
@@ -306,7 +306,10 @@ def test_responses_v2_with_previous_response_id_skips_local_stitching():
     )
 
     assert response.status_code == 200
-    assert app.state.request_transformer.response_v2_calls[0]["input"] == "hello"
+    assert (
+        app.state.request_transformer.response_chat_completion_calls[0]["input"]
+        == "hello"
+    )
 
 
 def test_chat_completions_stream_updates_conversation_after_completion():

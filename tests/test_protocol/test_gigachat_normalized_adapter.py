@@ -76,14 +76,14 @@ class FakeClient:
 class FakeTransformer:
     def __init__(self):
         self.calls = []
-        self.v2_calls = []
+        self.chat_completion_calls = []
 
-    async def prepare_chat_completion(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None):
         self.calls.append((data, giga_client))
         return {"model": data["model"], "messages": data["messages"]}
 
-    async def prepare_chat_completion_v2(self, data, giga_client=None):
-        self.v2_calls.append((data, giga_client))
+    async def prepare_chat_completion(self, data, giga_client=None):
+        self.chat_completion_calls.append((data, giga_client))
         return {"model": data["model"], "messages": data["messages"]}
 
 
@@ -149,7 +149,7 @@ def test_normalized_chat_to_openai_payload_maps_tools_and_generation_config():
 
 
 @pytest.mark.asyncio
-async def test_gigachat_provider_adapter_executes_v1_chat_to_normalized_response():
+async def test_gigachat_provider_adapter_executes_chat_to_normalized_response():
     client = FakeClient()
     transformer = FakeTransformer()
     adapter = GigaChatProviderAdapter(
@@ -186,7 +186,7 @@ async def test_gigachat_provider_adapter_executes_v1_chat_to_normalized_response
 
 
 @pytest.mark.asyncio
-async def test_gigachat_provider_adapter_executes_v2_chat_to_normalized_response():
+async def test_gigachat_provider_adapter_executes_chat_completion_to_normalized_response():
     client = FakeClient()
     transformer = FakeTransformer()
     adapter = GigaChatProviderAdapter(
@@ -204,11 +204,36 @@ async def test_gigachat_provider_adapter_executes_v2_chat_to_normalized_response
     )
 
     assert not transformer.calls
-    assert transformer.v2_calls
+    assert transformer.chat_completion_calls
     assert client.achat.create_calls
     assert response.choices[0].message.content == "ok-v2"
     assert response.usage.input_tokens == 4
     assert response.usage.output_tokens == 5
+
+
+@pytest.mark.asyncio
+async def test_gigachat_provider_adapter_api_mode_override_wins_over_config():
+    client = FakeClient()
+    transformer = FakeTransformer()
+    adapter = GigaChatProviderAdapter(
+        config=ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1")),
+        request_transformer=transformer,
+        giga_client=client,
+        model_limiter=ModelConcurrencyLimiter({}),
+        api_mode="v2",
+    )
+
+    await adapter.chat(
+        NormalizedChatRequest(
+            model="GigaChat",
+            messages=[NormalizedMessage(role="user", content="hello")],
+        ),
+    )
+
+    assert not transformer.calls
+    assert transformer.chat_completion_calls
+    assert client.achat.calls == []
+    assert client.achat.create_calls
 
 
 class FakeStreamClient:
@@ -242,7 +267,7 @@ class FakeAChatStream:
 
 
 @pytest.mark.asyncio
-async def test_gigachat_provider_adapter_streams_v1_chat_to_normalized_events():
+async def test_gigachat_provider_adapter_streams_chat_to_normalized_events():
     client = FakeStreamClient(
         chunks=[
             {

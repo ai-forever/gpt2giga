@@ -48,7 +48,7 @@ class FakeAnthropicGigachat:
 
 
 class FakeRequestTransformer:
-    async def prepare_chat_completion(self, data, giga_client=None):
+    async def prepare_chat(self, data, giga_client=None):
         return {"model": data.get("model", "giga"), "messages": data.get("messages")}
 
 
