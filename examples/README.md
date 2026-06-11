@@ -14,10 +14,11 @@
   - Chat Completions API: [`examples/openai/chat_completions/README.md`](openai/chat_completions/README.md)
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./anthropic/README.md)
+- Gemini-like REST API: [`examples/gemini/README.md`](./gemini/README.md)
 
 ## Логика папок
 
-Примеры сгруппированы сначала по SDK/API (`openai`, `anthropic`, `chat_completions`, `responses`, `messages`), а внутри — по capability: `basic`, `tools`, `batches`, `files`, `multimodal`, `structured_outputs`, `reasoning`, `concurrency`.
+Примеры сгруппированы сначала по SDK/API (`openai`, `anthropic`, `gemini`, `chat_completions`, `responses`, `messages`), а внутри — по capability: `basic`, `tools`, `batches`, `files`, `multimodal`, `structured_outputs`, `reasoning`, `concurrency`.
 
 ## Запуск примеров (из корня репозитория)
 
@@ -37,11 +38,17 @@ uv run python examples/anthropic/messages/basic/messages.py
 # Anthropic structured output
 uv run python examples/anthropic/messages/structured_outputs/structured_output.py
 
+# Gemini-like GenerateContent
+uv run python examples/gemini/generate_content/basic.py
+
+# Gemini-like streaming
+uv run python examples/gemini/generate_content/stream.py
+
 # Additional Responses API examples
 uv run python examples/openai/responses/tools/function_calling.py
 ```
 
-Files API, OpenAI Batches API и Anthropic Message Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
+Files API, OpenAI Batches API, Anthropic Message Batches API и Gemini Files/Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
 
 ## Дополнительно
 
@@ -55,3 +62,11 @@ Files API, OpenAI Batches API и Anthropic Message Batches API примеры у
 - `examples/anthropic/message_batches/basic.py`: Anthropic Message Batches API (router подготовлен, но временно не смонтирован)
 - `examples/openai/responses/tools/function_calling.py`: function calling через Responses API
 - `examples/openai/agents/weather_handoff.py`: интеграция с OpenAI Agents SDK (потребуются доп. зависимости, см. `examples/AGENTS.md`)
+- `examples/gemini/generate_content/basic.py`: Gemini-like `generateContent`
+- `examples/gemini/generate_content/stream.py`: Gemini-like `streamGenerateContent`
+- `examples/gemini/generate_content/function_calling.py`: Gemini-like function declarations
+- `examples/gemini/count_tokens/basic.py`: Gemini-like `countTokens`
+- `examples/gemini/embeddings/basic.py`: Gemini-like `embedContent` и `batchEmbedContents`
+- `examples/gemini/models/basic.py`: Gemini-like model listing
+- `examples/gemini/files/basic.py`: Gemini Files API (router подготовлен, но временно не смонтирован)
+- `examples/gemini/batches/basic.py`: Gemini Batch API (router подготовлен, но временно не смонтирован)

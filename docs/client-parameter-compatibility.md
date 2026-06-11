@@ -129,8 +129,9 @@ Anthropic `metadata`, `service_tier`, `top_k`, beta-заголовки и `betas
 
 ## Параметры тела Gemini
 
-Gemini-like routes доступны под `/v1beta`, например
-`/v1beta/models/{model}:generateContent`.
+Gemini-like operation routes доступны в корне, под `/v1`, `/v2` и `/v1beta`,
+например `/v1/models/{model}:generateContent`. `/v1` принудительно выбирает
+GigaChat v1 backend contract, `/v2` — GigaChat v2 backend contract.
 
 | Эндпоинт | Поддерживается |
 |---|---|
@@ -138,7 +139,7 @@ Gemini-like routes доступны под `/v1beta`, например
 | Stream Generate Content | Те же поля, что Generate Content; ответ отдаётся как Gemini `GenerateContentResponse` SSE chunks. |
 | Count Tokens | Текстовые части `contents`, `systemInstruction` и имена/описания function declarations. |
 | Embeddings | `content.parts[].text`, `requests[].content.parts[].text` для batch embeddings, `outputDimensionality` принимается как compatibility metadata. |
-| Models | `GET /v1beta/models`, `GET /v1beta/models/{model}` |
+| Models | `GET /v1beta/models`, `GET /v1beta/models/{model}`; общие `/models`, `/v1/models`, `/v2/models` возвращают Gemini форму для Google/Gemini requests, например с `X-Goog-Api-Client` |
 
 Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store`,
 unsupported subfields `generationConfig` и non-function built-in tools
@@ -150,7 +151,8 @@ unsupported subfields `generationConfig` и non-function built-in tools
 
 ## Область маршрутов
 
-Подключенные маршруты доступны и в корне, и под `/v1` через роутер приложения.
-Gemini-compatible маршруты доступны только под `/v1beta`.
+Подключенные OpenAI, Anthropic, LiteLLM и Gemini operation routes доступны в
+корне, под `/v1` и под `/v2` через роутер приложения. Gemini-compatible routes
+также доступны под `/v1beta`.
 Подготовленные, но отключенные маршруты OpenAI Files/Batches, Anthropic Message
 Batches и Gemini Files/Batches намеренно исключены из схемы OpenAPI по умолчанию.

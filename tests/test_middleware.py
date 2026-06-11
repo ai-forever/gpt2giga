@@ -236,10 +236,18 @@ def test_rquid_middleware_infers_v2_protocols():
     async def litellm_context():
         return {"protocol": get_request_context().protocol}
 
+    @test_app.post("/v2/models/{model}:generateContent")
+    async def gemini_context(model: str):
+        return {"model": model, "protocol": get_request_context().protocol}
+
     client = TestClient(test_app)
 
     assert client.get("/v2/messages").json()["protocol"] == "anthropic"
     assert client.get("/v2/model/info").json()["protocol"] == "litellm"
+    assert (
+        client.post("/v2/models/GigaChat:generateContent").json()["protocol"]
+        == "gemini"
+    )
 
 
 def test_read_request_json_updates_request_context_model():

@@ -19,4 +19,8 @@ router.include_router(embeddings_router)
 # router.include_router(files_router)
 # router.include_router(batches_router)
 
-__all__ = ["router"]
+operations_router = APIRouter()
+operations_router.include_router(generate_content_router)
+operations_router.include_router(embeddings_router)
+
+__all__ = ["operations_router", "router"]

@@ -26,10 +26,7 @@ async def list_models(request: Request):
     request_options = extract_gigachat_request_options(request)
     async with gigachat_request_options(giga_client, request_options):
         response = await giga_client.aget_models()
-    return {
-        "models": [_model_to_gemini(_dump_model(item)) for item in response.data],
-        "nextPageToken": "",
-    }
+    return build_gemini_model_list([dump_model_payload(item) for item in response.data])
 
 
 @router.get(
@@ -44,10 +41,11 @@ async def get_model(model: str, request: Request):
     request_options = extract_gigachat_request_options(request)
     async with gigachat_request_options(giga_client, request_options):
         response = await giga_client.aget_model(model=requested_model)
-    return _model_to_gemini(_dump_model(response))
+    return build_gemini_model(dump_model_payload(response))
 
 
-def _dump_model(model: Any) -> dict[str, Any]:
+def dump_model_payload(model: Any) -> dict[str, Any]:
+    """Return a plain mapping for a GigaChat model object."""
     if hasattr(model, "model_dump"):
         return model.model_dump(by_alias=True)
     if isinstance(model, dict):
@@ -55,7 +53,16 @@ def _dump_model(model: Any) -> dict[str, Any]:
     return {key: value for key, value in vars(model).items() if not key.startswith("_")}
 
 
-def _model_to_gemini(model: dict[str, Any]) -> dict[str, Any]:
+def build_gemini_model_list(models: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build a Gemini-compatible model list payload."""
+    return {
+        "models": [build_gemini_model(model) for model in models],
+        "nextPageToken": "",
+    }
+
+
+def build_gemini_model(model: dict[str, Any]) -> dict[str, Any]:
+    """Build one Gemini-compatible model payload."""
     model_id = str(model.get("id") or model.get("id_") or model.get("model") or "")
     display_name = str(model.get("display_name") or model.get("owned_by") or model_id)
     return {

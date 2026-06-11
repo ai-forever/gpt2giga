@@ -219,9 +219,20 @@ def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
         ("post", "/v2/responses"): [OPENAPI_TAG_OPENAI_RESPONSES],
         ("post", "/embeddings"): [OPENAPI_TAG_OPENAI_EMBEDDINGS],
         ("get", "/models"): [OPENAPI_TAG_OPENAI_MODELS],
+        ("post", "/models/{model}:generateContent"): [
+            OPENAPI_TAG_GEMINI_GENERATE_CONTENT
+        ],
+        ("post", "/v1/models/{model}:generateContent"): [
+            OPENAPI_TAG_GEMINI_GENERATE_CONTENT
+        ],
+        ("post", "/v2/models/{model}:generateContent"): [
+            OPENAPI_TAG_GEMINI_GENERATE_CONTENT
+        ],
         ("post", "/v1beta/models/{model}:generateContent"): [
             OPENAPI_TAG_GEMINI_GENERATE_CONTENT
         ],
+        ("post", "/v1/models/{model}:embedContent"): [OPENAPI_TAG_GEMINI_EMBEDDINGS],
+        ("post", "/v2/models/{model}:embedContent"): [OPENAPI_TAG_GEMINI_EMBEDDINGS],
         ("post", "/v1beta/models/{model}:embedContent"): [
             OPENAPI_TAG_GEMINI_EMBEDDINGS
         ],

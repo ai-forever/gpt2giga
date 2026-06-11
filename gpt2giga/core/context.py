@@ -127,11 +127,29 @@ def _infer_protocol(path: str) -> str:
         or normalized.startswith("/messages")
     ):
         return "anthropic"
-    if normalized.startswith("/v1beta/"):
+    if _is_gemini_route(normalized):
         return "gemini"
     if normalized in {"/v1/model/info", "/v2/model/info", "/model/info"}:
         return "litellm"
     return "openai"
+
+
+def _is_gemini_route(path: str) -> bool:
+    if path.startswith("/v1beta/"):
+        return True
+    for prefix in ("/v1", "/v2"):
+        if path.startswith(f"{prefix}/models/"):
+            path = path.removeprefix(prefix)
+            break
+    gemini_operations = (
+        ":generateContent",
+        ":streamGenerateContent",
+        ":countTokens",
+        ":embedContent",
+        ":batchEmbedContents",
+        ":batchGenerateContent",
+    )
+    return path.startswith("/models/") and path.endswith(gemini_operations)
 
 
 def _client_ip(request: Request) -> Optional[str]:
