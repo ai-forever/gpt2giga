@@ -7,8 +7,15 @@
 
 ## [Unreleased]
 
+Планируется к выпуску как `0.2.0`.
+
+### Breaking changes
+- **Внутренний GigaChat transformer API**: старые compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2` и модуль `gigachat_v2_adapter` заменены на явные `chat` / `chat_completion` имена; внешние OpenAI/Anthropic-compatible endpoints не меняются.
+
 ### Добавлено
-- **Modular roadmap safety baseline**: начата подготовка release-дисциплины для `v0.1.9` с правилами semantic versioning и release checklist.
+- **Явные GigaChat API mode routes**: публичные OpenAI/Anthropic/LiteLLM-compatible routes теперь доступны в корне, под `/v1` и под `/v2`; root routes следуют `GPT2GIGA_GIGACHAT_API_MODE` / `GPT2GIGA_RESPONSES_API_MODE`, `/v1` принудительно выбирает legacy chat contract, `/v2` - GigaChat chat-completion contract.
+- **Configuration reference**: расширен `docs/configuration.md` с quick profiles, форматами env values, security/auth notes, backend API modes, observability, metrics, traffic-log и storage настройками.
+- **Modular roadmap safety baseline**: начата подготовка release-дисциплины для `v0.2.0` с правилами semantic versioning и release checklist.
 - **Modular feature flags**: добавлены выключенные по умолчанию `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED` и `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
 - **RequestContext**: добавлен внутренний request-scoped context с `request_id`, `trace_id`, protocol/route metadata и безопасными hash-полями для будущих traffic logs/observability без изменения публичного API.
 - **Golden compatibility fixtures**: добавлены fixtures и тесты для OpenAI chat/tool/structured/streaming/embeddings и Anthropic messages/streaming shapes на mocked upstream.
@@ -49,6 +56,8 @@
 - **Prometheus metrics baseline**: добавлен выключенный по умолчанию `GPT2GIGA_METRICS_ENABLED`, configurable `GPT2GIGA_METRICS_PATH`, in-process Prometheus-compatible sink и endpoint для aggregate service metrics без prompt/response content, request ids или secrets.
 
 ### Изменено
+- **GigaChat backend naming**: внутренний upstream path теперь называется `chat` для legacy GigaChat calls и `chat_completion` для GigaChat `v2/chat/completions`; `_v2`-суффиксы убраны из transformer, response adapter, streaming helpers и tests.
+- **Versioned client docs**: README, integration guides, examples и `.env.example` уточняют выбор `base_url="http://localhost:8090/v1"` или `base_url="http://localhost:8090/v2"` для явного backend contract.
 - **App factory split**: создание FastAPI app, lifecycle startup/shutdown и загрузка app settings вынесены в `gpt2giga.app.factory`, `gpt2giga.app.lifecycle` и `gpt2giga.app.settings`; `gpt2giga.api_server` остается совместимым фасадом для `create_app` и `run`.
 - **OpenAI API namespace**: OpenAI-compatible router aggregator добавлен в `gpt2giga.api.openai.routes`, а app factory подключает OpenAI routes через новый modular namespace без изменения публичных paths и response shapes.
 - **Anthropic API namespace**: Anthropic-compatible router aggregator добавлен в `gpt2giga.api.anthropic.routes`, а app factory подключает Anthropic routes через новый modular namespace без изменения публичных paths, headers behavior и response shapes.

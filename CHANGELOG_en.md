@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Planned for release as `0.2.0`.
+
+### Breaking Changes
+- **Internal GigaChat transformer API**: the old compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2`, and the `gigachat_v2_adapter` module were replaced with explicit `chat` / `chat_completion` names; external OpenAI/Anthropic-compatible endpoints are unchanged.
+
 ### Added
-- **Modular roadmap safety baseline**: started the `v0.1.9` release discipline with semantic versioning rules and a release checklist.
+- **Explicit GigaChat API mode routes**: public OpenAI/Anthropic/LiteLLM-compatible routes are now available at root, `/v1`, and `/v2`; root routes follow `GPT2GIGA_GIGACHAT_API_MODE` / `GPT2GIGA_RESPONSES_API_MODE`, `/v1` forces the legacy chat contract, and `/v2` forces the GigaChat chat-completion contract.
+- **Configuration reference**: expanded `docs/configuration.md` with quick profiles, env value formats, security/auth notes, backend API modes, observability, metrics, traffic-log, and storage settings.
+- **Modular roadmap safety baseline**: started the `v0.2.0` release discipline with semantic versioning rules and a release checklist.
 - **Modular feature flags**: added default-safe `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED`, and `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
 - **RequestContext**: added an internal request-scoped context with `request_id`, `trace_id`, protocol/route metadata, and safe hash fields for future traffic logs and observability without changing the public API.
 - **Golden compatibility fixtures**: added mocked-upstream fixtures and tests for OpenAI chat/tool/structured/streaming/embeddings and Anthropic messages/streaming response shapes.
@@ -24,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Normalized OpenAI Chat path**: when `GPT2GIGA_NORMALIZATION_MODE=on`, OpenAI Chat Completions non-stream runs through `NormalizedChatRequest`, the GigaChat provider adapter, and the normalized-to-OpenAI response adapter; `GPT2GIGA_LEGACY_CHAT_FALLBACK=True` keeps fallback to the legacy path without recording raw prompt/response content.
 
 ### Changed
+- **GigaChat backend naming**: the internal upstream path is now named `chat` for legacy GigaChat calls and `chat_completion` for GigaChat `v2/chat/completions`; `_v2` suffixes were removed from the transformer, response adapter, streaming helpers, and tests.
+- **Versioned client docs**: README, integration guides, examples, and `.env.example` now clarify using `base_url="http://localhost:8090/v1"` or `base_url="http://localhost:8090/v2"` to choose an explicit backend contract.
 - **App factory split**: FastAPI app creation, lifecycle startup/shutdown, and app settings loading moved to `gpt2giga.app.factory`, `gpt2giga.app.lifecycle`, and `gpt2giga.app.settings`; `gpt2giga.api_server` remains a compatible facade for `create_app` and `run`.
 - **OpenAI API namespace**: added the OpenAI-compatible router aggregator under `gpt2giga.api.openai.routes`, and the app factory now mounts OpenAI routes through the new modular namespace without changing public paths or response shapes.
 - **Anthropic API namespace**: added the Anthropic-compatible router aggregator under `gpt2giga.api.anthropic.routes`, and the app factory now mounts Anthropic routes through the new modular namespace without changing public paths, header behavior, or response shapes.
