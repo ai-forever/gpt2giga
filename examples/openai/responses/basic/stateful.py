@@ -4,8 +4,7 @@ client = OpenAI(base_url="http://localhost:8090", api_key="0")
 
 MODEL = "GigaChat-2-Max"
 
-# Stateful Responses require GPT2GIGA_RESPONSES_API_MODE=v2
-# or GPT2GIGA_GIGACHAT_API_MODE=v2 on the proxy side.
+# Stateful Responses require GPT2GIGA_GIGACHAT_API_MODE=v2 on the proxy side.
 first_response = client.responses.create(
     model=MODEL,
     input=(

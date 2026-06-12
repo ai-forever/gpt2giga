@@ -126,14 +126,14 @@ class RecordingObservabilitySink:
         return None
 
 
-def make_app(gigachat_api_mode: str, responses_api_mode: str):
+def make_app(gigachat_api_mode: str):
     app = FastAPI()
     app.include_router(router)
-    configure_app_state(app, gigachat_api_mode, responses_api_mode)
+    configure_app_state(app, gigachat_api_mode)
     return app
 
 
-def make_versioned_app(gigachat_api_mode: str, responses_api_mode: str):
+def make_versioned_app(gigachat_api_mode: str):
     app = FastAPI()
     app.include_router(router)
     app.include_router(
@@ -146,14 +146,13 @@ def make_versioned_app(gigachat_api_mode: str, responses_api_mode: str):
         prefix="/v2",
         dependencies=[Depends(force_gigachat_api_mode("v2"))],
     )
-    configure_app_state(app, gigachat_api_mode, responses_api_mode)
+    configure_app_state(app, gigachat_api_mode)
     return app
 
 
 def configure_app_state(
     app: FastAPI,
     gigachat_api_mode: str,
-    responses_api_mode: str,
 ):
     app.state.gigachat_client = FakeGigachat()
     app.state.response_processor = ResponseProcessor(logger=logger)
@@ -161,26 +160,22 @@ def configure_app_state(
     app.state.config = ProxyConfig(
         proxy=ProxySettings(
             gigachat_api_mode=gigachat_api_mode,
-            responses_api_mode=responses_api_mode,
         ),
     )
 
 
 @pytest.mark.parametrize(
-    ("gigachat_api_mode", "responses_api_mode", "expected_mode"),
+    ("gigachat_api_mode", "expected_mode"),
     [
-        ("v1", "inherit", "v1"),
-        ("v2", "inherit", "v2"),
-        ("v1", "v2", "v2"),
-        ("v2", "v1", "v1"),
+        ("v1", "v1"),
+        ("v2", "v2"),
     ],
 )
-def test_responses_api_mode_matrix(
+def test_responses_inherits_gigachat_api_mode(
     gigachat_api_mode,
-    responses_api_mode,
     expected_mode,
 ):
-    app = make_app(gigachat_api_mode, responses_api_mode)
+    app = make_app(gigachat_api_mode)
     client = TestClient(app)
 
     response = client.post(
@@ -218,7 +213,7 @@ def test_responses_api_mode_matrix(
     ],
 )
 def test_responses_versioned_prefix_overrides_config(route, expected_mode):
-    app = make_versioned_app("v1", "v1" if expected_mode == "v2" else "v2")
+    app = make_versioned_app("v2" if expected_mode == "v1" else "v1")
     client = TestClient(app)
 
     response = client.post(
@@ -241,7 +236,7 @@ def test_responses_versioned_prefix_overrides_config(route, expected_mode):
 
 
 def test_responses_v2_non_stream_returns_openai_response_object():
-    app = make_app("v2", "inherit")
+    app = make_app("v2")
     client = TestClient(app)
 
     response = client.post(
@@ -263,12 +258,11 @@ def test_responses_v2_non_stream_returns_openai_response_object():
 
 
 def test_responses_v1_non_stream_emits_phoenix_llm_span():
-    app = make_app("v1", "inherit")
+    app = make_app("v1")
     app.state.gigachat_client.achat = FakeAChatResourceWithReasoning()
     app.state.config = ProxyConfig(
         proxy=ProxySettings(
             gigachat_api_mode="v1",
-            responses_api_mode="inherit",
             observability_capture_content=True,
             observability_capture_messages=True,
             observability_capture_responses=True,
@@ -314,7 +308,7 @@ def test_responses_v1_non_stream_emits_phoenix_llm_span():
 
 
 def test_responses_v2_uses_thread_id_as_response_id():
-    app = make_app("v2", "inherit")
+    app = make_app("v2")
     app.state.gigachat_client.achat.thread_id = "thread_1"
     app.state.observability_sink = RecordingObservabilitySink()
     client = TestClient(app)
@@ -339,7 +333,7 @@ def test_responses_v2_uses_thread_id_as_response_id():
 
 
 def test_responses_v2_stream_uses_chat_completion_stream():
-    app = make_app("v2", "inherit")
+    app = make_app("v2")
     client = TestClient(app)
 
     with client.stream(
@@ -366,11 +360,10 @@ def test_responses_v2_stream_uses_chat_completion_stream():
 
 
 def test_responses_v2_stream_emits_phoenix_llm_span():
-    app = make_app("v2", "inherit")
+    app = make_app("v2")
     app.state.config = ProxyConfig(
         proxy=ProxySettings(
             gigachat_api_mode="v2",
-            responses_api_mode="inherit",
             observability_capture_content=True,
             observability_capture_messages=True,
             observability_capture_responses=True,
@@ -411,7 +404,7 @@ def test_responses_v2_stream_emits_phoenix_llm_span():
 
 
 def test_responses_v2_stream_uses_thread_id_as_response_id():
-    app = make_app("v2", "inherit")
+    app = make_app("v2")
     app.state.gigachat_client.achat.thread_id = "thread_1"
     app.state.observability_sink = RecordingObservabilitySink()
     client = TestClient(app)

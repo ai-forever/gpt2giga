@@ -109,7 +109,6 @@ provider execution, описан в [Normalized messages architecture](./archite
 
 ```dotenv
 GPT2GIGA_GIGACHAT_API_MODE=v1
-GPT2GIGA_RESPONSES_API_MODE=inherit
 ```
 
 Задайте `GPT2GIGA_GIGACHAT_API_MODE=v2`, чтобы root routes использовали более новый GigaChat `v2/chat/completions` surface для chat-like запросов. Для явного выбора на уровне клиента используйте `base_url` с `/v1` или `/v2`.

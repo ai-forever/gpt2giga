@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
-from gpt2giga.common.api_mode import resolve_responses_api_mode
+from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.conversation import (
     commit_responses_response,
     stitch_responses_payload,
@@ -52,7 +52,7 @@ async def responses(request: Request):
     state = request.app.state
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
-    mode = resolve_responses_api_mode(request)
+    mode = resolve_gigachat_api_mode(request)
     conversation_turn = await stitch_responses_payload(request, data, mode=mode)
 
     populate_giga_functions(data, getattr(state, "logger", None))

@@ -562,7 +562,7 @@ class RequestTransformer:
         )
 
     def _responses_chat_completion_tools_enabled_by_default(self) -> bool:
-        return self.config.proxy_settings.resolve_responses_api_mode() == "v2"
+        return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
 
     @staticmethod
     def _strip_reasoning_payload_fields(payload: Dict[str, Any]) -> Dict[str, Any]:

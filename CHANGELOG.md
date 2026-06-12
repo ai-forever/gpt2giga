@@ -18,7 +18,7 @@
 - **Внутренний GigaChat transformer API**: старые compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2` и модуль `gigachat_v2_adapter` заменены на явные `chat` / `chat_completion` имена; внешние OpenAI/Anthropic-compatible endpoints не меняются.
 
 ### Добавлено
-- **Явные GigaChat API mode routes**: публичные OpenAI/Anthropic/LiteLLM-compatible routes теперь доступны в корне, под `/v1` и под `/v2`; root routes следуют `GPT2GIGA_GIGACHAT_API_MODE` / `GPT2GIGA_RESPONSES_API_MODE`, `/v1` принудительно выбирает legacy chat contract, `/v2` - GigaChat chat-completion contract.
+- **Явные GigaChat API mode routes**: публичные OpenAI/Anthropic/LiteLLM-compatible routes теперь доступны в корне, под `/v1` и под `/v2`; root routes следуют `GPT2GIGA_GIGACHAT_API_MODE`, `/v1` принудительно выбирает legacy chat contract, `/v2` - GigaChat chat-completion contract.
 - **Configuration reference**: расширен `docs/configuration.md` с quick profiles, форматами env values, security/auth notes, backend API modes, observability, metrics, traffic-log и storage настройками.
 - **Modular roadmap safety baseline**: начата подготовка release-дисциплины для `v0.2.0` с правилами semantic versioning и release checklist.
 - **Modular feature flags**: добавлены выключенные по умолчанию `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED` и `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
@@ -115,7 +115,7 @@
 ## [0.1.8a1] - 2026-06-06
 
 ### Добавлено
-- **GigaChat v2 backend mode**: добавлены `GPT2GIGA_GIGACHAT_API_MODE` и `GPT2GIGA_RESPONSES_API_MODE` для переключения chat-like upstream-вызовов на GigaChat chat-completion contract (`v2/chat/completions` в SDK 0.2.2a1); внешний OpenAI/Anthropic-compatible контракт и URL остаются прежними
+- **GigaChat v2 backend mode**: добавлен `GPT2GIGA_GIGACHAT_API_MODE` для переключения chat-like upstream-вызовов на GigaChat chat-completion contract (`v2/chat/completions` в SDK 0.2.2a1); внешний OpenAI/Anthropic-compatible контракт и URL остаются прежними
 - **Responses built-in tools в v2 mode**: добавлена поддержка встроенных GigaChat-инструментов для OpenAI Responses API (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); нормализованные output items, stream progress events, file/inline metadata и гидратация изображений реализованы для `web_search*` и `image_generation` / `image_generate`
 - **Per-model max connections**: добавлены локальные in-process лимиты одновременных upstream model-call по effective GigaChat model через `GPT2GIGA_MODEL_MAX_CONNECTIONS`, `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` и `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT`, а также соответствующие CLI-флаги
 - **Debug payload logs**: добавлены non-PROD DEBUG-логи payload'ов для upstream-запросов и обработанных ответов GigaChat; в PROD payload'ы не пишутся
