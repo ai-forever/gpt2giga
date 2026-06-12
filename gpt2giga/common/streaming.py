@@ -910,6 +910,7 @@ async def stream_responses_generator(
             try:
                 first_item = await anext(stream)
             except StopAsyncIteration:
+                # Empty upstream streams still need response start events below.
                 pass
             except Exception:
                 for event in response_start_events():

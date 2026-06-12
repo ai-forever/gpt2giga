@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from .constants import _JSON_KV_RE, _KV_EQ_RE, _BEARER_RE, SENSITIVE_KEYS
+from .constants import BEARER_RE, JSON_KV_RE, KV_EQ_RE, SENSITIVE_KEYS
 
 # Context variable for rquid
 rquid_context = contextvars.ContextVar("rquid", default="-")
@@ -17,9 +17,9 @@ _LOGURU_TAG_RE = re.compile(r"(\\*)(</?(?:[fb]g\s)?[^<>\s]*>)")
 
 def redact_sensitive(message: str) -> str:
     """Replace values of sensitive keys in a log message with '***'."""
-    message = _JSON_KV_RE.sub(r"\1\2\1: \3***\3", message)
-    message = _KV_EQ_RE.sub(r"\1=***", message)
-    message = _BEARER_RE.sub(r"\1***", message)
+    message = JSON_KV_RE.sub(r"\1\2\1: \3***\3", message)
+    message = KV_EQ_RE.sub(r"\1=***", message)
+    message = BEARER_RE.sub(r"\1***", message)
     return message
 
 

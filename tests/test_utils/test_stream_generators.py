@@ -514,8 +514,6 @@ async def test_stream_responses_chat_completion_generator_text_and_usage():
 
 
 async def test_stream_responses_chat_completion_generator_builtin_tool_outputs():
-    import json
-
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -702,8 +700,6 @@ async def test_stream_responses_chat_completion_generator_emits_source_annotatio
 
 
 async def test_stream_responses_chat_completion_generator_emits_builtin_tool_progress_events():
-    import json
-
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -884,8 +880,6 @@ async def test_stream_responses_chat_completion_generator_emits_builtin_tool_pro
 
 
 async def test_stream_responses_chat_completion_generator_maps_reasoning_role_to_output_item():
-    import json
-
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -1019,8 +1013,6 @@ async def test_stream_chat_generator_success_with_disconnect():
 
 async def test_stream_chat_completion_error_response_format():
     """Тест формата ответа об ошибке в стриминге"""
-    import json
-
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1040,8 +1032,6 @@ async def test_stream_chat_completion_error_response_format():
 
 async def test_stream_responses_generator_success():
     """Test successful streaming with all proper SSE events"""
-    import json
-
     req = FakeRequest(FakeClient())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1116,8 +1106,6 @@ async def test_stream_responses_generator_success():
 
 
 async def test_stream_responses_generator_preserves_reasoning_config():
-    import json
-
     req = FakeRequest(FakeClient())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1148,8 +1136,6 @@ async def test_stream_responses_generator_preserves_reasoning_config():
 
 
 async def test_stream_responses_generator_extracts_think_tags():
-    import json
-
     req = FakeRequest(FakeClientThinkTags())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1382,8 +1368,6 @@ class FakeClientFunctionCallReservedWebSearch:
 
 async def test_stream_responses_generator_function_call():
     """Test streaming with function call (single chunk)"""
-    import json
-
     req = FakeRequest(FakeClientFunctionCall())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1509,8 +1493,6 @@ async def test_stream_responses_generator_function_call_restores_namespace():
 
 async def test_stream_responses_generator_function_call_streamed_args():
     """Test streaming with function call arguments split across multiple chunks"""
-    import json
-
     req = FakeRequest(FakeClientFunctionCallStreamed())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1567,8 +1549,6 @@ async def test_stream_responses_generator_function_call_streamed_args():
 
 async def test_stream_responses_generator_unmaps_reserved_web_search_name():
     """Reserved tool name coming from GigaChat must be mapped back for client."""
-    import json
-
     req = FakeRequest(FakeClientFunctionCallReservedWebSearch())
     chat = SimpleNamespace(model="giga")
     lines = []
