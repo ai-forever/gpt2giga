@@ -27,6 +27,25 @@ Gemini operation routes доступны в корне, под `/v1`, `/v2` и `
 Официальный `google-genai` SDK при таком `base_url` ходит в Gemini-compatible
 маршруты через свой обычный `/v1beta` path.
 
+## Версия API
+
+Выбор версии GigaChat API для Gemini-примеров задаётся в `types.HttpOptions`.
+Укажите `api_version="v1"`, чтобы SDK ходил в `/v1`, или `api_version="v2"`,
+чтобы SDK ходил в `/v2`:
+
+```python
+client = genai.Client(
+    api_key="0",
+    http_options=types.HttpOptions(
+        base_url="http://localhost:8090",
+        api_version="v1",
+    ),
+)
+```
+
+Если `api_version` не указан, `google-genai` использует свой обычный Gemini
+path, а `gpt2giga` выбирает backend mode по `GPT2GIGA_GIGACHAT_API_MODE`.
+
 ## Запуск
 
 ```bash
