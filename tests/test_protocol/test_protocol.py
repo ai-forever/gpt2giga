@@ -60,6 +60,51 @@ async def test_request_transformer_tools_to_functions():
     assert chat.get("functions") and len(chat["functions"]) == 1
 
 
+async def test_prepare_chat_normalizes_raw_function_schemas():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "final_answer",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "answers": {"type": "object"},
+                                "score": {
+                                    "anyOf": [
+                                        {"type": "integer"},
+                                        {"type": "number"},
+                                        {"type": "null"},
+                                    ]
+                                },
+                                "meta": {"type": ["object", "null"]},
+                            },
+                        },
+                    },
+                }
+            ],
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+    )
+
+    params = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )
+    assert params["properties"]["answers"]["type"] == "object"
+    assert params["properties"]["answers"]["properties"] == {}
+    assert params["properties"]["score"]["type"] == "integer"
+    assert "anyOf" not in params["properties"]["score"]
+    assert params["properties"]["meta"]["type"] == "object"
+    assert params["properties"]["meta"]["properties"] == {}
+
+
 async def test_request_transformer_dev_debug_logging_includes_full_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()

@@ -581,6 +581,74 @@ def test_adapt_chat_completion_chunk_text_to_chat_shape():
     assert adapted["usage"] is None
 
 
+def test_adapt_chat_completion_openai_style_chunk_text_to_chat_shape():
+    chunk = {
+        "choices": [
+            {
+                "delta": {"content": "Прив", "role": "assistant"},
+                "index": 0,
+            }
+        ],
+        "created": 1781307410,
+        "model": "GigaChat-3-Ultra:32.3.18.5",
+        "object": "chat.completions",
+    }
+
+    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        chunk,
+        default_model="fallback",
+    )
+
+    assert adapted["model"] == "GigaChat-3-Ultra:32.3.18.5"
+    assert adapted["choices"][0]["delta"] == {
+        "content": "Прив",
+        "role": "assistant",
+    }
+    assert adapted["choices"][0]["finish_reason"] is None
+
+
+def test_adapt_chat_completion_openai_style_final_chunk_keeps_stop_and_usage():
+    chunk = {
+        "choices": [
+            {
+                "delta": {
+                    "content": "",
+                    "role": "assistant",
+                    "functions_state_id": "019ebe32-089b-7bee-b7a2-0d924c288064",
+                },
+                "index": 0,
+                "finish_reason": "stop",
+            }
+        ],
+        "created": 1781307410,
+        "model": "GigaChat-3-Ultra:32.3.18.5",
+        "object": "chat.completions",
+        "usage": {
+            "prompt_tokens": 27413,
+            "completion_tokens": 8,
+            "total_tokens": 27421,
+            "precached_prompt_tokens": 0,
+        },
+    }
+
+    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        chunk,
+        default_model="fallback",
+    )
+
+    assert adapted["choices"][0]["delta"] == {
+        "content": "",
+        "role": "assistant",
+    }
+    assert adapted["choices"][0]["finish_reason"] == "stop"
+    assert adapted["usage"] == {
+        "prompt_tokens": 27413,
+        "completion_tokens": 8,
+        "total_tokens": 27421,
+        "precached_prompt_tokens": 0,
+    }
+
+
 def test_adapt_chat_completion_chunk_reasoning_role_to_chat_delta_reasoning_content():
     chunk = ChatCompletionChunk.model_validate(
         {

@@ -223,6 +223,40 @@ def test_normalize_json_schema_anyof_string_or_object():
     assert "properties" not in result
 
 
+def test_normalize_json_schema_flattens_allof_refs():
+    """Test: allOf is merged away after $ref resolution."""
+    schema = {
+        "$defs": {
+            "Answer": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "metadata": {"type": "object"},
+                },
+            }
+        },
+        "type": "object",
+        "properties": {
+            "answers": {
+                "allOf": [{"$ref": "#/$defs/Answer"}],
+                "description": "Structured answer.",
+            }
+        },
+    }
+
+    result = normalize_tool_parameters_schema(schema)
+    answers = result["properties"]["answers"]
+
+    assert "allOf" not in answers
+    assert answers["type"] == "object"
+    assert answers["description"] == "Structured answer."
+    assert answers["properties"]["text"]["type"] == "string"
+    assert answers["properties"]["metadata"] == {
+        "type": "object",
+        "properties": {},
+    }
+
+
 def test_convert_tool_with_nested_object_without_properties():
     """Тест: convert_tool_to_giga_functions нормализует схемы с вложенными объектами без properties"""
     data = {

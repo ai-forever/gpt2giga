@@ -31,6 +31,7 @@ from gpt2giga.common.tools import (
     build_gigachat_builtin_tool_payload,
     iter_function_tool_payloads,
     map_tool_name_to_gigachat,
+    normalize_gigachat_function_definitions,
 )
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.models.config import ProxyConfig
@@ -827,6 +828,14 @@ class RequestTransformer:
         """Common logic for message transformation and logging."""
         transformed_data.pop("_gpt2giga_builtin_tools", None)
         transformed_data.pop("_gpt2giga_tool_config", None)
+        if "functions" in transformed_data:
+            functions = normalize_gigachat_function_definitions(
+                transformed_data.get("functions")
+            )
+            if functions:
+                transformed_data["functions"] = functions
+            else:
+                transformed_data.pop("functions", None)
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )

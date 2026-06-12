@@ -270,3 +270,63 @@ def convert_tool_to_giga_functions(data: dict):
         )
         functions.append(giga_function)
     return functions
+
+
+def normalize_gigachat_function_definitions(functions: Any) -> list[Function]:
+    """Return GigaChat Function models with sanitized parameters schemas."""
+    if not isinstance(functions, list):
+        return []
+
+    normalized_functions: list[Function] = []
+    for function in functions:
+        function_payload = _function_definition_payload(function)
+        if function_payload is None:
+            continue
+
+        name = _optional_tool_name(function_payload)
+        if name is None:
+            continue
+
+        normalized_params = normalize_tool_parameters_schema(
+            function_payload.get("parameters") or {}
+        )
+        payload: dict[str, Any] = {
+            "name": map_tool_name_to_gigachat(name),
+            "description": function_payload.get("description", ""),
+            "parameters": FunctionParameters(**normalized_params),
+        }
+        for field_name in ("few_shot_examples", "return_parameters"):
+            field_value = function_payload.get(field_name)
+            if field_value is None:
+                continue
+            if field_name == "return_parameters" and isinstance(field_value, Mapping):
+                field_value = normalize_tool_parameters_schema(field_value)
+            payload[field_name] = field_value
+
+        normalized_functions.append(Function(**payload))
+
+    return normalized_functions
+
+
+def _function_definition_payload(function: Any) -> dict[str, Any] | None:
+    if isinstance(function, Mapping):
+        if "function" in function and isinstance(function["function"], Mapping):
+            return dict(function["function"])
+        return dict(function)
+
+    if hasattr(function, "model_dump"):
+        dumped = function.model_dump(exclude_none=True, by_alias=True)
+        return dict(dumped) if isinstance(dumped, Mapping) else None
+
+    payload: dict[str, Any] = {}
+    for field_name in (
+        "name",
+        "description",
+        "parameters",
+        "few_shot_examples",
+        "return_parameters",
+    ):
+        if hasattr(function, field_name):
+            payload[field_name] = getattr(function, field_name)
+
+    return payload or None

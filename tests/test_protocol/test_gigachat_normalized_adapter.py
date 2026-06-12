@@ -148,6 +148,41 @@ def test_normalized_chat_to_openai_payload_maps_tools_and_generation_config():
     assert payload["additional_fields"] == {"profanity_check": False}
 
 
+def test_normalized_chat_to_openai_payload_sanitizes_tool_parameters():
+    request = NormalizedChatRequest(
+        model="GigaChat",
+        messages=[NormalizedMessage(role="user", content="answer")],
+        tools=[
+            NormalizedTool(
+                name="final_answer",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "answers": {"type": "object"},
+                        "score": {
+                            "anyOf": [
+                                {"type": "integer"},
+                                {"type": "number"},
+                                {"type": "null"},
+                            ]
+                        },
+                    },
+                },
+            )
+        ],
+    )
+
+    payload = normalized_chat_to_openai_payload(request)
+
+    parameters = payload["tools"][0]["function"]["parameters"]
+    assert parameters["properties"]["answers"] == {
+        "type": "object",
+        "properties": {},
+    }
+    assert parameters["properties"]["score"]["type"] == "integer"
+    assert "anyOf" not in parameters["properties"]["score"]
+
+
 async def test_gigachat_provider_adapter_executes_chat_to_normalized_response():
     client = FakeClient()
     transformer = FakeTransformer()

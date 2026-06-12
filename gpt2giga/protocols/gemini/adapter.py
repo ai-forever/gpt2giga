@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.gemini.response_adapter import (
     normalized_chat_response_to_gemini,
@@ -323,7 +324,7 @@ def _function_declaration_to_normalized(
     return NormalizedTool(
         name=str(declaration.get("name") or ""),
         description=_string_or_none(declaration.get("description")),
-        parameters=dict(parameters),
+        parameters=normalize_tool_parameters_schema(parameters),
         raw_extensions=raw_extensions,
     )
 

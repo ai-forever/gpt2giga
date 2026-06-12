@@ -10,6 +10,7 @@ from typing import Any, Literal
 import gigachat
 
 from gpt2giga.common.gigachat_options import gigachat_request_options
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
@@ -434,12 +435,13 @@ def _content_part_to_openai(part: NormalizedContentPart) -> dict[str, Any]:
 
 def _tool_to_openai(tool: NormalizedTool) -> dict[str, Any]:
     raw_extensions = dict(tool.raw_extensions)
+    parameters = normalize_tool_parameters_schema(tool.parameters)
     payload = {
         "type": tool.type,
         "function": {
             "name": tool.name,
             "description": tool.description,
-            "parameters": tool.parameters,
+            "parameters": parameters,
         },
     }
     function_payload = {

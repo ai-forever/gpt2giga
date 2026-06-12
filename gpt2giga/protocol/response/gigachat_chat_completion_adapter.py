@@ -283,13 +283,24 @@ def adapt_chat_completion_usage(usage: Any) -> Optional[dict]:
     if not usage_data:
         return None
 
-    prompt_tokens = usage_data.get("input_tokens") or 0
-    completion_tokens = usage_data.get("output_tokens") or 0
+    prompt_tokens = usage_data.get("input_tokens")
+    if prompt_tokens is None:
+        prompt_tokens = usage_data.get("prompt_tokens")
+    prompt_tokens = prompt_tokens or 0
+
+    completion_tokens = usage_data.get("output_tokens")
+    if completion_tokens is None:
+        completion_tokens = usage_data.get("completion_tokens")
+    completion_tokens = completion_tokens or 0
+
     total_tokens = usage_data.get("total_tokens")
     if total_tokens is None:
         total_tokens = prompt_tokens + completion_tokens
 
-    input_details = _dump_model(usage_data.get("input_tokens_details"))
+    input_details = _dump_model(
+        usage_data.get("input_tokens_details")
+        or usage_data.get("prompt_tokens_details")
+    )
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -323,6 +334,18 @@ def _copy_provider_metadata(target: dict[str, Any], source: dict[str, Any]) -> N
 
 
 def _select_message(data: dict) -> dict:
+    choice = _select_choice(data)
+    if choice:
+        for message_key in ("message", "delta"):
+            message = _dump_model(choice.get(message_key))
+            if message:
+                finish_reason = choice.get("finish_reason")
+                if finish_reason is not None:
+                    message.setdefault("finish_reason", finish_reason)
+                return message
+        if {"role", "content", "function_call"} & choice.keys():
+            return choice
+
     if "messages" not in data:
         if {"role", "content", "function_call"} & data.keys():
             return data
@@ -338,6 +361,18 @@ def _select_message(data: dict) -> dict:
             return message_data
 
     return _dump_model(messages[0])
+
+
+def _select_choice(data: dict) -> dict:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return {}
+
+    for choice in choices:
+        choice_data = _dump_model(choice)
+        if choice_data:
+            return choice_data
+    return {}
 
 
 def _extract_text_content(message: dict) -> str:

@@ -217,6 +217,41 @@ def test_build_openai_data_from_anthropic_request_defaults_bad_tool_schema():
     }
 
 
+def test_build_openai_data_from_anthropic_request_normalizes_tool_schema():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "name": "final_answer",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "answers": {"type": "object"},
+                        "score": {
+                            "anyOf": [
+                                {"type": "integer"},
+                                {"type": "number"},
+                                {"type": "null"},
+                            ]
+                        },
+                    },
+                },
+            }
+        ],
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    parameters = openai_data["tools"][0]["function"]["parameters"]
+    assert parameters["properties"]["answers"] == {
+        "type": "object",
+        "properties": {},
+    }
+    assert parameters["properties"]["score"]["type"] == "integer"
+    assert "anyOf" not in parameters["properties"]["score"]
+
+
 def test_build_openai_data_from_anthropic_request_keeps_function_tools():
     data = {
         "model": "claude-x",

@@ -35,6 +35,31 @@ def _ensure_concrete_property_schema(schema: dict) -> dict:
     return schema
 
 
+def _merge_schema_dict(target: dict, source: dict) -> dict:
+    merged = dict(target)
+    for key, value in source.items():
+        if key == "properties" and isinstance(value, dict):
+            existing = merged.get(key)
+            if isinstance(existing, dict):
+                merged[key] = {**value, **existing}
+            else:
+                merged[key] = value
+            continue
+        if key == "required" and isinstance(value, list):
+            existing = merged.get(key)
+            if isinstance(existing, list):
+                merged[key] = [
+                    *existing,
+                    *[item for item in value if item not in existing],
+                ]
+            else:
+                merged[key] = value
+            continue
+        if key not in merged:
+            merged[key] = value
+    return merged
+
+
 def resolve_schema_refs(schema: dict) -> dict:
     """Resolve $ref references and anyOf/oneOf in JSON schema.
 
@@ -139,9 +164,18 @@ def normalize_json_schema(schema: dict) -> dict:
                     if k not in result:
                         result[k] = v
 
-    # Обрабатываем allOf (без удаления null)
+    # Обрабатываем allOf - GigaChat не поддерживает композицию схем
     if "allOf" in result and isinstance(result["allOf"], list):
-        result["allOf"] = [normalize_json_schema(item) for item in result["allOf"]]
+        normalized_items = [
+            normalize_json_schema(item)
+            for item in result["allOf"]
+            if isinstance(item, dict)
+        ]
+        del result["allOf"]
+        merged_all_of: dict = {}
+        for item in normalized_items:
+            merged_all_of = _merge_schema_dict(merged_all_of, item)
+        result = _merge_schema_dict(result, merged_all_of)
 
     # Если это объект без properties, добавляем пустые properties
     schema_type = result.get("type")

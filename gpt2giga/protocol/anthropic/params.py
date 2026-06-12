@@ -3,6 +3,7 @@
 from typing import Any, Mapping
 
 from gpt2giga.common.client_params import ClientCompatibilityError, ClientParamStatus
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.protocol.request.params import OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS
 
 ANTHROPIC_MESSAGES_SUPPORTED_PARAMS = frozenset(
@@ -192,6 +193,10 @@ def _sanitize_tools(data: dict[str, Any]) -> None:
         sanitized_tool = dict(tool)
         if not isinstance(sanitized_tool.get("input_schema"), Mapping):
             sanitized_tool["input_schema"] = {"type": "object", "properties": {}}
+        else:
+            sanitized_tool["input_schema"] = normalize_tool_parameters_schema(
+                sanitized_tool["input_schema"]
+            )
         sanitized_tools.append(sanitized_tool)
 
     if sanitized_tools:
