@@ -191,3 +191,23 @@ def normalize_json_schema(schema: dict) -> dict:
             }
 
     return result
+
+
+def normalize_tool_parameters_schema(schema: object) -> dict:
+    """Normalize a root function/tool parameters schema for GigaChat."""
+    if not isinstance(schema, dict):
+        return {"type": "object", "properties": {}}
+
+    result = normalize_json_schema(resolve_schema_refs(schema))
+    if not isinstance(result, dict) or not result:
+        return {"type": "object", "properties": {}}
+
+    if "type" not in result:
+        result = dict(result)
+        result["type"] = "object"
+
+    if result.get("type") == "object":
+        result = dict(result)
+        result.setdefault("properties", {})
+
+    return result

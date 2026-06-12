@@ -72,6 +72,31 @@ async def test_prepare_chat_completion_maps_tools_and_forced_function_call():
     assert request.tool_config.function_name == "__gpt2giga_user_search_web"
 
 
+async def test_prepare_chat_completion_adds_properties_to_empty_tool_schema():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-3-Ultra",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "update_topic",
+                        "description": "Update progress.",
+                        "parameters": {},
+                    },
+                }
+            ],
+        }
+    )
+
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.parameters == {"type": "object", "properties": {}}
+
+
 async def test_prepare_chat_completion_normalizes_anthropic_nested_tool_schema():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

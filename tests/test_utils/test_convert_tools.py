@@ -1,4 +1,7 @@
-from gpt2giga.common.json_schema import normalize_json_schema
+from gpt2giga.common.json_schema import (
+    normalize_json_schema,
+    normalize_tool_parameters_schema,
+)
 from gpt2giga.common.tools import convert_tool_to_giga_functions
 
 
@@ -7,6 +10,11 @@ def test_normalize_json_schema_adds_properties_to_object():
     schema = {"type": "object"}
     result = normalize_json_schema(schema)
     assert result == {"type": "object", "properties": {}}
+
+
+def test_normalize_tool_parameters_schema_defaults_root_to_object():
+    result = normalize_tool_parameters_schema({"required": ["query"]})
+    assert result == {"required": ["query"], "type": "object", "properties": {}}
 
 
 def test_normalize_json_schema_nested_object():

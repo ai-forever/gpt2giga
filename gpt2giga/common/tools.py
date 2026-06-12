@@ -3,7 +3,7 @@ from typing import Any
 
 from gigachat.models import Function, FunctionParameters
 
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 
 _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
     # У GigaChat есть встроенный tool под названием "web_search".
@@ -262,9 +262,7 @@ def convert_tool_to_giga_functions(data: dict):
     functions = []
 
     for function in iter_function_tool_payloads(data):
-        # Resolve $ref/$defs references as GigaChat doesn't support them
-        resolved_params = resolve_schema_refs(function["parameters"])
-        normalized_params = normalize_json_schema(resolved_params)
+        normalized_params = normalize_tool_parameters_schema(function["parameters"])
         giga_function = Function(
             name=map_tool_name_to_gigachat(function["name"]),
             description=function.get("description", ""),

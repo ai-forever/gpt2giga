@@ -15,7 +15,11 @@ from gigachat.models import (
 
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.debug_logging import log_debug_payload
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.common.json_schema import (
+    normalize_json_schema,
+    normalize_tool_parameters_schema,
+    resolve_schema_refs,
+)
 from gpt2giga.common.message_utils import (
     collapse_user_messages,
     ensure_system_first,
@@ -1201,9 +1205,7 @@ class RequestTransformer:
 
     @staticmethod
     def _normalize_chat_completion_function_schema(schema: Any) -> dict[str, Any]:
-        if not isinstance(schema, dict):
-            return {}
-        return normalize_json_schema(resolve_schema_refs(schema))
+        return normalize_tool_parameters_schema(schema)
 
     @staticmethod
     def _dump_mapping(value: Any) -> Dict[str, Any]:
