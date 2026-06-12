@@ -82,14 +82,12 @@ def test_health_endpoint():
 ### Async Protocol Tests
 
 ```python
-import pytest
 from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer
 
 
-@pytest.mark.asyncio
 async def test_transformer_merges_messages():
     config = ProxyConfig()
     attachments = AttachmentProcessor(logger)
@@ -117,7 +115,7 @@ Defined in `pytest.ini`:
 
 ```bash
 # Find async tests
-rg -n "@pytest.mark.asyncio|async def test_" tests
+rg -n "async def test_" tests
 
 # Find router tests for a route family
 rg -n "batches|anthropic|responses|embeddings|metrics|admin|debug" tests/test_router
@@ -137,7 +135,7 @@ rg -n "mocker|MagicMock|AsyncMock|patch" tests
 
 ## Common Gotchas
 
-- Async auto-mode is enabled in `pytest.ini`, but explicit `@pytest.mark.asyncio` is still preferred for clarity.
+- Async auto-mode is enabled in `pytest.ini`; do not add `@pytest.mark.asyncio` unless a test needs explicit pytest-asyncio options.
 - There is no root-level shared `conftest.py`; package-specific fixtures live close to the tests that use them, such as under `tests/test_api_server/` and `tests/test_cli/`.
 - Coverage omits `tests/`, `scripts/`, `docs/`, `examples/`, migrations, `__pycache__`, and `.local/` according to `pyproject.toml`.
 - Batch and file helpers rely on in-memory stores in app state; router tests should initialize or mock that state explicitly when covering those disabled modules.

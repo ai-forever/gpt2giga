@@ -12,7 +12,6 @@ async def dummy_func_error():
     raise DummyError("test error")
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_success():
     @exceptions_handler
     async def ok():
@@ -21,7 +20,6 @@ async def test_exceptions_handler_success():
     assert await ok() == "ok"
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_converts_gigachat_response_error(monkeypatch):
     import gigachat
 

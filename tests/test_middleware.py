@@ -502,7 +502,6 @@ def test_rquid_middleware_emits_traffic_event_for_validation_error():
     assert event.metadata["lifecycle"] == "request_completed"
 
 
-@pytest.mark.asyncio
 async def test_traffic_log_body_iterator_emits_stream_completed():
     sink = RecordingTrafficSink()
     context = RequestContext(
@@ -534,7 +533,6 @@ async def test_traffic_log_body_iterator_emits_stream_completed():
     assert sink.events[0].metadata["lifecycle"] == "streaming_completed"
 
 
-@pytest.mark.asyncio
 async def test_traffic_log_body_iterator_emits_stream_aborted():
     sink = RecordingTrafficSink()
     context = RequestContext(

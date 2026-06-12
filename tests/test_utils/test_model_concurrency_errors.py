@@ -1,13 +1,11 @@
 import json
 
-import pytest
 
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.model_concurrency import ModelConcurrencyTimeoutError
 from gpt2giga.logger import rquid_context
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_renders_openai_model_concurrency_timeout() -> None:
     @exceptions_handler
     async def boom():
@@ -26,7 +24,6 @@ async def test_exceptions_handler_renders_openai_model_concurrency_timeout() -> 
     }
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_renders_anthropic_model_concurrency_timeout() -> None:
     token = rquid_context.set("rq-model-limit")
 

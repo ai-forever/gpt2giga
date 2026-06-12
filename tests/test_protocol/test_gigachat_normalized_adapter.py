@@ -148,7 +148,6 @@ def test_normalized_chat_to_openai_payload_maps_tools_and_generation_config():
     assert payload["additional_fields"] == {"profanity_check": False}
 
 
-@pytest.mark.asyncio
 async def test_gigachat_provider_adapter_executes_chat_to_normalized_response():
     client = FakeClient()
     transformer = FakeTransformer()
@@ -185,7 +184,6 @@ async def test_gigachat_provider_adapter_executes_chat_to_normalized_response():
     assert response.usage.output_tokens == 3
 
 
-@pytest.mark.asyncio
 async def test_gigachat_provider_adapter_executes_chat_completion_to_normalized_response():
     client = FakeClient()
     transformer = FakeTransformer()
@@ -211,7 +209,6 @@ async def test_gigachat_provider_adapter_executes_chat_completion_to_normalized_
     assert response.usage.output_tokens == 5
 
 
-@pytest.mark.asyncio
 async def test_gigachat_provider_adapter_api_mode_override_wins_over_config():
     client = FakeClient()
     transformer = FakeTransformer()
@@ -266,7 +263,6 @@ class FakeAChatStream:
         return gen()
 
 
-@pytest.mark.asyncio
 async def test_gigachat_provider_adapter_streams_chat_to_normalized_events():
     client = FakeStreamClient(
         chunks=[
@@ -327,7 +323,6 @@ async def test_gigachat_provider_adapter_streams_chat_to_normalized_events():
     )
 
 
-@pytest.mark.asyncio
 async def test_gigachat_provider_adapter_streams_tool_call_delta():
     client = FakeStreamClient(
         chunks=[
@@ -373,7 +368,6 @@ async def test_gigachat_provider_adapter_streams_tool_call_delta():
     assert events[1].tool_call.arguments == '{"q": "ping"}'
 
 
-@pytest.mark.asyncio
 async def test_gigachat_provider_adapter_stream_error_event_and_cancellation():
     error_adapter = GigaChatProviderAdapter(
         config=ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1")),
@@ -418,7 +412,6 @@ async def test_gigachat_provider_adapter_stream_error_event_and_cancellation():
         await anext(stream)
 
 
-@pytest.mark.asyncio
 async def test_gigachat_provider_adapter_stream_disconnect_stops_after_start():
     adapter = GigaChatProviderAdapter(
         config=ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1")),

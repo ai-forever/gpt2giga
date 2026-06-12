@@ -1,7 +1,6 @@
 import json
 from types import SimpleNamespace
 
-import pytest
 from gigachat.models import ChatCompletionResponse
 from gigachat.models.chat_completions import ChatCompletionChunk
 from loguru import logger
@@ -368,7 +367,6 @@ def test_adapted_chat_completion_reasoning_flows_through_response_processors():
     assert responses["output"][1]["content"][0]["text"] == "Paris"
 
 
-@pytest.mark.asyncio
 async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_responses_processor():
     class FakeImageClient:
         async def aget_image(self, file_id):

@@ -169,7 +169,6 @@ def test_openai_adapter_preserves_message_tool_calls_and_unknown_extensions():
     }
 
 
-@pytest.mark.asyncio
 async def test_openai_adapter_async_entrypoint_matches_chat_converter():
     adapter = OpenAIProtocolAdapter()
     payload = {

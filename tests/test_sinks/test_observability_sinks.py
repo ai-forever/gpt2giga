@@ -2,7 +2,6 @@ import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-import pytest
 
 from gpt2giga.core.context import RequestContext
 from gpt2giga.core.interfaces import ObservabilitySink
@@ -55,7 +54,6 @@ def assert_span_status_code(status: object, expected: str) -> None:
     assert (status_name or str(status_code)) == expected
 
 
-@pytest.mark.asyncio
 async def test_noop_observability_sink_implements_contract():
     sink = NoopObservabilitySink()
 
@@ -496,7 +494,6 @@ def test_openai_response_stream_observer_synthesizes_failed_response_after_error
     assert "stream.error" in event_names
 
 
-@pytest.mark.asyncio
 async def test_otel_sink_records_span_and_flushes_provider():
     class FakeSpan:
         def __init__(self, *, start_time=None):
@@ -585,7 +582,6 @@ async def test_otel_sink_records_span_and_flushes_provider():
     assert provider.flushed is True
 
 
-@pytest.mark.asyncio
 async def test_otel_sink_marks_failed_span_status():
     class FakeSpan:
         def __init__(self):
@@ -630,7 +626,6 @@ async def test_otel_sink_marks_failed_span_status():
     assert_span_status_code(tracer.spans[0].status, "ERROR")
 
 
-@pytest.mark.asyncio
 async def test_otel_sink_honors_zero_sample_rate():
     class FakeTracer:
         spans = []
@@ -643,7 +638,6 @@ async def test_otel_sink_honors_zero_sample_rate():
     await sink.emit("gpt2giga.request", {"status_code": 200})
 
 
-@pytest.mark.asyncio
 async def test_observability_safe_helpers_do_not_raise_on_sink_errors():
     class BrokenSink:
         async def emit(self, name, attributes=None, *, context=None):
@@ -658,7 +652,6 @@ async def test_observability_safe_helpers_do_not_raise_on_sink_errors():
     await flush_observability_sink(sink)
 
 
-@pytest.mark.asyncio
 async def test_response_observability_uses_previous_response_id_as_session():
     class RecordingSink:
         def __init__(self):

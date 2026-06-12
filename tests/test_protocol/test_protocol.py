@@ -1,7 +1,6 @@
 import json
 from unittest.mock import MagicMock
 
-import pytest
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
@@ -18,7 +17,6 @@ def test_attachment_processor_construction():
     assert hasattr(p, "upload_file")
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_collapse_messages():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -37,7 +35,6 @@ async def test_request_transformer_collapse_messages():
     )
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_tools_to_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -63,7 +60,6 @@ async def test_request_transformer_tools_to_functions():
     assert chat.get("functions") and len(chat["functions"]) == 1
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_dev_debug_logging_includes_full_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()

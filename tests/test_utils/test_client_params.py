@@ -188,7 +188,6 @@ def test_client_compatibility_error_rejects_unknown_provider():
         raise ClientCompatibilityError("bad provider", provider="gemini")
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_renders_openai_client_compatibility_error():
     @exceptions_handler
     async def boom():
@@ -201,7 +200,6 @@ async def test_exceptions_handler_renders_openai_client_compatibility_error():
     assert exc_info.value.detail["error"]["param"] == "n"
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_renders_anthropic_client_compatibility_error():
     token = rquid_context.set("rq-anthropic")
 

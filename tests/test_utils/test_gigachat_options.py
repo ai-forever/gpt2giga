@@ -2,7 +2,6 @@ import json
 from types import SimpleNamespace
 
 import httpx
-import pytest
 from gigachat.api.utils import build_headers
 from starlette.requests import Request
 
@@ -93,7 +92,6 @@ def test_extract_gigachat_request_options_drops_provider_sdk_metadata():
     assert options.query == ()
 
 
-@pytest.mark.asyncio
 async def test_gigachat_request_options_sets_gigachat_header_contextvars():
     options = GigaRequestOptions(
         headers={
@@ -128,7 +126,6 @@ async def test_gigachat_request_options_sets_gigachat_header_contextvars():
     assert headers_after_context == {"User-Agent": "GigaChat-python-lib"}
 
 
-@pytest.mark.asyncio
 async def test_gigachat_request_options_hook_applies_headers_query_and_body():
     captured = {}
 
@@ -164,7 +161,6 @@ async def test_gigachat_request_options_hook_applies_headers_query_and_body():
     }
 
 
-@pytest.mark.asyncio
 async def test_gigachat_request_options_hook_skips_auth_requests():
     captured = {}
 

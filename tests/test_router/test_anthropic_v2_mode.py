@@ -1,7 +1,6 @@
 import asyncio
 
 import httpx
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gigachat.models.chat_completions import ChatCompletionChunk
@@ -210,7 +209,6 @@ async def _post_anthropic_message(client: httpx.AsyncClient) -> httpx.Response:
     return await client.post("/messages", json=_anthropic_payload())
 
 
-@pytest.mark.asyncio
 async def test_anthropic_messages_v2_mode_serializes_same_upstream_model():
     app = make_app("v2", limiter=ModelConcurrencyLimiter({"GigaChat": 1}))
     app.state.gigachat_client.achat.release_create = asyncio.Event()

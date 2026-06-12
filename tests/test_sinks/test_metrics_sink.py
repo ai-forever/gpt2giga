@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-import pytest
 
 from gpt2giga.core.interfaces import MetricsSink
 from gpt2giga.models.config import ProxySettings
@@ -16,7 +15,6 @@ from gpt2giga.sinks.metrics.noop import NoopMetricsSink
 from gpt2giga.sinks.metrics.prometheus import PrometheusMetricsSink
 
 
-@pytest.mark.asyncio
 async def test_noop_metrics_sink_implements_contract():
     sink = NoopMetricsSink()
 
@@ -38,7 +36,6 @@ def test_metrics_factory_returns_prometheus_when_enabled():
     assert isinstance(sink, PrometheusMetricsSink)
 
 
-@pytest.mark.asyncio
 async def test_prometheus_sink_renders_counters_histograms_and_safe_labels():
     sink = PrometheusMetricsSink()
 
@@ -71,7 +68,6 @@ async def test_prometheus_sink_renders_counters_histograms_and_safe_labels():
     assert "raw prompt" not in text
 
 
-@pytest.mark.asyncio
 async def test_metrics_emission_maps_request_tokens_and_stream_disconnect():
     sink = PrometheusMetricsSink()
     event = TrafficLogEvent(

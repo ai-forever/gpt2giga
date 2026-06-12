@@ -1,7 +1,6 @@
 import asyncio
 
 import httpx
-import pytest
 from fastapi import FastAPI
 
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
@@ -54,7 +53,6 @@ async def _wait_for_call_count(gigachat: GateEmbeddingsClient, count: int) -> No
         await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
 async def test_embeddings_same_model_serializes() -> None:
     limiter = ModelConcurrencyLimiter({"EmbeddingsGigaR": 1})
     gigachat = GateEmbeddingsClient()
@@ -75,7 +73,6 @@ async def test_embeddings_same_model_serializes() -> None:
     assert gigachat.max_active["EmbeddingsGigaR"] == 1
 
 
-@pytest.mark.asyncio
 async def test_embeddings_different_models_are_independent() -> None:
     limiter = ModelConcurrencyLimiter({"Embeddings": 1, "Embeddings-2": 1})
     gigachat = GateEmbeddingsClient()
@@ -97,7 +94,6 @@ async def test_embeddings_different_models_are_independent() -> None:
     assert second_response.status_code == 200
 
 
-@pytest.mark.asyncio
 async def test_embeddings_timeout_returns_429() -> None:
     limiter = ModelConcurrencyLimiter({"EmbeddingsGigaR": 1}, acquire_timeout=0)
     gigachat = GateEmbeddingsClient()
@@ -117,7 +113,6 @@ async def test_embeddings_timeout_returns_429() -> None:
     assert limited.json()["error"]["code"] == "model_concurrency_limit"
 
 
-@pytest.mark.asyncio
 async def test_embeddings_disabled_limiter_preserves_concurrency() -> None:
     gigachat = GateEmbeddingsClient()
     app = _make_app(limiter=None, gigachat=gigachat)
@@ -136,7 +131,6 @@ async def test_embeddings_disabled_limiter_preserves_concurrency() -> None:
     assert gigachat.max_active["EmbeddingsGigaR"] == 2
 
 
-@pytest.mark.asyncio
 async def test_embeddings_pass_model_false_uses_transformed_model() -> None:
     limiter = ModelConcurrencyLimiter({"raw-client-model": 1}, acquire_timeout=0)
     gigachat = GateEmbeddingsClient()

@@ -104,7 +104,6 @@ def test_embeddings_endpoint_ignores_extra_body():
     ]
 
 
-@pytest.mark.asyncio
 async def test_transform_embedding_body_ignores_extra_body():
     transformed = await transform_embedding_body(
         {"input": "hello", "extra_body": {"custom_flag": "on"}},
@@ -117,7 +116,6 @@ async def test_transform_embedding_body_ignores_extra_body():
     }
 
 
-@pytest.mark.asyncio
 async def test_transform_embedding_body_ignores_user():
     transformed = await transform_embedding_body(
         {"input": "hello", "user": "user-1"},

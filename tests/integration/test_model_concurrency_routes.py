@@ -1,7 +1,6 @@
 import asyncio
 
 import httpx
-import pytest
 from fastapi import FastAPI
 from loguru import logger
 
@@ -101,7 +100,6 @@ async def _post_response(client: httpx.AsyncClient, model: str):
     return await client.post("/responses", json={"model": model, "input": "hi"})
 
 
-@pytest.mark.asyncio
 async def test_model_concurrency_caps_six_calls_to_five_active() -> None:
     app, gigachat = _make_app(
         ModelConcurrencyLimiter({"GigaChat": 1, "GigaChat-Pro": 1, "GigaChat-Max": 5})
@@ -124,7 +122,6 @@ async def test_model_concurrency_caps_six_calls_to_five_active() -> None:
     assert gigachat.max_active["GigaChat-Max"] == 5
 
 
-@pytest.mark.asyncio
 async def test_model_concurrency_independent_across_openai_routes() -> None:
     app, gigachat = _make_app(
         ModelConcurrencyLimiter({"GigaChat": 1, "GigaChat-Pro": 1})
@@ -146,7 +143,6 @@ async def test_model_concurrency_independent_across_openai_routes() -> None:
     assert responses_response.status_code == 200
 
 
-@pytest.mark.asyncio
 async def test_model_concurrency_default_limit_is_per_unknown_model() -> None:
     app, gigachat = _make_app(ModelConcurrencyLimiter({}, default_limit=1))
 
@@ -169,7 +165,6 @@ async def test_model_concurrency_default_limit_is_per_unknown_model() -> None:
     assert gigachat.max_active["Unknown-B"] == 1
 
 
-@pytest.mark.asyncio
 async def test_model_concurrency_disabled_mode_does_not_limit_routes() -> None:
     app, gigachat = _make_app(None)
 
