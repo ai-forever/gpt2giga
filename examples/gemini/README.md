@@ -1,48 +1,70 @@
-# Gemini-like examples
+# Gemini Developer API через `gpt2giga`
 
-These examples call the `gpt2giga` Gemini-compatible REST surface directly.
+`gpt2giga` поддерживает Gemini Developer API-совместимые эндпоинты. Это
+позволяет использовать официальный Python SDK
+[`google-genai`](https://github.com/googleapis/python-genai) поверх локального
+прокси.
 
-Default base URL:
+## Зависимости
 
-```bash
-http://localhost:8090/v1
-```
-
-Override it with:
-
-```bash
-export GEMINI_BASE_URL=http://localhost:8090/v2
-```
-
-If proxy API-key auth is enabled, set:
+Gemini-примеры находятся в группе `integrations`:
 
 ```bash
-export GPT2GIGA_API_KEY=your-proxy-key
+uv sync --group integrations
 ```
 
-Gemini `:generateContent`, `:streamGenerateContent`, `:countTokens`,
-`:embedContent`, and `:batchEmbedContents` routes are mounted at the root path,
-`/v1`, `/v2`, and `/v1beta`, matching the rest of the public API wiring.
-`/v1` forces the GigaChat v1 backend path and `/v2` forces the v2 backend path.
+## Базовая настройка
 
-Gemini-shaped model discovery is available at `/v1beta/models`. On the shared
-`/models`, `/v1/models`, and `/v2/models` paths the proxy returns Gemini model
-shape when the request looks like a Google/Gemini client request, for example
-when it includes `X-Goog-Api-Client`.
+Во всех примерах используется:
 
-Run examples from the repo root:
+- `api_key="0"` как заглушка;
+- `http_options=types.HttpOptions(base_url="http://localhost:8090")`.
+
+Если у вас включена защита API-ключом (`GPT2GIGA_ENABLE_API_KEY_AUTH=True`),
+подставьте ваш ключ вместо `"0"`.
+
+Gemini operation routes доступны в корне, под `/v1`, `/v2` и `/v1beta`.
+Официальный `google-genai` SDK при таком `base_url` ходит в Gemini-compatible
+маршруты через свой обычный `/v1beta` path.
+
+## Запуск
 
 ```bash
-uv run python examples/gemini/generate_content/basic.py
-uv run python examples/gemini/generate_content/stream.py
-uv run python examples/gemini/count_tokens/basic.py
-uv run python examples/gemini/embeddings/basic.py
-uv run python examples/gemini/models/basic.py
+uv run python examples/gemini/content/generate_content.py
+uv run python examples/gemini/content/stream_generate_content.py
+uv run python examples/gemini/content/chat.py
+uv run python examples/gemini/count_tokens/count_tokens.py
+uv run python examples/gemini/embeddings/embeddings.py
 ```
 
-Prepared but not mounted by default:
+Prepared Files/Batches examples are included for the implemented router modules,
+but those routes are not mounted by the default public app yet:
 
 ```bash
-uv run python examples/gemini/files/basic.py
-uv run python examples/gemini/batches/basic.py
+uv run python examples/gemini/files/files.py
+uv run python examples/gemini/batches/batches.py
 ```
+
+## Структура по capability
+
+| Capability | Каталог | Что внутри |
+|---|---|---|
+| content generation | [content/README.md](./content/README.md) | `generate_content`, stream, chat-session, function calling, structured output |
+| `countTokens` | [count_tokens/README.md](./count_tokens/README.md) | Подсчёт токенов для `models.count_tokens(...)` |
+| files | [files/README.md](./files/README.md) | Prepared upload, list, get, download, delete |
+| batches | [batches/README.md](./batches/README.md) | Prepared `batchGenerateContent` и bundled JSONL source |
+| embeddings | [embeddings/README.md](./embeddings/README.md) | `models.embed_content(...)` с несколькими строками |
+
+## Нюансы
+
+- Генерация использует реальные GigaChat model ids, например `GigaChat-2-Max`.
+- Эмбеддинги используют модель, настроенную на стороне proxy. По умолчанию это
+  `EmbeddingsGigaR`; если вы поменяли `GPT2GIGA_EMBEDDINGS`, обновите
+  `model=...` в примере.
+- `embeddings/embeddings.py` передаёт список `contents=[...]`, поэтому пример
+  покрывает batch-style embeddings flow поверх Gemini-compatible embeddings
+  routes.
+- Совместимость в этой итерации сфокусирована на text, function calling,
+  embeddings и подготовленных files/batchGenerateContent handlers.
+- Built-in Gemini tools и часть мультимодальных/file-backed сценариев всё ещё
+  остаются вне scope.

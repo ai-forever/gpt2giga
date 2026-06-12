@@ -1,0 +1,2 @@
+{"request":{"contents":[{"role":"user","parts":[{"text":"Draft a one-line release note title for adding batch JSONL examples."}]}],"generationConfig":{"temperature":0.2}},"metadata":{"requestLabel":"gemini-batch-1"}}
+{"request":{"contents":[{"role":"user","parts":[{"text":"Summarize why Gemini batch file rows store request and metadata separately."}]}],"generationConfig":{"temperature":0.3}},"metadata":{"requestLabel":"gemini-batch-2"}}
