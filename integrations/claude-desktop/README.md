@@ -10,7 +10,8 @@
 ## Что работает
 
 - Claude Desktop отправляет chat-запросы в `gpt2giga`.
-- `gpt2giga` принимает путь Claude gateway вида `/v2/v1/messages` и обрабатывает его как `/v2/messages`.
+- Текущая проверенная схема использует `inferenceGatewayBaseUrl=http://localhost:8090/v2`. Claude Desktop добавляет к нему Anthropic path `/v1/messages`, а `gpt2giga` принимает итоговый путь `/v2/v1/messages` и обрабатывает его как `/v2/messages`.
+- При таком `/v2` route запрос идёт через GigaChat v2 backend, поэтому доступны v2-интеграции GigaChat, например `web_search`.
 - Имя модели Claude можно оставить клиентским alias; при `GPT2GIGA_PASS_MODEL=False` реальная GigaChat model берётся из `GIGACHAT_MODEL`.
 - Plugins/MCP в 3p mode работают иначе, чем в обычном consumer Claude: публичный Directory может быть пустым, а плагины лучше подключать как `managedMcpServers` или org plugins.
 
@@ -43,7 +44,7 @@ GPT2GIGA_ENABLE_API_KEY_AUTH=False
 
 Ключевые настройки:
 
-- `GPT2GIGA_GIGACHAT_API_MODE=v2` — включает GigaChat v2 backend для versioned routes, включая `/v2/messages`.
+- `GPT2GIGA_GIGACHAT_API_MODE=v2` — включает GigaChat v2 backend для root routes. Для Claude Desktop дополнительно укажите `/v2` в `inferenceGatewayBaseUrl`, чтобы гарантированно попасть в `/v2/messages`.
 - `GPT2GIGA_PASS_MODEL=False` — игнорирует Claude model id вроде `claude-opus-4` и использует `GIGACHAT_MODEL`.
 - `GPT2GIGA_ENABLE_API_KEY_AUTH=False` удобно для локального beta-теста. Для удалённого сервера включайте API-key auth.
 
@@ -100,33 +101,27 @@ mkdir -p "$HOME/Library/Application Support/Claude-3p/configLibrary"
 ~/Library/Application Support/Claude-3p/configLibrary/11111111-1111-4111-8111-111111111111.json
 ```
 
-Пример без API-key auth:
+Проверенный пример без API-key auth:
 
 ```json
 {
   "inferenceProvider": "gateway",
   "inferenceCredentialKind": "static",
-  "inferenceGatewayBaseUrl": "http://localhost:8090",
+  "inferenceGatewayBaseUrl": "http://localhost:8090/v2",
   "inferenceGatewayApiKey": "0",
   "inferenceGatewayAuthScheme": "x-api-key",
   "modelDiscoveryEnabled": false,
   "inferenceModels": [
     {
-      "name": "claude-sonnet-4-5",
-      "labelOverride": "GigaChat 3 Ultra"
-    },
-    {
       "name": "claude-opus-4",
-      "labelOverride": "GigaChat 3 Ultra"
-    },
-    {
-      "name": "claude-haiku-4-5",
-      "labelOverride": "GigaChat 3 Ultra"
+      "labelOverride": "GigaChat 3 Ultra",
+      "supports1m": false
     }
-  ],
-  "chatTabEnabled": true
+  ]
 }
 ```
+
+В этом варианте в UI выбирается `claude-opus-4`, но фактическая upstream-модель задаётся через `GIGACHAT_MODEL`, потому что на стороне `gpt2giga` включён `GPT2GIGA_PASS_MODEL=False`. Суффикс `/v2` в `inferenceGatewayBaseUrl` важен для v2 tools/integrations, включая `web_search`.
 
 Если в `gpt2giga` включён `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, замените `inferenceGatewayApiKey` на значение `GPT2GIGA_API_KEY`.
 
@@ -157,6 +152,8 @@ curl -sS http://localhost:8090/v2/v1/messages \
 ```
 
 Ожидается Anthropic-compatible JSON-ответ с `type: "message"`. Внутри `gpt2giga` путь `/v2/v1/messages` нормализуется в `/v2/messages`, поэтому запрос идёт через GigaChat v2 backend.
+
+Такой же путь получается из Claude Desktop при `inferenceGatewayBaseUrl=http://localhost:8090/v2`: приложение добавляет `/v1/messages`, а gateway-префикс `/v2` остаётся первым сегментом.
 
 Если включён API-key auth:
 
@@ -237,6 +234,7 @@ EOF
 
 - **`Configured model not available`, `HTTP 404`, `requestUrl: http://localhost:8090/v2/v1/messages`** — нужна версия `gpt2giga`, где поддержана нормализация `/v2/v1/messages -> /v2/messages`. Перезапустите `gpt2giga` после обновления кода.
 - **Gateway rejected model `claude-opus-4`** — проверьте `GPT2GIGA_PASS_MODEL=False`. Тогда Claude model id будет только client-side alias, а upstream model возьмётся из `GIGACHAT_MODEL`.
+- **`web_search` или другие v2-интеграции не срабатывают** — проверьте, что в Claude Desktop config указан `inferenceGatewayBaseUrl: "http://localhost:8090/v2"` и в `.env` стоит `GPT2GIGA_GIGACHAT_API_MODE=v2`.
 - **Claude всё ещё показывает обычные Sonnet/Opus/Haiku и не использует gateway** — проверьте путь `~/Library/Application Support/Claude-3p/configLibrary`, а не `/Library/Application Support/Claude-3p/configLibrary`; затем полностью перезапустите Claude.
 - **401/403 от `gpt2giga`** — если включён `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, значение `inferenceGatewayApiKey` должно совпадать с `GPT2GIGA_API_KEY`.
 - **Directory plugins пустой** — это ограничение 3p mode. Используйте `managedMcpServers` или org plugins; поведение пока считается beta testing.
