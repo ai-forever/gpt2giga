@@ -237,6 +237,47 @@ async def test_prepare_chat_completion_maps_builtin_tools_in_v2_mode():
     assert request.tool_config.tool_name == "web_search"
 
 
+async def test_prepare_chat_completion_maps_anthropic_builtin_tool_types():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "search and fetch"}],
+            "tools": [
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5,
+                    "allowed_domains": ["example.com"],
+                    "indexes": ["web"],
+                },
+                {
+                    "type": "web_fetch_20250910",
+                    "name": "web_fetch",
+                    "max_uses": 2,
+                },
+                {
+                    "type": "code_execution_20250825",
+                    "name": "code_execution",
+                },
+            ],
+            "tool_choice": {"type": "web_search"},
+        }
+    )
+
+    assert request.tools[0].web_search.model_dump(exclude_none=True) == {
+        "indexes": ["web"],
+        "max_uses": 5,
+        "allowed_domains": ["example.com"],
+    }
+    assert request.tools[1].url_content_extraction == {"max_uses": 2}
+    assert request.tools[2].code_interpreter == {}
+    assert request.tool_config.mode == "tool"
+    assert request.tool_config.tool_name == "web_search"
+
+
 async def test_prepare_chat_completion_enables_builtin_tools_when_default_mode_is_v1():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     rt = RequestTransformer(cfg, logger=logger)

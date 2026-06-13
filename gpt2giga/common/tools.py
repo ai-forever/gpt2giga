@@ -15,12 +15,18 @@ _RESERVED_GIGACHAT_TOOL_NAME_MAP_REVERSE = {
 }
 _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES = {
     "code_interpreter": "code_interpreter",
+    "code_execution": "code_interpreter",
+    "web_fetch": "url_content_extraction",
     "image_generate": "image_generate",
     "image_generation": "image_generate",
     "model_3d_generate": "model_3d_generate",
     "url_content_extraction": "url_content_extraction",
 }
-_GIGACHAT_WEB_SEARCH_TOOL_PREFIX = "web_search"
+_GIGACHAT_BUILTIN_TOOL_TYPE_PREFIX_ALIASES = (
+    ("web_search", "web_search"),
+    ("web_fetch", "url_content_extraction"),
+    ("code_execution", "code_interpreter"),
+)
 _NAMESPACE_TOOL_SEPARATOR = "__"
 
 
@@ -83,8 +89,9 @@ def normalize_gigachat_builtin_tool_type(tool_type: Any) -> str | None:
         return None
 
     normalized = tool_type.strip()
-    if normalized.startswith(_GIGACHAT_WEB_SEARCH_TOOL_PREFIX):
-        return "web_search"
+    for prefix, field_name in _GIGACHAT_BUILTIN_TOOL_TYPE_PREFIX_ALIASES:
+        if normalized == prefix or normalized.startswith(f"{prefix}_"):
+            return field_name
     return _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES.get(normalized)
 
 
@@ -105,7 +112,15 @@ def build_gigachat_builtin_tool_payload(tool: Mapping[str, Any]) -> dict[str, An
         if isinstance(alias_config, Mapping):
             config.update(alias_config)
 
-    structural_keys = {"type", "function", field_name}
+    structural_keys = {
+        "type",
+        "function",
+        "name",
+        "description",
+        "parameters",
+        "input_schema",
+        field_name,
+    }
     if isinstance(tool_type, str):
         structural_keys.add(tool_type)
     for key, value in tool.items():

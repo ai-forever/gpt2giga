@@ -5,7 +5,10 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from gpt2giga.common.content_utils import ensure_json_object_str
-from gpt2giga.common.tools import convert_tool_to_giga_functions
+from gpt2giga.common.tools import (
+    convert_tool_to_giga_functions,
+    normalize_gigachat_builtin_tool_type,
+)
 from gpt2giga.protocol.anthropic.params import (
     sanitize_anthropic_messages_parameters,
     validate_anthropic_content_blocks,
@@ -56,23 +59,97 @@ def _is_anthropic_structured_output_request(data: Dict[str, Any]) -> bool:
     return _convert_anthropic_output_format_to_openai_response_format(data) is not None
 
 
+_ANTHROPIC_NAMED_BUILTIN_TOOL_TYPES = {
+    "WebSearch": "web_search",
+    "WebFetch": "url_content_extraction",
+    "CodeExecution": "code_interpreter",
+}
+
+
 def _convert_anthropic_tools_to_openai(tools: List[Dict]) -> List[Dict]:
     """Convert Anthropic tool definitions to OpenAI format."""
     openai_tools: List[Dict] = []
     for tool in tools:
-        openai_tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": tool["name"],
-                    "description": tool.get("description", ""),
-                    "parameters": tool.get(
-                        "input_schema", {"type": "object", "properties": {}}
-                    ),
-                },
-            }
-        )
+        builtin_tool = _convert_anthropic_builtin_tool_to_openai(tool)
+        if builtin_tool is not None:
+            openai_tools.append(builtin_tool)
+            continue
+
+        function_tool = _convert_anthropic_function_tool_to_openai(tool)
+        if function_tool is not None:
+            openai_tools.append(function_tool)
     return openai_tools
+
+
+def _convert_anthropic_builtin_tool_to_openai(
+    tool: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    field_name = normalize_gigachat_builtin_tool_type(tool.get("type"))
+    if field_name is None:
+        name = tool.get("name")
+        if isinstance(name, str):
+            field_name = _ANTHROPIC_NAMED_BUILTIN_TOOL_TYPES.get(name)
+    if field_name is None:
+        return None
+
+    converted: Dict[str, Any] = {"type": field_name}
+    for key, value in tool.items():
+        if key in {
+            "type",
+            "name",
+            "description",
+            "parameters",
+            "input_schema",
+        }:
+            continue
+        converted[key] = value
+    return converted
+
+
+def _convert_anthropic_function_tool_to_openai(
+    tool: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    name = tool.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+
+    parameters = tool.get("input_schema", {"type": "object", "properties": {}})
+    if not isinstance(parameters, dict):
+        parameters = {"type": "object", "properties": {}}
+
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": tool.get("description", ""),
+            "parameters": parameters,
+        },
+    }
+
+
+def _anthropic_builtin_tool_choice_type(
+    tool_name: str,
+    tools: Any,
+) -> Optional[str]:
+    builtin_type = _ANTHROPIC_NAMED_BUILTIN_TOOL_TYPES.get(tool_name)
+    if builtin_type is not None:
+        return builtin_type
+
+    if not isinstance(tools, list):
+        return None
+
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = tool.get("name")
+        if name != tool_name:
+            continue
+        builtin_type = normalize_gigachat_builtin_tool_type(tool.get("type"))
+        if builtin_type is not None:
+            return builtin_type
+        return None
+
+    return None
 
 
 def _convert_anthropic_messages_to_openai(
@@ -278,8 +355,13 @@ def _build_openai_data_from_anthropic_request(
 
     if "tools" in data and data["tools"]:
         openai_data["tools"] = _convert_anthropic_tools_to_openai(data["tools"])
-        openai_data["functions"] = convert_tool_to_giga_functions(openai_data)
-        if logger:
+        if openai_data["tools"]:
+            functions = convert_tool_to_giga_functions(openai_data)
+            if functions:
+                openai_data["functions"] = functions
+        else:
+            openai_data.pop("tools", None)
+        if logger and "functions" in openai_data:
             logger.debug(f"Functions count: {len(openai_data['functions'])}")
 
     tool_choice = data.get("tool_choice")
@@ -288,7 +370,14 @@ def _build_openai_data_from_anthropic_request(
         if tool_choice_type == "tool":
             tool_name = tool_choice.get("name")
             if tool_name:
-                openai_data["function_call"] = {"name": tool_name}
+                builtin_tool_choice = _anthropic_builtin_tool_choice_type(
+                    tool_name,
+                    data.get("tools"),
+                )
+                if builtin_tool_choice:
+                    openai_data["tool_choice"] = {"type": builtin_tool_choice}
+                else:
+                    openai_data["function_call"] = {"name": tool_name}
         elif tool_choice_type == "none":
             openai_data.pop("tools", None)
             openai_data.pop("functions", None)

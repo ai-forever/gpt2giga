@@ -56,7 +56,7 @@ contract, `/v2` принудительно выбирает GigaChat v2 contract
 |---|---|---|
 | `GET /models` | Поддерживается | Возвращается в Anthropic shape, когда запрос содержит headers Anthropic SDK. |
 | `GET /models/{model_id}` | Поддерживается | Возвращается в Anthropic shape, когда запрос содержит headers Anthropic SDK. |
-| `POST /messages` | Поддерживается | Messages API, streaming, local tools, structured-output fallback. |
+| `POST /messages` | Поддерживается | Messages API, streaming, local tools, GigaChat v2 mapping for compatible Anthropic provider tools, structured-output fallback. |
 | `POST /messages/count_tokens` | Поддерживается | Считает message, system, tool и structured-output text через GigaChat token counting. |
 | `POST /messages/batches`, `GET /messages/batches*` | Отключено | Router-код есть, но не смонтирован до появления batch methods в GigaChat SDK/backend. |
 | Files API beta | Не реализовано | Сейчас вне scope. |
@@ -93,7 +93,7 @@ Gemini model discovery в чистой Gemini форме всегда досту
 Типичные accepted-and-ignored поля:
 
 - OpenAI metadata и tuning knobs: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
-- Anthropic optional fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, server tools, citations, unsupported document/file content blocks.
+- Anthropic optional fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, unsupported provider tools, citations, unsupported document/file content blocks. Compatible provider tools (`web_search*`, `web_fetch*`, `code_execution*`) map to GigaChat v2 built-ins.
 - Gemini optional fields: `safetySettings`, `cachedContent`, `serviceTier`, unsupported `generationConfig` subfields and non-function built-in tools are accepted/preserved for diagnostics but are not enforced by GigaChat.
 
 Если поле намеренно игнорируется, оно не отправляется upstream как исполняемая GigaChat feature. Literal `extra_body` object может быть передан в GigaChat `additional_fields`; в таком случае поддержку определяет GigaChat API.

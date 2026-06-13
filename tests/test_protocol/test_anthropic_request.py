@@ -167,17 +167,100 @@ def test_build_openai_data_from_anthropic_request_ignores_forced_tool_without_na
     assert "function_call" not in openai_data
 
 
-def test_build_openai_data_from_anthropic_request_ignores_server_tools():
+def test_build_openai_data_from_anthropic_request_maps_server_tools_to_builtins():
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
-        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "tools": [
+            {
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 5,
+                "allowed_domains": ["example.com"],
+            },
+            {
+                "type": "web_fetch_20250910",
+                "name": "web_fetch",
+                "max_uses": 2,
+            },
+            {"type": "code_execution_20250825", "name": "code_execution"},
+            {
+                "name": "sum",
+                "description": "Add numbers",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"a": {"type": "number"}},
+                },
+            },
+        ],
+        "tool_choice": {"type": "tool", "name": "web_search"},
     }
 
     openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert "tools" not in openai_data
+    assert openai_data["tools"][:3] == [
+        {
+            "type": "web_search",
+            "max_uses": 5,
+            "allowed_domains": ["example.com"],
+        },
+        {"type": "url_content_extraction", "max_uses": 2},
+        {"type": "code_interpreter"},
+    ]
+    assert openai_data["tools"][3]["type"] == "function"
+    assert openai_data["tools"][3]["function"]["name"] == "sum"
+    assert len(openai_data["functions"]) == 1
+    assert openai_data["tool_choice"] == {"type": "web_search"}
+
+
+def test_build_openai_data_from_anthropic_request_maps_named_websearch_builtin():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "name": "WebSearch",
+                "description": "Allows Claude to search the web.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            }
+        ],
+        "tool_choice": {"type": "tool", "name": "WebSearch"},
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    assert openai_data["tools"] == [{"type": "web_search"}]
     assert "functions" not in openai_data
+    assert "function_call" not in openai_data
+    assert openai_data["tool_choice"] == {"type": "web_search"}
+
+
+def test_build_openai_data_from_anthropic_request_keeps_custom_web_search_tool():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "name": "web_search",
+                "description": "Local search function.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            }
+        ],
+        "tool_choice": {"type": "tool", "name": "web_search"},
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    assert openai_data["tools"][0]["type"] == "function"
+    assert openai_data["tools"][0]["function"]["name"] == "web_search"
+    assert openai_data["function_call"] == {"name": "web_search"}
 
 
 @pytest.mark.parametrize(

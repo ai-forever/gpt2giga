@@ -166,7 +166,11 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
             },
             "tools": {
                 "type": "array",
-                "description": "Anthropic tools (input_schema).",
+                "description": (
+                    "Anthropic tools (input_schema), plus compatible provider "
+                    "tools in GigaChat v2 mode (`web_search*`, `web_fetch*`, "
+                    "`code_execution*`)."
+                ),
                 "items": {"type": "object", "additionalProperties": True},
             },
             "tool_choice": {
@@ -236,6 +240,8 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
         "- `stream=true` returns Anthropic-style SSE events.\n"
         "- `tool_choice.type` supports `auto`, `none`, and forced `tool`; "
         "unknown values are accepted but ignored.\n"
+        "- Compatible Anthropic provider tools map to GigaChat v2 built-ins: "
+        "`web_search*`, `web_fetch*`, and `code_execution*`.\n"
         "- Supported request content blocks are `text`, `image`, `tool_use`, "
         "and `tool_result`; document/file/container/search/thinking input blocks "
         "are accepted but ignored.\n"
