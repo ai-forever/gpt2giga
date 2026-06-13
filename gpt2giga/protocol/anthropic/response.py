@@ -11,6 +11,7 @@ from gpt2giga.common.reasoning import (
     extract_reasoning_from_content,
     merge_reasoning_text,
 )
+from gpt2giga.common.sources import render_text_with_sources
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 
@@ -59,7 +60,10 @@ def _build_anthropic_response(
     if reasoning:
         content_blocks.append({"type": "thinking", "thinking": reasoning})
 
-    text_content = parsed_content.content
+    text_content = render_text_with_sources(
+        parsed_content.content,
+        message.get("inline_data") or {},
+    )
 
     tool_calls = list(message.get("tool_calls") or [])
     if message.get("function_call"):

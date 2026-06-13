@@ -1,6 +1,7 @@
 import json
 from typing import Any, Optional
 
+from gpt2giga.common.sources import merge_inline_data
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 
 
@@ -399,25 +400,7 @@ def _append_tool_execution(items: list[dict[str, Any]], value: Any) -> None:
 
 
 def _merge_inline_data(target: dict[str, Any], value: Any) -> None:
-    inline_data = _dump_model(value)
-    if not inline_data:
-        return
-
-    for key, item in inline_data.items():
-        if key == "sources" and isinstance(item, dict):
-            existing = target.setdefault("sources", {})
-            if isinstance(existing, dict):
-                existing.update(item)
-            else:
-                target["sources"] = item
-        elif isinstance(item, list):
-            existing_list = target.setdefault(key, [])
-            if isinstance(existing_list, list):
-                existing_list.extend(item)
-            else:
-                target[key] = item
-        elif item is not None:
-            target[key] = item
+    merge_inline_data(target, _dump_model(value))
 
 
 def _is_image_file(file_data: dict[str, Any]) -> bool:

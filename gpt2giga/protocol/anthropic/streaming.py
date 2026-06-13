@@ -20,6 +20,11 @@ from gpt2giga.common.model_concurrency import (
     resolve_gigachat_model,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
+from gpt2giga.common.sources import (
+    SourceMarkerStreamRenderer,
+    extract_sources,
+    has_source_marker_start,
+)
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import adapt_chat_completion_chunk_to_chat_chunk_shape
@@ -76,6 +81,8 @@ async def _stream_anthropic_generator(
         thinking_block_started = False
         thinking_block_stopped = False
         reasoning_parser = ReasoningContentParser()
+        source_renderer = SourceMarkerStreamRenderer()
+        source_rendering_enabled = False
         content_index = 0
         output_tokens = 0
 
@@ -97,6 +104,15 @@ async def _stream_anthropic_generator(
                     delta_reasoning = delta.get("reasoning_content", "")
                     parsed_content = reasoning_parser.feed(delta_content)
                     delta_content = parsed_content.content
+                    inline_data = delta.get("inline_data")
+                    source_rendering_enabled = (
+                        source_rendering_enabled
+                        or bool(extract_sources(inline_data or {}))
+                        or has_source_marker_start(delta_content)
+                    )
+                    if source_rendering_enabled:
+                        source_renderer.merge_inline_data(inline_data)
+                        delta_content = source_renderer.feed(delta_content)
                     delta_reasoning = (
                         f"{delta_reasoning}{parsed_content.reasoning_content}"
                     )
@@ -282,7 +298,12 @@ async def _stream_anthropic_generator(
                     },
                 },
             )
-        if flushed_reasoning.content:
+        if source_rendering_enabled:
+            source_text = source_renderer.feed(flushed_reasoning.content)
+            source_text += source_renderer.finish()
+        else:
+            source_text = flushed_reasoning.content
+        if source_text:
             if thinking_block_started and not thinking_block_stopped:
                 yield sse(
                     "content_block_stop",
@@ -307,7 +328,7 @@ async def _stream_anthropic_generator(
                     "index": content_index,
                     "delta": {
                         "type": "text_delta",
-                        "text": flushed_reasoning.content,
+                        "text": source_text,
                     },
                 },
             )

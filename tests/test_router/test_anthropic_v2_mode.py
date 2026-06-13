@@ -28,6 +28,7 @@ class FakeAChatResource:
         self.chat_completion_calls = []
         self.stream_calls = []
         self.openai_style_stream = False
+        self.source_stream = False
         self.active_create_calls = 0
         self.max_active_create_calls = 0
         self.release_create: asyncio.Event | None = None
@@ -84,6 +85,63 @@ class FakeAChatResource:
         self.stream_calls.append(payload)
 
         async def gen():
+            if self.source_stream:
+                yield ChatCompletionChunk.model_validate(
+                    {
+                        "messages": [
+                            {
+                                "role": "assistant",
+                                "content": [
+                                    {
+                                        "inline_data": {
+                                            "sources": {
+                                                "1": {
+                                                    "url": (
+                                                        "https://example.test/source"
+                                                    ),
+                                                    "title": "Example Source",
+                                                }
+                                            }
+                                        }
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                )
+                yield ChatCompletionChunk.model_validate(
+                    {
+                        "messages": [
+                            {
+                                "role": "assistant",
+                                "content": [{"text": "Answer. "}],
+                            }
+                        ]
+                    }
+                )
+                yield ChatCompletionChunk.model_validate(
+                    {
+                        "messages": [
+                            {
+                                "role": "assistant",
+                                "content": [{"text": "[sources=[1"}],
+                            }
+                        ]
+                    }
+                )
+                yield ChatCompletionChunk.model_validate(
+                    {
+                        "messages": [
+                            {
+                                "role": "assistant",
+                                "content": [{"text": "]]"}],
+                            }
+                        ],
+                        "finish_reason": "stop",
+                    }
+                )
+                return
+
             if self.openai_style_stream:
                 for text in ("Прив", "ет", "! Чем", " могу", " помочь?"):
                     yield MockResponse(
@@ -336,6 +394,29 @@ def test_anthropic_messages_v2_stream_uses_chat_completion_stream():
     assert app.state.gigachat_client.achat.stream_calls == [
         {"contract": "anthropic-v2"}
     ]
+
+
+def test_anthropic_messages_v2_stream_renders_sources_section():
+    app = make_app("v2")
+    app.state.gigachat_client.achat.source_stream = True
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/messages",
+        json={
+            "model": "claude-x",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "search"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "[sources=" not in body
+    assert "Sources:" in body
+    assert "- [Example Source](https://example.test/source)" in body
 
 
 def test_anthropic_messages_v2_stream_handles_openai_style_chat_completion_chunks():

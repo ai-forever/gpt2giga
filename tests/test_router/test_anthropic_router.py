@@ -948,6 +948,35 @@ class TestBuildAnthropicResponse:
         assert result["usage"]["input_tokens"] == 5
         assert result["usage"]["output_tokens"] == 3
 
+    def test_text_response_renders_sources_section(self):
+        giga = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Answer. [sources=[1]]",
+                        "inline_data": {
+                            "sources": {
+                                "1": {
+                                    "url": "https://example.test/source",
+                                    "title": "Example Source",
+                                }
+                            }
+                        },
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+        result = _build_anthropic_response(giga, "claude-test", "rq123")
+
+        text = result["content"][0]["text"]
+        assert text == (
+            "Answer.\n\nSources:\n- [Example Source](https://example.test/source)"
+        )
+        assert "[sources=" not in text
+
     def test_function_call_response(self):
         giga = {
             "choices": [

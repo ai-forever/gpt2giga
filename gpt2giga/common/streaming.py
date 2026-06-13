@@ -25,6 +25,7 @@ from gpt2giga.common.model_concurrency import (
     resolve_gigachat_model,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
+from gpt2giga.common.sources import merge_inline_data
 from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import (
@@ -100,6 +101,29 @@ async def stream_chat_generator(
                             {
                                 "index": 0,
                                 "delta": delta,
+                                "finish_reason": None,
+                                "logprobs": None,
+                            }
+                        ],
+                        "usage": None,
+                        "system_fingerprint": f"fp_{response_id}",
+                    }
+                    yield f"data: {json.dumps(processed)}\n\n"
+            flush_stream_sources = getattr(
+                response_processor, "flush_stream_sources", None
+            )
+            if flush_stream_sources:
+                source_text = flush_stream_sources(response_id, family="chat")
+                if source_text:
+                    processed = {
+                        "id": f"chatcmpl-{response_id}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": source_text},
                                 "finish_reason": None,
                                 "logprobs": None,
                             }
@@ -239,6 +263,29 @@ async def stream_chat_completion_generator(
                             {
                                 "index": 0,
                                 "delta": delta,
+                                "finish_reason": None,
+                                "logprobs": None,
+                            }
+                        ],
+                        "usage": None,
+                        "system_fingerprint": f"fp_{response_id}",
+                    }
+                    yield f"data: {json.dumps(processed)}\n\n"
+            flush_stream_sources = getattr(
+                response_processor, "flush_stream_sources", None
+            )
+            if flush_stream_sources:
+                source_text = flush_stream_sources(response_id, family="chat")
+                if source_text:
+                    processed = {
+                        "id": f"chatcmpl-{response_id}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": source_text},
                                 "finish_reason": None,
                                 "logprobs": None,
                             }
@@ -395,21 +442,7 @@ def _accumulate_builtin_metadata(target: dict[str, Any], delta: dict[str, Any]) 
 
 
 def _merge_inline_data(target: dict[str, Any], inline_data: dict[str, Any]) -> None:
-    for key, value in inline_data.items():
-        if key == "sources" and isinstance(value, dict):
-            sources = target.setdefault("sources", {})
-            if isinstance(sources, dict):
-                sources.update(value)
-            else:
-                target["sources"] = value
-        elif isinstance(value, list):
-            items = target.setdefault(key, [])
-            if isinstance(items, list):
-                items.extend(value)
-            else:
-                target[key] = value
-        elif value is not None:
-            target[key] = value
+    merge_inline_data(target, inline_data)
 
 
 def _builtin_tool_stream_name(name: Any) -> str:

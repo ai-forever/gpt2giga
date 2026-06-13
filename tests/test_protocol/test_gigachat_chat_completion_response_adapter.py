@@ -457,6 +457,130 @@ async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_respons
     )
 
 
+def test_chat_completion_response_renders_sources_section():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "text": "Answer with a source. [sources=[1]]",
+                            "inline_data": {
+                                "sources": {
+                                    "1": {
+                                        "url": "https://example.test/source",
+                                        "title": "Example Source",
+                                    }
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+        }
+    )
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
+
+    processor = ResponseProcessor(logger=logger)
+    processed = processor.process_response(
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+    )
+
+    content = processed["choices"][0]["message"]["content"]
+    assert content == (
+        "Answer with a source.\n\n"
+        "Sources:\n"
+        "- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in content
+
+
+def test_chat_completion_stream_renders_fragmented_source_marker():
+    processor = ResponseProcessor(logger=logger)
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "inline_data": {
+                                    "sources": {
+                                        "1": {
+                                            "url": "https://example.test/source",
+                                            "title": "Example Source",
+                                        }
+                                    }
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "Answer with a source. "}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "[sources=[1"}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "]]"}],
+                    }
+                ],
+                "finish_reason": "stop",
+            }
+        ),
+    ]
+
+    rendered = "".join(
+        processor.process_stream_chunk(
+            SimpleNamespace(
+                model_dump=lambda chunk=chunk: (
+                    adapt_chat_completion_chunk_to_chat_chunk_shape(
+                        chunk,
+                        default_model="fallback",
+                    )
+                )
+            ),
+            gpt_model="gpt-x",
+            response_id="v2",
+        )["choices"][0]["delta"]["content"]
+        for chunk in chunks
+    )
+
+    assert rendered == (
+        "Answer with a source.\n\n"
+        "Sources:\n"
+        "- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in rendered
+
+
 def test_adapted_chat_completion_function_call_unmaps_reserved_tool_name_through_processor():
     response = ChatCompletionResponse.model_validate(
         {
