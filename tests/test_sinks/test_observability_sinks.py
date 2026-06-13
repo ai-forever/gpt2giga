@@ -654,8 +654,6 @@ async def test_observability_safe_helpers_do_not_raise_on_sink_errors():
 
 
 async def test_observability_emit_timeout_returns_false(monkeypatch):
-    import gpt2giga.sinks.observability.factory as factory
-
     class SlowSink:
         async def emit(self, name, attributes=None, *, context=None):
             await asyncio.sleep(1)
@@ -663,7 +661,10 @@ async def test_observability_emit_timeout_returns_false(monkeypatch):
         async def flush(self):
             return None
 
-    monkeypatch.setattr(factory, "DEFAULT_OBSERVABILITY_TIMEOUT_SECONDS", 0.001)
+    monkeypatch.setattr(
+        "gpt2giga.sinks.observability.factory.DEFAULT_OBSERVABILITY_TIMEOUT_SECONDS",
+        0.001,
+    )
 
     emitted = await emit_observability_event(SlowSink(), "request.slow")
 
