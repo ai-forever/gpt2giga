@@ -5,7 +5,31 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [0.2.1a1] - 2026-06-13
+
+### Добавлено
+- **Gemini-compatible API**: добавлены Gemini-like routes для `generateContent`, `streamGenerateContent`, `countTokens`, `embedContent`, `batchEmbedContents` и model discovery; operation routes доступны в корне, под `/v1`, `/v2` и `/v1beta`, а `/v1`/`/v2` явно выбирают backend contract GigaChat.
+- **Gemini protocol adapters**: добавлена нормализация Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations, `toolConfig`, text/image/file parts и обратный маппинг кандидатов, usage metadata, function calls и SSE chunks в Gemini shape.
+- **Gemini examples and docs**: добавлены примеры для `google-genai`: content generation, streaming, chat session, function calling, structured output, `countTokens`, embeddings, а также подготовленные examples для Files/Batches; README и compatibility docs описывают Gemini route matrix и ограничения.
+- **Prepared Gemini Files/Batches routers**: добавлены router-модули и OpenAPI helpers для Gemini Files API и `batchGenerateContent`, но публично они пока не смонтированы до end-to-end проверки upstream file/batch execution.
+- **Claude Desktop integration guide**: добавлен beta guide для Claude Desktop App через local gateway, включая `/v2` gateway setup, model aliasing через `GPT2GIGA_PASS_MODEL=False`, API-key notes и диагностику plugins/MCP.
+- **Test coverage**: добавлены unit/integration tests для Gemini router wiring, adapter mappings, streaming, embeddings, models, prepared Files/Batches, shared prefixes, Claude gateway path normalization, Anthropic provider tools, source rendering и observability hardening.
+
+### Изменено
+- **Unified backend mode for Responses**: удален `GPT2GIGA_RESPONSES_API_MODE`; OpenAI `/responses` теперь следует `GPT2GIGA_GIGACHAT_API_MODE`, а явный выбор backend contract делается через `/v1/responses` или `/v2/responses`.
+- **Model discovery negotiation**: общие `/models`, `/v1/models` и `/v2/models` сохраняют OpenAI форму по умолчанию, но возвращают Gemini `models/*` shape для Google/Gemini clients по headers/query/user-agent.
+- **GigaChat provider adapter**: provider label теперь передается в per-model concurrency limiter, чтобы Gemini traffic учитывался отдельно от OpenAI/Anthropic paths; raw extensions отправляются upstream только для OpenAI protocol payloads.
+- **Dependencies**: добавлен `google-genai` для Gemini examples/integration coverage, обновлен `uv.lock`, расширены допустимые версии `tiktoken` и `starlette`.
+- **Docs alignment**: README, API compatibility, client parameter compatibility, configuration, examples index и integrations index обновлены под Gemini-compatible API, Claude Desktop и удаление отдельного Responses API mode flag.
+
+### Исправлено
+- **Anthropic provider tools in v2 mode**: совместимые Anthropic provider tools (`web_search*`, `web_fetch*`, `code_execution*`) теперь маппятся в GigaChat v2 built-ins, включая forced `tool_choice`; неподдерживаемые provider tools остаются accepted/ignored.
+- **Tool schema normalization**: function/tool schemas теперь нормализуются через общий helper, получают object root и `properties` по умолчанию, а `allOf` схлопывается в поддерживаемую GigaChat schema форму.
+- **GigaChat v2 stream completion**: stream adapter корректно разбирает raw SSE strings, wrapped `data`, named done events, `choices[].delta/message`, `[DONE]` и usage aliases `input/output` или `prompt/completion`.
+- **Source rendering**: GigaChat source markers и `inline_data.sources` теперь превращаются в видимый Markdown `Sources` appendix в OpenAI Chat, OpenAI Responses и streaming flows; Responses annotations используют raw text, чтобы ссылки не терялись после удаления markers.
+- **Codex Responses sources**: Responses API теперь корректно отдает source annotations и финальный source appendix для Codex-style streaming/non-streaming ответов.
+- **Claude gateway path normalization**: путь Claude Desktop gateway вида `/v2/v1/messages` нормализуется в `/v2/messages`, сохраняя выбор GigaChat v2 backend.
+- **Observability isolation**: emit/flush observability sinks ограничены timeout-ом, OpenTelemetry span emission перенесен из event loop, а ошибки stream observers больше не ломают OpenAI/Anthropic/Gemini response paths.
 
 ## [0.2.0a2] - 2026-06-11
 
@@ -405,7 +429,8 @@
 
 ---
 
-[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...HEAD
+[0.2.1a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a2...v0.2.1a1
+[0.2.0a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...v0.2.0a2
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a3...v0.2.0a1
 [0.1.8a3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a2...v0.1.8a3
 [0.1.8a2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a1...v0.1.8a2
