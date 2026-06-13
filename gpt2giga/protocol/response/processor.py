@@ -359,13 +359,18 @@ class ResponseProcessor:
                 inline_data = ResponseProcessor._normalize_inline_data(
                     message.get("inline_data")
                 )
+                rendered_content = (
+                    render_text_with_sources(content, inline_data)
+                    if isinstance(content, str)
+                    else content
+                )
                 annotations = ResponseProcessor._create_url_annotations(
                     content,
                     inline_data,
                 )
                 builtin_items.append(
                     ResponseProcessor._create_message_item(
-                        content,
+                        rendered_content,
                         response_id,
                         annotations=annotations,
                         inline_data=inline_data,

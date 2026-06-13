@@ -680,6 +680,14 @@ async def test_stream_responses_chat_completion_generator_emits_source_annotatio
         for event_type, data in events
         if event_type == "response.output_text.annotation.added"
     ]
+    delta_text = "".join(
+        data["delta"]
+        for event_type, data in events
+        if event_type == "response.output_text.delta"
+    )
+    text_done = [
+        data for event_type, data in events if event_type == "response.output_text.done"
+    ][-1]
     completed = [
         data for event_type, data in events if event_type == "response.completed"
     ][-1]
@@ -695,6 +703,12 @@ async def test_stream_responses_chat_completion_generator_emits_source_annotatio
     assert annotation["start_index"] == len("Answer. ")
     assert annotation["url"] == "https://example.test/source"
     assert annotation["title"] == "Example Source"
+    assert delta_text == (
+        "Answer.\n\nSources:\n- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in delta_text
+    assert text_done["text"] == delta_text
+    assert content["text"] == delta_text
     assert content["annotations"] == [annotation]
     assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
 

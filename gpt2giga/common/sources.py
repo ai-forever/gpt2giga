@@ -79,6 +79,10 @@ class SourceMarkerStreamRenderer:
         """Merge inline source metadata from a stream chunk."""
         merge_inline_data(self.inline_data, inline_data)
 
+    def mark_emitted_text(self) -> None:
+        """Record that surrounding stream text was already emitted."""
+        self._emitted_text = True
+
     def feed(self, text: str) -> str:
         """Return text safe to emit for this chunk."""
         if not text:

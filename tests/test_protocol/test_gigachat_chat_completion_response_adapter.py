@@ -436,6 +436,12 @@ async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_respons
     message = processed["output"][2]
     assert message["type"] == "message"
     content = message["content"][0]
+    assert content["text"] == (
+        "Answer with a source.\n\n"
+        "Sources:\n"
+        "- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in content["text"]
     assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
     assert content["annotations"] == [
         {
