@@ -4,6 +4,8 @@
 
 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) — CLI-агент от Anthropic для написания кода. С помощью `gpt2giga` можно использовать модели GigaChat в Claude Code, направив запросы Anthropic Messages API через прокси-сервер.
 
+Если нужен Claude Desktop App, а не CLI, используйте отдельный beta guide: [integrations/claude-desktop/README.md](../claude-desktop/README.md).
+
 ## Подключение Claude Code к GigaChat
 
 Для работы Claude Code с GigaChat используется утилита `gpt2giga`, которая преобразует запросы в формате Anthropic Messages API в вызовы GigaChat API.

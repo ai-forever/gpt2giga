@@ -40,6 +40,7 @@ http://localhost:8090
 | OpenAI Codex | [integrations/codex/README.md](../integrations/codex/README.md) |
 | Aider | [integrations/aider/README.md](../integrations/aider/README.md) |
 | Claude Code | [integrations/claude-code/README.md](../integrations/claude-code/README.md) |
+| Claude Desktop App | [integrations/claude-desktop/README.md](../integrations/claude-desktop/README.md) |
 | Cursor | [integrations/cursor/README.md](../integrations/cursor/README.md) |
 | Qwen Code | [integrations/qwen-code/README.md](../integrations/qwen-code/README.md) |
 | Xcode | [integrations/xcode/README.md](../integrations/xcode/README.md) |
@@ -65,6 +66,7 @@ http://localhost:8090
 | smolagents | https://github.com/huggingface/smolagents | Hugging Face agent framework. |
 | Openclaw | https://openclaw.ai/ | Personal AI assistant. |
 | Claude Code | https://code.claude.com/docs/en/overview | Anthropic CLI coding agent. |
+| Claude Desktop App | https://claude.com/download | Desktop app for macOS and Windows. |
 | OpenAI Agents SDK | https://github.com/openai/openai-agents-python | Agent SDK с function calling и handoffs. |
 | Anthropic SDK | https://github.com/anthropics/anthropic-sdk-python | Официальный Anthropic Python SDK. |
 | Cursor | https://cursor.com/ | AI editor. |
