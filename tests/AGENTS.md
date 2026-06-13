@@ -37,6 +37,7 @@ uv run pytest -m integration
 | `tests/test_golden/` | Compatibility fixtures for stable OpenAI/Anthropic shapes |
 | `tests/common/` | Shared behavioral tests for common utilities such as model concurrency |
 | `tests/integration/` | Integration-style tests that still run hermetically |
+| `tests/live/` | Opt-in live tests that call real GigaChat; skipped unless `GPT2GIGA_RUN_LIVE_TESTS=1` |
 | `tests/fixtures/` | JSON fixtures for debug translation and protocol compatibility |
 | `tests/golden/` | Expected wire shapes for golden tests |
 | `tests/test_auth.py` | API-key auth dependency |
@@ -49,7 +50,8 @@ uv run pytest -m integration
 
 - Mirror the source behavior being tested; keep router, protocol, and helper coverage separated when practical.
 - Prefer standalone `test_*` functions over test classes.
-- Mock all upstream GigaChat interactions; tests should stay hermetic.
+- Mock upstream GigaChat interactions by default; only `tests/live/` may call real
+  upstream GigaChat, and those tests must be opt-in and secret-free in git.
 - Build small `FastAPI()` apps in router tests and mount only the routers under test.
 - Reuse existing dummy-client and mocked-response patterns instead of introducing live API calls.
 - When testing app-wide behavior, prefer `create_app()` plus explicit `ProxyConfig` rather than relying on ambient environment.
@@ -110,6 +112,7 @@ Defined in `pytest.ini`:
 - `unit`
 - `integration`
 - `slow`
+- `live_gigachat`
 
 ## Quick Find Commands
 

@@ -91,6 +91,7 @@ print(response.content[0].text)
 | Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
 | Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
 | Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
+| Live GigaChat integration tests | [docs/live-integration-tests.md](./docs/live-integration-tests.md) |
 | Внутренняя архитектура normalized messages | [docs/architecture/normalized-messages.md](./docs/architecture/normalized-messages.md) |
 | Checklist для добавления provider/protocol | [docs/architecture/how-to-add-provider.md](./docs/architecture/how-to-add-provider.md) |
 | Редакторы, агенты, SDK examples, reverse proxies | [docs/integrations.md](./docs/integrations.md) |
@@ -176,5 +177,8 @@ uv run ruff check .
 uv run ruff format --check .
 uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
+
+Live-тесты с реальными вызовами GigaChat запускаются отдельно и требуют
+локальных секретов: см. [Live GigaChat Integration Tests](./docs/live-integration-tests.md).
 
 Используйте Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `ci:`) и сверяйтесь с `.github/PULL_REQUEST_TEMPLATE.md`.
