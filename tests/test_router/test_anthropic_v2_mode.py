@@ -4,8 +4,7 @@ import json
 import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from gigachat.models.chat_completions import ChatCompletionChunk
-from gigachat.models.chat_completions import ChatCompletionResponse
+from gigachat.models.chat_completions import ChatCompletionChunk, ChatCompletionResponse
 from loguru import logger
 
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
@@ -196,12 +195,28 @@ class FakeAChatResource:
                             "content": [{"text": "ok-stream"}],
                         }
                     ],
-                    "usage": {
-                        "input_tokens": 2,
-                        "output_tokens": 3,
-                        "total_tokens": 5,
-                    },
                 }
+            )
+            done_payload = {
+                "event": "response.message.done",
+                "model": "GigaChat-2-Max",
+                "created_at": 1781352508,
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_state_id": "new-state",
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 2,
+                    "output_tokens": 3,
+                    "total_tokens": 5,
+                },
+            }
+            yield (
+                "event: response.message.done\n"
+                f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
             )
 
         return gen()
@@ -387,6 +402,20 @@ def test_anthropic_messages_v2_stream_uses_chat_completion_stream():
     assert response.status_code == 200
     assert "event: content_block_delta" in body
     assert "ok-stream" in body
+    events: list[tuple[str, dict]] = []
+    pending_event: str | None = None
+    for line in body.splitlines():
+        if line.startswith("event: "):
+            pending_event = line.removeprefix("event: ")
+        elif line.startswith("data: ") and pending_event is not None:
+            events.append((pending_event, json.loads(line.removeprefix("data: "))))
+            pending_event = None
+    message_delta = next(
+        event for event_name, event in events if event_name == "message_delta"
+    )
+    assert message_delta["delta"]["stop_reason"] == "end_turn"
+    assert message_delta["usage"]["output_tokens"] == 3
+    assert events[-1][0] == "message_stop"
     assert not app.state.request_transformer.chat_calls
     assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == []

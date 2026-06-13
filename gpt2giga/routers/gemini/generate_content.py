@@ -128,14 +128,27 @@ async def stream_generate_content(model: str, request: Request):
                 and bool(event.content_delta)
                 and not seen_content_delta
             )
-            span_events.extend(
-                build_stream_span_events(
-                    event,
-                    settings=request.app.state.config.proxy_settings,
-                    first_content_delta=first_content_delta,
+            try:
+                span_events.extend(
+                    build_stream_span_events(
+                        event,
+                        settings=request.app.state.config.proxy_settings,
+                        first_content_delta=first_content_delta,
+                    )
                 )
-            )
-            observer.observe(event)
+            except Exception as exc:
+                logger = getattr(request.app.state, "logger", None)
+                if logger is not None:
+                    logger.warning("Gemini stream span event build failed: {}", exc)
+            try:
+                observer.observe(event)
+            except Exception as exc:
+                logger = getattr(request.app.state, "logger", None)
+                if logger is not None:
+                    logger.warning(
+                        "Gemini stream observability observe failed: {}",
+                        exc,
+                    )
             if event.type == "content_delta" and event.content_delta:
                 seen_content_delta = True
             chunk = normalized_stream_event_to_gemini_sse(
@@ -146,10 +159,20 @@ async def stream_generate_content(model: str, request: Request):
             if chunk is not None:
                 yield chunk
 
+        try:
+            normalized_response = observer.to_normalized_response()
+        except Exception as exc:
+            logger = getattr(request.app.state, "logger", None)
+            if logger is not None:
+                logger.warning(
+                    "Gemini stream observability response build failed: {}",
+                    exc,
+                )
+            return
         await _emit_gemini_observability(
             request.app.state,
             normalized_request,
-            observer.to_normalized_response(),
+            normalized_response,
             context=context,
             events=span_events,
         )
@@ -224,27 +247,32 @@ async def _emit_gemini_observability(
     context,
     events: list[dict[str, Any]] | None = None,
 ) -> None:
-    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
-    span_events = list(events or [])
-    span_events.extend(
-        build_tool_call_span_events(normalized_response, settings=settings)
-    )
-    attributes = build_llm_chat_completion_attributes(
-        normalized_request,
-        normalized_response,
-        settings=settings,
-    )
-    attributes["gpt2giga.api_format"] = "generate_content"
-    await emit_observability_event(
-        getattr(state, "observability_sink", None),
-        GEMINI_SPAN_NAME,
-        attributes,
-        context=context,
-        events=span_events or None,
-        logger=getattr(state, "logger", None),
-    )
-    if context is not None:
-        context.llm_observability_emitted = True
+    logger = getattr(state, "logger", None)
+    try:
+        settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+        span_events = list(events or [])
+        span_events.extend(
+            build_tool_call_span_events(normalized_response, settings=settings)
+        )
+        attributes = build_llm_chat_completion_attributes(
+            normalized_request,
+            normalized_response,
+            settings=settings,
+        )
+        attributes["gpt2giga.api_format"] = "generate_content"
+        emitted = await emit_observability_event(
+            getattr(state, "observability_sink", None),
+            GEMINI_SPAN_NAME,
+            attributes,
+            context=context,
+            events=span_events or None,
+            logger=logger,
+        )
+        if emitted and context is not None:
+            context.llm_observability_emitted = True
+    except Exception as exc:
+        if logger is not None:
+            logger.warning("Gemini observability emission failed: {}", exc)
 
 
 def _extract_texts_for_token_count(payload: dict[str, Any]) -> list[str]:
@@ -322,7 +350,7 @@ class _GeminiStreamObserver:
     def observe(self, event) -> None:
         if event.type == "content_delta" and event.content_delta:
             self.content_parts.append(event.content_delta)
-        if event.type == "usage":
+        if event.usage is not None:
             self.usage = event.usage
         if event.type == "message_end":
             self.finish_reason = event.finish_reason

@@ -4,7 +4,6 @@ from typing import Any, Optional
 from gpt2giga.common.sources import merge_inline_data
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 
-
 GIGACHAT_PROVIDER_METADATA_KEY = "_gpt2giga_provider_metadata"
 
 
@@ -57,7 +56,7 @@ def adapt_chat_completion_chunk_to_chat_chunk_shape(
     default_model: str,
 ) -> dict:
     """Adapt a GigaChat chat completion stream chunk to the legacy chat shape."""
-    chunk_data = _dump_model(chunk)
+    chunk_data = _dump_chat_completion_stream_chunk(chunk)
     message = _select_message(chunk_data)
     function_call = extract_chat_completion_function_call(message)
     text = extract_chat_completion_assistant_text(message)
@@ -320,6 +319,109 @@ def _dump_model(value: Any) -> dict:
     if hasattr(value, "dict"):
         return value.dict(exclude_none=True, by_alias=True)
     return {}
+
+
+def _dump_chat_completion_stream_chunk(value: Any) -> dict:
+    data = _dump_model(value)
+    if not data:
+        data = _parse_sse_event_text(value)
+    return _unwrap_sse_event_data(data)
+
+
+def _parse_sse_event_text(value: Any) -> dict:
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError:
+            return {}
+    elif isinstance(value, str):
+        text = value
+    else:
+        return {}
+
+    text = text.strip()
+    if not text:
+        return {}
+
+    payload = _loads_json_dict(text)
+    if payload:
+        return payload
+    if text == "[DONE]":
+        return {"finish_reason": "stop"}
+
+    event: Optional[str] = None
+    data_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip("\r")
+        if not line or line.startswith(":"):
+            continue
+
+        name, separator, line_value = line.partition(":")
+        if not separator:
+            continue
+        if line_value.startswith(" "):
+            line_value = line_value[1:]
+
+        if name == "event":
+            event = line_value
+        elif name == "data":
+            data_lines.append(line_value)
+
+    if not data_lines:
+        return {}
+
+    raw_data = "\n".join(data_lines).strip()
+    if raw_data == "[DONE]":
+        payload = {"finish_reason": "stop"}
+    else:
+        payload = _loads_json_dict(raw_data)
+        if not payload:
+            return {}
+
+    if event and "event" not in payload:
+        payload["event"] = event
+    return payload
+
+
+def _unwrap_sse_event_data(data: dict) -> dict:
+    raw_data = data.get("data")
+    if raw_data is None:
+        return data
+
+    payload: dict[str, Any]
+    if isinstance(raw_data, dict):
+        payload = dict(raw_data)
+    elif isinstance(raw_data, bytes):
+        try:
+            raw_text = raw_data.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return data
+        payload = {"finish_reason": "stop"} if raw_text == "[DONE]" else {}
+        if not payload:
+            payload = _loads_json_dict(raw_text)
+    elif isinstance(raw_data, str):
+        raw_text = raw_data.strip()
+        payload = {"finish_reason": "stop"} if raw_text == "[DONE]" else {}
+        if not payload:
+            payload = _loads_json_dict(raw_text)
+    else:
+        return data
+
+    if not payload:
+        return data
+
+    for key in ("event", "x_headers"):
+        if key in data and key not in payload:
+            payload[key] = data[key]
+    return payload
+
+
+def _loads_json_dict(value: str) -> dict:
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _copy_x_headers(target: dict[str, Any], source: dict[str, Any]) -> None:

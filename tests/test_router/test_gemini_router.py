@@ -18,13 +18,15 @@ class MockResponse:
     def __init__(self, data):
         self.data = data
 
-    def model_dump(self):
+    def model_dump(self, **_kwargs):
         return self.data
 
 
 class FakeAChat:
     def __init__(self):
         self.calls = []
+        self.create_calls = []
+        self.stream_calls = []
 
     async def __call__(self, payload):
         self.calls.append(payload)
@@ -43,6 +45,65 @@ class FakeAChat:
                 },
             }
         )
+
+    async def create(self, payload):
+        self.create_calls.append(payload)
+        return MockResponse(
+            {
+                "model": "GigaChat-2-Max",
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "Gemini ok"}],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 2,
+                    "output_tokens": 3,
+                    "total_tokens": 5,
+                },
+            }
+        )
+
+    def stream(self, payload):
+        self.stream_calls.append(payload)
+
+        async def gen():
+            yield MockResponse(
+                {
+                    "model": "GigaChat-2-Max",
+                    "messages": [
+                        {
+                            "role": "assistant",
+                            "content": [{"text": "Gem"}],
+                        }
+                    ],
+                }
+            )
+            done_payload = {
+                "event": "response.message.done",
+                "model": "GigaChat-2-Max",
+                "created_at": 1781352508,
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_state_id": "new-state",
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 2,
+                    "output_tokens": 3,
+                    "total_tokens": 5,
+                },
+            }
+            yield (
+                "event: response.message.done\n"
+                f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+            )
+
+        return gen()
 
 
 class FakeModels(BaseModel):
@@ -137,13 +198,18 @@ class FakeGigaChat:
 class FakeRequestTransformer:
     def __init__(self):
         self.chat_calls = []
+        self.chat_completion_calls = []
 
     async def prepare_chat(self, data, giga_client=None):
         self.chat_calls.append((data, giga_client))
         return {"model": data["model"], "messages": data["messages"]}
 
+    async def prepare_chat_completion(self, data, giga_client=None):
+        self.chat_completion_calls.append((data, giga_client))
+        return {"model": data["model"], "messages": data["messages"]}
 
-def make_app(*, include_prepared_files_batches=False):
+
+def make_app(*, include_prepared_files_batches=False, mode="v1"):
     app = FastAPI()
     app.include_router(gemini_router)
     if include_prepared_files_batches:
@@ -153,7 +219,7 @@ def make_app(*, include_prepared_files_batches=False):
     app.state.request_transformer = FakeRequestTransformer()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
-    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
+    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode=mode))
     return app
 
 
@@ -196,6 +262,38 @@ def test_gemini_stream_generate_content_returns_sse_without_openai_done_marker()
     assert '"text": "Hel"' in body
     assert '"finishReason": "STOP"' in body
     assert "[DONE]" not in body
+
+
+def test_gemini_v2_stream_generate_content_handles_named_done_event():
+    app = make_app(mode="v2")
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/models/gemini-pro:streamGenerateContent?alt=sse",
+        json={"contents": [{"parts": [{"text": "Hello"}]}]},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    chunks = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert chunks[0]["candidates"][0]["content"]["parts"] == [{"text": "Gem"}]
+    assert chunks[-1]["candidates"][0]["finishReason"] == "STOP"
+    assert chunks[-1]["usageMetadata"] == {
+        "promptTokenCount": 2,
+        "candidatesTokenCount": 3,
+        "totalTokenCount": 5,
+    }
+    assert "[DONE]" not in body
+    assert not app.state.request_transformer.chat_calls
+    assert app.state.request_transformer.chat_completion_calls
+    assert app.state.gigachat_client.achat.stream_calls == [
+        {"model": "gemini-pro", "messages": [{"role": "user", "content": "Hello"}]}
+    ]
 
 
 def test_gemini_count_tokens_and_embeddings():

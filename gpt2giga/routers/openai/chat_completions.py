@@ -1,8 +1,7 @@
 """OpenAI chat completions endpoint."""
 
 import json
-from collections.abc import AsyncIterator
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
@@ -25,19 +24,14 @@ from gpt2giga.common.gigachat_options import (
 from gpt2giga.common.model_concurrency import resolve_gigachat_model
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
-    stream_chat_generator,
     stream_chat_completion_generator,
+    stream_chat_generator,
 )
 from gpt2giga.core.context import get_request_context, update_request_context
 from gpt2giga.logger import rquid_context
 from gpt2giga.openapi_specs.openai import chat_completions_openapi_extra
 from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS
 from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
-from gpt2giga.protocols.openai import (
-    normalized_chat_response_to_openai,
-    normalized_stream_done_sse,
-    normalized_stream_event_to_openai_sse,
-)
 from gpt2giga.protocols.normalized import run_openai_chat_shadow_normalization
 from gpt2giga.protocols.normalized.models import (
     NormalizedChoice,
@@ -46,6 +40,11 @@ from gpt2giga.protocols.normalized.models import (
     NormalizedResponse,
     NormalizedToolCall,
     NormalizedUsage,
+)
+from gpt2giga.protocols.openai import (
+    normalized_chat_response_to_openai,
+    normalized_stream_done_sse,
+    normalized_stream_event_to_openai_sse,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.routers.openai.helpers import populate_giga_functions
@@ -316,13 +315,21 @@ async def _try_normalized_stream_chat(
                     and bool(event.content_delta)
                     and not seen_content_delta
                 )
-                span_events = build_stream_span_events(
-                    event,
-                    settings=settings,
-                    first_content_delta=first_content_delta,
-                )
-                if span_events:
-                    stream_span_events.extend(span_events)
+                try:
+                    span_events = build_stream_span_events(
+                        event,
+                        settings=settings,
+                        first_content_delta=first_content_delta,
+                    )
+                    if span_events:
+                        stream_span_events.extend(span_events)
+                except Exception as exc:
+                    logger = getattr(state, "logger", None)
+                    if logger is not None:
+                        logger.warning(
+                            "Chat completion stream span event build failed: {}",
+                            exc,
+                        )
                 if event.type == "content_delta" and event.content_delta:
                     seen_content_delta = True
                 sse = normalized_stream_event_to_openai_sse(
@@ -397,16 +404,35 @@ async def _observe_chat_completion_stream(
 
     observer = _ChatCompletionStreamObserver()
     async for chunk in body_iterator:
-        observer.observe_chunk(chunk)
+        try:
+            observer.observe_chunk(chunk)
+        except Exception as exc:
+            logger = getattr(state, "logger", None)
+            if logger is not None:
+                logger.warning(
+                    "Chat completion stream observability observe failed: {}",
+                    exc,
+                )
         yield chunk
 
     if normalized_request is None or not observer.has_observed_payload:
         return
 
+    try:
+        normalized_response = observer.to_normalized_response()
+    except Exception as exc:
+        logger = getattr(state, "logger", None)
+        if logger is not None:
+            logger.warning(
+                "Chat completion stream observability response build failed: {}",
+                exc,
+            )
+        return
+
     await _emit_chat_completion_observability(
         state,
         normalized_request,
-        observer.to_normalized_response(),
+        normalized_response,
         context=context,
         events=stream_span_events,
     )
@@ -464,24 +490,30 @@ async def _emit_chat_completion_observability(
 ) -> None:
     if settings is None:
         settings = getattr(getattr(state, "config", None), "proxy_settings", None)
-    span_events = list(events or [])
-    span_events.extend(
-        build_tool_call_span_events(normalized_response, settings=settings)
-    )
-    await emit_observability_event(
-        getattr(state, "observability_sink", None),
-        CHAT_COMPLETION_SPAN_NAME,
-        build_llm_chat_completion_attributes(
+    logger = getattr(state, "logger", None)
+    try:
+        span_events = list(events or [])
+        span_events.extend(
+            build_tool_call_span_events(normalized_response, settings=settings)
+        )
+        attributes = build_llm_chat_completion_attributes(
             normalized_request,
             normalized_response,
             settings=settings,
-        ),
-        context=context,
-        events=span_events or None,
-        logger=getattr(state, "logger", None),
-    )
-    if context is not None:
-        context.llm_observability_emitted = True
+        )
+        emitted = await emit_observability_event(
+            getattr(state, "observability_sink", None),
+            CHAT_COMPLETION_SPAN_NAME,
+            attributes,
+            context=context,
+            events=span_events or None,
+            logger=logger,
+        )
+        if emitted and context is not None:
+            context.llm_observability_emitted = True
+    except Exception as exc:
+        if logger is not None:
+            logger.warning("Chat completion observability emission failed: {}", exc)
 
 
 class _ChatCompletionStreamObserver:

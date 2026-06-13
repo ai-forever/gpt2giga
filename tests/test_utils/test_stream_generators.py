@@ -8,10 +8,10 @@ import pytest
 from gigachat.models.chat_completions import ChatCompletionChunk
 
 from gpt2giga.common.streaming import (
-    stream_chat_generator,
     stream_chat_completion_generator,
-    stream_responses_generator,
+    stream_chat_generator,
     stream_responses_chat_completion_generator,
+    stream_responses_generator,
 )
 from gpt2giga.protocol import ResponseProcessor
 
@@ -303,6 +303,52 @@ async def test_stream_chat_completion_generator_text_chunks():
     assert len(lines) == 3
     assert '"content": "A"' in lines[0]
     assert '"content": "B"' in lines[1]
+    assert lines[2].strip() == "data: [DONE]"
+
+
+async def test_stream_chat_completion_generator_named_done_event_finishes_stream():
+    done_payload = {
+        "model": "GigaChat-3-Ultra:32.3.18.5",
+        "created_at": 1781352508,
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_state_id": "019ec0e2-2bc1-7cf4-86fb-0280fd4c7cb9",
+            }
+        ],
+        "finish_reason": "stop",
+        "usage": {
+            "input_tokens": 27221,
+            "input_tokens_details": {"prompt_tokens": 27221, "cached_tokens": 0},
+            "output_tokens": 16,
+            "total_tokens": 27237,
+        },
+    }
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "A"}]}]}
+        ),
+        (
+            "event: response.message.done\n"
+            f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
+    lines = []
+
+    async for line in stream_chat_completion_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    final_payload = json.loads(lines[1].removeprefix("data: "))
+    assert len(lines) == 3
+    assert final_payload["choices"][0]["finish_reason"] == "stop"
+    assert final_payload["usage"]["prompt_tokens"] == 27221
+    assert final_payload["metadata"]["gigachat_tool_state_id"] == (
+        "019ec0e2-2bc1-7cf4-86fb-0280fd4c7cb9"
+    )
     assert lines[2].strip() == "data: [DONE]"
 
 

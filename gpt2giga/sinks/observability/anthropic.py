@@ -35,6 +35,7 @@ async def emit_anthropic_message_observability(
     sink = getattr(state, "observability_sink", None)
     if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
         return
+    logger = getattr(state, "logger", None)
     try:
         protocol_adapter = getattr(state, "openai_protocol_adapter", None)
         if protocol_adapter is None:
@@ -45,33 +46,30 @@ async def emit_anthropic_message_observability(
         )
         normalized_request.protocol = "anthropic"
         normalized_response = anthropic_message_to_normalized_response(response_payload)
-    except Exception as exc:
-        logger = getattr(state, "logger", None)
-        if logger is not None:
-            logger.warning(
-                "Anthropic message observability normalization failed: {}", exc
-            )
-        return
 
-    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
-    span_events = list(events or [])
-    span_events.extend(
-        build_tool_call_span_events(normalized_response, settings=settings)
-    )
-    await emit_observability_event(
-        sink,
-        MESSAGES_SPAN_NAME,
-        build_llm_chat_completion_attributes(
+        settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+        span_events = list(events or [])
+        span_events.extend(
+            build_tool_call_span_events(normalized_response, settings=settings)
+        )
+        attributes = build_llm_chat_completion_attributes(
             normalized_request,
             normalized_response,
             settings=settings,
-        ),
-        context=context,
-        events=span_events or None,
-        logger=getattr(state, "logger", None),
-    )
-    if context is not None:
-        context.llm_observability_emitted = True
+        )
+        emitted = await emit_observability_event(
+            sink,
+            MESSAGES_SPAN_NAME,
+            attributes,
+            context=context,
+            events=span_events or None,
+            logger=logger,
+        )
+        if emitted and context is not None:
+            context.llm_observability_emitted = True
+    except Exception as exc:
+        if logger is not None:
+            logger.warning("Anthropic message observability emission failed: {}", exc)
 
 
 async def observe_anthropic_message_stream(
@@ -90,15 +88,33 @@ async def observe_anthropic_message_stream(
 
     observer = AnthropicMessageStreamObserver()
     async for chunk in body_iterator:
-        observer.observe_chunk(chunk)
+        try:
+            observer.observe_chunk(chunk)
+        except Exception as exc:
+            logger = getattr(state, "logger", None)
+            if logger is not None:
+                logger.warning(
+                    "Anthropic message stream observability observe failed: {}",
+                    exc,
+                )
         yield chunk
 
     if not observer.has_observed_payload:
         return
+    try:
+        response_payload = observer.to_anthropic_message()
+    except Exception as exc:
+        logger = getattr(state, "logger", None)
+        if logger is not None:
+            logger.warning(
+                "Anthropic message stream observability response build failed: {}",
+                exc,
+            )
+        return
     await emit_anthropic_message_observability(
         state,
         request_payload,
-        observer.to_anthropic_message(),
+        response_payload,
         context=context,
         events=observer.events,
     )

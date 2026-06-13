@@ -92,6 +92,7 @@ def normalized_stream_event_to_gemini_chunk(
                     "finishReason": _finish_reason(event.finish_reason),
                 }
             ],
+            usage=_usage_to_gemini(event.usage),
         )
     return None
 

@@ -1,7 +1,8 @@
+import asyncio
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-
 
 from gpt2giga.core.context import RequestContext
 from gpt2giga.core.interfaces import ObservabilitySink
@@ -650,6 +651,90 @@ async def test_observability_safe_helpers_do_not_raise_on_sink_errors():
 
     await emit_observability_event(sink, "request.failed")
     await flush_observability_sink(sink)
+
+
+async def test_observability_emit_timeout_returns_false(monkeypatch):
+    import gpt2giga.sinks.observability.factory as factory
+
+    class SlowSink:
+        async def emit(self, name, attributes=None, *, context=None):
+            await asyncio.sleep(1)
+
+        async def flush(self):
+            return None
+
+    monkeypatch.setattr(factory, "DEFAULT_OBSERVABILITY_TIMEOUT_SECONDS", 0.001)
+
+    emitted = await emit_observability_event(SlowSink(), "request.slow")
+
+    assert emitted is False
+
+
+async def test_otel_sink_runs_span_work_off_event_loop_thread():
+    event_loop_thread_id = threading.get_ident()
+
+    class FakeSpan:
+        def __init__(self):
+            self.thread_id = threading.get_ident()
+
+        def set_attribute(self, key, value):
+            return None
+
+        def set_status(self, status):
+            return None
+
+    class SpanContext:
+        def __init__(self, span):
+            self.span = span
+
+        def __enter__(self):
+            return self.span
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeTracer:
+        def __init__(self):
+            self.spans = []
+
+        def start_as_current_span(self, name, start_time=None):
+            span = FakeSpan()
+            self.spans.append(span)
+            return SpanContext(span)
+
+    tracer = FakeTracer()
+    sink = OpenTelemetryObservabilitySink(tracer=tracer, sample_rate=1.0)
+
+    await sink.emit("gpt2giga.request", {"status_code": 200})
+
+    assert len(tracer.spans) == 1
+    assert tracer.spans[0].thread_id != event_loop_thread_id
+
+
+async def test_otel_sink_flush_runs_off_event_loop_thread():
+    event_loop_thread_id = threading.get_ident()
+
+    class FakeProvider:
+        def __init__(self):
+            self.thread_id = None
+
+        def force_flush(self):
+            self.thread_id = threading.get_ident()
+
+    class FakeTracer:
+        def start_as_current_span(self, name, start_time=None):
+            raise AssertionError("unexpected span")
+
+    provider = FakeProvider()
+    sink = OpenTelemetryObservabilitySink(
+        tracer=FakeTracer(),
+        tracer_provider=provider,
+        sample_rate=0.0,
+    )
+
+    await sink.flush()
+
+    assert provider.thread_id != event_loop_thread_id
 
 
 async def test_response_observability_uses_previous_response_id_as_session():

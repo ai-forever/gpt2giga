@@ -1,14 +1,15 @@
 import json
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
-import pytest
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.routers.openai import router
+import gpt2giga.routers.openai.chat_completions as chat_module
 
 
 class MockResponse:
@@ -378,6 +379,47 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     assert "ChatCompletion" in emitted
     assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
     assert "hi" in emitted["ChatCompletion"]["input.value"]
+
+
+def test_chat_completions_stream_span_event_failure_does_not_break_sse(monkeypatch):
+    def fail_stream_span_events(*args, **kwargs):
+        raise RuntimeError("span event failed")
+
+    monkeypatch.setattr(
+        chat_module, "build_stream_span_events", fail_stream_span_events
+    )
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            gigachat_api_mode="v1",
+            observability_capture_content=True,
+            observability_capture_messages=True,
+            observability_capture_responses=True,
+        )
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in body
+    assert "ChatCompletion" in emitted
 
 
 def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():

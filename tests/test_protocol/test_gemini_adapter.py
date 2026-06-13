@@ -6,10 +6,14 @@ from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.gemini.response_adapter import (
     normalized_chat_response_to_gemini,
 )
+from gpt2giga.protocols.gemini.streaming import (
+    normalized_stream_event_to_gemini_chunk,
+)
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
     NormalizedMessage,
     NormalizedResponse,
+    NormalizedStreamEvent,
     NormalizedToolCall,
     NormalizedUsage,
 )
@@ -153,3 +157,24 @@ def test_gemini_response_adapter_maps_normalized_response():
         "functionCall": {"name": "lookup", "args": {"q": "ping"}}
     }
     assert candidate["finishReason"] == "STOP"
+
+
+def test_gemini_stream_message_end_includes_usage_metadata():
+    payload = normalized_stream_event_to_gemini_chunk(
+        NormalizedStreamEvent(
+            type="message_end",
+            id="req-1",
+            model="gemini-pro",
+            finish_reason="stop",
+            usage=NormalizedUsage(input_tokens=2, output_tokens=3, total_tokens=5),
+        ),
+        requested_model="gemini-pro",
+        response_id="fallback",
+    )
+
+    assert payload["candidates"][0]["finishReason"] == "STOP"
+    assert payload["usageMetadata"] == {
+        "promptTokenCount": 2,
+        "candidatesTokenCount": 3,
+        "totalTokenCount": 5,
+    }
