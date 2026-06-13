@@ -10,7 +10,7 @@ class MockResponse:
     def __init__(self, data):
         self.data = data
 
-    def model_dump(self):
+    def model_dump(self, *args, **kwargs):
         return self.data
 
 
@@ -23,17 +23,8 @@ class FakeModel:
         }
 
 
-class FakeGigaChat:
-    def __init__(self, **kwargs):
-        pass
-
-    async def aget_models(self):
-        return SimpleNamespace(data=[FakeModel()], object_="list")
-
-    async def aget_model(self, model: str):
-        return SimpleNamespace(id_=model)
-
-    async def achat(self, chat):
+class FakeAChatResource:
+    async def __call__(self, chat):
         return MockResponse(
             {
                 "choices": [
@@ -50,12 +41,52 @@ class FakeGigaChat:
             }
         )
 
+    async def create(self, chat):
+        return MockResponse(
+            {
+                "model": chat.get("model", "GigaChat"),
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "Hello!"}],
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "total_tokens": 15,
+                },
+            }
+        )
+
+
+class FakeGigaChat:
+    def __init__(self, **kwargs):
+        self.achat = FakeAChatResource()
+
+    async def aget_models(self):
+        return SimpleNamespace(data=[FakeModel()], object_="list")
+
+    async def aget_model(self, model: str):
+        return SimpleNamespace(id_=model)
+
     async def aclose(self):
         return None
 
 
 class FakeRequestTransformer:
     async def prepare_chat(self, data, giga_client=None):
+        return {
+            "model": data.get("model", "giga"),
+            "messages": data.get("messages", []),
+            "tools": data.get("tools"),
+            "function_call": data.get("function_call"),
+            "functions": data.get("functions"),
+            "reasoning_effort": data.get("reasoning_effort"),
+        }
+
+    async def prepare_chat_completion(self, data, giga_client=None):
         return {
             "model": data.get("model", "giga"),
             "messages": data.get("messages", []),
@@ -164,6 +195,26 @@ def test_ci_smoke_anthropic_messages_duplicate_v1_prefix(monkeypatch):
         install_fake_transformer(app)
         response = client.post(
             "/v1/v1/messages",
+            json={
+                "model": "claude-test",
+                "max_tokens": 64,
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "message"
+    assert body["role"] == "assistant"
+
+
+def test_ci_smoke_anthropic_messages_gateway_v2_api_v1_prefix(monkeypatch):
+    app = make_app(monkeypatch)
+
+    with TestClient(app) as client:
+        install_fake_transformer(app)
+        response = client.post(
+            "/v2/v1/messages",
             json={
                 "model": "claude-test",
                 "max_tokens": 64,
