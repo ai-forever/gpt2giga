@@ -3,7 +3,6 @@ from unittest.mock import MagicMock
 
 from gigachat.models import Chat
 from loguru import logger
-import pytest
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
@@ -47,7 +46,6 @@ def test_attachment_processor_construction():
     assert hasattr(p, "upload_file")
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_collapse_messages():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -66,7 +64,6 @@ async def test_request_transformer_collapse_messages():
     )
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_tools_to_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -92,7 +89,6 @@ async def test_request_transformer_tools_to_functions():
     assert chat.get("functions") and len(chat["functions"]) == 1
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_chat():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -115,12 +111,14 @@ async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_ch
     chat = await rt.prepare_chat(data)
 
     Chat.model_validate(chat)
-    properties = chat["functions"][0]["parameters"]["properties"]
+    properties = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )["properties"]
     for field_name in ("url", "coordinate", "size", "text", "path"):
         assert properties[field_name]["type"] == "string"
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_normalizes_nullable_legacy_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -139,12 +137,14 @@ async def test_request_transformer_normalizes_nullable_legacy_functions():
     chat = await rt.prepare_chat(data)
 
     Chat.model_validate(chat)
-    properties = chat["functions"][0]["parameters"]["properties"]
+    properties = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )["properties"]
     for field_name in ("url", "coordinate", "size", "text", "path"):
         assert properties[field_name]["type"] == "string"
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_normalizes_raw_function_schemas():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
