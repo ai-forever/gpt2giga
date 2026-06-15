@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from gigachat import GigaChat
@@ -491,6 +492,11 @@ class RequestTransformer:
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
+        if "functions" in transformed:
+            transformed["functions"] = self._normalize_legacy_functions(
+                transformed["functions"]
+            )
+
         # Map reserved tool names to safe aliases for GigaChat
         function_call = transformed.get("function_call")
         if isinstance(function_call, dict) and function_call.get("name"):
@@ -505,6 +511,31 @@ class RequestTransformer:
                     setattr(fn, "name", map_tool_name_to_gigachat(getattr(fn, "name")))
 
         return transformed
+
+    @staticmethod
+    def _normalize_legacy_functions(functions: Any) -> Any:
+        """Normalize legacy function schemas before GigaChat Chat validation."""
+        if not isinstance(functions, list):
+            return functions
+
+        normalized_functions = []
+        for function in functions:
+            if hasattr(function, "model_dump"):
+                function_payload = function.model_dump(exclude_none=True, by_alias=True)
+            elif isinstance(function, Mapping):
+                function_payload = dict(function)
+            else:
+                normalized_functions.append(function)
+                continue
+
+            parameters = function_payload.get("parameters")
+            if isinstance(parameters, dict):
+                function_payload["parameters"] = normalize_json_schema(
+                    resolve_schema_refs(parameters)
+                )
+            normalized_functions.append(function_payload)
+
+        return normalized_functions
 
     @staticmethod
     def _apply_json_schema_as_function(
