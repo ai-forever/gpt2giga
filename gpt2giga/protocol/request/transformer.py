@@ -14,6 +14,7 @@ from gigachat.models import (
     MessagesRole,
 )
 
+from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.debug_logging import log_debug_payload
 from gpt2giga.common.json_schema import (
@@ -601,6 +602,16 @@ class RequestTransformer:
             response_format["strict"] = strict
         transformed["response_format"] = response_format
 
+    @staticmethod
+    def _reject_json_object_response_format(param: str) -> None:
+        raise ClientCompatibilityError(
+            "GigaChat does not support response_format.type='json_object'. "
+            "Use response_format.type='json_schema' with a schema.",
+            provider="openai",
+            param=param,
+            code="unsupported_response_format",
+        )
+
     def _structured_output_mode(self) -> str:
         return getattr(
             self.config.proxy_settings,
@@ -669,6 +680,8 @@ class RequestTransformer:
                     self._apply_json_schema_as_function(
                         transformed, schema_name, schema
                     )
+            elif response_format.get("type") == "json_object":
+                self._reject_json_object_response_format("response_format.type")
             else:
                 transformed["response_format"] = {
                     "type": response_format.get("type"),
@@ -730,8 +743,17 @@ class RequestTransformer:
                     self._apply_json_schema_as_function(
                         transformed, schema_name, schema
                     )
+            elif response_format.get("type") == "json_object":
+                self._reject_json_object_response_format("text.format.type")
             else:
                 transformed["response_format"] = response_format
+
+        top_level_response_format = transformed.get("response_format")
+        if (
+            isinstance(top_level_response_format, dict)
+            and top_level_response_format.get("type") == "json_object"
+        ):
+            self._reject_json_object_response_format("response_format.type")
 
         return transformed
 

@@ -206,6 +206,11 @@ GPT2GIGA_STRUCTURED_OUTPUT_MODE=function_call
 - `function_call`: compatibility fallback через function calling;
 - `native`: передаёт JSON Schema через GigaChat `response_format`, если model/API это поддерживает.
 
+Оба режима рассчитаны на schema-based structured output. OpenAI
+`response_format.type=json_object` и Gemini `responseMimeType=application/json`
+без `responseJsonSchema` / `responseSchema` не проксируются в GigaChat, потому
+что upstream не поддерживает отдельный schema-less JSON mode.
+
 ## Backend API mode
 
 ```dotenv

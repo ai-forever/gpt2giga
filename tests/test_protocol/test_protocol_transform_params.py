@@ -474,6 +474,23 @@ def test_transform_chat_parameters_json_schema_native_response_format():
     assert "function_call" not in out
 
 
+def test_transform_chat_parameters_rejects_json_object_response_format():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        rt.transform_chat_parameters(
+            {
+                "model": "GigaChat-2-Max",
+                "messages": [{"role": "user", "content": "return json"}],
+                "response_format": {"type": "json_object"},
+            }
+        )
+
+    assert exc_info.value.param == "response_format.type"
+    assert exc_info.value.code == "unsupported_response_format"
+
+
 def test_transform_chat_parameters_native_keeps_user_tools_as_functions():
     """Native SO should not disable normal OpenAI tools conversion."""
     cfg = ProxyConfig(proxy=ProxySettings(structured_output_mode="native"))
@@ -802,6 +819,23 @@ def test_transform_responses_parameters_text_json_schema_native():
     }
     assert "functions" not in out
     assert "function_call" not in out
+
+
+def test_transform_responses_parameters_rejects_json_object_response_format():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    with pytest.raises(ClientCompatibilityError) as exc_info:
+        rt.transform_responses_parameters(
+            {
+                "model": "GigaChat-2-Max",
+                "input": "return json",
+                "text": {"format": {"type": "json_object"}},
+            }
+        )
+
+    assert exc_info.value.param == "text.format.type"
+    assert exc_info.value.code == "unsupported_response_format"
 
 
 def test_apply_json_schema_resolves_refs():

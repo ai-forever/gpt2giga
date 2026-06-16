@@ -123,6 +123,40 @@ def test_gemini_adapter_maps_generate_content_to_normalized_request():
     json.dumps(payload)
 
 
+def test_gemini_adapter_maps_response_json_schema_alias_to_json_schema():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "Recommend a movie"}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseJsonSchema": {
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                },
+            },
+        },
+        model="gemini-pro",
+    )
+
+    payload = normalized.to_json_dict()
+
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"] == {
+        "schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+        }
+    }
+    assert payload["response_format"]["raw_extensions"] == {
+        "responseMimeType": "application/json"
+    }
+    assert normalized.raw_extensions == {}
+
+
 def _gemini_tool_config_payload(
     function_calling_config,
     *,
@@ -320,6 +354,22 @@ def test_gemini_adapter_rejects_unsupported_function_calling_config(
                 "generationConfig": {"responseSchema": {"type": "object"}},
             },
             "generationConfig.responseSchema",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "generationConfig": {"responseMimeType": "application/json"},
+            },
+            "generationConfig.responseMimeType",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "generationConfig": {
+                    "responseJsonSchema": {"type": "object"},
+                },
+            },
+            "generationConfig.responseJsonSchema",
         ),
         (
             {"contents": [{"parts": [{"text": "hello"}]}], "tools": "bad"},

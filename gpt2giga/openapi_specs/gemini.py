@@ -26,7 +26,8 @@ def gemini_generate_content_openapi_extra(*, streaming: bool) -> dict[str, Any]:
                 "type": "object",
                 "description": (
                     "Supported fields include temperature, topP, maxOutputTokens, "
-                    "stopSequences, seed, presencePenalty and frequencyPenalty."
+                    "stopSequences, seed, presencePenalty, frequencyPenalty, "
+                    "responseMimeType, responseSchema, and responseJsonSchema."
                 ),
                 "additionalProperties": True,
             },

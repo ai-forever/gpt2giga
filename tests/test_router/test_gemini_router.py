@@ -309,6 +309,40 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
     assert payload["max_tokens"] == 64
 
 
+def test_gemini_generate_content_maps_response_json_schema_alias():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "contents": [{"parts": [{"text": "Recommend a movie"}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseJsonSchema": {
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = app.state.request_transformer.chat_calls[0][0]
+    assert payload["response_format"]["type"] == "json_schema"
+    assert payload["response_format"]["json_schema"] == {
+        "schema": {
+            "type": "object",
+            "properties": {"title": {"type": "string"}},
+            "required": ["title"],
+        }
+    }
+    assert payload["response_format"]["raw_extensions"] == {
+        "responseMimeType": "application/json"
+    }
+
+
 def test_gemini_generate_content_emits_phoenix_span_name():
     app = make_app()
     app.state.observability_sink = RecordingObservabilitySink()

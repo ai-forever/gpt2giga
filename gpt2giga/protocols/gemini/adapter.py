@@ -293,7 +293,21 @@ def _validate_generation_config(value: Any) -> None:
             param="generationConfig",
         )
     mime_type = _part_value(value, "responseMimeType", "response_mime_type")
-    schema = _part_value(value, "responseSchema", "response_schema")
+    response_schema = _response_schema_value(value)
+    response_json_schema = _response_json_schema_value(value)
+    if response_schema is not None and response_json_schema is not None:
+        raise gemini_invalid_request(
+            "Gemini responseSchema and responseJsonSchema are mutually exclusive.",
+            param="generationConfig.responseJsonSchema",
+        )
+    schema = (
+        response_json_schema if response_json_schema is not None else response_schema
+    )
+    schema_param = (
+        "generationConfig.responseJsonSchema"
+        if response_json_schema is not None
+        else "generationConfig.responseSchema"
+    )
     if mime_type is not None and not isinstance(mime_type, str):
         raise gemini_invalid_request(
             "Gemini responseMimeType must be a string.",
@@ -302,12 +316,18 @@ def _validate_generation_config(value: Any) -> None:
     if schema is not None and not isinstance(schema, Mapping):
         raise gemini_invalid_request(
             "Gemini responseSchema must be an object.",
-            param="generationConfig.responseSchema",
+            param=schema_param,
         )
     if schema is not None and mime_type != "application/json":
         raise gemini_invalid_request(
             "Gemini responseSchema is supported only with application/json.",
-            param="generationConfig.responseSchema",
+            param=schema_param,
+        )
+    if mime_type == "application/json" and schema is None:
+        raise gemini_invalid_request(
+            "GigaChat does not support Gemini JSON mode without a response schema. "
+            "Provide generationConfig.responseJsonSchema or responseSchema.",
+            param="generationConfig.responseMimeType",
         )
     if mime_type not in {None, "application/json", "text/plain"}:
         raise gemini_invalid_request(
@@ -448,6 +468,8 @@ def _gemini_protocol_extensions(payload: Mapping[str, Any]) -> dict[str, Any]:
             "response_mime_type",
             "responseModalities",
             "response_modalities",
+            "responseJsonSchema",
+            "response_json_schema",
             "responseSchema",
             "response_schema",
             "seed",
@@ -810,17 +832,19 @@ def _normalize_response_format(
     config: Mapping[str, Any],
 ) -> NormalizedResponseFormat | None:
     mime_type = _part_value(config, "responseMimeType", "response_mime_type")
-    schema = _part_value(config, "responseSchema", "response_schema")
+    schema = _response_json_schema_value(config)
+    if schema is None:
+        schema = _response_schema_value(config)
     if not isinstance(mime_type, str):
         return None
     if mime_type == "text/plain":
         return None
     if mime_type == "application/json":
+        if not isinstance(schema, Mapping):
+            return None
         return NormalizedResponseFormat(
-            type="json_schema" if isinstance(schema, Mapping) else "json_object",
-            json_schema={"schema": dict(schema)}
-            if isinstance(schema, Mapping)
-            else None,
+            type="json_schema",
+            json_schema={"schema": dict(schema)},
             raw_extensions={"responseMimeType": mime_type},
         )
     return NormalizedResponseFormat(
@@ -945,6 +969,14 @@ def _part_value(mapping: Mapping[str, Any], camel: str, snake: str) -> Any:
     if camel in mapping:
         return mapping[camel]
     return mapping.get(snake)
+
+
+def _response_schema_value(mapping: Mapping[str, Any]) -> Any:
+    return _part_value(mapping, "responseSchema", "response_schema")
+
+
+def _response_json_schema_value(mapping: Mapping[str, Any]) -> Any:
+    return _part_value(mapping, "responseJsonSchema", "response_json_schema")
 
 
 def _mime_type(mapping: Mapping[str, Any]) -> str | None:
