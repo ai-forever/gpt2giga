@@ -89,6 +89,46 @@ async def test_request_transformer_tools_to_functions():
     assert chat.get("functions") and len(chat["functions"]) == 1
 
 
+async def test_prepare_chat_preserves_tool_call_state_for_legacy_gigachat():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "Weather?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": '{"city": "Москва"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4",
+                    "content": '{"city": "Москва", "temp": "+5°C"}',
+                },
+            ],
+        }
+    )
+
+    assert chat["messages"][1]["functions_state_id"] == (
+        "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"
+    )
+    assert chat["messages"][2]["functions_state_id"] == (
+        "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"
+    )
+
+
 async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_chat():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)

@@ -108,8 +108,7 @@ class RequestTransformer:
                 )
                 if function_name and not message.get("name"):
                     message["name"] = function_name
-                if tool_call_id and not message.get("tools_state_id"):
-                    message["tools_state_id"] = tool_call_id
+                self._set_backend_state_id(message, tool_call_id)
                 message["content"] = ensure_json_object_str(message.get("content"))
                 if message.get("name"):
                     message["name"] = map_tool_name_to_gigachat(message["name"])
@@ -141,8 +140,7 @@ class RequestTransformer:
                 tool_call = message["tool_calls"][0]
                 if isinstance(tool_call, dict):
                     tool_call_id = self._extract_tool_call_id(tool_call)
-                    if tool_call_id and not message.get("tools_state_id"):
-                        message["tools_state_id"] = tool_call_id
+                    self._set_backend_state_id(message, tool_call_id)
                     message["function_call"] = tool_call.get("function")
                     if isinstance(message.get("function_call"), dict):
                         self._normalize_message_function_call(message["function_call"])
@@ -166,8 +164,7 @@ class RequestTransformer:
                 and message["function_call"].get("name")
             ):
                 tool_call_id = self._extract_tool_call_id(message)
-                if tool_call_id and not message.get("tools_state_id"):
-                    message["tools_state_id"] = tool_call_id
+                self._set_backend_state_id(message, tool_call_id)
                 self._normalize_message_function_call(message["function_call"])
                 self._track_pending_tool_call(
                     message["function_call"],
@@ -264,6 +261,20 @@ class RequestTransformer:
                 return state_id.removeprefix(prefix)
         return state_id
 
+    @classmethod
+    def _set_backend_state_id(
+        cls,
+        message: Dict[str, Any],
+        state_id: Optional[str],
+    ) -> None:
+        normalized = cls._normalize_backend_state_id(state_id)
+        if not normalized:
+            return
+        if not cls._normalize_backend_state_id(message.get("tools_state_id")):
+            message["tools_state_id"] = normalized
+        if not cls._normalize_backend_state_id(message.get("functions_state_id")):
+            message["functions_state_id"] = normalized
+
     @staticmethod
     def _track_pending_tool_call(
         function_call: Dict[str, Any],
@@ -300,7 +311,7 @@ class RequestTransformer:
         if pending_tool_calls:
             pending_name, pending_call_id = pending_tool_calls.pop(0)
             if pending_call_id and not tool_call_id:
-                message["tools_state_id"] = pending_call_id
+                RequestTransformer._set_backend_state_id(message, pending_call_id)
             return pending_name
 
         return None
@@ -763,8 +774,7 @@ class RequestTransformer:
                         "name": fn_name,
                         "content": ensure_json_object_str(message.get("output")),
                     }
-                    if tools_state_id:
-                        payload["tools_state_id"] = tools_state_id
+                    self._set_backend_state_id(payload, tools_state_id)
                     message_payload.append(payload)
                     continue
                 if message_type == "function_call":
@@ -782,8 +792,7 @@ class RequestTransformer:
                         )
 
                     completion_payload = self.mock_completion(message)
-                    if tools_state_id:
-                        completion_payload["tools_state_id"] = tools_state_id
+                    self._set_backend_state_id(completion_payload, tools_state_id)
                     message_payload.append(completion_payload)
                     continue
 
@@ -992,7 +1001,11 @@ class RequestTransformer:
         if content_parts:
             payload["content"] = content_parts
 
-        for field_name in ("message_id", "tools_state_id", "inline_data"):
+        tool_state_id = self._extract_tool_call_id(message)
+        if tool_state_id:
+            payload["tools_state_id"] = tool_state_id
+
+        for field_name in ("message_id", "inline_data"):
             if field_name in message:
                 payload[field_name] = message[field_name]
 

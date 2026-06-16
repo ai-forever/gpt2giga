@@ -988,6 +988,7 @@ class TestBuildAnthropicResponse:
                             "name": "search",
                             "arguments": {"q": "test"},
                         },
+                        "functions_state_id": ("019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"),
                     },
                     "finish_reason": "function_call",
                 }
@@ -997,6 +998,7 @@ class TestBuildAnthropicResponse:
         result = _build_anthropic_response(giga, "claude-test", "rq456")
         assert result["stop_reason"] == "tool_use"
         assert result["content"][0]["type"] == "tool_use"
+        assert result["content"][0]["id"] == "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"
         assert result["content"][0]["name"] == "search"
         assert result["content"][0]["input"] == {"q": "test"}
 
