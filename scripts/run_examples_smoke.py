@@ -13,6 +13,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -148,6 +149,16 @@ def parse_api_versions(raw: str) -> tuple[str, ...]:
     if not versions:
         raise ValueError("at least one api_version is required")
     return tuple(versions)
+
+
+def positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be greater than or equal to 1")
+    return value
 
 
 def relative_to_repo(path: Path) -> str:
@@ -306,54 +317,105 @@ def run_matrix(
     base_url: str,
     python: str,
     timeout: float,
+    concurrency: int,
     fail_fast: bool,
     verbose: bool,
 ) -> list[ExampleResult]:
+    if concurrency < 1:
+        raise ValueError("concurrency must be greater than or equal to 1")
+
     results: list[ExampleResult] = []
     for api_version in api_versions:
-        for case in cases:
-            if case.skip_reason is not None:
-                result = ExampleResult(
-                    path=case.rel_path,
-                    api_version=api_version,
-                    status=SKIP,
-                    duration_seconds=0.0,
-                    error=case.skip_reason,
-                )
-                print(f"[{api_version}] SKIP {case.rel_path} - {case.skip_reason}")
-                results.append(result)
-                continue
+        stop_scheduling = False
+        pending_cases = iter(cases)
+        active: dict[Future[ExampleResult], ExampleCase] = {}
 
-            print(f"[{api_version}] RUN  {case.rel_path}")
-            result = run_example_subprocess(
-                case,
-                api_version=api_version,
-                base_url=base_url,
-                python=python,
-                timeout=timeout,
-            )
-            results.append(result)
-            if result.status == PASS:
-                print(
-                    f"[{api_version}] OK   {case.rel_path} "
-                    f"({result.duration_seconds:.1f}s)"
-                )
-                if verbose and result.stdout:
-                    print(
-                        result.stdout, end="" if result.stdout.endswith("\n") else "\n"
-                    )
-                if verbose and result.stderr:
-                    print(
-                        result.stderr, end="" if result.stderr.endswith("\n") else "\n"
-                    )
-                continue
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
 
-            print(
-                f"[{api_version}] FAIL {case.rel_path} ({result.duration_seconds:.1f}s)"
-            )
-            if fail_fast:
-                return results
+            def schedule_until_full() -> None:
+                nonlocal stop_scheduling
+                while not stop_scheduling and len(active) < concurrency:
+                    try:
+                        case = next(pending_cases)
+                    except StopIteration:
+                        return
+
+                    if case.skip_reason is not None:
+                        result = ExampleResult(
+                            path=case.rel_path,
+                            api_version=api_version,
+                            status=SKIP,
+                            duration_seconds=0.0,
+                            error=case.skip_reason,
+                        )
+                        print(
+                            f"[{api_version}] SKIP {case.rel_path} - {case.skip_reason}"
+                        )
+                        results.append(result)
+                        continue
+
+                    print(f"[{api_version}] RUN  {case.rel_path}")
+                    future = executor.submit(
+                        run_example_subprocess,
+                        case,
+                        api_version=api_version,
+                        base_url=base_url,
+                        python=python,
+                        timeout=timeout,
+                    )
+                    active[future] = case
+
+            schedule_until_full()
+            while active:
+                done, _ = wait(active, return_when=FIRST_COMPLETED)
+                for future in done:
+                    case = active.pop(future)
+                    try:
+                        result = future.result()
+                    except Exception as exc:
+                        result = ExampleResult(
+                            path=case.rel_path,
+                            api_version=api_version,
+                            status=FAIL,
+                            duration_seconds=0.0,
+                            error=f"runner failed: {exc}",
+                        )
+
+                    results.append(result)
+                    print_result(result, verbose=verbose)
+                    if fail_fast and result.status == FAIL:
+                        stop_scheduling = True
+
+                schedule_until_full()
+
+        if stop_scheduling:
+            return results
+
     return results
+
+
+def print_result(result: ExampleResult, *, verbose: bool) -> None:
+    if result.status == PASS:
+        print(
+            f"[{result.api_version}] OK   {result.path} "
+            f"({result.duration_seconds:.1f}s)"
+        )
+        if verbose and result.stdout:
+            print(result.stdout, end="" if result.stdout.endswith("\n") else "\n")
+        if verbose and result.stderr:
+            print(result.stderr, end="" if result.stderr.endswith("\n") else "\n")
+        return
+
+    if result.status == FAIL:
+        print(
+            f"[{result.api_version}] FAIL {result.path} "
+            f"({result.duration_seconds:.1f}s)"
+        )
+        return
+
+    if result.status == SKIP:
+        suffix = f" - {result.error}" if result.error else ""
+        print(f"[{result.api_version}] SKIP {result.path}{suffix}")
 
 
 def check_server_health(base_url: str, timeout: float) -> None:
@@ -500,6 +562,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Per-example timeout in seconds. Default: 180.",
     )
     parser.add_argument(
+        "-n",
+        "--concurrency",
+        type=positive_int,
+        default=1,
+        help="Maximum number of examples to run at the same time. Default: 1.",
+    )
+    parser.add_argument(
         "--python",
         default=sys.executable,
         help="Python executable used for child example runs.",
@@ -602,6 +671,7 @@ def run_cli(args: argparse.Namespace) -> int:
         base_url=args.base_url,
         python=args.python,
         timeout=args.timeout,
+        concurrency=args.concurrency,
         fail_fast=args.fail_fast,
         verbose=args.verbose,
     )

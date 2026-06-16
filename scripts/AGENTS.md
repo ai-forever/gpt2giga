@@ -21,7 +21,7 @@
 uv run python scripts/generate_badge.py 87.5 badges/coverage.svg
 
 # Run runnable examples against a local proxy for both API versions
-uv run python scripts/run_examples_smoke.py --api-versions v1,v2
+uv run python scripts/run_examples_smoke.py --api-versions v1,v2 -n 4
 
 # Use the mitmproxy addon manually
 mitmproxy -s scripts/sse_event.py

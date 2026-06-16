@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import threading
 from pathlib import Path
 
 
@@ -23,6 +24,14 @@ def test_parse_api_versions_deduplicates_and_normalizes():
     smoke = load_smoke_module()
 
     assert smoke.parse_api_versions("v1,/v2,v1") == ("v1", "v2")
+
+
+def test_parser_accepts_concurrency_short_option():
+    smoke = load_smoke_module()
+
+    args = smoke.build_parser().parse_args(["-n", "3", "--dry-run"])
+
+    assert args.concurrency == 3
 
 
 def test_discover_examples_skips_known_unsupported_by_default():
@@ -87,6 +96,7 @@ def test_run_matrix_collects_failures_and_report_json(tmp_path):
         base_url="http://localhost:8090",
         python=sys.executable,
         timeout=10,
+        concurrency=1,
         fail_fast=False,
         verbose=False,
     )
@@ -112,3 +122,60 @@ def test_run_matrix_collects_failures_and_report_json(tmp_path):
     }
     assert report["results"][1]["path"] == "bad.py"
     assert "RuntimeError: boom v1" in report["results"][1]["stderr_tail"]
+
+
+def test_run_matrix_uses_requested_concurrency(monkeypatch, tmp_path):
+    smoke = load_smoke_module()
+    cases = [
+        smoke.ExampleCase(path=tmp_path / "one.py", rel_path="one.py"),
+        smoke.ExampleCase(path=tmp_path / "two.py", rel_path="two.py"),
+    ]
+    lock = threading.Lock()
+    both_started = threading.Event()
+    active = 0
+    started = 0
+    max_active = 0
+
+    def fake_run_example_subprocess(
+        case,
+        *,
+        api_version,
+        base_url,
+        python,
+        timeout,
+    ):
+        nonlocal active, max_active, started
+        with lock:
+            active += 1
+            started += 1
+            max_active = max(max_active, active)
+            if started == 2:
+                both_started.set()
+
+        assert both_started.wait(1)
+
+        with lock:
+            active -= 1
+
+        return smoke.ExampleResult(
+            path=case.rel_path,
+            api_version=api_version,
+            status=smoke.PASS,
+            duration_seconds=0.1,
+        )
+
+    monkeypatch.setattr(smoke, "run_example_subprocess", fake_run_example_subprocess)
+
+    results = smoke.run_matrix(
+        cases,
+        api_versions=("v1",),
+        base_url="http://localhost:8090",
+        python=sys.executable,
+        timeout=10,
+        concurrency=2,
+        fail_fast=False,
+        verbose=False,
+    )
+
+    assert [result.status for result in results] == [smoke.PASS, smoke.PASS]
+    assert max_active == 2

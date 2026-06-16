@@ -75,17 +75,19 @@ uv run python examples/openai/responses/tools/function_calling.py
 Для быстрой проверки примеров на локально запущенном прокси используйте:
 
 ```bash
-uv run python scripts/run_examples_smoke.py --api-versions v1,v2
+uv run python scripts/run_examples_smoke.py --api-versions v1,v2 -n 4
 ```
 
 Скрипт запускает каждый runnable `examples/**/*.py` отдельным процессом,
 подставляет `api_version` из матрицы `v1/v2`, проверяет
 `http://localhost:8090/health` перед стартом и в конце группирует ошибки по
-версии API и файлу. Чтобы сохранить отчет:
+версии API и файлу. Флаг `-n` / `--concurrency` задает количество одновременно
+запущенных examples. Чтобы сохранить отчет:
 
 ```bash
 uv run python scripts/run_examples_smoke.py \
   --api-versions v1,v2 \
+  --concurrency 4 \
   --report-json .local/examples-smoke-report.json
 ```
 
