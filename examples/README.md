@@ -70,6 +70,29 @@ uv run python examples/gemini/content/stream_generate_content.py
 uv run python examples/openai/responses/tools/function_calling.py
 ```
 
+## E2E smoke всех runnable-примеров
+
+Для быстрой проверки примеров на локально запущенном прокси используйте:
+
+```bash
+uv run python scripts/run_examples_smoke.py --api-versions v1,v2
+```
+
+Скрипт запускает каждый runnable `examples/**/*.py` отдельным процессом,
+подставляет `api_version` из матрицы `v1/v2`, проверяет
+`http://localhost:8090/health` перед стартом и в конце группирует ошибки по
+версии API и файлу. Чтобы сохранить отчет:
+
+```bash
+uv run python scripts/run_examples_smoke.py \
+  --api-versions v1,v2 \
+  --report-json .local/examples-smoke-report.json
+```
+
+По умолчанию пропускаются подготовленные, но пока не смонтированные Files/Batches
+examples и OpenAI Agents example с внешними HTTP API. Для принудительного запуска
+всего набора добавьте `--include-known-unsupported`.
+
 Files API, OpenAI Batches API, Anthropic Message Batches API и Gemini Files/Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
 
 Stateful Anthropic/Gemini examples require the proxy process to be started with
