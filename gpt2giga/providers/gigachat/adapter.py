@@ -16,7 +16,10 @@ from gpt2giga.common.model_concurrency import (
     ModelConcurrencyTimeoutError,
     resolve_gigachat_model,
 )
-from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.common.tools import (
+    map_tool_name_from_gigachat,
+    normalize_gigachat_builtin_tool_type,
+)
 from gpt2giga.core.context import RequestContext, update_request_context
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.response import (
@@ -435,6 +438,15 @@ def _content_part_to_openai(part: NormalizedContentPart) -> dict[str, Any]:
 
 def _tool_to_openai(tool: NormalizedTool) -> dict[str, Any]:
     raw_extensions = dict(tool.raw_extensions)
+    builtin_field_name = normalize_gigachat_builtin_tool_type(tool.type)
+    if builtin_field_name is not None:
+        payload: dict[str, Any] = {"type": builtin_field_name}
+        config = raw_extensions.pop(builtin_field_name, None)
+        if isinstance(config, Mapping):
+            payload[builtin_field_name] = dict(config)
+        payload.update(raw_extensions)
+        return payload
+
     parameters = normalize_tool_parameters_schema(tool.parameters)
     payload = {
         "type": tool.type,

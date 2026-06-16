@@ -148,6 +148,30 @@ def test_normalized_chat_to_openai_payload_maps_tools_and_generation_config():
     assert payload["additional_fields"] == {"profanity_check": False}
 
 
+def test_normalized_chat_to_openai_payload_preserves_builtin_tools():
+    request = NormalizedChatRequest(
+        protocol="gemini",
+        model="GigaChat",
+        messages=[NormalizedMessage(role="user", content="search")],
+        tools=[
+            NormalizedTool(
+                type="web_search",
+                name="web_search",
+                raw_extensions={"web_search": {"indexes": ["web"]}},
+            )
+        ],
+    )
+
+    payload = normalized_chat_to_openai_payload(request)
+
+    assert payload["tools"] == [
+        {
+            "type": "web_search",
+            "web_search": {"indexes": ["web"]},
+        }
+    ]
+
+
 def test_normalized_chat_to_openai_payload_sanitizes_tool_parameters():
     request = NormalizedChatRequest(
         model="GigaChat",

@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from gpt2giga.common.json_schema import normalize_tool_parameters_schema
+from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.gemini.response_adapter import (
     normalized_chat_response_to_gemini,
@@ -39,6 +40,10 @@ _GENERATE_FIELDS = {
     "toolConfig",
     "tool_config",
     "tools",
+}
+_GEMINI_FUNCTION_DECLARATION_KEYS = {
+    "functionDeclarations",
+    "function_declarations",
 }
 
 
@@ -590,6 +595,7 @@ def _normalize_tools(value: Any) -> list[NormalizedTool]:
     for tool in value:
         if not isinstance(tool, Mapping):
             continue
+        tools.extend(_gemini_builtin_tools_to_normalized(tool))
         declarations = _part_value(
             tool,
             "functionDeclarations",
@@ -605,6 +611,30 @@ def _normalize_tools(value: Any) -> list[NormalizedTool]:
     return tools
 
 
+def _gemini_builtin_tools_to_normalized(
+    tool: Mapping[str, Any],
+) -> list[NormalizedTool]:
+    normalized_tools: list[NormalizedTool] = []
+    seen_fields: set[str] = set()
+    for key, value in tool.items():
+        if key in _GEMINI_FUNCTION_DECLARATION_KEYS:
+            continue
+        field_name = normalize_gigachat_builtin_tool_type(key)
+        if field_name is None or field_name in seen_fields:
+            continue
+        seen_fields.add(field_name)
+        config = dict(value) if isinstance(value, Mapping) else {}
+        normalized_tools.append(
+            NormalizedTool(
+                type=field_name,
+                name=field_name,
+                parameters={},
+                raw_extensions={field_name: config},
+            )
+        )
+    return normalized_tools
+
+
 def _unsupported_gemini_tools(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
@@ -612,18 +642,11 @@ def _unsupported_gemini_tools(value: Any) -> list[dict[str, Any]]:
     for tool in value:
         if not isinstance(tool, Mapping):
             continue
-        declarations = _part_value(
-            tool,
-            "functionDeclarations",
-            "function_declarations",
-        )
-        if declarations is None:
-            unsupported_tools.append(dict(tool))
-            continue
         tool_extensions = {
             key: item
             for key, item in tool.items()
-            if key not in {"functionDeclarations", "function_declarations"}
+            if key not in _GEMINI_FUNCTION_DECLARATION_KEYS
+            and normalize_gigachat_builtin_tool_type(key) is None
         }
         if tool_extensions:
             unsupported_tools.append(tool_extensions)
@@ -645,7 +668,8 @@ def _function_declaration_to_normalized(
     tool_extensions = {
         key: value
         for key, value in tool.items()
-        if key not in {"functionDeclarations", "function_declarations"}
+        if key not in _GEMINI_FUNCTION_DECLARATION_KEYS
+        and normalize_gigachat_builtin_tool_type(key) is None
     }
     if tool_extensions:
         raw_extensions["tool"] = tool_extensions
@@ -714,7 +738,7 @@ def _validate_allowed_function_names(
 ) -> None:
     if allowed_names is None:
         return
-    declared_names = {tool.name for tool in tools}
+    declared_names = {tool.name for tool in tools if tool.type == "function"}
     missing_names = [name for name in allowed_names if name not in declared_names]
     if missing_names:
         missing = ", ".join(missing_names)
@@ -731,7 +755,7 @@ def _filter_tools_by_allowed_names(
     if allowed_names is None:
         return tools
     allowed = set(allowed_names)
-    return [tool for tool in tools if tool.name in allowed]
+    return [tool for tool in tools if tool.type != "function" or tool.name in allowed]
 
 
 def _normalize_tool_choice(
@@ -747,7 +771,7 @@ def _normalize_tool_choice(
         return "none"
     if mode == "auto":
         return "auto"
-    candidate_names = allowed_names or _unique_tool_names(tools)
+    candidate_names = allowed_names or _unique_function_tool_names(tools)
     if len(candidate_names) == 1:
         return {"type": "function", "function": {"name": candidate_names[0]}}
     if not candidate_names:
@@ -785,9 +809,11 @@ def _function_calling_mode(value: Any) -> str:
     )
 
 
-def _unique_tool_names(tools: list[NormalizedTool]) -> list[str]:
+def _unique_function_tool_names(tools: list[NormalizedTool]) -> list[str]:
     names: list[str] = []
     for tool in tools:
+        if tool.type != "function":
+            continue
         if tool.name and tool.name not in names:
             names.append(tool.name)
     return names

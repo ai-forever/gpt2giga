@@ -575,7 +575,7 @@ def test_gemini_generate_content_ignores_unsupported_but_accepted_fields():
                 "responseModalities": ["TEXT"],
                 "responseMimeType": "text/plain",
             },
-            "tools": [{"googleSearch": {}}],
+            "tools": [{"googleMaps": {}}],
             "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT"}],
             "cachedContent": "cachedContents/1",
         },
@@ -587,6 +587,28 @@ def test_gemini_generate_content_ignores_unsupported_but_accepted_fields():
         "model": "gemini-pro",
         "messages": [{"role": "user", "content": "Hello"}],
         "stream": False,
+    }
+
+
+def test_gemini_generate_content_passes_supported_builtin_tools_to_provider_payload():
+    app = make_app(mode="v2")
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "contents": [{"parts": [{"text": "Hello"}]}],
+            "tools": [{"googleSearch": {}}],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = app.state.request_transformer.chat_completion_calls[0][0]
+    assert payload == {
+        "model": "gemini-pro",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "stream": False,
+        "tools": [{"type": "web_search", "web_search": {}}],
     }
 
 

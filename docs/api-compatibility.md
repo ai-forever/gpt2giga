@@ -152,8 +152,9 @@ request/observability, но не передается upstream как испол
   дефолтным текстовым режимом, `application/json` маппится в JSON response
   format, а другие MIME types и `responseSchema` без `application/json`
   возвращают `400`;
-- unsupported features: built-in Gemini tools, full multimodal/file-backed
-  Gemini flows, non-text embeddings content;
+- unsupported features: Gemini tools outside the GigaChat SDK built-in mapping
+  (`fileSearch`, `googleMaps`, `computerUse`, MCP, RAG/retrieval/Vertex tools),
+  full multimodal/file-backed Gemini flows, non-text embeddings content;
 - approximations: `countTokens` считает извлеченный текст через GigaChat token
   counting, игнорирует non-text/file/cachedContent parts и не является точным
   Gemini tokenizer.
@@ -180,7 +181,7 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 - OpenAI metadata и tuning knobs: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
 - Anthropic optional fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, unsupported provider tools, citations, unsupported document/file content blocks. Compatible provider tools (`web_search*`, `web_fetch*`, `code_execution*`) map to GigaChat v2 built-ins.
-- Gemini optional fields: `safetySettings`, `cachedContent`, `serviceTier`, ignored `generationConfig` controls such as `candidateCount`/`topK`/`responseModalities`, and non-function built-in tools are accepted/preserved for diagnostics but are not enforced by GigaChat. Unsupported `responseMimeType` values and `responseSchema` without `application/json` are rejected.
+- Gemini optional fields: `safetySettings`, `cachedContent`, `serviceTier`, ignored `generationConfig` controls such as `candidateCount`/`topK`/`responseModalities`, and unsupported non-function tools are accepted/preserved for diagnostics but are not enforced by GigaChat. Compatible Gemini provider tools map to GigaChat v2 built-ins: `googleSearch` / `googleSearchRetrieval` -> `web_search`, `urlContext` -> `url_content_extraction`, `codeExecution` -> `code_interpreter`. Unsupported `responseMimeType` values and `responseSchema` without `application/json` are rejected.
 
 Если поле намеренно игнорируется, оно не отправляется upstream как исполняемая GigaChat feature. Literal `extra_body` object может быть передан в GigaChat `additional_fields`; в таком случае поддержку определяет GigaChat API.
 

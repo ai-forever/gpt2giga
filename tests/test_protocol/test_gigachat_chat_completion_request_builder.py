@@ -319,6 +319,36 @@ async def test_prepare_chat_completion_maps_anthropic_builtin_tool_types():
     assert request.tool_config.tool_name == "web_search"
 
 
+async def test_prepare_chat_completion_maps_gemini_builtin_tool_types():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "search, read, calculate"}],
+            "tools": [
+                {
+                    "type": "googleSearch",
+                    "googleSearch": {"indexes": ["web"]},
+                },
+                {
+                    "type": "urlContext",
+                    "urlContext": {"max_uses": 2},
+                },
+                {"type": "codeExecution"},
+            ],
+            "tool_choice": {"type": "googleSearch"},
+        }
+    )
+
+    assert request.tools[0].web_search.indexes == ["web"]
+    assert request.tools[1].url_content_extraction == {"max_uses": 2}
+    assert request.tools[2].code_interpreter == {}
+    assert request.tool_config.mode == "tool"
+    assert request.tool_config.tool_name == "web_search"
+
+
 async def test_prepare_chat_completion_enables_builtin_tools_when_default_mode_is_v1():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     rt = RequestTransformer(cfg, logger=logger)

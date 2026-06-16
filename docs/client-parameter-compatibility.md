@@ -145,16 +145,18 @@ backend по `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 | Эндпоинт | Поддерживается |
 |---|---|
-| Generate Content | `contents`, `systemInstruction`, `generationConfig.temperature`, `generationConfig.topP`, `generationConfig.maxOutputTokens`, `generationConfig.stopSequences`, `generationConfig.seed`, `generationConfig.presencePenalty`, `generationConfig.frequencyPenalty`, function `tools.functionDeclarations`, базовый `toolConfig.functionCallingConfig`, text/image/file parts |
+| Generate Content | `contents`, `systemInstruction`, `generationConfig.temperature`, `generationConfig.topP`, `generationConfig.maxOutputTokens`, `generationConfig.stopSequences`, `generationConfig.seed`, `generationConfig.presencePenalty`, `generationConfig.frequencyPenalty`, function `tools.functionDeclarations`, Gemini provider tools в GigaChat v2 mode (`googleSearch` / `googleSearchRetrieval` как `web_search`, `urlContext` как `url_content_extraction`, `codeExecution` как `code_interpreter`), базовый `toolConfig.functionCallingConfig`, text/image/file parts |
 | Stream Generate Content | Те же поля, что Generate Content; ответ отдаётся как Gemini `GenerateContentResponse` SSE chunks. |
 | Count Tokens | Текстовые части `contents`, `systemInstruction` и имена/описания function declarations. |
 | Embeddings | `content.parts[].text`, `requests[].content.parts[].text` для batch embeddings, `outputDimensionality` принимается как compatibility metadata. |
 | Models | `GET /v1beta/models`, `GET /v1/v1beta/models`, `GET /v2/v1beta/models` и `{model}` variants; общие `/models`, `/v1/models`, `/v2/models` возвращают Gemini форму для Google/Gemini requests, например с `X-Goog-Api-Client` |
 
-Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store`,
-unsupported subfields `generationConfig` и non-function built-in tools
-принимаются и сохраняются в normalized extensions для диагностики, но не
-передаются в GigaChat как исполняемые параметры и не применяются прокси.
+Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store` и unsupported
+subfields `generationConfig` принимаются и сохраняются в normalized extensions
+для диагностики, но не передаются в GigaChat как исполняемые параметры и не
+применяются прокси. Non-function provider tools, которые не соответствуют
+GigaChat SDK built-ins (`fileSearch`, `googleMaps`, `computerUse`, MCP,
+RAG/retrieval/Vertex tools), также сохраняются только для диагностики.
 
 Код Gemini Files и Batches существует, но публичный роутер не подключается,
 пока file/batch execution не будет проверен end-to-end.

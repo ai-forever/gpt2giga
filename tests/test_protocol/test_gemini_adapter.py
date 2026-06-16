@@ -403,7 +403,7 @@ def test_gemini_adapter_rejects_invalid_generate_payloads(
     assert exc_info.value.detail["error"]["param"] == expected_param
 
 
-def test_gemini_adapter_preserves_ignored_generation_fields_and_builtin_tools():
+def test_gemini_adapter_preserves_ignored_generation_fields_and_unsupported_tools():
     adapter = GeminiProtocolAdapter()
 
     normalized = adapter.generate_content_to_normalized(
@@ -418,7 +418,7 @@ def test_gemini_adapter_preserves_ignored_generation_fields_and_builtin_tools():
             "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT"}],
             "cachedContent": "cachedContents/1",
             "serviceTier": "flex",
-            "tools": [{"googleSearch": {}}],
+            "tools": [{"googleMaps": {"api_key": "secret-gemini-key"}}],
         },
         model="gemini-pro",
     )
@@ -435,7 +435,75 @@ def test_gemini_adapter_preserves_ignored_generation_fields_and_builtin_tools():
     ]
     assert normalized.raw_extensions["cachedContent"] == "cachedContents/1"
     assert normalized.raw_extensions["serviceTier"] == "flex"
-    assert normalized.raw_extensions["unsupportedTools"] == [{"googleSearch": {}}]
+    assert normalized.raw_extensions["unsupportedTools"] == [
+        {"googleMaps": {"api_key": "secret-gemini-key"}}
+    ]
+
+
+def test_gemini_adapter_maps_supported_builtin_tools_to_gigachat_tools():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "hello"}]}],
+            "tools": [
+                {"googleSearch": {"indexes": ["web"]}},
+                {"urlContext": {"max_uses": 2}, "codeExecution": {}},
+                {"googleMaps": {"api_key": "secret-gemini-key"}},
+            ],
+        },
+        model="gemini-pro",
+    )
+
+    assert [
+        (tool.type, tool.name, tool.raw_extensions) for tool in normalized.tools
+    ] == [
+        ("web_search", "web_search", {"web_search": {"indexes": ["web"]}}),
+        (
+            "url_content_extraction",
+            "url_content_extraction",
+            {"url_content_extraction": {"max_uses": 2}},
+        ),
+        ("code_interpreter", "code_interpreter", {"code_interpreter": {}}),
+    ]
+    assert normalized.raw_extensions["unsupportedTools"] == [
+        {"googleMaps": {"api_key": "secret-gemini-key"}}
+    ]
+
+
+def test_gemini_adapter_function_calling_config_filters_only_function_tools():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "hello"}]}],
+            "tools": [
+                {"googleSearch": {}},
+                {
+                    "functionDeclarations": [
+                        {"name": "lookup", "parameters": {"type": "object"}},
+                        {"name": "ignored", "parameters": {"type": "object"}},
+                    ]
+                },
+            ],
+            "toolConfig": {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["lookup"],
+                }
+            },
+        },
+        model="gemini-pro",
+    )
+
+    assert [(tool.type, tool.name) for tool in normalized.tools] == [
+        ("web_search", "web_search"),
+        ("function", "lookup"),
+    ]
+    assert normalized.tool_choice == {
+        "type": "function",
+        "function": {"name": "lookup"},
+    }
 
 
 def test_gemini_adapter_maps_single_function_call_from_model():

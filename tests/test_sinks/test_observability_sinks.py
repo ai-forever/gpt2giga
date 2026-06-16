@@ -235,7 +235,7 @@ def test_build_llm_request_attributes_exposes_redacted_request_extensions():
             "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT"}],
             "cachedContent": "cachedContents/1",
             "serviceTier": "flex",
-            "unsupportedTools": [{"googleSearch": {"api_key": "secret-gemini-key"}}],
+            "unsupportedTools": [{"googleMaps": {"api_key": "secret-gemini-key"}}],
         },
     )
 
@@ -247,7 +247,7 @@ def test_build_llm_request_attributes_exposes_redacted_request_extensions():
     assert extensions["safetySettings"] == [{"category": "HARM_CATEGORY_HARASSMENT"}]
     assert extensions["cachedContent"] == "cachedContents/1"
     assert extensions["serviceTier"] == "flex"
-    assert extensions["unsupportedTools"] == [{"googleSearch": {"api_key": "***"}}]
+    assert extensions["unsupportedTools"] == [{"googleMaps": {"api_key": "***"}}]
     assert invocation["raw_extensions"] == {
         "candidateCount": 2,
         "topK": 40,

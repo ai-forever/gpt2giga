@@ -1,3 +1,4 @@
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -13,20 +14,29 @@ _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
 _RESERVED_GIGACHAT_TOOL_NAME_MAP_REVERSE = {
     v: k for k, v in _RESERVED_GIGACHAT_TOOL_NAME_MAP.items()
 }
+GIGACHAT_BUILTIN_TOOL_TYPES = (
+    "web_search",
+    "url_content_extraction",
+    "code_interpreter",
+    "image_generate",
+    "model_3d_generate",
+)
 _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES = {
-    "code_interpreter": "code_interpreter",
+    **{tool_type: tool_type for tool_type in GIGACHAT_BUILTIN_TOOL_TYPES},
     "code_execution": "code_interpreter",
+    "google_search": "web_search",
+    "google_search_retrieval": "web_search",
     "web_fetch": "url_content_extraction",
-    "image_generate": "image_generate",
     "image_generation": "image_generate",
-    "model_3d_generate": "model_3d_generate",
-    "url_content_extraction": "url_content_extraction",
+    "url_context": "url_content_extraction",
 }
 _GIGACHAT_BUILTIN_TOOL_TYPE_PREFIX_ALIASES = (
     ("web_search", "web_search"),
+    ("google_search", "web_search"),
     ("web_fetch", "url_content_extraction"),
     ("code_execution", "code_interpreter"),
 )
+_CAMEL_TO_SNAKE_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
 _NAMESPACE_TOOL_SEPARATOR = "__"
 
 
@@ -84,15 +94,31 @@ def split_gigachat_tool_name(
 
 
 def normalize_gigachat_builtin_tool_type(tool_type: Any) -> str | None:
-    """Return a GigaChat v2 built-in tool field name for a Responses tool type."""
+    """Return a GigaChat v2 built-in tool field name for a provider tool type."""
     if not isinstance(tool_type, str):
         return None
 
-    normalized = tool_type.strip()
-    for prefix, field_name in _GIGACHAT_BUILTIN_TOOL_TYPE_PREFIX_ALIASES:
-        if normalized == prefix or normalized.startswith(f"{prefix}_"):
+    for normalized in _tool_type_alias_keys(tool_type):
+        for prefix, field_name in _GIGACHAT_BUILTIN_TOOL_TYPE_PREFIX_ALIASES:
+            if normalized == prefix or normalized.startswith(f"{prefix}_"):
+                return field_name
+        field_name = _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES.get(normalized)
+        if field_name is not None:
             return field_name
-    return _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES.get(normalized)
+    return None
+
+
+def _tool_type_alias_keys(tool_type: str) -> tuple[str, ...]:
+    stripped = tool_type.strip()
+    if not stripped:
+        return ()
+    snake_case = _CAMEL_TO_SNAKE_BOUNDARY.sub("_", stripped).lower()
+    lower_case = stripped.lower()
+    keys = []
+    for key in (stripped, lower_case, snake_case):
+        if key and key not in keys:
+            keys.append(key)
+    return tuple(keys)
 
 
 def build_gigachat_builtin_tool_payload(tool: Mapping[str, Any]) -> dict[str, Any]:
