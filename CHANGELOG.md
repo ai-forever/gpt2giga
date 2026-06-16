@@ -18,6 +18,7 @@
 ### Изменено
 - **Unified backend mode for Responses**: удален `GPT2GIGA_RESPONSES_API_MODE`; OpenAI `/responses` теперь следует `GPT2GIGA_GIGACHAT_API_MODE`, а явный выбор backend contract делается через `/v1/responses` или `/v2/responses`.
 - **Model discovery negotiation**: общие `/models`, `/v1/models` и `/v2/models` сохраняют OpenAI форму по умолчанию, но возвращают Gemini `models/*` shape для Google/Gemini clients по headers/query/user-agent.
+- **Gemini release hardening**: Gemini-compatible docs и examples теперь явно описывают supported routes, version prefixes, disabled Files/Batches routes, text-only embeddings, `countTokens` approximation и release smoke checklist для `google-genai`/Gemini CLI.
 - **GigaChat provider adapter**: provider label теперь передается в per-model concurrency limiter, чтобы Gemini traffic учитывался отдельно от OpenAI/Anthropic paths; raw extensions отправляются upstream только для OpenAI protocol payloads.
 - **Dependencies**: добавлен `google-genai` для Gemini examples/integration coverage, обновлен `uv.lock`, расширены допустимые версии `tiktoken` и `starlette`.
 - **Docs alignment**: README, API compatibility, client parameter compatibility, configuration, examples index и integrations index обновлены под Gemini-compatible API, Claude Desktop и удаление отдельного Responses API mode flag.
@@ -30,6 +31,8 @@
 - **Codex Responses sources**: Responses API теперь корректно отдает source annotations и финальный source appendix для Codex-style streaming/non-streaming ответов.
 - **Claude gateway path normalization**: путь Claude Desktop gateway вида `/v2/v1/messages` нормализуется в `/v2/messages`, сохраняя выбор GigaChat v2 backend.
 - **Observability isolation**: emit/flush observability sinks ограничены timeout-ом, OpenTelemetry span emission перенесен из event loop, а ошибки stream observers больше не ломают OpenAI/Anthropic/Gemini response paths.
+- **Gemini tool and embeddings validation**: Gemini adapter больше не теряет multi-`functionResponse` и mixed text/tool parts, `toolConfig.functionCallingConfig` валидируется явно, invalid `allowedFunctionNames` возвращают `400`, malformed `embedContent`/`batchEmbedContents` больше не вызывают upstream embeddings с пустой строкой.
+- **Gemini model capabilities**: Gemini model discovery теперь консервативно различает generation, embedding и unknown/custom models вместо одинакового `supportedGenerationMethods` для всех моделей.
 
 ## [0.2.0a2] - 2026-06-11
 

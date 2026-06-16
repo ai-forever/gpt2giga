@@ -517,6 +517,7 @@ def _request_api_key(request: Request) -> str | None:
         request.headers.get("x-api-key")
         or request.headers.get("x-goog-api-key")
         or request.query_params.get("x-api-key")
+        or request.query_params.get("key")
     )
     if api_key:
         return api_key.strip()

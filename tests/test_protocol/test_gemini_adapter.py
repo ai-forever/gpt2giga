@@ -1,6 +1,9 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
+from fastapi import HTTPException
+
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.gemini.response_adapter import (
@@ -118,6 +121,481 @@ def test_gemini_adapter_maps_generate_content_to_normalized_request():
         "HARM_CATEGORY_HARASSMENT"
     )
     json.dumps(payload)
+
+
+def _gemini_tool_config_payload(
+    function_calling_config,
+    *,
+    declarations=("first", "second"),
+):
+    return {
+        "contents": [{"parts": [{"text": "hello"}]}],
+        "tools": [
+            {
+                "functionDeclarations": [
+                    {"name": name, "parameters": {"type": "object"}}
+                    for name in declarations
+                ]
+            }
+        ],
+        "toolConfig": {"functionCallingConfig": function_calling_config},
+    }
+
+
+@pytest.mark.parametrize(
+    ("function_calling_config", "declarations", "expected_tool_choice", "expected"),
+    [
+        ({"mode": "AUTO"}, ("first", "second"), "auto", ["first", "second"]),
+        (
+            {"mode": "AUTO", "allowedFunctionNames": ["first"]},
+            ("first", "second"),
+            "auto",
+            ["first"],
+        ),
+        (
+            {"mode": "AUTO", "allowedFunctionNames": ["first", "second"]},
+            ("first", "second"),
+            "auto",
+            ["first", "second"],
+        ),
+        ({"mode": "NONE"}, ("first", "second"), "none", ["first", "second"]),
+        (
+            {"mode": "ANY", "allowedFunctionNames": ["first"]},
+            ("first", "second"),
+            {"type": "function", "function": {"name": "first"}},
+            ["first"],
+        ),
+        (
+            {"mode": "ANY"},
+            ("first",),
+            {"type": "function", "function": {"name": "first"}},
+            ["first"],
+        ),
+        (
+            {"allowedFunctionNames": ["second"]},
+            ("first", "second"),
+            "auto",
+            ["second"],
+        ),
+    ],
+)
+def test_gemini_adapter_maps_function_calling_config(
+    function_calling_config,
+    declarations,
+    expected_tool_choice,
+    expected,
+):
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        _gemini_tool_config_payload(
+            function_calling_config,
+            declarations=declarations,
+        ),
+        model="gemini-pro",
+    )
+
+    assert normalized.tool_choice == expected_tool_choice
+    assert [tool.name for tool in normalized.tools] == expected
+
+
+@pytest.mark.parametrize(
+    ("function_calling_config", "declarations", "expected_param"),
+    [
+        (
+            {"mode": "ANY"},
+            ("first", "second"),
+            "toolConfig.functionCallingConfig.allowedFunctionNames",
+        ),
+        (
+            {"mode": "ANY", "allowedFunctionNames": ["first", "second"]},
+            ("first", "second"),
+            "toolConfig.functionCallingConfig.allowedFunctionNames",
+        ),
+        (
+            {"mode": "AUTO", "allowedFunctionNames": ["missing"]},
+            ("first",),
+            "toolConfig.functionCallingConfig.allowedFunctionNames",
+        ),
+        (
+            {"mode": "AUTO", "allowedFunctionNames": []},
+            ("first",),
+            "toolConfig.functionCallingConfig.allowedFunctionNames",
+        ),
+        (
+            {"mode": "AUTO", "allowedFunctionNames": "first"},
+            ("first",),
+            "toolConfig.functionCallingConfig.allowedFunctionNames",
+        ),
+    ],
+)
+def test_gemini_adapter_rejects_unsupported_function_calling_config(
+    function_calling_config,
+    declarations,
+    expected_param,
+):
+    adapter = GeminiProtocolAdapter()
+
+    with pytest.raises(HTTPException) as exc_info:
+        adapter.generate_content_to_normalized(
+            _gemini_tool_config_payload(
+                function_calling_config,
+                declarations=declarations,
+            ),
+            model="gemini-pro",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["error"]["param"] == expected_param
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_param"),
+    [
+        ({}, "contents"),
+        ({"contents": "hello"}, "contents"),
+        ({"contents": []}, "contents"),
+        ({"contents": [{"parts": "bad"}]}, "contents[0].parts"),
+        (
+            {"contents": [{"parts": [{"unknown": {"value": 1}}]}]},
+            "contents[0].parts[0]",
+        ),
+        ({"contents": [{"parts": [{"text": 123}]}]}, "contents[0].parts[0].text"),
+        (
+            {"contents": [{"parts": [{"functionCall": {"args": {}}}]}]},
+            "contents[0].parts[0].functionCall.name",
+        ),
+        (
+            {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "name": "lookup",
+                                    "response": "bad",
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            "contents[0].parts[0].functionResponse.response",
+        ),
+        (
+            {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": "do not drop",
+                                "functionResponse": {
+                                    "name": "lookup",
+                                    "response": {},
+                                },
+                            }
+                        ]
+                    }
+                ]
+            },
+            "contents[0].parts[0]",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "generationConfig": "bad",
+            },
+            "generationConfig",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "generationConfig": {"responseMimeType": "application/xml"},
+            },
+            "generationConfig.responseMimeType",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "generationConfig": {"responseSchema": {"type": "object"}},
+            },
+            "generationConfig.responseSchema",
+        ),
+        (
+            {"contents": [{"parts": [{"text": "hello"}]}], "tools": "bad"},
+            "tools",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "tools": [
+                    {"functionDeclarations": [{"name": "lookup", "parameters": "bad"}]}
+                ],
+            },
+            "tools[0].functionDeclarations[0].parameters",
+        ),
+        (
+            {"contents": [{"parts": [{"text": "hello"}]}], "toolConfig": "bad"},
+            "toolConfig",
+        ),
+    ],
+)
+def test_gemini_adapter_rejects_invalid_generate_payloads(
+    payload,
+    expected_param,
+):
+    adapter = GeminiProtocolAdapter()
+
+    with pytest.raises(HTTPException) as exc_info:
+        adapter.generate_content_to_normalized(payload, model="gemini-pro")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["error"]["param"] == expected_param
+
+
+def test_gemini_adapter_preserves_ignored_generation_fields_and_builtin_tools():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "hello"}]}],
+            "generationConfig": {
+                "candidateCount": 2,
+                "topK": 40,
+                "responseModalities": ["TEXT"],
+                "responseMimeType": "text/plain",
+            },
+            "tools": [{"googleSearch": {}}],
+        },
+        model="gemini-pro",
+    )
+
+    assert normalized.response_format is None
+    assert normalized.generation_config.raw_extensions == {
+        "candidateCount": 2,
+        "topK": 40,
+        "responseModalities": ["TEXT"],
+    }
+    assert normalized.tools == []
+    assert normalized.raw_extensions["unsupportedTools"] == [{"googleSearch": {}}]
+
+
+def test_gemini_adapter_maps_single_function_call_from_model():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {"text": "I need a lookup."},
+                        {
+                            "functionCall": {
+                                "name": "lookup",
+                                "args": {"q": "ping"},
+                            }
+                        },
+                    ],
+                }
+            ]
+        },
+        model="gemini-pro",
+    )
+
+    message = normalized.messages[0]
+    assert message.role == "assistant"
+    assert message.content == "I need a lookup."
+    assert len(message.tool_calls) == 1
+    assert message.tool_calls[0].name == "lookup"
+    assert message.tool_calls[0].arguments == {"q": "ping"}
+
+
+def test_gemini_adapter_preserves_one_function_response_and_followup():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "lookup",
+                                "args": {"q": "ping"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "function",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "name": "lookup",
+                                "response": {"answer": "pong"},
+                            }
+                        }
+                    ],
+                },
+                {"role": "user", "parts": [{"text": "continue"}]},
+            ]
+        },
+        model="gemini-pro",
+    )
+
+    assert [message.role for message in normalized.messages] == [
+        "assistant",
+        "tool",
+        "user",
+    ]
+    assert normalized.messages[0].tool_calls[0].name == "lookup"
+    assert normalized.messages[1].name == "lookup"
+    assert normalized.messages[1].tool_call_id == "lookup"
+    assert json.loads(normalized.messages[1].content) == {"answer": "pong"}
+    assert normalized.messages[2].content == "continue"
+
+
+def test_gemini_adapter_preserves_multiple_function_response_parts():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "function",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "name": "first",
+                                "response": {"value": 1},
+                            }
+                        },
+                        {
+                            "functionResponse": {
+                                "name": "second",
+                                "response": {"value": 2},
+                            }
+                        },
+                    ],
+                }
+            ]
+        },
+        model="gemini-pro",
+    )
+
+    assert [message.role for message in normalized.messages] == ["tool", "tool"]
+    assert [message.name for message in normalized.messages] == ["first", "second"]
+    assert [json.loads(message.content) for message in normalized.messages] == [
+        {"value": 1},
+        {"value": 2},
+    ]
+    assert normalized.messages[0].raw_extensions["functionResponse"] == {
+        "name": "first",
+        "response": {"value": 1},
+    }
+
+
+def test_gemini_adapter_preserves_mixed_text_and_function_response_parts():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": "before"},
+                        {
+                            "functionResponse": {
+                                "name": "lookup",
+                                "response": {"answer": "pong"},
+                            }
+                        },
+                        {"text": "after"},
+                    ],
+                }
+            ]
+        },
+        model="gemini-pro",
+    )
+
+    assert [message.role for message in normalized.messages] == [
+        "user",
+        "tool",
+        "user",
+    ]
+    assert normalized.messages[0].content == "before"
+    assert normalized.messages[1].name == "lookup"
+    assert json.loads(normalized.messages[1].content) == {"answer": "pong"}
+    assert normalized.messages[2].content == "after"
+
+
+def test_gemini_adapter_preserves_multiple_function_calls():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "first",
+                                "args": {"value": 1},
+                            }
+                        },
+                        {
+                            "functionCall": {
+                                "name": "second",
+                                "args": {"value": 2},
+                            }
+                        },
+                    ],
+                }
+            ]
+        },
+        model="gemini-pro",
+    )
+
+    message = normalized.messages[0]
+    assert message.role == "assistant"
+    assert message.content is None
+    assert [tool_call.name for tool_call in message.tool_calls] == [
+        "first",
+        "second",
+    ]
+    assert [tool_call.arguments for tool_call in message.tool_calls] == [
+        {"value": 1},
+        {"value": 2},
+    ]
+
+
+def test_gemini_adapter_rejects_malformed_function_response():
+    adapter = GeminiProtocolAdapter()
+
+    with pytest.raises(HTTPException) as exc_info:
+        adapter.generate_content_to_normalized(
+            {
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "functionResponse": "not an object",
+                            }
+                        ],
+                    }
+                ]
+            },
+            model="gemini-pro",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["error"]["param"] == (
+        "contents[0].parts[0].functionResponse"
+    )
 
 
 def test_gemini_response_adapter_maps_normalized_response():

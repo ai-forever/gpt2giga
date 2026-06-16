@@ -36,6 +36,7 @@ def _is_gemini_models_request(request: Request) -> bool:
     user_agent = request.headers.get("user-agent", "").lower()
     return (
         "x-goog-api-client" in request.headers
+        or "x-goog-api-key" in request.headers
         or "x-goog-user-project" in request.headers
         or request.query_params.get("key") is not None
         or "google-generative-ai" in user_agent

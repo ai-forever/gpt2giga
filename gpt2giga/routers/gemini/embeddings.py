@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.exceptions import exceptions_handler
@@ -39,7 +40,7 @@ async def embed_content(model: str, request: Request):
         model_requested=requested_model,
         metadata={"protocol": "gemini", "api_format": "embed_content"},
     )
-    text = _content_text(data.get("content"))
+    text = _content_text(data.get("content"), param="content")
     result = await _embed_texts(request, data, requested_model, [text])
     return _openai_embedding_to_gemini(result, index=0)
 
@@ -57,13 +58,10 @@ async def batch_embed_contents(model: str, request: Request):
         model_requested=requested_model,
         metadata={"protocol": "gemini", "api_format": "batch_embed_contents"},
     )
-    requests = data.get("requests")
-    if not isinstance(requests, list):
-        requests = []
+    requests = _batch_requests(data)
     texts = [
-        _content_text(item.get("content"))
-        for item in requests
-        if isinstance(item, dict)
+        _content_text(item.get("content"), param=f"requests[{index}].content")
+        for index, item in enumerate(requests)
     ]
     result = await _embed_texts(request, data, requested_model, texts)
     return {
@@ -82,7 +80,7 @@ async def _embed_texts(
 ) -> dict[str, Any]:
     proxy_settings = request.app.state.config.proxy_settings
     transformed = await transform_embedding_body(
-        {"model": requested_model, "input": texts or [""]},
+        {"model": requested_model, "input": texts},
         proxy_settings.embeddings,
         pass_model=proxy_settings.pass_model,
     )
@@ -146,20 +144,98 @@ def _openai_embedding_to_gemini(
     }
 
 
-def _content_text(value: Any) -> str:
+def _batch_requests(data: dict[str, Any]) -> list[Mapping[str, Any]]:
+    if "requests" not in data:
+        raise _invalid_embedding_request(
+            "`requests` is required for batchEmbedContents.",
+            param="requests",
+        )
+    requests = data.get("requests")
+    if not isinstance(requests, list):
+        raise _invalid_embedding_request(
+            "`requests` must be a non-empty list.",
+            param="requests",
+        )
+    if not requests:
+        raise _invalid_embedding_request(
+            "`requests` must be a non-empty list.",
+            param="requests",
+        )
+    normalized_requests: list[Mapping[str, Any]] = []
+    for index, item in enumerate(requests):
+        if not isinstance(item, Mapping):
+            raise _invalid_embedding_request(
+                "Each batchEmbedContents request entry must be an object.",
+                param=f"requests[{index}]",
+            )
+        normalized_requests.append(item)
+    return normalized_requests
+
+
+def _content_text(value: Any, *, param: str) -> str:
     if value is None:
-        return ""
+        raise _invalid_embedding_request(
+            f"`{param}` is required.",
+            param=param,
+        )
     if isinstance(value, str):
+        if not value:
+            raise _invalid_embedding_request(
+                f"`{param}` must contain non-empty text.",
+                param=param,
+            )
         return value
-    if not isinstance(value, dict):
-        return str(value)
+    if not isinstance(value, Mapping):
+        raise _invalid_embedding_request(
+            f"`{param}` must be a Gemini content object with text parts.",
+            param=param,
+        )
     parts = value.get("parts")
-    if isinstance(parts, dict):
+    if isinstance(parts, Mapping):
         parts = [parts]
     if not isinstance(parts, list):
-        return ""
-    return "".join(
-        part.get("text", "")
-        for part in parts
-        if isinstance(part, dict) and isinstance(part.get("text"), str)
+        raise _invalid_embedding_request(
+            f"`{param}.parts` must be a non-empty list of text parts.",
+            param=f"{param}.parts",
+        )
+    if not parts:
+        raise _invalid_embedding_request(
+            f"`{param}.parts` must be a non-empty list of text parts.",
+            param=f"{param}.parts",
+        )
+
+    texts: list[str] = []
+    for index, part in enumerate(parts):
+        part_param = f"{param}.parts[{index}]"
+        if not isinstance(part, Mapping):
+            raise _invalid_embedding_request(
+                "Gemini embedding parts must be objects.",
+                param=part_param,
+            )
+        if "text" not in part:
+            raise _invalid_embedding_request(
+                "Gemini embeddings only support text parts.",
+                param=part_param,
+            )
+        text = part.get("text")
+        if not isinstance(text, str) or not text:
+            raise _invalid_embedding_request(
+                "Gemini embedding text parts must be non-empty strings.",
+                param=f"{part_param}.text",
+            )
+        texts.append(text)
+    return "".join(texts)
+
+
+def _invalid_embedding_request(message: str, *, param: str) -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": message,
+                "type": "invalid_request_error",
+                "param": param,
+                "code": "invalid_request",
+            }
+        },
     )

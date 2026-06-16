@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
@@ -12,6 +13,7 @@ from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.routers.gemini import router as gemini_router
 from gpt2giga.routers.gemini.batches import router as gemini_batches_router
 from gpt2giga.routers.gemini.files import router as gemini_files_router
+from gpt2giga.routers.gemini.models import build_gemini_model
 
 
 class MockResponse:
@@ -247,6 +249,251 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
     assert payload["max_tokens"] == 64
 
 
+def test_gemini_generate_content_preserves_multi_function_response_payload():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "first",
+                                "args": {"value": 1},
+                            }
+                        },
+                        {
+                            "functionCall": {
+                                "name": "second",
+                                "args": {"value": 2},
+                            }
+                        },
+                    ],
+                },
+                {
+                    "role": "function",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "name": "first",
+                                "response": {"result": "one"},
+                            }
+                        },
+                        {"text": "kept"},
+                        {
+                            "functionResponse": {
+                                "name": "second",
+                                "response": {"result": "two"},
+                            }
+                        },
+                    ],
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    payload = app.state.request_transformer.chat_calls[0][0]
+    assert payload["messages"] == [
+        {
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "first",
+                        "arguments": {"value": 1},
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "second",
+                        "arguments": {"value": 2},
+                    },
+                },
+            ],
+        },
+        {
+            "role": "tool",
+            "content": '{"result": "one"}',
+            "name": "first",
+            "tool_call_id": "first",
+            "gemini_role": "function",
+            "functionResponse": {
+                "name": "first",
+                "response": {"result": "one"},
+            },
+        },
+        {
+            "role": "tool",
+            "content": "kept",
+        },
+        {
+            "role": "tool",
+            "content": '{"result": "two"}',
+            "name": "second",
+            "tool_call_id": "second",
+            "gemini_role": "function",
+            "functionResponse": {
+                "name": "second",
+                "response": {"result": "two"},
+            },
+        },
+    ]
+
+
+def test_gemini_generate_content_rejects_malformed_function_response():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "functionResponse": "not an object",
+                        }
+                    ]
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["param"] == (
+        "contents[0].parts[0].functionResponse"
+    )
+    assert app.state.request_transformer.chat_calls == []
+
+
+def test_gemini_generate_content_rejects_undeclared_allowed_function_name():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "contents": [{"parts": [{"text": "Hello"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {"name": "declared", "parameters": {"type": "object"}}
+                    ]
+                }
+            ],
+            "toolConfig": {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["missing"],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["param"] == (
+        "toolConfig.functionCallingConfig.allowedFunctionNames"
+    )
+    assert app.state.request_transformer.chat_calls == []
+
+
+@pytest.mark.parametrize(
+    ("payload", "param"),
+    [
+        ({}, "contents"),
+        ({"contents": "bad"}, "contents"),
+        (
+            {"contents": [{"parts": [{"unknown": {"value": 1}}]}]},
+            "contents[0].parts[0]",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "Hello"}]}],
+                "generationConfig": {"responseMimeType": "application/xml"},
+            },
+            "generationConfig.responseMimeType",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "Hello"}]}],
+                "tools": [
+                    {"functionDeclarations": [{"name": "lookup", "parameters": "bad"}]}
+                ],
+            },
+            "tools[0].functionDeclarations[0].parameters",
+        ),
+        (
+            {"contents": [{"parts": [{"text": "Hello"}]}], "toolConfig": "bad"},
+            "toolConfig",
+        ),
+    ],
+)
+def test_gemini_generate_content_rejects_invalid_payload_without_upstream_call(
+    payload,
+    param,
+):
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post("/models/gemini-pro:generateContent", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["param"] == param
+    assert app.state.request_transformer.chat_calls == []
+    assert app.state.gigachat_client.achat.calls == []
+
+
+def test_gemini_generate_content_ignores_unsupported_but_accepted_fields():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "contents": [{"parts": [{"text": "Hello"}]}],
+            "generationConfig": {
+                "candidateCount": 2,
+                "topK": 40,
+                "responseModalities": ["TEXT"],
+                "responseMimeType": "text/plain",
+            },
+            "tools": [{"googleSearch": {}}],
+            "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT"}],
+            "cachedContent": "cachedContents/1",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = app.state.request_transformer.chat_calls[0][0]
+    assert payload == {
+        "model": "gemini-pro",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "stream": False,
+    }
+
+
+def test_gemini_stream_generate_content_rejects_malformed_payload_before_upstream():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:streamGenerateContent?alt=sse",
+        json={"contents": "bad"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["param"] == "contents"
+    assert app.state.request_transformer.chat_calls == []
+    assert app.state.gigachat_client.achat.stream_calls == []
+
+
 def test_gemini_stream_generate_content_returns_sse_without_openai_done_marker():
     app = make_app()
     client = TestClient(app)
@@ -320,6 +567,93 @@ def test_gemini_count_tokens_and_embeddings():
     ]
 
 
+def test_gemini_batch_embed_contents_and_output_dimensionality():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-embedding:batchEmbedContents",
+        json={
+            "requests": [
+                {"content": {"parts": [{"text": "embed one"}]}},
+                {"content": {"parts": [{"text": "embed two"}]}},
+            ],
+            "outputDimensionality": 128,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["embeddings"] == [
+        {"values": [0.0]},
+        {"values": [1.0]},
+    ]
+    assert app.state.gigachat_client.embedding_calls == [
+        {"texts": ["embed one", "embed two"], "model": "gemini-embedding"}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("payload", "param"),
+    [
+        ({}, "content"),
+        ({"content": 123}, "content"),
+        ({"content": {"parts": []}}, "content.parts"),
+        (
+            {"content": {"parts": [{"inlineData": {"data": "AA=="}}]}},
+            "content.parts[0]",
+        ),
+        ({"content": {"parts": [{"text": ""}]}}, "content.parts[0].text"),
+    ],
+)
+def test_gemini_embed_content_rejects_invalid_payload_without_upstream_call(
+    payload,
+    param,
+):
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post("/models/gemini-embedding:embedContent", json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["param"] == param
+    assert app.state.gigachat_client.embedding_calls == []
+
+
+@pytest.mark.parametrize(
+    ("payload", "param"),
+    [
+        ({}, "requests"),
+        ({"requests": "bad"}, "requests"),
+        ({"requests": []}, "requests"),
+        ({"requests": [None]}, "requests[0]"),
+        ({"requests": [{}]}, "requests[0].content"),
+        (
+            {"requests": [{"content": {"parts": [{"text": ""}]}}]},
+            "requests[0].content.parts[0].text",
+        ),
+        (
+            {"requests": [{"content": {"parts": [{"fileData": {"fileUri": "x"}}]}}]},
+            "requests[0].content.parts[0]",
+        ),
+    ],
+)
+def test_gemini_batch_embed_contents_rejects_invalid_payload_without_upstream_call(
+    payload,
+    param,
+):
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-embedding:batchEmbedContents",
+        json=payload,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error"]["param"] == param
+    assert app.state.gigachat_client.embedding_calls == []
+
+
 def test_gemini_models_use_gemini_resource_shape():
     client = TestClient(make_app())
 
@@ -334,6 +668,31 @@ def test_gemini_models_use_gemini_resource_shape():
         "streamGenerateContent",
         "countTokens",
     ]
+
+
+def test_gemini_model_capabilities_are_inferred_conservatively():
+    assert build_gemini_model({"id": "GigaChat-2-Max"})[
+        "supportedGenerationMethods"
+    ] == [
+        "generateContent",
+        "streamGenerateContent",
+        "countTokens",
+    ]
+    assert build_gemini_model({"id": "EmbeddingsGigaR"})[
+        "supportedGenerationMethods"
+    ] == [
+        "embedContent",
+        "batchEmbedContents",
+    ]
+    assert build_gemini_model({"id": "custom-model"})["supportedGenerationMethods"] == [
+        "countTokens"
+    ]
+    assert build_gemini_model(
+        {
+            "id": "explicit",
+            "supportedGenerationMethods": ["embedContent"],
+        }
+    )["supportedGenerationMethods"] == ["embedContent"]
 
 
 def test_gemini_files_and_batches_are_not_mounted_in_public_router():

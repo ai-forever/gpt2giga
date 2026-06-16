@@ -75,7 +75,19 @@ Gemini model discovery в чистой Gemini форме всегда досту
 `/v1/v1beta` и `/v2/v1beta`.
 На общих `/models`, `/v1/models` и `/v2/models` прокси сохраняет OpenAI форму
 по умолчанию, но возвращает Gemini форму для Google/Gemini-клиентов, например
-при заголовке `X-Goog-Api-Client`.
+при заголовках `X-Goog-Api-Client` или `X-Goog-Api-Key`, либо при query
+параметре `?key=...`.
+
+Если proxy API-key auth включен, Gemini-compatible клиенты могут передавать
+ключ через `x-goog-api-key` или `?key=...`, помимо общих `Authorization:
+Bearer ...`, `x-api-key` и `?x-api-key=...`. Для новых настроек
+предпочтительнее header-based auth: query keys чаще попадают в access logs.
+
+`supportedGenerationMethods` строится консервативно: known GigaChat/chat-like
+models advertise `generateContent`, `streamGenerateContent` и `countTokens`;
+embedding-like models advertise только `embedContent` и `batchEmbedContents`;
+unknown/custom model ids advertise только `countTokens`, если backend metadata
+не дает более точной информации.
 
 | Route / group | Статус | Комментарий |
 |---|---|---|
@@ -89,6 +101,72 @@ Gemini model discovery в чистой Gemini форме всегда досту
 | `POST /v1beta/files`, `GET /v1beta/files*` | Отключено | Router-код подготовлен, но не смонтирован по умолчанию. |
 | `POST /v1beta/models/{model}:batchGenerateContent`, `GET /v1beta/batches*` | Отключено | Router-код подготовлен, но не смонтирован до end-to-end batch execution. |
 
+### Gemini function calling
+
+`toolConfig.functionCallingConfig` маппится в ближайшую поддержанную
+семантику normalized/OpenAI-like слоя:
+
+- `mode=AUTO` оставляет вызов функций опциональным. Если задан
+  `allowedFunctionNames`, upstream получает только эти объявленные функции.
+- `mode=NONE` отключает function calling.
+- `mode=ANY` поддерживается только когда после учета `allowedFunctionNames`
+  остается ровно одна функция; она маппится в forced function call.
+- `mode=ANY` без `allowedFunctionNames` также поддерживается, если объявлена
+  ровно одна функция.
+- `mode=ANY` с несколькими возможными функциями возвращает `400`, потому что
+  GigaChat backend path сейчас не умеет честно выразить “обязательно вызвать
+  одну из нескольких функций”.
+- `allowedFunctionNames` валидируется против объявленных
+  `functionDeclarations`; ссылки на необъявленные функции возвращают `400`.
+
+### Gemini embeddings
+
+`embedContent` и `batchEmbedContents` поддерживают только текстовые
+`content.parts[].text`. Пустые `requests`, malformed batch entries и
+non-text parts возвращают `400` до вызова GigaChat embeddings backend.
+
+`outputDimensionality` принимается как compatibility metadata для normalized
+request/observability, но не передается upstream как исполняемая настройка:
+текущий GigaChat embeddings backend path не предоставляет управляемое
+уменьшение размерности через этот параметр.
+
+### Gemini release scope and validation
+
+Это Gemini-compatible API surface, а не full Gemini API parity. Перед релизом
+проверяйте именно заявленный scope:
+
+- supported routes: `generateContent`, `streamGenerateContent`, `countTokens`,
+  `embedContent`, `batchEmbedContents`, model discovery;
+- supported prefixes: root, `/v1`, `/v2`, `/v1beta`, `/v1/v1beta`,
+  `/v2/v1beta`;
+- disabled routes: Gemini Files API и `batchGenerateContent` routers есть в
+  коде, но не смонтированы публично до end-to-end upstream execution;
+- partially supported fields: `safetySettings` и `cachedContent` принимаются
+  для compatibility/diagnostics, но не enforced; `candidateCount`, `topK` и
+  `responseModalities` accepted/observed but ignored by GigaChat execution;
+- structured output: `generationConfig.responseMimeType=text/plain` считается
+  дефолтным текстовым режимом, `application/json` маппится в JSON response
+  format, а другие MIME types и `responseSchema` без `application/json`
+  возвращают `400`;
+- unsupported features: built-in Gemini tools, full multimodal/file-backed
+  Gemini flows, non-text embeddings content;
+- approximations: `countTokens` считает извлеченный текст через GigaChat token
+  counting и не является точным Gemini tokenizer.
+
+Copyable release checklist for PR description:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest tests/test_protocol/test_gemini_adapter.py tests/test_router/test_gemini_router.py tests/integration/gemini/test_gemini_app_wiring.py
+
+# Optional, requires live GigaChat credentials.
+GPT2GIGA_RUN_LIVE_TESTS=1 uv run pytest tests/live/test_real_gigachat_integration.py -k gemini
+
+# Optional release smoke for google-genai + Gemini CLI, auth on/off, and base URL matrix.
+GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests/live/test_gemini_client_smoke.py
+```
+
 ## Политика совместимости
 
 `gpt2giga` намеренно принимает многие optional SDK fields, которые GigaChat не может исполнить. Это не даёт клиентам падать до того, как полезная часть запроса попадёт в модель.
@@ -97,7 +175,7 @@ Gemini model discovery в чистой Gemini форме всегда досту
 
 - OpenAI metadata и tuning knobs: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
 - Anthropic optional fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, unsupported provider tools, citations, unsupported document/file content blocks. Compatible provider tools (`web_search*`, `web_fetch*`, `code_execution*`) map to GigaChat v2 built-ins.
-- Gemini optional fields: `safetySettings`, `cachedContent`, `serviceTier`, unsupported `generationConfig` subfields and non-function built-in tools are accepted/preserved for diagnostics but are not enforced by GigaChat.
+- Gemini optional fields: `safetySettings`, `cachedContent`, `serviceTier`, ignored `generationConfig` controls such as `candidateCount`/`topK`/`responseModalities`, and non-function built-in tools are accepted/preserved for diagnostics but are not enforced by GigaChat. Unsupported `responseMimeType` values and `responseSchema` without `application/json` are rejected.
 
 Если поле намеренно игнорируется, оно не отправляется upstream как исполняемая GigaChat feature. Literal `extra_body` object может быть передан в GigaChat `additional_fields`; в таком случае поддержку определяет GigaChat API.
 

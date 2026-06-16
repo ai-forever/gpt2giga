@@ -6,6 +6,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from fastapi import HTTPException
+
 from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.gemini.response_adapter import (
@@ -82,11 +84,22 @@ class GeminiProtocolAdapter:
         stream: bool | None = None,
     ) -> NormalizedChatRequest:
         """Convert a Gemini generateContent request body to normalized form."""
+        _validate_generate_payload(payload)
         generation_config = _mapping_value(
             payload, "generationConfig", "generation_config"
         )
         metadata, raw_extensions = _extensions(payload)
         raw_extensions.update(_gemini_protocol_extensions(payload))
+        unsupported_tools = _unsupported_gemini_tools(payload.get("tools"))
+        if unsupported_tools:
+            raw_extensions["unsupportedTools"] = unsupported_tools
+        tools = _normalize_tools(payload.get("tools"))
+        function_calling_config = _function_calling_config(
+            _mapping_value(payload, "toolConfig", "tool_config")
+        )
+        allowed_function_names = _allowed_function_names(function_calling_config)
+        _validate_allowed_function_names(allowed_function_names, tools)
+        tools = _filter_tools_by_allowed_names(tools, allowed_function_names)
 
         return NormalizedChatRequest(
             id=context.request_id if context is not None else None,
@@ -100,14 +113,269 @@ class GeminiProtocolAdapter:
                 ),
                 *_normalize_contents(payload.get("contents")),
             ],
-            tools=_normalize_tools(payload.get("tools")),
+            tools=tools,
             tool_choice=_normalize_tool_choice(
-                _mapping_value(payload, "toolConfig", "tool_config")
+                function_calling_config,
+                allowed_names=allowed_function_names,
+                tools=tools,
             ),
             response_format=_normalize_response_format(generation_config),
             generation_config=_normalize_generation_config(generation_config),
             metadata=metadata,
             raw_extensions=raw_extensions,
+        )
+
+
+def gemini_invalid_request(message: str, *, param: str | None = None) -> HTTPException:
+    """Build a Gemini-compatible validation error."""
+    return HTTPException(
+        status_code=400,
+        detail={
+            "error": {
+                "message": message,
+                "type": "invalid_request_error",
+                "param": param,
+                "code": "invalid_request",
+            }
+        },
+    )
+
+
+def _validate_generate_payload(payload: Mapping[str, Any]) -> None:
+    if not isinstance(payload, Mapping):
+        raise gemini_invalid_request(
+            "Gemini generateContent request body must be an object."
+        )
+    contents = payload.get("contents")
+    if contents is None:
+        raise gemini_invalid_request(
+            "Gemini generateContent request must include contents.",
+            param="contents",
+        )
+    if not isinstance(contents, list):
+        raise gemini_invalid_request(
+            "Gemini contents must be a non-empty list.",
+            param="contents",
+        )
+    if not contents:
+        raise gemini_invalid_request(
+            "Gemini contents must not be empty.",
+            param="contents",
+        )
+    for content_index, content in enumerate(contents):
+        _validate_content(content, param=f"contents[{content_index}]")
+    _validate_generation_config(
+        _value(payload, "generationConfig", "generation_config")
+    )
+    _validate_tools(payload.get("tools"))
+    _validate_tool_config(_value(payload, "toolConfig", "tool_config"))
+
+
+def _validate_content(value: Any, *, param: str) -> None:
+    if not isinstance(value, Mapping):
+        raise gemini_invalid_request(
+            "Gemini content entries must be objects.",
+            param=param,
+        )
+    parts = value.get("parts")
+    if not isinstance(parts, list):
+        raise gemini_invalid_request(
+            "Gemini content parts must be a non-empty list.",
+            param=f"{param}.parts",
+        )
+    if not parts:
+        raise gemini_invalid_request(
+            "Gemini content parts must not be empty.",
+            param=f"{param}.parts",
+        )
+    for part_index, part in enumerate(parts):
+        _validate_content_part(part, param=f"{param}.parts[{part_index}]")
+
+
+def _validate_content_part(part: Any, *, param: str) -> None:
+    if not isinstance(part, Mapping):
+        raise gemini_invalid_request(
+            "Gemini content parts must be objects.",
+            param=param,
+        )
+    field_count = sum(
+        bool(value)
+        for value in (
+            "text" in part,
+            _part_value(part, "inlineData", "inline_data") is not None,
+            _part_value(part, "fileData", "file_data") is not None,
+            _part_value(part, "functionCall", "function_call") is not None,
+            _part_value(part, "functionResponse", "function_response") is not None,
+        )
+    )
+    if field_count == 0:
+        raise gemini_invalid_request(
+            "Gemini content part shape is not supported.",
+            param=param,
+        )
+    if field_count > 1:
+        raise gemini_invalid_request(
+            "Gemini content parts must contain exactly one supported part field.",
+            param=param,
+        )
+    if "text" in part and not isinstance(part.get("text"), str):
+        raise gemini_invalid_request(
+            "Gemini text parts must contain a string text value.",
+            param=f"{param}.text",
+        )
+    inline_data = _part_value(part, "inlineData", "inline_data")
+    if inline_data is not None and not isinstance(inline_data, Mapping):
+        raise gemini_invalid_request(
+            "Gemini inlineData parts must be objects.",
+            param=f"{param}.inlineData",
+        )
+    file_data = _part_value(part, "fileData", "file_data")
+    if file_data is not None and not isinstance(file_data, Mapping):
+        raise gemini_invalid_request(
+            "Gemini fileData parts must be objects.",
+            param=f"{param}.fileData",
+        )
+    function_call = _part_value(part, "functionCall", "function_call")
+    if function_call is not None:
+        _validate_function_call(function_call, param=f"{param}.functionCall")
+    function_response = _part_value(part, "functionResponse", "function_response")
+    if function_response is not None:
+        _validate_function_response(
+            function_response,
+            param=f"{param}.functionResponse",
+        )
+
+
+def _validate_function_call(value: Any, *, param: str) -> None:
+    if not isinstance(value, Mapping):
+        raise gemini_invalid_request(
+            "Gemini functionCall parts must be objects.",
+            param=param,
+        )
+    if not isinstance(value.get("name"), str) or not value.get("name"):
+        raise gemini_invalid_request(
+            "Gemini functionCall.name must be a non-empty string.",
+            param=f"{param}.name",
+        )
+    args = value.get("args")
+    if args is not None and not isinstance(args, Mapping):
+        raise gemini_invalid_request(
+            "Gemini functionCall.args must be an object when provided.",
+            param=f"{param}.args",
+        )
+
+
+def _validate_function_response(value: Any, *, param: str) -> None:
+    if not isinstance(value, Mapping):
+        raise gemini_invalid_request(
+            "Gemini functionResponse parts must be objects.",
+            param=param,
+        )
+    if not isinstance(value.get("name"), str) or not value.get("name"):
+        raise gemini_invalid_request(
+            "Gemini functionResponse.name must be a non-empty string.",
+            param=f"{param}.name",
+        )
+    response = value.get("response")
+    if response is not None and not isinstance(response, Mapping):
+        raise gemini_invalid_request(
+            "Gemini functionResponse.response must be an object when provided.",
+            param=f"{param}.response",
+        )
+
+
+def _validate_generation_config(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise gemini_invalid_request(
+            "Gemini generationConfig must be an object.",
+            param="generationConfig",
+        )
+    mime_type = _part_value(value, "responseMimeType", "response_mime_type")
+    schema = _part_value(value, "responseSchema", "response_schema")
+    if mime_type is not None and not isinstance(mime_type, str):
+        raise gemini_invalid_request(
+            "Gemini responseMimeType must be a string.",
+            param="generationConfig.responseMimeType",
+        )
+    if schema is not None and not isinstance(schema, Mapping):
+        raise gemini_invalid_request(
+            "Gemini responseSchema must be an object.",
+            param="generationConfig.responseSchema",
+        )
+    if schema is not None and mime_type != "application/json":
+        raise gemini_invalid_request(
+            "Gemini responseSchema is supported only with application/json.",
+            param="generationConfig.responseSchema",
+        )
+    if mime_type not in {None, "application/json", "text/plain"}:
+        raise gemini_invalid_request(
+            f"Unsupported Gemini responseMimeType: {mime_type}.",
+            param="generationConfig.responseMimeType",
+        )
+
+
+def _validate_tools(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise gemini_invalid_request("Gemini tools must be a list.", param="tools")
+    for tool_index, tool in enumerate(value):
+        if not isinstance(tool, Mapping):
+            raise gemini_invalid_request(
+                "Gemini tool entries must be objects.",
+                param=f"tools[{tool_index}]",
+            )
+        declarations = _part_value(
+            tool,
+            "functionDeclarations",
+            "function_declarations",
+        )
+        if declarations is None:
+            continue
+        if isinstance(declarations, Mapping):
+            declarations = [declarations]
+        if not isinstance(declarations, list):
+            raise gemini_invalid_request(
+                "Gemini functionDeclarations must be a list.",
+                param=f"tools[{tool_index}].functionDeclarations",
+            )
+        for declaration_index, declaration in enumerate(declarations):
+            _validate_function_declaration(
+                declaration,
+                param=(
+                    f"tools[{tool_index}].functionDeclarations[{declaration_index}]"
+                ),
+            )
+
+
+def _validate_function_declaration(value: Any, *, param: str) -> None:
+    if not isinstance(value, Mapping):
+        raise gemini_invalid_request(
+            "Gemini function declarations must be objects.",
+            param=param,
+        )
+    if not isinstance(value.get("name"), str) or not value.get("name"):
+        raise gemini_invalid_request(
+            "Gemini function declaration name must be a non-empty string.",
+            param=f"{param}.name",
+        )
+    parameters = value.get("parameters")
+    if parameters is not None and not isinstance(parameters, Mapping):
+        raise gemini_invalid_request(
+            "Gemini function declaration parameters must be an object.",
+            param=f"{param}.parameters",
+        )
+
+
+def _validate_tool_config(value: Any) -> None:
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise gemini_invalid_request(
+            "Gemini toolConfig must be an object.",
+            param="toolConfig",
         )
 
 
@@ -210,19 +478,19 @@ def _normalize_contents(value: Any) -> list[NormalizedMessage]:
     if isinstance(value, str):
         return [NormalizedMessage(role="user", content=value)]
     if isinstance(value, Mapping):
-        return [_normalize_content(value)]
+        return _normalize_content(value)
     if isinstance(value, list):
-        return [
-            _normalize_content(item)
-            for item in value
-            if isinstance(item, Mapping) or isinstance(item, str)
-        ]
+        messages: list[NormalizedMessage] = []
+        for item in value:
+            if isinstance(item, Mapping) or isinstance(item, str):
+                messages.extend(_normalize_content(item))
+        return messages
     return [NormalizedMessage(role="user", content=str(value))]
 
 
-def _normalize_content(value: Mapping[str, Any] | str) -> NormalizedMessage:
+def _normalize_content(value: Mapping[str, Any] | str) -> list[NormalizedMessage]:
     if isinstance(value, str):
-        return NormalizedMessage(role="user", content=value)
+        return [NormalizedMessage(role="user", content=value)]
 
     role = _gemini_role_to_normalized(str(value.get("role") or "user"))
     parts = value.get("parts")
@@ -231,43 +499,56 @@ def _normalize_content(value: Mapping[str, Any] | str) -> NormalizedMessage:
     if not isinstance(parts, list):
         parts = []
 
-    tool_calls = [
-        _function_call_to_normalized(part)
-        for part in parts
-        if isinstance(part, Mapping)
-        and _part_value(part, "functionCall", "function_call")
-    ]
-    function_responses = [
-        _function_response_payload(part)
-        for part in parts
-        if isinstance(part, Mapping)
-        and _part_value(part, "functionResponse", "function_response")
-    ]
-    if function_responses:
-        first = function_responses[0]
-        return NormalizedMessage(
-            role="tool",
-            content=json.dumps(first.get("response", {}), ensure_ascii=False),
-            name=_string_or_none(first.get("name")),
-            tool_call_id=_string_or_none(first.get("name")),
-            raw_extensions={
-                "gemini_role": value.get("role"),
-                "functionResponse": first,
-            },
-        )
+    messages: list[NormalizedMessage] = []
+    pending_parts: list[NormalizedContentPart] = []
+    pending_tool_calls: list[NormalizedToolCall] = []
+    raw_extensions = _content_raw_extensions(value)
 
-    normalized_parts = [
-        _part_to_normalized(part) for part in parts if isinstance(part, Mapping)
+    def flush_pending_message() -> None:
+        if not pending_parts and not pending_tool_calls:
+            return
+        messages.append(
+            NormalizedMessage(
+                role=role,
+                content=_collapse_text_parts(pending_parts),
+                tool_calls=list(pending_tool_calls),
+                raw_extensions=raw_extensions,
+            )
+        )
+        pending_parts.clear()
+        pending_tool_calls.clear()
+
+    for part in parts:
+        if not isinstance(part, Mapping):
+            continue
+        if "functionResponse" in part or "function_response" in part:
+            flush_pending_message()
+            messages.append(
+                _function_response_to_normalized(
+                    part,
+                    gemini_role=value.get("role"),
+                )
+            )
+            continue
+        if "functionCall" in part or "function_call" in part:
+            pending_tool_calls.append(_function_call_to_normalized(part))
+            continue
+        pending_parts.append(_part_to_normalized(part))
+
+    flush_pending_message()
+    if messages:
+        return messages
+    return [
+        NormalizedMessage(
+            role=role,
+            content=None,
+            raw_extensions=raw_extensions,
+        )
     ]
-    content = _collapse_text_parts(normalized_parts)
-    return NormalizedMessage(
-        role=role,
-        content=content,
-        tool_calls=tool_calls,
-        raw_extensions={
-            key: item for key, item in value.items() if key not in {"role", "parts"}
-        },
-    )
+
+
+def _content_raw_extensions(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if key not in {"role", "parts"}}
 
 
 def _gemini_role_to_normalized(role: str) -> str:
@@ -302,6 +583,31 @@ def _normalize_tools(value: Any) -> list[NormalizedTool]:
     return tools
 
 
+def _unsupported_gemini_tools(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    unsupported_tools = []
+    for tool in value:
+        if not isinstance(tool, Mapping):
+            continue
+        declarations = _part_value(
+            tool,
+            "functionDeclarations",
+            "function_declarations",
+        )
+        if declarations is None:
+            unsupported_tools.append(dict(tool))
+            continue
+        tool_extensions = {
+            key: item
+            for key, item in tool.items()
+            if key not in {"functionDeclarations", "function_declarations"}
+        }
+        if tool_extensions:
+            unsupported_tools.append(tool_extensions)
+    return unsupported_tools
+
+
 def _function_declaration_to_normalized(
     declaration: Mapping[str, Any],
     tool: Mapping[str, Any],
@@ -329,29 +635,140 @@ def _function_declaration_to_normalized(
     )
 
 
-def _normalize_tool_choice(tool_config: Mapping[str, Any]) -> Any | None:
+def _function_calling_config(
+    tool_config: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
     function_calling_config = _part_value(
         tool_config,
         "functionCallingConfig",
         "function_calling_config",
     )
+    if function_calling_config is None:
+        return None
     if not isinstance(function_calling_config, Mapping):
+        raise gemini_invalid_request(
+            "Gemini toolConfig.functionCallingConfig must be an object.",
+            param="toolConfig.functionCallingConfig",
+        )
+    return function_calling_config
+
+
+def _allowed_function_names(
+    function_calling_config: Mapping[str, Any] | None,
+) -> list[str] | None:
+    if function_calling_config is None:
         return None
     allowed_names = _part_value(
         function_calling_config,
         "allowedFunctionNames",
         "allowed_function_names",
     )
-    if isinstance(allowed_names, list) and len(allowed_names) == 1:
-        return {"type": "function", "function": {"name": str(allowed_names[0])}}
-    mode = function_calling_config.get("mode")
-    if isinstance(mode, str):
-        normalized_mode = mode.lower()
-        if normalized_mode == "none":
-            return "none"
-        if normalized_mode == "any":
-            return "required"
-    return dict(function_calling_config)
+    if allowed_names is None:
+        return None
+    if not isinstance(allowed_names, list):
+        raise gemini_invalid_request(
+            "Gemini allowedFunctionNames must be a list of function names.",
+            param="toolConfig.functionCallingConfig.allowedFunctionNames",
+        )
+    normalized_names = []
+    for name in allowed_names:
+        if not isinstance(name, str) or not name:
+            raise gemini_invalid_request(
+                "Gemini allowedFunctionNames entries must be non-empty strings.",
+                param="toolConfig.functionCallingConfig.allowedFunctionNames",
+            )
+        normalized_names.append(name)
+    if not normalized_names:
+        raise gemini_invalid_request(
+            "Gemini allowedFunctionNames must not be empty when provided.",
+            param="toolConfig.functionCallingConfig.allowedFunctionNames",
+        )
+    return normalized_names
+
+
+def _validate_allowed_function_names(
+    allowed_names: list[str] | None,
+    tools: list[NormalizedTool],
+) -> None:
+    if allowed_names is None:
+        return
+    declared_names = {tool.name for tool in tools}
+    missing_names = [name for name in allowed_names if name not in declared_names]
+    if missing_names:
+        missing = ", ".join(missing_names)
+        raise gemini_invalid_request(
+            f"Gemini allowedFunctionNames reference undeclared functions: {missing}.",
+            param="toolConfig.functionCallingConfig.allowedFunctionNames",
+        )
+
+
+def _filter_tools_by_allowed_names(
+    tools: list[NormalizedTool],
+    allowed_names: list[str] | None,
+) -> list[NormalizedTool]:
+    if allowed_names is None:
+        return tools
+    allowed = set(allowed_names)
+    return [tool for tool in tools if tool.name in allowed]
+
+
+def _normalize_tool_choice(
+    function_calling_config: Mapping[str, Any] | None,
+    *,
+    allowed_names: list[str] | None,
+    tools: list[NormalizedTool],
+) -> Any | None:
+    if function_calling_config is None:
+        return None
+    mode = _function_calling_mode(function_calling_config.get("mode"))
+    if mode == "none":
+        return "none"
+    if mode == "auto":
+        return "auto"
+    candidate_names = allowed_names or _unique_tool_names(tools)
+    if len(candidate_names) == 1:
+        return {"type": "function", "function": {"name": candidate_names[0]}}
+    if not candidate_names:
+        raise gemini_invalid_request(
+            "Gemini functionCallingConfig mode ANY requires at least one declared "
+            "function.",
+            param="toolConfig.functionCallingConfig.mode",
+        )
+    raise gemini_invalid_request(
+        "Gemini functionCallingConfig mode ANY with multiple candidate functions "
+        "is not supported by this backend; provide exactly one allowedFunctionNames "
+        "entry to force a function.",
+        param="toolConfig.functionCallingConfig.allowedFunctionNames",
+    )
+
+
+def _function_calling_mode(value: Any) -> str:
+    if value is None:
+        return "auto"
+    if not isinstance(value, str):
+        raise gemini_invalid_request(
+            "Gemini functionCallingConfig.mode must be a string.",
+            param="toolConfig.functionCallingConfig.mode",
+        )
+    mode = value.strip().upper()
+    if mode in {"AUTO", "MODE_UNSPECIFIED"}:
+        return "auto"
+    if mode == "NONE":
+        return "none"
+    if mode == "ANY":
+        return "any"
+    raise gemini_invalid_request(
+        f"Unsupported Gemini functionCallingConfig.mode: {value}.",
+        param="toolConfig.functionCallingConfig.mode",
+    )
+
+
+def _unique_tool_names(tools: list[NormalizedTool]) -> list[str]:
+    names: list[str] = []
+    for tool in tools:
+        if tool.name and tool.name not in names:
+            names.append(tool.name)
+    return names
 
 
 def _normalize_generation_config(
@@ -395,6 +812,8 @@ def _normalize_response_format(
     mime_type = _part_value(config, "responseMimeType", "response_mime_type")
     schema = _part_value(config, "responseSchema", "response_schema")
     if not isinstance(mime_type, str):
+        return None
+    if mime_type == "text/plain":
         return None
     if mime_type == "application/json":
         return NormalizedResponseFormat(
@@ -467,7 +886,30 @@ def _function_call_to_normalized(part: Mapping[str, Any]) -> NormalizedToolCall:
 
 def _function_response_payload(part: Mapping[str, Any]) -> dict[str, Any]:
     function_response = _part_value(part, "functionResponse", "function_response")
-    return dict(function_response) if isinstance(function_response, Mapping) else {}
+    if not isinstance(function_response, Mapping):
+        raise gemini_invalid_request(
+            "Gemini functionResponse parts must be objects.",
+            param="contents.parts.functionResponse",
+        )
+    return dict(function_response)
+
+
+def _function_response_to_normalized(
+    part: Mapping[str, Any],
+    *,
+    gemini_role: Any,
+) -> NormalizedMessage:
+    function_response = _function_response_payload(part)
+    return NormalizedMessage(
+        role="tool",
+        content=json.dumps(function_response.get("response", {}), ensure_ascii=False),
+        name=_string_or_none(function_response.get("name")),
+        tool_call_id=_string_or_none(function_response.get("name")),
+        raw_extensions={
+            "gemini_role": gemini_role,
+            "functionResponse": function_response,
+        },
+    )
 
 
 def _collapse_text_parts(

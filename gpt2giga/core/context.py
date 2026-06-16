@@ -172,6 +172,7 @@ def _api_key_value(request: Request) -> Optional[str]:
         request.headers.get("x-api-key")
         or request.headers.get("x-goog-api-key")
         or request.query_params.get("x-api-key")
+        or request.query_params.get("key")
     )
     if api_key:
         return api_key.strip() or None

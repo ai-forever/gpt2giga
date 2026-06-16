@@ -5,6 +5,12 @@
 [`google-genai`](https://github.com/googleapis/python-genai) поверх локального
 прокси.
 
+Это Gemini-compatible examples, а не полный Gemini API clone. Runnable examples
+покрывают text generation, streaming, chat session, function calling,
+structured output, `countTokens` и text embeddings. Files/Batches examples
+показывают подготовленный client flow, но соответствующие public routes в
+обычном app пока не смонтированы.
+
 ## Зависимости
 
 Gemini-примеры находятся в группе `integrations`:
@@ -90,5 +96,8 @@ uv run python examples/gemini/batches/batches.py
   routes.
 - Совместимость в этой итерации сфокусирована на text, function calling,
   embeddings и подготовленных files/batchGenerateContent handlers.
-- Built-in Gemini tools и часть мультимодальных/file-backed сценариев всё ещё
+- Built-in Gemini tools, safety enforcement, `cachedContent`, non-text
+  embeddings content и часть мультимодальных/file-backed сценариев всё ещё
   остаются вне scope.
+- `countTokens` использует GigaChat token counting по извлеченному тексту и
+  является compatibility approximation, а не точным Gemini tokenizer.

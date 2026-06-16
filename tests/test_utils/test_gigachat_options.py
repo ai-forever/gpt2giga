@@ -35,7 +35,7 @@ def test_extract_gigachat_request_options_allows_only_safe_metadata():
             "X-Request-ID": "from-header",
             "X-Stainless-Lang": "python",
         },
-        query_string=b"beta=true&x-api-key=secret&local=skip",
+        query_string=b"beta=true&x-api-key=secret&key=google-secret&local=skip",
     )
     data = {
         "extra_headers": {
