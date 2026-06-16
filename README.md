@@ -87,6 +87,20 @@ print(response.content[0].text)
 
 Полная документация публикуется на [GitHub Pages](https://ai-forever.github.io/gpt2giga/).
 
+Локально проверить docs можно так:
+
+```sh
+uv sync --all-extras --dev --group docs
+uv run --group docs mkdocs build --strict
+uv run --group docs mkdocs serve
+```
+
+После `mkdocs serve` сайт доступен на `http://127.0.0.1:8000/`. Если порт занят:
+
+```sh
+uv run --group docs mkdocs serve -a 127.0.0.1:8001
+```
+
 | Тема | Документ |
 |---|---|
 | Быстрый запуск и первые запросы | [docs/quickstart.md](./docs/quickstart.md) |

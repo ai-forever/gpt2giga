@@ -23,6 +23,11 @@ uv run --group docs mkdocs serve
 ```
 
 По умолчанию MkDocs откроет сайт на `http://127.0.0.1:8000/`.
+Если порт занят, задайте другой адрес:
+
+```sh
+uv run --group docs mkdocs serve -a 127.0.0.1:8001
+```
 
 ## Что публикуется
 
@@ -42,4 +47,3 @@ uv run --group docs mkdocs serve
 - Не публикуйте secrets, локальные `.env`, credentials, keys или raw traffic payloads.
 - При изменении deployment behavior обновляйте одновременно `docs/deployment.md`, `deploy/README.md` и relevant compose manifests.
 - При изменении compatibility behavior обновляйте `docs/api-compatibility.md` и `docs/client-parameter-compatibility.md`.
-
