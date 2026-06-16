@@ -1,6 +1,9 @@
 # Anthropic Messages API через `gpt2giga`
 
-`gpt2giga` поддерживает эндпоинт `/v1/messages`, совместимый с [Anthropic Messages API](https://docs.anthropic.com/en/api/messages). Это позволяет использовать Anthropic Python SDK для работы с GigaChat через локальный прокси.
+`gpt2giga` поддерживает эндпоинты `/v1/messages` и `/v2/messages`,
+совместимые с [Anthropic Messages API](https://docs.anthropic.com/en/api/messages).
+Это позволяет использовать Anthropic Python SDK для работы с GigaChat через
+локальный прокси.
 
 ## Зависимости
 
@@ -20,9 +23,21 @@ Anthropic SDK не входит в обязательные зависимост
 
 ## Базовая настройка
 
-Во всех примерах используется:
+В Anthropic Python SDK нет отдельного `api_version` параметра для клиента.
+Версия GigaChat backend contract выбирается через `base_url`: `/v1` всегда
+идёт в GigaChat v1 contract, `/v2` всегда идёт в GigaChat v2 contract.
+Root `base_url` без версии использует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
-- `base_url="http://localhost:8090/v1"`
+```python
+api_version = "v1"
+client = Anthropic(
+    base_url=f"http://localhost:8090/{api_version}/",
+    api_key="any-key",
+)
+```
+
+Также можно указать `api_version = "v2"` для v2-compatible routes.
+
 - `api_key="any-key"` (заглушка, прокси не требует “настоящего” Anthropic API key)
 
 Если вы:

@@ -1,6 +1,7 @@
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8090", api_key="ollama")
+api_version = "v2"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="ollama")
 
 completion = client.chat.completions.create(
     model="GigaChat-2-Max",

@@ -8,7 +8,8 @@ def encode_file(file_path: Path) -> str:
     return base64.b64encode(file_path.read_bytes()).decode("utf-8")
 
 
-client = OpenAI(base_url="http://localhost:8090", api_key="0")
+api_version = "v2"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 file_path = Path("sample.pdf")
 
 # Getting the base64 string

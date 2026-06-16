@@ -24,7 +24,19 @@ uv sync --group integrations
 Во всех примерах используется:
 
 - `api_key="0"` как заглушка;
-- `http_options=types.HttpOptions(base_url="http://localhost:8090")`.
+- `http_options=types.HttpOptions(base_url="http://localhost:8090", ...)`
+  с `api_version=api_version`.
+
+```python
+api_version = "v1"
+client = genai.Client(
+    api_key="0",
+    http_options=types.HttpOptions(
+        base_url="http://localhost:8090",
+        api_version=api_version,
+    ),
+)
+```
 
 Если у вас включена защита API-ключом (`GPT2GIGA_ENABLE_API_KEY_AUTH=True`),
 подставьте ваш ключ вместо `"0"`.
@@ -42,17 +54,20 @@ Gemini operation routes доступны в корне, под `/v1`, `/v2` и `
 чтобы SDK ходил в `/v2`:
 
 ```python
+api_version = "v1"
 client = genai.Client(
     api_key="0",
     http_options=types.HttpOptions(
         base_url="http://localhost:8090",
-        api_version="v1",
+        api_version=api_version,
     ),
 )
 ```
 
 Если `api_version` не указан, `google-genai` использует свой обычный Gemini
-path, а `gpt2giga` выбирает backend mode по `GPT2GIGA_GIGACHAT_API_MODE`.
+path, а `gpt2giga` выбирает backend mode по
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`. Иначе `api_version="v1"` всегда идёт в
+GigaChat v1 contract, а `api_version="v2"` — в GigaChat v2 contract.
 Для клиентов вроде Gemini CLI можно указать `base_url="http://localhost:8090/v2"`:
 их `/v1beta/...` path будет обработан как `/v2/v1beta/...` и выполнен через
 GigaChat v2 contract.

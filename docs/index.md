@@ -31,6 +31,11 @@ http://localhost:8090
 - `/v1beta/models/{model}:generateContent` и совместимые Gemini paths
 - `/models`, `/model/info`, `/health`, `/ping`
 
+Правило выбора backend одинаковое для OpenAI-, Anthropic- и Gemini-compatible
+routes: `/v1/...` всегда отправляет chat-like запросы в GigaChat v1 contract,
+`/v2/...` всегда отправляет их в GigaChat v2 contract, а root path без `/v1`
+или `/v2` использует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+
 OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подготовлены в коде, но намеренно не смонтированы до появления end-to-end execution в upstream SDK/backend.
 
 ## Быстрый путь
@@ -39,11 +44,10 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 2. Заполните `GIGACHAT_CREDENTIALS`, `GIGACHAT_SCOPE`, `GIGACHAT_MODEL`.
 3. Запустите `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
 4. Проверьте `curl http://localhost:8090/health`.
-5. Подключите SDK к `http://localhost:8090/v1` для OpenAI-compatible clients или к `http://localhost:8090` для Anthropic/Gemini-compatible clients.
+5. Подключите SDK к `http://localhost:8090/v1` или `http://localhost:8090/v2` для явного backend contract, либо к `http://localhost:8090`, если root должен следовать `GPT2GIGA_GIGACHAT_API_MODE`.
 
 ## Для разработчиков
 
 - [Normalized messages](architecture/normalized-messages.md) описывает экспериментальный слой protocol-independent моделей.
 - [Logging и observability](architecture/logging-and-observability.md) фиксирует границы runtime logs, traffic logs, metrics и traces.
 - [Добавление provider/protocol](architecture/how-to-add-provider.md) дает checklist для расширения public protocol surface и upstream providers.
-

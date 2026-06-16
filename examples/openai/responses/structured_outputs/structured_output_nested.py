@@ -3,7 +3,8 @@ from typing import List
 from openai import OpenAI
 from pydantic import BaseModel
 
-client = OpenAI(base_url="http://localhost:8090/v2", api_key="0")
+api_version = "v2"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 
 class Step(BaseModel):

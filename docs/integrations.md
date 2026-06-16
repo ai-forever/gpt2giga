@@ -16,6 +16,11 @@ http://localhost:8090/v1
 http://localhost:8090/v2
 ```
 
+Правило выбора backend одинаковое для всех совместимых клиентов: URL с `/v1`
+принудительно идёт в GigaChat v1 contract, URL с `/v2` — в GigaChat v2
+contract. Корневой URL без версии (`http://localhost:8090`) использует
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+
 Anthropic-compatible clients обычно используют:
 
 ```text

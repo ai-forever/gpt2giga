@@ -6,7 +6,8 @@ from tempfile import TemporaryDirectory
 
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8090", api_key="0")
+api_version = "v1"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 model_name = "GigaChat-2-Max"
 print("Using model:", model_name)
 

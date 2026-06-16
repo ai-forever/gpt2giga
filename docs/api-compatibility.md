@@ -21,9 +21,11 @@
 
 ## Смонтированные routes
 
-Публичные API routes доступны в корне и под versioned prefixes. Root routes
-используют backend mode из env, `/v1` принудительно выбирает GigaChat v1
-contract, `/v2` принудительно выбирает GigaChat v2 contract.
+Публичные API routes доступны в корне и под versioned prefixes. Правило выбора
+backend одинаковое для OpenAI-, Anthropic- и Gemini-compatible routes:
+`/v1` принудительно выбирает GigaChat v1 contract, `/v2` принудительно
+выбирает GigaChat v2 contract, а root routes без versioned prefix используют
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 Примеры:
 
@@ -69,7 +71,9 @@ Gemini operation routes монтируются в корне, под `/v1`, `/v2
 как остальные публичные API. Для клиентов, которые добавляют Gemini API
 version к уже versioned base URL, также доступны `/v1/v1beta` и `/v2/v1beta`.
 `/v1` и `/v1/v1beta` принудительно выбирают GigaChat v1 backend contract,
-`/v2` и `/v2/v1beta` — GigaChat v2 backend contract.
+`/v2` и `/v2/v1beta` — GigaChat v2 backend contract. Корневые Gemini paths
+`/...` и `/v1beta/...` без outer `/v1` или `/v2` используют
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 Gemini model discovery в чистой Gemini форме всегда доступен под `/v1beta`,
 `/v1/v1beta` и `/v2/v1beta`.
@@ -197,6 +201,12 @@ provider execution, описан в [Normalized messages architecture](./archite
 GPT2GIGA_GIGACHAT_API_MODE=v1
 ```
 
-Задайте `GPT2GIGA_GIGACHAT_API_MODE=v2`, чтобы root routes использовали более новый GigaChat `v2/chat/completions` surface для chat-like запросов. Для явного выбора на уровне клиента используйте `base_url` с `/v1` или `/v2`.
+Задайте `GPT2GIGA_GIGACHAT_API_MODE=v2`, чтобы root routes без `/v1` или
+`/v2` использовали более новый GigaChat `v2/chat/completions` surface для
+chat-like запросов. Для явного выбора на уровне клиента используйте `base_url`
+с `/v1` или `/v2`: `/v1` всегда идёт в GigaChat v1 contract, `/v2` всегда
+идёт в GigaChat v2 contract.
 
-`/chat/completions` остаётся compatibility route и следует env. Новые built-in-tool возможности развиваются преимущественно вокруг GigaChat v2 mode, поэтому клиенты, которым они нужны, могут указывать `http://localhost:8090/v2`.
+`/chat/completions` остаётся compatibility route и следует env. Новые
+built-in-tool возможности развиваются преимущественно вокруг GigaChat v2 mode,
+поэтому клиенты, которым они нужны, могут указывать `http://localhost:8090/v2`.

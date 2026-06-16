@@ -140,7 +140,8 @@ Gemini-like operation routes доступны в корне, под `/v1`, `/v2`
 пути `/v1/v1beta/...` и `/v2/v1beta/...`, когда клиент сам добавляет
 `/v1beta` к versioned base URL. `/v1` и `/v1/v1beta` принудительно выбирают
 GigaChat v1 backend contract, `/v2` и `/v2/v1beta` — GigaChat v2 backend
-contract.
+contract. Корневые paths без `/v1` или `/v2`, включая `/v1beta/...`, выбирают
+backend по `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 | Эндпоинт | Поддерживается |
 |---|---|
@@ -163,5 +164,8 @@ unsupported subfields `generationConfig` и non-function built-in tools
 Подключенные OpenAI, Anthropic, LiteLLM и Gemini operation routes доступны в
 корне, под `/v1` и под `/v2` через роутер приложения. Gemini-compatible routes
 также доступны под `/v1beta`, `/v1/v1beta` и `/v2/v1beta`.
+`/v1` всегда выбирает GigaChat v1 backend contract, `/v2` всегда выбирает
+GigaChat v2 backend contract, а root без versioned prefix следует
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 Подготовленные, но отключенные маршруты OpenAI Files/Batches, Anthropic Message
 Batches и Gemini Files/Batches намеренно исключены из схемы OpenAPI по умолчанию.

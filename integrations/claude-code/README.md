@@ -46,7 +46,7 @@ export ANTHROPIC_BASE_URL=http://localhost:8090
 export ANTHROPIC_API_KEY=0
 ```
 
-- `ANTHROPIC_BASE_URL` — адрес прокси-сервера `gpt2giga`. Утилита принимает запросы на эндпоинт `/v1/messages`, совместимый с Anthropic Messages API.
+- `ANTHROPIC_BASE_URL` — адрес прокси-сервера `gpt2giga`. Утилита принимает запросы на эндпоинт `/v1/messages`, совместимый с Anthropic Messages API. Root URL без `/v1` или `/v2` следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`; URL с `/v1` принудительно выбирает GigaChat v1 contract, URL с `/v2` — GigaChat v2 contract.
 - `ANTHROPIC_API_KEY` — любое непустое значение (например, `0`). Реальный ключ Anthropic не нужен — все запросы проксируются через `gpt2giga` в GigaChat.
 
 ### Запуск

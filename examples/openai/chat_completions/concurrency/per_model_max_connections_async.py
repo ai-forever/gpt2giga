@@ -22,7 +22,8 @@ from contextlib import suppress
 from openai import APIStatusError, AsyncOpenAI
 
 
-BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8090")
+api_version = "v2"
+BASE_URL = os.getenv("OPENAI_BASE_URL", f"http://localhost:8090/{api_version}/")
 API_KEY = os.getenv("OPENAI_API_KEY", "0")
 MODEL = os.getenv("GPT2GIGA_EXAMPLE_MODEL", "GigaChat-2")
 HOLD_SECONDS = float(os.getenv("GPT2GIGA_EXAMPLE_HOLD_SECONDS", "3"))

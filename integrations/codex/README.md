@@ -33,7 +33,7 @@ GPT2GIGA_DISABLE_REASONING=True
 
 Рекомендуемые параметры для Codex:
 
-- `GPT2GIGA_GIGACHAT_API_MODE=v2` — включает режим `v2`, который нужен для встроенных инструментов GigaChat, например `web_search` и `image_generate`.
+- `GPT2GIGA_GIGACHAT_API_MODE=v2` — включает режим `v2` для root routes без `/v1` или `/v2`; он нужен для встроенных инструментов GigaChat, например `web_search` и `image_generate`.
 - `GPT2GIGA_PASS_MODEL=False` — заставляет прокси использовать модель из `GIGACHAT_MODEL`, даже если Codex передал в запросе имя модели OpenAI.
 - `GPT2GIGA_DISABLE_REASONING=True` — удаляет `reasoning` и `reasoning_effort` из запроса к GigaChat, чтобы клиентские reasoning-поля не мешали обработке.
 
@@ -72,7 +72,7 @@ supports_websockets = false
 Ключевые настройки:
 
 - `model` — имя модели, которое будет отображаться и передаваться в Codex.
-- `base_url` — OpenAI-совместимый адрес `gpt2giga`; для Codex с built-in tools указывайте путь с `/v2`.
+- `base_url` — OpenAI-совместимый адрес `gpt2giga`; для Codex с built-in tools указывайте путь с `/v2`. URL с `/v1` всегда идёт в GigaChat v1 contract, URL с `/v2` — в GigaChat v2 contract, а root URL без версии следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 - `env_key` — имя переменной окружения, из которой Codex берёт API-ключ.
 - `wire_api = "responses"` — использовать OpenAI Responses API, который поддерживается `gpt2giga`.
 

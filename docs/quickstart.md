@@ -77,7 +77,11 @@ uv run gpt2giga
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8090/v1", api_key="<local-proxy-api-key>")
+api_version = "v1"
+client = OpenAI(
+    base_url=f"http://localhost:8090/{api_version}/",
+    api_key="<local-proxy-api-key>",
+)
 
 completion = client.chat.completions.create(
     model="GigaChat-2-Max",
@@ -86,16 +90,21 @@ completion = client.chat.completions.create(
 print(completion.choices[0].message.content)
 ```
 
-Для явного выбора GigaChat backend contract используйте
-`http://localhost:8090/v1` или `http://localhost:8090/v2` как `base_url`.
-`http://localhost:8090` следует `GPT2GIGA_GIGACHAT_API_MODE`.
+Для явного выбора GigaChat backend contract используйте `api_version = "v1"`
+или `api_version = "v2"` и прокидывайте его в `base_url`. `/v1` всегда
+выбирает GigaChat v1 contract, `/v2` — GigaChat v2 contract.
+`http://localhost:8090` без версии следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 ## Anthropic SDK
 
 ```python
 from anthropic import Anthropic
 
-client = Anthropic(base_url="http://localhost:8090", api_key="<local-proxy-api-key>")
+api_version = "v1"
+client = Anthropic(
+    base_url=f"http://localhost:8090/{api_version}/",
+    api_key="<local-proxy-api-key>",
+)
 
 message = client.messages.create(
     model="GigaChat-2-Max",

@@ -5,9 +5,13 @@ from pathlib import Path
 from google import genai
 from google.genai import types
 
+api_version = "v1"
 client = genai.Client(
     api_key="0",
-    http_options=types.HttpOptions(base_url="http://localhost:8090"),
+    http_options=types.HttpOptions(
+        base_url="http://localhost:8090",
+        api_version=api_version,
+    ),
 )
 
 batch_source_path = Path(__file__).with_name("batch_generate_content.jsonl")

@@ -8,6 +8,22 @@
 2. По умолчанию прокси слушает `http://localhost:8090` (если вы меняли порт через `GPT2GIGA_PORT` / `--proxy.port`, обновите `base_url` в примерах).
 3. Если включена защита API-ключом (`GPT2GIGA_ENABLE_API_KEY_AUTH=True`), передавайте ключ как `api_key` (OpenAI SDK) или через заголовок `x-api-key`.
 
+OpenAI и Anthropic SDK выбирают GigaChat backend contract через версионный
+`base_url`: `http://localhost:8090/v1` всегда идёт в GigaChat v1 contract,
+`http://localhost:8090/v2` всегда идёт в GigaChat v2 contract.
+Root `base_url` без версии (`http://localhost:8090`) использует
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+Gemini-примеры используют нативный для `google-genai` вариант:
+`types.HttpOptions(base_url="http://localhost:8090", ...)` с
+`api_version="v1"` или `api_version="v2"`.
+
+В runnable-примерах версия вынесена отдельной строкой, например:
+
+```python
+api_version = "v1"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
+```
+
 ## Быстрые ссылки
 
 - OpenAI Python SDK:

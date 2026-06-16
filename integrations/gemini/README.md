@@ -13,6 +13,10 @@ Gemini-совместимом формате.
 
 Это Gemini-compatible integration, а не full Gemini API parity. Public routes
 доступны в root, `/v1`, `/v2`, `/v1beta`, `/v1/v1beta` и `/v2/v1beta`.
+`/v1` и `/v1/v1beta` всегда выбирают GigaChat v1 contract, `/v2` и
+`/v2/v1beta` всегда выбирают GigaChat v2 contract. Root paths без outer
+`/v1` или `/v2`, включая `/v1beta`, используют
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 Gemini Files API и `batchGenerateContent` подготовлены в коде, но не
 смонтированы публично; built-in Gemini tools, safety enforcement,
 `cachedContent`, full multimodal/file-backed flows и non-text embeddings content
@@ -66,6 +70,8 @@ export GEMINI_MODEL="GigaChat-2-Max"
 
 - `GOOGLE_GEMINI_BASE_URL` — адрес `gpt2giga`. Gemini CLI разрешает HTTP для
   `localhost`, `127.0.0.1` и `[::1]`; для удалённых серверов нужен HTTPS.
+  Root URL без `/v1` или `/v2` следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`;
+  укажите `/v1` или `/v2`, если нужен явный GigaChat backend contract.
 - `GEMINI_API_KEY` — любое непустое значение, если авторизация на `gpt2giga`
   отключена. Если включена `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, укажите здесь
   значение `GPT2GIGA_API_KEY`.
