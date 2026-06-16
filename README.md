@@ -5,8 +5,9 @@
 [![PyPI Downloads](https://img.shields.io/pypi/dm/gpt2giga?style=flat-square)](https://pypistats.org/packages/gpt2giga)
 [![GitHub Repo stars](https://img.shields.io/github/stars/ai-forever/gpt2giga?style=flat-square)](https://star-history.com/#ai-forever/gpt2giga)
 [![GitHub Open Issues](https://img.shields.io/github/issues-raw/ai-forever/gpt2giga?style=flat-square)](https://github.com/ai-forever/gpt2giga/issues)
-[![Telegram](https://img.shields.io/badge/Telegram-chat-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/krakenalt)
-[![Telegram Group](https://img.shields.io/badge/Telegram-group-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+7owoBivn9xY3NWYy)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-111827?style=flat-square)](https://ai-forever.github.io/gpt2giga/)
+[![Telegram](https://img.shields.io/badge/Maintainer-chat-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/krakenalt)
+[![Telegram Group](https://img.shields.io/badge/GigaChain-group-26A5E4?style=flat-square&logo=telegram&logoColor=white)](https://t.me/+7owoBivn9xY3NWYy)
 
 ![Coverage](./badges/coverage.svg)
 
@@ -83,6 +84,8 @@ print(response.content[0].text)
 Больше вариантов запуска — в [Quickstart](./docs/quickstart.md).
 
 ## Документация
+
+Полная документация публикуется на [GitHub Pages](https://ai-forever.github.io/gpt2giga/).
 
 | Тема | Документ |
 |---|---|

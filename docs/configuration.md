@@ -31,7 +31,7 @@ gpt2giga \
 gpt2giga --help
 ```
 
-Env template для копирования: [.env.example](../.env.example).
+Env template для копирования: [.env.example](https://github.com/ai-forever/gpt2giga/blob/main/.env.example).
 
 ## Как читать этот документ
 

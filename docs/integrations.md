@@ -36,27 +36,27 @@ http://localhost:8090
 
 ## Запускаемые примеры
 
-- OpenAI examples: [examples/openai/](../examples/openai/)
-- OpenAI Chat Completions: [examples/openai/chat_completions/README.md](../examples/openai/chat_completions/README.md)
-- OpenAI Responses: [examples/openai/responses/README.md](../examples/openai/responses/README.md)
-- Anthropic examples: [examples/anthropic/README.md](../examples/anthropic/README.md)
-- Gemini examples: [examples/gemini/README.md](../examples/gemini/README.md)
-- OpenAI Agents SDK: [examples/openai/agents/weather_handoff.py](../examples/openai/agents/weather_handoff.py)
+- OpenAI examples: [examples/openai/](https://github.com/ai-forever/gpt2giga/tree/main/examples/openai)
+- OpenAI Chat Completions: [examples/openai/chat_completions/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/chat_completions/README.md)
+- OpenAI Responses: [examples/openai/responses/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/responses/README.md)
+- Anthropic examples: [examples/anthropic/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/anthropic/README.md)
+- Gemini examples: [examples/gemini/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/gemini/README.md)
+- OpenAI Agents SDK: [examples/openai/agents/weather_handoff.py](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/agents/weather_handoff.py)
 
 ## Гайды по интеграциям
 
 | Tool / client | Гайд |
 |---|---|
-| OpenHands | [integrations/openhands/README.md](../integrations/openhands/README.md) |
-| OpenAI Codex | [integrations/codex/README.md](../integrations/codex/README.md) |
-| Aider | [integrations/aider/README.md](../integrations/aider/README.md) |
-| Claude Code | [integrations/claude-code/README.md](../integrations/claude-code/README.md) |
-| Claude Desktop App | [integrations/claude-desktop/README.md](../integrations/claude-desktop/README.md) |
-| Gemini CLI | [integrations/gemini/README.md](../integrations/gemini/README.md) |
-| Cursor | [integrations/cursor/README.md](../integrations/cursor/README.md) |
-| Qwen Code | [integrations/qwen-code/README.md](../integrations/qwen-code/README.md) |
-| Xcode | [integrations/xcode/README.md](../integrations/xcode/README.md) |
-| nginx reverse proxy | [integrations/nginx/README.md](../integrations/nginx/README.md) |
+| OpenHands | [integrations/openhands/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/openhands/README.md) |
+| OpenAI Codex | [integrations/codex/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/codex/README.md) |
+| Aider | [integrations/aider/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/aider/README.md) |
+| Claude Code | [integrations/claude-code/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/claude-code/README.md) |
+| Claude Desktop App | [integrations/claude-desktop/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/claude-desktop/README.md) |
+| Gemini CLI | [integrations/gemini/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/gemini/README.md) |
+| Cursor | [integrations/cursor/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/cursor/README.md) |
+| Qwen Code | [integrations/qwen-code/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/qwen-code/README.md) |
+| Xcode | [integrations/xcode/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/xcode/README.md) |
+| nginx reverse proxy | [integrations/nginx/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/nginx/README.md) |
 
 ## Проверенные apps и frameworks
 

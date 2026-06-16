@@ -123,7 +123,7 @@ GPT2GIGA_PASS_TOKEN=True
 
 ## Примеры
 
-- OpenAI Chat Completions: [examples/openai/chat_completions/README.md](../examples/openai/chat_completions/README.md)
-- OpenAI Responses: [examples/openai/responses/README.md](../examples/openai/responses/README.md)
-- Anthropic Messages: [examples/anthropic/README.md](../examples/anthropic/README.md)
-- Все примеры: [examples/README.md](../examples/README.md)
+- OpenAI Chat Completions: [examples/openai/chat_completions/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/chat_completions/README.md)
+- OpenAI Responses: [examples/openai/responses/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/responses/README.md)
+- Anthropic Messages: [examples/anthropic/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/anthropic/README.md)
+- Все примеры: [examples/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)
