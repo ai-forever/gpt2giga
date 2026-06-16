@@ -1,6 +1,6 @@
 # Интеграции
 
-`gpt2giga` рассчитан на клиентов, которые умеют указывать custom base URL для OpenAI-compatible или Anthropic-compatible SDK.
+`gpt2giga` рассчитан на клиентов, которые умеют указывать custom base URL для OpenAI-compatible, Anthropic-compatible или Gemini-compatible SDK и CLI.
 
 ## Base URLs
 
@@ -22,7 +22,17 @@ Anthropic-compatible clients обычно используют:
 http://localhost:8090
 ```
 
-Если `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, используйте `GPT2GIGA_API_KEY` как client API key.
+Gemini-compatible clients обычно используют корневой адрес:
+
+```text
+http://localhost:8090
+```
+
+Официальные Gemini SDK/CLI при таком base URL сами добавляют Gemini-style path,
+например `/v1beta/models/{model}:generateContent`.
+
+Если `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, используйте `GPT2GIGA_API_KEY` как client API key. Для Gemini clients поддерживается также заголовок
+`x-goog-api-key`.
 
 ## Запускаемые примеры
 
@@ -30,6 +40,7 @@ http://localhost:8090
 - OpenAI Chat Completions: [examples/openai/chat_completions/README.md](../examples/openai/chat_completions/README.md)
 - OpenAI Responses: [examples/openai/responses/README.md](../examples/openai/responses/README.md)
 - Anthropic examples: [examples/anthropic/README.md](../examples/anthropic/README.md)
+- Gemini examples: [examples/gemini/README.md](../examples/gemini/README.md)
 - OpenAI Agents SDK: [examples/openai/agents/weather_handoff.py](../examples/openai/agents/weather_handoff.py)
 
 ## Гайды по интеграциям
@@ -41,6 +52,7 @@ http://localhost:8090
 | Aider | [integrations/aider/README.md](../integrations/aider/README.md) |
 | Claude Code | [integrations/claude-code/README.md](../integrations/claude-code/README.md) |
 | Claude Desktop App | [integrations/claude-desktop/README.md](../integrations/claude-desktop/README.md) |
+| Gemini CLI | [integrations/gemini/README.md](../integrations/gemini/README.md) |
 | Cursor | [integrations/cursor/README.md](../integrations/cursor/README.md) |
 | Qwen Code | [integrations/qwen-code/README.md](../integrations/qwen-code/README.md) |
 | Xcode | [integrations/xcode/README.md](../integrations/xcode/README.md) |
@@ -56,6 +68,7 @@ http://localhost:8090
 | Zed | https://zed.dev/ | Editor AI assistant. |
 | Cline | https://cline.bot/ | Developer agent. |
 | OpenAI Codex | https://github.com/openai/codex | CLI coding agent. |
+| Gemini CLI | https://github.com/google-gemini/gemini-cli | Google CLI coding agent. |
 | Aider | https://aider.chat/ | App-building coding assistant. |
 | Langflow | https://github.com/langflow-ai/langflow | Low-code/no-code agent builder. |
 | DeepAgentsCLI | https://github.com/langchain-ai/deepagents | Agent platform на LangChain/LangGraph. |

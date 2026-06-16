@@ -166,7 +166,11 @@ def _api_key_value(request: Request) -> Optional[str]:
             return authorization[7:].strip() or None
         return authorization
 
-    api_key = request.headers.get("x-api-key") or request.query_params.get("x-api-key")
+    api_key = (
+        request.headers.get("x-api-key")
+        or request.headers.get("x-goog-api-key")
+        or request.query_params.get("x-api-key")
+    )
     if api_key:
         return api_key.strip() or None
     return None

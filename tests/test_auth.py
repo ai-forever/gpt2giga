@@ -30,6 +30,13 @@ def test_verify_api_key_success_x_api_key():
     assert verify_api_key(req) == "secret"
 
 
+def test_verify_api_key_success_x_goog_api_key():
+    cfg = ProxyConfig()
+    cfg.proxy_settings.api_key = "secret"
+    req = make_request({"x-goog-api-key": "secret"}, cfg)
+    assert verify_api_key(req) == "secret"
+
+
 def test_verify_api_key_missing():
     cfg = ProxyConfig()
     cfg.proxy_settings.api_key = "secret"

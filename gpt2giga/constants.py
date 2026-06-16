@@ -71,6 +71,7 @@ SENSITIVE_KEYS = frozenset(
         "api_key",
         "api-key",
         "x-api-key",
+        "x-goog-api-key",
         "admin_api_key",
         "x-admin-api-key",
         "opensearch_password",

@@ -60,7 +60,12 @@ def build_cors_settings(config: ProxyConfig) -> CorsSettings:
         if not allow_methods:
             allow_methods = ["GET", "POST", "OPTIONS"]
         if not allow_headers:
-            allow_headers = ["authorization", "content-type", "x-api-key"]
+            allow_headers = [
+                "authorization",
+                "content-type",
+                "x-api-key",
+                "x-goog-api-key",
+            ]
         allow_credentials = False
 
     return CorsSettings(

@@ -15,6 +15,7 @@
 | `integrations/aider/.aider.model.metadata.json` | Aider model metadata |
 | `integrations/claude-code/README.md` | Claude Code setup |
 | `integrations/codex/README.md` | OpenAI Codex setup |
+| `integrations/gemini/README.md` | Gemini CLI setup |
 | `integrations/cursor/README.md` | Cursor setup |
 | `integrations/qwen-code/README.md` | Qwen Code setup |
 | `integrations/openhands/README.md` | OpenHands setup |
@@ -53,7 +54,7 @@
 rg -n "localhost:8090|base_url|api_key|x-api-key" integrations
 
 # Find model naming examples
-rg -n "GigaChat|openai/" integrations
+rg -n "GigaChat|openai/|GEMINI_MODEL" integrations
 
 # Find nginx-specific files
 rg -n "server|proxy_pass|location" integrations/nginx
