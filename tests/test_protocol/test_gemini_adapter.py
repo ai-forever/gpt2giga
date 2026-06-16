@@ -518,6 +518,7 @@ def test_gemini_adapter_maps_single_function_call_from_model():
                         {"text": "I need a lookup."},
                         {
                             "functionCall": {
+                                "id": "state-1",
                                 "name": "lookup",
                                 "args": {"q": "ping"},
                             }
@@ -533,6 +534,7 @@ def test_gemini_adapter_maps_single_function_call_from_model():
     assert message.role == "assistant"
     assert message.content == "I need a lookup."
     assert len(message.tool_calls) == 1
+    assert message.tool_calls[0].id == "state-1"
     assert message.tool_calls[0].name == "lookup"
     assert message.tool_calls[0].arguments == {"q": "ping"}
 
@@ -559,6 +561,7 @@ def test_gemini_adapter_preserves_one_function_response_and_followup():
                     "parts": [
                         {
                             "functionResponse": {
+                                "id": "state-1",
                                 "name": "lookup",
                                 "response": {"answer": "pong"},
                             }
@@ -578,7 +581,7 @@ def test_gemini_adapter_preserves_one_function_response_and_followup():
     ]
     assert normalized.messages[0].tool_calls[0].name == "lookup"
     assert normalized.messages[1].name == "lookup"
-    assert normalized.messages[1].tool_call_id == "lookup"
+    assert normalized.messages[1].tool_call_id == "state-1"
     assert json.loads(normalized.messages[1].content) == {"answer": "pong"}
     assert normalized.messages[2].content == "continue"
 
@@ -736,7 +739,11 @@ def test_gemini_response_adapter_maps_normalized_response():
                     role="assistant",
                     content="ok",
                     tool_calls=[
-                        NormalizedToolCall(name="lookup", arguments='{"q":"ping"}')
+                        NormalizedToolCall(
+                            id="state-1",
+                            name="lookup",
+                            arguments='{"q":"ping"}',
+                        )
                     ],
                 ),
                 finish_reason="tool_calls",
@@ -760,7 +767,11 @@ def test_gemini_response_adapter_maps_normalized_response():
     assert candidate["content"]["role"] == "model"
     assert candidate["content"]["parts"][0] == {"text": "ok"}
     assert candidate["content"]["parts"][1] == {
-        "functionCall": {"name": "lookup", "args": {"q": "ping"}}
+        "functionCall": {
+            "id": "state-1",
+            "name": "lookup",
+            "args": {"q": "ping"},
+        }
     }
     assert candidate["finishReason"] == "STOP"
 
@@ -783,6 +794,31 @@ def test_gemini_stream_message_end_includes_usage_metadata():
         "promptTokenCount": 2,
         "candidatesTokenCount": 3,
         "totalTokenCount": 5,
+    }
+
+
+def test_gemini_stream_tool_call_includes_state_id():
+    payload = normalized_stream_event_to_gemini_chunk(
+        NormalizedStreamEvent(
+            type="tool_call_start",
+            id="req-1",
+            model="gemini-pro",
+            tool_call=NormalizedToolCall(
+                id="state-1",
+                name="lookup",
+                arguments={"q": "ping"},
+            ),
+        ),
+        requested_model="gemini-pro",
+        response_id="fallback",
+    )
+
+    assert payload["candidates"][0]["content"]["parts"][0] == {
+        "functionCall": {
+            "id": "state-1",
+            "name": "lookup",
+            "args": {"q": "ping"},
+        }
     }
 
 

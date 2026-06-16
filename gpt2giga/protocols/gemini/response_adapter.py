@@ -104,10 +104,13 @@ def _tool_calls_to_gemini_parts(
 ) -> list[dict[str, Any]]:
     return [
         {
-            "functionCall": {
-                "name": tool_call.name or "",
-                "args": _tool_arguments(tool_call.arguments),
-            }
+            "functionCall": _compact_dict(
+                {
+                    "id": tool_call.id,
+                    "name": tool_call.name or "",
+                    "args": _tool_arguments(tool_call.arguments),
+                }
+            )
         }
         for tool_call in tool_calls
     ]
@@ -123,6 +126,10 @@ def _tool_arguments(value: Any) -> dict[str, Any]:
             return {"arguments": value}
         return parsed if isinstance(parsed, dict) else {"arguments": parsed}
     return {} if value is None else {"arguments": value}
+
+
+def _compact_dict(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 def _role_to_gemini(role: str) -> str:

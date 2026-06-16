@@ -373,6 +373,7 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
                     "parts": [
                         {
                             "functionCall": {
+                                "id": "state-1",
                                 "name": "first",
                                 "args": {"value": 1},
                             }
@@ -390,6 +391,7 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
                     "parts": [
                         {
                             "functionResponse": {
+                                "id": "state-1",
                                 "name": "first",
                                 "response": {"result": "one"},
                             }
@@ -415,6 +417,7 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
             "tool_calls": [
                 {
                     "type": "function",
+                    "id": "state-1",
                     "function": {
                         "name": "first",
                         "arguments": {"value": 1},
@@ -433,9 +436,10 @@ def test_gemini_generate_content_preserves_multi_function_response_payload():
             "role": "tool",
             "content": '{"result": "one"}',
             "name": "first",
-            "tool_call_id": "first",
+            "tool_call_id": "state-1",
             "gemini_role": "function",
             "functionResponse": {
+                "id": "state-1",
                 "name": "first",
                 "response": {"result": "one"},
             },

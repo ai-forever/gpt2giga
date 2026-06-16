@@ -51,6 +51,7 @@ if response.function_calls:
     function_call = response.function_calls[0]
     print("Модель вызвала функцию:")
     print(function_call)
+    print(f"tool state id: {function_call.id}")
 
     tool_result = {
         "city": function_call.args["city"],
@@ -67,18 +68,24 @@ if response.function_calls:
             types.Content(
                 role="model",
                 parts=[
-                    types.Part.from_function_call(
-                        name=function_call.name,
-                        args=function_call.args,
+                    types.Part(
+                        function_call=types.FunctionCall(
+                            id=function_call.id,
+                            name=function_call.name,
+                            args=function_call.args,
+                        )
                     )
                 ],
             ),
             types.Content(
                 role="user",
                 parts=[
-                    types.Part.from_function_response(
-                        name=function_call.name,
-                        response=tool_result,
+                    types.Part(
+                        function_response=types.FunctionResponse(
+                            id=function_call.id,
+                            name=function_call.name,
+                            response=tool_result,
+                        )
                     )
                 ],
             ),

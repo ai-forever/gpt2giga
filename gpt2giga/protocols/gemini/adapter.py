@@ -923,13 +923,14 @@ def _function_call_to_normalized(part: Mapping[str, Any]) -> NormalizedToolCall:
     function_call = _part_value(part, "functionCall", "function_call")
     function_call = function_call if isinstance(function_call, Mapping) else {}
     return NormalizedToolCall(
+        id=_string_or_none(function_call.get("id")),
         type="function",
         name=_string_or_none(function_call.get("name")),
         arguments=function_call.get("args", {}),
         raw_extensions={
             key: value
             for key, value in function_call.items()
-            if key not in {"name", "args"}
+            if key not in {"id", "name", "args"}
         },
     )
 
@@ -950,11 +951,12 @@ def _function_response_to_normalized(
     gemini_role: Any,
 ) -> NormalizedMessage:
     function_response = _function_response_payload(part)
+    tool_call_id = _string_or_none(function_response.get("id"))
     return NormalizedMessage(
         role="tool",
         content=json.dumps(function_response.get("response", {}), ensure_ascii=False),
         name=_string_or_none(function_response.get("name")),
-        tool_call_id=_string_or_none(function_response.get("name")),
+        tool_call_id=tool_call_id or _string_or_none(function_response.get("name")),
         raw_extensions={
             "gemini_role": gemini_role,
             "functionResponse": function_response,

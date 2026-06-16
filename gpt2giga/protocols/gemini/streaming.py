@@ -131,11 +131,18 @@ def _tool_call_part(tool_call: NormalizedToolCall | None) -> dict[str, Any]:
     if not isinstance(args, dict):
         args = {} if args is None else {"arguments": args}
     return {
-        "functionCall": {
-            "name": tool_call.name or "",
-            "args": args,
-        }
+        "functionCall": _compact_dict(
+            {
+                "id": tool_call.id,
+                "name": tool_call.name or "",
+                "args": args,
+            }
+        )
     }
+
+
+def _compact_dict(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 def _finish_reason(value: str | None) -> str:
