@@ -112,6 +112,27 @@ class FakeClientThinkTags:
         return gen()
 
 
+class FakeClientNullReasoning:
+    def astream(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [{"delta": {"content": "A", "reasoning_content": None}}],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [{"delta": {"content": "B", "reasoning_content": None}}],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
 class FakeClientError:
     def astream(self, chat):
         async def gen():
@@ -1163,6 +1184,21 @@ async def test_stream_responses_generator_success():
     assert event_type == "response.completed"
     assert data["response"]["status"] == "completed"
     assert data["response"]["output"][0]["content"][0]["text"] == "AB"
+
+
+async def test_stream_responses_generator_ignores_null_reasoning_content():
+    req = FakeRequest(FakeClientNullReasoning())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(req, chat, response_id="null-reason"):
+        lines.append(line)
+
+    completed = [line for line in lines if "event: response.completed" in line][-1]
+    data = json.loads(completed.strip().split("\n")[1].replace("data: ", ""))
+    output = data["response"]["output"]
+
+    assert [item["type"] for item in output] == ["message"]
+    assert output[0]["content"][0]["text"] == "AB"
 
 
 async def test_stream_responses_generator_preserves_reasoning_config():

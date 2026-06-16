@@ -93,6 +93,35 @@ class FakeGigachat:
         return gen()
 
 
+class FakeGigachatNullReasoningStream(FakeGigachat):
+    """Fake v1 stream chunks that include null reasoning_content fields."""
+
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "choices": [
+                        {"delta": {"content": "Жил-был кот", "reasoning_content": None}}
+                    ],
+                    "usage": None,
+                }
+            )
+            yield MockResponse(
+                {
+                    "choices": [
+                        {"delta": {"content": " Барсик.", "reasoning_content": None}}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+            )
+
+        return gen()
+
+
 class FakeGigachatTokenRecorder(FakeGigachat):
     def __init__(self):
         super().__init__()
@@ -1816,6 +1845,51 @@ class TestMessagesEndpoint:
         assert "Hello" in attributes["input.value"]
         assert "Hello!" in attributes["output.value"]
         assert attributes["llm.token_count.completion"] == 2
+
+    def test_stream_ignores_null_reasoning_content_in_v1_chunks(self):
+        app = make_app(FakeGigachatNullReasoningStream())
+        app.state.config = ProxyConfig(
+            proxy=ProxySettings(
+                structured_output_mode="function_call",
+                observability_capture_content=True,
+                observability_capture_messages=True,
+                observability_capture_responses=True,
+            )
+        )
+        app.state.observability_sink = RecordingObservabilitySink()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 200
+        data_lines = [
+            line.replace("data: ", "")
+            for line in resp.text.strip().split("\n")
+            if line.startswith("data: ")
+        ]
+        deltas = [
+            json.loads(line)
+            for line in data_lines
+            if json.loads(line).get("type") == "content_block_delta"
+        ]
+        assert [delta["delta"]["type"] for delta in deltas] == [
+            "text_delta",
+            "text_delta",
+        ]
+        assert "".join(delta["delta"]["text"] for delta in deltas) == (
+            "Жил-был кот Барсик."
+        )
+
+        _name, attributes, _context, _events = app.state.observability_sink.events[0]
+        assert "Жил-был кот Барсик." in attributes["output.value"]
+        assert "reasoning_content" not in attributes["output.value"]
+        assert "None" not in attributes["output.value"]
 
     def test_stream_extracts_think_tags(self):
         app = make_app(FakeGigachatThinkTags())

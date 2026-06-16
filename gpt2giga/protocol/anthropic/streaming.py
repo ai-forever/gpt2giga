@@ -99,9 +99,9 @@ async def _stream_anthropic_generator(
                     giga_dict = chunk.model_dump()
                     choice = giga_dict["choices"][0]
                     delta = choice.get("delta", {})
-                    delta_content = delta.get("content", "")
+                    delta_content = _delta_text(delta.get("content"))
                     delta_function_call = delta.get("function_call")
-                    delta_reasoning = delta.get("reasoning_content", "")
+                    delta_reasoning = _delta_text(delta.get("reasoning_content"))
                     parsed_content = reasoning_parser.feed(delta_content)
                     delta_content = parsed_content.content
                     inline_data = delta.get("inline_data")
@@ -456,3 +456,7 @@ async def _stream_anthropic_chat_completion_generator(
         effective_model=effective_model,
     ):
         yield event
+
+
+def _delta_text(value: Any) -> str:
+    return value if isinstance(value, str) else ""
