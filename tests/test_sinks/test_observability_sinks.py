@@ -811,7 +811,7 @@ async def test_response_observability_uses_previous_response_id_as_session():
     )
 
     name, attributes, _context, events = sink.events[0]
-    assert name == "Responses"
+    assert name == "OpenAI-Responses"
     assert attributes["gpt2giga.api_format"] == "responses"
     assert attributes["session.id"] == "thread_1"
     assert attributes["conversation.id"] == "thread_1"

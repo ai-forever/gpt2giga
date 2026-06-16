@@ -247,6 +247,17 @@ class FailingPrepareRequestTransformer(FakeRequestTransformer):
         raise RuntimeError("prepare stream payload failed")
 
 
+class RecordingObservabilitySink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, name, attributes=None, *, context=None, events=None):
+        self.events.append((name, attributes or {}, context, list(events or [])))
+
+    async def flush(self):
+        return None
+
+
 def make_app(
     *,
     include_prepared_files_batches=False,
@@ -296,6 +307,23 @@ def test_gemini_generate_content_roundtrips_through_gigachat_provider():
     assert payload["messages"][0] == {"role": "system", "content": "Be concise."}
     assert payload["messages"][1] == {"role": "user", "content": "Hello"}
     assert payload["max_tokens"] == 64
+
+
+def test_gemini_generate_content_emits_phoenix_span_name():
+    app = make_app()
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={"contents": [{"parts": [{"text": "Hello"}]}]},
+    )
+
+    assert response.status_code == 200
+    name, attributes, _context, events = app.state.observability_sink.events[0]
+    assert name == "Gemini-Content"
+    assert attributes["gpt2giga.api_format"] == "generate_content"
+    assert events == []
 
 
 def test_gemini_generate_content_preserves_multi_function_response_payload():

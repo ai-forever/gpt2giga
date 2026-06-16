@@ -157,7 +157,7 @@ def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    attributes = emitted["ChatCompletion"]
+    attributes = emitted["OpenAI-Completions"]
     assert attributes["gpt2giga.api_format"] == "chat_completions"
     assert "secret prompt" in attributes["input.value"]
     assert "ok" in attributes["output.value"]
@@ -234,7 +234,7 @@ def test_chat_completions_legacy_stream_emits_phoenix_input_output_span():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    attributes = emitted["ChatCompletion"]
+    attributes = emitted["OpenAI-Completions"]
 
     assert response.status_code == 200
     assert attributes["gpt2giga.api_format"] == "chat_completions"
@@ -304,10 +304,10 @@ def test_chat_completions_normalization_on_emits_safe_llm_observability_spans():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    assert list(emitted) == ["ChatCompletion"]
-    assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
-    assert emitted["ChatCompletion"]["llm.input_messages.count"] == 1
-    assert emitted["ChatCompletion"]["llm.finish_reason"] == "tool_calls"
+    assert list(emitted) == ["OpenAI-Completions"]
+    assert emitted["OpenAI-Completions"]["gpt2giga.api_format"] == "chat_completions"
+    assert emitted["OpenAI-Completions"]["llm.input_messages.count"] == 1
+    assert emitted["OpenAI-Completions"]["llm.finish_reason"] == "tool_calls"
     assert "secret prompt" not in json.dumps(emitted)
 
 
@@ -363,7 +363,7 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     event_names = [
         event["name"]
         for name, _attributes, _context, events in app.state.observability_sink.events
-        if name == "ChatCompletion"
+        if name == "OpenAI-Completions"
         for event in events
     ]
     emitted = {
@@ -376,9 +376,9 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     assert "stream.start" in event_names
     assert "stream.completed" in event_names
     assert "stream.emit" not in emitted
-    assert "ChatCompletion" in emitted
-    assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
-    assert "hi" in emitted["ChatCompletion"]["input.value"]
+    assert "OpenAI-Completions" in emitted
+    assert emitted["OpenAI-Completions"]["gpt2giga.api_format"] == "chat_completions"
+    assert "hi" in emitted["OpenAI-Completions"]["input.value"]
 
 
 def test_chat_completions_stream_span_event_failure_does_not_break_sse(monkeypatch):
@@ -419,7 +419,7 @@ def test_chat_completions_stream_span_event_failure_does_not_break_sse(monkeypat
 
     assert response.status_code == 200
     assert "data: [DONE]" in body
-    assert "ChatCompletion" in emitted
+    assert "OpenAI-Completions" in emitted
 
 
 def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():

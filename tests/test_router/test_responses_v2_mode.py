@@ -290,7 +290,7 @@ def test_responses_v1_non_stream_emits_phoenix_llm_span():
         name: (attributes, events)
         for name, attributes, _context, events in app.state.observability_sink.events
     }
-    attributes, events = emitted["Responses"]
+    attributes, events = emitted["OpenAI-Responses"]
 
     assert response.status_code == 200
     assert attributes["gpt2giga.api_format"] == "responses"
@@ -327,9 +327,9 @@ def test_responses_v2_uses_thread_id_as_response_id():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    assert emitted["Responses"]["gpt2giga.api_format"] == "responses"
-    assert emitted["Responses"]["session.id"] == "thread_1"
-    assert emitted["Responses"]["conversation.id"] == "thread_1"
+    assert emitted["OpenAI-Responses"]["gpt2giga.api_format"] == "responses"
+    assert emitted["OpenAI-Responses"]["session.id"] == "thread_1"
+    assert emitted["OpenAI-Responses"]["conversation.id"] == "thread_1"
 
 
 def test_responses_v2_stream_uses_chat_completion_stream():
@@ -387,7 +387,7 @@ def test_responses_v2_stream_emits_phoenix_llm_span():
         name: (attributes, events)
         for name, attributes, _context, events in app.state.observability_sink.events
     }
-    attributes, events = emitted["Responses"]
+    attributes, events = emitted["OpenAI-Responses"]
     event_names = [event["name"] for event in events]
 
     assert response.status_code == 200
@@ -436,5 +436,5 @@ def test_responses_v2_stream_uses_thread_id_as_response_id():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    assert emitted["Responses"]["session.id"] == "thread_1"
-    assert emitted["Responses"]["conversation.id"] == "thread_1"
+    assert emitted["OpenAI-Responses"]["session.id"] == "thread_1"
+    assert emitted["OpenAI-Responses"]["conversation.id"] == "thread_1"

@@ -21,9 +21,9 @@ from gpt2giga.protocols.normalized import (
 
 NORMALIZE_REQUEST_SPAN_NAME = "protocol.normalize.request"
 NORMALIZE_RESPONSE_SPAN_NAME = "protocol.normalize.response"
-CHAT_COMPLETION_SPAN_NAME = "ChatCompletion"
-RESPONSES_SPAN_NAME = "Responses"
-MESSAGES_SPAN_NAME = "Messages"
+CHAT_COMPLETION_SPAN_NAME = "OpenAI-Completions"
+RESPONSES_SPAN_NAME = "OpenAI-Responses"
+MESSAGES_SPAN_NAME = "Anthropic-Messages"
 EMBEDDINGS_SPAN_NAME = "Embeddings"
 STREAM_SPAN_NAME = "stream.emit"
 OPENINFERENCE_SPAN_KIND = "LLM"

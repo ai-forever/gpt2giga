@@ -43,7 +43,7 @@ from gpt2giga.sinks.observability.llm import (
 
 router = APIRouter(tags=[OPENAPI_TAG_GEMINI_GENERATE_CONTENT])
 
-GEMINI_SPAN_NAME = "Gemini"
+GEMINI_SPAN_NAME = "Gemini-Content"
 
 
 @router.post(

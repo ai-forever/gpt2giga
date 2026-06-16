@@ -1251,10 +1251,10 @@ class TestMessagesEndpoint:
 
         assert resp.status_code == 200
         assert [event[0] for event in app.state.observability_sink.events] == [
-            "Messages"
+            "Anthropic-Messages"
         ]
         name, attributes, context, events = app.state.observability_sink.events[0]
-        assert name == "Messages"
+        assert name == "Anthropic-Messages"
         assert attributes["gpt2giga.api_format"] == "messages"
         assert context.protocol == "anthropic"
         assert context.caller_client_family == "anthropic"
@@ -1668,7 +1668,7 @@ class TestMessagesEndpoint:
             name: attributes
             for name, attributes, _context, _events in app.state.observability_sink.events
         }
-        attributes = emitted["Messages"]
+        attributes = emitted["Anthropic-Messages"]
         assert attributes["gpt2giga.api_format"] == "messages"
         assert "1021" in attributes["output.value"]
         assert "reasoning_content" in attributes["output.value"]
@@ -1803,7 +1803,7 @@ class TestMessagesEndpoint:
 
         assert resp.status_code == 200
         assert [event[0] for event in app.state.observability_sink.events] == [
-            "Messages"
+            "Anthropic-Messages"
         ]
         _name, attributes, context, events = app.state.observability_sink.events[0]
         event_names = [event["name"] for event in events]
