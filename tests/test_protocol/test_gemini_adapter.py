@@ -365,6 +365,9 @@ def test_gemini_adapter_preserves_ignored_generation_fields_and_builtin_tools():
                 "responseModalities": ["TEXT"],
                 "responseMimeType": "text/plain",
             },
+            "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT"}],
+            "cachedContent": "cachedContents/1",
+            "serviceTier": "flex",
             "tools": [{"googleSearch": {}}],
         },
         model="gemini-pro",
@@ -377,6 +380,11 @@ def test_gemini_adapter_preserves_ignored_generation_fields_and_builtin_tools():
         "responseModalities": ["TEXT"],
     }
     assert normalized.tools == []
+    assert normalized.raw_extensions["safetySettings"] == [
+        {"category": "HARM_CATEGORY_HARASSMENT"}
+    ]
+    assert normalized.raw_extensions["cachedContent"] == "cachedContents/1"
+    assert normalized.raw_extensions["serviceTier"] == "flex"
     assert normalized.raw_extensions["unsupportedTools"] == [{"googleSearch": {}}]
 
 

@@ -179,6 +179,10 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 Если поле намеренно игнорируется, оно не отправляется upstream как исполняемая GigaChat feature. Literal `extra_body` object может быть передан в GigaChat `additional_fields`; в таком случае поддержку определяет GigaChat API.
 
+В observability ignored request extensions публикуются в redacted атрибуте
+`llm.request.extensions`, а ignored Gemini generation controls остаются в
+`llm.invocation_parameters`.
+
 Справочник по каждому parameter: [Совместимость параметров клиентов](./client-parameter-compatibility.md).
 
 Внутренний normalized слой, который отделяет public protocol formats от

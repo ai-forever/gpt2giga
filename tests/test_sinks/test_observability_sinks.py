@@ -219,6 +219,43 @@ def test_build_llm_request_attributes_default_omits_raw_content():
     assert "llm.tools" not in attributes
 
 
+def test_build_llm_request_attributes_exposes_redacted_request_extensions():
+    request = NormalizedChatRequest(
+        protocol="gemini",
+        model="GigaChat",
+        messages=[NormalizedMessage(role="user", content="hello")],
+        generation_config=NormalizedGenerationConfig(
+            raw_extensions={
+                "candidateCount": 2,
+                "topK": 40,
+                "responseModalities": ["TEXT"],
+            }
+        ),
+        raw_extensions={
+            "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT"}],
+            "cachedContent": "cachedContents/1",
+            "serviceTier": "flex",
+            "unsupportedTools": [{"googleSearch": {"api_key": "secret-gemini-key"}}],
+        },
+    )
+
+    attributes = build_llm_request_attributes(request, settings=capture_off_settings())
+
+    extensions = json.loads(attributes["llm.request.extensions"])
+    invocation = json.loads(attributes["llm.invocation_parameters"])
+
+    assert extensions["safetySettings"] == [{"category": "HARM_CATEGORY_HARASSMENT"}]
+    assert extensions["cachedContent"] == "cachedContents/1"
+    assert extensions["serviceTier"] == "flex"
+    assert extensions["unsupportedTools"] == [{"googleSearch": {"api_key": "***"}}]
+    assert invocation["raw_extensions"] == {
+        "candidateCount": 2,
+        "topK": 40,
+        "responseModalities": ["TEXT"],
+    }
+    assert "secret-gemini-key" not in attributes["llm.request.extensions"]
+
+
 def test_build_llm_request_attributes_includes_mcp_tool_names_from_extensions():
     request = NormalizedChatRequest(
         model="GigaChat",
