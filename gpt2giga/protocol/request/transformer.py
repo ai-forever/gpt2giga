@@ -901,6 +901,9 @@ class RequestTransformer:
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
+        transformed_data["messages"] = self._sanitize_legacy_function_call_history(
+            transformed_data["messages"]
+        )
         self._sanitize_legacy_message_state_ids(transformed_data["messages"])
 
         messages_objs = [
@@ -932,6 +935,56 @@ class RequestTransformer:
         for message in messages:
             if message.get("role") not in {"user", "function"}:
                 message.pop("functions_state_id", None)
+
+    @classmethod
+    def _sanitize_legacy_function_call_history(
+        cls, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Remove OpenAI/Anthropic assistant tool-call replays from v1 history."""
+        sanitized: list[dict[str, Any]] = []
+        for index, message in enumerate(messages):
+            if not cls._is_legacy_assistant_function_call_replay(
+                message,
+                messages[index + 1 :],
+            ):
+                sanitized.append(message)
+                continue
+
+            text = message.get("content")
+            if isinstance(text, str) and text.strip():
+                message = dict(message)
+                message.pop("function_call", None)
+                message.pop("functions_state_id", None)
+                sanitized.append(message)
+
+        return sanitized
+
+    @classmethod
+    def _is_legacy_assistant_function_call_replay(
+        cls,
+        message: dict[str, Any],
+        following_messages: list[dict[str, Any]],
+    ) -> bool:
+        if message.get("role") != "assistant":
+            return False
+
+        function_call = message.get("function_call")
+        if not isinstance(function_call, dict) or not function_call.get("name"):
+            return False
+
+        state_id = cls._extract_tool_call_id(message)
+        function_name = function_call.get("name")
+        for following_message in following_messages:
+            if following_message.get("role") != "function":
+                continue
+
+            result_state_id = cls._extract_tool_call_id(following_message)
+            if state_id and result_state_id == state_id:
+                return True
+            if following_message.get("name") == function_name:
+                return True
+
+        return False
 
     async def _finalize_chat_completion_transformation(
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None

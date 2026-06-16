@@ -118,7 +118,7 @@ def test_chat_completions_non_stream_basic():
     assert body["object"] == "chat.completion"
 
 
-def test_chat_completions_legacy_strips_assistant_function_state_id():
+def test_chat_completions_legacy_strips_assistant_function_call_replay():
     class RecordingGigachat(FakeGigachat):
         def __init__(self):
             self.chat_calls = []
@@ -171,8 +171,8 @@ def test_chat_completions_legacy_strips_assistant_function_state_id():
 
     assert response.status_code == 200
     sent_messages = app.state.gigachat_client.chat_calls[0]["messages"]
-    assert "functions_state_id" not in sent_messages[1]
-    assert sent_messages[2]["functions_state_id"] == state_id
+    assert [message["role"] for message in sent_messages] == ["user", "function"]
+    assert sent_messages[1]["functions_state_id"] == state_id
 
 
 def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():

@@ -1,7 +1,10 @@
 import pytest
+from gigachat.models import Chat
 from loguru import logger
 
 from gpt2giga.common.client_params import ClientParamStatus
+from gpt2giga.models.config import ProxyConfig
+from gpt2giga.protocol import RequestTransformer
 from gpt2giga.protocol.anthropic.params import classify_anthropic_messages_parameter
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
@@ -457,6 +460,56 @@ def test_build_openai_data_from_anthropic_request_ignores_nested_tool_result_blo
 
     assert openai_data["messages"][1]["role"] == "tool"
     assert openai_data["messages"][1]["content"] == "{}"
+
+
+async def test_anthropic_tool_result_history_prepares_valid_legacy_chat_payload():
+    data = {
+        "model": "GigaChat-2-Max",
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get weather.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            }
+        ],
+        "messages": [
+            {"role": "user", "content": "Какая погода в Москве?"},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_weather_1",
+                        "name": "get_weather",
+                        "input": {"city": "Москва"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_weather_1",
+                        "content": '{"city": "Москва", "temp": "+5°C"}',
+                    }
+                ],
+            },
+        ],
+    }
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+    rt = RequestTransformer(ProxyConfig(), logger)
+
+    chat = await rt.prepare_chat(openai_data)
+
+    assert [message["role"] for message in chat["messages"]] == ["user", "function"]
+    assert chat["messages"][1]["functions_state_id"] == "toolu_weather_1"
+    assert chat.get("functions") and len(chat["functions"]) == 1
+    Chat.model_validate(chat)
 
 
 def test_build_openai_data_from_anthropic_request_ignores_unsupported_system_block():
