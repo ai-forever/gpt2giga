@@ -81,6 +81,7 @@ nav:
   - Совместимость:
       - API compatibility: api-compatibility.md
       - Client parameters: client-parameter-compatibility.md
+      - Встроенные инструменты: builtin-tools.md
       - Интеграции: integrations.md
   - Эксплуатация:
       - Развертывание: deployment.md

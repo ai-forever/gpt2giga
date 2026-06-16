@@ -177,11 +177,11 @@ GPT2GIGA_RUN_GEMINI_SMOKE=1 GPT2GIGA_LIVE_ENV_FILE=.env.live uv run pytest tests
 
 `gpt2giga` намеренно принимает многие optional SDK fields, которые GigaChat не может исполнить. Это не даёт клиентам падать до того, как полезная часть запроса попадёт в модель.
 
-Типичные accepted-and-ignored поля:
+Типичные поля, которые принимаются и игнорируются:
 
-- OpenAI metadata и tuning knobs: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
-- Anthropic optional fields: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, unsupported provider tools, citations, unsupported document/file content blocks. Compatible provider tools (`web_search*`, `web_fetch*`, `code_execution*`) map to GigaChat v2 built-ins.
-- Gemini optional fields: `safetySettings`, `cachedContent`, `serviceTier`, ignored `generationConfig` controls such as `candidateCount`/`topK`/`responseModalities`, and unsupported non-function tools are accepted/preserved for diagnostics but are not enforced by GigaChat. Compatible Gemini provider tools map to GigaChat v2 built-ins: `googleSearch` / `googleSearchRetrieval` -> `web_search`, `urlContext` -> `url_content_extraction`, `codeExecution` -> `code_interpreter`. Unsupported `responseMimeType` values and `responseSchema` without `application/json` are rejected.
+- Метаданные OpenAI и параметры тонкой настройки: `user`, `metadata`, `service_tier`, `seed`, `prompt_cache_key`, `logprobs`, `top_logprobs`, `logit_bias`, `prediction`, `web_search_options`, `n > 1`, `parallel_tool_calls=true`;
+- Опциональные поля Anthropic: `metadata`, `service_tier`, `top_k`, `container`, `context_management`, `mcp_servers`, неподдержанные provider tools, citations, неподдержанные document/file content blocks. Совместимые provider tools (`web_search*`, `web_fetch*`, `code_execution*`) маппятся на встроенные инструменты GigaChat v2.
+- Опциональные поля Gemini: `safetySettings`, `cachedContent`, `serviceTier`, игнорируемые controls `generationConfig`, например `candidateCount`/`topK`/`responseModalities`, и неподдержанные non-function tools принимаются и сохраняются для диагностики, но не применяются GigaChat. Совместимые provider tools Gemini маппятся на встроенные инструменты GigaChat v2: `googleSearch` / `googleSearchRetrieval` -> `web_search`, `urlContext` -> `url_content_extraction`, `codeExecution` -> `code_interpreter`; полный маппинг описан в [Встроенных инструментах](builtin-tools.md). Неподдержанные значения `responseMimeType` и `responseSchema` без `application/json` отклоняются.
 
 Если поле намеренно игнорируется, оно не отправляется upstream как исполняемая GigaChat feature. Literal `extra_body` object может быть передан в GigaChat `additional_fields`; в таком случае поддержку определяет GigaChat API.
 

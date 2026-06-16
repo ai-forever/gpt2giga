@@ -151,12 +151,14 @@ backend по `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 | Embeddings | `content.parts[].text`, `requests[].content.parts[].text` для batch embeddings, `outputDimensionality` принимается как compatibility metadata. |
 | Models | `GET /v1beta/models`, `GET /v1/v1beta/models`, `GET /v2/v1beta/models` и `{model}` variants; общие `/models`, `/v1/models`, `/v2/models` возвращают Gemini форму для Google/Gemini requests, например с `X-Goog-Api-Client` |
 
-Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store` и unsupported
-subfields `generationConfig` принимаются и сохраняются в normalized extensions
+Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store` и
+неподдержанные subfields `generationConfig` принимаются и сохраняются в normalized extensions
 для диагностики, но не передаются в GigaChat как исполняемые параметры и не
 применяются прокси. Non-function provider tools, которые не соответствуют
-GigaChat SDK built-ins (`fileSearch`, `googleMaps`, `computerUse`, MCP,
-RAG/retrieval/Vertex tools), также сохраняются только для диагностики.
+встроенным инструментам GigaChat SDK (`fileSearch`, `googleMaps`, `computerUse`,
+MCP, RAG/retrieval/Vertex tools), также сохраняются только для диагностики.
+Полный список канонических встроенных инструментов и aliases провайдеров описан в
+[Встроенных инструментах](builtin-tools.md).
 
 Код Gemini Files и Batches существует, но публичный роутер не подключается,
 пока file/batch execution не будет проверен end-to-end.

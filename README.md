@@ -106,6 +106,7 @@ uv run --group docs mkdocs serve -a 127.0.0.1:8001
 | Быстрый запуск и первые запросы | [docs/quickstart.md](./docs/quickstart.md) |
 | Что поддерживается, отключено или намеренно игнорируется | [docs/api-compatibility.md](./docs/api-compatibility.md) |
 | Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
+| Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |
 | Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
 | Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
 | Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |
