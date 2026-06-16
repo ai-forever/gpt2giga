@@ -133,6 +133,7 @@ class FakeGigaChat:
     def __init__(self):
         self.achat = FakeAChat()
         self.embedding_calls = []
+        self.token_count_calls = []
 
     def astream(self, payload):
         async def gen():
@@ -165,6 +166,7 @@ class FakeGigaChat:
         return gen()
 
     async def atokens_count(self, texts, model):
+        self.token_count_calls.append({"texts": texts, "model": model})
         return [SimpleNamespace(tokens=len(text.split()) or 1) for text in texts]
 
     async def aembeddings(self, texts, model):
@@ -198,6 +200,33 @@ class FakeGigaChat:
         )
 
 
+class EmptyStreamGigaChat(FakeGigaChat):
+    def astream(self, payload):
+        async def gen():
+            if False:
+                yield payload
+
+        return gen()
+
+
+class PartialFailingStreamGigaChat(FakeGigaChat):
+    def astream(self, payload):
+        async def gen():
+            yield MockResponse(
+                {
+                    "choices": [
+                        {
+                            "delta": {"role": "assistant", "content": "Hel"},
+                            "finish_reason": None,
+                        }
+                    ]
+                }
+            )
+            raise RuntimeError("upstream stream exploded")
+
+        return gen()
+
+
 class FakeRequestTransformer:
     def __init__(self):
         self.chat_calls = []
@@ -212,18 +241,38 @@ class FakeRequestTransformer:
         return {"model": data["model"], "messages": data["messages"]}
 
 
-def make_app(*, include_prepared_files_batches=False, mode="v1"):
+class FailingPrepareRequestTransformer(FakeRequestTransformer):
+    async def prepare_chat(self, data, giga_client=None):
+        self.chat_calls.append((data, giga_client))
+        raise RuntimeError("prepare stream payload failed")
+
+
+def make_app(
+    *,
+    include_prepared_files_batches=False,
+    mode="v1",
+    giga_client=None,
+    request_transformer=None,
+):
     app = FastAPI()
     app.include_router(gemini_router)
     if include_prepared_files_batches:
         app.include_router(gemini_files_router)
         app.include_router(gemini_batches_router)
-    app.state.gigachat_client = FakeGigaChat()
-    app.state.request_transformer = FakeRequestTransformer()
+    app.state.gigachat_client = giga_client or FakeGigaChat()
+    app.state.request_transformer = request_transformer or FakeRequestTransformer()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
     app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode=mode))
     return app
+
+
+def _gemini_sse_chunks(body: str):
+    return [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
 
 
 def test_gemini_generate_content_roundtrips_through_gigachat_provider():
@@ -524,11 +573,7 @@ def test_gemini_v2_stream_generate_content_handles_named_done_event():
         body = "".join(response.iter_text())
 
     assert response.status_code == 200
-    chunks = [
-        json.loads(line.removeprefix("data: "))
-        for line in body.splitlines()
-        if line.startswith("data: ")
-    ]
+    chunks = _gemini_sse_chunks(body)
     assert chunks[0]["candidates"][0]["content"]["parts"] == [{"text": "Gem"}]
     assert chunks[-1]["candidates"][0]["content"]["parts"] == [{"text": "ini"}]
     assert chunks[-1]["candidates"][0]["finishReason"] == "STOP"
@@ -543,6 +588,81 @@ def test_gemini_v2_stream_generate_content_handles_named_done_event():
     assert app.state.gigachat_client.achat.stream_calls == [
         {"model": "gemini-pro", "messages": [{"role": "user", "content": "Hello"}]}
     ]
+
+
+def test_gemini_stream_generate_content_empty_stream_returns_final_chunk():
+    app = make_app(giga_client=EmptyStreamGigaChat())
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/models/gemini-pro:streamGenerateContent?alt=sse",
+        json={"contents": [{"parts": [{"text": "Hello"}]}]},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    chunks = _gemini_sse_chunks(body)
+
+    assert response.status_code == 200
+    assert chunks == [
+        {
+            "candidates": [{"index": 0, "finishReason": "STOP"}],
+            "modelVersion": "gemini-pro",
+            "responseId": chunks[0]["responseId"],
+        }
+    ]
+    assert "[DONE]" not in body
+
+
+def test_gemini_stream_generate_content_returns_error_chunk_before_first_delta():
+    app = make_app(request_transformer=FailingPrepareRequestTransformer())
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/models/gemini-pro:streamGenerateContent?alt=sse",
+        json={"contents": [{"parts": [{"text": "Hello"}]}]},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    chunks = _gemini_sse_chunks(body)
+
+    assert response.status_code == 200
+    assert chunks == [
+        {
+            "error": {
+                "code": "internal_error",
+                "message": "Stream interrupted",
+                "status": "RuntimeError",
+            }
+        }
+    ]
+    assert "[DONE]" not in body
+
+
+def test_gemini_stream_generate_content_returns_error_chunk_after_partial_delta():
+    app = make_app(giga_client=PartialFailingStreamGigaChat())
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/models/gemini-pro:streamGenerateContent?alt=sse",
+        json={"contents": [{"parts": [{"text": "Hello"}]}]},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    chunks = _gemini_sse_chunks(body)
+
+    assert response.status_code == 200
+    assert chunks[0]["candidates"][0]["content"]["parts"] == [{"text": "Hel"}]
+    assert chunks[-1] == {
+        "error": {
+            "code": "internal_error",
+            "message": "Stream interrupted",
+            "status": "RuntimeError",
+        }
+    }
+    assert "[DONE]" not in body
 
 
 def test_gemini_count_tokens_and_embeddings():
@@ -565,6 +685,68 @@ def test_gemini_count_tokens_and_embeddings():
     assert app.state.gigachat_client.embedding_calls == [
         {"texts": ["embed me"], "model": "gemini-embedding"}
     ]
+
+
+def test_gemini_count_tokens_includes_system_contents_and_tools():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:countTokens",
+        json={
+            "systemInstruction": {"parts": [{"text": "system prompt"}]},
+            "contents": [{"parts": [{"text": "hello world"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "lookup",
+                            "description": "Find fresh data",
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"totalTokens": 8}
+    assert app.state.gigachat_client.token_count_calls == [
+        {
+            "texts": ["system prompt", "hello world", "lookup", "Find fresh data"],
+            "model": "gemini-pro",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"contents": []},
+        {"contents": [{"parts": []}]},
+        {
+            "cachedContent": "cachedContents/1",
+            "contents": [
+                {
+                    "parts": [
+                        {"fileData": {"fileUri": "files/1"}},
+                        {"inlineData": {"mimeType": "image/png", "data": "AA=="}},
+                    ]
+                }
+            ],
+            "tools": [{"googleSearch": {}}],
+        },
+    ],
+)
+def test_gemini_count_tokens_ignores_non_text_shapes_without_upstream_call(payload):
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post("/models/gemini-pro:countTokens", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {"totalTokens": 0}
+    assert app.state.gigachat_client.token_count_calls == []
 
 
 def test_gemini_batch_embed_contents_and_output_dimensionality():

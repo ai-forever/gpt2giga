@@ -151,7 +151,8 @@ request/observability, но не передается upstream как испол
 - unsupported features: built-in Gemini tools, full multimodal/file-backed
   Gemini flows, non-text embeddings content;
 - approximations: `countTokens` считает извлеченный текст через GigaChat token
-  counting и не является точным Gemini tokenizer.
+  counting, игнорирует non-text/file/cachedContent parts и не является точным
+  Gemini tokenizer.
 
 Copyable release checklist for PR description:
 

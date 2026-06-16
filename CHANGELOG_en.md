@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Unified backend mode for Responses**: removed `GPT2GIGA_RESPONSES_API_MODE`; OpenAI `/responses` now follows `GPT2GIGA_GIGACHAT_API_MODE`, and explicit backend-contract selection is done through `/v1/responses` or `/v2/responses`.
 - **Model discovery negotiation**: shared `/models`, `/v1/models`, and `/v2/models` keep the OpenAI shape by default, but return the Gemini `models/*` shape for Google/Gemini clients based on headers, query parameters, or user-agent.
+- **Gemini release hardening**: Gemini-compatible docs and examples now explicitly describe supported routes, version prefixes, disabled Files/Batches routes, text-only embeddings, the `countTokens` approximation, and the release smoke checklist for `google-genai`/Gemini CLI.
 - **GigaChat provider adapter**: provider labels now pass into the per-model concurrency limiter so Gemini traffic is tracked separately from OpenAI/Anthropic paths; raw extensions are forwarded upstream only for OpenAI protocol payloads.
 - **Dependencies**: added `google-genai` for Gemini examples/integration coverage, refreshed `uv.lock`, and widened supported `tiktoken` and `starlette` versions.
 - **Docs alignment**: README, API compatibility, client parameter compatibility, configuration, examples index, and integrations index were updated for the Gemini-compatible API, Claude Desktop, and removal of the separate Responses API mode flag.
@@ -30,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Codex Responses sources**: the Responses API now returns source annotations and a final source appendix correctly for Codex-style streaming/non-streaming responses.
 - **Claude gateway path normalization**: Claude Desktop gateway paths such as `/v2/v1/messages` now normalize to `/v2/messages` while preserving the GigaChat v2 backend selection.
 - **Observability isolation**: observability sink emit/flush calls are timeout-bounded, OpenTelemetry span emission is moved out of the event loop, and stream observer errors no longer break OpenAI/Anthropic/Gemini response paths.
+- **Gemini tool and embeddings validation**: the Gemini adapter no longer loses multi-`functionResponse` or mixed text/tool parts, `toolConfig.functionCallingConfig` is validated explicitly, invalid `allowedFunctionNames` return `400`, and malformed `embedContent`/`batchEmbedContents` payloads no longer call upstream embeddings with an empty string.
+- **Gemini model capabilities**: Gemini model discovery now conservatively distinguishes generation, embedding, and unknown/custom models instead of advertising the same `supportedGenerationMethods` for every model.
+- **Gemini streaming and diagnostics hardening**: `streamGenerateContent` now returns deterministic Gemini-compatible SSE error chunks for early and partial stream failures, empty streams finish with a valid `STOP` chunk, and accepted-but-ignored Gemini request extensions are visible in redacted observability attributes.
+- **CI runtime warning**: updated the coverage artifact download action to a Node.js 24-based release while keeping the coverage badge workflow behavior unchanged.
 
 ## [0.2.0a2] - 2026-06-11
 

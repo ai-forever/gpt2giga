@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -26,8 +27,10 @@ from gpt2giga.protocols.gemini import (
 )
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
+    NormalizedError,
     NormalizedMessage,
     NormalizedResponse,
+    NormalizedStreamEvent,
     NormalizedUsage,
 )
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
@@ -116,48 +119,104 @@ async def stream_generate_content(model: str, request: Request):
     span_events: list[dict[str, Any]] = []
 
     async def emit_stream() -> AsyncIterator[str]:
+        emitted_chunk = False
         seen_content_delta = False
-        async for event in provider_adapter.stream_chat(
-            normalized_request,
-            context=context,
-            is_disconnected=request.is_disconnected,
-            logger=getattr(request.app.state, "logger", None),
-        ):
-            first_content_delta = (
-                event.type == "content_delta"
-                and bool(event.content_delta)
-                and not seen_content_delta
-            )
-            try:
-                span_events.extend(
-                    build_stream_span_events(
-                        event,
-                        settings=request.app.state.config.proxy_settings,
-                        first_content_delta=first_content_delta,
-                    )
+        try:
+            async for event in provider_adapter.stream_chat(
+                normalized_request,
+                context=context,
+                is_disconnected=request.is_disconnected,
+                logger=getattr(request.app.state, "logger", None),
+            ):
+                first_content_delta = (
+                    event.type == "content_delta"
+                    and bool(event.content_delta)
+                    and not seen_content_delta
                 )
-            except Exception as exc:
-                logger = getattr(request.app.state, "logger", None)
-                if logger is not None:
-                    logger.warning("Gemini stream span event build failed: {}", exc)
+                try:
+                    span_events.extend(
+                        build_stream_span_events(
+                            event,
+                            settings=request.app.state.config.proxy_settings,
+                            first_content_delta=first_content_delta,
+                        )
+                    )
+                except Exception as exc:
+                    logger = getattr(request.app.state, "logger", None)
+                    if logger is not None:
+                        logger.warning(
+                            "Gemini stream span event build failed: {}",
+                            exc,
+                        )
+                try:
+                    observer.observe(event)
+                except Exception as exc:
+                    logger = getattr(request.app.state, "logger", None)
+                    if logger is not None:
+                        logger.warning(
+                            "Gemini stream observability observe failed: {}",
+                            exc,
+                        )
+                if event.type == "content_delta" and event.content_delta:
+                    seen_content_delta = True
+                chunk = normalized_stream_event_to_gemini_sse(
+                    event,
+                    requested_model=requested_model,
+                    response_id=response_id,
+                )
+                if chunk is not None:
+                    emitted_chunk = True
+                    yield chunk
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger = getattr(request.app.state, "logger", None)
+            if logger is not None:
+                logger.warning("Gemini stream failed before response chunk: {}", exc)
+            event = _stream_error_event(
+                response_id=response_id,
+                model=requested_model,
+                error_type=type(exc).__name__,
+                code="internal_error",
+            )
+            span_events.extend(
+                build_stream_span_events(
+                    event,
+                    settings=request.app.state.config.proxy_settings,
+                )
+            )
+            yield normalized_stream_event_to_gemini_sse(
+                event,
+                requested_model=requested_model,
+                response_id=response_id,
+            )
+            return
+
+        if not emitted_chunk:
+            event = _stream_empty_end_event(
+                response_id=response_id,
+                model=requested_model,
+            )
             try:
                 observer.observe(event)
             except Exception as exc:
                 logger = getattr(request.app.state, "logger", None)
                 if logger is not None:
                     logger.warning(
-                        "Gemini stream observability observe failed: {}",
+                        "Gemini empty stream observability observe failed: {}",
                         exc,
                     )
-            if event.type == "content_delta" and event.content_delta:
-                seen_content_delta = True
-            chunk = normalized_stream_event_to_gemini_sse(
+            span_events.extend(
+                build_stream_span_events(
+                    event,
+                    settings=request.app.state.config.proxy_settings,
+                )
+            )
+            yield normalized_stream_event_to_gemini_sse(
                 event,
                 requested_model=requested_model,
                 response_id=response_id,
             )
-            if chunk is not None:
-                yield chunk
 
         try:
             normalized_response = observer.to_normalized_response()
@@ -178,6 +237,38 @@ async def stream_generate_content(model: str, request: Request):
         )
 
     return StreamingResponse(emit_stream(), media_type="text/event-stream")
+
+
+def _stream_error_event(
+    *,
+    response_id: str,
+    model: str,
+    error_type: str,
+    code: str,
+) -> NormalizedStreamEvent:
+    return NormalizedStreamEvent(
+        type="error",
+        id=response_id,
+        model=model,
+        error=NormalizedError(
+            type=error_type,
+            message="Stream interrupted",
+            code=code,
+        ),
+    )
+
+
+def _stream_empty_end_event(
+    *,
+    response_id: str,
+    model: str,
+) -> NormalizedStreamEvent:
+    return NormalizedStreamEvent(
+        type="message_end",
+        id=response_id,
+        model=model,
+        finish_reason="stop",
+    )
 
 
 @router.post(
