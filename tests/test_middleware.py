@@ -126,6 +126,38 @@ def test_path_norm_keeps_outer_gateway_v2_before_api_v1_prefix():
     assert client.post("/proxy/v2/v1/messages", json={}).status_code == 200
 
 
+def test_path_norm_keeps_gateway_version_before_gemini_v1beta_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["v1", "v2", "v1beta", "models"],
+    )
+
+    @test_app.post("/v1/v1beta/models/{model}:generateContent")
+    def create_v1_gemini(model: str):
+        return {"ok": True, "version": "v1", "model": model}
+
+    @test_app.post("/v2/v1beta/models/{model}:generateContent")
+    def create_v2_gemini(model: str):
+        return {"ok": True, "version": "v2", "model": model}
+
+    client = TestClient(test_app)
+
+    v1_response = client.post(
+        "/proxy/v1/v1beta/models/GigaChat:generateContent",
+        json={},
+    )
+    v2_response = client.post(
+        "/proxy/v2/v1beta/models/GigaChat:generateContent",
+        json={},
+    )
+
+    assert v1_response.status_code == 200
+    assert v1_response.json()["version"] == "v1"
+    assert v2_response.status_code == 200
+    assert v2_response.json()["version"] == "v2"
+
+
 def test_pass_token_middleware(monkeypatch):
     test_app = FastAPI()
     test_app.add_middleware(PassTokenMiddleware)
@@ -263,6 +295,32 @@ def test_rquid_middleware_infers_v2_protocols():
     assert client.get("/v2/model/info").json()["protocol"] == "litellm"
     assert (
         client.post("/v2/models/GigaChat:generateContent").json()["protocol"]
+        == "gemini"
+    )
+
+
+def test_rquid_middleware_infers_versioned_gemini_v1beta_protocols():
+    test_app = FastAPI()
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.post("/v1/v1beta/models/{model}:generateContent")
+    async def v1_gemini_context(model: str):
+        return {"model": model, "protocol": get_request_context().protocol}
+
+    @test_app.post("/v2/v1beta/models/{model}:streamGenerateContent")
+    async def v2_gemini_context(model: str):
+        return {"model": model, "protocol": get_request_context().protocol}
+
+    client = TestClient(test_app)
+
+    assert (
+        client.post("/v1/v1beta/models/GigaChat:generateContent").json()["protocol"]
+        == "gemini"
+    )
+    assert (
+        client.post(
+            "/v2/v1beta/models/GigaChat:streamGenerateContent",
+        ).json()["protocol"]
         == "gemini"
     )
 

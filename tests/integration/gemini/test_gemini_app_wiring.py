@@ -243,6 +243,10 @@ def test_gemini_generate_is_mounted_on_shared_prefixes(monkeypatch):
     assert "/v1/models/{model}:generateContent" in paths
     assert "/v2/models/{model}:generateContent" in paths
     assert "/v1beta/models/{model}:generateContent" in paths
+    assert "/v1/v1beta/models/{model}:generateContent" in paths
+    assert "/v2/v1beta/models/{model}:generateContent" in paths
+    assert "/v1/v1beta/models" in paths
+    assert "/v2/v1beta/models" in paths
 
     with TestClient(app) as client:
         install_fake_transformer(app)
@@ -263,15 +267,58 @@ def test_gemini_generate_is_mounted_on_shared_prefixes(monkeypatch):
                 "/v1beta/models/GigaChat:generateContent",
                 json={"contents": [{"parts": [{"text": "v1beta"}]}]},
             ),
+            client.post(
+                "/v1/v1beta/models/GigaChat:generateContent",
+                json={"contents": [{"parts": [{"text": "v1/v1beta"}]}]},
+            ),
+            client.post(
+                "/v2/v1beta/models/GigaChat:generateContent",
+                json={"contents": [{"parts": [{"text": "v2/v1beta"}]}]},
+            ),
         ]
 
-    assert [response.status_code for response in responses] == [200, 200, 200, 200]
+    assert [response.status_code for response in responses] == [
+        200,
+        200,
+        200,
+        200,
+        200,
+        200,
+    ]
     assert [call["mode"] for call in fake_client.chat_calls] == [
         "v1",
         "v1",
         "v2",
         "v1",
+        "v1",
+        "v2",
     ]
+
+
+def test_gemini_v1beta_under_version_prefixes_supports_stream_and_models(
+    monkeypatch,
+):
+    app, fake_client = make_app(monkeypatch)
+
+    with TestClient(app) as client:
+        install_fake_transformer(app)
+        v1_models = client.get("/v1/v1beta/models")
+        v2_model = client.get("/v2/v1beta/models/GigaChat-2-Max")
+        with client.stream(
+            "POST",
+            "/v2/v1beta/models/GigaChat-2-Max:streamGenerateContent?alt=sse",
+            json={"contents": [{"parts": [{"text": "hello"}]}]},
+        ) as response:
+            body = "".join(response.iter_text())
+
+    assert v1_models.status_code == 200
+    assert v1_models.json()["models"][0]["name"] == "models/GigaChat"
+    assert v2_model.status_code == 200
+    assert v2_model.json()["name"] == "models/GigaChat-2-Max"
+    assert response.status_code == 200
+    assert fake_client.chat_calls[-1]["mode"] == "v2-stream"
+    assert '"text": "Gem"' in body
+    assert '"finishReason": "STOP"' in body
 
 
 def test_gemini_prepared_files_and_batches_are_not_publicly_mounted(monkeypatch):
@@ -284,9 +331,15 @@ def test_gemini_prepared_files_and_batches_are_not_publicly_mounted(monkeypatch)
     assert "/v1/files" not in paths
     assert "/v1/batches" not in paths
     assert "/v1/models/{model}:batchGenerateContent" not in paths
+    assert "/v1/v1beta/files" not in paths
+    assert "/v1/v1beta/batches" not in paths
+    assert "/v1/v1beta/models/{model}:batchGenerateContent" not in paths
     assert "/v2/files" not in paths
     assert "/v2/batches" not in paths
     assert "/v2/models/{model}:batchGenerateContent" not in paths
+    assert "/v2/v1beta/files" not in paths
+    assert "/v2/v1beta/batches" not in paths
+    assert "/v2/v1beta/models/{model}:batchGenerateContent" not in paths
 
     with TestClient(app) as client:
         install_fake_transformer(app)
@@ -299,7 +352,12 @@ def test_gemini_prepared_files_and_batches_are_not_publicly_mounted(monkeypatch)
             "/v1/models/GigaChat:batchGenerateContent",
             json={"batch": {"displayName": "demo"}},
         )
+        v2_v1beta_batch = client.post(
+            "/v2/v1beta/models/GigaChat:batchGenerateContent",
+            json={"batch": {"displayName": "demo"}},
+        )
 
     assert files.status_code == 404
     assert batch.status_code in {404, 405}
     assert v1_batch.status_code in {404, 405}
+    assert v2_v1beta_batch.status_code in {404, 405}

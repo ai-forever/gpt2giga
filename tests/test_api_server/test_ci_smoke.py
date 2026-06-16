@@ -226,3 +226,21 @@ def test_ci_smoke_anthropic_messages_gateway_v2_api_v1_prefix(monkeypatch):
     body = response.json()
     assert body["type"] == "message"
     assert body["role"] == "assistant"
+
+
+def test_ci_smoke_gemini_v1beta_under_v2_prefix(monkeypatch):
+    app = make_app(monkeypatch)
+
+    with TestClient(app) as client:
+        install_fake_transformer(app)
+        response = client.post(
+            "/v2/v1beta/models/GigaChat-2-Max:generateContent",
+            json={
+                "contents": [{"parts": [{"text": "Hello"}]}],
+                "generationConfig": {"maxOutputTokens": 64},
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidates"][0]["content"]["parts"] == [{"text": "Hello!"}]

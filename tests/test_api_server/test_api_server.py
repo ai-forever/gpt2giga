@@ -231,12 +231,26 @@ def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
         ("post", "/v1beta/models/{model}:generateContent"): [
             OPENAPI_TAG_GEMINI_GENERATE_CONTENT
         ],
+        ("post", "/v1/v1beta/models/{model}:generateContent"): [
+            OPENAPI_TAG_GEMINI_GENERATE_CONTENT
+        ],
+        ("post", "/v2/v1beta/models/{model}:generateContent"): [
+            OPENAPI_TAG_GEMINI_GENERATE_CONTENT
+        ],
         ("post", "/v1/models/{model}:embedContent"): [OPENAPI_TAG_GEMINI_EMBEDDINGS],
         ("post", "/v2/models/{model}:embedContent"): [OPENAPI_TAG_GEMINI_EMBEDDINGS],
         ("post", "/v1beta/models/{model}:embedContent"): [
             OPENAPI_TAG_GEMINI_EMBEDDINGS
         ],
+        ("post", "/v1/v1beta/models/{model}:embedContent"): [
+            OPENAPI_TAG_GEMINI_EMBEDDINGS
+        ],
+        ("post", "/v2/v1beta/models/{model}:embedContent"): [
+            OPENAPI_TAG_GEMINI_EMBEDDINGS
+        ],
         ("get", "/v1beta/models"): [OPENAPI_TAG_GEMINI_MODELS],
+        ("get", "/v1/v1beta/models"): [OPENAPI_TAG_GEMINI_MODELS],
+        ("get", "/v2/v1beta/models"): [OPENAPI_TAG_GEMINI_MODELS],
         ("post", "/messages"): [OPENAPI_TAG_ANTHROPIC_MESSAGES],
         ("post", "/v1/messages/count_tokens"): [OPENAPI_TAG_ANTHROPIC_MESSAGES],
         ("get", "/model/info"): [OPENAPI_TAG_LITELLM_MODEL_INFO],

@@ -137,6 +137,8 @@ def _infer_protocol(path: str) -> str:
 def _is_gemini_route(path: str) -> bool:
     if path.startswith("/v1beta/"):
         return True
+    if path.startswith(("/v1/v1beta/", "/v2/v1beta/")):
+        return True
     for prefix in ("/v1", "/v2"):
         if path.startswith(f"{prefix}/models/"):
             path = path.removeprefix(prefix)

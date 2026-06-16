@@ -66,23 +66,26 @@ contract, `/v2` принудительно выбирает GigaChat v2 contract
 ## Gemini-compatible routes
 
 Gemini operation routes монтируются в корне, под `/v1`, `/v2` и `/v1beta`,
-как остальные публичные API. `/v1` принудительно выбирает GigaChat v1 backend
-contract, `/v2` — GigaChat v2 backend contract.
+как остальные публичные API. Для клиентов, которые добавляют Gemini API
+version к уже versioned base URL, также доступны `/v1/v1beta` и `/v2/v1beta`.
+`/v1` и `/v1/v1beta` принудительно выбирают GigaChat v1 backend contract,
+`/v2` и `/v2/v1beta` — GigaChat v2 backend contract.
 
-Gemini model discovery в чистой Gemini форме всегда доступен под `/v1beta`.
+Gemini model discovery в чистой Gemini форме всегда доступен под `/v1beta`,
+`/v1/v1beta` и `/v2/v1beta`.
 На общих `/models`, `/v1/models` и `/v2/models` прокси сохраняет OpenAI форму
 по умолчанию, но возвращает Gemini форму для Google/Gemini-клиентов, например
 при заголовке `X-Goog-Api-Client`.
 
 | Route / group | Статус | Комментарий |
 |---|---|---|
-| `GET /v1beta/models` | Поддерживается | Список GigaChat models в Gemini `models/*` форме. |
-| `GET /v1beta/models/{model}` | Поддерживается | Одна модель в Gemini `Model` форме. |
-| `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...` | Поддерживается | Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations и multimodal parts маппятся в normalized chat request. |
-| `POST /models/{model}:streamGenerateContent`, `/v1/...`, `/v2/...`, `/v1beta/...` | Поддерживается | Возвращает `text/event-stream` с Gemini `GenerateContentResponse` chunks. |
-| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...` | Поддерживается | Считает текстовые части contents/system/tools через GigaChat token counting. |
-| `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...` | Поддерживается | Возвращает Gemini `embedding.values`, используя GigaChat embeddings backend. |
-| `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...` | Поддерживается | Возвращает Gemini `embeddings[]`, используя GigaChat embeddings backend. |
+| `GET /v1beta/models`, `/v1/v1beta/models`, `/v2/v1beta/models` | Поддерживается | Список GigaChat models в Gemini `models/*` форме. |
+| `GET /v1beta/models/{model}`, `/v1/v1beta/models/{model}`, `/v2/v1beta/models/{model}` | Поддерживается | Одна модель в Gemini `Model` форме. |
+| `POST /models/{model}:generateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations и multimodal parts маппятся в normalized chat request. |
+| `POST /models/{model}:streamGenerateContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает `text/event-stream` с Gemini `GenerateContentResponse` chunks. |
+| `POST /models/{model}:countTokens`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Считает текстовые части contents/system/tools через GigaChat token counting. |
+| `POST /models/{model}:embedContent`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embedding.values`, используя GigaChat embeddings backend. |
+| `POST /models/{model}:batchEmbedContents`, `/v1/...`, `/v2/...`, `/v1beta/...`, `/v1/v1beta/...`, `/v2/v1beta/...` | Поддерживается | Возвращает Gemini `embeddings[]`, используя GigaChat embeddings backend. |
 | `POST /v1beta/files`, `GET /v1beta/files*` | Отключено | Router-код подготовлен, но не смонтирован по умолчанию. |
 | `POST /v1beta/models/{model}:batchGenerateContent`, `GET /v1beta/batches*` | Отключено | Router-код подготовлен, но не смонтирован до end-to-end batch execution. |
 

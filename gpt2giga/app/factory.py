@@ -169,6 +169,16 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         dependencies=api_dependencies,
     )
     app.include_router(
+        gemini_router,
+        prefix="/v1/v1beta",
+        dependencies=v1_dependencies,
+    )
+    app.include_router(
+        gemini_router,
+        prefix="/v2/v1beta",
+        dependencies=v2_dependencies,
+    )
+    app.include_router(
         litellm_router,
         prefix="/v1",
         dependencies=v1_dependencies,

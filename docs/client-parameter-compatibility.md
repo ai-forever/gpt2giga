@@ -131,8 +131,11 @@ document/file, загрузки в container, блоки результатов 
 ## Параметры тела Gemini
 
 Gemini-like operation routes доступны в корне, под `/v1`, `/v2` и `/v1beta`,
-например `/v1/models/{model}:generateContent`. `/v1` принудительно выбирает
-GigaChat v1 backend contract, `/v2` — GigaChat v2 backend contract.
+например `/v1/models/{model}:generateContent`. Также поддержаны Gemini SDK/CLI
+пути `/v1/v1beta/...` и `/v2/v1beta/...`, когда клиент сам добавляет
+`/v1beta` к versioned base URL. `/v1` и `/v1/v1beta` принудительно выбирают
+GigaChat v1 backend contract, `/v2` и `/v2/v1beta` — GigaChat v2 backend
+contract.
 
 | Эндпоинт | Поддерживается |
 |---|---|
@@ -140,7 +143,7 @@ GigaChat v1 backend contract, `/v2` — GigaChat v2 backend contract.
 | Stream Generate Content | Те же поля, что Generate Content; ответ отдаётся как Gemini `GenerateContentResponse` SSE chunks. |
 | Count Tokens | Текстовые части `contents`, `systemInstruction` и имена/описания function declarations. |
 | Embeddings | `content.parts[].text`, `requests[].content.parts[].text` для batch embeddings, `outputDimensionality` принимается как compatibility metadata. |
-| Models | `GET /v1beta/models`, `GET /v1beta/models/{model}`; общие `/models`, `/v1/models`, `/v2/models` возвращают Gemini форму для Google/Gemini requests, например с `X-Goog-Api-Client` |
+| Models | `GET /v1beta/models`, `GET /v1/v1beta/models`, `GET /v2/v1beta/models` и `{model}` variants; общие `/models`, `/v1/models`, `/v2/models` возвращают Gemini форму для Google/Gemini requests, например с `X-Goog-Api-Client` |
 
 Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store`,
 unsupported subfields `generationConfig` и non-function built-in tools
@@ -154,6 +157,6 @@ unsupported subfields `generationConfig` и non-function built-in tools
 
 Подключенные OpenAI, Anthropic, LiteLLM и Gemini operation routes доступны в
 корне, под `/v1` и под `/v2` через роутер приложения. Gemini-compatible routes
-также доступны под `/v1beta`.
+также доступны под `/v1beta`, `/v1/v1beta` и `/v2/v1beta`.
 Подготовленные, но отключенные маршруты OpenAI Files/Batches, Anthropic Message
 Batches и Gemini Files/Batches намеренно исключены из схемы OpenAPI по умолчанию.
