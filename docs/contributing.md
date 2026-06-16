@@ -38,8 +38,6 @@ uv run --group docs mkdocs serve -a 127.0.0.1:8001
 - ссылки на runnable examples и integration guides в репозитории;
 - GitHub links на deployment manifests и другие файлы вне `docs/`.
 
-`docs/internal/` и `docs/codex/` остаются служебными материалами и не входят в навигацию сайта.
-
 ## Правила обновления
 
 - Держите README и `mkdocs.yml` согласованными по списку основных документов.
