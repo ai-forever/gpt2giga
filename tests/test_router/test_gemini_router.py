@@ -264,6 +264,7 @@ def make_app(
     mode="v1",
     giga_client=None,
     request_transformer=None,
+    **settings,
 ):
     app = FastAPI()
     app.include_router(gemini_router)
@@ -274,7 +275,9 @@ def make_app(
     app.state.request_transformer = request_transformer or FakeRequestTransformer()
     app.state.response_processor = ResponseProcessor(logger=logger)
     app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
-    app.state.config = ProxyConfig(proxy=ProxySettings(gigachat_api_mode=mode))
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(gigachat_api_mode=mode, **settings)
+    )
     return app
 
 
@@ -616,6 +619,35 @@ def test_gemini_generate_content_passes_supported_builtin_tools_to_provider_payl
     }
 
 
+def test_gemini_generate_content_stitches_by_metadata_conversation_id_v2():
+    app = make_app(mode="v2", conversation_stitching_enabled=True)
+    client = TestClient(app)
+
+    first = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "metadata": {"conversation_id": "conv-1"},
+            "contents": [{"parts": [{"text": "Hello"}]}],
+        },
+    )
+    second = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "metadata": {"conversation_id": "conv-1"},
+            "contents": [{"parts": [{"text": "Again"}]}],
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    payload = app.state.request_transformer.chat_completion_calls[1][0]
+    assert payload["messages"] == [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Gemini ok"},
+        {"role": "user", "content": "Again"},
+    ]
+
+
 def test_gemini_stream_generate_content_rejects_malformed_payload_before_upstream():
     app = make_app()
     client = TestClient(app)
@@ -675,6 +707,38 @@ def test_gemini_v2_stream_generate_content_handles_named_done_event():
     assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.stream_calls == [
         {"model": "gemini-pro", "messages": [{"role": "user", "content": "Hello"}]}
+    ]
+
+
+def test_gemini_v2_stream_generate_content_updates_conversation():
+    app = make_app(mode="v2", conversation_stitching_enabled=True)
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/models/gemini-pro:streamGenerateContent?alt=sse",
+        json={
+            "metadata": {"conversation_id": "conv-1"},
+            "contents": [{"parts": [{"text": "Hello"}]}],
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+    second = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "metadata": {"conversation_id": "conv-1"},
+            "contents": [{"parts": [{"text": "Again"}]}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert second.status_code == 200
+    assert '"text": "Gem"' in body
+    payload = app.state.request_transformer.chat_completion_calls[1][0]
+    assert payload["messages"] == [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Gemini"},
+        {"role": "user", "content": "Again"},
     ]
 
 

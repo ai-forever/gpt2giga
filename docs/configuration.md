@@ -252,6 +252,9 @@ GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 Conversation stitching - opt-in in-memory state для stateless chat-like
 клиентов, которые передают стабильный conversation identifier. По умолчанию
 выключено и не влияет на совместимость.
+Поддержаны OpenAI Chat Completions, Anthropic Messages и Gemini GenerateContent.
+Conversation identifier берётся из `conversation`, `metadata.conversation_id`,
+`x-gpt2giga-conversation-id` или, если включено, `x-session-id`.
 
 ```dotenv
 GPT2GIGA_CONVERSATION_STITCHING_ENABLED=False

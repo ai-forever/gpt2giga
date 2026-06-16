@@ -11,6 +11,10 @@ from fastapi.responses import StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
+from gpt2giga.common.conversation import (
+    commit_conversation_turn,
+    stitch_message_list,
+)
 from gpt2giga.common.exceptions import exceptions_handler
 from gpt2giga.common.gigachat_options import extract_gigachat_request_options
 from gpt2giga.common.request_json import read_request_json
@@ -67,6 +71,11 @@ async def generate_content(model: str, request: Request):
         context=context,
         stream=False,
     )
+    conversation_turn = await _stitch_gemini_request(
+        request,
+        data,
+        normalized_request,
+    )
     request_options = extract_gigachat_request_options(request, data)
     provider_adapter = _provider_adapter(request, request_options=request_options)
     normalized_response = await provider_adapter.chat(
@@ -77,6 +86,11 @@ async def generate_content(model: str, request: Request):
         normalized_response,
         requested_model=requested_model,
         context=context,
+    )
+    await commit_conversation_turn(
+        request,
+        conversation_turn,
+        _normalized_response_messages(normalized_response),
     )
     await _emit_gemini_observability(
         request.app.state,
@@ -107,6 +121,11 @@ async def stream_generate_content(model: str, request: Request):
         model=requested_model,
         context=context,
         stream=True,
+    )
+    conversation_turn = await _stitch_gemini_request(
+        request,
+        data,
+        normalized_request,
     )
     request_options = extract_gigachat_request_options(request, data)
     provider_adapter = _provider_adapter(
@@ -228,6 +247,11 @@ async def stream_generate_content(model: str, request: Request):
                     exc,
                 )
             return
+        await commit_conversation_turn(
+            request,
+            conversation_turn,
+            _normalized_response_messages(normalized_response),
+        )
         await _emit_gemini_observability(
             request.app.state,
             normalized_request,
@@ -328,6 +352,33 @@ def _gemini_adapter(request: Request) -> GeminiProtocolAdapter:
         adapter = GeminiProtocolAdapter()
         request.app.state.gemini_protocol_adapter = adapter
     return adapter
+
+
+async def _stitch_gemini_request(
+    request: Request,
+    payload: dict[str, Any],
+    normalized_request,
+):
+    turn = await stitch_message_list(
+        request,
+        [message.to_json_dict() for message in normalized_request.messages],
+        payload=payload,
+        protocol="gemini",
+    )
+    if turn is not None:
+        normalized_request.messages = [
+            NormalizedMessage.model_validate(message)
+            for message in turn.request_messages
+        ]
+    return turn
+
+
+def _normalized_response_messages(normalized_response) -> list[dict[str, Any]]:
+    return [
+        choice.message.to_json_dict()
+        for choice in normalized_response.choices
+        if choice.message is not None
+    ]
 
 
 async def _emit_gemini_observability(

@@ -51,11 +51,17 @@ uv run python examples/openai/responses/basic/single_prompt.py
 # Anthropic Messages API
 uv run python examples/anthropic/messages/basic/messages.py
 
+# Anthropic stateful Messages API
+uv run python examples/anthropic/messages/basic/stateful.py
+
 # Anthropic structured output
 uv run python examples/anthropic/messages/structured_outputs/structured_output.py
 
 # Gemini-like GenerateContent
 uv run python examples/gemini/content/generate_content.py
+
+# Gemini-like stateful GenerateContent
+uv run python examples/gemini/content/stateful.py
 
 # Gemini-like streaming
 uv run python examples/gemini/content/stream_generate_content.py
@@ -66,6 +72,9 @@ uv run python examples/openai/responses/tools/function_calling.py
 
 Files API, OpenAI Batches API, Anthropic Message Batches API и Gemini Files/Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
 
+Stateful Anthropic/Gemini examples require the proxy process to be started with
+`GPT2GIGA_CONVERSATION_STITCHING_ENABLED=True`.
+
 ## Дополнительно
 
 - `examples/openai/embeddings/basic.py`: эмбеддинги (`/embeddings` или `/v1/embeddings`)
@@ -74,6 +83,7 @@ Files API, OpenAI Batches API, Anthropic Message Batches API и Gemini Files/Bat
 - `examples/openai/batches/basic.py`: OpenAI Batches API (router подготовлен, но временно не смонтирован)
 - `examples/anthropic/messages/structured_outputs/structured_output.py`: Anthropic Messages structured output
 - `examples/anthropic/messages/structured_outputs/structured_output_stream.py`: Anthropic streaming structured output
+- `examples/anthropic/messages/basic/stateful.py`: Anthropic stateful Messages через conversation stitching
 - `examples/anthropic/message_batches/structured_output.py`: Anthropic Message Batches structured output
 - `examples/anthropic/message_batches/basic.py`: Anthropic Message Batches API (router подготовлен, но временно не смонтирован)
 - `examples/openai/responses/tools/function_calling.py`: function calling через Responses API
@@ -81,6 +91,7 @@ Files API, OpenAI Batches API, Anthropic Message Batches API и Gemini Files/Bat
 - `examples/gemini/content/generate_content.py`: Gemini-like `generateContent`
 - `examples/gemini/content/stream_generate_content.py`: Gemini-like `streamGenerateContent`
 - `examples/gemini/content/chat.py`: Gemini chat-session через официальный SDK
+- `examples/gemini/content/stateful.py`: Gemini-like stateful `generateContent` через conversation stitching
 - `examples/gemini/content/function_calling.py`: Gemini-like function declarations
 - `examples/gemini/content/structured_output.py`: Gemini-like structured output
 - `examples/gemini/count_tokens/count_tokens.py`: Gemini-like `countTokens`

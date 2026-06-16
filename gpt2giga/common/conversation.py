@@ -19,6 +19,8 @@ from gpt2giga.core.context import (
 )
 from gpt2giga.models.config import ProxySettings
 
+ConversationProtocol = Literal["openai", "anthropic", "gemini"]
+
 
 @dataclass(frozen=True)
 class ConversationKey:
@@ -120,21 +122,39 @@ async def stitch_chat_payload(
     request: Request,
     payload: dict[str, Any],
     *,
-    protocol: Literal["openai", "anthropic"],
+    protocol: ConversationProtocol,
 ) -> ConversationTurn | None:
     """Apply local conversation history to a Chat Completions-shaped payload."""
+    incoming = _coerce_message_list(payload.get("messages"))
+    if incoming is None:
+        return None
+
+    turn = await stitch_message_list(
+        request,
+        incoming,
+        payload=payload,
+        protocol=protocol,
+    )
+    if turn is None:
+        return None
+    payload["messages"] = deepcopy(turn.request_messages)
+    return turn
+
+
+async def stitch_message_list(
+    request: Request,
+    messages: list[dict[str, Any]],
+    *,
+    payload: Mapping[str, Any],
+    protocol: ConversationProtocol,
+) -> ConversationTurn | None:
+    """Apply local conversation history to an already-normalized message list."""
     settings = _settings(request)
     key = _conversation_key(request, payload, settings=settings, protocol=protocol)
     if key is None:
         return None
 
-    incoming = _coerce_message_list(payload.get("messages"))
-    if incoming is None:
-        return None
-
-    turn = await _stitch_messages(request, key, incoming, settings=settings)
-    payload["messages"] = deepcopy(turn.request_messages)
-    return turn
+    return await _stitch_messages(request, key, messages, settings=settings)
 
 
 async def stitch_responses_payload(
@@ -459,7 +479,7 @@ def _conversation_key(
     payload: Mapping[str, Any],
     *,
     settings: ProxySettings,
-    protocol: Literal["openai", "anthropic"],
+    protocol: ConversationProtocol,
 ) -> ConversationKey | None:
     if not settings.conversation_stitching_enabled:
         return None

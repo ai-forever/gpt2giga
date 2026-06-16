@@ -50,17 +50,22 @@ client = Anthropic(
 ```bash
 uv run python examples/anthropic/messages/basic/messages.py
 uv run python examples/anthropic/messages/basic/messages_stream.py
+uv run python examples/anthropic/messages/basic/stateful.py
 uv run python examples/anthropic/messages/structured_outputs/structured_output.py
 uv run python examples/anthropic/messages/structured_outputs/structured_output_stream.py
 uv run python examples/anthropic/message_batches/basic.py
 uv run python examples/anthropic/message_batches/structured_output.py
 ```
 
+`messages/basic/stateful.py` требует, чтобы proxy был запущен с
+`GPT2GIGA_CONVERSATION_STITCHING_ENABLED=True`.
+
 ## Что есть в папке
 
 - `messages/basic/messages.py`: базовый запрос (не стрим)
 - `messages/basic/messages_stream.py`: streaming
 - `messages/basic/multi_turn.py`: многоходовый диалог
+- `messages/basic/stateful.py`: stateful диалог через `x-gpt2giga-conversation-id` и GigaChat v2 chat completions
 - `messages/basic/system_prompt.py`: системный промпт
 - `messages/tools/function_calling.py`: tool use / function calling
 - `messages/reasoning/reasoning.py`: extended thinking (`thinking`) → `reasoning_effort`

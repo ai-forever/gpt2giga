@@ -78,9 +78,13 @@ GigaChat v2 contract.
 uv run python examples/gemini/content/generate_content.py
 uv run python examples/gemini/content/stream_generate_content.py
 uv run python examples/gemini/content/chat.py
+uv run python examples/gemini/content/stateful.py
 uv run python examples/gemini/count_tokens/count_tokens.py
 uv run python examples/gemini/embeddings/embeddings.py
 ```
+
+`content/stateful.py` требует, чтобы proxy был запущен с
+`GPT2GIGA_CONVERSATION_STITCHING_ENABLED=True`.
 
 Prepared Files/Batches examples are included for the implemented router modules,
 but those routes are not mounted by the default public app yet:
@@ -94,7 +98,7 @@ uv run python examples/gemini/batches/batches.py
 
 | Capability | Каталог | Что внутри |
 |---|---|---|
-| content generation | [content/README.md](./content/README.md) | `generate_content`, stream, chat-session, function calling, structured output |
+| content generation | [content/README.md](./content/README.md) | `generate_content`, stream, chat-session, stateful, function calling, structured output |
 | `countTokens` | [count_tokens/README.md](./count_tokens/README.md) | Подсчёт токенов для `models.count_tokens(...)` |
 | files | [files/README.md](./files/README.md) | Prepared upload, list, get, download, delete |
 | batches | [batches/README.md](./batches/README.md) | Prepared `batchGenerateContent` и bundled JSONL source |

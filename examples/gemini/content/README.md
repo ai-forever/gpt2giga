@@ -8,7 +8,11 @@
 ```bash
 uv run python examples/gemini/content/generate_content.py
 uv run python examples/gemini/content/stream_generate_content.py
+uv run python examples/gemini/content/stateful.py
 ```
+
+`stateful.py` требует, чтобы proxy был запущен с
+`GPT2GIGA_CONVERSATION_STITCHING_ENABLED=True`.
 
 ## Версия API
 
@@ -33,5 +37,6 @@ client = genai.Client(
 - `generate_content.py`: базовый `models.generate_content(...)`
 - `stream_generate_content.py`: streaming через `generate_content_stream(...)`
 - `chat.py`: клиентский chat-session поверх `generateContent`
+- `stateful.py`: stateful `generateContent` через `x-gpt2giga-conversation-id` и GigaChat v2 chat completions
 - `function_calling.py`: function declarations и tool response
 - `structured_output.py`: JSON schema / structured output
