@@ -89,6 +89,7 @@ class FakeAChat:
                     {
                         "role": "assistant",
                         "tool_state_id": "new-state",
+                        "content": [{"text": "ini"}],
                     }
                 ],
                 "finish_reason": "stop",
@@ -282,6 +283,7 @@ def test_gemini_v2_stream_generate_content_handles_named_done_event():
         if line.startswith("data: ")
     ]
     assert chunks[0]["candidates"][0]["content"]["parts"] == [{"text": "Gem"}]
+    assert chunks[-1]["candidates"][0]["content"]["parts"] == [{"text": "ini"}]
     assert chunks[-1]["candidates"][0]["finishReason"] == "STOP"
     assert chunks[-1]["usageMetadata"] == {
         "promptTokenCount": 2,

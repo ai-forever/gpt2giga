@@ -82,16 +82,20 @@ def normalized_stream_event_to_gemini_chunk(
             ],
         )
     if event.type == "message_end":
+        candidate = {
+            "index": event.choice_index,
+            "finishReason": _finish_reason(event.finish_reason),
+        }
+        if event.content_delta:
+            candidate["content"] = {
+                "role": "model",
+                "parts": [{"text": event.content_delta}],
+            }
         return _base_chunk(
             event,
             requested_model=requested_model,
             response_id=response_id,
-            candidates=[
-                {
-                    "index": event.choice_index,
-                    "finishReason": _finish_reason(event.finish_reason),
-                }
-            ],
+            candidates=[candidate],
             usage=_usage_to_gemini(event.usage),
         )
     return None

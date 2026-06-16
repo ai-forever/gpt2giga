@@ -348,7 +348,7 @@ class _GeminiStreamObserver:
         self.finish_reason: str | None = None
 
     def observe(self, event) -> None:
-        if event.type == "content_delta" and event.content_delta:
+        if event.type in {"content_delta", "message_end"} and event.content_delta:
             self.content_parts.append(event.content_delta)
         if event.usage is not None:
             self.usage = event.usage

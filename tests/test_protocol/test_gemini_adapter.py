@@ -180,3 +180,26 @@ def test_gemini_stream_message_end_includes_usage_metadata():
         "candidatesTokenCount": 3,
         "totalTokenCount": 5,
     }
+
+
+def test_gemini_stream_message_end_preserves_final_text_delta():
+    payload = normalized_stream_event_to_gemini_chunk(
+        NormalizedStreamEvent(
+            type="message_end",
+            id="req-1",
+            model="gemini-pro",
+            content_delta="?",
+            finish_reason="stop",
+            usage=NormalizedUsage(input_tokens=2, output_tokens=3, total_tokens=5),
+        ),
+        requested_model="gemini-pro",
+        response_id="fallback",
+    )
+
+    candidate = payload["candidates"][0]
+    assert candidate["content"] == {
+        "role": "model",
+        "parts": [{"text": "?"}],
+    }
+    assert candidate["finishReason"] == "STOP"
+    assert payload["usageMetadata"]["totalTokenCount"] == 5
