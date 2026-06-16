@@ -121,13 +121,22 @@ async def test_prepare_chat_keeps_tool_result_state_for_legacy_gigachat():
         }
     )
 
-    assert [message["role"] for message in chat["messages"]] == ["user", "function"]
-    assert chat["messages"][1]["functions_state_id"] == (
+    assert [message["role"] for message in chat["messages"]] == [
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][1]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Москва"},
+    }
+    assert "functions_state_id" not in chat["messages"][1]
+    assert chat["messages"][2]["functions_state_id"] == (
         "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"
     )
 
 
-async def test_prepare_chat_strips_assistant_replay_from_legacy_function_history():
+async def test_prepare_chat_keeps_assistant_replay_in_legacy_function_history():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
 
@@ -170,13 +179,19 @@ async def test_prepare_chat_strips_assistant_replay_from_legacy_function_history
 
     assert [message["role"] for message in chat["messages"]] == [
         "user",
+        "assistant",
         "function",
     ]
-    assert chat["messages"][1]["functions_state_id"] == state_id
+    assert chat["messages"][1]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Москва"},
+    }
+    assert "functions_state_id" not in chat["messages"][1]
+    assert chat["messages"][2]["functions_state_id"] == state_id
     Chat.model_validate(chat)
 
 
-async def test_prepare_chat_keeps_legacy_functions_after_stripping_assistant_replay():
+async def test_prepare_chat_drops_legacy_functions_for_completed_replay_history():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
 
@@ -228,9 +243,63 @@ async def test_prepare_chat_keeps_legacy_functions_after_stripping_assistant_rep
     assert [message["role"] for message in chat["messages"]] == [
         "system",
         "user",
+        "assistant",
         "function",
     ]
-    assert chat["messages"][2]["functions_state_id"] == state_id
+    assert chat["messages"][2]["function_call"] == {
+        "name": "get_horoscope",
+        "arguments": {"sign": "Aquarius"},
+    }
+    assert "functions_state_id" not in chat["messages"][2]
+    assert chat["messages"][3]["functions_state_id"] == state_id
+    assert "functions" not in chat
+    Chat.model_validate(chat)
+
+
+async def test_prepare_chat_keeps_legacy_functions_for_next_user_turn_after_tool():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "Какая погода в Москве?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Москва"},
+                    },
+                },
+                {
+                    "role": "function",
+                    "content": '{"city": "Москва", "temp": "+5°C"}',
+                    "name": "get_weather",
+                    "functions_state_id": "019ed1d4-f021-7c7d-9107-a090ceb57fa7",
+                },
+                {"role": "user", "content": "А в Санкт-Петербурге?"},
+            ],
+            "functions": [
+                {
+                    "name": "get_weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert [message["role"] for message in chat["messages"]] == [
+        "user",
+        "assistant",
+        "function",
+        "user",
+    ]
     assert chat.get("functions") and len(chat["functions"]) == 1
     Chat.model_validate(chat)
 

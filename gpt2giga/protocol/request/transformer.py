@@ -901,10 +901,9 @@ class RequestTransformer:
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
-        transformed_data["messages"] = self._sanitize_legacy_function_call_history(
-            transformed_data["messages"]
-        )
         self._sanitize_legacy_message_state_ids(transformed_data["messages"])
+        if self._has_legacy_function_call_replay(transformed_data["messages"]):
+            transformed_data.pop("functions", None)
 
         messages_objs = [
             Messages.model_validate(m) for m in transformed_data["messages"]
@@ -937,27 +936,18 @@ class RequestTransformer:
                 message.pop("functions_state_id", None)
 
     @classmethod
-    def _sanitize_legacy_function_call_history(
-        cls, messages: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
-        """Remove OpenAI/Anthropic assistant tool-call replays from v1 history."""
-        sanitized: list[dict[str, Any]] = []
-        for index, message in enumerate(messages):
-            if not cls._is_legacy_assistant_function_call_replay(
+    def _has_legacy_function_call_replay(cls, messages: list[dict[str, Any]]) -> bool:
+        """Return true when the current v1 turn is a completed tool result."""
+        if not messages or messages[-1].get("role") != "function":
+            return False
+
+        for index, message in enumerate(messages[:-1]):
+            if cls._is_legacy_assistant_function_call_replay(
                 message,
                 messages[index + 1 :],
             ):
-                sanitized.append(message)
-                continue
-
-            text = message.get("content")
-            if isinstance(text, str) and text.strip():
-                message = dict(message)
-                message.pop("function_call", None)
-                message.pop("functions_state_id", None)
-                sanitized.append(message)
-
-        return sanitized
+                return True
+        return False
 
     @classmethod
     def _is_legacy_assistant_function_call_replay(

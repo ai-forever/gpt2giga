@@ -506,9 +506,18 @@ async def test_anthropic_tool_result_history_prepares_valid_legacy_chat_payload(
 
     chat = await rt.prepare_chat(openai_data)
 
-    assert [message["role"] for message in chat["messages"]] == ["user", "function"]
-    assert chat["messages"][1]["functions_state_id"] == "toolu_weather_1"
-    assert chat.get("functions") and len(chat["functions"]) == 1
+    assert [message["role"] for message in chat["messages"]] == [
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][1]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Москва"},
+    }
+    assert "functions_state_id" not in chat["messages"][1]
+    assert chat["messages"][2]["functions_state_id"] == "toolu_weather_1"
+    assert "functions" not in chat
     Chat.model_validate(chat)
 
 
