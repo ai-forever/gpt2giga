@@ -119,6 +119,49 @@ async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_ch
         assert properties[field_name]["type"] == "string"
 
 
+async def test_request_transformer_normalizes_uppercase_tool_schema_for_legacy_chat():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+    data = {
+        "model": "GigaChat-2-Max",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "city": {"type": "STRING"},
+                            "include_forecast": {"type": "BOOLEAN"},
+                            "daily_highs": {
+                                "type": "ARRAY",
+                                "items": {"type": "NUMBER"},
+                            },
+                        },
+                        "required": ["city"],
+                    },
+                },
+            }
+        ],
+        "messages": [{"role": "user", "content": "weather"}],
+    }
+
+    chat = await rt.prepare_chat(data)
+
+    Chat.model_validate(chat)
+    params = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )
+    assert params["type"] == "object"
+    assert params["properties"]["city"]["type"] == "string"
+    assert params["properties"]["include_forecast"]["type"] == "boolean"
+    assert params["properties"]["daily_highs"]["type"] == "array"
+    assert params["properties"]["daily_highs"]["items"]["type"] == "number"
+
+
 async def test_request_transformer_normalizes_nullable_legacy_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)

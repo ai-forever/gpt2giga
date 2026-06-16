@@ -123,7 +123,7 @@ def test_normalize_json_schema_removes_null_from_anyof():
     schema = {
         "anyOf": [
             {"type": "string"},
-            {"type": "null"},
+            {"type": "NULL"},
         ],
         "default": None,
         "description": "Optional string parameter",
@@ -142,7 +142,7 @@ def test_normalize_json_schema_removes_null_from_oneof():
     schema = {
         "oneOf": [
             {"type": "integer"},
-            {"type": "null"},
+            {"type": ["NULL"]},
         ],
     }
     result = normalize_json_schema(schema)
@@ -408,6 +408,31 @@ def test_normalize_json_schema_array_type_with_null():
     # type should be converted to single string
     assert result["type"] == "string"
     assert result["description"] == "Optional string parameter"
+
+
+def test_normalize_json_schema_uppercase_gemini_types():
+    """Test: converts Gemini Schema Type enum values to JSON Schema types."""
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "city": {"type": "STRING"},
+            "coordinates": {
+                "type": "ARRAY",
+                "items": {"type": "NUMBER"},
+            },
+            "metadata": {"type": "OBJECT"},
+            "optional": {"type": ["STRING", "NULL"]},
+        },
+    }
+
+    result = normalize_json_schema(schema)
+
+    assert result["type"] == "object"
+    assert result["properties"]["city"]["type"] == "string"
+    assert result["properties"]["coordinates"]["type"] == "array"
+    assert result["properties"]["coordinates"]["items"]["type"] == "number"
+    assert result["properties"]["metadata"] == {"type": "object", "properties": {}}
+    assert result["properties"]["optional"]["type"] == "string"
 
 
 def test_normalize_json_schema_array_type_multiple():

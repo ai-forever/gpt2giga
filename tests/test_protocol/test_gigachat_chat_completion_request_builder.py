@@ -72,6 +72,47 @@ async def test_prepare_chat_completion_maps_tools_and_forced_function_call():
     assert request.tool_config.function_name == "__gpt2giga_user_search_web"
 
 
+async def test_prepare_chat_completion_normalizes_uppercase_gemini_tool_schema():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "weather"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get weather.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "city": {"type": "STRING"},
+                                "include_forecast": {"type": "BOOLEAN"},
+                                "daily_highs": {
+                                    "type": "ARRAY",
+                                    "items": {"type": "NUMBER"},
+                                },
+                            },
+                            "required": ["city"],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert isinstance(request, ChatCompletionRequest)
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.parameters["type"] == "object"
+    assert spec.parameters["properties"]["city"]["type"] == "string"
+    assert spec.parameters["properties"]["include_forecast"]["type"] == "boolean"
+    assert spec.parameters["properties"]["daily_highs"]["type"] == "array"
+    assert spec.parameters["properties"]["daily_highs"]["items"]["type"] == "number"
+
+
 async def test_prepare_chat_completion_adds_properties_to_empty_tool_schema():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

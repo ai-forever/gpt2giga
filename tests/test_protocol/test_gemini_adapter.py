@@ -56,11 +56,11 @@ def test_gemini_adapter_maps_generate_content_to_normalized_request():
                             "name": "lookup",
                             "description": "Lookup data.",
                             "parameters": {
-                                "type": "object",
+                                "type": "OBJECT",
                                 "properties": {
-                                    "q": {"type": "string"},
-                                    "answers": {"type": "object"},
-                                    "limit": {"type": ["integer", "null"]},
+                                    "q": {"type": "STRING"},
+                                    "answers": {"type": "OBJECT"},
+                                    "limit": {"type": ["INTEGER", "NULL"]},
                                 },
                             },
                         }
@@ -97,6 +97,8 @@ def test_gemini_adapter_maps_generate_content_to_normalized_request():
     assert payload["messages"][1]["content"][0]["text"] == "Describe this image"
     assert payload["messages"][1]["content"][1]["type"] == "image_url"
     assert payload["tools"][0]["name"] == "lookup"
+    assert payload["tools"][0]["parameters"]["type"] == "object"
+    assert payload["tools"][0]["parameters"]["properties"]["q"]["type"] == "string"
     assert payload["tools"][0]["parameters"]["properties"]["answers"] == {
         "type": "object",
         "properties": {},

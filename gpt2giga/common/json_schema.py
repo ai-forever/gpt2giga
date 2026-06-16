@@ -1,4 +1,31 @@
 _GIGACHAT_ALLOWED_SCHEMA_FORMATS = frozenset({"date", "date-time", "time"})
+_JSON_SCHEMA_TYPES = frozenset(
+    {"array", "boolean", "integer", "null", "number", "object", "string"}
+)
+
+
+def _normalize_schema_type(value):
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _JSON_SCHEMA_TYPES:
+            return normalized
+        return value
+
+    if isinstance(value, list):
+        return [_normalize_schema_type(item) for item in value]
+
+    return value
+
+
+def _schema_type_is_null(schema: object) -> bool:
+    if not isinstance(schema, dict):
+        return False
+    schema_type = _normalize_schema_type(schema.get("type"))
+    if schema_type == "null":
+        return True
+    if isinstance(schema_type, list):
+        return bool(schema_type) and all(item == "null" for item in schema_type)
+    return False
 
 
 def _infer_missing_type(schema: dict, *, default: str = "string") -> str:
@@ -88,7 +115,9 @@ def resolve_schema_refs(schema: dict) -> dict:
                 if union_key in obj:
                     variants = obj[union_key]
                     # Find non-null variant
-                    non_null_variants = [v for v in variants if v.get("type") != "null"]
+                    non_null_variants = [
+                        v for v in variants if not _schema_type_is_null(v)
+                    ]
                     if non_null_variants:
                         # Take the first non-null variant and merge with other props
                         result = resolve(non_null_variants[0], defs)
@@ -133,6 +162,9 @@ def normalize_json_schema(schema: dict) -> dict:
 
     result = dict(schema)
 
+    if "type" in result:
+        result["type"] = _normalize_schema_type(result["type"])
+
     # Handle array-style type field: type: ['string', 'null'] -> type: 'string'
     if "type" in result and isinstance(result["type"], list):
         non_null_types = [t for t in result["type"] if t != "null"]
@@ -148,11 +180,7 @@ def normalize_json_schema(schema: dict) -> dict:
     for key in ("anyOf", "oneOf"):
         if key in result and isinstance(result[key], list):
             # Фильтруем null типы
-            filtered = [
-                item
-                for item in result[key]
-                if not (isinstance(item, dict) and item.get("type") == "null")
-            ]
+            filtered = [item for item in result[key] if not _schema_type_is_null(item)]
 
             # Удаляем anyOf/oneOf - GigaChat SDK его не поддерживает
             del result[key]
