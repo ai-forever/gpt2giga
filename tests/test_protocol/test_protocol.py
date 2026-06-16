@@ -89,7 +89,7 @@ async def test_request_transformer_tools_to_functions():
     assert chat.get("functions") and len(chat["functions"]) == 1
 
 
-async def test_prepare_chat_preserves_tool_call_state_for_legacy_gigachat():
+async def test_prepare_chat_keeps_tool_result_state_for_legacy_gigachat():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
 
@@ -121,12 +121,56 @@ async def test_prepare_chat_preserves_tool_call_state_for_legacy_gigachat():
         }
     )
 
-    assert chat["messages"][1]["functions_state_id"] == (
-        "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"
-    )
+    assert "functions_state_id" not in chat["messages"][1]
     assert chat["messages"][2]["functions_state_id"] == (
         "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"
     )
+
+
+async def test_prepare_chat_strips_assistant_state_from_legacy_function_history():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    state_id = "019ed0fe-194e-7e50-87b1-16acc2509040"
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "Какая погода в Москве?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Москва"},
+                    },
+                    "functions_state_id": state_id,
+                },
+                {
+                    "role": "function",
+                    "content": (
+                        '{"city": "Москва", "temp": "+5°C", "conditions": "облачно"}'
+                    ),
+                    "name": "get_weather",
+                    "functions_state_id": state_id,
+                },
+            ],
+            "functions": [
+                {
+                    "name": "get_weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert "functions_state_id" not in chat["messages"][1]
+    assert chat["messages"][2]["functions_state_id"] == state_id
+    Chat.model_validate(chat)
 
 
 async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_chat():

@@ -901,6 +901,7 @@ class RequestTransformer:
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
+        self._sanitize_legacy_message_state_ids(transformed_data["messages"])
 
         messages_objs = [
             Messages.model_validate(m) for m in transformed_data["messages"]
@@ -924,6 +925,13 @@ class RequestTransformer:
         )
 
         return transformed_data
+
+    @staticmethod
+    def _sanitize_legacy_message_state_ids(messages: list[dict[str, Any]]) -> None:
+        """Keep legacy GigaChat function state ids only on roles accepted by v1."""
+        for message in messages:
+            if message.get("role") not in {"user", "function"}:
+                message.pop("functions_state_id", None)
 
     async def _finalize_chat_completion_transformation(
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None

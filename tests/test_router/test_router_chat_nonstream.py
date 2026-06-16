@@ -118,6 +118,63 @@ def test_chat_completions_non_stream_basic():
     assert body["object"] == "chat.completion"
 
 
+def test_chat_completions_legacy_strips_assistant_function_state_id():
+    class RecordingGigachat(FakeGigachat):
+        def __init__(self):
+            self.chat_calls = []
+
+        async def achat(self, chat):
+            self.chat_calls.append(chat)
+            return await super().achat(chat)
+
+    state_id = "019ed0fe-194e-7e50-87b1-16acc2509040"
+    app = make_app_with_real_transformer()
+    app.state.gigachat_client = RecordingGigachat()
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/completions",
+        json={
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "Какая погода в Москве?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Москва"},
+                    },
+                    "functions_state_id": state_id,
+                },
+                {
+                    "role": "function",
+                    "content": (
+                        '{"city": "Москва", "temp": "+5°C", "conditions": "облачно"}'
+                    ),
+                    "name": "get_weather",
+                    "functions_state_id": state_id,
+                },
+            ],
+            "functions": [
+                {
+                    "name": "get_weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sent_messages = app.state.gigachat_client.chat_calls[0]["messages"]
+    assert "functions_state_id" not in sent_messages[1]
+    assert sent_messages[2]["functions_state_id"] == state_id
+
+
 def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
     class FakeGigachatWithHeaders(FakeGigachat):
         async def achat(self, chat):
