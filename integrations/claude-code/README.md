@@ -4,6 +4,8 @@
 
 [Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview) — CLI-агент от Anthropic для написания кода. С помощью `gpt2giga` можно использовать модели GigaChat в Claude Code, направив запросы Anthropic Messages API через прокси-сервер.
 
+Если нужен Claude Desktop App, а не CLI, используйте отдельный beta guide: [integrations/claude-desktop/README.md](../claude-desktop/README.md).
+
 ## Подключение Claude Code к GigaChat
 
 Для работы Claude Code с GigaChat используется утилита `gpt2giga`, которая преобразует запросы в формате Anthropic Messages API в вызовы GigaChat API.
@@ -57,7 +59,42 @@ Claude Code будет отправлять запросы через `gpt2giga`
 
 ---
 
-## 3. Использование с API-ключом gpt2giga
+## 3. Headless / print mode
+
+Для одноразового запуска без интерактивного UI используйте `-p` / `--print`:
+
+```shell
+export ANTHROPIC_BASE_URL=http://localhost:8090
+export ANTHROPIC_API_KEY=0
+
+claude -p --model GigaChat-2-Max "Что ты умеешь?"
+```
+
+Если нужно получить машинно-читаемый ответ, добавьте `--output-format json` или
+`--output-format stream-json`:
+
+```shell
+claude -p \
+  --model GigaChat-2-Max \
+  --output-format json \
+  "Суммируй архитектуру текущего проекта"
+```
+
+Полезные флаги для автоматизации:
+
+- `--max-turns <N>` — ограничить количество agentic turns.
+- `--no-session-persistence` — не сохранять сессию на диск.
+- `--permission-mode plan` — запустить в read-only planning mode.
+- `--permission-mode bypassPermissions` — разрешить действия без prompts только
+  в изолированной среде, где это действительно безопасно.
+
+В print mode Claude Code всегда использует `ANTHROPIC_API_KEY`, если эта
+переменная задана. Поэтому при включённой авторизации на `gpt2giga` укажите в
+ней реальный `GPT2GIGA_API_KEY`.
+
+---
+
+## 4. Использование с API-ключом gpt2giga
 
 Если на прокси-сервере включена авторизация по API-ключу (`GPT2GIGA_ENABLE_API_KEY_AUTH=True`), передайте значение `GPT2GIGA_API_KEY` через переменную `ANTHROPIC_API_KEY`:
 
@@ -68,7 +105,7 @@ export ANTHROPIC_API_KEY=<ваш_GPT2GIGA_API_KEY>
 
 ---
 
-## 4. Использование удалённого сервера
+## 5. Использование удалённого сервера
 
 Если `gpt2giga` развёрнут на удалённом сервере (например, за nginx с TLS), укажите адрес сервера:
 
@@ -82,7 +119,7 @@ claude
 
 ---
 
-## 5. Настройка через скрипт
+## 6. Настройка через скрипт
 
 Чтобы не задавать переменные окружения вручную при каждом запуске, добавьте их в профиль оболочки (`~/.bashrc`, `~/.zshrc` и т.д.):
 

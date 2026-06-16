@@ -173,7 +173,6 @@ async def _wait_for_token_count(gigachat: GateAnthropicGigachat, count: int) -> 
         await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
 async def test_anthropic_count_tokens_timeout_returns_429() -> None:
     limiter = ModelConcurrencyLimiter({"claude-visible": 1}, acquire_timeout=0)
     gigachat = GateAnthropicGigachat()
@@ -196,7 +195,6 @@ async def test_anthropic_count_tokens_timeout_returns_429() -> None:
     assert limited.json()["error"]["type"] == "rate_limit_error"
 
 
-@pytest.mark.asyncio
 async def test_anthropic_messages_non_stream_serializes_same_upstream_model() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1})
     gigachat = GateAnthropicGigachat()
@@ -225,7 +223,6 @@ async def test_anthropic_messages_non_stream_serializes_same_upstream_model() ->
     assert gigachat.max_active["GigaChat"] == 1
 
 
-@pytest.mark.asyncio
 async def test_anthropic_messages_uses_effective_model_but_preserves_display_model() -> (
     None
 ):
@@ -256,7 +253,6 @@ async def test_anthropic_messages_uses_effective_model_but_preserves_display_mod
     ]
 
 
-@pytest.mark.asyncio
 async def test_stream_anthropic_holds_slot_until_generator_closes() -> None:
     from gpt2giga.protocol.anthropic.streaming import _stream_anthropic_generator
 
@@ -289,7 +285,6 @@ async def test_stream_anthropic_holds_slot_until_generator_closes() -> None:
         pass
 
 
-@pytest.mark.asyncio
 async def test_stream_anthropic_timeout_does_not_call_upstream() -> None:
     from gpt2giga.protocol.anthropic.streaming import _stream_anthropic_generator
 

@@ -1,11 +1,11 @@
 import json
 from unittest.mock import MagicMock
 
-import pytest
+from gigachat.models import Chat
+from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-from loguru import logger
 
 
 class DummyClient:
@@ -13,12 +13,39 @@ class DummyClient:
         self.called = False
 
 
+def _kilocode_nullable_parameters():
+    return {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["launch", "click"]},
+            "url": {"type": ["string", "null"], "description": "URL to navigate to"},
+            "coordinate": {
+                "type": ["string", "null"],
+                "description": "Screen coordinate for click actions",
+            },
+            "size": {
+                "type": ["string", "null"],
+                "description": "Viewport dimensions",
+            },
+            "text": {
+                "type": ["string", "null"],
+                "description": "Text to type",
+            },
+            "path": {
+                "type": ["string", "null"],
+                "description": "Screenshot output path",
+            },
+        },
+        "required": ["action", "url", "coordinate", "size", "text", "path"],
+        "additionalProperties": False,
+    }
+
+
 def test_attachment_processor_construction():
     p = AttachmentProcessor(logger)
     assert hasattr(p, "upload_file")
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_collapse_messages():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -37,7 +64,6 @@ async def test_request_transformer_collapse_messages():
     )
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_tools_to_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -63,7 +89,150 @@ async def test_request_transformer_tools_to_functions():
     assert chat.get("functions") and len(chat["functions"]) == 1
 
 
-@pytest.mark.asyncio
+async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_chat():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+    data = {
+        "model": "GigaChat-2-Max",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "browser_action",
+                    "description": "Perform browser actions",
+                    "strict": True,
+                    "parameters": _kilocode_nullable_parameters(),
+                },
+            }
+        ],
+        "messages": [{"role": "user", "content": "open a page"}],
+    }
+
+    chat = await rt.prepare_chat(data)
+
+    Chat.model_validate(chat)
+    properties = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )["properties"]
+    for field_name in ("url", "coordinate", "size", "text", "path"):
+        assert properties[field_name]["type"] == "string"
+
+
+async def test_request_transformer_normalizes_uppercase_tool_schema_for_legacy_chat():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+    data = {
+        "model": "GigaChat-2-Max",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "city": {"type": "STRING"},
+                            "include_forecast": {"type": "BOOLEAN"},
+                            "daily_highs": {
+                                "type": "ARRAY",
+                                "items": {"type": "NUMBER"},
+                            },
+                        },
+                        "required": ["city"],
+                    },
+                },
+            }
+        ],
+        "messages": [{"role": "user", "content": "weather"}],
+    }
+
+    chat = await rt.prepare_chat(data)
+
+    Chat.model_validate(chat)
+    params = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )
+    assert params["type"] == "object"
+    assert params["properties"]["city"]["type"] == "string"
+    assert params["properties"]["include_forecast"]["type"] == "boolean"
+    assert params["properties"]["daily_highs"]["type"] == "array"
+    assert params["properties"]["daily_highs"]["items"]["type"] == "number"
+
+
+async def test_request_transformer_normalizes_nullable_legacy_functions():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+    data = {
+        "model": "GigaChat-2-Max",
+        "functions": [
+            {
+                "name": "browser_action",
+                "description": "Perform browser actions",
+                "parameters": _kilocode_nullable_parameters(),
+            }
+        ],
+        "messages": [{"role": "user", "content": "open a page"}],
+    }
+
+    chat = await rt.prepare_chat(data)
+
+    Chat.model_validate(chat)
+    properties = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )["properties"]
+    for field_name in ("url", "coordinate", "size", "text", "path"):
+        assert properties[field_name]["type"] == "string"
+
+
+async def test_prepare_chat_normalizes_raw_function_schemas():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "final_answer",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "answers": {"type": "object"},
+                                "score": {
+                                    "anyOf": [
+                                        {"type": "integer"},
+                                        {"type": "number"},
+                                        {"type": "null"},
+                                    ]
+                                },
+                                "meta": {"type": ["object", "null"]},
+                            },
+                        },
+                    },
+                }
+            ],
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+    )
+
+    params = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )
+    assert params["properties"]["answers"]["type"] == "object"
+    assert params["properties"]["answers"]["properties"] == {}
+    assert params["properties"]["score"]["type"] == "integer"
+    assert "anyOf" not in params["properties"]["score"]
+    assert params["properties"]["meta"]["type"] == "object"
+    assert params["properties"]["meta"]["properties"] == {}
+
+
 async def test_request_transformer_dev_debug_logging_includes_full_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()

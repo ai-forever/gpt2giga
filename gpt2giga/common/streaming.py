@@ -25,6 +25,12 @@ from gpt2giga.common.model_concurrency import (
     resolve_gigachat_model,
 )
 from gpt2giga.common.reasoning import ReasoningContentParser
+from gpt2giga.common.sources import (
+    SourceMarkerStreamRenderer,
+    extract_sources,
+    has_source_marker_start,
+    merge_inline_data,
+)
 from gpt2giga.common.tools import split_gigachat_tool_name
 from gpt2giga.logger import rquid_context
 from gpt2giga.protocol.response import (
@@ -100,6 +106,29 @@ async def stream_chat_generator(
                             {
                                 "index": 0,
                                 "delta": delta,
+                                "finish_reason": None,
+                                "logprobs": None,
+                            }
+                        ],
+                        "usage": None,
+                        "system_fingerprint": f"fp_{response_id}",
+                    }
+                    yield f"data: {json.dumps(processed)}\n\n"
+            flush_stream_sources = getattr(
+                response_processor, "flush_stream_sources", None
+            )
+            if flush_stream_sources:
+                source_text = flush_stream_sources(response_id, family="chat")
+                if source_text:
+                    processed = {
+                        "id": f"chatcmpl-{response_id}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": source_text},
                                 "finish_reason": None,
                                 "logprobs": None,
                             }
@@ -239,6 +268,29 @@ async def stream_chat_completion_generator(
                             {
                                 "index": 0,
                                 "delta": delta,
+                                "finish_reason": None,
+                                "logprobs": None,
+                            }
+                        ],
+                        "usage": None,
+                        "system_fingerprint": f"fp_{response_id}",
+                    }
+                    yield f"data: {json.dumps(processed)}\n\n"
+            flush_stream_sources = getattr(
+                response_processor, "flush_stream_sources", None
+            )
+            if flush_stream_sources:
+                source_text = flush_stream_sources(response_id, family="chat")
+                if source_text:
+                    processed = {
+                        "id": f"chatcmpl-{response_id}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": source_text},
                                 "finish_reason": None,
                                 "logprobs": None,
                             }
@@ -395,21 +447,7 @@ def _accumulate_builtin_metadata(target: dict[str, Any], delta: dict[str, Any]) 
 
 
 def _merge_inline_data(target: dict[str, Any], inline_data: dict[str, Any]) -> None:
-    for key, value in inline_data.items():
-        if key == "sources" and isinstance(value, dict):
-            sources = target.setdefault("sources", {})
-            if isinstance(sources, dict):
-                sources.update(value)
-            else:
-                target["sources"] = value
-        elif isinstance(value, list):
-            items = target.setdefault(key, [])
-            if isinstance(items, list):
-                items.extend(value)
-            else:
-                target[key] = value
-        elif value is not None:
-            target[key] = value
+    merge_inline_data(target, inline_data)
 
 
 def _builtin_tool_stream_name(name: Any) -> str:
@@ -652,8 +690,11 @@ async def stream_responses_generator(
         logger = getattr(request.app.state, "logger", None)
 
         full_text = ""
+        raw_full_text = ""
         reasoning_text = ""
         reasoning_parser = ReasoningContentParser()
+        source_renderer = SourceMarkerStreamRenderer()
+        source_rendering_enabled = False
         function_call_data = None  # {"name": ..., "arguments": ...}
         functions_state_id = None
         output_item_added = False
@@ -868,11 +909,11 @@ async def stream_responses_generator(
             include_unreferenced: bool,
         ) -> list[str]:
             nonlocal emitted_annotation_count
-            if not output_item_added or not full_text:
+            if not output_item_added or not raw_full_text:
                 return []
 
             annotations = ResponseProcessor._create_url_annotations(
-                full_text,
+                raw_full_text,
                 builtin_message_metadata["inline_data"],
                 include_unreferenced=include_unreferenced,
             )
@@ -897,6 +938,51 @@ async def stream_responses_generator(
                 emitted_annotation_count += 1
             return events
 
+        def emit_text_output_start_events() -> list[str]:
+            nonlocal output_item_added, sequence_number, text_output_index
+            if output_item_added:
+                return []
+
+            text_output_index = len(builtin_tool_stream_order)
+            events = [
+                sse_event(
+                    "response.output_item.added",
+                    {
+                        "type": "response.output_item.added",
+                        "output_index": text_output_index,
+                        "item": {
+                            "id": msg_id,
+                            "status": "in_progress",
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [],
+                        },
+                        "sequence_number": sequence_number,
+                    },
+                )
+            ]
+            sequence_number += 1
+            events.append(
+                sse_event(
+                    "response.content_part.added",
+                    {
+                        "type": "response.content_part.added",
+                        "item_id": msg_id,
+                        "output_index": text_output_index,
+                        "content_index": 0,
+                        "part": {
+                            "type": "output_text",
+                            "text": "",
+                            "annotations": [],
+                        },
+                        "sequence_number": sequence_number,
+                    },
+                )
+            )
+            sequence_number += 1
+            output_item_added = True
+            return events
+
         async def iterate_chunks_with_optional_prefetch():
             stream = aio_enumerate(giga_client.astream(chat_messages))
             if not response_id_from_stream_metadata:
@@ -910,6 +996,7 @@ async def stream_responses_generator(
             try:
                 first_item = await anext(stream)
             except StopAsyncIteration:
+                # Empty upstream streams still need response start events below.
                 pass
             except Exception:
                 for event in response_start_events():
@@ -933,8 +1020,8 @@ async def stream_responses_generator(
 
         async def emit_upstream_events() -> AsyncGenerator[str, None]:
             nonlocal final_usage, full_text, function_call_data, functions_state_id
-            nonlocal is_function_call, output_item_added, reasoning_text
-            nonlocal sequence_number, text_output_index
+            nonlocal is_function_call, output_item_added, raw_full_text, reasoning_text
+            nonlocal sequence_number, source_rendering_enabled, text_output_index
             async with gigachat_request_options(giga_client, request_options):
                 async for (
                     prebuilt_event,
@@ -976,7 +1063,29 @@ async def stream_responses_generator(
                     delta_function_call = delta.get("function_call")
                     delta_reasoning = delta.get("reasoning_content", "")
                     parsed_content = reasoning_parser.feed(delta_content)
-                    delta_content = parsed_content.content
+                    raw_delta_content = parsed_content.content
+                    inline_data = delta.get("inline_data")
+                    had_source_rendering = source_rendering_enabled
+                    source_rendering_enabled = (
+                        source_rendering_enabled
+                        or bool(extract_sources(inline_data or {}))
+                        or has_source_marker_start(raw_delta_content)
+                    )
+                    if (
+                        source_rendering_enabled
+                        and not had_source_rendering
+                        and full_text
+                    ):
+                        source_renderer.mark_emitted_text()
+                    delta_content = (
+                        source_renderer.feed(raw_delta_content)
+                        if source_rendering_enabled
+                        else raw_delta_content
+                    )
+                    if source_rendering_enabled:
+                        source_renderer.merge_inline_data(inline_data)
+                    if raw_delta_content:
+                        raw_full_text += raw_delta_content
                     if parsed_content.reasoning_content:
                         reasoning_text += parsed_content.reasoning_content
                     if delta_reasoning:
@@ -1064,42 +1173,8 @@ async def stream_responses_generator(
                                 function_call_data["arguments"] += args_str
 
                     elif delta_content:
-                        if not output_item_added:
-                            text_output_index = len(builtin_tool_stream_order)
-                            yield sse_event(
-                                "response.output_item.added",
-                                {
-                                    "type": "response.output_item.added",
-                                    "output_index": text_output_index,
-                                    "item": {
-                                        "id": msg_id,
-                                        "status": "in_progress",
-                                        "type": "message",
-                                        "role": "assistant",
-                                        "content": [],
-                                    },
-                                    "sequence_number": sequence_number,
-                                },
-                            )
-                            sequence_number += 1
-
-                            yield sse_event(
-                                "response.content_part.added",
-                                {
-                                    "type": "response.content_part.added",
-                                    "item_id": msg_id,
-                                    "output_index": text_output_index,
-                                    "content_index": 0,
-                                    "part": {
-                                        "type": "output_text",
-                                        "text": "",
-                                        "annotations": [],
-                                    },
-                                    "sequence_number": sequence_number,
-                                },
-                            )
-                            sequence_number += 1
-                            output_item_added = True
+                        for event in emit_text_output_start_events():
+                            yield event
 
                         full_text += delta_content
                         yield sse_event(
@@ -1129,7 +1204,30 @@ async def stream_responses_generator(
 
         flushed_reasoning = reasoning_parser.flush()
         if flushed_reasoning.content:
-            full_text += flushed_reasoning.content
+            raw_full_text += flushed_reasoning.content
+        if source_rendering_enabled:
+            source_text = source_renderer.feed(flushed_reasoning.content)
+            source_text += source_renderer.finish()
+        else:
+            source_text = flushed_reasoning.content
+        if source_text:
+            for event in emit_text_output_start_events():
+                yield event
+            full_text += source_text
+            yield sse_event(
+                "response.output_text.delta",
+                {
+                    "type": "response.output_text.delta",
+                    "item_id": msg_id,
+                    "output_index": text_output_index,
+                    "content_index": 0,
+                    "delta": source_text,
+                    "sequence_number": sequence_number,
+                },
+            )
+            sequence_number += 1
+            for event in emit_url_annotation_events(include_unreferenced=False):
+                yield event
         if flushed_reasoning.reasoning_content:
             reasoning_text += flushed_reasoning.reasoning_content
 
@@ -1202,7 +1300,7 @@ async def stream_responses_generator(
                 request_data=request_data,
             )
             annotations = ResponseProcessor._create_url_annotations(
-                full_text,
+                raw_full_text,
                 builtin_message_metadata["inline_data"],
             )
             output_text_part = {
@@ -1218,40 +1316,8 @@ async def stream_responses_generator(
 
             if message_needed:
                 if not output_item_added:
-                    text_output_index = len(builtin_tool_stream_order)
-                    yield sse_event(
-                        "response.output_item.added",
-                        {
-                            "type": "response.output_item.added",
-                            "output_index": text_output_index,
-                            "item": {
-                                "id": msg_id,
-                                "status": "in_progress",
-                                "type": "message",
-                                "role": "assistant",
-                                "content": [],
-                            },
-                            "sequence_number": sequence_number,
-                        },
-                    )
-                    sequence_number += 1
-
-                    yield sse_event(
-                        "response.content_part.added",
-                        {
-                            "type": "response.content_part.added",
-                            "item_id": msg_id,
-                            "output_index": text_output_index,
-                            "content_index": 0,
-                            "part": {
-                                "type": "output_text",
-                                "text": "",
-                                "annotations": [],
-                            },
-                            "sequence_number": sequence_number,
-                        },
-                    )
-                    sequence_number += 1
+                    for event in emit_text_output_start_events():
+                        yield event
 
                 for event in emit_url_annotation_events(include_unreferenced=True):
                     yield event

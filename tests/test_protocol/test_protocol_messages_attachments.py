@@ -45,7 +45,6 @@ class DummyGigaClient:
         return type("DummyUploaded", (), {"id_": "file_x"})()
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_with_images_and_limit_two_per_message():
     cfg = ProxyConfig()
     cfg.proxy_settings.enable_images = True
@@ -64,7 +63,6 @@ async def test_transform_messages_with_images_and_limit_two_per_message():
     assert out[0]["attachments"] == ["file_1", "file_2"]
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_total_attachments_limit_ten():
     cfg = ProxyConfig()
     cfg.proxy_settings.enable_images = True
@@ -81,7 +79,6 @@ async def test_transform_messages_total_attachments_limit_ten():
     assert total == 4
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_audio_image_total_size_limit():
     cfg = ProxyConfig()
     cfg.proxy_settings.enable_images = True
@@ -100,7 +97,6 @@ async def test_transform_messages_audio_image_total_size_limit():
     assert out[0]["attachments"] == ["file_1"]
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_raises_413_on_attachment_oversize():
     cfg = ProxyConfig()
     cfg.proxy_settings.enable_images = True

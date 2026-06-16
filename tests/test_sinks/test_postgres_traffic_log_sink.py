@@ -1,7 +1,6 @@
 import json
 from datetime import datetime, timezone
 
-import pytest
 
 from gpt2giga.sinks.logs.models import TrafficLogEvent
 from gpt2giga.sinks.logs.postgres import (
@@ -67,7 +66,6 @@ class FakePool:
         self.closed = True
 
 
-@pytest.mark.asyncio
 async def test_postgres_sink_writes_event_batch():
     pool = FakePool()
 
@@ -110,7 +108,6 @@ async def test_postgres_sink_writes_event_batch():
     assert json.loads(row[25]) == {"choices": []}
 
 
-@pytest.mark.asyncio
 async def test_postgres_sink_does_not_raise_on_pool_failure():
     async def pool_factory(dsn):
         raise RuntimeError("database unavailable")
@@ -121,7 +118,6 @@ async def test_postgres_sink_does_not_raise_on_pool_failure():
     await sink.flush()
 
 
-@pytest.mark.asyncio
 async def test_postgres_query_store_lists_with_filters_and_decodes_json():
     pool = FakePool()
 
@@ -177,7 +173,6 @@ async def test_postgres_query_store_lists_with_filters_and_decodes_json():
     )
 
 
-@pytest.mark.asyncio
 async def test_postgres_query_store_gets_by_id():
     pool = FakePool()
 
@@ -197,7 +192,6 @@ async def test_postgres_query_store_gets_by_id():
     assert args == ("550e8400-e29b-41d4-a716-446655440000",)
 
 
-@pytest.mark.asyncio
 async def test_postgres_query_store_purge_expired_dry_run_counts_by_created_at():
     pool = FakePool()
 
@@ -232,7 +226,6 @@ async def test_postgres_query_store_purge_expired_dry_run_counts_by_created_at()
     assert args == (cutoff,)
 
 
-@pytest.mark.asyncio
 async def test_postgres_query_store_purge_expired_deletes_bounded_batch():
     pool = FakePool()
 
@@ -264,7 +257,6 @@ async def test_postgres_query_store_purge_expired_deletes_bounded_batch():
     assert args == (cutoff, 100)
 
 
-@pytest.mark.asyncio
 async def test_postgres_query_store_redacts_payload_columns():
     class RedactPool(FakePool):
         async def fetchrow(self, sql, *args):

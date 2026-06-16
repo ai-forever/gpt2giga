@@ -1,8 +1,8 @@
 import json
 from typing import Any, Optional
 
+from gpt2giga.common.sources import merge_inline_data
 from gpt2giga.common.tools import map_tool_name_from_gigachat
-
 
 GIGACHAT_PROVIDER_METADATA_KEY = "_gpt2giga_provider_metadata"
 
@@ -56,7 +56,7 @@ def adapt_chat_completion_chunk_to_chat_chunk_shape(
     default_model: str,
 ) -> dict:
     """Adapt a GigaChat chat completion stream chunk to the legacy chat shape."""
-    chunk_data = _dump_model(chunk)
+    chunk_data = _dump_chat_completion_stream_chunk(chunk)
     message = _select_message(chunk_data)
     function_call = extract_chat_completion_function_call(message)
     text = extract_chat_completion_assistant_text(message)
@@ -283,13 +283,24 @@ def adapt_chat_completion_usage(usage: Any) -> Optional[dict]:
     if not usage_data:
         return None
 
-    prompt_tokens = usage_data.get("input_tokens") or 0
-    completion_tokens = usage_data.get("output_tokens") or 0
+    prompt_tokens = usage_data.get("input_tokens")
+    if prompt_tokens is None:
+        prompt_tokens = usage_data.get("prompt_tokens")
+    prompt_tokens = prompt_tokens or 0
+
+    completion_tokens = usage_data.get("output_tokens")
+    if completion_tokens is None:
+        completion_tokens = usage_data.get("completion_tokens")
+    completion_tokens = completion_tokens or 0
+
     total_tokens = usage_data.get("total_tokens")
     if total_tokens is None:
         total_tokens = prompt_tokens + completion_tokens
 
-    input_details = _dump_model(usage_data.get("input_tokens_details"))
+    input_details = _dump_model(
+        usage_data.get("input_tokens_details")
+        or usage_data.get("prompt_tokens_details")
+    )
     return {
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
@@ -310,6 +321,109 @@ def _dump_model(value: Any) -> dict:
     return {}
 
 
+def _dump_chat_completion_stream_chunk(value: Any) -> dict:
+    data = _dump_model(value)
+    if not data:
+        data = _parse_sse_event_text(value)
+    return _unwrap_sse_event_data(data)
+
+
+def _parse_sse_event_text(value: Any) -> dict:
+    if isinstance(value, bytes):
+        try:
+            text = value.decode("utf-8")
+        except UnicodeDecodeError:
+            return {}
+    elif isinstance(value, str):
+        text = value
+    else:
+        return {}
+
+    text = text.strip()
+    if not text:
+        return {}
+
+    payload = _loads_json_dict(text)
+    if payload:
+        return payload
+    if text == "[DONE]":
+        return {"finish_reason": "stop"}
+
+    event: Optional[str] = None
+    data_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip("\r")
+        if not line or line.startswith(":"):
+            continue
+
+        name, separator, line_value = line.partition(":")
+        if not separator:
+            continue
+        if line_value.startswith(" "):
+            line_value = line_value[1:]
+
+        if name == "event":
+            event = line_value
+        elif name == "data":
+            data_lines.append(line_value)
+
+    if not data_lines:
+        return {}
+
+    raw_data = "\n".join(data_lines).strip()
+    if raw_data == "[DONE]":
+        payload = {"finish_reason": "stop"}
+    else:
+        payload = _loads_json_dict(raw_data)
+        if not payload:
+            return {}
+
+    if event and "event" not in payload:
+        payload["event"] = event
+    return payload
+
+
+def _unwrap_sse_event_data(data: dict) -> dict:
+    raw_data = data.get("data")
+    if raw_data is None:
+        return data
+
+    payload: dict[str, Any]
+    if isinstance(raw_data, dict):
+        payload = dict(raw_data)
+    elif isinstance(raw_data, bytes):
+        try:
+            raw_text = raw_data.decode("utf-8").strip()
+        except UnicodeDecodeError:
+            return data
+        payload = {"finish_reason": "stop"} if raw_text == "[DONE]" else {}
+        if not payload:
+            payload = _loads_json_dict(raw_text)
+    elif isinstance(raw_data, str):
+        raw_text = raw_data.strip()
+        payload = {"finish_reason": "stop"} if raw_text == "[DONE]" else {}
+        if not payload:
+            payload = _loads_json_dict(raw_text)
+    else:
+        return data
+
+    if not payload:
+        return data
+
+    for key in ("event", "x_headers"):
+        if key in data and key not in payload:
+            payload[key] = data[key]
+    return payload
+
+
+def _loads_json_dict(value: str) -> dict:
+    try:
+        payload = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _copy_x_headers(target: dict[str, Any], source: dict[str, Any]) -> None:
     x_headers = source.get("x_headers")
     if isinstance(x_headers, dict) and x_headers:
@@ -323,6 +437,18 @@ def _copy_provider_metadata(target: dict[str, Any], source: dict[str, Any]) -> N
 
 
 def _select_message(data: dict) -> dict:
+    choice = _select_choice(data)
+    if choice:
+        for message_key in ("message", "delta"):
+            message = _dump_model(choice.get(message_key))
+            if message:
+                finish_reason = choice.get("finish_reason")
+                if finish_reason is not None:
+                    message.setdefault("finish_reason", finish_reason)
+                return message
+        if {"role", "content", "function_call"} & choice.keys():
+            return choice
+
     if "messages" not in data:
         if {"role", "content", "function_call"} & data.keys():
             return data
@@ -338,6 +464,18 @@ def _select_message(data: dict) -> dict:
             return message_data
 
     return _dump_model(messages[0])
+
+
+def _select_choice(data: dict) -> dict:
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return {}
+
+    for choice in choices:
+        choice_data = _dump_model(choice)
+        if choice_data:
+            return choice_data
+    return {}
 
 
 def _extract_text_content(message: dict) -> str:
@@ -364,25 +502,7 @@ def _append_tool_execution(items: list[dict[str, Any]], value: Any) -> None:
 
 
 def _merge_inline_data(target: dict[str, Any], value: Any) -> None:
-    inline_data = _dump_model(value)
-    if not inline_data:
-        return
-
-    for key, item in inline_data.items():
-        if key == "sources" and isinstance(item, dict):
-            existing = target.setdefault("sources", {})
-            if isinstance(existing, dict):
-                existing.update(item)
-            else:
-                target["sources"] = item
-        elif isinstance(item, list):
-            existing_list = target.setdefault(key, [])
-            if isinstance(existing_list, list):
-                existing_list.extend(item)
-            else:
-                target[key] = item
-        elif item is not None:
-            target[key] = item
+    merge_inline_data(target, _dump_model(value))
 
 
 def _is_image_file(file_data: dict[str, Any]) -> bool:

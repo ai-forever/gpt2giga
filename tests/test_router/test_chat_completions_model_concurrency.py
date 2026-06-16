@@ -148,7 +148,6 @@ async def _wait_for_call_count(gigachat: GateGigachat, count: int) -> None:
         await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
 async def test_chat_completions_non_stream_serializes_same_model() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1})
     gigachat = GateGigachat()
@@ -177,7 +176,6 @@ async def test_chat_completions_non_stream_serializes_same_model() -> None:
     assert gigachat.max_active["GigaChat"] == 1
 
 
-@pytest.mark.asyncio
 async def test_chat_completions_non_stream_different_models_are_independent() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1, "GigaChat-Pro": 1})
     gigachat = GateGigachat()
@@ -199,7 +197,6 @@ async def test_chat_completions_non_stream_different_models_are_independent() ->
     assert second_response.status_code == 200
 
 
-@pytest.mark.asyncio
 async def test_chat_completions_non_stream_timeout_returns_429() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
     gigachat = GateGigachat()
@@ -226,7 +223,6 @@ async def test_chat_completions_non_stream_timeout_returns_429() -> None:
     }
 
 
-@pytest.mark.asyncio
 async def test_chat_completions_pass_model_false_uses_effective_model() -> None:
     limiter = ModelConcurrencyLimiter({"raw-client-model": 1}, acquire_timeout=0)
     gigachat = GateGigachat()
@@ -255,7 +251,6 @@ async def test_chat_completions_pass_model_false_uses_effective_model() -> None:
     assert gigachat.call_count == 1
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_completion_holds_slot_until_generator_closes() -> None:
     from gpt2giga.common.streaming import stream_chat_generator
 
@@ -284,7 +279,6 @@ async def test_stream_chat_completion_holds_slot_until_generator_closes() -> Non
         pass
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_completion_timeout_does_not_call_upstream() -> None:
     from gpt2giga.common.streaming import stream_chat_generator
 
@@ -312,7 +306,6 @@ async def test_stream_chat_completion_timeout_does_not_call_upstream() -> None:
     assert lines[1].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_chat_completions_stream_timeout_returns_http_429() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
     gigachat = StreamingGigachat()

@@ -109,6 +109,55 @@ def test_path_norm_collapses_duplicate_v2_prefix():
     assert client.post("/proxy/v2/v2/chat/completions", json={}).status_code == 200
 
 
+def test_path_norm_keeps_outer_gateway_v2_before_api_v1_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["v1", "v2", "messages"],
+    )
+
+    @test_app.post("/v2/messages")
+    def create_message():
+        return {"ok": True}
+
+    client = TestClient(test_app)
+
+    assert client.post("/v2/v1/messages", json={}).status_code == 200
+    assert client.post("/proxy/v2/v1/messages", json={}).status_code == 200
+
+
+def test_path_norm_keeps_gateway_version_before_gemini_v1beta_prefix():
+    test_app = FastAPI()
+    test_app.add_middleware(
+        PathNormalizationMiddleware,
+        valid_roots=["v1", "v2", "v1beta", "models"],
+    )
+
+    @test_app.post("/v1/v1beta/models/{model}:generateContent")
+    def create_v1_gemini(model: str):
+        return {"ok": True, "version": "v1", "model": model}
+
+    @test_app.post("/v2/v1beta/models/{model}:generateContent")
+    def create_v2_gemini(model: str):
+        return {"ok": True, "version": "v2", "model": model}
+
+    client = TestClient(test_app)
+
+    v1_response = client.post(
+        "/proxy/v1/v1beta/models/GigaChat:generateContent",
+        json={},
+    )
+    v2_response = client.post(
+        "/proxy/v2/v1beta/models/GigaChat:generateContent",
+        json={},
+    )
+
+    assert v1_response.status_code == 200
+    assert v1_response.json()["version"] == "v1"
+    assert v2_response.status_code == 200
+    assert v2_response.json()["version"] == "v2"
+
+
 def test_pass_token_middleware(monkeypatch):
     test_app = FastAPI()
     test_app.add_middleware(PassTokenMiddleware)
@@ -236,10 +285,44 @@ def test_rquid_middleware_infers_v2_protocols():
     async def litellm_context():
         return {"protocol": get_request_context().protocol}
 
+    @test_app.post("/v2/models/{model}:generateContent")
+    async def gemini_context(model: str):
+        return {"model": model, "protocol": get_request_context().protocol}
+
     client = TestClient(test_app)
 
     assert client.get("/v2/messages").json()["protocol"] == "anthropic"
     assert client.get("/v2/model/info").json()["protocol"] == "litellm"
+    assert (
+        client.post("/v2/models/GigaChat:generateContent").json()["protocol"]
+        == "gemini"
+    )
+
+
+def test_rquid_middleware_infers_versioned_gemini_v1beta_protocols():
+    test_app = FastAPI()
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.post("/v1/v1beta/models/{model}:generateContent")
+    async def v1_gemini_context(model: str):
+        return {"model": model, "protocol": get_request_context().protocol}
+
+    @test_app.post("/v2/v1beta/models/{model}:streamGenerateContent")
+    async def v2_gemini_context(model: str):
+        return {"model": model, "protocol": get_request_context().protocol}
+
+    client = TestClient(test_app)
+
+    assert (
+        client.post("/v1/v1beta/models/GigaChat:generateContent").json()["protocol"]
+        == "gemini"
+    )
+    assert (
+        client.post(
+            "/v2/v1beta/models/GigaChat:streamGenerateContent",
+        ).json()["protocol"]
+        == "gemini"
+    )
 
 
 def test_read_request_json_updates_request_context_model():
@@ -494,7 +577,6 @@ def test_rquid_middleware_emits_traffic_event_for_validation_error():
     assert event.metadata["lifecycle"] == "request_completed"
 
 
-@pytest.mark.asyncio
 async def test_traffic_log_body_iterator_emits_stream_completed():
     sink = RecordingTrafficSink()
     context = RequestContext(
@@ -526,7 +608,6 @@ async def test_traffic_log_body_iterator_emits_stream_completed():
     assert sink.events[0].metadata["lifecycle"] == "streaming_completed"
 
 
-@pytest.mark.asyncio
 async def test_traffic_log_body_iterator_emits_stream_aborted():
     sink = RecordingTrafficSink()
     context = RequestContext(

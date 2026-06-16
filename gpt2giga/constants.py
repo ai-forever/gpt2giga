@@ -71,6 +71,7 @@ SENSITIVE_KEYS = frozenset(
         "api_key",
         "api-key",
         "x-api-key",
+        "x-goog-api-key",
         "admin_api_key",
         "x-admin-api-key",
         "opensearch_password",
@@ -91,21 +92,21 @@ SENSITIVE_KEYS = frozenset(
 _KEYS_PATTERN = "|".join(re.escape(k) for k in SENSITIVE_KEYS)
 
 # "key": "value" or 'key': 'value' (JSON-style)
-_JSON_KV_RE = re.compile(
+JSON_KV_RE = re.compile(
     r"""(['"])({keys})\1\s*:\s*(['"])(.+?)\3""".format(keys=_KEYS_PATTERN),
     re.IGNORECASE,
 )
 
 # key=value (query-param / env-var style)
-_KV_EQ_RE = re.compile(
+KV_EQ_RE = re.compile(
     r"\b({keys})=([^\s&,;]+)".format(keys=_KEYS_PATTERN),
     re.IGNORECASE,
 )
 
 # Bearer <token>
-_BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
+BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
 
-_SENSITIVE_CLI_ARGS = frozenset(
+SENSITIVE_CLI_ARGS = frozenset(
     {
         "--proxy.api-key",
         "--proxy.admin-api-key",
@@ -118,4 +119,4 @@ _SENSITIVE_CLI_ARGS = frozenset(
     }
 )
 
-_AUTH_KEYS = ("credentials", "user", "password", "access_token", "key_file_password")
+AUTH_KEYS = ("credentials", "user", "password", "access_token", "key_file_password")

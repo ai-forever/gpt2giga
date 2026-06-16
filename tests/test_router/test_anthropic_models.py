@@ -95,3 +95,34 @@ def test_openai_models_keep_openai_shape_without_anthropic_headers():
     assert body["data"][0]["id"] == "GigaChat"
     assert body["data"][0]["object"] == "model"
     assert "display_name" not in body["data"][0]
+
+
+def test_gemini_models_list_uses_gemini_shape_for_google_client_headers():
+    app = _make_app()
+    response = TestClient(app).get(
+        "/v1/models",
+        headers={"x-goog-api-client": "genai-python/1.0"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["models"][0]["name"] == "models/GigaChat"
+    assert body["models"][0]["supportedGenerationMethods"] == [
+        "generateContent",
+        "streamGenerateContent",
+        "countTokens",
+    ]
+    assert body["nextPageToken"] == ""
+
+
+def test_gemini_model_retrieve_uses_gemini_shape_for_google_client_headers():
+    app = _make_app()
+    response = TestClient(app).get(
+        "/v1/models/GigaChat-Pro",
+        headers={"x-goog-api-client": "genai-python/1.0"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "models/GigaChat-Pro"
+    assert body["baseModelId"] == "GigaChat-Pro"

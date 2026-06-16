@@ -3,7 +3,6 @@ import pytest
 from gpt2giga.common.exceptions import exceptions_handler
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_unexpected_structure(monkeypatch):
     import gigachat
 

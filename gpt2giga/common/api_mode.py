@@ -33,11 +33,3 @@ def resolve_gigachat_api_mode(request: Request) -> GigaChatAPIMode:
     if override is not None:
         return override
     return getattr(request.app.state.config.proxy_settings, "gigachat_api_mode", "v1")
-
-
-def resolve_responses_api_mode(request: Request) -> GigaChatAPIMode:
-    """Resolve the GigaChat API mode for OpenAI Responses requests."""
-    override = get_gigachat_api_mode_override(request)
-    if override is not None:
-        return override
-    return request.app.state.config.proxy_settings.resolve_responses_api_mode()

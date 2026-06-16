@@ -127,9 +127,31 @@ def _infer_protocol(path: str) -> str:
         or normalized.startswith("/messages")
     ):
         return "anthropic"
+    if _is_gemini_route(normalized):
+        return "gemini"
     if normalized in {"/v1/model/info", "/v2/model/info", "/model/info"}:
         return "litellm"
     return "openai"
+
+
+def _is_gemini_route(path: str) -> bool:
+    if path.startswith("/v1beta/"):
+        return True
+    if path.startswith(("/v1/v1beta/", "/v2/v1beta/")):
+        return True
+    for prefix in ("/v1", "/v2"):
+        if path.startswith(f"{prefix}/models/"):
+            path = path.removeprefix(prefix)
+            break
+    gemini_operations = (
+        ":generateContent",
+        ":streamGenerateContent",
+        ":countTokens",
+        ":embedContent",
+        ":batchEmbedContents",
+        ":batchGenerateContent",
+    )
+    return path.startswith("/models/") and path.endswith(gemini_operations)
 
 
 def _client_ip(request: Request) -> Optional[str]:
@@ -146,7 +168,12 @@ def _api_key_value(request: Request) -> Optional[str]:
             return authorization[7:].strip() or None
         return authorization
 
-    api_key = request.headers.get("x-api-key") or request.query_params.get("x-api-key")
+    api_key = (
+        request.headers.get("x-api-key")
+        or request.headers.get("x-goog-api-key")
+        or request.query_params.get("x-api-key")
+        or request.query_params.get("key")
+    )
     if api_key:
         return api_key.strip() or None
     return None

@@ -1,6 +1,5 @@
 import json
 
-import pytest
 
 from gpt2giga.sinks.logs.models import TrafficLogEvent
 from gpt2giga.sinks.logs.opensearch import (
@@ -83,7 +82,6 @@ def test_opensearch_bulk_body_uses_index_for_plain_index():
     assert lines[1]["has_error"] is True
 
 
-@pytest.mark.asyncio
 async def test_opensearch_sink_writes_batch_and_closes_client():
     client = FakeOpenSearchClient()
     sink = OpenSearchTrafficLogSink(
@@ -100,7 +98,6 @@ async def test_opensearch_sink_writes_batch_and_closes_client():
     assert client.closed is True
 
 
-@pytest.mark.asyncio
 async def test_opensearch_sink_retries_before_success():
     client = FakeOpenSearchClient(fail_times=1)
     sink = OpenSearchTrafficLogSink(
@@ -115,7 +112,6 @@ async def test_opensearch_sink_retries_before_success():
     assert len(client.bulk_bodies) == 2
 
 
-@pytest.mark.asyncio
 async def test_opensearch_sink_does_not_raise_on_bulk_failure():
     client = FakeOpenSearchClient(fail_times=3)
     sink = OpenSearchTrafficLogSink(

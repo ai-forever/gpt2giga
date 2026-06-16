@@ -1,22 +1,22 @@
 # Развертывание
 
-Docker Compose manifests лежат в [deploy/](../deploy/). Они используют корневой `.env` и build context из корня репозитория.
+Docker Compose manifests лежат в [deploy/](https://github.com/ai-forever/gpt2giga/tree/main/deploy). Они используют корневой `.env` и build context из корня репозитория.
 
 ## Карта Compose-файлов
 
 | Файл | Назначение |
 |---|---|
-| [deploy/base.yaml](../deploy/base.yaml) | Базовый gpt2giga service с профилями `DEV` и `PROD`. |
-| [deploy/traefik.yaml](../deploy/traefik.yaml) | Traefik и несколько gpt2giga instances для примера model-based routing. |
-| [deploy/nginx.yaml](../deploy/nginx.yaml) | Минимальный nginx reverse-proxy compose stack. |
-| [deploy/observability.yaml](../deploy/observability.yaml) | gpt2giga с mitmproxy для отладки traffic. |
-| [deploy/observe-multiple.yaml](../deploy/observe-multiple.yaml) | Несколько gpt2giga instances за mitmproxy. |
-| [deploy/mitmproxy.yaml](../deploy/mitmproxy.yaml) | Optional mitmproxy overlay для `base.yaml`, Phoenix и других compose overlays. |
-| [deploy/postgres.yaml](../deploy/postgres.yaml) | Optional Postgres durable traffic-log backend. |
-| [deploy/opensearch.yaml](../deploy/opensearch.yaml) | Optional OpenSearch traffic-log mirror. |
-| [deploy/phoenix.yaml](../deploy/phoenix.yaml) | Optional Phoenix/OpenTelemetry observability stack. |
+| [deploy/base.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/base.yaml) | Базовый gpt2giga service с профилями `DEV` и `PROD`. |
+| [deploy/traefik.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/traefik.yaml) | Traefik и несколько gpt2giga instances для примера model-based routing. |
+| [deploy/nginx.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/nginx.yaml) | Минимальный nginx reverse-proxy compose stack. |
+| [deploy/observability.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observability.yaml) | gpt2giga с mitmproxy для отладки traffic. |
+| [deploy/observe-multiple.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observe-multiple.yaml) | Несколько gpt2giga instances за mitmproxy. |
+| [deploy/mitmproxy.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/mitmproxy.yaml) | Optional mitmproxy overlay для `base.yaml`, Phoenix и других compose overlays. |
+| [deploy/postgres.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/postgres.yaml) | Optional Postgres durable traffic-log backend. |
+| [deploy/opensearch.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/opensearch.yaml) | Optional OpenSearch traffic-log mirror. |
+| [deploy/phoenix.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/phoenix.yaml) | Optional Phoenix/OpenTelemetry observability stack. |
 
-Команды для копирования есть в [deploy/README.md](../deploy/README.md).
+Команды для копирования есть в [deploy/README.md](https://github.com/ai-forever/gpt2giga/blob/main/deploy/README.md).
 
 ## Базовый service
 
@@ -62,7 +62,7 @@ GIGACHAT_VERIFY_SSL_CERTS=True
 docker compose --env-file .env -f deploy/traefik.yaml up -d
 ```
 
-Пример Traefik использует host-based routing из [traefik/rules.yml](../traefik/rules.yml). Если обращаетесь по IP, задайте `HOST=127.0.0.1` или отправляйте ожидаемый `Host` header.
+Пример Traefik использует host-based routing из [traefik/rules.yml](https://github.com/ai-forever/gpt2giga/blob/main/traefik/rules.yml). Если обращаетесь по IP, задайте `HOST=127.0.0.1` или отправляйте ожидаемый `Host` header.
 
 Локальный self-signed HTTPS можно включить прямо в app:
 

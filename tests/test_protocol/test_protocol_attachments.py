@@ -51,7 +51,6 @@ class FakeStreamResponse:
         yield self._content
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_base64_and_cache(monkeypatch):
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)
@@ -69,7 +68,6 @@ async def test_attachment_processor_base64_and_cache(monkeypatch):
     assert client.calls == before
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_async_httpx(monkeypatch):
     """Тест async HTTP клиента для скачивания изображений"""
 
@@ -101,7 +99,6 @@ async def test_attachment_processor_async_httpx(monkeypatch):
     await p.close()
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_cache_ttl(monkeypatch):
     """Тест TTL кэша - записи должны истекать"""
 
@@ -125,7 +122,6 @@ async def test_attachment_processor_cache_ttl(monkeypatch):
     assert client.calls == 2
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_cache_lru_eviction(monkeypatch):
     """Тест LRU eviction при переполнении кэша"""
 
@@ -143,7 +139,6 @@ async def test_attachment_processor_cache_lru_eviction(monkeypatch):
     assert len(p._cache) <= 3
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_cache_stats():
     """Тест получения статистики кэша"""
 
@@ -156,7 +151,6 @@ async def test_attachment_processor_cache_stats():
     assert stats["expired_entries"] == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_clear_cache():
     """Тест очистки кэша"""
 
@@ -174,7 +168,6 @@ async def test_attachment_processor_clear_cache():
     assert len(p._cache) == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_http_error(monkeypatch):
     """Тест обработки HTTP ошибок"""
 
@@ -212,7 +205,6 @@ async def test_attachment_processor_http_error(monkeypatch):
     await p.close()
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_base64_image_limit():
     client = DummyClient()
     p = AttachmentProcessor(logger=logger, max_image_file_size_bytes=3)
@@ -225,7 +217,6 @@ async def test_attachment_processor_base64_image_limit():
     assert client.calls == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_remote_content_length_limit(monkeypatch):
     class FakeAsyncClient:
         def __init__(self, *args, **kwargs):
@@ -258,7 +249,6 @@ async def test_attachment_processor_remote_content_length_limit(monkeypatch):
     assert client.calls == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_rejects_unsupported_base64_mime():
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)
@@ -271,7 +261,6 @@ async def test_attachment_processor_rejects_unsupported_base64_mime():
     assert client.calls == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_rejects_unsupported_remote_content_type(
     monkeypatch,
 ):
@@ -307,7 +296,6 @@ async def test_attachment_processor_rejects_unsupported_remote_content_type(
     assert client.calls == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_blocks_localhost_url():
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)
@@ -317,7 +305,6 @@ async def test_attachment_processor_blocks_localhost_url():
     assert client.calls == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_blocks_loopback_ip_url():
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)
@@ -327,7 +314,6 @@ async def test_attachment_processor_blocks_loopback_ip_url():
     assert client.calls == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_blocks_metadata_ip_url():
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)
@@ -337,7 +323,6 @@ async def test_attachment_processor_blocks_metadata_ip_url():
     assert client.calls == 0
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_blocks_private_ip_url():
     client = DummyClient()
     p = AttachmentProcessor(logger=logger)

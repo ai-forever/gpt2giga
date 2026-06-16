@@ -1,6 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
 from starlette.datastructures import Headers, QueryParams
 
 from gpt2giga.common.conversation import (
@@ -23,7 +22,6 @@ def make_request(settings: ProxySettings, headers: dict[str, str] | None = None)
     )
 
 
-@pytest.mark.asyncio
 async def test_stitch_chat_payload_uses_overlap_without_duplicates():
     request = make_request(ProxySettings(conversation_stitching_enabled=True))
     first = {
@@ -57,7 +55,6 @@ async def test_stitch_chat_payload_uses_overlap_without_duplicates():
     assert second_turn.divergent is False
 
 
-@pytest.mark.asyncio
 async def test_stitch_chat_payload_forks_on_divergence():
     request = make_request(
         ProxySettings(
@@ -93,7 +90,6 @@ async def test_stitch_chat_payload_forks_on_divergence():
     assert divergent_turn.save_key.conversation_id == "conv-1:fork:2"
 
 
-@pytest.mark.asyncio
 async def test_stitch_chat_payload_trims_history_and_keeps_system_message():
     request = make_request(
         ProxySettings(
@@ -131,7 +127,6 @@ async def test_stitch_chat_payload_trims_history_and_keeps_system_message():
     ]
 
 
-@pytest.mark.asyncio
 async def test_stitch_chat_payload_uses_session_id_only_when_enabled():
     default_request = make_request(
         ProxySettings(conversation_stitching_enabled=True),

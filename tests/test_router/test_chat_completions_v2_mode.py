@@ -2,8 +2,7 @@ import json
 
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from gigachat.models.chat_completions import ChatCompletionChunk
-from gigachat.models.chat_completions import ChatCompletionResponse
+from gigachat.models.chat_completions import ChatCompletionChunk, ChatCompletionResponse
 from loguru import logger
 
 from gpt2giga.common.api_mode import force_gigachat_api_mode
@@ -78,21 +77,26 @@ class FakeAChatResource:
                     ]
                 }
             )
-            yield ChatCompletionChunk.model_validate(
-                {
-                    "messages": [
-                        {
-                            "role": "assistant",
-                            "tools_state_id": "new-state",
-                        }
-                    ],
-                    "finish_reason": "stop",
-                    "usage": {
-                        "input_tokens": 2,
-                        "output_tokens": 3,
-                        "total_tokens": 5,
-                    },
-                }
+            done_payload = {
+                "event": "response.message.done",
+                "model": "GigaChat-2-Max",
+                "created_at": 1781352508,
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_state_id": "new-state",
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 2,
+                    "output_tokens": 3,
+                    "total_tokens": 5,
+                },
+            }
+            yield (
+                "event: response.message.done\n"
+                f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
             )
 
         return gen()
@@ -255,6 +259,13 @@ def test_chat_completions_v2_stream_uses_chat_completion_stream():
     assert response.status_code == 200
     assert "ok-stream" in body
     assert "data: [DONE]" in body
+    chunks = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: {")
+    ]
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+    assert chunks[-1]["usage"]["prompt_tokens"] == 2
     assert not app.state.request_transformer.chat_calls
     assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == []

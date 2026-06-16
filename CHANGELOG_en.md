@@ -5,7 +5,36 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1a1] - 2026-06-13
+
+### Added
+- **Gemini-compatible API**: added Gemini-like routes for `generateContent`, `streamGenerateContent`, `countTokens`, `embedContent`, `batchEmbedContents`, and model discovery; operation routes are available at root, `/v1`, `/v2`, and `/v1beta`, while `/v1` and `/v2` explicitly select the GigaChat backend contract.
+- **Gemini protocol adapters**: added normalization for Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations, `toolConfig`, text/image/file parts, plus reverse mapping for candidates, usage metadata, function calls, and SSE chunks into Gemini shape.
+- **Gemini examples and docs**: added `google-genai` examples for content generation, streaming, chat sessions, function calling, structured output, `countTokens`, embeddings, and prepared Files/Batches examples; README and compatibility docs now describe the Gemini route matrix and limitations.
+- **Prepared Gemini Files/Batches routers**: added router modules and OpenAPI helpers for Gemini Files API and `batchGenerateContent`, but they are still not mounted publicly until upstream file/batch execution is validated end to end.
+- **Claude Desktop integration guide**: added a beta guide for Claude Desktop App through a local gateway, including `/v2` gateway setup, model aliasing through `GPT2GIGA_PASS_MODEL=False`, API-key notes, and plugins/MCP diagnostics.
+- **Test coverage**: added unit/integration tests for Gemini router wiring, adapter mappings, streaming, embeddings, models, prepared Files/Batches, shared prefixes, Claude gateway path normalization, Anthropic provider tools, source rendering, and observability hardening.
+
+### Changed
+- **Unified backend mode for Responses**: removed `GPT2GIGA_RESPONSES_API_MODE`; OpenAI `/responses` now follows `GPT2GIGA_GIGACHAT_API_MODE`, and explicit backend-contract selection is done through `/v1/responses` or `/v2/responses`.
+- **Model discovery negotiation**: shared `/models`, `/v1/models`, and `/v2/models` keep the OpenAI shape by default, but return the Gemini `models/*` shape for Google/Gemini clients based on headers, query parameters, or user-agent.
+- **Gemini release hardening**: Gemini-compatible docs and examples now explicitly describe supported routes, version prefixes, disabled Files/Batches routes, text-only embeddings, the `countTokens` approximation, and the release smoke checklist for `google-genai`/Gemini CLI.
+- **GigaChat provider adapter**: provider labels now pass into the per-model concurrency limiter so Gemini traffic is tracked separately from OpenAI/Anthropic paths; raw extensions are forwarded upstream only for OpenAI protocol payloads.
+- **Dependencies**: added `google-genai` for Gemini examples/integration coverage, refreshed `uv.lock`, and widened supported `tiktoken` and `starlette` versions.
+- **Docs alignment**: README, API compatibility, client parameter compatibility, configuration, examples index, and integrations index were updated for the Gemini-compatible API, Claude Desktop, and removal of the separate Responses API mode flag.
+
+### Fixed
+- **Anthropic provider tools in v2 mode**: compatible Anthropic provider tools (`web_search*`, `web_fetch*`, `code_execution*`) now map to GigaChat v2 built-ins, including forced `tool_choice`; unsupported provider tools remain accepted/ignored.
+- **Tool schema normalization**: function/tool schemas now normalize through a shared helper, get an object root and default `properties`, and collapse `allOf` into a GigaChat-supported schema shape.
+- **GigaChat v2 stream completion**: the stream adapter now handles raw SSE strings, wrapped `data`, named done events, `choices[].delta/message`, `[DONE]`, and both `input/output` and `prompt/completion` usage aliases.
+- **Source rendering**: GigaChat source markers and `inline_data.sources` now render into a visible Markdown `Sources` appendix in OpenAI Chat, OpenAI Responses, and streaming flows; Responses annotations use raw text so links are preserved after markers are stripped.
+- **Codex Responses sources**: the Responses API now returns source annotations and a final source appendix correctly for Codex-style streaming/non-streaming responses.
+- **Claude gateway path normalization**: Claude Desktop gateway paths such as `/v2/v1/messages` now normalize to `/v2/messages` while preserving the GigaChat v2 backend selection.
+- **Observability isolation**: observability sink emit/flush calls are timeout-bounded, OpenTelemetry span emission is moved out of the event loop, and stream observer errors no longer break OpenAI/Anthropic/Gemini response paths.
+- **Gemini tool and embeddings validation**: the Gemini adapter no longer loses multi-`functionResponse` or mixed text/tool parts, `toolConfig.functionCallingConfig` is validated explicitly, invalid `allowedFunctionNames` return `400`, and malformed `embedContent`/`batchEmbedContents` payloads no longer call upstream embeddings with an empty string.
+- **Gemini model capabilities**: Gemini model discovery now conservatively distinguishes generation, embedding, and unknown/custom models instead of advertising the same `supportedGenerationMethods` for every model.
+- **Gemini streaming and diagnostics hardening**: `streamGenerateContent` now returns deterministic Gemini-compatible SSE error chunks for early and partial stream failures, empty streams finish with a valid `STOP` chunk, and accepted-but-ignored Gemini request extensions are visible in redacted observability attributes.
+- **CI runtime warning**: updated the coverage artifact download action to a Node.js 24-based release while keeping the coverage badge workflow behavior unchanged.
 
 ## [0.2.0a2] - 2026-06-11
 
@@ -18,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Internal GigaChat transformer API**: the old compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2`, and the `gigachat_v2_adapter` module were replaced with explicit `chat` / `chat_completion` names; external OpenAI/Anthropic-compatible endpoints are unchanged.
 
 ### Added
-- **Explicit GigaChat API mode routes**: public OpenAI/Anthropic/LiteLLM-compatible routes are now available at root, `/v1`, and `/v2`; root routes follow `GPT2GIGA_GIGACHAT_API_MODE` / `GPT2GIGA_RESPONSES_API_MODE`, `/v1` forces the legacy chat contract, and `/v2` forces the GigaChat chat-completion contract.
+- **Explicit GigaChat API mode routes**: public OpenAI/Anthropic/LiteLLM-compatible routes are now available at root, `/v1`, and `/v2`; root routes follow `GPT2GIGA_GIGACHAT_API_MODE`, `/v1` forces the legacy chat contract, and `/v2` forces the GigaChat chat-completion contract.
 - **Configuration reference**: expanded `docs/configuration.md` with quick profiles, env value formats, security/auth notes, backend API modes, observability, metrics, traffic-log, and storage settings.
 - **Modular roadmap safety baseline**: started the `v0.2.0` release discipline with semantic versioning rules and a release checklist.
 - **Modular feature flags**: added default-safe `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED`, and `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
@@ -115,7 +144,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.8a1] - 2026-06-06
 
 ### Added
-- **GigaChat v2 backend mode**: added `GPT2GIGA_GIGACHAT_API_MODE` and `GPT2GIGA_RESPONSES_API_MODE` to switch chat-like upstream calls to the GigaChat chat-completion contract (`v2/chat/completions` in SDK 0.2.2a1) while keeping the external OpenAI/Anthropic-compatible contract and URLs unchanged
+- **GigaChat v2 backend mode**: added `GPT2GIGA_GIGACHAT_API_MODE` to switch chat-like upstream calls to the GigaChat chat-completion contract (`v2/chat/completions` in SDK 0.2.2a1) while keeping the external OpenAI/Anthropic-compatible contract and URLs unchanged
 - **Responses built-in tools in v2 mode**: added support for GigaChat built-in tools in OpenAI Responses API (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); normalized output items, stream progress events, file/inline metadata, and image hydration are implemented for `web_search*` and `image_generation` / `image_generate`
 - **Per-model max connections**: added local in-process limits for concurrent upstream model calls by effective GigaChat model via `GPT2GIGA_MODEL_MAX_CONNECTIONS`, `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT`, and `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT`, plus matching CLI flags
 - **Debug payload logs**: added non-PROD DEBUG payload logs for upstream GigaChat requests and processed responses; payloads are omitted in PROD
@@ -408,7 +437,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...HEAD
+[0.2.1a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a2...v0.2.1a1
+[0.2.0a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...v0.2.0a2
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a3...v0.2.0a1
 [0.1.8a3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a2...v0.1.8a3
 [0.1.8a2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a1...v0.1.8a2

@@ -22,7 +22,6 @@ async def _hold_slot(
         await release.wait()
 
 
-@pytest.mark.asyncio
 async def test_disabled_mode_does_not_block() -> None:
     limiter = ModelConcurrencyLimiter({})
     first_entered = asyncio.Event()
@@ -42,7 +41,6 @@ async def test_disabled_mode_does_not_block() -> None:
     assert limiter.is_enabled_for("GigaChat") is False
 
 
-@pytest.mark.asyncio
 async def test_explicit_model_limit_serializes_same_model() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1})
     first_entered = asyncio.Event()
@@ -67,7 +65,6 @@ async def test_explicit_model_limit_serializes_same_model() -> None:
     await asyncio.gather(first, second)
 
 
-@pytest.mark.asyncio
 async def test_different_models_are_independent() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1, "GigaChat-Pro": 1})
     first_entered = asyncio.Event()
@@ -84,7 +81,6 @@ async def test_different_models_are_independent() -> None:
     await asyncio.gather(first, second)
 
 
-@pytest.mark.asyncio
 async def test_default_limit_applies_per_unknown_model() -> None:
     limiter = ModelConcurrencyLimiter({}, default_limit=1)
     first_entered = asyncio.Event()
@@ -116,7 +112,6 @@ async def test_default_limit_applies_per_unknown_model() -> None:
     await asyncio.gather(first, second, third)
 
 
-@pytest.mark.asyncio
 async def test_timeout_zero_is_fail_fast() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
 
@@ -130,7 +125,6 @@ async def test_timeout_zero_is_fail_fast() -> None:
     assert exc_info.value.provider == "openai"
 
 
-@pytest.mark.asyncio
 async def test_positive_timeout_raises_when_slot_is_unavailable() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0.01)
 
@@ -140,7 +134,6 @@ async def test_positive_timeout_raises_when_slot_is_unavailable() -> None:
                 pass
 
 
-@pytest.mark.asyncio
 async def test_slot_released_after_normal_exit() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
 
@@ -151,7 +144,6 @@ async def test_slot_released_after_normal_exit() -> None:
         pass
 
 
-@pytest.mark.asyncio
 async def test_slot_released_after_exception() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
 
@@ -163,7 +155,6 @@ async def test_slot_released_after_exception() -> None:
         pass
 
 
-@pytest.mark.asyncio
 async def test_slot_released_after_cancellation() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
     entered = asyncio.Event()
@@ -180,7 +171,6 @@ async def test_slot_released_after_cancellation() -> None:
         pass
 
 
-@pytest.mark.asyncio
 async def test_timeout_error_contains_model_limit_and_provider() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat-Max": 1}, acquire_timeout=0)
 

@@ -30,7 +30,6 @@ def request_transformer(mock_logger, mock_attachment_processor):
     return RequestTransformer(config, mock_logger, mock_attachment_processor)
 
 
-@pytest.mark.asyncio
 async def test_process_content_parts_limits(request_transformer):
     # Test cutting off excess attachments (> 2 per message)
     # We use "file" type because "image_url" has early cutoff in the loop preventing accumulation
@@ -49,7 +48,6 @@ async def test_process_content_parts_limits(request_transformer):
     )
 
 
-@pytest.mark.asyncio
 async def test_process_content_parts_file(request_transformer):
     content = [{"type": "file", "file": {"filename": "f.txt", "file_data": "data"}}]
     texts, attachments = await request_transformer._process_content_parts(
@@ -59,7 +57,6 @@ async def test_process_content_parts_file(request_transformer):
     assert attachments[0] == "file_id_123"
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_roles(request_transformer):
     messages = [
         {"role": "developer", "content": "dev"},
@@ -91,7 +88,6 @@ async def test_transform_messages_roles(request_transformer):
     assert res[2]["content"] == '{"result": "tool_res"}'
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_tool_calls_bad_json(request_transformer):
     messages = [
         {
@@ -188,7 +184,6 @@ def test_limit_attachments(request_transformer):
     assert len(messages[0]["attachments"]) == 4
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_unknown_role_becomes_user(request_transformer):
     """Unknown roles should be mapped to 'user'."""
     messages = [
@@ -206,7 +201,6 @@ async def test_transform_messages_unknown_role_becomes_user(request_transformer)
     assert "unknown content" in res[1]["content"]
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_merges_consecutive_user(request_transformer):
     """Consecutive user messages should be merged."""
     messages = [
@@ -222,7 +216,6 @@ async def test_transform_messages_merges_consecutive_user(request_transformer):
     assert res[0]["content"] == "first\nsecond\nthird"
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_no_merge_with_function_call(request_transformer):
     """Messages with function_call should not be merged."""
     messages = [
@@ -240,7 +233,6 @@ async def test_transform_messages_no_merge_with_function_call(request_transforme
     assert len(res) == 2
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_system_moved_to_front(request_transformer):
     """If system message is not first after transformation, move it."""
     # This scenario: user message first, then developer (-> system)
@@ -259,7 +251,6 @@ async def test_transform_messages_system_moved_to_front(request_transformer):
     assert res[1]["content"] == "user first"
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_multiple_system_first_wins(request_transformer):
     """Only the first system message stays system, others become user."""
     messages = [
@@ -278,7 +269,6 @@ async def test_transform_messages_multiple_system_first_wins(request_transformer
     assert "dev as system" in res[1]["content"]
 
 
-@pytest.mark.asyncio
 async def test_transform_messages_merges_attachments(request_transformer):
     """Merged messages should combine their attachments."""
     messages = [

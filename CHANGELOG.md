@@ -5,7 +5,34 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [0.2.1a1] - 2026-06-13
+
+### Добавлено
+- **Gemini-compatible API**: добавлены Gemini-like routes для `generateContent`, `streamGenerateContent`, `countTokens`, `embedContent`, `batchEmbedContents` и model discovery; operation routes доступны в корне, под `/v1`, `/v2` и `/v1beta`, а `/v1`/`/v2` явно выбирают backend contract GigaChat.
+- **Gemini protocol adapters**: добавлена нормализация Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations, `toolConfig`, text/image/file parts и обратный маппинг кандидатов, usage metadata, function calls и SSE chunks в Gemini shape.
+- **Gemini examples and docs**: добавлены примеры для `google-genai`: content generation, streaming, chat session, function calling, structured output, `countTokens`, embeddings, а также подготовленные examples для Files/Batches; README и compatibility docs описывают Gemini route matrix и ограничения.
+- **Prepared Gemini Files/Batches routers**: добавлены router-модули и OpenAPI helpers для Gemini Files API и `batchGenerateContent`, но публично они пока не смонтированы до end-to-end проверки upstream file/batch execution.
+- **Claude Desktop integration guide**: добавлен beta guide для Claude Desktop App через local gateway, включая `/v2` gateway setup, model aliasing через `GPT2GIGA_PASS_MODEL=False`, API-key notes и диагностику plugins/MCP.
+- **Test coverage**: добавлены unit/integration tests для Gemini router wiring, adapter mappings, streaming, embeddings, models, prepared Files/Batches, shared prefixes, Claude gateway path normalization, Anthropic provider tools, source rendering и observability hardening.
+
+### Изменено
+- **Unified backend mode for Responses**: удален `GPT2GIGA_RESPONSES_API_MODE`; OpenAI `/responses` теперь следует `GPT2GIGA_GIGACHAT_API_MODE`, а явный выбор backend contract делается через `/v1/responses` или `/v2/responses`.
+- **Model discovery negotiation**: общие `/models`, `/v1/models` и `/v2/models` сохраняют OpenAI форму по умолчанию, но возвращают Gemini `models/*` shape для Google/Gemini clients по headers/query/user-agent.
+- **Gemini release hardening**: Gemini-compatible docs и examples теперь явно описывают supported routes, version prefixes, disabled Files/Batches routes, text-only embeddings, `countTokens` approximation и release smoke checklist для `google-genai`/Gemini CLI.
+- **GigaChat provider adapter**: provider label теперь передается в per-model concurrency limiter, чтобы Gemini traffic учитывался отдельно от OpenAI/Anthropic paths; raw extensions отправляются upstream только для OpenAI protocol payloads.
+- **Dependencies**: добавлен `google-genai` для Gemini examples/integration coverage, обновлен `uv.lock`, расширены допустимые версии `tiktoken` и `starlette`.
+- **Docs alignment**: README, API compatibility, client parameter compatibility, configuration, examples index и integrations index обновлены под Gemini-compatible API, Claude Desktop и удаление отдельного Responses API mode flag.
+
+### Исправлено
+- **Anthropic provider tools in v2 mode**: совместимые Anthropic provider tools (`web_search*`, `web_fetch*`, `code_execution*`) теперь маппятся в GigaChat v2 built-ins, включая forced `tool_choice`; неподдерживаемые provider tools остаются accepted/ignored.
+- **Tool schema normalization**: function/tool schemas теперь нормализуются через общий helper, получают object root и `properties` по умолчанию, а `allOf` схлопывается в поддерживаемую GigaChat schema форму.
+- **GigaChat v2 stream completion**: stream adapter корректно разбирает raw SSE strings, wrapped `data`, named done events, `choices[].delta/message`, `[DONE]` и usage aliases `input/output` или `prompt/completion`.
+- **Source rendering**: GigaChat source markers и `inline_data.sources` теперь превращаются в видимый Markdown `Sources` appendix в OpenAI Chat, OpenAI Responses и streaming flows; Responses annotations используют raw text, чтобы ссылки не терялись после удаления markers.
+- **Codex Responses sources**: Responses API теперь корректно отдает source annotations и финальный source appendix для Codex-style streaming/non-streaming ответов.
+- **Claude gateway path normalization**: путь Claude Desktop gateway вида `/v2/v1/messages` нормализуется в `/v2/messages`, сохраняя выбор GigaChat v2 backend.
+- **Observability isolation**: emit/flush observability sinks ограничены timeout-ом, OpenTelemetry span emission перенесен из event loop, а ошибки stream observers больше не ломают OpenAI/Anthropic/Gemini response paths.
+- **Gemini tool and embeddings validation**: Gemini adapter больше не теряет multi-`functionResponse` и mixed text/tool parts, `toolConfig.functionCallingConfig` валидируется явно, invalid `allowedFunctionNames` возвращают `400`, malformed `embedContent`/`batchEmbedContents` больше не вызывают upstream embeddings с пустой строкой.
+- **Gemini model capabilities**: Gemini model discovery теперь консервативно различает generation, embedding и unknown/custom models вместо одинакового `supportedGenerationMethods` для всех моделей.
 
 ## [0.2.0a2] - 2026-06-11
 
@@ -18,7 +45,7 @@
 - **Внутренний GigaChat transformer API**: старые compatibility aliases `send_to_gigachat*`, `prepare_*_v2`, `stream_*_v2` и модуль `gigachat_v2_adapter` заменены на явные `chat` / `chat_completion` имена; внешние OpenAI/Anthropic-compatible endpoints не меняются.
 
 ### Добавлено
-- **Явные GigaChat API mode routes**: публичные OpenAI/Anthropic/LiteLLM-compatible routes теперь доступны в корне, под `/v1` и под `/v2`; root routes следуют `GPT2GIGA_GIGACHAT_API_MODE` / `GPT2GIGA_RESPONSES_API_MODE`, `/v1` принудительно выбирает legacy chat contract, `/v2` - GigaChat chat-completion contract.
+- **Явные GigaChat API mode routes**: публичные OpenAI/Anthropic/LiteLLM-compatible routes теперь доступны в корне, под `/v1` и под `/v2`; root routes следуют `GPT2GIGA_GIGACHAT_API_MODE`, `/v1` принудительно выбирает legacy chat contract, `/v2` - GigaChat chat-completion contract.
 - **Configuration reference**: расширен `docs/configuration.md` с quick profiles, форматами env values, security/auth notes, backend API modes, observability, metrics, traffic-log и storage настройками.
 - **Modular roadmap safety baseline**: начата подготовка release-дисциплины для `v0.2.0` с правилами semantic versioning и release checklist.
 - **Modular feature flags**: добавлены выключенные по умолчанию `GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER`, `GPT2GIGA_NORMALIZATION_MODE`, `GPT2GIGA_LEGACY_CHAT_FALLBACK`, `GPT2GIGA_TRAFFIC_LOG_ENABLED`, `GPT2GIGA_OBSERVABILITY_ENABLED`, `GPT2GIGA_UI_ENABLED` и `GPT2GIGA_DEBUG_TRANSLATE_ENABLED`.
@@ -115,7 +142,7 @@
 ## [0.1.8a1] - 2026-06-06
 
 ### Добавлено
-- **GigaChat v2 backend mode**: добавлены `GPT2GIGA_GIGACHAT_API_MODE` и `GPT2GIGA_RESPONSES_API_MODE` для переключения chat-like upstream-вызовов на GigaChat chat-completion contract (`v2/chat/completions` в SDK 0.2.2a1); внешний OpenAI/Anthropic-compatible контракт и URL остаются прежними
+- **GigaChat v2 backend mode**: добавлен `GPT2GIGA_GIGACHAT_API_MODE` для переключения chat-like upstream-вызовов на GigaChat chat-completion contract (`v2/chat/completions` в SDK 0.2.2a1); внешний OpenAI/Anthropic-compatible контракт и URL остаются прежними
 - **Responses built-in tools в v2 mode**: добавлена поддержка встроенных GigaChat-инструментов для OpenAI Responses API (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`); нормализованные output items, stream progress events, file/inline metadata и гидратация изображений реализованы для `web_search*` и `image_generation` / `image_generate`
 - **Per-model max connections**: добавлены локальные in-process лимиты одновременных upstream model-call по effective GigaChat model через `GPT2GIGA_MODEL_MAX_CONNECTIONS`, `GPT2GIGA_MODEL_MAX_CONNECTIONS_DEFAULT` и `GPT2GIGA_MODEL_MAX_CONNECTIONS_ACQUIRE_TIMEOUT`, а также соответствующие CLI-флаги
 - **Debug payload logs**: добавлены non-PROD DEBUG-логи payload'ов для upstream-запросов и обработанных ответов GigaChat; в PROD payload'ы не пишутся
@@ -405,7 +432,8 @@
 
 ---
 
-[Unreleased]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...HEAD
+[0.2.1a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a2...v0.2.1a1
+[0.2.0a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...v0.2.0a2
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a3...v0.2.0a1
 [0.1.8a3]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a2...v0.1.8a3
 [0.1.8a2]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a1...v0.1.8a2

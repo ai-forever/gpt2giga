@@ -31,7 +31,7 @@ gpt2giga \
 gpt2giga --help
 ```
 
-Env template для копирования: [.env.example](../.env.example).
+Env template для копирования: [.env.example](https://github.com/ai-forever/gpt2giga/blob/main/.env.example).
 
 ## Как читать этот документ
 
@@ -82,11 +82,10 @@ GIGACHAT_MODEL=GigaChat-2-Max
 GIGACHAT_VERIFY_SSL_CERTS=True
 ```
 
-Явный GigaChat v2 для клиентов:
+Явный выбор GigaChat v2 на стороне клиента:
 
 ```dotenv
 GPT2GIGA_GIGACHAT_API_MODE=v1
-GPT2GIGA_RESPONSES_API_MODE=inherit
 ```
 
 При таком env root routes остаются на v1, а клиент может выбрать v2 через
@@ -211,17 +210,14 @@ GPT2GIGA_STRUCTURED_OUTPUT_MODE=function_call
 
 ```dotenv
 GPT2GIGA_GIGACHAT_API_MODE=v1
-GPT2GIGA_RESPONSES_API_MODE=inherit
 ```
 
-| `GPT2GIGA_GIGACHAT_API_MODE` | `GPT2GIGA_RESPONSES_API_MODE` | `/chat/completions` backend | `/responses` backend |
-|---|---|---|---|
-| `v1` | `inherit` | `v1` | `v1` |
-| `v2` | `inherit` | `v2` | `v2` |
-| `v1` | `v2` | `v1` | `v2` |
-| `v2` | `v1` | `v2` | `v1` |
+| `GPT2GIGA_GIGACHAT_API_MODE` | `/chat/completions` backend | `/responses` backend |
+|---|---|---|
+| `v1` | `v1` | `v1` |
+| `v2` | `v2` | `v2` |
 
-Root URLs (`/chat/completions`, `/responses`, `/messages`) используют эти flags.
+Root URLs (`/chat/completions`, `/responses`, `/messages`) используют этот flag.
 Versioned prefixes являются явным per-request override:
 
 - `/v1/chat/completions`, `/v1/responses`, `/v1/messages` используют GigaChat v1 contract;

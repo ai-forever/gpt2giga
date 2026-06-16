@@ -46,6 +46,9 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
             if segment not in self.valid_roots:
                 continue
             normalized_segments = segments[index:]
+            if self._has_outer_gateway_version_prefix(normalized_segments):
+                normalized_segments.pop(1)
+
             while (
                 len(normalized_segments) > 1
                 and normalized_segments[0] in {"v1", "v2"}
@@ -58,3 +61,12 @@ class PathNormalizationMiddleware(BaseHTTPMiddleware):
             return "/" + "/".join(normalized_segments)
 
         return None
+
+    def _has_outer_gateway_version_prefix(self, segments: list[str]) -> bool:
+        """Return whether Claude gateway v2 wraps an inner API version segment."""
+        return (
+            len(segments) > 2
+            and segments[0] == "v2"
+            and segments[1] in {"v1", "v2"}
+            and segments[2] in self.valid_roots
+        )

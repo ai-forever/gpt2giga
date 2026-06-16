@@ -6,6 +6,11 @@ OPENAPI_TAG_OPENAI_EMBEDDINGS = "OpenAI / Embeddings"
 OPENAPI_TAG_OPENAI_MODELS = "OpenAI / Models"
 OPENAPI_TAG_OPENAI_FILES = "OpenAI / Files"
 OPENAPI_TAG_OPENAI_BATCHES = "OpenAI / Batches"
+OPENAPI_TAG_GEMINI_GENERATE_CONTENT = "Gemini / Generate Content"
+OPENAPI_TAG_GEMINI_EMBEDDINGS = "Gemini / Embeddings"
+OPENAPI_TAG_GEMINI_MODELS = "Gemini / Models"
+OPENAPI_TAG_GEMINI_FILES = "Gemini / Files"
+OPENAPI_TAG_GEMINI_BATCHES = "Gemini / Batches"
 OPENAPI_TAG_ANTHROPIC_MESSAGES = "Anthropic / Messages"
 OPENAPI_TAG_ANTHROPIC_MESSAGE_BATCHES = "Anthropic / Message Batches"
 OPENAPI_TAG_LITELLM_MODEL_INFO = "LiteLLM / Model Info"
@@ -38,6 +43,26 @@ _OPENAPI_TAGS_METADATA_BY_NAME = {
     OPENAPI_TAG_OPENAI_BATCHES: {
         "name": OPENAPI_TAG_OPENAI_BATCHES,
         "description": "OpenAI-compatible batch routes.",
+    },
+    OPENAPI_TAG_GEMINI_GENERATE_CONTENT: {
+        "name": OPENAPI_TAG_GEMINI_GENERATE_CONTENT,
+        "description": "Gemini-compatible generateContent and countTokens routes.",
+    },
+    OPENAPI_TAG_GEMINI_EMBEDDINGS: {
+        "name": OPENAPI_TAG_GEMINI_EMBEDDINGS,
+        "description": "Gemini-compatible embeddings routes.",
+    },
+    OPENAPI_TAG_GEMINI_MODELS: {
+        "name": OPENAPI_TAG_GEMINI_MODELS,
+        "description": "Gemini-compatible model discovery routes.",
+    },
+    OPENAPI_TAG_GEMINI_FILES: {
+        "name": OPENAPI_TAG_GEMINI_FILES,
+        "description": "Prepared Gemini-compatible file routes.",
+    },
+    OPENAPI_TAG_GEMINI_BATCHES: {
+        "name": OPENAPI_TAG_GEMINI_BATCHES,
+        "description": "Prepared Gemini-compatible batch routes.",
     },
     OPENAPI_TAG_ANTHROPIC_MESSAGES: {
         "name": OPENAPI_TAG_ANTHROPIC_MESSAGES,
@@ -74,6 +99,9 @@ _DEFAULT_OPENAPI_TAGS = [
     OPENAPI_TAG_OPENAI_RESPONSES,
     OPENAPI_TAG_OPENAI_EMBEDDINGS,
     OPENAPI_TAG_OPENAI_MODELS,
+    OPENAPI_TAG_GEMINI_GENERATE_CONTENT,
+    OPENAPI_TAG_GEMINI_EMBEDDINGS,
+    OPENAPI_TAG_GEMINI_MODELS,
     OPENAPI_TAG_ANTHROPIC_MESSAGES,
     OPENAPI_TAG_LITELLM_MODEL_INFO,
     OPENAPI_TAG_SYSTEM_HEALTH,

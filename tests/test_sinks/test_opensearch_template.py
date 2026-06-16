@@ -1,5 +1,3 @@
-import pytest
-
 from gpt2giga.storage.opensearch import (
     build_traffic_log_index_template,
     install_traffic_log_index_template,
@@ -32,7 +30,6 @@ def test_opensearch_template_can_disable_data_stream():
     assert "data_stream" not in template
 
 
-@pytest.mark.asyncio
 async def test_install_opensearch_template_uses_indices_api():
     class FakeIndices:
         def __init__(self):

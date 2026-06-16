@@ -292,7 +292,7 @@ def test_chat_completions_session_id_is_opt_in_conversation_key():
 
 
 def test_responses_v2_with_previous_response_id_skips_local_stitching():
-    app = make_openai_app(gigachat_api_mode="v2", responses_api_mode="inherit")
+    app = make_openai_app(gigachat_api_mode="v2")
     client = TestClient(app)
 
     response = client.post(

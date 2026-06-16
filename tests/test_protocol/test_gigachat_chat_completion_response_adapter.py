@@ -1,7 +1,6 @@
 import json
 from types import SimpleNamespace
 
-import pytest
 from gigachat.models import ChatCompletionResponse
 from gigachat.models.chat_completions import ChatCompletionChunk
 from loguru import logger
@@ -13,9 +12,9 @@ from gpt2giga.protocol.response.gigachat_chat_completion_adapter import (
     adapt_chat_completion_usage,
     extract_chat_completion_assistant_text,
     extract_chat_completion_function_call,
-    hydrate_chat_completion_image_files,
     extract_chat_completion_reasoning_text,
     extract_chat_completion_thread_id,
+    hydrate_chat_completion_image_files,
 )
 from gpt2giga.protocol.response.processor import ResponseProcessor
 
@@ -368,7 +367,6 @@ def test_adapted_chat_completion_reasoning_flows_through_response_processors():
     assert responses["output"][1]["content"][0]["text"] == "Paris"
 
 
-@pytest.mark.asyncio
 async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_responses_processor():
     class FakeImageClient:
         async def aget_image(self, file_id):
@@ -438,6 +436,12 @@ async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_respons
     message = processed["output"][2]
     assert message["type"] == "message"
     content = message["content"][0]
+    assert content["text"] == (
+        "Answer with a source.\n\n"
+        "Sources:\n"
+        "- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in content["text"]
     assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
     assert content["annotations"] == [
         {
@@ -457,6 +461,130 @@ async def test_adapted_chat_completion_builtin_tool_outputs_flow_through_respons
     assert parsed.output[2].content[0].inline_data["sources"]["1"]["title"] == (
         "Example Source"
     )
+
+
+def test_chat_completion_response_renders_sources_section():
+    response = ChatCompletionResponse.model_validate(
+        {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "text": "Answer with a source. [sources=[1]]",
+                            "inline_data": {
+                                "sources": {
+                                    "1": {
+                                        "url": "https://example.test/source",
+                                        "title": "Example Source",
+                                    }
+                                }
+                            },
+                        }
+                    ],
+                }
+            ],
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 1, "output_tokens": 2, "total_tokens": 3},
+        }
+    )
+    adapted = adapt_chat_completion_to_chat_shape(response, default_model="fallback")
+
+    processor = ResponseProcessor(logger=logger)
+    processed = processor.process_response(
+        SimpleNamespace(model_dump=lambda: adapted),
+        gpt_model="gpt-x",
+        response_id="v2",
+    )
+
+    content = processed["choices"][0]["message"]["content"]
+    assert content == (
+        "Answer with a source.\n\n"
+        "Sources:\n"
+        "- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in content
+
+
+def test_chat_completion_stream_renders_fragmented_source_marker():
+    processor = ResponseProcessor(logger=logger)
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "inline_data": {
+                                    "sources": {
+                                        "1": {
+                                            "url": "https://example.test/source",
+                                            "title": "Example Source",
+                                        }
+                                    }
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "Answer with a source. "}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "[sources=[1"}],
+                    }
+                ]
+            }
+        ),
+        ChatCompletionChunk.model_validate(
+            {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": [{"text": "]]"}],
+                    }
+                ],
+                "finish_reason": "stop",
+            }
+        ),
+    ]
+
+    rendered = "".join(
+        processor.process_stream_chunk(
+            SimpleNamespace(
+                model_dump=lambda chunk=chunk: (
+                    adapt_chat_completion_chunk_to_chat_chunk_shape(
+                        chunk,
+                        default_model="fallback",
+                    )
+                )
+            ),
+            gpt_model="gpt-x",
+            response_id="v2",
+        )["choices"][0]["delta"]["content"]
+        for chunk in chunks
+    )
+
+    assert rendered == (
+        "Answer with a source.\n\n"
+        "Sources:\n"
+        "- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in rendered
 
 
 def test_adapted_chat_completion_function_call_unmaps_reserved_tool_name_through_processor():
@@ -581,6 +709,130 @@ def test_adapt_chat_completion_chunk_text_to_chat_shape():
     }
     assert adapted["choices"][0]["finish_reason"] is None
     assert adapted["usage"] is None
+
+
+def test_adapt_chat_completion_openai_style_chunk_text_to_chat_shape():
+    chunk = {
+        "choices": [
+            {
+                "delta": {"content": "Прив", "role": "assistant"},
+                "index": 0,
+            }
+        ],
+        "created": 1781307410,
+        "model": "GigaChat-3-Ultra:32.3.18.5",
+        "object": "chat.completions",
+    }
+
+    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        chunk,
+        default_model="fallback",
+    )
+
+    assert adapted["model"] == "GigaChat-3-Ultra:32.3.18.5"
+    assert adapted["choices"][0]["delta"] == {
+        "content": "Прив",
+        "role": "assistant",
+    }
+    assert adapted["choices"][0]["finish_reason"] is None
+
+
+def test_adapt_chat_completion_openai_style_final_chunk_keeps_stop_and_usage():
+    chunk = {
+        "choices": [
+            {
+                "delta": {
+                    "content": "",
+                    "role": "assistant",
+                    "functions_state_id": "019ebe32-089b-7bee-b7a2-0d924c288064",
+                },
+                "index": 0,
+                "finish_reason": "stop",
+            }
+        ],
+        "created": 1781307410,
+        "model": "GigaChat-3-Ultra:32.3.18.5",
+        "object": "chat.completions",
+        "usage": {
+            "prompt_tokens": 27413,
+            "completion_tokens": 8,
+            "total_tokens": 27421,
+            "precached_prompt_tokens": 0,
+        },
+    }
+
+    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        chunk,
+        default_model="fallback",
+    )
+
+    assert adapted["choices"][0]["delta"] == {
+        "content": "",
+        "role": "assistant",
+    }
+    assert adapted["choices"][0]["finish_reason"] == "stop"
+    assert adapted["usage"] == {
+        "prompt_tokens": 27413,
+        "completion_tokens": 8,
+        "total_tokens": 27421,
+        "precached_prompt_tokens": 0,
+    }
+
+
+def test_adapt_chat_completion_named_done_event_keeps_stop_usage_and_state():
+    payload = {
+        "model": "GigaChat-3-Ultra:32.3.18.5",
+        "created_at": 1781352508,
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_state_id": "019ec0e2-2bc1-7cf4-86fb-0280fd4c7cb9",
+            }
+        ],
+        "finish_reason": "stop",
+        "usage": {
+            "input_tokens": 27221,
+            "input_tokens_details": {"prompt_tokens": 27221, "cached_tokens": 0},
+            "output_tokens": 16,
+            "total_tokens": 27237,
+        },
+    }
+    chunk = (
+        "event: response.message.done\n"
+        f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    )
+
+    adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        chunk,
+        default_model="fallback",
+    )
+
+    assert adapted["model"] == "GigaChat-3-Ultra:32.3.18.5"
+    assert adapted["choices"][0]["delta"] == {
+        "content": "",
+        "role": "assistant",
+    }
+    assert adapted["choices"][0]["finish_reason"] == "stop"
+    assert adapted["usage"] == {
+        "prompt_tokens": 27221,
+        "completion_tokens": 16,
+        "total_tokens": 27237,
+        "precached_prompt_tokens": 0,
+    }
+    assert (
+        adapted["_gpt2giga_provider_metadata"]["gigachat_tool_state_id"]
+        == "019ec0e2-2bc1-7cf4-86fb-0280fd4c7cb9"
+    )
+
+    wrapped = {
+        "event": "response.message.done",
+        "data": json.dumps(payload, ensure_ascii=False),
+    }
+    wrapped_adapted = adapt_chat_completion_chunk_to_chat_chunk_shape(
+        wrapped,
+        default_model="fallback",
+    )
+    assert wrapped_adapted["choices"][0]["finish_reason"] == "stop"
 
 
 def test_adapt_chat_completion_chunk_reasoning_role_to_chat_delta_reasoning_content():

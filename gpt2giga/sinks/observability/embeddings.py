@@ -27,25 +27,31 @@ async def emit_openai_embeddings_observability(
     if sink is None or sink.__class__.__name__ == "NoopObservabilitySink":
         return
 
-    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
-    normalized_request = embeddings_request_to_normalized(
-        request_payload,
-        transformed_payload,
-        context=context,
-    )
-    await emit_observability_event(
-        sink,
-        EMBEDDINGS_SPAN_NAME,
-        build_llm_embeddings_attributes(
+    logger = getattr(state, "logger", None)
+    try:
+        settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+        normalized_request = embeddings_request_to_normalized(
+            request_payload,
+            transformed_payload,
+            context=context,
+        )
+        attributes = build_llm_embeddings_attributes(
             normalized_request,
             response_payload,
             settings=settings,
-        ),
-        context=context,
-        logger=getattr(state, "logger", None),
-    )
-    if context is not None:
-        context.llm_observability_emitted = True
+        )
+        emitted = await emit_observability_event(
+            sink,
+            EMBEDDINGS_SPAN_NAME,
+            attributes,
+            context=context,
+            logger=logger,
+        )
+        if emitted and context is not None:
+            context.llm_observability_emitted = True
+    except Exception as exc:
+        if logger is not None:
+            logger.warning("OpenAI embeddings observability emission failed: {}", exc)
 
 
 def embeddings_request_to_normalized(

@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import pytest
 from gigachat.models import ChatCompletionRequest
 from loguru import logger
 
@@ -12,7 +11,6 @@ from gpt2giga.protocol.anthropic.request import (
 )
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_builds_chat_completion_request():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -38,7 +36,6 @@ async def test_prepare_chat_completion_builds_chat_completion_request():
     assert request.model_options.top_p == 0.8
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_maps_tools_and_forced_function_call():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -75,7 +72,72 @@ async def test_prepare_chat_completion_maps_tools_and_forced_function_call():
     assert request.tool_config.function_name == "__gpt2giga_user_search_web"
 
 
-@pytest.mark.asyncio
+async def test_prepare_chat_completion_normalizes_uppercase_gemini_tool_schema():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "weather"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get weather.",
+                        "parameters": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "city": {"type": "STRING"},
+                                "include_forecast": {"type": "BOOLEAN"},
+                                "daily_highs": {
+                                    "type": "ARRAY",
+                                    "items": {"type": "NUMBER"},
+                                },
+                            },
+                            "required": ["city"],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert isinstance(request, ChatCompletionRequest)
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.parameters["type"] == "object"
+    assert spec.parameters["properties"]["city"]["type"] == "string"
+    assert spec.parameters["properties"]["include_forecast"]["type"] == "boolean"
+    assert spec.parameters["properties"]["daily_highs"]["type"] == "array"
+    assert spec.parameters["properties"]["daily_highs"]["items"]["type"] == "number"
+
+
+async def test_prepare_chat_completion_adds_properties_to_empty_tool_schema():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-3-Ultra",
+            "messages": [{"role": "user", "content": "hello"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "update_topic",
+                        "description": "Update progress.",
+                        "parameters": {},
+                    },
+                }
+            ],
+        }
+    )
+
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.parameters == {"type": "object", "properties": {}}
+
+
 async def test_prepare_chat_completion_normalizes_anthropic_nested_tool_schema():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -118,7 +180,6 @@ async def test_prepare_chat_completion_normalizes_anthropic_nested_tool_schema()
     assert annotations["properties"] == {}
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_defaults_untyped_array_items():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -152,7 +213,6 @@ async def test_prepare_chat_completion_defaults_untyped_array_items():
     assert excluded_body_parts["items"]["type"] == "string"
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_defaults_untyped_tool_properties():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -193,7 +253,6 @@ async def test_prepare_chat_completion_defaults_untyped_tool_properties():
     assert args["properties"] == {}
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_maps_builtin_tools_in_v2_mode():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)
@@ -219,7 +278,47 @@ async def test_prepare_chat_completion_maps_builtin_tools_in_v2_mode():
     assert request.tool_config.tool_name == "web_search"
 
 
-@pytest.mark.asyncio
+async def test_prepare_chat_completion_maps_anthropic_builtin_tool_types():
+    cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "search and fetch"}],
+            "tools": [
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5,
+                    "allowed_domains": ["example.com"],
+                    "indexes": ["web"],
+                },
+                {
+                    "type": "web_fetch_20250910",
+                    "name": "web_fetch",
+                    "max_uses": 2,
+                },
+                {
+                    "type": "code_execution_20250825",
+                    "name": "code_execution",
+                },
+            ],
+            "tool_choice": {"type": "web_search"},
+        }
+    )
+
+    assert request.tools[0].web_search.model_dump(exclude_none=True) == {
+        "indexes": ["web"],
+        "max_uses": 5,
+        "allowed_domains": ["example.com"],
+    }
+    assert request.tools[1].url_content_extraction == {"max_uses": 2}
+    assert request.tools[2].code_interpreter == {}
+    assert request.tool_config.mode == "tool"
+    assert request.tool_config.tool_name == "web_search"
+
+
 async def test_prepare_chat_completion_enables_builtin_tools_when_default_mode_is_v1():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v1"))
     rt = RequestTransformer(cfg, logger=logger)
@@ -237,7 +336,6 @@ async def test_prepare_chat_completion_enables_builtin_tools_when_default_mode_i
     assert request.tool_config.tool_name == "web_search"
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_disables_builtin_tools_when_default_mode_is_v2():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)
@@ -255,7 +353,6 @@ async def test_prepare_chat_disables_builtin_tools_when_default_mode_is_v2():
     assert "tools" not in request
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_maps_native_structured_output_and_reasoning():
     cfg = ProxyConfig(
         proxy=ProxySettings(
@@ -290,7 +387,6 @@ async def test_prepare_chat_completion_maps_native_structured_output_and_reasoni
     assert request.tools is None
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_disable_reasoning_omits_model_option():
     cfg = ProxyConfig(
         proxy=ProxySettings(
@@ -312,7 +408,6 @@ async def test_prepare_chat_completion_disable_reasoning_omits_model_option():
     assert "reasoning" not in request.model_dump(exclude_none=True)
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_respects_pass_model_false():
     cfg = ProxyConfig(proxy=ProxySettings(pass_model=False))
     rt = RequestTransformer(cfg, logger=logger)
@@ -327,7 +422,6 @@ async def test_prepare_chat_completion_respects_pass_model_false():
     assert request.model is None
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_prod_logging_omits_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
@@ -347,7 +441,6 @@ async def test_prepare_chat_completion_prod_logging_omits_payload():
     )
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_dev_logging_includes_full_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()
@@ -371,7 +464,6 @@ async def test_prepare_chat_completion_dev_logging_includes_full_payload():
     )
 
 
-@pytest.mark.asyncio
 async def test_prepare_response_chat_completion_builds_chat_completion_request_from_responses_input():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -394,7 +486,6 @@ async def test_prepare_response_chat_completion_builds_chat_completion_request_f
     assert "storage" not in request.model_dump(exclude_none=True)
 
 
-@pytest.mark.asyncio
 async def test_prepare_response_chat_completion_sends_storage_when_store_true():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -411,7 +502,6 @@ async def test_prepare_response_chat_completion_sends_storage_when_store_true():
     assert request.model_dump(exclude_none=True)["storage"] == {}
 
 
-@pytest.mark.asyncio
 async def test_prepare_response_chat_completion_omits_storage_when_store_false():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -428,7 +518,6 @@ async def test_prepare_response_chat_completion_omits_storage_when_store_false()
     assert "storage" not in request.model_dump(exclude_none=True)
 
 
-@pytest.mark.asyncio
 async def test_prepare_response_chat_completion_maps_previous_response_id_to_storage_thread_id():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -447,7 +536,6 @@ async def test_prepare_response_chat_completion_maps_previous_response_id_to_sto
     assert "model" not in request.model_dump(exclude_none=True)
 
 
-@pytest.mark.asyncio
 async def test_prepare_response_chat_completion_maps_function_call_output():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -477,7 +565,6 @@ async def test_prepare_response_chat_completion_maps_function_call_output():
     assert result.result == {"result": 2}
 
 
-@pytest.mark.asyncio
 async def test_prepare_response_chat_completion_replays_function_call_with_tools_state_id():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -551,7 +638,6 @@ async def test_prepare_response_chat_completion_replays_function_call_with_tools
     assert "storage" not in request.model_dump(exclude_none=True)
 
 
-@pytest.mark.asyncio
 async def test_prepare_response_chat_completion_maps_responses_builtin_tools():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -600,7 +686,6 @@ async def test_prepare_response_chat_completion_maps_responses_builtin_tools():
     assert request.tool_config.tool_name == "web_search"
 
 
-@pytest.mark.asyncio
 async def test_prepare_response_chat_completion_flattens_namespace_tools():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -635,7 +720,6 @@ async def test_prepare_response_chat_completion_flattens_namespace_tools():
     assert spec.parameters["properties"]["url"]["type"] == "string"
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_maps_additional_fields():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -657,7 +741,6 @@ async def test_prepare_chat_completion_maps_additional_fields():
     assert request.model_extra["custom_flag"] == "on"
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_maps_profanity_check_to_disable_filter():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -674,7 +757,6 @@ async def test_prepare_chat_completion_maps_profanity_check_to_disable_filter():
     assert "profanity_check" not in request.model_dump(exclude_none=True)
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_maps_gigachat_profanity_check_default():
     cfg = ProxyConfig(gigachat={"profanity_check": True})
     rt = RequestTransformer(cfg, logger=logger)
@@ -689,7 +771,6 @@ async def test_prepare_chat_completion_maps_gigachat_profanity_check_default():
     assert request.disable_filter is False
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_request_profanity_check_overrides_default():
     cfg = ProxyConfig(gigachat={"profanity_check": True})
     rt = RequestTransformer(cfg, logger=logger)
@@ -705,7 +786,6 @@ async def test_prepare_chat_completion_request_profanity_check_overrides_default
     assert request.disable_filter is True
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_explicit_disable_filter_overrides_profanity_check():
     cfg = ProxyConfig(gigachat={"profanity_check": True})
     rt = RequestTransformer(cfg, logger=logger)
@@ -724,7 +804,6 @@ async def test_prepare_chat_completion_explicit_disable_filter_overrides_profani
     assert request.disable_filter is False
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_reuses_attachment_uploads():
     class AttachmentProcessor:
         async def upload_file_with_meta(self, *_args, **_kwargs):
@@ -763,7 +842,6 @@ async def test_prepare_chat_completion_reuses_attachment_uploads():
     assert content[1].files[0].id_ == "file_1"
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_maps_tool_call_result_history():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -825,7 +903,6 @@ async def test_prepare_chat_completion_maps_tool_call_result_history():
     }
 
 
-@pytest.mark.asyncio
 async def test_prepare_chat_completion_repairs_legacy_empty_tool_result():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

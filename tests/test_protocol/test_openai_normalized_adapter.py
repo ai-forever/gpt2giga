@@ -123,6 +123,41 @@ def test_openai_adapter_maps_tools_tool_choice_and_response_format():
     assert payload["response_format"]["json_schema"]["name"] == "answer"
 
 
+def test_openai_adapter_normalizes_tool_parameter_schema():
+    adapter = OpenAIProtocolAdapter()
+
+    normalized = adapter.chat_to_normalized(
+        {
+            "model": "GigaChat",
+            "messages": [{"role": "user", "content": "lookup"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "answers": {"type": "object"},
+                                "limit": {
+                                    "type": ["integer", "number", "null"],
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    parameters = normalized.to_json_dict()["tools"][0]["parameters"]
+    assert parameters["properties"]["answers"] == {
+        "type": "object",
+        "properties": {},
+    }
+    assert parameters["properties"]["limit"]["type"] == "integer"
+
+
 def test_openai_adapter_preserves_message_tool_calls_and_unknown_extensions():
     adapter = OpenAIProtocolAdapter()
 
@@ -169,7 +204,6 @@ def test_openai_adapter_preserves_message_tool_calls_and_unknown_extensions():
     }
 
 
-@pytest.mark.asyncio
 async def test_openai_adapter_async_entrypoint_matches_chat_converter():
     adapter = OpenAIProtocolAdapter()
     payload = {

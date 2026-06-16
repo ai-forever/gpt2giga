@@ -110,7 +110,7 @@ def _extract_request_headers(request: Request) -> dict[str, str]:
 def _extract_request_query(
     request: Request, exclude_query_params: Iterable[str]
 ) -> list[tuple[str, str]]:
-    excluded = {item.lower() for item in exclude_query_params} | {"x-api-key"}
+    excluded = {item.lower() for item in exclude_query_params} | {"x-api-key", "key"}
     items = (
         (key, value)
         for key, value in request.query_params.multi_items()

@@ -1,4 +1,7 @@
-from gpt2giga.common.json_schema import normalize_json_schema
+from gpt2giga.common.json_schema import (
+    normalize_json_schema,
+    normalize_tool_parameters_schema,
+)
 from gpt2giga.common.tools import convert_tool_to_giga_functions
 
 
@@ -7,6 +10,11 @@ def test_normalize_json_schema_adds_properties_to_object():
     schema = {"type": "object"}
     result = normalize_json_schema(schema)
     assert result == {"type": "object", "properties": {}}
+
+
+def test_normalize_tool_parameters_schema_defaults_root_to_object():
+    result = normalize_tool_parameters_schema({"required": ["query"]})
+    assert result == {"required": ["query"], "type": "object", "properties": {}}
 
 
 def test_normalize_json_schema_nested_object():
@@ -115,7 +123,7 @@ def test_normalize_json_schema_removes_null_from_anyof():
     schema = {
         "anyOf": [
             {"type": "string"},
-            {"type": "null"},
+            {"type": "NULL"},
         ],
         "default": None,
         "description": "Optional string parameter",
@@ -134,7 +142,7 @@ def test_normalize_json_schema_removes_null_from_oneof():
     schema = {
         "oneOf": [
             {"type": "integer"},
-            {"type": "null"},
+            {"type": ["NULL"]},
         ],
     }
     result = normalize_json_schema(schema)
@@ -213,6 +221,40 @@ def test_normalize_json_schema_anyof_string_or_object():
     assert result["type"] == "string"
     # string не требует properties
     assert "properties" not in result
+
+
+def test_normalize_json_schema_flattens_allof_refs():
+    """Test: allOf is merged away after $ref resolution."""
+    schema = {
+        "$defs": {
+            "Answer": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "metadata": {"type": "object"},
+                },
+            }
+        },
+        "type": "object",
+        "properties": {
+            "answers": {
+                "allOf": [{"$ref": "#/$defs/Answer"}],
+                "description": "Structured answer.",
+            }
+        },
+    }
+
+    result = normalize_tool_parameters_schema(schema)
+    answers = result["properties"]["answers"]
+
+    assert "allOf" not in answers
+    assert answers["type"] == "object"
+    assert answers["description"] == "Structured answer."
+    assert answers["properties"]["text"]["type"] == "string"
+    assert answers["properties"]["metadata"] == {
+        "type": "object",
+        "properties": {},
+    }
 
 
 def test_convert_tool_with_nested_object_without_properties():
@@ -366,6 +408,31 @@ def test_normalize_json_schema_array_type_with_null():
     # type should be converted to single string
     assert result["type"] == "string"
     assert result["description"] == "Optional string parameter"
+
+
+def test_normalize_json_schema_uppercase_gemini_types():
+    """Test: converts Gemini Schema Type enum values to JSON Schema types."""
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "city": {"type": "STRING"},
+            "coordinates": {
+                "type": "ARRAY",
+                "items": {"type": "NUMBER"},
+            },
+            "metadata": {"type": "OBJECT"},
+            "optional": {"type": ["STRING", "NULL"]},
+        },
+    }
+
+    result = normalize_json_schema(schema)
+
+    assert result["type"] == "object"
+    assert result["properties"]["city"]["type"] == "string"
+    assert result["properties"]["coordinates"]["type"] == "array"
+    assert result["properties"]["coordinates"]["items"]["type"] == "number"
+    assert result["properties"]["metadata"] == {"type": "object", "properties": {}}
+    assert result["properties"]["optional"]["type"] == "string"
 
 
 def test_normalize_json_schema_array_type_multiple():

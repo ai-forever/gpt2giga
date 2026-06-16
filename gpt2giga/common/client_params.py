@@ -70,6 +70,7 @@ BLOCKED_CLIENT_HEADER_NAMES = frozenset(
         "upgrade",
         "user-agent",
         "x-api-key",
+        "x-goog-api-key",
         "x-forwarded-for",
         "x-forwarded-host",
         "x-forwarded-port",

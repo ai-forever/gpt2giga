@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from gigachat import GigaChat
@@ -15,7 +16,11 @@ from gigachat.models import (
 
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.debug_logging import log_debug_payload
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.common.json_schema import (
+    normalize_json_schema,
+    normalize_tool_parameters_schema,
+    resolve_schema_refs,
+)
 from gpt2giga.common.message_utils import (
     collapse_user_messages,
     ensure_system_first,
@@ -27,6 +32,7 @@ from gpt2giga.common.tools import (
     build_gigachat_builtin_tool_payload,
     iter_function_tool_payloads,
     map_tool_name_to_gigachat,
+    normalize_gigachat_function_definitions,
 )
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.models.config import ProxyConfig
@@ -486,6 +492,11 @@ class RequestTransformer:
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
+        if "functions" in transformed:
+            transformed["functions"] = self._normalize_legacy_functions(
+                transformed["functions"]
+            )
+
         # Map reserved tool names to safe aliases for GigaChat
         function_call = transformed.get("function_call")
         if isinstance(function_call, dict) and function_call.get("name"):
@@ -500,6 +511,31 @@ class RequestTransformer:
                     setattr(fn, "name", map_tool_name_to_gigachat(getattr(fn, "name")))
 
         return transformed
+
+    @staticmethod
+    def _normalize_legacy_functions(functions: Any) -> Any:
+        """Normalize legacy function schemas before GigaChat Chat validation."""
+        if not isinstance(functions, list):
+            return functions
+
+        normalized_functions = []
+        for function in functions:
+            if hasattr(function, "model_dump"):
+                function_payload = function.model_dump(exclude_none=True, by_alias=True)
+            elif isinstance(function, Mapping):
+                function_payload = dict(function)
+            else:
+                normalized_functions.append(function)
+                continue
+
+            parameters = function_payload.get("parameters")
+            if isinstance(parameters, dict):
+                function_payload["parameters"] = normalize_json_schema(
+                    resolve_schema_refs(parameters)
+                )
+            normalized_functions.append(function_payload)
+
+        return normalized_functions
 
     @staticmethod
     def _apply_json_schema_as_function(
@@ -562,7 +598,7 @@ class RequestTransformer:
         )
 
     def _responses_chat_completion_tools_enabled_by_default(self) -> bool:
-        return self.config.proxy_settings.resolve_responses_api_mode() == "v2"
+        return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
 
     @staticmethod
     def _strip_reasoning_payload_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -823,6 +859,14 @@ class RequestTransformer:
         """Common logic for message transformation and logging."""
         transformed_data.pop("_gpt2giga_builtin_tools", None)
         transformed_data.pop("_gpt2giga_tool_config", None)
+        if "functions" in transformed_data:
+            functions = normalize_gigachat_function_definitions(
+                transformed_data.get("functions")
+            )
+            if functions:
+                transformed_data["functions"] = functions
+            else:
+                transformed_data.pop("functions", None)
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
@@ -1201,9 +1245,7 @@ class RequestTransformer:
 
     @staticmethod
     def _normalize_chat_completion_function_schema(schema: Any) -> dict[str, Any]:
-        if not isinstance(schema, dict):
-            return {}
-        return normalize_json_schema(resolve_schema_refs(schema))
+        return normalize_tool_parameters_schema(schema)
 
     @staticmethod
     def _dump_mapping(value: Any) -> Dict[str, Any]:

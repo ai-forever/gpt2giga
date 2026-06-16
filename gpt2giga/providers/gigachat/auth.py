@@ -5,7 +5,7 @@ from typing import Any
 from gigachat import GigaChat
 from gigachat.settings import SCOPE
 
-from gpt2giga.constants import _AUTH_KEYS
+from gpt2giga.constants import AUTH_KEYS
 from gpt2giga.providers.gigachat.client import create_gigachat_client
 
 
@@ -34,7 +34,7 @@ def create_gigachat_client_for_request(settings: Any, token: str) -> GigaChat:
     """
     if token.startswith("giga-auth-"):
         kwargs = dict(settings.model_dump())
-        for key in _AUTH_KEYS:
+        for key in AUTH_KEYS:
             kwargs.pop(key, None)
         kwargs["access_token"] = token.replace("giga-auth-", "", 1)
         return GigaChat(**kwargs)

@@ -1,6 +1,5 @@
 import io
 
-import pytest
 from PIL import Image
 from loguru import logger
 
@@ -17,7 +16,6 @@ class DummyClient:
         return DummyFile("ok2")
 
 
-@pytest.mark.asyncio
 async def test_attachment_processor_success_with_pil(monkeypatch):
     client = DummyClient()
     p = AttachmentProcessor(logger)
