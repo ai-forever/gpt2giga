@@ -45,6 +45,11 @@ _GEMINI_FUNCTION_DECLARATION_KEYS = {
     "functionDeclarations",
     "function_declarations",
 }
+_GEMINI_FUNCTION_PARAMETERS_KEYS = {
+    "parameters",
+    "parametersJsonSchema",
+    "parameters_json_schema",
+}
 
 
 class GeminiProtocolAdapter:
@@ -392,6 +397,25 @@ def _validate_function_declaration(value: Any, *, param: str) -> None:
             "Gemini function declaration parameters must be an object.",
             param=f"{param}.parameters",
         )
+    parameters_json_schema = _part_value(
+        value,
+        "parametersJsonSchema",
+        "parameters_json_schema",
+    )
+    if parameters_json_schema is not None and not isinstance(
+        parameters_json_schema,
+        Mapping,
+    ):
+        raise gemini_invalid_request(
+            "Gemini function declaration parametersJsonSchema must be an object.",
+            param=f"{param}.parametersJsonSchema",
+        )
+    if parameters is not None and parameters_json_schema is not None:
+        raise gemini_invalid_request(
+            "Gemini function declaration parameters and parametersJsonSchema are "
+            "mutually exclusive.",
+            param=f"{param}.parametersJsonSchema",
+        )
 
 
 def _validate_tool_config(value: Any) -> None:
@@ -657,13 +681,11 @@ def _function_declaration_to_normalized(
     declaration: Mapping[str, Any],
     tool: Mapping[str, Any],
 ) -> NormalizedTool:
-    parameters = declaration.get("parameters")
-    if not isinstance(parameters, Mapping):
-        parameters = {}
+    parameters = _function_declaration_parameters(declaration)
     raw_extensions = {
         key: value
         for key, value in declaration.items()
-        if key not in {"name", "description", "parameters"}
+        if key not in {"name", "description"} | _GEMINI_FUNCTION_PARAMETERS_KEYS
     }
     tool_extensions = {
         key: value
@@ -679,6 +701,22 @@ def _function_declaration_to_normalized(
         parameters=normalize_tool_parameters_schema(parameters),
         raw_extensions=raw_extensions,
     )
+
+
+def _function_declaration_parameters(
+    declaration: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    parameters = declaration.get("parameters")
+    if isinstance(parameters, Mapping):
+        return parameters
+    parameters_json_schema = _part_value(
+        declaration,
+        "parametersJsonSchema",
+        "parameters_json_schema",
+    )
+    if isinstance(parameters_json_schema, Mapping):
+        return parameters_json_schema
+    return {}
 
 
 def _function_calling_config(

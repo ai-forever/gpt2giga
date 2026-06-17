@@ -346,6 +346,49 @@ def test_gemini_generate_content_maps_response_json_schema_alias():
     }
 
 
+def test_gemini_generate_content_preserves_tool_parameters_json_schema():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "contents": [{"parts": [{"text": "Read a file"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "read_file",
+                            "description": "Read a file.",
+                            "parametersJsonSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "start_line": {"type": "integer"},
+                                },
+                                "required": ["path"],
+                            },
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = app.state.request_transformer.chat_calls[0][0]
+    tool = payload["tools"][0]["function"]
+    assert tool["name"] == "read_file"
+    assert tool["parameters"] == {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "start_line": {"type": "integer"},
+        },
+        "required": ["path"],
+    }
+
+
 def test_gemini_generate_content_emits_phoenix_span_name():
     app = make_app()
     app.state.observability_sink = RecordingObservabilitySink()

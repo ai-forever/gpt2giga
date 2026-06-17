@@ -157,6 +157,52 @@ def test_gemini_adapter_maps_response_json_schema_alias_to_json_schema():
     assert normalized.raw_extensions == {}
 
 
+@pytest.mark.parametrize(
+    "schema_key",
+    ["parametersJsonSchema", "parameters_json_schema"],
+)
+def test_gemini_adapter_maps_function_parameters_json_schema(schema_key):
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "Read a file"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "read_file",
+                            "description": "Read a file.",
+                            schema_key: {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "start_line": {"type": "integer"},
+                                },
+                                "required": ["path"],
+                            },
+                        }
+                    ]
+                }
+            ],
+        },
+        model="gemini-pro",
+    )
+
+    tool = normalized.tools[0]
+
+    assert tool.name == "read_file"
+    assert tool.parameters == {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "start_line": {"type": "integer"},
+        },
+        "required": ["path"],
+    }
+    assert schema_key not in tool.raw_extensions
+
+
 def _gemini_tool_config_payload(
     function_calling_config,
     *,
@@ -383,6 +429,36 @@ def test_gemini_adapter_rejects_unsupported_function_calling_config(
                 ],
             },
             "tools[0].functionDeclarations[0].parameters",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "tools": [
+                    {
+                        "functionDeclarations": [
+                            {"name": "lookup", "parametersJsonSchema": "bad"}
+                        ]
+                    }
+                ],
+            },
+            "tools[0].functionDeclarations[0].parametersJsonSchema",
+        ),
+        (
+            {
+                "contents": [{"parts": [{"text": "hello"}]}],
+                "tools": [
+                    {
+                        "functionDeclarations": [
+                            {
+                                "name": "lookup",
+                                "parameters": {"type": "object"},
+                                "parametersJsonSchema": {"type": "object"},
+                            }
+                        ]
+                    }
+                ],
+            },
+            "tools[0].functionDeclarations[0].parametersJsonSchema",
         ),
         (
             {"contents": [{"parts": [{"text": "hello"}]}], "toolConfig": "bad"},
