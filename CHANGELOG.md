@@ -25,6 +25,7 @@
 - **GigaChat provider adapter**: provider label теперь передается в per-model concurrency limiter, чтобы Gemini traffic учитывался отдельно от OpenAI/Anthropic paths; raw extensions отправляются upstream только для OpenAI protocol payloads.
 - **Dependencies**: добавлен `google-genai` для Gemini examples/integration coverage, обновлен `uv.lock`, расширены допустимые версии `tiktoken` и `starlette`.
 - **Docs alignment**: README, API compatibility, client parameter compatibility, configuration, examples index и integrations index обновлены под Gemini-compatible API, Claude Desktop и удаление отдельного Responses API mode flag.
+- **Compatibility matrix**: добавлена краткая матрица OpenAI/Anthropic/Gemini/LiteLLM поддержки с явным release scope для Gemini и ссылкой на детальные API ограничения.
 - **API version routing docs**: docs, examples и integration guides уточняют явный выбор backend contract через `/v1` или `/v2`, а также переменные `GPT2GIGA_EXAMPLE_API_VERSION` и `GPT2GIGA_EXAMPLE_BASE_URL` для examples.
 - **Phoenix span names**: LLM spans выровнены по совместимым API-форматам: `OpenAI-Completions`, `OpenAI-Responses`, `Anthropic-Messages`, `Gemini-Content` и `Embeddings`.
 - **Built-in tools docs**: добавлен русскоязычный справочник по маппингу built-in tools и обновлены compatibility/configuration материалы.
@@ -40,6 +41,7 @@
 - **Gemini tool and embeddings validation**: Gemini adapter больше не теряет multi-`functionResponse` и mixed text/tool parts, `toolConfig.functionCallingConfig` валидируется явно, invalid `allowedFunctionNames` возвращают `400`, malformed `embedContent`/`batchEmbedContents` больше не вызывают upstream embeddings с пустой строкой.
 - **Gemini model capabilities**: Gemini model discovery теперь консервативно различает generation, embedding и unknown/custom models вместо одинакового `supportedGenerationMethods` для всех моделей.
 - **Gemini streaming and diagnostics hardening**: `streamGenerateContent` теперь возвращает детерминированные Gemini-compatible SSE error chunks для ранних и частичных stream failures, пустые streams завершаются валидным `STOP` chunk, а accepted-but-ignored Gemini request extensions видны в redacted observability attributes.
+- **Gemini lifecycle telemetry metadata**: traffic logs, observability attributes и metrics labels для Gemini request lifecycle теперь получают `provider=gigachat`, как OpenAI/Anthropic lifecycle events.
 - **Legacy GigaChat v1 function calling**: legacy `/chat` path снова сохраняет `functions` после tool/function results для следующих вызовов, при этом удаляет backend `functions_state_id`/`tools_state_id` из history, чтобы не ломать GigaChat v1 validation.
 - **Tool state ids**: Anthropic `tool_use` blocks и Gemini `functionCall`/`functionResponse` теперь сохраняют upstream tool state ids в non-streaming и streaming flows, включая multi-tool turns.
 - **Gemini structured output aliases**: Gemini `generationConfig.responseJsonSchema` теперь поддерживается как alias для JSON Schema structured output; конфликт с `responseSchema` и JSON mode без schema возвращают совместимый `400`.

@@ -79,6 +79,7 @@ nav:
       - Быстрый старт: quickstart.md
       - Конфигурация: configuration.md
   - Совместимость:
+      - Compatibility matrix: compatibility.md
       - API compatibility: api-compatibility.md
       - Client parameters: client-parameter-compatibility.md
       - Встроенные инструменты: builtin-tools.md

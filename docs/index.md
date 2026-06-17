@@ -13,6 +13,7 @@ http://localhost:8090
 | Возможность | Где читать |
 |---|---|
 | Быстрый запуск через Docker Compose или `uv` | [Быстрый старт](quickstart.md) |
+| Краткая матрица OpenAI, Anthropic, Gemini и LiteLLM поддержки | [Compatibility matrix](compatibility.md) |
 | Поддержанные OpenAI, Anthropic, Gemini и LiteLLM routes | [API compatibility](api-compatibility.md) |
 | Поведение `extra_headers`, `extra_query`, `extra_body` и optional fields | [Client parameters](client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |

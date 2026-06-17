@@ -29,7 +29,7 @@ GigaChat не является drop-in заменой OpenAI или Anthropic AP
 - отдаёт список моделей в OpenAI-, Anthropic-, Gemini- и LiteLLM-совместимом виде;
 - держит batch/file routes отключёнными, пока их нельзя выполнить end-to-end через GigaChat SDK/backend.
 
-Подробная матрица поддержки и список реальных ограничений вынесены в [API Compatibility](./docs/api-compatibility.md).
+Короткая матрица поддержки вынесена в [Compatibility Matrix](./docs/compatibility.md), а детальный список route-ограничений - в [API Compatibility](./docs/api-compatibility.md).
 
 ## Быстрый Старт
 
@@ -104,6 +104,7 @@ uv run --group docs mkdocs serve -a 127.0.0.1:8001
 | Тема | Документ |
 |---|---|
 | Быстрый запуск и первые запросы | [docs/quickstart.md](./docs/quickstart.md) |
+| Краткая матрица OpenAI/Anthropic/Gemini/LiteLLM поддержки | [docs/compatibility.md](./docs/compatibility.md) |
 | Что поддерживается, отключено или намеренно игнорируется | [docs/api-compatibility.md](./docs/api-compatibility.md) |
 | Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |

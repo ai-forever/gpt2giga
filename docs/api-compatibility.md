@@ -34,6 +34,20 @@ backend одинаковое для OpenAI-, Anthropic- и Gemini-compatible rou
 - `/messages`, `/v1/messages` и `/v2/messages`
 - `/models/{model}:generateContent`, `/v1/models/{model}:generateContent`, `/v2/models/{model}:generateContent` и `/v1beta/models/{model}:generateContent`
 
+## Сводная матрица
+
+Короткая release-матрица также доступна отдельной страницей:
+[Compatibility matrix](./compatibility.md).
+
+| Surface | Non-stream | Stream | Tools | Structured output | Embeddings | Models | Token count |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| OpenAI Chat | yes | yes | yes | yes | n/a | yes | n/a |
+| OpenAI Responses | yes | yes | yes | yes | n/a | n/a | n/a |
+| Anthropic Messages | yes | yes | yes | yes | n/a | yes | yes |
+| Gemini generateContent | yes | yes | yes | yes | n/a | yes | yes |
+| Gemini embeddings | n/a | n/a | n/a | n/a | yes | yes | n/a |
+| LiteLLM model info | n/a | n/a | n/a | n/a | n/a | yes | n/a |
+
 ## OpenAI-compatible routes
 
 | Route / group | Статус | Комментарий |
