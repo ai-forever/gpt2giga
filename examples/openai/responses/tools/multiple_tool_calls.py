@@ -3,7 +3,7 @@ from typing import Any
 
 from openai import OpenAI
 
-api_version = "v2"
+api_version = "v1"
 client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 MODEL = "GigaChat-2-Max"

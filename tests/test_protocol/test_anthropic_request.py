@@ -516,9 +516,9 @@ async def test_anthropic_tool_result_history_prepares_valid_legacy_chat_payload(
         "arguments": {"city": "Москва"},
     }
     assert "functions_state_id" not in chat["messages"][1]
-    assert chat["messages"][2]["functions_state_id"] == "toolu_weather_1"
+    assert "functions_state_id" not in chat["messages"][2]
     assert "tools" not in chat
-    assert "functions" not in chat
+    assert [function.name for function in chat["functions"]] == ["get_weather"]
     Chat.model_validate(chat)
 
 

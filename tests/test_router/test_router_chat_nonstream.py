@@ -181,8 +181,11 @@ def test_chat_completions_legacy_keeps_assistant_function_call_replay():
         "arguments": {"city": "Москва"},
     }
     assert "functions_state_id" not in sent_messages[1]
-    assert sent_messages[2]["functions_state_id"] == state_id
-    assert "functions" not in app.state.gigachat_client.chat_calls[0]
+    assert "functions_state_id" not in sent_messages[2]
+    assert [
+        function.name
+        for function in app.state.gigachat_client.chat_calls[0]["functions"]
+    ] == ["get_weather"]
 
 
 def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():

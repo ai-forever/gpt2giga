@@ -90,7 +90,7 @@ async def test_request_transformer_tools_to_functions():
     assert "tools" not in chat
 
 
-async def test_prepare_chat_keeps_tool_result_state_for_legacy_gigachat():
+async def test_prepare_chat_drops_tool_result_state_for_legacy_gigachat():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
 
@@ -132,9 +132,7 @@ async def test_prepare_chat_keeps_tool_result_state_for_legacy_gigachat():
         "arguments": {"city": "Москва"},
     }
     assert "functions_state_id" not in chat["messages"][1]
-    assert chat["messages"][2]["functions_state_id"] == (
-        "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"
-    )
+    assert "functions_state_id" not in chat["messages"][2]
 
 
 async def test_prepare_chat_keeps_assistant_replay_in_legacy_function_history():
@@ -188,11 +186,11 @@ async def test_prepare_chat_keeps_assistant_replay_in_legacy_function_history():
         "arguments": {"city": "Москва"},
     }
     assert "functions_state_id" not in chat["messages"][1]
-    assert chat["messages"][2]["functions_state_id"] == state_id
+    assert "functions_state_id" not in chat["messages"][2]
     Chat.model_validate(chat)
 
 
-async def test_prepare_chat_drops_legacy_functions_for_completed_replay_history():
+async def test_prepare_chat_keeps_legacy_functions_for_completed_replay_history():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
 
@@ -252,8 +250,74 @@ async def test_prepare_chat_drops_legacy_functions_for_completed_replay_history(
         "arguments": {"sign": "Aquarius"},
     }
     assert "functions_state_id" not in chat["messages"][2]
-    assert chat["messages"][3]["functions_state_id"] == state_id
+    assert "functions_state_id" not in chat["messages"][3]
+    assert [function.name for function in chat["functions"]] == ["get_horoscope"]
+    Chat.model_validate(chat)
+
+
+async def test_prepare_chat_strips_function_result_state_id_without_functions():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Before the final answer, call tools for weather, hotel "
+                        "search, and currency conversion when that data is missing."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Plan a 2-night trip to Saint Petersburg tomorrow. Use "
+                        "tools to check weather, find a hotel under 15000 RUB per "
+                        "night, and convert 200 USD to RUB. Then answer in Russian."
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {
+                            "city": "Saint Petersburg",
+                            "date": "tomorrow",
+                        },
+                    },
+                },
+                {
+                    "role": "function",
+                    "content": (
+                        '{"city": "Saint Petersburg", "date": "tomorrow", '
+                        '"forecast": "cloudy, +7 C", '
+                        '"advice": "take a windproof jacket"}'
+                    ),
+                    "name": "get_weather",
+                    "functions_state_id": "019ed5e3-9699-7936-8e72-a4ef02de4313",
+                },
+            ],
+            "profanity_check": False,
+        }
+    )
+
+    assert [message["role"] for message in chat["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][2]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Saint Petersburg", "date": "tomorrow"},
+    }
+    assert "functions_state_id" not in chat["messages"][2]
+    assert "functions_state_id" not in chat["messages"][3]
     assert "functions" not in chat
+    assert chat["additional_fields"] == {"profanity_check": False}
     Chat.model_validate(chat)
 
 
@@ -305,7 +369,7 @@ async def test_prepare_chat_keeps_legacy_functions_for_next_user_turn_after_tool
     Chat.model_validate(chat)
 
 
-async def test_prepare_chat_examples_tool_loop_drops_replay_functions_upstream():
+async def test_prepare_chat_examples_tool_loop_keeps_legacy_functions_upstream():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
 
@@ -356,16 +420,16 @@ async def test_prepare_chat_examples_tool_loop_drops_replay_functions_upstream()
     )
 
     assert "tools" not in chat
-    assert "functions" not in chat
+    assert [function.name for function in chat["functions"]] == ["get_horoscope"]
     assert chat["messages"][1]["function_call"] == {
         "name": "get_horoscope",
         "arguments": {"sign": "Aquarius"},
     }
-    assert chat["messages"][2]["functions_state_id"] == state_id
+    assert "functions_state_id" not in chat["messages"][2]
     Chat.model_validate(chat)
 
 
-async def test_prepare_response_chat_examples_multiple_tool_loop_drops_replay_functions():
+async def test_prepare_response_chat_examples_multiple_tool_loop_keeps_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
 
@@ -398,6 +462,23 @@ async def test_prepare_response_chat_examples_multiple_tool_loop_drops_replay_fu
                             "max_price_rub": {"type": "integer"},
                         },
                         "required": ["city", "nights", "max_price_rub"],
+                    },
+                },
+                {
+                    "type": "function",
+                    "name": "convert_currency",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "amount": {"type": "number"},
+                            "from_currency": {"type": "string"},
+                            "to_currency": {"type": "string"},
+                        },
+                        "required": [
+                            "amount",
+                            "from_currency",
+                            "to_currency",
+                        ],
                     },
                 },
             ],
@@ -435,7 +516,11 @@ async def test_prepare_response_chat_examples_multiple_tool_loop_drops_replay_fu
     )
 
     assert "tools" not in chat
-    assert "functions" not in chat
+    assert [function.name for function in chat["functions"]] == [
+        "get_weather",
+        "find_hotel",
+        "convert_currency",
+    ]
     assert [message["role"] for message in chat["messages"]] == [
         "system",
         "user",
@@ -444,12 +529,12 @@ async def test_prepare_response_chat_examples_multiple_tool_loop_drops_replay_fu
         "assistant",
         "function",
     ]
-    assert chat["messages"][3]["functions_state_id"] == "state_weather"
-    assert chat["messages"][5]["functions_state_id"] == "state_hotel"
+    assert "functions_state_id" not in chat["messages"][3]
+    assert "functions_state_id" not in chat["messages"][5]
     Chat.model_validate(chat)
 
 
-async def test_prepare_response_chat_function_calling_example_drops_replay_functions():
+async def test_prepare_response_chat_function_calling_example_keeps_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
 
@@ -502,7 +587,7 @@ async def test_prepare_response_chat_function_calling_example_drops_replay_funct
     )
 
     assert "tools" not in chat
-    assert "functions" not in chat
+    assert [function.name for function in chat["functions"]] == ["get_horoscope"]
     assert [message["role"] for message in chat["messages"]] == [
         "system",
         "user",
@@ -514,7 +599,7 @@ async def test_prepare_response_chat_function_calling_example_drops_replay_funct
         "arguments": {"sign": "Aquarius"},
     }
     assert "functions_state_id" not in chat["messages"][2]
-    assert chat["messages"][3]["functions_state_id"] == state_id
+    assert "functions_state_id" not in chat["messages"][3]
     Chat.model_validate(chat)
 
 
