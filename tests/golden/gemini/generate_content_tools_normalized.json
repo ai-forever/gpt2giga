@@ -1,0 +1,57 @@
+{
+  "generation_config": {
+    "provider_metadata": {},
+    "raw_extensions": {}
+  },
+  "messages": [
+    {
+      "content": "lookup weather",
+      "provider_metadata": {},
+      "raw_extensions": {},
+      "role": "user",
+      "tool_calls": []
+    }
+  ],
+  "metadata": {},
+  "model": "gemini-pro",
+  "operation": "chat",
+  "protocol": "gemini",
+  "provider_metadata": {},
+  "raw_extensions": {
+    "toolConfig": {
+      "functionCallingConfig": {
+        "allowedFunctionNames": [
+          "lookup_weather"
+        ],
+        "mode": "ANY"
+      }
+    }
+  },
+  "stream": false,
+  "tool_choice": {
+    "function": {
+      "name": "lookup_weather"
+    },
+    "type": "function"
+  },
+  "tools": [
+    {
+      "description": "Lookup weather.",
+      "name": "lookup_weather",
+      "parameters": {
+        "properties": {
+          "city": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "city"
+        ],
+        "type": "object"
+      },
+      "provider_metadata": {},
+      "raw_extensions": {},
+      "type": "function"
+    }
+  ]
+}

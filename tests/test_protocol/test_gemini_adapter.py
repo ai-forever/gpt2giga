@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.gemini.response_adapter import (
+    gemini_response_to_normalized,
     normalized_chat_response_to_gemini,
 )
 from gpt2giga.protocols.gemini.streaming import (
@@ -850,6 +851,62 @@ def test_gemini_response_adapter_maps_normalized_response():
         }
     }
     assert candidate["finishReason"] == "STOP"
+
+
+def test_gemini_response_adapter_maps_gemini_response_to_normalized():
+    normalized = gemini_response_to_normalized(
+        {
+            "responseId": "resp-1",
+            "modelVersion": "gemini-pro",
+            "candidates": [
+                {
+                    "index": 0,
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            {"text": "ok"},
+                            {
+                                "functionCall": {
+                                    "id": "state-1",
+                                    "name": "lookup",
+                                    "args": {"q": "ping"},
+                                }
+                            },
+                        ],
+                    },
+                    "finishReason": "STOP",
+                    "safetyRatings": [{"category": "HARM_CATEGORY_DANGEROUS"}],
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 2,
+                "candidatesTokenCount": 3,
+                "totalTokenCount": 5,
+            },
+        }
+    )
+
+    assert normalized.id == "resp-1"
+    assert normalized.model == "gemini-pro"
+    assert normalized.provider == "gemini"
+    assert normalized.usage == NormalizedUsage(
+        input_tokens=2,
+        output_tokens=3,
+        total_tokens=5,
+    )
+    choice = normalized.choices[0]
+    assert choice.finish_reason == "stop"
+    assert choice.raw_extensions["safetyRatings"] == [
+        {"category": "HARM_CATEGORY_DANGEROUS"}
+    ]
+    assert choice.message is not None
+    assert choice.message.role == "assistant"
+    assert choice.message.content == "ok"
+    assert choice.message.tool_calls[0] == NormalizedToolCall(
+        id="state-1",
+        name="lookup",
+        arguments={"q": "ping"},
+    )
 
 
 def test_gemini_stream_message_end_includes_usage_metadata():

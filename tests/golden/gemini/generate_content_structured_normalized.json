@@ -1,0 +1,43 @@
+{
+  "generation_config": {
+    "provider_metadata": {},
+    "raw_extensions": {}
+  },
+  "messages": [
+    {
+      "content": "Recommend a movie",
+      "provider_metadata": {},
+      "raw_extensions": {},
+      "role": "user",
+      "tool_calls": []
+    }
+  ],
+  "metadata": {},
+  "model": "gemini-pro",
+  "operation": "chat",
+  "protocol": "gemini",
+  "provider_metadata": {},
+  "raw_extensions": {},
+  "response_format": {
+    "json_schema": {
+      "schema": {
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      }
+    },
+    "provider_metadata": {},
+    "raw_extensions": {
+      "responseMimeType": "application/json"
+    },
+    "type": "json_schema"
+  },
+  "stream": false,
+  "tools": []
+}

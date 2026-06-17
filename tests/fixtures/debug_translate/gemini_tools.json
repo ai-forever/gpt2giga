@@ -1,0 +1,38 @@
+{
+  "model": "gemini-pro",
+  "contents": [
+    {
+      "role": "user",
+      "parts": [
+        {
+          "text": "lookup weather"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "functionDeclarations": [
+        {
+          "name": "lookup_weather",
+          "description": "Lookup weather.",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": ["city"]
+          }
+        }
+      ]
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "ANY",
+      "allowedFunctionNames": ["lookup_weather"]
+    }
+  }
+}

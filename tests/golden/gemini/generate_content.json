@@ -1,0 +1,33 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "parts": [
+          {
+            "text": "ok"
+          },
+          {
+            "functionCall": {
+              "args": {
+                "q": "ping"
+              },
+              "id": "state-1",
+              "name": "lookup"
+            }
+          }
+        ],
+        "role": "model"
+      },
+      "finishReason": "STOP",
+      "index": 0,
+      "safetyRatings": []
+    }
+  ],
+  "modelVersion": "gemini-pro",
+  "responseId": "golden-gemini",
+  "usageMetadata": {
+    "candidatesTokenCount": 3,
+    "promptTokenCount": 2,
+    "totalTokenCount": 5
+  }
+}

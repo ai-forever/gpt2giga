@@ -1,0 +1,12 @@
+{
+  "embedding": {
+    "values": [
+      0.0,
+      1.0
+    ]
+  },
+  "usageMetadata": {
+    "promptTokenCount": 2,
+    "totalTokenCount": 2
+  }
+}

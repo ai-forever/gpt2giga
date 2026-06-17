@@ -1,0 +1,2 @@
+data: {"candidates": [{"index": 0, "content": {"role": "model", "parts": [{"text": "ok"}]}}], "modelVersion": "gemini-pro", "responseId": "golden-stream"}
+

@@ -14,6 +14,10 @@ from gpt2giga.openapi_tags import OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
+from gpt2giga.protocols.gemini import (
+    GeminiProtocolAdapter,
+    normalized_chat_response_to_gemini,
+)
 from gpt2giga.protocols.normalized import (
     NormalizedChatRequest,
     NormalizedContentPart,
@@ -29,7 +33,7 @@ from gpt2giga.providers.gigachat.adapter import (
 
 
 SUPPORTED_TRANSLATE_FORMATS = frozenset(
-    {"anthropic", "gigachat", "normalized", "openai"}
+    {"anthropic", "gemini", "gigachat", "normalized", "openai"}
 )
 
 
@@ -103,6 +107,19 @@ async def anthropic_to_normalized(request: Request):
         "source": "anthropic",
         "target": "normalized",
         "intermediate_openai": openai_payload,
+        "normalized": normalized.to_json_dict(),
+    }
+
+
+@router.post("/gemini-to-normalized")
+@exceptions_handler
+async def gemini_to_normalized(request: Request):
+    """Translate a Gemini GenerateContent request to normalized form."""
+    payload = await _read_json_object(request)
+    normalized = await _gemini_payload_to_normalized(request, payload)
+    return {
+        "source": "gemini",
+        "target": "normalized",
         "normalized": normalized.to_json_dict(),
     }
 
@@ -200,6 +217,19 @@ async def _translate_payload(
             intermediate={"openai": openai_payload},
         )
 
+    if source == "gemini":
+        normalized = await _gemini_payload_to_normalized(
+            request,
+            payload,
+            requested_model=requested_model,
+        )
+        return await _translate_normalized_request_to_target(
+            request,
+            normalized=normalized,
+            target=target,
+            intermediate={},
+        )
+
     if source == "normalized":
         normalized = NormalizedChatRequest.model_validate(
             payload.get("normalized", payload)
@@ -241,6 +271,11 @@ async def _translate_normalized_request_to_target(
     if target == "anthropic":
         return {
             "payload": _normalized_chat_to_anthropic_payload(normalized),
+            "intermediate": {"normalized": normalized.to_json_dict(), **intermediate},
+        }
+    if target == "gemini":
+        return {
+            "payload": _normalized_chat_to_gemini_payload(normalized),
             "intermediate": {"normalized": normalized.to_json_dict(), **intermediate},
         }
     if target == "gigachat":
@@ -296,6 +331,16 @@ def _translate_gigachat_response_to_target(
             "payload": openai_payload,
             "intermediate": {"normalized": normalized.to_json_dict()},
         }
+    if target == "gemini":
+        gemini_payload = normalized_chat_response_to_gemini(
+            normalized,
+            requested_model=model,
+            context=None,
+        )
+        return {
+            "payload": gemini_payload,
+            "intermediate": {"normalized": normalized.to_json_dict()},
+        }
     return _raise_unsupported_pair("gigachat", target)
 
 
@@ -315,6 +360,231 @@ def _anthropic_payload_to_openai(
 ) -> dict[str, Any]:
     logger = getattr(request.app.state, "logger", None)
     return _build_openai_data_from_anthropic_request(payload, logger)
+
+
+async def _gemini_payload_to_normalized(
+    request: Request,
+    payload: dict[str, Any],
+    *,
+    requested_model: Any = None,
+) -> NormalizedChatRequest:
+    model = _debug_requested_model(requested_model, payload)
+    gemini_payload = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"model", "requested_model"}
+    }
+    adapter = _gemini_protocol_adapter(request)
+    return adapter.generate_content_to_normalized(
+        gemini_payload,
+        model=model,
+        context=None,
+    )
+
+
+def _gemini_protocol_adapter(request: Request) -> GeminiProtocolAdapter:
+    adapter = getattr(request.app.state, "gemini_protocol_adapter", None)
+    if adapter is None:
+        adapter = GeminiProtocolAdapter()
+        request.app.state.gemini_protocol_adapter = adapter
+    return adapter
+
+
+def _debug_requested_model(requested_model: Any, payload: dict[str, Any]) -> str:
+    model = requested_model or payload.get("requested_model") or payload.get("model")
+    if not isinstance(model, str) or not model.strip():
+        return "GigaChat"
+    return model.strip().removeprefix("models/")
+
+
+def _normalized_chat_to_gemini_payload(
+    request: NormalizedChatRequest,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"contents": []}
+    system_parts: list[dict[str, Any]] = []
+    for message in request.messages:
+        if message.role == "system":
+            system_parts.extend(_normalized_content_to_gemini_parts(message.content))
+            continue
+        parts = _normalized_message_to_gemini_parts(message)
+        if parts:
+            payload["contents"].append(
+                {
+                    "role": _normalized_role_to_gemini(message.role),
+                    "parts": parts,
+                }
+            )
+
+    if system_parts:
+        payload["systemInstruction"] = {"parts": system_parts}
+    if request.tools:
+        payload["tools"] = [
+            {
+                "functionDeclarations": [
+                    _normalized_tool_to_gemini(tool) for tool in request.tools
+                ]
+            }
+        ]
+    tool_config = _normalized_tool_choice_to_gemini(request.tool_choice)
+    if tool_config:
+        payload["toolConfig"] = {"functionCallingConfig": tool_config}
+
+    generation_config = _normalized_generation_config_to_gemini(request)
+    if generation_config:
+        payload["generationConfig"] = generation_config
+
+    for key in ("cachedContent", "safetySettings", "serviceTier", "store"):
+        value = request.raw_extensions.get(key)
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
+def _normalized_message_to_gemini_parts(
+    message: NormalizedMessage,
+) -> list[dict[str, Any]]:
+    if message.role == "tool" and (message.name or message.tool_call_id):
+        response = {
+            "name": message.name or message.tool_call_id or "",
+            "response": _normalized_tool_response_content(message.content),
+        }
+        if message.tool_call_id:
+            response["id"] = message.tool_call_id
+        return [{"functionResponse": response}]
+
+    parts = _normalized_content_to_gemini_parts(message.content)
+    parts.extend(_normalized_tool_call_to_gemini(tool) for tool in message.tool_calls)
+    return parts
+
+
+def _normalized_content_to_gemini_parts(
+    content: str | list[NormalizedContentPart] | None,
+) -> list[dict[str, Any]]:
+    if content is None:
+        return []
+    if isinstance(content, str):
+        return [{"text": content}]
+
+    parts: list[dict[str, Any]] = []
+    for part in content:
+        if part.type == "text":
+            parts.append({"text": part.text or ""})
+            continue
+        if part.type == "image_url":
+            inline_data = _normalized_image_part_to_gemini(part)
+            if inline_data:
+                parts.append({"inlineData": inline_data})
+            continue
+        if part.type == "file":
+            file_data = part.raw_extensions.get("gemini_file_data")
+            if isinstance(file_data, Mapping):
+                parts.append({"fileData": dict(file_data)})
+    return parts
+
+
+def _normalized_image_part_to_gemini(
+    part: NormalizedContentPart,
+) -> dict[str, str] | None:
+    url = part.data.get("url") if isinstance(part.data, Mapping) else part.data
+    if not isinstance(url, str) or not url.startswith("data:"):
+        return None
+    header, separator, data = url.partition(",")
+    if separator != ",":
+        return None
+    mime_type = header.removeprefix("data:").split(";", maxsplit=1)[0]
+    if not mime_type:
+        mime_type = part.mime_type or "application/octet-stream"
+    return {"mimeType": mime_type, "data": data}
+
+
+def _normalized_tool_call_to_gemini(
+    tool_call: NormalizedToolCall,
+) -> dict[str, Any]:
+    return {
+        "functionCall": _compact_dict(
+            {
+                "id": tool_call.id,
+                "name": tool_call.name or "",
+                "args": _tool_arguments_to_mapping(tool_call.arguments),
+            }
+        )
+    }
+
+
+def _normalized_tool_response_content(
+    content: str | list[NormalizedContentPart] | None,
+) -> dict[str, Any]:
+    text = _normalized_content_text(content)
+    if not text:
+        return {}
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        return {"content": text}
+    return dict(decoded) if isinstance(decoded, Mapping) else {"content": decoded}
+
+
+def _normalized_tool_to_gemini(tool: NormalizedTool) -> dict[str, Any]:
+    return _compact_dict(
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters or {"type": "object", "properties": {}},
+        }
+    )
+
+
+def _normalized_tool_choice_to_gemini(tool_choice: Any) -> dict[str, Any] | None:
+    if tool_choice is None:
+        return None
+    if isinstance(tool_choice, str):
+        mode = {"auto": "AUTO", "none": "NONE", "required": "ANY", "any": "ANY"}.get(
+            tool_choice
+        )
+        return {"mode": mode} if mode else None
+    if not isinstance(tool_choice, Mapping):
+        return None
+    function = tool_choice.get("function")
+    name = None
+    if isinstance(function, Mapping):
+        name = function.get("name")
+    name = name or tool_choice.get("name")
+    return {"mode": "ANY", "allowedFunctionNames": [str(name)]} if name else None
+
+
+def _normalized_generation_config_to_gemini(
+    request: NormalizedChatRequest,
+) -> dict[str, Any]:
+    generation = request.generation_config
+    payload = _compact_dict(
+        {
+            "temperature": generation.temperature,
+            "topP": generation.top_p,
+            "maxOutputTokens": generation.max_tokens,
+            "presencePenalty": generation.presence_penalty,
+            "frequencyPenalty": generation.frequency_penalty,
+            "stopSequences": generation.stop,
+            "seed": generation.seed,
+        }
+    )
+    if request.response_format is not None:
+        mime_type = request.response_format.raw_extensions.get(
+            "responseMimeType",
+            "application/json",
+        )
+        payload["responseMimeType"] = mime_type
+        if request.response_format.json_schema:
+            payload["responseJsonSchema"] = request.response_format.json_schema
+    payload.update(request.generation_config.raw_extensions)
+    return payload
+
+
+def _normalized_role_to_gemini(role: str) -> str:
+    if role == "assistant":
+        return "model"
+    if role == "tool":
+        return "function"
+    return "user"
 
 
 async def _normalized_chat_to_gigachat_payload(
@@ -555,6 +825,10 @@ async def _read_json_object(request: Request) -> dict[str, Any]:
             detail="Expected a JSON object",
         )
     return payload
+
+
+def _compact_dict(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if value is not None}
 
 
 def _serialize(value: Any) -> Any:

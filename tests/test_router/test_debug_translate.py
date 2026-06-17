@@ -9,6 +9,7 @@ import pytest
 from gpt2giga.api.admin import router as debug_router
 from gpt2giga.app.factory import create_app
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 
 FIXTURES_DIR = Path(__file__).parents[1] / "fixtures" / "debug_translate"
@@ -38,6 +39,7 @@ def make_debug_app(*, admin_key: str | None = "secret", mode: str = "v1"):
     )
     app.state.logger = logger
     app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
+    app.state.gemini_protocol_adapter = GeminiProtocolAdapter()
     app.state.request_transformer = FakeRequestTransformer()
     app.state.gigachat_client = object()
     return app
@@ -221,6 +223,84 @@ def test_debug_translate_anthropic_to_normalized_fixtures(fixture_name, expected
     assert body["source"] == "anthropic"
     assert body["target"] == "normalized"
     assert expected in json.dumps(body, ensure_ascii=False)
+
+
+def test_debug_translate_gemini_to_normalized_fixture():
+    client = TestClient(make_debug_app())
+
+    response = client.post(
+        "/_debug/translate/gemini-to-normalized",
+        json=_fixture("gemini_tools.json"),
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    normalized = body["normalized"]
+    assert body["source"] == "gemini"
+    assert body["target"] == "normalized"
+    assert normalized["protocol"] == "gemini"
+    assert normalized["model"] == "gemini-pro"
+    assert normalized["messages"][0]["content"] == "lookup weather"
+    assert normalized["tools"][0]["name"] == "lookup_weather"
+    assert normalized["tool_choice"]["function"]["name"] == "lookup_weather"
+
+
+def test_debug_translate_generic_gemini_to_openai():
+    client = TestClient(make_debug_app())
+
+    response = client.post(
+        "/_debug/translate",
+        json={
+            "from": "gemini",
+            "to": "openai",
+            "requested_model": "gemini-pro",
+            "payload": _fixture("gemini_tools.json"),
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = body["payload"]
+    assert body["from"] == "gemini"
+    assert body["to"] == "openai"
+    assert payload["model"] == "gemini-pro"
+    assert payload["messages"][0]["content"] == "lookup weather"
+    assert payload["tools"][0]["function"]["name"] == "lookup_weather"
+    assert body["intermediate"]["normalized"]["protocol"] == "gemini"
+
+
+def test_debug_translate_generic_normalized_to_gemini():
+    client = TestClient(make_debug_app())
+
+    response = client.post(
+        "/_debug/translate",
+        json={
+            "from": "normalized",
+            "to": "gemini",
+            "payload": {
+                "protocol": "gemini",
+                "operation": "chat",
+                "model": "gemini-pro",
+                "messages": [
+                    {"role": "system", "content": "Be concise."},
+                    {"role": "user", "content": "hello"},
+                ],
+                "generation_config": {"max_tokens": 64},
+            },
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = body["payload"]
+    assert body["from"] == "normalized"
+    assert body["to"] == "gemini"
+    assert payload["systemInstruction"]["parts"] == [{"text": "Be concise."}]
+    assert payload["contents"] == [{"role": "user", "parts": [{"text": "hello"}]}]
+    assert payload["generationConfig"]["maxOutputTokens"] == 64
 
 
 def test_debug_translate_normalized_to_gigachat():

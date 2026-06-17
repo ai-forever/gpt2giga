@@ -14,7 +14,22 @@ from gpt2giga.protocol.embeddings import (
     apply_embedding_encoding_format,
     normalize_embedding_response,
 )
+from gpt2giga.protocols.gemini import (
+    GeminiProtocolAdapter,
+    normalized_chat_response_to_gemini,
+    normalized_stream_event_to_gemini_sse,
+)
+from gpt2giga.protocols.normalized import (
+    NormalizedChoice,
+    NormalizedMessage,
+    NormalizedResponse,
+    NormalizedStreamEvent,
+    NormalizedToolCall,
+    NormalizedUsage,
+)
 from gpt2giga.routers.anthropic import router as anthropic_router
+from gpt2giga.routers.gemini.embeddings import _openai_embedding_to_gemini
+from gpt2giga.routers.gemini.generate_content import _extract_texts_for_token_count
 
 FIXTURES = Path(__file__).resolve().parents[1] / "golden"
 
@@ -263,3 +278,130 @@ def test_anthropic_messages_streaming_matches_golden_fixture():
 
     assert response.status_code == 200
     assert response.text == _load_text("anthropic/messages_streaming.txt")
+
+
+def test_gemini_generate_content_matches_golden_fixture():
+    response = NormalizedResponse(
+        id="golden-gemini",
+        model="gemini-pro",
+        provider="gigachat",
+        choices=[
+            NormalizedChoice(
+                index=0,
+                message=NormalizedMessage(
+                    role="assistant",
+                    content="ok",
+                    tool_calls=[
+                        NormalizedToolCall(
+                            id="state-1",
+                            name="lookup",
+                            arguments={"q": "ping"},
+                        )
+                    ],
+                ),
+                finish_reason="stop",
+            )
+        ],
+        usage=NormalizedUsage(input_tokens=2, output_tokens=3, total_tokens=5),
+    )
+
+    actual = normalized_chat_response_to_gemini(
+        response,
+        requested_model="gemini-pro",
+    )
+
+    assert actual == _load_json("gemini/generate_content.json")
+
+
+def test_gemini_stream_generate_content_matches_golden_fixture():
+    actual = normalized_stream_event_to_gemini_sse(
+        NormalizedStreamEvent(
+            type="content_delta",
+            id="golden-stream",
+            model="gemini-pro",
+            content_delta="ok",
+        ),
+        requested_model="gemini-pro",
+        response_id="fallback",
+    )
+
+    assert actual == _load_text("gemini/stream_generate_content.txt")
+
+
+def test_gemini_tools_request_matches_golden_fixture():
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        {
+            "contents": [{"role": "user", "parts": [{"text": "lookup weather"}]}],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "lookup_weather",
+                            "description": "Lookup weather.",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {"city": {"type": "string"}},
+                                "required": ["city"],
+                            },
+                        }
+                    ]
+                }
+            ],
+            "toolConfig": {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["lookup_weather"],
+                }
+            },
+        },
+        model="gemini-pro",
+    )
+
+    assert normalized.to_json_dict() == _load_json(
+        "gemini/generate_content_tools_normalized.json"
+    )
+
+
+def test_gemini_structured_output_request_matches_golden_fixture():
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "Recommend a movie"}]}],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseJsonSchema": {
+                    "type": "object",
+                    "properties": {"title": {"type": "string"}},
+                    "required": ["title"],
+                },
+            },
+        },
+        model="gemini-pro",
+    )
+
+    assert normalized.to_json_dict() == _load_json(
+        "gemini/generate_content_structured_normalized.json"
+    )
+
+
+def test_gemini_embeddings_matches_golden_fixture():
+    response = {
+        "data": [{"embedding": [0.0, 1.0], "index": 0}],
+        "usage": {"prompt_tokens": 2, "total_tokens": 2},
+    }
+
+    assert _openai_embedding_to_gemini(response, index=0) == _load_json(
+        "gemini/embeddings.json"
+    )
+
+
+def test_gemini_count_tokens_matches_golden_fixture():
+    payload = {
+        "systemInstruction": {"parts": [{"text": "Be concise."}]},
+        "contents": [
+            {"parts": [{"text": "one"}]},
+            {"parts": [{"text": "two"}]},
+        ],
+    }
+    actual = {"totalTokens": len(_extract_texts_for_token_count(payload))}
+
+    assert actual == _load_json("gemini/count_tokens.json")

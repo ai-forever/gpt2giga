@@ -9,6 +9,7 @@ from gpt2giga.core.context import RequestContext
 from gpt2giga.protocols.normalized import (
     NormalizedChoice,
     NormalizedContentPart,
+    NormalizedError,
     NormalizedMessage,
     NormalizedResponse,
     NormalizedToolCall,
@@ -49,6 +50,144 @@ def normalized_chat_response_to_gemini(
     if metadata:
         result["gpt2gigaMetadata"] = metadata
     return result
+
+
+def gemini_response_to_normalized(
+    payload: dict[str, Any],
+    *,
+    requested_model: str | None = None,
+) -> NormalizedResponse:
+    """Convert a Gemini GenerateContent response to normalized form."""
+    if isinstance(payload.get("error"), dict):
+        error = payload["error"]
+        return NormalizedResponse(
+            id=_string_or_none(payload.get("responseId")),
+            model=_string_or_none(payload.get("modelVersion")) or requested_model,
+            provider="gemini",
+            error=NormalizedError(
+                type=str(error.get("status") or "error"),
+                message=str(error.get("message") or ""),
+                code=error.get("code"),
+            ),
+            metadata=_metadata_from_gemini(payload),
+        )
+
+    candidates = payload.get("candidates")
+    choices = [
+        _gemini_candidate_to_normalized(candidate, index=index)
+        for index, candidate in enumerate(
+            candidates if isinstance(candidates, list) else []
+        )
+        if isinstance(candidate, dict)
+    ]
+    return NormalizedResponse(
+        id=_string_or_none(payload.get("responseId")),
+        model=_string_or_none(payload.get("modelVersion")) or requested_model,
+        provider="gemini",
+        choices=choices,
+        usage=_gemini_usage_to_normalized(payload.get("usageMetadata")),
+        metadata=_metadata_from_gemini(payload),
+    )
+
+
+def _gemini_candidate_to_normalized(
+    candidate: dict[str, Any],
+    *,
+    index: int,
+) -> NormalizedChoice:
+    candidate_index = candidate.get("index")
+    if not isinstance(candidate_index, int):
+        candidate_index = index
+    return NormalizedChoice(
+        index=candidate_index,
+        message=_gemini_content_to_normalized_message(candidate.get("content")),
+        finish_reason=_gemini_finish_reason_to_normalized(
+            _string_or_none(candidate.get("finishReason"))
+        ),
+        raw_extensions={
+            key: value
+            for key, value in {
+                "safetyRatings": candidate.get("safetyRatings"),
+                "citationMetadata": candidate.get("citationMetadata"),
+                "groundingMetadata": candidate.get("groundingMetadata"),
+            }.items()
+            if value is not None
+        },
+    )
+
+
+def _gemini_content_to_normalized_message(value: Any) -> NormalizedMessage:
+    if not isinstance(value, dict):
+        return NormalizedMessage(role="assistant", content="")
+    role = _gemini_role_to_normalized(_string_or_none(value.get("role")) or "model")
+    text_parts: list[str] = []
+    content_parts: list[NormalizedContentPart] = []
+    tool_calls: list[NormalizedToolCall] = []
+    parts = value.get("parts")
+    if isinstance(parts, dict):
+        parts = [parts]
+    for part in parts if isinstance(parts, list) else []:
+        if not isinstance(part, dict):
+            continue
+        text = part.get("text")
+        if isinstance(text, str):
+            text_parts.append(text)
+            content_parts.append(NormalizedContentPart(type="text", text=text))
+            continue
+        function_call = part.get("functionCall") or part.get("function_call")
+        if isinstance(function_call, dict):
+            tool_calls.append(_gemini_function_call_to_normalized(function_call))
+            continue
+        inline_data = part.get("inlineData") or part.get("inline_data")
+        if isinstance(inline_data, dict):
+            content_parts.append(
+                NormalizedContentPart(
+                    type="image_url",
+                    data={"url": _inline_data_to_data_url(inline_data)},
+                    mime_type=_string_or_none(inline_data.get("mimeType"))
+                    or _string_or_none(inline_data.get("mime_type")),
+                    raw_extensions={"inlineData": inline_data},
+                )
+            )
+            continue
+        file_data = part.get("fileData") or part.get("file_data")
+        if isinstance(file_data, dict):
+            content_parts.append(
+                NormalizedContentPart(
+                    type="file",
+                    raw_extensions={"gemini_file_data": file_data},
+                )
+            )
+    content: str | list[NormalizedContentPart]
+    content = "\n".join(text_parts)
+    if len(content_parts) != len(text_parts):
+        content = content_parts
+    return NormalizedMessage(role=role, content=content, tool_calls=tool_calls)
+
+
+def _gemini_function_call_to_normalized(value: dict[str, Any]) -> NormalizedToolCall:
+    return NormalizedToolCall(
+        id=_string_or_none(value.get("id")),
+        name=_string_or_none(value.get("name")),
+        arguments=value.get("args", {}),
+    )
+
+
+def _gemini_usage_to_normalized(value: Any) -> NormalizedUsage | None:
+    if not isinstance(value, dict):
+        return None
+    usage = NormalizedUsage(
+        input_tokens=_int_or_none(value.get("promptTokenCount")),
+        output_tokens=_int_or_none(value.get("candidatesTokenCount")),
+        total_tokens=_int_or_none(value.get("totalTokenCount")),
+    )
+    if (
+        usage.input_tokens is None
+        and usage.output_tokens is None
+        and usage.total_tokens is None
+    ):
+        return None
+    return usage
 
 
 def _choice_to_gemini(choice: NormalizedChoice) -> dict[str, Any]:
@@ -188,3 +327,47 @@ def _data_url_to_inline_data(url: Any) -> dict[str, str] | None:
     if not mime_type:
         return None
     return {"mimeType": mime_type, "data": data}
+
+
+def _gemini_role_to_normalized(role: str) -> str:
+    normalized = role.strip().lower()
+    if normalized == "model":
+        return "assistant"
+    if normalized == "function":
+        return "tool"
+    return normalized or "assistant"
+
+
+def _gemini_finish_reason_to_normalized(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return {
+        "MAX_TOKENS": "length",
+        "SAFETY": "content_filter",
+        "STOP": "stop",
+    }.get(value.upper(), value.lower())
+
+
+def _metadata_from_gemini(payload: dict[str, Any]) -> dict[str, Any]:
+    metadata = payload.get("gpt2gigaMetadata")
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _inline_data_to_data_url(value: dict[str, Any]) -> str | None:
+    data = value.get("data")
+    if not isinstance(data, str):
+        return None
+    mime_type = (
+        _string_or_none(value.get("mimeType"))
+        or _string_or_none(value.get("mime_type"))
+        or "application/octet-stream"
+    )
+    return f"data:{mime_type};base64,{data}"
+
+
+def _string_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _int_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) else None
