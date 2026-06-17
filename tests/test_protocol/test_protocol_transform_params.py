@@ -1,4 +1,5 @@
 import pytest
+from gigachat.models import Function, FunctionParameters
 from loguru import logger
 
 from gpt2giga.common.client_params import ClientCompatibilityError, ClientParamStatus
@@ -39,6 +40,38 @@ def test_transform_chat_parameters_max_tokens_and_tools():
     out = rt.transform_chat_parameters(data)
     assert out.get("max_tokens") == 128
     assert "functions" in out and len(out["functions"]) == 2
+
+
+def test_transform_chat_parameters_keeps_sdk_function_models():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_chat_parameters(
+        {
+            "model": "gpt-x",
+            "functions": [
+                Function(
+                    name="get_weather",
+                    parameters=FunctionParameters(
+                        type="object",
+                        properties={"city": {"type": "string"}},
+                        required=["city"],
+                    ),
+                )
+            ],
+        }
+    )
+
+    assert out["functions"] == [
+        {
+            "name": "get_weather",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string", "description": ""}},
+                "required": ["city"],
+            },
+        }
+    ]
 
 
 def test_transform_common_parameters_positive_temperature():

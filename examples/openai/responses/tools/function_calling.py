@@ -2,7 +2,7 @@ import json
 
 from openai import OpenAI
 
-api_version = "v2"
+api_version = "v1"
 client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 # 1. Define a list of callable tools for the model

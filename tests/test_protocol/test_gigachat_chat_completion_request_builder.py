@@ -9,6 +9,8 @@ from gpt2giga.protocol import RequestTransformer
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
 )
+from gpt2giga.protocols.gemini.adapter import GeminiProtocolAdapter
+from gpt2giga.providers.gigachat.adapter import normalized_chat_to_openai_payload
 
 
 async def test_prepare_chat_completion_builds_chat_completion_request():
@@ -966,3 +968,95 @@ async def test_prepare_chat_completion_repairs_legacy_empty_tool_result():
     function_result = request.messages[1].content[0].function_result
     assert function_result.name == "run_shell_command"
     assert function_result.result == {}
+
+
+async def test_prepare_chat_completion_maps_gemini_function_calling_example_history():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": "Какая погода в Москве?"}],
+                },
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "id": "state-1",
+                                "name": "get_weather",
+                                "args": {"city": "Москва"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "id": "state-1",
+                                "name": "get_weather",
+                                "response": {
+                                    "city": "Москва",
+                                    "temperature_c": 5,
+                                    "conditions": "облачно",
+                                },
+                            }
+                        }
+                    ],
+                },
+            ],
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "get_weather",
+                            "description": (
+                                "Получить текущую погоду для указанного города."
+                            ),
+                            "parameters": {
+                                "type": "OBJECT",
+                                "properties": {
+                                    "city": {
+                                        "type": "STRING",
+                                        "description": (
+                                            "Название города, например Москва."
+                                        ),
+                                    }
+                                },
+                                "required": ["city"],
+                            },
+                        }
+                    ]
+                }
+            ],
+        },
+        model="GigaChat-2-Max",
+    )
+
+    request = await rt.prepare_chat_completion(
+        normalized_chat_to_openai_payload(normalized)
+    )
+
+    assert [message.role for message in request.messages] == [
+        "user",
+        "assistant",
+        "tool",
+    ]
+    assert request.messages[1].tools_state_id == "state-1"
+    assert request.messages[1].content[0].function_call.name == "get_weather"
+    assert request.messages[1].content[0].function_call.arguments == {"city": "Москва"}
+    assert request.messages[2].tools_state_id == "state-1"
+    result = request.messages[2].content[0].function_result
+    assert result.name == "get_weather"
+    assert result.result == {
+        "city": "Москва",
+        "temperature_c": 5,
+        "conditions": "облачно",
+    }
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.name == "get_weather"
+    assert spec.parameters["properties"]["city"]["type"] == "string"

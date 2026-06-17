@@ -890,6 +890,7 @@ class RequestTransformer:
         """Common logic for message transformation and logging."""
         transformed_data.pop("_gpt2giga_builtin_tools", None)
         transformed_data.pop("_gpt2giga_tool_config", None)
+        transformed_data.pop("tools", None)
         if "functions" in transformed_data:
             functions = normalize_gigachat_function_definitions(
                 transformed_data.get("functions")
@@ -937,7 +938,7 @@ class RequestTransformer:
 
     @classmethod
     def _has_legacy_function_call_replay(cls, messages: list[dict[str, Any]]) -> bool:
-        """Return true when the current v1 turn is a completed tool result."""
+        """Return true when v1 history already contains a completed function call."""
         if not messages or messages[-1].get("role") != "function":
             return False
 
