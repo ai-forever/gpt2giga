@@ -5,13 +5,16 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
-## [0.2.1a1] - 2026-06-13
+## [0.2.1a1] - 2026-06-17
 
 ### Добавлено
 - **Gemini-compatible API**: добавлены Gemini-like routes для `generateContent`, `streamGenerateContent`, `countTokens`, `embedContent`, `batchEmbedContents` и model discovery; operation routes доступны в корне, под `/v1`, `/v2` и `/v1beta`, а `/v1`/`/v2` явно выбирают backend contract GigaChat.
 - **Gemini protocol adapters**: добавлена нормализация Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations, `toolConfig`, text/image/file parts и обратный маппинг кандидатов, usage metadata, function calls и SSE chunks в Gemini shape.
 - **Gemini examples and docs**: добавлены примеры для `google-genai`: content generation, streaming, chat session, function calling, structured output, `countTokens`, embeddings, а также подготовленные examples для Files/Batches; README и compatibility docs описывают Gemini route matrix и ограничения.
 - **Prepared Gemini Files/Batches routers**: добавлены router-модули и OpenAPI helpers для Gemini Files API и `batchGenerateContent`, но публично они пока не смонтированы до end-to-end проверки upstream file/batch execution.
+- **Stateful Gemini conversations**: Gemini `generateContent` и `streamGenerateContent` теперь поддерживают opt-in conversation stitching по stable conversation id; добавлены stateful examples для Gemini и Anthropic.
+- **Provider built-in tools mapping**: добавлен общий маппинг provider tool aliases (`web_search*`, `googleSearch`, `urlContext`, `codeExecution`/`code_execution`, `image_generation`, `model_3d_generate`) в GigaChat v2 built-ins.
+- **Examples smoke runner**: добавлен `scripts/run_examples_smoke.py` для smoke-прогона examples по `/v1` и `/v2` с переписыванием локального base URL, known-skip правилами, параллельным запуском и JSON-отчетом.
 - **Claude Desktop integration guide**: добавлен beta guide для Claude Desktop App через local gateway, включая `/v2` gateway setup, model aliasing через `GPT2GIGA_PASS_MODEL=False`, API-key notes и диагностику plugins/MCP.
 - **Test coverage**: добавлены unit/integration tests для Gemini router wiring, adapter mappings, streaming, embeddings, models, prepared Files/Batches, shared prefixes, Claude gateway path normalization, Anthropic provider tools, source rendering и observability hardening.
 
@@ -22,6 +25,9 @@
 - **GigaChat provider adapter**: provider label теперь передается в per-model concurrency limiter, чтобы Gemini traffic учитывался отдельно от OpenAI/Anthropic paths; raw extensions отправляются upstream только для OpenAI protocol payloads.
 - **Dependencies**: добавлен `google-genai` для Gemini examples/integration coverage, обновлен `uv.lock`, расширены допустимые версии `tiktoken` и `starlette`.
 - **Docs alignment**: README, API compatibility, client parameter compatibility, configuration, examples index и integrations index обновлены под Gemini-compatible API, Claude Desktop и удаление отдельного Responses API mode flag.
+- **API version routing docs**: docs, examples и integration guides уточняют явный выбор backend contract через `/v1` или `/v2`, а также переменные `GPT2GIGA_EXAMPLE_API_VERSION` и `GPT2GIGA_EXAMPLE_BASE_URL` для examples.
+- **Phoenix span names**: LLM spans выровнены по совместимым API-форматам: `OpenAI-Completions`, `OpenAI-Responses`, `Anthropic-Messages`, `Gemini-Content` и `Embeddings`.
+- **Built-in tools docs**: добавлен русскоязычный справочник по маппингу built-in tools и обновлены compatibility/configuration материалы.
 
 ### Исправлено
 - **Anthropic provider tools in v2 mode**: совместимые Anthropic provider tools (`web_search*`, `web_fetch*`, `code_execution*`) теперь маппятся в GigaChat v2 built-ins, включая forced `tool_choice`; неподдерживаемые provider tools остаются accepted/ignored.
@@ -33,6 +39,13 @@
 - **Observability isolation**: emit/flush observability sinks ограничены timeout-ом, OpenTelemetry span emission перенесен из event loop, а ошибки stream observers больше не ломают OpenAI/Anthropic/Gemini response paths.
 - **Gemini tool and embeddings validation**: Gemini adapter больше не теряет multi-`functionResponse` и mixed text/tool parts, `toolConfig.functionCallingConfig` валидируется явно, invalid `allowedFunctionNames` возвращают `400`, malformed `embedContent`/`batchEmbedContents` больше не вызывают upstream embeddings с пустой строкой.
 - **Gemini model capabilities**: Gemini model discovery теперь консервативно различает generation, embedding и unknown/custom models вместо одинакового `supportedGenerationMethods` для всех моделей.
+- **Gemini streaming and diagnostics hardening**: `streamGenerateContent` теперь возвращает детерминированные Gemini-compatible SSE error chunks для ранних и частичных stream failures, пустые streams завершаются валидным `STOP` chunk, а accepted-but-ignored Gemini request extensions видны в redacted observability attributes.
+- **Legacy GigaChat v1 function calling**: legacy `/chat` path снова сохраняет `functions` после tool/function results для следующих вызовов, при этом удаляет backend `functions_state_id`/`tools_state_id` из history, чтобы не ломать GigaChat v1 validation.
+- **Tool state ids**: Anthropic `tool_use` blocks и Gemini `functionCall`/`functionResponse` теперь сохраняют upstream tool state ids в non-streaming и streaming flows, включая multi-tool turns.
+- **Gemini structured output aliases**: Gemini `generationConfig.responseJsonSchema` теперь поддерживается как alias для JSON Schema structured output; конфликт с `responseSchema` и JSON mode без schema возвращают совместимый `400`.
+- **Null reasoning stream deltas**: OpenAI Responses и Anthropic streaming больше не падают на `reasoning_content=null` и корректно продолжают text deltas.
+- **Examples paths**: исправлен путь к локальному изображению в Anthropic multimodal example.
+- **CI runtime warning**: workflow загрузки coverage artifact обновлен на Node.js 24-based action без изменения поведения coverage badge.
 
 ## [0.2.0a2] - 2026-06-11
 

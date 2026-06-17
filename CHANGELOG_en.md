@@ -5,13 +5,16 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.1a1] - 2026-06-13
+## [0.2.1a1] - 2026-06-17
 
 ### Added
 - **Gemini-compatible API**: added Gemini-like routes for `generateContent`, `streamGenerateContent`, `countTokens`, `embedContent`, `batchEmbedContents`, and model discovery; operation routes are available at root, `/v1`, `/v2`, and `/v1beta`, while `/v1` and `/v2` explicitly select the GigaChat backend contract.
 - **Gemini protocol adapters**: added normalization for Gemini `contents`/`parts`, `systemInstruction`, `generationConfig`, function declarations, `toolConfig`, text/image/file parts, plus reverse mapping for candidates, usage metadata, function calls, and SSE chunks into Gemini shape.
 - **Gemini examples and docs**: added `google-genai` examples for content generation, streaming, chat sessions, function calling, structured output, `countTokens`, embeddings, and prepared Files/Batches examples; README and compatibility docs now describe the Gemini route matrix and limitations.
 - **Prepared Gemini Files/Batches routers**: added router modules and OpenAPI helpers for Gemini Files API and `batchGenerateContent`, but they are still not mounted publicly until upstream file/batch execution is validated end to end.
+- **Stateful Gemini conversations**: Gemini `generateContent` and `streamGenerateContent` now support opt-in conversation stitching by stable conversation id; stateful examples were added for Gemini and Anthropic.
+- **Provider built-in tool mapping**: added shared mapping from provider tool aliases (`web_search*`, `googleSearch`, `urlContext`, `codeExecution`/`code_execution`, `image_generation`, `model_3d_generate`) into GigaChat v2 built-ins.
+- **Examples smoke runner**: added `scripts/run_examples_smoke.py` for smoke-running examples across `/v1` and `/v2` with local base URL rewriting, known-skip rules, parallel execution, and JSON reporting.
 - **Claude Desktop integration guide**: added a beta guide for Claude Desktop App through a local gateway, including `/v2` gateway setup, model aliasing through `GPT2GIGA_PASS_MODEL=False`, API-key notes, and plugins/MCP diagnostics.
 - **Test coverage**: added unit/integration tests for Gemini router wiring, adapter mappings, streaming, embeddings, models, prepared Files/Batches, shared prefixes, Claude gateway path normalization, Anthropic provider tools, source rendering, and observability hardening.
 
@@ -22,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **GigaChat provider adapter**: provider labels now pass into the per-model concurrency limiter so Gemini traffic is tracked separately from OpenAI/Anthropic paths; raw extensions are forwarded upstream only for OpenAI protocol payloads.
 - **Dependencies**: added `google-genai` for Gemini examples/integration coverage, refreshed `uv.lock`, and widened supported `tiktoken` and `starlette` versions.
 - **Docs alignment**: README, API compatibility, client parameter compatibility, configuration, examples index, and integrations index were updated for the Gemini-compatible API, Claude Desktop, and removal of the separate Responses API mode flag.
+- **API version routing docs**: docs, examples, and integration guides now clarify explicit backend-contract selection through `/v1` or `/v2`, plus `GPT2GIGA_EXAMPLE_API_VERSION` and `GPT2GIGA_EXAMPLE_BASE_URL` for examples.
+- **Phoenix span names**: LLM spans are aligned to compatible API formats: `OpenAI-Completions`, `OpenAI-Responses`, `Anthropic-Messages`, `Gemini-Content`, and `Embeddings`.
+- **Built-in tools docs**: added the Russian built-in tools mapping reference and updated compatibility/configuration material.
 
 ### Fixed
 - **Anthropic provider tools in v2 mode**: compatible Anthropic provider tools (`web_search*`, `web_fetch*`, `code_execution*`) now map to GigaChat v2 built-ins, including forced `tool_choice`; unsupported provider tools remain accepted/ignored.
@@ -34,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Gemini tool and embeddings validation**: the Gemini adapter no longer loses multi-`functionResponse` or mixed text/tool parts, `toolConfig.functionCallingConfig` is validated explicitly, invalid `allowedFunctionNames` return `400`, and malformed `embedContent`/`batchEmbedContents` payloads no longer call upstream embeddings with an empty string.
 - **Gemini model capabilities**: Gemini model discovery now conservatively distinguishes generation, embedding, and unknown/custom models instead of advertising the same `supportedGenerationMethods` for every model.
 - **Gemini streaming and diagnostics hardening**: `streamGenerateContent` now returns deterministic Gemini-compatible SSE error chunks for early and partial stream failures, empty streams finish with a valid `STOP` chunk, and accepted-but-ignored Gemini request extensions are visible in redacted observability attributes.
+- **Legacy GigaChat v1 function calling**: the legacy `/chat` path again preserves `functions` after tool/function results for following calls while stripping backend `functions_state_id`/`tools_state_id` values from history so GigaChat v1 validation keeps passing.
+- **Tool state ids**: Anthropic `tool_use` blocks and Gemini `functionCall`/`functionResponse` now preserve upstream tool state ids in non-streaming and streaming flows, including multi-tool turns.
+- **Gemini structured output aliases**: Gemini `generationConfig.responseJsonSchema` is now supported as a JSON Schema structured-output alias; conflicts with `responseSchema` and JSON mode without a schema return a compatible `400`.
+- **Null reasoning stream deltas**: OpenAI Responses and Anthropic streaming no longer fail on `reasoning_content=null` and continue text deltas correctly.
+- **Examples paths**: fixed the local image path in the Anthropic multimodal example.
 - **CI runtime warning**: updated the coverage artifact download action to a Node.js 24-based release while keeping the coverage badge workflow behavior unchanged.
 
 ## [0.2.0a2] - 2026-06-11
