@@ -1,6 +1,6 @@
 # Совместимость API
 
-`gpt2giga` — compatibility proxy, а не полный клон OpenAI или Anthropic. Он фокусируется на API-поверхностях, которые обычно нужны SDK, редакторам и агентным инструментам при backend GigaChat.
+`gpt2giga` — compatibility proxy, а не полный клон OpenAI, Anthropic или Gemini. Он фокусируется на API-поверхностях, которые обычно нужны SDK, редакторам и агентным инструментам при backend GigaChat.
 
 ## Что не работает напрямую с GigaChat
 
@@ -13,10 +13,10 @@
 | Anthropic Messages API | Anthropic content blocks, tool use, `system`, `max_tokens` и stream events не совпадают с GigaChat. | Конвертирует Anthropic payloads в GigaChat-compatible chat requests и маппит ответы обратно. |
 | Gemini GenerateContent API | Gemini `contents`/`parts`, candidates, function declarations, token counting и SSE chunks отличаются от OpenAI/Anthropic и GigaChat. | Принимает Gemini-like requests в корне, под `/v1`, `/v2` и `/v1beta`, переводит их в normalized chat/embeddings requests и маппит ответы обратно в Gemini shape. |
 | SDK `extra_headers`, `extra_query`, `extra_body` | SDK могут прислать transport-поля или optional model-поля, которые GigaChat не принимает. | Фильтрует опасные headers, передаёт только разрешённые metadata, прокидывает GigaChat-specific `extra_body` и игнорирует известные unsupported optional fields. |
-| Streaming SSE | OpenAI и Anthropic SDK ждут свои event names и delta shapes. | Генерирует OpenAI/Anthropic-compatible SSE из GigaChat streaming responses. |
+| Streaming SSE | OpenAI, Anthropic и Gemini SDK ждут свои event names и delta shapes. | Генерирует OpenAI-, Anthropic- и Gemini-compatible SSE из GigaChat streaming responses. |
 | Tools и structured output | Function/tool schemas и JSON-schema controls отличаются между провайдерами и backend modes. | Маппит local tools/functions и даёт function-call fallback для structured outputs. |
 | Авторизация | OpenAI/Anthropic клиенты работают с API keys, а GigaChat требует другой credentials/scope механизм. | Разделяет proxy API-key auth и upstream GigaChat auth, при необходимости поддерживает per-request pass-through. |
-| Model discovery | GigaChat model responses не совпадают с OpenAI/Anthropic/LiteLLM shape. | Переупаковывает список и описание моделей под нужный клиент. |
+| Model discovery | GigaChat model responses не совпадают с OpenAI/Anthropic/Gemini/LiteLLM shape. | Переупаковывает список и описание моделей под нужный клиент. |
 | OpenAI/Anthropic/Gemini batch routes | У установленного GigaChat SDK/backend нет полного create/list/retrieve/cancel flow для batch APIs. | Держит Files/Batches routers отключёнными, пока они не смогут работать end-to-end. |
 
 ## Смонтированные routes

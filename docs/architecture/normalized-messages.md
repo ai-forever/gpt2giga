@@ -2,13 +2,14 @@
 
 Normalized слой - внутренний контракт между публичными API-форматами и
 upstream providers. Он не является новым публичным API. Клиенты продолжают
-посылать OpenAI Chat Completions, OpenAI Responses или Anthropic Messages, а
-gateway приводит совместимые части payload к каноническим моделям из
-`gpt2giga/protocols/normalized/`.
+посылать OpenAI Chat Completions, OpenAI Responses, Anthropic Messages или
+Gemini GenerateContent, а gateway приводит совместимые части payload к
+каноническим моделям из `gpt2giga/protocols/normalized/`. Gemini GenerateContent
+уже использует отдельный Gemini-to-normalized adapter в основном execution path.
 
 ## Текущий статус
 
-- `GPT2GIGA_NORMALIZATION_MODE=off`: все chat-like routes идут через legacy
+- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions идёт через legacy
   transforms.
 - `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat строит normalized request
   рядом с legacy path и сохраняет safe diagnostic shape hash без prompt content.
@@ -18,6 +19,9 @@ gateway приводит совместимые части payload к канон
 - OpenAI Responses и Anthropic Messages пока исполняются через legacy route
   transforms, но observability и debug translation уже используют normalized
   представление там, где это возможно.
+- Gemini GenerateContent и streamGenerateContent исполняются через
+  `GeminiProtocolAdapter`, normalized models и `GigaChatProviderAdapter`
+  независимо от OpenAI Chat normalization flags.
 - Debug endpoints умеют переводить между `openai`, `anthropic`, `normalized` и
   `gigachat` форматами для protected admin workflows.
 
@@ -121,6 +125,29 @@ observability:
 request transformers и response processor. Поэтому normalized Responses helper
 сейчас нужен для consistent observability, а не для основного execution path.
 
+## Отличия от Gemini GenerateContent
+
+Gemini GenerateContent - отдельный публичный protocol с `contents`, `parts`,
+`systemInstruction`, `generationConfig`, `tools.functionDeclarations`,
+`toolConfig.functionCallingConfig`, candidates и своим SSE response shape.
+
+Normalized слой отличается так:
+
+- `contents[].parts` превращаются в normalized messages/content parts.
+- `systemInstruction` становится normalized system message.
+- `generationConfig.temperature`, `topP`, `maxOutputTokens`, penalties, `seed` и
+  `stopSequences` маппятся в `NormalizedGenerationConfig`.
+- `functionDeclarations` превращаются в `NormalizedTool`; supported provider
+  tools сохраняются как GigaChat-compatible built-in tool metadata, а
+  unsupported tools остаются в `raw_extensions` для диагностики.
+- `toolConfig.functionCallingConfig` применяется к function declarations и не
+  форсирует встроенные provider tools.
+- Gemini candidates, finish reasons и usage metadata формируются на выходе из
+  normalized response/stream adapters.
+
+Gemini Files/Batches router modules подготовлены, но не смонтированы в публичной
+API surface; они не являются частью текущего normalized execution path.
+
 ## Отличия от GigaChat формата
 
 GigaChat - upstream provider format, который gateway вызывает через SDK. Его
@@ -176,6 +203,8 @@ LLM observability намеренно строится поверх normalized sh
   `NormalizedChatRequest` и `NormalizedResponse`.
 - Responses и Anthropic helpers приводят свои public payloads к normalized
   chat-like representation перед построением span attributes.
+- Gemini GenerateContent route уже отдаёт observability из normalized
+  request/response и использует root span `Gemini-Content`.
 - Streaming milestones строятся из `NormalizedStreamEvent`, когда route уже
   использует normalized stream path.
 - Content capture остаётся выключенным по умолчанию; messages, tool args и

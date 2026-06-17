@@ -233,7 +233,8 @@ Versioned prefixes являются явным per-request override:
 
 ## Normalized layer flags
 
-Экспериментальные flags, которые по умолчанию сохраняют legacy behavior:
+Экспериментальные flags управляют OpenAI Chat Completions normalized path и по
+умолчанию сохраняют legacy behavior для этого route:
 
 ```dotenv
 GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER=False
@@ -241,9 +242,14 @@ GPT2GIGA_NORMALIZATION_MODE=off
 GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 ```
 
-- `off`: только legacy path;
+- `off`: OpenAI Chat Completions идёт через legacy path;
 - `shadow`: строит normalized diagnostics рядом с legacy OpenAI Chat handling без изменения client responses;
 - `on`: переводит OpenAI Chat на normalized path, с legacy fallback до старта ответа, если fallback включён.
+
+Gemini GenerateContent использует свой dedicated Gemini-to-normalized adapter и
+GigaChat provider path независимо от этих OpenAI Chat flags. OpenAI Responses и
+Anthropic Messages остаются на legacy execution paths, но используют normalized
+представление для observability/debug helpers там, где это возможно.
 
 Подробное описание моделей и текущих execution paths: [Normalized messages architecture](./architecture/normalized-messages.md).
 

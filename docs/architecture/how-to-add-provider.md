@@ -1,7 +1,7 @@
 # How to add a provider or protocol
 
 Этот документ описывает практический checklist для расширения gpt2giga новым
-upstream provider или новым публичным protocol. Для следующего релиза с Gemini
+upstream provider или новым публичным protocol. Перед изменением API surface
 сначала нужно решить, что именно добавляется:
 
 - новый public protocol: клиенты отправляют Gemini-compatible payloads, а
@@ -75,10 +75,12 @@ upstream provider или новым публичным protocol. Для след
 - finish reasons приводите к общему набору вроде `stop`, `length`,
   `tool_calls`, если это возможно.
 
-Для Gemini protocol это означает отдельный Gemini-to-normalized mapper, а не
-новую ветку внутри OpenAI adapter. Gemini-specific safety settings, candidates,
-content parts, tool declarations и stream events должны быть либо подняты в
-canonical fields, либо явно сохранены в extensions.
+Для уже смонтированного Gemini protocol это сделано отдельным
+Gemini-to-normalized mapper, а не новой веткой внутри OpenAI adapter.
+Gemini-specific safety settings, candidates, content parts, tool declarations и
+stream events должны быть либо подняты в canonical fields, либо явно сохранены в
+extensions. Для будущих protocols сохраняйте тот же принцип изоляции wire format
+от OpenAI adapter.
 
 ## 4. Добавить provider adapter
 
@@ -222,8 +224,9 @@ stream event order.
 - README documentation table, если появился новый user-facing document.
 
 Документация должна явно разделять "реализовано сейчас" и "подготовлено для
-следующего шага". Это особенно важно для Gemini, чтобы не обещать public route,
-пока он не смонтирован и не покрыт тестами.
+следующего шага". Это особенно важно для частично подготовленных API families,
+например Files/Batches, чтобы не обещать public route, пока он не смонтирован и
+не покрыт тестами.
 
 ## 10. Проверить качество
 

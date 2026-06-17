@@ -140,7 +140,8 @@ v1 contract, `/v2` принудительно выбирает GigaChat v2 contr
 Сейчас не является целью проекта:
 
 - полная OpenAI parity для audio, image generation/editing, fine-tuning, assistants, threads, runs, vector stores, uploads, moderations, realtime;
-- полная Anthropic parity для Files beta, Skills beta, Agents beta, Sessions, Environments или Admin API.
+- полная Anthropic parity для Files beta, Skills beta, Agents beta, Sessions, Environments или Admin API;
+- полная Gemini parity для Files, batchGenerateContent, cached content, Vertex/RAG tools и non-text embeddings content.
 
 ## Деплой
 
@@ -168,7 +169,7 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 |---|---|
 | `gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
 | `tests/` | Unit, router, protocol, sink и integration tests |
-| `examples/` | Runnable OpenAI, Anthropic, embeddings, files/batches, agents examples |
+| `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
 | `docs/` | Пользовательская документация и architecture notes |
 | `integrations/` | Editor/agent/reverse-proxy integration guides |
 | `deploy/` | Docker Compose deployment manifests |
