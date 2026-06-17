@@ -1,6 +1,7 @@
 # Интеграция Gemini CLI с GigaChat
 
-> **Проверено:** 16 июня 2026 — официальный `@google/gemini-cli`
+> **Проверено:** 17 июня 2026 — официальный `@google/gemini-cli`, `GeminiCLI-tui/0.46.0/`
+> **Проверенные GigaChat paths:** `/v1/chat/completions`, `/v2/chat/completions`
 
 [Gemini CLI](https://github.com/google-gemini/gemini-cli) — CLI-агент от
 Google. Через `gpt2giga` его можно подключить к GigaChat, направив Gemini API
