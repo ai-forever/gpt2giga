@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -553,6 +554,56 @@ def test_rquid_middleware_emits_metrics_for_completed_request():
     assert name == "gpt2giga_request_duration_seconds"
     assert value >= 0
     assert attributes["route"] == "/v1/models"
+
+
+def test_rquid_middleware_hides_gemini_query_key_from_sinks():
+    test_app = FastAPI()
+    traffic_sink = RecordingTrafficSink()
+    observability_sink = RecordingObservabilitySink()
+    metrics_sink = RecordingMetricsSink()
+    test_app.state.traffic_log_sink = traffic_sink
+    test_app.state.observability_sink = observability_sink
+    test_app.state.metrics_sink = metrics_sink
+    test_app.add_middleware(RquidMiddleware)
+
+    @test_app.get("/v1beta/models")
+    async def models():
+        return {"models": []}
+
+    client = TestClient(test_app)
+    response = client.get("/v1beta/models?key=gemini-secret")
+
+    assert response.status_code == 200
+    assert len(traffic_sink.events) == 1
+    event = traffic_sink.events[0]
+    assert event.protocol == "gemini"
+    assert event.route == "/v1beta/models"
+    assert event.provider == "gigachat"
+    assert event.api_key_hash.startswith("pbkdf2-sha256:")
+
+    assert observability_sink.events[0]["attributes"]["protocol"] == "gemini"
+    assert observability_sink.events[0]["attributes"]["provider"] == "gigachat"
+    assert metrics_sink.counters[0][2]["protocol"] == "gemini"
+    assert metrics_sink.counters[0][2]["provider"] == "gigachat"
+
+    event_payload = json.dumps(event.to_json_dict(), ensure_ascii=False, default=str)
+    observability_payload = json.dumps(
+        observability_sink.events,
+        ensure_ascii=False,
+        default=str,
+    )
+    metrics_payload = json.dumps(
+        metrics_sink.counters + metrics_sink.observations,
+        ensure_ascii=False,
+        default=str,
+    )
+
+    assert "gemini-secret" not in event_payload
+    assert "gemini-secret" not in observability_payload
+    assert "gemini-secret" not in metrics_payload
+    assert "key=" not in event_payload
+    assert "key=" not in observability_payload
+    assert "key=" not in metrics_payload
 
 
 def test_rquid_middleware_emits_traffic_event_for_validation_error():

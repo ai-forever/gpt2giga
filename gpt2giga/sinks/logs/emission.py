@@ -239,6 +239,6 @@ def _latency_ms(started_at: datetime) -> float:
 
 
 def _provider_for_protocol(protocol: str) -> str | None:
-    if protocol in {"openai", "anthropic"}:
+    if protocol in {"openai", "anthropic", "gemini"}:
         return "gigachat"
     return None

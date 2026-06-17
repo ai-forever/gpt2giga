@@ -50,6 +50,17 @@ def test_redact_kv_eq_style():
     assert "host=example.com" in result
 
 
+def test_redact_gemini_query_key_and_google_header():
+    msg = 'GET /v1beta/models?key=gemini-secret {"x-goog-api-key": "google-secret"}'
+
+    result = redact_sensitive(msg)
+
+    assert "gemini-secret" not in result
+    assert "google-secret" not in result
+    assert "key=***" in result
+    assert '"x-goog-api-key": "***"' in result
+
+
 def test_redact_bearer_token():
     msg = "Header: Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9"
     result = redact_sensitive(msg)

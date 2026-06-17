@@ -29,6 +29,7 @@ def test_traffic_redaction_redacts_nested_dicts_and_lists():
         "headers": {
             "Authorization": "Bearer secret-token",
             "cookie": "session=secret",
+            "x-goog-api-key": "google-secret",
             "x-request-id": "req-1",
         },
         "messages": [
@@ -41,6 +42,7 @@ def test_traffic_redaction_redacts_nested_dicts_and_lists():
                 },
             }
         ],
+        "key": "gemini-query-secret",
         "token": "plain-token",
     }
 
@@ -48,20 +50,24 @@ def test_traffic_redaction_redacts_nested_dicts_and_lists():
 
     assert redacted["headers"]["Authorization"] == "***"
     assert redacted["headers"]["cookie"] == "***"
+    assert redacted["headers"]["x-goog-api-key"] == "***"
     assert redacted["headers"]["x-request-id"] == "req-1"
     assert redacted["messages"][0]["content"] == "hello"
     assert redacted["messages"][0]["metadata"]["api_key"] == "***"
     assert redacted["messages"][0]["metadata"]["items"][0]["set-cookie"] == "***"
+    assert redacted["key"] == "***"
     assert redacted["token"] == "***"
     assert payload["headers"]["Authorization"] == "Bearer secret-token"
 
 
 def test_traffic_redaction_redacts_token_like_strings():
-    payload = {"query": "api_key=sk-secret&model=GigaChat"}
+    payload = {
+        "query": "api_key=sk-secret&key=gemini-secret&model=GigaChat",
+    }
 
     redacted = redact_traffic_payload(payload)
 
-    assert redacted["query"] == "api_key=***&model=GigaChat"
+    assert redacted["query"] == "api_key=***&key=***&model=GigaChat"
 
 
 def test_traffic_redaction_supports_extra_keys():
