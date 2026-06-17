@@ -11,6 +11,7 @@
 | File | Purpose |
 |---|---|
 | `scripts/generate_badge.py` | Generate `badges/coverage.svg` from a numeric coverage percentage |
+| `scripts/run_examples_smoke.py` | Run runnable examples as a v1/v2 E2E smoke matrix against a local proxy |
 | `scripts/sse_event.py` | mitmproxy addon for inspecting SSE chunks and reconstructing streamed responses |
 
 ## Setup & Run
@@ -18,6 +19,9 @@
 ```bash
 # Generate/update the coverage badge
 uv run python scripts/generate_badge.py 87.5 badges/coverage.svg
+
+# Run runnable examples against a local proxy for both API versions
+uv run python scripts/run_examples_smoke.py --api-versions v1,v2 -n 4
 
 # Use the mitmproxy addon manually
 mitmproxy -s scripts/sse_event.py

@@ -1,0 +1,34 @@
+:root {
+  --gpt2giga-card-border: rgba(15, 23, 42, 0.12);
+}
+
+.md-typeset h1 {
+  font-weight: 760;
+}
+
+.md-typeset h2 {
+  font-weight: 700;
+}
+
+.md-typeset table:not([class]) {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  font-weight: 700;
+}
+
+.md-typeset code {
+  border-radius: 4px;
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 8px;
+}
+
+[data-md-color-scheme="slate"] {
+  --gpt2giga-card-border: rgba(226, 232, 240, 0.14);
+}
+
