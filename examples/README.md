@@ -57,6 +57,10 @@ uv run python examples/anthropic/messages/basic/stateful.py
 # Anthropic structured output
 uv run python examples/anthropic/messages/structured_outputs/structured_output.py
 
+# Anthropic GigaChat built-in tools through v2 chat completions
+uv run python examples/anthropic/messages/tools/gigachat_tools/code_interpreter.py
+uv run python examples/anthropic/messages/tools/gigachat_tools/image_generate.py
+
 # Gemini-like GenerateContent
 uv run python examples/gemini/content/generate_content.py
 
@@ -65,6 +69,10 @@ uv run python examples/gemini/content/stateful.py
 
 # Gemini-like streaming
 uv run python examples/gemini/content/stream_generate_content.py
+
+# Gemini-like GigaChat built-in tools through v2 chat completions
+uv run python examples/gemini/content/gigachat_tools/code_interpreter.py
+uv run python examples/gemini/content/gigachat_tools/image_generate.py
 
 # Additional Responses API examples
 uv run python examples/openai/responses/tools/function_calling.py
@@ -108,6 +116,8 @@ Stateful Anthropic/Gemini examples require the proxy process to be started with
 - `examples/openai/batches/basic.py`: OpenAI Batches API (router подготовлен, но временно не смонтирован)
 - `examples/anthropic/messages/structured_outputs/structured_output.py`: Anthropic Messages structured output
 - `examples/anthropic/messages/structured_outputs/structured_output_stream.py`: Anthropic streaming structured output
+- `examples/anthropic/messages/tools/gigachat_tools/code_interpreter.py`: Anthropic Messages GigaChat built-in code interpreter через v2 chat completions
+- `examples/anthropic/messages/tools/gigachat_tools/image_generate.py`: Anthropic Messages GigaChat built-in image generation через v2 chat completions
 - `examples/anthropic/messages/basic/stateful.py`: Anthropic stateful Messages через conversation stitching
 - `examples/anthropic/message_batches/structured_output.py`: Anthropic Message Batches structured output
 - `examples/anthropic/message_batches/basic.py`: Anthropic Message Batches API (router подготовлен, но временно не смонтирован)
@@ -118,6 +128,8 @@ Stateful Anthropic/Gemini examples require the proxy process to be started with
 - `examples/gemini/content/chat.py`: Gemini chat-session через официальный SDK
 - `examples/gemini/content/stateful.py`: Gemini-like stateful `generateContent` через conversation stitching
 - `examples/gemini/content/function_calling.py`: Gemini-like function declarations
+- `examples/gemini/content/gigachat_tools/code_interpreter.py`: Gemini-like GigaChat built-in code interpreter через v2 chat completions
+- `examples/gemini/content/gigachat_tools/image_generate.py`: Gemini-like GigaChat built-in image generation через v2 chat completions
 - `examples/gemini/content/structured_output.py`: Gemini-like structured output
 - `examples/gemini/count_tokens/count_tokens.py`: Gemini-like `countTokens`
 - `examples/gemini/embeddings/embeddings.py`: Gemini-like `embedContent` и batch-style embeddings

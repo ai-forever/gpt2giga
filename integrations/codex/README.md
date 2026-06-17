@@ -1,7 +1,8 @@
 # Интеграция OpenAI Codex с GigaChat
 
-> **Проверено:** 9 июня 2026 — `codex-cli 0.138.0`
+> **Проверено:** 17 июня 2026 — `codex_exec/0.140.0`
 > **Codex App для macOS:** `codex-cli 0.137.0-alpha.4`
+> **Проверенные GigaChat paths:** `/v1/chat/completions`, `/v2/chat/completions`
 
 [OpenAI Codex](https://github.com/openai/codex) — агент для работы с кодом из терминала и Codex App. Через `gpt2giga` Codex можно подключить к моделям GigaChat как к OpenAI-совместимому провайдеру.
 

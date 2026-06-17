@@ -1,6 +1,7 @@
 # Интеграция Gemini CLI с GigaChat
 
-> **Проверено:** 16 июня 2026 — официальный `@google/gemini-cli`
+> **Проверено:** 17 июня 2026 — официальный `@google/gemini-cli`, `GeminiCLI-tui/0.46.0/`
+> **Проверенные GigaChat paths:** `/v1/chat/completions`, `/v2/chat/completions`
 
 [Gemini CLI](https://github.com/google-gemini/gemini-cli) — CLI-агент от
 Google. Через `gpt2giga` его можно подключить к GigaChat, направив Gemini API
@@ -51,10 +52,29 @@ GPT2GIGA_API_KEY=<ваш_api_ключ>
 Запустите прокси-сервер:
 
 ```shell
-gpt2giga
+uv run gpt2giga
 ```
 
-По умолчанию сервер будет доступен по адресу `http://localhost:8090`.
+Если пакет установлен как CLI-команда, можно использовать `gpt2giga` вместо
+`uv run gpt2giga`. По умолчанию сервер будет доступен по адресу
+`http://localhost:8090`.
+
+Проверьте, что на этом порту отвечает именно proxy:
+
+```shell
+curl -i http://localhost:8090/health
+```
+
+Ожидаемый результат — HTTP `200` с пустым телом. Этот endpoint проверяет только
+локальный server process. Для проверки GigaChat upstream используйте model
+discovery endpoint:
+
+```shell
+curl -i "http://localhost:8090/v1beta/models?key=0"
+```
+
+Если включена `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, вместо `0` передайте
+значение `GPT2GIGA_API_KEY`.
 
 ---
 
@@ -76,6 +96,28 @@ export GEMINI_MODEL="GigaChat-2-Max"
   отключена. Если включена `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, укажите здесь
   значение `GPT2GIGA_API_KEY`.
 - `GEMINI_MODEL` — модель по умолчанию для Gemini CLI.
+
+Если Gemini CLI уже был залогинен через Google account, он может продолжить
+использовать cached auth вместо `GEMINI_API_KEY`. Для явного API-key auth
+проверьте `~/.gemini/settings.json`:
+
+```json
+{
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  }
+}
+```
+
+`GOOGLE_GENAI_API_VERSION` для этого guide обычно не нужен. Если хотите
+принудительно выбрать GigaChat v2 backend contract, предпочтительнее указать
+`GOOGLE_GEMINI_BASE_URL="http://localhost:8090/v2"` или настроить
+`GPT2GIGA_GIGACHAT_API_MODE=v2` на server side. Если всё же задаёте
+`GOOGLE_GENAI_API_VERSION="v2"`, Gemini CLI будет строить v2-style внешние
+paths; `gpt2giga` их поддерживает, но эта переменная не заменяет запуск proxy и
+не исправляет неверный GigaChat upstream URL.
 
 ### Запуск через npx
 
@@ -239,10 +281,20 @@ Smoke suite:
 
 ## Диагностика
 
+- **502 Bad Gateway с `Connect call failed ('::1', 8090)` или
+  `('127.0.0.1', 8090)`** — сначала выполните
+  `curl -i http://localhost:8090/health`. Если `/health` не отвечает, proxy не
+  запущен на `8090` или `GOOGLE_GEMINI_BASE_URL` указывает не туда. Если
+  `/health` отвечает, но Gemini request или `/v1beta/models` возвращает такой
+  502, значит `gpt2giga` запущен, но его GigaChat upstream указывает на
+  недоступный `localhost:8090`. Проверьте `.env` и окружение server process:
+  `GIGACHAT_BASE_URL` не должен указывать на сам `gpt2giga`; для обычного
+  `GIGACHAT_CREDENTIALS`-сценария чаще всего его нужно не задавать.
 - **Gemini CLI ходит в Google, а не в `gpt2giga`** — проверьте
   `GOOGLE_GEMINI_BASE_URL` и убедитесь, что используется Gemini API key auth.
-  Если у вас уже есть cached Google auth, для чистой проверки можно временно
-  указать отдельный `GEMINI_CLI_HOME`.
+  Если у вас уже есть cached Google auth, выставьте
+  `security.auth.selectedType="gemini-api-key"` в `~/.gemini/settings.json` или
+  временно укажите отдельный `GEMINI_CLI_HOME`.
 - **Получаете 401/403 от `gpt2giga`** — проверьте, что `GEMINI_API_KEY`
   совпадает со значением `GPT2GIGA_API_KEY` на сервере, если авторизация
   включена.
