@@ -1,7 +1,6 @@
 import asyncio
 import json
 
-import pytest
 
 from gpt2giga.core.interfaces import TrafficLogSink
 from gpt2giga.models.config import ProxySettings
@@ -42,7 +41,6 @@ def test_traffic_log_event_is_json_serializable():
     json.dumps(payload)
 
 
-@pytest.mark.asyncio
 async def test_noop_traffic_log_sink_implements_contract():
     sink = NoopTrafficLogSink()
 
@@ -51,7 +49,6 @@ async def test_noop_traffic_log_sink_implements_contract():
     await sink.flush()
 
 
-@pytest.mark.asyncio
 async def test_jsonl_traffic_log_sink_writes_one_event(tmp_path):
     path = tmp_path / "traffic.jsonl"
     sink = JsonlTrafficLogSink(path)
@@ -173,7 +170,6 @@ def test_traffic_log_factory_creates_composite_for_multiple_sinks():
     assert isinstance(sink.sinks[1].sink, OpenSearchTrafficLogSink)
 
 
-@pytest.mark.asyncio
 async def test_traffic_log_safe_helpers_do_not_raise_on_sink_errors():
     class BrokenSink:
         async def emit(self, event):
@@ -188,7 +184,6 @@ async def test_traffic_log_safe_helpers_do_not_raise_on_sink_errors():
     await flush_traffic_log_sink(sink)
 
 
-@pytest.mark.asyncio
 async def test_composite_traffic_log_sink_isolates_child_errors():
     class BrokenSink:
         async def emit(self, event):
@@ -218,7 +213,6 @@ async def test_composite_traffic_log_sink_isolates_child_errors():
     assert recorder.flushed is True
 
 
-@pytest.mark.asyncio
 async def test_queued_traffic_log_sink_flushes_batches():
     class RecordingSink:
         def __init__(self):
@@ -246,7 +240,6 @@ async def test_queued_traffic_log_sink_flushes_batches():
     assert sink.emitted_events == 3
 
 
-@pytest.mark.asyncio
 async def test_queued_traffic_log_sink_drops_on_backpressure():
     release = asyncio.Event()
 
@@ -275,7 +268,6 @@ async def test_queued_traffic_log_sink_drops_on_backpressure():
     assert sink.dropped_events >= 1
 
 
-@pytest.mark.asyncio
 async def test_queued_traffic_log_sink_isolates_inner_errors():
     class BrokenSink:
         async def emit_many(self, events):

@@ -16,7 +16,11 @@ from openai import AsyncOpenAI
 enable_verbose_stdout_logging()
 
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:8090")  # без /v1
+api_version = "v2"
+OPENAI_BASE_URL = os.getenv(
+    "OPENAI_BASE_URL",
+    f"http://localhost:8090/{api_version}/",
+)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "0")
 MODEL_NAME = os.getenv("MODEL_NAME", "GigaChat-2-Max")
 

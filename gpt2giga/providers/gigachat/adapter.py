@@ -10,12 +10,16 @@ from typing import Any, Literal
 import gigachat
 
 from gpt2giga.common.gigachat_options import gigachat_request_options
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.common.model_concurrency import (
     ModelConcurrencyLimiter,
     ModelConcurrencyTimeoutError,
     resolve_gigachat_model,
 )
-from gpt2giga.common.tools import map_tool_name_from_gigachat
+from gpt2giga.common.tools import (
+    map_tool_name_from_gigachat,
+    normalize_gigachat_builtin_tool_type,
+)
 from gpt2giga.core.context import RequestContext, update_request_context
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol.response import (
@@ -51,6 +55,7 @@ class GigaChatProviderAdapter:
         request_options: Any = None,
         response_processor: Any = None,
         api_mode: Literal["v1", "v2"] | None = None,
+        provider_label: str = "openai",
     ) -> None:
         self.config = config
         self.request_transformer = request_transformer
@@ -59,6 +64,7 @@ class GigaChatProviderAdapter:
         self.request_options = request_options
         self.response_processor = response_processor
         self.api_mode = api_mode
+        self.provider_label = provider_label
 
     async def complete(
         self,
@@ -135,7 +141,10 @@ class GigaChatProviderAdapter:
             )
         effective_model = resolve_gigachat_model(chat_payload, self.config)
         update_request_context(model_effective=effective_model)
-        async with self.model_limiter.limit(effective_model, provider="openai"):
+        async with self.model_limiter.limit(
+            effective_model,
+            provider=self.provider_label,
+        ):
             async with gigachat_request_options(self.giga_client, self.request_options):
                 response = await self.giga_client.achat(chat_payload)
         return gigachat_response_to_normalized(
@@ -158,7 +167,10 @@ class GigaChatProviderAdapter:
             )
         effective_model = resolve_gigachat_model(chat_payload, self.config)
         update_request_context(model_effective=effective_model)
-        async with self.model_limiter.limit(effective_model, provider="openai"):
+        async with self.model_limiter.limit(
+            effective_model,
+            provider=self.provider_label,
+        ):
             async with gigachat_request_options(self.giga_client, self.request_options):
                 response = await self.giga_client.achat.create(chat_payload)
         adapted = adapt_chat_completion_to_chat_shape(
@@ -191,7 +203,10 @@ class GigaChatProviderAdapter:
         yield mapper.message_start()
 
         try:
-            async with self.model_limiter.limit(effective_model, provider="openai"):
+            async with self.model_limiter.limit(
+                effective_model,
+                provider=self.provider_label,
+            ):
                 async with gigachat_request_options(
                     self.giga_client,
                     self.request_options,
@@ -248,7 +263,10 @@ class GigaChatProviderAdapter:
         yield mapper.message_start()
 
         try:
-            async with self.model_limiter.limit(effective_model, provider="openai"):
+            async with self.model_limiter.limit(
+                effective_model,
+                provider=self.provider_label,
+            ):
                 async with gigachat_request_options(
                     self.giga_client,
                     self.request_options,
@@ -338,7 +356,8 @@ def normalized_chat_to_openai_payload(
         if value is not None:
             payload[target] = value
 
-    payload.update(request.raw_extensions)
+    if request.protocol == "openai":
+        payload.update(request.raw_extensions)
     additional_fields = _gigachat_additional_fields(request.provider_metadata)
     if additional_fields:
         existing = payload.get("additional_fields")
@@ -419,12 +438,22 @@ def _content_part_to_openai(part: NormalizedContentPart) -> dict[str, Any]:
 
 def _tool_to_openai(tool: NormalizedTool) -> dict[str, Any]:
     raw_extensions = dict(tool.raw_extensions)
+    builtin_field_name = normalize_gigachat_builtin_tool_type(tool.type)
+    if builtin_field_name is not None:
+        payload: dict[str, Any] = {"type": builtin_field_name}
+        config = raw_extensions.pop(builtin_field_name, None)
+        if isinstance(config, Mapping):
+            payload[builtin_field_name] = dict(config)
+        payload.update(raw_extensions)
+        return payload
+
+    parameters = normalize_tool_parameters_schema(tool.parameters)
     payload = {
         "type": tool.type,
         "function": {
             "name": tool.name,
             "description": tool.description,
-            "parameters": tool.parameters,
+            "parameters": parameters,
         },
     }
     function_payload = {

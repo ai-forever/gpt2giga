@@ -1,6 +1,7 @@
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8090", api_key="0")
+api_version = "v1"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 model = "Embeddings"
 dimensions = 1024
 inputs = ["Hello", "itsme"]

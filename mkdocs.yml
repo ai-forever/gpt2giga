@@ -1,0 +1,95 @@
+site_name: gpt2giga
+site_description: FastAPI compatibility gateway from OpenAI, Anthropic and Gemini-shaped clients to GigaChat.
+site_url: https://ai-forever.github.io/gpt2giga/
+repo_url: https://github.com/ai-forever/gpt2giga
+repo_name: ai-forever/gpt2giga
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+exclude_docs: |
+  internal/**
+  codex/**
+
+theme:
+  name: material
+  language: ru
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Системная тема
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Темная тема
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Светлая тема
+  features:
+    - content.action.edit
+    - content.code.copy
+    - content.tabs.link
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.sections
+    - navigation.tabs
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+
+plugins:
+  - search:
+      lang:
+        - ru
+        - en
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Обзор:
+      - Главная: index.md
+      - Быстрый старт: quickstart.md
+      - Конфигурация: configuration.md
+  - Совместимость:
+      - API compatibility: api-compatibility.md
+      - Client parameters: client-parameter-compatibility.md
+      - Встроенные инструменты: builtin-tools.md
+      - Интеграции: integrations.md
+  - Эксплуатация:
+      - Развертывание: deployment.md
+      - Операции: operations.md
+      - Live-тесты: live-integration-tests.md
+  - Архитектура:
+      - Normalized messages: architecture/normalized-messages.md
+      - Logging и observability: architecture/logging-and-observability.md
+      - Добавление provider/protocol: architecture/how-to-add-provider.md
+  - Участие:
+      - Документация: contributing.md

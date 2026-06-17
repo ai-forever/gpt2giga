@@ -2,13 +2,12 @@ import json
 
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from gigachat.models.chat_completions import ChatCompletionChunk
-from gigachat.models.chat_completions import ChatCompletionResponse
+from gigachat.models.chat_completions import ChatCompletionChunk, ChatCompletionResponse
 from loguru import logger
 
 from gpt2giga.common.api_mode import force_gigachat_api_mode
 from gpt2giga.models.config import ProxyConfig, ProxySettings
-from gpt2giga.protocol import ResponseProcessor
+from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.routers.openai import router
 
 
@@ -78,21 +77,26 @@ class FakeAChatResource:
                     ]
                 }
             )
-            yield ChatCompletionChunk.model_validate(
-                {
-                    "messages": [
-                        {
-                            "role": "assistant",
-                            "tools_state_id": "new-state",
-                        }
-                    ],
-                    "finish_reason": "stop",
-                    "usage": {
-                        "input_tokens": 2,
-                        "output_tokens": 3,
-                        "total_tokens": 5,
-                    },
-                }
+            done_payload = {
+                "event": "response.message.done",
+                "model": "GigaChat-2-Max",
+                "created_at": 1781352508,
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_state_id": "new-state",
+                    }
+                ],
+                "finish_reason": "stop",
+                "usage": {
+                    "input_tokens": 2,
+                    "output_tokens": 3,
+                    "total_tokens": 5,
+                },
+            }
+            yield (
+                "event: response.message.done\n"
+                f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
             )
 
         return gen()
@@ -217,6 +221,45 @@ def test_chat_completions_v1_prefix_forces_v1_when_default_is_v2():
     assert app.state.gigachat_client.achat.chat_completion_calls == []
 
 
+def test_chat_completions_v1_prefix_with_tools_sends_legacy_functions():
+    app = make_versioned_app("v2")
+    app.state.request_transformer = RequestTransformer(app.state.config, logger=logger)
+    client = TestClient(app)
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "weather?"}],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "description": "Get weather by city.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                            "required": ["city"],
+                        },
+                    },
+                }
+            ],
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": "get_weather"},
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    [sent_payload] = app.state.gigachat_client.achat.chat_calls
+    assert "tools" not in sent_payload
+    assert [function.name for function in sent_payload["functions"]] == ["get_weather"]
+    assert sent_payload["function_call"] == {"name": "get_weather"}
+    assert app.state.gigachat_client.achat.chat_completion_calls == []
+
+
 def test_chat_completions_v2_prefix_forces_v2_when_default_is_v1():
     app = make_versioned_app("v1")
     client = TestClient(app)
@@ -255,6 +298,13 @@ def test_chat_completions_v2_stream_uses_chat_completion_stream():
     assert response.status_code == 200
     assert "ok-stream" in body
     assert "data: [DONE]" in body
+    chunks = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: {")
+    ]
+    assert chunks[-1]["choices"][0]["finish_reason"] == "stop"
+    assert chunks[-1]["usage"]["prompt_tokens"] == 2
     assert not app.state.request_transformer.chat_calls
     assert app.state.request_transformer.chat_completion_calls
     assert app.state.gigachat_client.achat.chat_calls == []

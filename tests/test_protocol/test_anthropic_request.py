@@ -1,7 +1,10 @@
 import pytest
+from gigachat.models import Chat
 from loguru import logger
 
 from gpt2giga.common.client_params import ClientParamStatus
+from gpt2giga.models.config import ProxyConfig
+from gpt2giga.protocol import RequestTransformer
 from gpt2giga.protocol.anthropic.params import classify_anthropic_messages_parameter
 from gpt2giga.protocol.anthropic.request import (
     _build_openai_data_from_anthropic_request,
@@ -167,17 +170,100 @@ def test_build_openai_data_from_anthropic_request_ignores_forced_tool_without_na
     assert "function_call" not in openai_data
 
 
-def test_build_openai_data_from_anthropic_request_ignores_server_tools():
+def test_build_openai_data_from_anthropic_request_maps_server_tools_to_builtins():
     data = {
         "model": "claude-x",
         "messages": [{"role": "user", "content": "hi"}],
-        "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+        "tools": [
+            {
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": 5,
+                "allowed_domains": ["example.com"],
+            },
+            {
+                "type": "web_fetch_20250910",
+                "name": "web_fetch",
+                "max_uses": 2,
+            },
+            {"type": "code_execution_20250825", "name": "code_execution"},
+            {
+                "name": "sum",
+                "description": "Add numbers",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"a": {"type": "number"}},
+                },
+            },
+        ],
+        "tool_choice": {"type": "tool", "name": "web_search"},
     }
 
     openai_data = _build_openai_data_from_anthropic_request(data, logger)
 
-    assert "tools" not in openai_data
+    assert openai_data["tools"][:3] == [
+        {
+            "type": "web_search",
+            "max_uses": 5,
+            "allowed_domains": ["example.com"],
+        },
+        {"type": "url_content_extraction", "max_uses": 2},
+        {"type": "code_interpreter"},
+    ]
+    assert openai_data["tools"][3]["type"] == "function"
+    assert openai_data["tools"][3]["function"]["name"] == "sum"
+    assert len(openai_data["functions"]) == 1
+    assert openai_data["tool_choice"] == {"type": "web_search"}
+
+
+def test_build_openai_data_from_anthropic_request_maps_named_websearch_builtin():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "name": "WebSearch",
+                "description": "Allows Claude to search the web.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            }
+        ],
+        "tool_choice": {"type": "tool", "name": "WebSearch"},
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    assert openai_data["tools"] == [{"type": "web_search"}]
     assert "functions" not in openai_data
+    assert "function_call" not in openai_data
+    assert openai_data["tool_choice"] == {"type": "web_search"}
+
+
+def test_build_openai_data_from_anthropic_request_keeps_custom_web_search_tool():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "name": "web_search",
+                "description": "Local search function.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+            }
+        ],
+        "tool_choice": {"type": "tool", "name": "web_search"},
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    assert openai_data["tools"][0]["type"] == "function"
+    assert openai_data["tools"][0]["function"]["name"] == "web_search"
+    assert openai_data["function_call"] == {"name": "web_search"}
 
 
 @pytest.mark.parametrize(
@@ -215,6 +301,41 @@ def test_build_openai_data_from_anthropic_request_defaults_bad_tool_schema():
         "type": "object",
         "properties": {},
     }
+
+
+def test_build_openai_data_from_anthropic_request_normalizes_tool_schema():
+    data = {
+        "model": "claude-x",
+        "messages": [{"role": "user", "content": "hi"}],
+        "tools": [
+            {
+                "name": "final_answer",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "answers": {"type": "object"},
+                        "score": {
+                            "anyOf": [
+                                {"type": "integer"},
+                                {"type": "number"},
+                                {"type": "null"},
+                            ]
+                        },
+                    },
+                },
+            }
+        ],
+    }
+
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+
+    parameters = openai_data["tools"][0]["function"]["parameters"]
+    assert parameters["properties"]["answers"] == {
+        "type": "object",
+        "properties": {},
+    }
+    assert parameters["properties"]["score"]["type"] == "integer"
+    assert "anyOf" not in parameters["properties"]["score"]
 
 
 def test_build_openai_data_from_anthropic_request_keeps_function_tools():
@@ -339,6 +460,66 @@ def test_build_openai_data_from_anthropic_request_ignores_nested_tool_result_blo
 
     assert openai_data["messages"][1]["role"] == "tool"
     assert openai_data["messages"][1]["content"] == "{}"
+
+
+async def test_anthropic_tool_result_history_prepares_valid_legacy_chat_payload():
+    data = {
+        "model": "GigaChat-2-Max",
+        "tools": [
+            {
+                "name": "get_weather",
+                "description": "Get weather.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            }
+        ],
+        "messages": [
+            {"role": "user", "content": "Какая погода в Москве?"},
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_weather_1",
+                        "name": "get_weather",
+                        "input": {"city": "Москва"},
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_weather_1",
+                        "content": '{"city": "Москва", "temp": "+5°C"}',
+                    }
+                ],
+            },
+        ],
+    }
+    openai_data = _build_openai_data_from_anthropic_request(data, logger)
+    rt = RequestTransformer(ProxyConfig(), logger)
+
+    chat = await rt.prepare_chat(openai_data)
+
+    assert [message["role"] for message in chat["messages"]] == [
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][1]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Москва"},
+    }
+    assert "functions_state_id" not in chat["messages"][1]
+    assert "functions_state_id" not in chat["messages"][2]
+    assert "tools" not in chat
+    assert [function.name for function in chat["functions"]] == ["get_weather"]
+    Chat.model_validate(chat)
 
 
 def test_build_openai_data_from_anthropic_request_ignores_unsupported_system_block():

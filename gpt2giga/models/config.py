@@ -112,13 +112,6 @@ class ProxySettings(BaseSettings):
             "legacy chat methods, v2 uses chat completion resource methods"
         ),
     )
-    responses_api_mode: Literal["inherit", "v1", "v2"] = Field(
-        default="inherit",
-        description=(
-            "Backend contract for OpenAI /responses: inherit follows "
-            "gigachat_api_mode, v1/v2 override only /responses"
-        ),
-    )
     experimental_normalized_layer: bool = Field(
         default=False,
         description="Enable experimental normalized protocol layer wiring.",
@@ -401,7 +394,6 @@ class ProxySettings(BaseSettings):
 
     @field_validator(
         "gigachat_api_mode",
-        "responses_api_mode",
         "normalization_mode",
         "conversation_on_divergence",
         "traffic_log_sink",
@@ -409,12 +401,9 @@ class ProxySettings(BaseSettings):
         mode="before",
     )
     @classmethod
-    def normalize_api_modes(cls, value, info):
+    def normalize_api_modes(cls, value):
         if isinstance(value, str):
-            normalized = value.strip().lower()
-            if info.field_name == "responses_api_mode" and normalized == "":
-                return "inherit"
-            return normalized
+            return value.strip().lower()
         return value
 
     @field_validator("traffic_log_sinks", mode="before")
@@ -447,12 +436,6 @@ class ProxySettings(BaseSettings):
         if not path.startswith("/"):
             path = f"/{path}"
         return path.rstrip("/") or "/metrics"
-
-    def resolve_responses_api_mode(self) -> Literal["v1", "v2"]:
-        """Return the effective GigaChat backend mode for `/responses`."""
-        if self.responses_api_mode == "inherit":
-            return self.gigachat_api_mode
-        return self.responses_api_mode
 
     @model_validator(mode="after")
     def _validate_prod_security(self):

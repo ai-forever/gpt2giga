@@ -1,8 +1,8 @@
+import asyncio
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-
-import pytest
 
 from gpt2giga.core.context import RequestContext
 from gpt2giga.core.interfaces import ObservabilitySink
@@ -55,7 +55,6 @@ def assert_span_status_code(status: object, expected: str) -> None:
     assert (status_name or str(status_code)) == expected
 
 
-@pytest.mark.asyncio
 async def test_noop_observability_sink_implements_contract():
     sink = NoopObservabilitySink()
 
@@ -218,6 +217,43 @@ def test_build_llm_request_attributes_default_omits_raw_content():
     assert "api_key" not in serialized
     assert "llm.input_messages" not in attributes
     assert "llm.tools" not in attributes
+
+
+def test_build_llm_request_attributes_exposes_redacted_request_extensions():
+    request = NormalizedChatRequest(
+        protocol="gemini",
+        model="GigaChat",
+        messages=[NormalizedMessage(role="user", content="hello")],
+        generation_config=NormalizedGenerationConfig(
+            raw_extensions={
+                "candidateCount": 2,
+                "topK": 40,
+                "responseModalities": ["TEXT"],
+            }
+        ),
+        raw_extensions={
+            "safetySettings": [{"category": "HARM_CATEGORY_HARASSMENT"}],
+            "cachedContent": "cachedContents/1",
+            "serviceTier": "flex",
+            "unsupportedTools": [{"googleMaps": {"api_key": "secret-gemini-key"}}],
+        },
+    )
+
+    attributes = build_llm_request_attributes(request, settings=capture_off_settings())
+
+    extensions = json.loads(attributes["llm.request.extensions"])
+    invocation = json.loads(attributes["llm.invocation_parameters"])
+
+    assert extensions["safetySettings"] == [{"category": "HARM_CATEGORY_HARASSMENT"}]
+    assert extensions["cachedContent"] == "cachedContents/1"
+    assert extensions["serviceTier"] == "flex"
+    assert extensions["unsupportedTools"] == [{"googleMaps": {"api_key": "***"}}]
+    assert invocation["raw_extensions"] == {
+        "candidateCount": 2,
+        "topK": 40,
+        "responseModalities": ["TEXT"],
+    }
+    assert "secret-gemini-key" not in attributes["llm.request.extensions"]
 
 
 def test_build_llm_request_attributes_includes_mcp_tool_names_from_extensions():
@@ -496,7 +532,6 @@ def test_openai_response_stream_observer_synthesizes_failed_response_after_error
     assert "stream.error" in event_names
 
 
-@pytest.mark.asyncio
 async def test_otel_sink_records_span_and_flushes_provider():
     class FakeSpan:
         def __init__(self, *, start_time=None):
@@ -585,7 +620,6 @@ async def test_otel_sink_records_span_and_flushes_provider():
     assert provider.flushed is True
 
 
-@pytest.mark.asyncio
 async def test_otel_sink_marks_failed_span_status():
     class FakeSpan:
         def __init__(self):
@@ -630,7 +664,6 @@ async def test_otel_sink_marks_failed_span_status():
     assert_span_status_code(tracer.spans[0].status, "ERROR")
 
 
-@pytest.mark.asyncio
 async def test_otel_sink_honors_zero_sample_rate():
     class FakeTracer:
         spans = []
@@ -643,7 +676,6 @@ async def test_otel_sink_honors_zero_sample_rate():
     await sink.emit("gpt2giga.request", {"status_code": 200})
 
 
-@pytest.mark.asyncio
 async def test_observability_safe_helpers_do_not_raise_on_sink_errors():
     class BrokenSink:
         async def emit(self, name, attributes=None, *, context=None):
@@ -658,7 +690,91 @@ async def test_observability_safe_helpers_do_not_raise_on_sink_errors():
     await flush_observability_sink(sink)
 
 
-@pytest.mark.asyncio
+async def test_observability_emit_timeout_returns_false(monkeypatch):
+    class SlowSink:
+        async def emit(self, name, attributes=None, *, context=None):
+            await asyncio.sleep(1)
+
+        async def flush(self):
+            return None
+
+    monkeypatch.setattr(
+        "gpt2giga.sinks.observability.factory.DEFAULT_OBSERVABILITY_TIMEOUT_SECONDS",
+        0.001,
+    )
+
+    emitted = await emit_observability_event(SlowSink(), "request.slow")
+
+    assert emitted is False
+
+
+async def test_otel_sink_runs_span_work_off_event_loop_thread():
+    event_loop_thread_id = threading.get_ident()
+
+    class FakeSpan:
+        def __init__(self):
+            self.thread_id = threading.get_ident()
+
+        def set_attribute(self, key, value):
+            return None
+
+        def set_status(self, status):
+            return None
+
+    class SpanContext:
+        def __init__(self, span):
+            self.span = span
+
+        def __enter__(self):
+            return self.span
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeTracer:
+        def __init__(self):
+            self.spans = []
+
+        def start_as_current_span(self, name, start_time=None):
+            span = FakeSpan()
+            self.spans.append(span)
+            return SpanContext(span)
+
+    tracer = FakeTracer()
+    sink = OpenTelemetryObservabilitySink(tracer=tracer, sample_rate=1.0)
+
+    await sink.emit("gpt2giga.request", {"status_code": 200})
+
+    assert len(tracer.spans) == 1
+    assert tracer.spans[0].thread_id != event_loop_thread_id
+
+
+async def test_otel_sink_flush_runs_off_event_loop_thread():
+    event_loop_thread_id = threading.get_ident()
+
+    class FakeProvider:
+        def __init__(self):
+            self.thread_id = None
+
+        def force_flush(self):
+            self.thread_id = threading.get_ident()
+
+    class FakeTracer:
+        def start_as_current_span(self, name, start_time=None):
+            raise AssertionError("unexpected span")
+
+    provider = FakeProvider()
+    sink = OpenTelemetryObservabilitySink(
+        tracer=FakeTracer(),
+        tracer_provider=provider,
+        sample_rate=0.0,
+    )
+
+    await sink.flush()
+
+    assert provider.thread_id != event_loop_thread_id
+
+
 async def test_response_observability_uses_previous_response_id_as_session():
     class RecordingSink:
         def __init__(self):
@@ -695,7 +811,7 @@ async def test_response_observability_uses_previous_response_id_as_session():
     )
 
     name, attributes, _context, events = sink.events[0]
-    assert name == "Responses"
+    assert name == "OpenAI-Responses"
     assert attributes["gpt2giga.api_format"] == "responses"
     assert attributes["session.id"] == "thread_1"
     assert attributes["conversation.id"] == "thread_1"

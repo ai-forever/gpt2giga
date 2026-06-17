@@ -4,7 +4,6 @@ import base64
 import json
 import struct
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from gigachat.models.embeddings import Embeddings
@@ -131,7 +130,6 @@ def test_openai_python_sdk_default_encoding_roundtrips_base64():
     assert response.usage.total_tokens == 4
 
 
-@pytest.mark.asyncio
 async def test_embedding_batch_output_honors_base64_encoding_format():
     """Batch embeddings output mirrors direct endpoint base64 encoding."""
     input_line = {

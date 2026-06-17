@@ -20,7 +20,7 @@ gpt2giga
 ```
 
 ## Запустите OpenHands
-### CLI 
+### CLI
 Поставьте openhands
 ```
 pip install openhands-ai
@@ -38,6 +38,11 @@ openhands
   - **Custom Model**: `openai/gpt4o-mini` (или любая openai модель в формате `openai/<имя>`)
   - **Base URL**: `http://localhost:8090` (та ссылка, по которой запущена gpt2giga)
   - **API Key**: Любая строка (например, `xxx`)
+
+Root Base URL без `/v1` или `/v2` следует
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`. Если нужен явный backend contract,
+укажите `http://localhost:8090/v1` для GigaChat v1 или
+`http://localhost:8090/v2` для GigaChat v2.
 
 **Если запускаете GUI, то необходимо прописать те же параметры через Advanced Settings в соответствующей вкладке в интерфейсе**
 

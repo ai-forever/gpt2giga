@@ -93,6 +93,35 @@ class FakeGigachat:
         return gen()
 
 
+class FakeGigachatNullReasoningStream(FakeGigachat):
+    """Fake v1 stream chunks that include null reasoning_content fields."""
+
+    def astream(self, chat):
+        async def gen():
+            yield MockResponse(
+                {
+                    "choices": [
+                        {"delta": {"content": "Жил-был кот", "reasoning_content": None}}
+                    ],
+                    "usage": None,
+                }
+            )
+            yield MockResponse(
+                {
+                    "choices": [
+                        {"delta": {"content": " Барсик.", "reasoning_content": None}}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 10,
+                        "completion_tokens": 4,
+                        "total_tokens": 14,
+                    },
+                }
+            )
+
+        return gen()
+
+
 class FakeGigachatTokenRecorder(FakeGigachat):
     def __init__(self):
         super().__init__()
@@ -948,6 +977,35 @@ class TestBuildAnthropicResponse:
         assert result["usage"]["input_tokens"] == 5
         assert result["usage"]["output_tokens"] == 3
 
+    def test_text_response_renders_sources_section(self):
+        giga = {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "Answer. [sources=[1]]",
+                        "inline_data": {
+                            "sources": {
+                                "1": {
+                                    "url": "https://example.test/source",
+                                    "title": "Example Source",
+                                }
+                            }
+                        },
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+        result = _build_anthropic_response(giga, "claude-test", "rq123")
+
+        text = result["content"][0]["text"]
+        assert text == (
+            "Answer.\n\nSources:\n- [Example Source](https://example.test/source)"
+        )
+        assert "[sources=" not in text
+
     def test_function_call_response(self):
         giga = {
             "choices": [
@@ -959,6 +1017,7 @@ class TestBuildAnthropicResponse:
                             "name": "search",
                             "arguments": {"q": "test"},
                         },
+                        "functions_state_id": ("019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"),
                     },
                     "finish_reason": "function_call",
                 }
@@ -968,6 +1027,7 @@ class TestBuildAnthropicResponse:
         result = _build_anthropic_response(giga, "claude-test", "rq456")
         assert result["stop_reason"] == "tool_use"
         assert result["content"][0]["type"] == "tool_use"
+        assert result["content"][0]["id"] == "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4"
         assert result["content"][0]["name"] == "search"
         assert result["content"][0]["input"] == {"q": "test"}
 
@@ -1220,10 +1280,10 @@ class TestMessagesEndpoint:
 
         assert resp.status_code == 200
         assert [event[0] for event in app.state.observability_sink.events] == [
-            "Messages"
+            "Anthropic-Messages"
         ]
         name, attributes, context, events = app.state.observability_sink.events[0]
-        assert name == "Messages"
+        assert name == "Anthropic-Messages"
         assert attributes["gpt2giga.api_format"] == "messages"
         assert context.protocol == "anthropic"
         assert context.caller_client_family == "anthropic"
@@ -1637,7 +1697,7 @@ class TestMessagesEndpoint:
             name: attributes
             for name, attributes, _context, _events in app.state.observability_sink.events
         }
-        attributes = emitted["Messages"]
+        attributes = emitted["Anthropic-Messages"]
         assert attributes["gpt2giga.api_format"] == "messages"
         assert "1021" in attributes["output.value"]
         assert "reasoning_content" in attributes["output.value"]
@@ -1772,7 +1832,7 @@ class TestMessagesEndpoint:
 
         assert resp.status_code == 200
         assert [event[0] for event in app.state.observability_sink.events] == [
-            "Messages"
+            "Anthropic-Messages"
         ]
         _name, attributes, context, events = app.state.observability_sink.events[0]
         event_names = [event["name"] for event in events]
@@ -1785,6 +1845,51 @@ class TestMessagesEndpoint:
         assert "Hello" in attributes["input.value"]
         assert "Hello!" in attributes["output.value"]
         assert attributes["llm.token_count.completion"] == 2
+
+    def test_stream_ignores_null_reasoning_content_in_v1_chunks(self):
+        app = make_app(FakeGigachatNullReasoningStream())
+        app.state.config = ProxyConfig(
+            proxy=ProxySettings(
+                structured_output_mode="function_call",
+                observability_capture_content=True,
+                observability_capture_messages=True,
+                observability_capture_responses=True,
+            )
+        )
+        app.state.observability_sink = RecordingObservabilitySink()
+        client = TestClient(app)
+        payload = {
+            "model": "claude-test",
+            "max_tokens": 100,
+            "stream": True,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+
+        resp = client.post("/messages", json=payload)
+
+        assert resp.status_code == 200
+        data_lines = [
+            line.replace("data: ", "")
+            for line in resp.text.strip().split("\n")
+            if line.startswith("data: ")
+        ]
+        deltas = [
+            json.loads(line)
+            for line in data_lines
+            if json.loads(line).get("type") == "content_block_delta"
+        ]
+        assert [delta["delta"]["type"] for delta in deltas] == [
+            "text_delta",
+            "text_delta",
+        ]
+        assert "".join(delta["delta"]["text"] for delta in deltas) == (
+            "Жил-был кот Барсик."
+        )
+
+        _name, attributes, _context, _events = app.state.observability_sink.events[0]
+        assert "Жил-был кот Барсик." in attributes["output.value"]
+        assert "reasoning_content" not in attributes["output.value"]
+        assert "None" not in attributes["output.value"]
 
     def test_stream_extracts_think_tags(self):
         app = make_app(FakeGigachatThinkTags())

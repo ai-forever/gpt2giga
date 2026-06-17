@@ -2,7 +2,7 @@ import socket
 import sys
 from importlib.metadata import PackageNotFoundError, version as pkg_version
 
-from gpt2giga.constants import _SENSITIVE_CLI_ARGS
+from gpt2giga.constants import SENSITIVE_CLI_ARGS
 from gpt2giga.logger import rquid_context
 
 
@@ -12,7 +12,7 @@ def warn_sensitive_cli_args() -> None:
     CLI arguments are visible to all users on the same host via ``ps aux``.
     Secrets should be passed through environment variables or a ``.env`` file.
     """
-    found = [arg for arg in sys.argv if arg.split("=")[0] in _SENSITIVE_CLI_ARGS]
+    found = [arg for arg in sys.argv if arg.split("=")[0] in SENSITIVE_CLI_ARGS]
     if found:
         message = (
             "Security warning: sensitive arguments detected in CLI: "

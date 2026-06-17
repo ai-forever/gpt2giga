@@ -3,6 +3,8 @@
 from typing import Any, Mapping
 
 from gpt2giga.common.client_params import ClientCompatibilityError, ClientParamStatus
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
+from gpt2giga.common.tools import normalize_gigachat_builtin_tool_type
 from gpt2giga.protocol.request.params import OPENAI_GIGACHAT_ADDITIONAL_FIELD_KEYS
 
 ANTHROPIC_MESSAGES_SUPPORTED_PARAMS = frozenset(
@@ -36,6 +38,13 @@ ANTHROPIC_ACCEPTED_IGNORED_PARAMS = frozenset(
         "metadata",
         "service_tier",
         "top_k",
+    }
+)
+_ANTHROPIC_NAMED_BUILTIN_TOOLS = frozenset(
+    {
+        "WebSearch",
+        "WebFetch",
+        "CodeExecution",
     }
 )
 
@@ -185,13 +194,29 @@ def _sanitize_tools(data: dict[str, Any]) -> None:
         if not isinstance(tool, Mapping):
             continue
         tool_type = tool.get("type")
+        if normalize_gigachat_builtin_tool_type(tool_type) is not None:
+            sanitized_tools.append(dict(tool))
+            continue
+        if tool_type in (None, "custom") and tool.get("name") in (
+            _ANTHROPIC_NAMED_BUILTIN_TOOLS
+        ):
+            sanitized_tools.append(dict(tool))
+            continue
         if tool_type not in (None, "custom"):
             continue
         if not _is_non_empty_string(tool.get("name")):
             continue
         sanitized_tool = dict(tool)
         if not isinstance(sanitized_tool.get("input_schema"), Mapping):
+            parameters = sanitized_tool.get("parameters")
+            if isinstance(parameters, Mapping):
+                sanitized_tool["input_schema"] = parameters
+        if not isinstance(sanitized_tool.get("input_schema"), Mapping):
             sanitized_tool["input_schema"] = {"type": "object", "properties": {}}
+        else:
+            sanitized_tool["input_schema"] = normalize_tool_parameters_schema(
+                sanitized_tool["input_schema"]
+            )
         sanitized_tools.append(sanitized_tool)
 
     if sanitized_tools:

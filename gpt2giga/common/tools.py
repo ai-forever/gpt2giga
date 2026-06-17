@@ -1,9 +1,10 @@
+import re
 from collections.abc import Mapping
 from typing import Any
 
 from gigachat.models import Function, FunctionParameters
 
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 
 _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
     # У GigaChat есть встроенный tool под названием "web_search".
@@ -13,14 +14,29 @@ _RESERVED_GIGACHAT_TOOL_NAME_MAP = {
 _RESERVED_GIGACHAT_TOOL_NAME_MAP_REVERSE = {
     v: k for k, v in _RESERVED_GIGACHAT_TOOL_NAME_MAP.items()
 }
+GIGACHAT_BUILTIN_TOOL_TYPES = (
+    "web_search",
+    "url_content_extraction",
+    "code_interpreter",
+    "image_generate",
+    "model_3d_generate",
+)
 _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES = {
-    "code_interpreter": "code_interpreter",
-    "image_generate": "image_generate",
+    **{tool_type: tool_type for tool_type in GIGACHAT_BUILTIN_TOOL_TYPES},
+    "code_execution": "code_interpreter",
+    "google_search": "web_search",
+    "google_search_retrieval": "web_search",
+    "web_fetch": "url_content_extraction",
     "image_generation": "image_generate",
-    "model_3d_generate": "model_3d_generate",
-    "url_content_extraction": "url_content_extraction",
+    "url_context": "url_content_extraction",
 }
-_GIGACHAT_WEB_SEARCH_TOOL_PREFIX = "web_search"
+_GIGACHAT_BUILTIN_TOOL_TYPE_PREFIX_ALIASES = (
+    ("web_search", "web_search"),
+    ("google_search", "web_search"),
+    ("web_fetch", "url_content_extraction"),
+    ("code_execution", "code_interpreter"),
+)
+_CAMEL_TO_SNAKE_BOUNDARY = re.compile(r"(?<!^)(?=[A-Z])")
 _NAMESPACE_TOOL_SEPARATOR = "__"
 
 
@@ -78,14 +94,31 @@ def split_gigachat_tool_name(
 
 
 def normalize_gigachat_builtin_tool_type(tool_type: Any) -> str | None:
-    """Return a GigaChat v2 built-in tool field name for a Responses tool type."""
+    """Return a GigaChat v2 built-in tool field name for a provider tool type."""
     if not isinstance(tool_type, str):
         return None
 
-    normalized = tool_type.strip()
-    if normalized.startswith(_GIGACHAT_WEB_SEARCH_TOOL_PREFIX):
-        return "web_search"
-    return _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES.get(normalized)
+    for normalized in _tool_type_alias_keys(tool_type):
+        for prefix, field_name in _GIGACHAT_BUILTIN_TOOL_TYPE_PREFIX_ALIASES:
+            if normalized == prefix or normalized.startswith(f"{prefix}_"):
+                return field_name
+        field_name = _GIGACHAT_BUILTIN_TOOL_TYPE_ALIASES.get(normalized)
+        if field_name is not None:
+            return field_name
+    return None
+
+
+def _tool_type_alias_keys(tool_type: str) -> tuple[str, ...]:
+    stripped = tool_type.strip()
+    if not stripped:
+        return ()
+    snake_case = _CAMEL_TO_SNAKE_BOUNDARY.sub("_", stripped).lower()
+    lower_case = stripped.lower()
+    keys = []
+    for key in (stripped, lower_case, snake_case):
+        if key and key not in keys:
+            keys.append(key)
+    return tuple(keys)
 
 
 def build_gigachat_builtin_tool_payload(tool: Mapping[str, Any]) -> dict[str, Any]:
@@ -105,7 +138,15 @@ def build_gigachat_builtin_tool_payload(tool: Mapping[str, Any]) -> dict[str, An
         if isinstance(alias_config, Mapping):
             config.update(alias_config)
 
-    structural_keys = {"type", "function", field_name}
+    structural_keys = {
+        "type",
+        "function",
+        "name",
+        "description",
+        "parameters",
+        "input_schema",
+        field_name,
+    }
     if isinstance(tool_type, str):
         structural_keys.add(tool_type)
     for key, value in tool.items():
@@ -262,9 +303,7 @@ def convert_tool_to_giga_functions(data: dict):
     functions = []
 
     for function in iter_function_tool_payloads(data):
-        # Resolve $ref/$defs references as GigaChat doesn't support them
-        resolved_params = resolve_schema_refs(function["parameters"])
-        normalized_params = normalize_json_schema(resolved_params)
+        normalized_params = normalize_tool_parameters_schema(function["parameters"])
         giga_function = Function(
             name=map_tool_name_to_gigachat(function["name"]),
             description=function.get("description", ""),
@@ -272,3 +311,63 @@ def convert_tool_to_giga_functions(data: dict):
         )
         functions.append(giga_function)
     return functions
+
+
+def normalize_gigachat_function_definitions(functions: Any) -> list[Function]:
+    """Return GigaChat Function models with sanitized parameters schemas."""
+    if not isinstance(functions, list):
+        return []
+
+    normalized_functions: list[Function] = []
+    for function in functions:
+        function_payload = _function_definition_payload(function)
+        if function_payload is None:
+            continue
+
+        name = _optional_tool_name(function_payload)
+        if name is None:
+            continue
+
+        normalized_params = normalize_tool_parameters_schema(
+            function_payload.get("parameters") or {}
+        )
+        payload: dict[str, Any] = {
+            "name": map_tool_name_to_gigachat(name),
+            "description": function_payload.get("description", ""),
+            "parameters": FunctionParameters(**normalized_params),
+        }
+        for field_name in ("few_shot_examples", "return_parameters"):
+            field_value = function_payload.get(field_name)
+            if field_value is None:
+                continue
+            if field_name == "return_parameters" and isinstance(field_value, Mapping):
+                field_value = normalize_tool_parameters_schema(field_value)
+            payload[field_name] = field_value
+
+        normalized_functions.append(Function(**payload))
+
+    return normalized_functions
+
+
+def _function_definition_payload(function: Any) -> dict[str, Any] | None:
+    if isinstance(function, Mapping):
+        if "function" in function and isinstance(function["function"], Mapping):
+            return dict(function["function"])
+        return dict(function)
+
+    if hasattr(function, "model_dump"):
+        dumped = function.model_dump(exclude_none=True, by_alias=True)
+        return dict(dumped) if isinstance(dumped, Mapping) else None
+
+    payload: dict[str, Any] = {}
+    for field_name in (
+        "name",
+        "description",
+        "parameters",
+        "few_shot_examples",
+        "return_parameters",
+    ):
+        if hasattr(function, field_name):
+            payload[field_name] = getattr(function, field_name)
+
+    return payload or None

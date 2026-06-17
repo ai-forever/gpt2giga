@@ -1,11 +1,11 @@
 import json
 from unittest.mock import MagicMock
 
-import pytest
+from gigachat.models import Chat
+from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
-from loguru import logger
 
 
 class DummyClient:
@@ -13,12 +13,39 @@ class DummyClient:
         self.called = False
 
 
+def _kilocode_nullable_parameters():
+    return {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["launch", "click"]},
+            "url": {"type": ["string", "null"], "description": "URL to navigate to"},
+            "coordinate": {
+                "type": ["string", "null"],
+                "description": "Screen coordinate for click actions",
+            },
+            "size": {
+                "type": ["string", "null"],
+                "description": "Viewport dimensions",
+            },
+            "text": {
+                "type": ["string", "null"],
+                "description": "Text to type",
+            },
+            "path": {
+                "type": ["string", "null"],
+                "description": "Screenshot output path",
+            },
+        },
+        "required": ["action", "url", "coordinate", "size", "text", "path"],
+        "additionalProperties": False,
+    }
+
+
 def test_attachment_processor_construction():
     p = AttachmentProcessor(logger)
     assert hasattr(p, "upload_file")
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_collapse_messages():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -37,7 +64,6 @@ async def test_request_transformer_collapse_messages():
     )
 
 
-@pytest.mark.asyncio
 async def test_request_transformer_tools_to_functions():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger)
@@ -61,9 +87,666 @@ async def test_request_transformer_tools_to_functions():
     chat = await rt.prepare_chat(data)
     # chat is dict
     assert chat.get("functions") and len(chat["functions"]) == 1
+    assert "tools" not in chat
 
 
-@pytest.mark.asyncio
+async def test_prepare_chat_drops_tool_result_state_for_legacy_gigachat():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "Weather?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4",
+                            "type": "function",
+                            "function": {
+                                "name": "get_weather",
+                                "arguments": '{"city": "Москва"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": "019ed0c7-f14d-7cae-8dc6-ff8d01d617e4",
+                    "content": '{"city": "Москва", "temp": "+5°C"}',
+                },
+            ],
+        }
+    )
+
+    assert [message["role"] for message in chat["messages"]] == [
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][1]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Москва"},
+    }
+    assert "functions_state_id" not in chat["messages"][1]
+    assert "functions_state_id" not in chat["messages"][2]
+
+
+async def test_prepare_chat_keeps_assistant_replay_in_legacy_function_history():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    state_id = "019ed0fe-194e-7e50-87b1-16acc2509040"
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "Какая погода в Москве?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Москва"},
+                    },
+                    "functions_state_id": state_id,
+                },
+                {
+                    "role": "function",
+                    "content": (
+                        '{"city": "Москва", "temp": "+5°C", "conditions": "облачно"}'
+                    ),
+                    "name": "get_weather",
+                    "functions_state_id": state_id,
+                },
+            ],
+            "functions": [
+                {
+                    "name": "get_weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert [message["role"] for message in chat["messages"]] == [
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][1]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Москва"},
+    }
+    assert "functions_state_id" not in chat["messages"][1]
+    assert "functions_state_id" not in chat["messages"][2]
+    Chat.model_validate(chat)
+
+
+async def test_prepare_chat_keeps_legacy_functions_for_completed_replay_history():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    state_id = "019ed1c3-938e-7f10-a020-3bb34ff2ad31"
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Respond only with a horoscope generated by a tool.",
+                },
+                {
+                    "role": "user",
+                    "content": "What is my horoscope? I am an Aquarius.",
+                },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_horoscope",
+                        "arguments": {"sign": "Aquarius"},
+                    },
+                },
+                {
+                    "role": "function",
+                    "content": (
+                        '{"horoscope": "Aquarius: Next Tuesday you will befriend '
+                        'a baby otter."}'
+                    ),
+                    "name": "get_horoscope",
+                    "functions_state_id": state_id,
+                },
+            ],
+            "functions": [
+                {
+                    "name": "get_horoscope",
+                    "description": "Get today's horoscope for an astrological sign.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"sign": {"type": "string"}},
+                        "required": ["sign"],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert [message["role"] for message in chat["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][2]["function_call"] == {
+        "name": "get_horoscope",
+        "arguments": {"sign": "Aquarius"},
+    }
+    assert "functions_state_id" not in chat["messages"][2]
+    assert "functions_state_id" not in chat["messages"][3]
+    assert [function.name for function in chat["functions"]] == ["get_horoscope"]
+    Chat.model_validate(chat)
+
+
+async def test_prepare_chat_strips_function_result_state_id_without_functions():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": (
+                        "Before the final answer, call tools for weather, hotel "
+                        "search, and currency conversion when that data is missing."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Plan a 2-night trip to Saint Petersburg tomorrow. Use "
+                        "tools to check weather, find a hotel under 15000 RUB per "
+                        "night, and convert 200 USD to RUB. Then answer in Russian."
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {
+                            "city": "Saint Petersburg",
+                            "date": "tomorrow",
+                        },
+                    },
+                },
+                {
+                    "role": "function",
+                    "content": (
+                        '{"city": "Saint Petersburg", "date": "tomorrow", '
+                        '"forecast": "cloudy, +7 C", '
+                        '"advice": "take a windproof jacket"}'
+                    ),
+                    "name": "get_weather",
+                    "functions_state_id": "019ed5e3-9699-7936-8e72-a4ef02de4313",
+                },
+            ],
+            "profanity_check": False,
+        }
+    )
+
+    assert [message["role"] for message in chat["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][2]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Saint Petersburg", "date": "tomorrow"},
+    }
+    assert "functions_state_id" not in chat["messages"][2]
+    assert "functions_state_id" not in chat["messages"][3]
+    assert "functions" not in chat
+    assert chat["additional_fields"] == {"profanity_check": False}
+    Chat.model_validate(chat)
+
+
+async def test_prepare_chat_keeps_legacy_functions_for_next_user_turn_after_tool():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "Какая погода в Москве?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Москва"},
+                    },
+                },
+                {
+                    "role": "function",
+                    "content": '{"city": "Москва", "temp": "+5°C"}',
+                    "name": "get_weather",
+                    "functions_state_id": "019ed1d4-f021-7c7d-9107-a090ceb57fa7",
+                },
+                {"role": "user", "content": "А в Санкт-Петербурге?"},
+            ],
+            "functions": [
+                {
+                    "name": "get_weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert [message["role"] for message in chat["messages"]] == [
+        "user",
+        "assistant",
+        "function",
+        "user",
+    ]
+    assert chat.get("functions") and len(chat["functions"]) == 1
+    Chat.model_validate(chat)
+
+
+async def test_prepare_chat_examples_tool_loop_keeps_legacy_functions_upstream():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    state_id = "019ed1e0-e329-78b6-b939-df7093cb0631"
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "What is my horoscope? I am an Aquarius."},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": state_id,
+                            "type": "function",
+                            "function": {
+                                "name": "get_horoscope",
+                                "arguments": '{"sign": "Aquarius"}',
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "tool",
+                    "tool_call_id": state_id,
+                    "content": (
+                        '{"horoscope": "Aquarius: Next Tuesday you will befriend '
+                        'a baby otter."}'
+                    ),
+                },
+            ],
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_horoscope",
+                        "description": "Get today's horoscope for an astrological sign.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"sign": {"type": "string"}},
+                            "required": ["sign"],
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert "tools" not in chat
+    assert [function.name for function in chat["functions"]] == ["get_horoscope"]
+    assert chat["messages"][1]["function_call"] == {
+        "name": "get_horoscope",
+        "arguments": {"sign": "Aquarius"},
+    }
+    assert "functions_state_id" not in chat["messages"][2]
+    Chat.model_validate(chat)
+
+
+async def test_prepare_response_chat_examples_multiple_tool_loop_keeps_functions():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_response_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "instructions": "Use tools before the final answer.",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "description": "Get a short weather forecast for a city and date.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string"},
+                            "date": {"type": "string"},
+                        },
+                        "required": ["city", "date"],
+                    },
+                },
+                {
+                    "type": "function",
+                    "name": "find_hotel",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string"},
+                            "nights": {"type": "integer"},
+                            "max_price_rub": {"type": "integer"},
+                        },
+                        "required": ["city", "nights", "max_price_rub"],
+                    },
+                },
+                {
+                    "type": "function",
+                    "name": "convert_currency",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "amount": {"type": "number"},
+                            "from_currency": {"type": "string"},
+                            "to_currency": {"type": "string"},
+                        },
+                        "required": [
+                            "amount",
+                            "from_currency",
+                            "to_currency",
+                        ],
+                    },
+                },
+            ],
+            "input": [
+                {"role": "user", "content": "Plan a trip."},
+                {
+                    "type": "function_call",
+                    "id": "fc_state_weather",
+                    "call_id": "call_weather",
+                    "name": "get_weather",
+                    "arguments": ('{"city": "Saint Petersburg", "date": "tomorrow"}'),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_weather",
+                    "output": '{"forecast": "cloudy, +7 C"}',
+                },
+                {
+                    "type": "function_call",
+                    "id": "fc_state_hotel",
+                    "call_id": "call_hotel",
+                    "name": "find_hotel",
+                    "arguments": (
+                        '{"city": "Saint Petersburg", "nights": 2, '
+                        '"max_price_rub": 15000}'
+                    ),
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_hotel",
+                    "output": '{"hotel": "Nevsky Central"}',
+                },
+            ],
+        }
+    )
+
+    assert "tools" not in chat
+    assert [function.name for function in chat["functions"]] == [
+        "get_weather",
+        "find_hotel",
+        "convert_currency",
+    ]
+    assert [message["role"] for message in chat["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "function",
+        "assistant",
+        "function",
+    ]
+    assert "functions_state_id" not in chat["messages"][3]
+    assert "functions_state_id" not in chat["messages"][5]
+    Chat.model_validate(chat)
+
+
+async def test_prepare_response_chat_function_calling_example_keeps_functions():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    state_id = "019ed1f2-4c31-7c21-9615-6739213ba849"
+    chat = await rt.prepare_response_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "instructions": "Respond only with a horoscope generated by a tool.",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "get_horoscope",
+                    "description": "Get today's horoscope for an astrological sign.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "sign": {
+                                "type": "string",
+                                "description": (
+                                    "An astrological sign like Taurus or Aquarius"
+                                ),
+                            },
+                        },
+                        "required": ["sign"],
+                    },
+                },
+            ],
+            "input": [
+                {
+                    "role": "user",
+                    "content": "What is my horoscope? I am an Aquarius.",
+                },
+                {
+                    "type": "function_call",
+                    "id": f"fc_{state_id}",
+                    "call_id": state_id,
+                    "name": "get_horoscope",
+                    "arguments": '{"sign": "Aquarius"}',
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": state_id,
+                    "output": (
+                        '{"horoscope": "Aquarius: Next Tuesday you will befriend '
+                        'a baby otter."}'
+                    ),
+                },
+            ],
+        }
+    )
+
+    assert "tools" not in chat
+    assert [function.name for function in chat["functions"]] == ["get_horoscope"]
+    assert [message["role"] for message in chat["messages"]] == [
+        "system",
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert chat["messages"][2]["function_call"] == {
+        "name": "get_horoscope",
+        "arguments": {"sign": "Aquarius"},
+    }
+    assert "functions_state_id" not in chat["messages"][2]
+    assert "functions_state_id" not in chat["messages"][3]
+    Chat.model_validate(chat)
+
+
+async def test_request_transformer_normalizes_nullable_tool_schema_for_legacy_chat():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+    data = {
+        "model": "GigaChat-2-Max",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "browser_action",
+                    "description": "Perform browser actions",
+                    "strict": True,
+                    "parameters": _kilocode_nullable_parameters(),
+                },
+            }
+        ],
+        "messages": [{"role": "user", "content": "open a page"}],
+    }
+
+    chat = await rt.prepare_chat(data)
+
+    Chat.model_validate(chat)
+    properties = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )["properties"]
+    for field_name in ("url", "coordinate", "size", "text", "path"):
+        assert properties[field_name]["type"] == "string"
+
+
+async def test_request_transformer_normalizes_uppercase_tool_schema_for_legacy_chat():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+    data = {
+        "model": "GigaChat-2-Max",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_weather",
+                    "description": "Get weather.",
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "city": {"type": "STRING"},
+                            "include_forecast": {"type": "BOOLEAN"},
+                            "daily_highs": {
+                                "type": "ARRAY",
+                                "items": {"type": "NUMBER"},
+                            },
+                        },
+                        "required": ["city"],
+                    },
+                },
+            }
+        ],
+        "messages": [{"role": "user", "content": "weather"}],
+    }
+
+    chat = await rt.prepare_chat(data)
+
+    Chat.model_validate(chat)
+    params = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )
+    assert params["type"] == "object"
+    assert params["properties"]["city"]["type"] == "string"
+    assert params["properties"]["include_forecast"]["type"] == "boolean"
+    assert params["properties"]["daily_highs"]["type"] == "array"
+    assert params["properties"]["daily_highs"]["items"]["type"] == "number"
+
+
+async def test_request_transformer_normalizes_nullable_legacy_functions():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+    data = {
+        "model": "GigaChat-2-Max",
+        "functions": [
+            {
+                "name": "browser_action",
+                "description": "Perform browser actions",
+                "parameters": _kilocode_nullable_parameters(),
+            }
+        ],
+        "messages": [{"role": "user", "content": "open a page"}],
+    }
+
+    chat = await rt.prepare_chat(data)
+
+    Chat.model_validate(chat)
+    properties = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )["properties"]
+    for field_name in ("url", "coordinate", "size", "text", "path"):
+        assert properties[field_name]["type"] == "string"
+
+
+async def test_prepare_chat_normalizes_raw_function_schemas():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger)
+
+    chat = await rt.prepare_chat(
+        {
+            "model": "GigaChat-2-Max",
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "final_answer",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "answers": {"type": "object"},
+                                "score": {
+                                    "anyOf": [
+                                        {"type": "integer"},
+                                        {"type": "number"},
+                                        {"type": "null"},
+                                    ]
+                                },
+                                "meta": {"type": ["object", "null"]},
+                            },
+                        },
+                    },
+                }
+            ],
+            "messages": [{"role": "user", "content": "hi"}],
+        }
+    )
+
+    params = chat["functions"][0].parameters.model_dump(
+        by_alias=True,
+        exclude_none=True,
+    )
+    assert params["properties"]["answers"]["type"] == "object"
+    assert params["properties"]["answers"]["properties"] == {}
+    assert params["properties"]["score"]["type"] == "integer"
+    assert "anyOf" not in params["properties"]["score"]
+    assert params["properties"]["meta"]["type"] == "object"
+    assert params["properties"]["meta"]["properties"] == {}
+
+
 async def test_request_transformer_dev_debug_logging_includes_full_payload():
     mock_logger = MagicMock()
     mock_bound_logger = MagicMock()

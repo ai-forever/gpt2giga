@@ -1,4 +1,5 @@
 import json
+from collections.abc import Mapping
 from typing import Any, Dict, List, Optional, Tuple
 
 from gigachat import GigaChat
@@ -13,9 +14,14 @@ from gigachat.models import (
     MessagesRole,
 )
 
+from gpt2giga.common.client_params import ClientCompatibilityError
 from gpt2giga.common.content_utils import ensure_json_object_str
 from gpt2giga.common.debug_logging import log_debug_payload
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.common.json_schema import (
+    normalize_json_schema,
+    normalize_tool_parameters_schema,
+    resolve_schema_refs,
+)
 from gpt2giga.common.message_utils import (
     collapse_user_messages,
     ensure_system_first,
@@ -27,6 +33,7 @@ from gpt2giga.common.tools import (
     build_gigachat_builtin_tool_payload,
     iter_function_tool_payloads,
     map_tool_name_to_gigachat,
+    normalize_gigachat_function_definitions,
 )
 from gpt2giga.constants import DEFAULT_MAX_AUDIO_IMAGE_TOTAL_SIZE_BYTES
 from gpt2giga.models.config import ProxyConfig
@@ -102,8 +109,7 @@ class RequestTransformer:
                 )
                 if function_name and not message.get("name"):
                     message["name"] = function_name
-                if tool_call_id and not message.get("tools_state_id"):
-                    message["tools_state_id"] = tool_call_id
+                self._set_backend_state_id(message, tool_call_id)
                 message["content"] = ensure_json_object_str(message.get("content"))
                 if message.get("name"):
                     message["name"] = map_tool_name_to_gigachat(message["name"])
@@ -135,8 +141,7 @@ class RequestTransformer:
                 tool_call = message["tool_calls"][0]
                 if isinstance(tool_call, dict):
                     tool_call_id = self._extract_tool_call_id(tool_call)
-                    if tool_call_id and not message.get("tools_state_id"):
-                        message["tools_state_id"] = tool_call_id
+                    self._set_backend_state_id(message, tool_call_id)
                     message["function_call"] = tool_call.get("function")
                     if isinstance(message.get("function_call"), dict):
                         self._normalize_message_function_call(message["function_call"])
@@ -160,8 +165,7 @@ class RequestTransformer:
                 and message["function_call"].get("name")
             ):
                 tool_call_id = self._extract_tool_call_id(message)
-                if tool_call_id and not message.get("tools_state_id"):
-                    message["tools_state_id"] = tool_call_id
+                self._set_backend_state_id(message, tool_call_id)
                 self._normalize_message_function_call(message["function_call"])
                 self._track_pending_tool_call(
                     message["function_call"],
@@ -258,6 +262,20 @@ class RequestTransformer:
                 return state_id.removeprefix(prefix)
         return state_id
 
+    @classmethod
+    def _set_backend_state_id(
+        cls,
+        message: Dict[str, Any],
+        state_id: Optional[str],
+    ) -> None:
+        normalized = cls._normalize_backend_state_id(state_id)
+        if not normalized:
+            return
+        if not cls._normalize_backend_state_id(message.get("tools_state_id")):
+            message["tools_state_id"] = normalized
+        if not cls._normalize_backend_state_id(message.get("functions_state_id")):
+            message["functions_state_id"] = normalized
+
     @staticmethod
     def _track_pending_tool_call(
         function_call: Dict[str, Any],
@@ -294,7 +312,7 @@ class RequestTransformer:
         if pending_tool_calls:
             pending_name, pending_call_id = pending_tool_calls.pop(0)
             if pending_call_id and not tool_call_id:
-                message["tools_state_id"] = pending_call_id
+                RequestTransformer._set_backend_state_id(message, pending_call_id)
             return pending_name
 
         return None
@@ -486,6 +504,11 @@ class RequestTransformer:
             transformed["functions"] = functions
             self.logger.debug(f"Transformed {len(functions)} tools to functions")
 
+        if "functions" in transformed:
+            transformed["functions"] = self._normalize_legacy_functions(
+                transformed["functions"]
+            )
+
         # Map reserved tool names to safe aliases for GigaChat
         function_call = transformed.get("function_call")
         if isinstance(function_call, dict) and function_call.get("name"):
@@ -500,6 +523,31 @@ class RequestTransformer:
                     setattr(fn, "name", map_tool_name_to_gigachat(getattr(fn, "name")))
 
         return transformed
+
+    @staticmethod
+    def _normalize_legacy_functions(functions: Any) -> Any:
+        """Normalize legacy function schemas before GigaChat Chat validation."""
+        if not isinstance(functions, list):
+            return functions
+
+        normalized_functions = []
+        for function in functions:
+            if hasattr(function, "model_dump"):
+                function_payload = function.model_dump(exclude_none=True, by_alias=True)
+            elif isinstance(function, Mapping):
+                function_payload = dict(function)
+            else:
+                normalized_functions.append(function)
+                continue
+
+            parameters = function_payload.get("parameters")
+            if isinstance(parameters, dict):
+                function_payload["parameters"] = normalize_json_schema(
+                    resolve_schema_refs(parameters)
+                )
+            normalized_functions.append(function_payload)
+
+        return normalized_functions
 
     @staticmethod
     def _apply_json_schema_as_function(
@@ -554,6 +602,16 @@ class RequestTransformer:
             response_format["strict"] = strict
         transformed["response_format"] = response_format
 
+    @staticmethod
+    def _reject_json_object_response_format(param: str) -> None:
+        raise ClientCompatibilityError(
+            "GigaChat does not support response_format.type='json_object'. "
+            "Use response_format.type='json_schema' with a schema.",
+            provider="openai",
+            param=param,
+            code="unsupported_response_format",
+        )
+
     def _structured_output_mode(self) -> str:
         return getattr(
             self.config.proxy_settings,
@@ -562,7 +620,7 @@ class RequestTransformer:
         )
 
     def _responses_chat_completion_tools_enabled_by_default(self) -> bool:
-        return self.config.proxy_settings.resolve_responses_api_mode() == "v2"
+        return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
 
     @staticmethod
     def _strip_reasoning_payload_fields(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -622,6 +680,8 @@ class RequestTransformer:
                     self._apply_json_schema_as_function(
                         transformed, schema_name, schema
                     )
+            elif response_format.get("type") == "json_object":
+                self._reject_json_object_response_format("response_format.type")
             else:
                 transformed["response_format"] = {
                     "type": response_format.get("type"),
@@ -683,8 +743,17 @@ class RequestTransformer:
                     self._apply_json_schema_as_function(
                         transformed, schema_name, schema
                     )
+            elif response_format.get("type") == "json_object":
+                self._reject_json_object_response_format("text.format.type")
             else:
                 transformed["response_format"] = response_format
+
+        top_level_response_format = transformed.get("response_format")
+        if (
+            isinstance(top_level_response_format, dict)
+            and top_level_response_format.get("type") == "json_object"
+        ):
+            self._reject_json_object_response_format("response_format.type")
 
         return transformed
 
@@ -727,8 +796,7 @@ class RequestTransformer:
                         "name": fn_name,
                         "content": ensure_json_object_str(message.get("output")),
                     }
-                    if tools_state_id:
-                        payload["tools_state_id"] = tools_state_id
+                    self._set_backend_state_id(payload, tools_state_id)
                     message_payload.append(payload)
                     continue
                 if message_type == "function_call":
@@ -746,8 +814,7 @@ class RequestTransformer:
                         )
 
                     completion_payload = self.mock_completion(message)
-                    if tools_state_id:
-                        completion_payload["tools_state_id"] = tools_state_id
+                    self._set_backend_state_id(completion_payload, tools_state_id)
                     message_payload.append(completion_payload)
                     continue
 
@@ -823,9 +890,19 @@ class RequestTransformer:
         """Common logic for message transformation and logging."""
         transformed_data.pop("_gpt2giga_builtin_tools", None)
         transformed_data.pop("_gpt2giga_tool_config", None)
+        transformed_data.pop("tools", None)
+        if "functions" in transformed_data:
+            functions = normalize_gigachat_function_definitions(
+                transformed_data.get("functions")
+            )
+            if functions:
+                transformed_data["functions"] = functions
+            else:
+                transformed_data.pop("functions", None)
         transformed_data["messages"] = await self.transform_messages(
             transformed_data.get("messages", []), giga_client
         )
+        self._sanitize_legacy_message_state_ids(transformed_data["messages"])
 
         messages_objs = [
             Messages.model_validate(m) for m in transformed_data["messages"]
@@ -849,6 +926,13 @@ class RequestTransformer:
         )
 
         return transformed_data
+
+    @staticmethod
+    def _sanitize_legacy_message_state_ids(messages: list[dict[str, Any]]) -> None:
+        """Drop backend tool state ids from legacy GigaChat v1 chat history."""
+        for message in messages:
+            message.pop("functions_state_id", None)
+            message.pop("tools_state_id", None)
 
     async def _finalize_chat_completion_transformation(
         self, transformed_data: dict, giga_client: Optional[GigaChat] = None
@@ -948,7 +1032,11 @@ class RequestTransformer:
         if content_parts:
             payload["content"] = content_parts
 
-        for field_name in ("message_id", "tools_state_id", "inline_data"):
+        tool_state_id = self._extract_tool_call_id(message)
+        if tool_state_id:
+            payload["tools_state_id"] = tool_state_id
+
+        for field_name in ("message_id", "inline_data"):
             if field_name in message:
                 payload[field_name] = message[field_name]
 
@@ -1201,9 +1289,7 @@ class RequestTransformer:
 
     @staticmethod
     def _normalize_chat_completion_function_schema(schema: Any) -> dict[str, Any]:
-        if not isinstance(schema, dict):
-            return {}
-        return normalize_json_schema(resolve_schema_refs(schema))
+        return normalize_tool_parameters_schema(schema)
 
     @staticmethod
     def _dump_mapping(value: Any) -> Dict[str, Any]:

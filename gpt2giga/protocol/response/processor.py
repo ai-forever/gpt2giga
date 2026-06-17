@@ -18,6 +18,12 @@ from gpt2giga.common.reasoning import (
     extract_reasoning_from_content,
     merge_reasoning_text,
 )
+from gpt2giga.common.sources import (
+    SourceMarkerStreamRenderer,
+    extract_sources,
+    has_source_marker_start,
+    render_text_with_sources,
+)
 from gpt2giga.common.tools import map_tool_name_from_gigachat, split_gigachat_tool_name
 from gpt2giga.protocol.response.gigachat_chat_completion_adapter import (
     GIGACHAT_PROVIDER_METADATA_KEY,
@@ -45,6 +51,7 @@ class ResponseProcessor:
             else "function_call"
         )
         self._stream_reasoning_parsers: dict[str, ReasoningContentParser] = {}
+        self._stream_source_renderers: dict[str, SourceMarkerStreamRenderer] = {}
 
     def _uses_structured_output_function_call(self) -> bool:
         return self._structured_output_mode == "function_call"
@@ -352,13 +359,18 @@ class ResponseProcessor:
                 inline_data = ResponseProcessor._normalize_inline_data(
                     message.get("inline_data")
                 )
+                rendered_content = (
+                    render_text_with_sources(content, inline_data)
+                    if isinstance(content, str)
+                    else content
+                )
                 annotations = ResponseProcessor._create_url_annotations(
                     content,
                     inline_data,
                 )
                 builtin_items.append(
                     ResponseProcessor._create_message_item(
-                        content,
+                        rendered_content,
                         response_id,
                         annotations=annotations,
                         inline_data=inline_data,
@@ -449,15 +461,7 @@ class ResponseProcessor:
 
     @staticmethod
     def _extract_sources(inline_data: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-        sources = inline_data.get("sources")
-        if not isinstance(sources, Mapping):
-            return {}
-
-        normalized_sources: dict[str, dict[str, Any]] = {}
-        for key, source in sources.items():
-            if isinstance(source, Mapping):
-                normalized_sources[str(key)] = dict(source)
-        return normalized_sources
+        return extract_sources(inline_data)
 
     @staticmethod
     def _create_url_annotations(
@@ -707,6 +711,18 @@ class ResponseProcessor:
             return ReasoningContent(content="", reasoning_content="")
         return parser.flush()
 
+    def flush_stream_sources(
+        self,
+        response_id: str,
+        *,
+        family: Literal["chat", "responses"] = "chat",
+    ) -> str:
+        """Flush and remove any source renderer state for a completed stream."""
+        renderer = self._stream_source_renderers.pop(f"{family}:{response_id}", None)
+        if renderer is None:
+            return ""
+        return renderer.finish()
+
     def process_stream_chunk_response(
         self,
         giga_resp: ChatCompletionChunk,
@@ -794,6 +810,53 @@ class ResponseProcessor:
                 parser_key=f"chat:{response_id}" if response_id else None,
                 finish_reason=choice.get("finish_reason"),
             )
+            self._render_sources_in_message(
+                message,
+                is_stream=is_stream,
+                renderer_key=f"chat:{response_id}" if response_id else None,
+                finish_reason=choice.get("finish_reason"),
+            )
+
+    def _render_sources_in_message(
+        self,
+        message: Dict,
+        *,
+        is_stream: bool,
+        renderer_key: Optional[str] = None,
+        finish_reason: Optional[str] = None,
+    ) -> None:
+        inline_data = self._normalize_inline_data(message.get("inline_data"))
+        content = message.get("content")
+
+        if not is_stream:
+            if isinstance(content, str) and extract_sources(inline_data):
+                message["content"] = render_text_with_sources(content, inline_data)
+            return
+
+        if renderer_key is None:
+            renderer_key = f"anonymous:{id(message)}"
+        renderer = self._stream_source_renderers.get(renderer_key)
+        should_render_sources = (
+            renderer is not None
+            or bool(extract_sources(inline_data))
+            or has_source_marker_start(content)
+        )
+        if not should_render_sources:
+            return
+
+        if renderer is None:
+            renderer = SourceMarkerStreamRenderer()
+            self._stream_source_renderers[renderer_key] = renderer
+        renderer.merge_inline_data(inline_data)
+
+        rendered_content = ""
+        if isinstance(content, str):
+            rendered_content = renderer.feed(content)
+        if finish_reason is not None:
+            rendered_content += renderer.finish()
+            self._stream_source_renderers.pop(renderer_key, None)
+
+        message["content"] = rendered_content
 
     def _extract_reasoning_from_message(
         self,

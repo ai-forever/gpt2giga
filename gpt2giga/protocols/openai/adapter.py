@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from gpt2giga.common.client_params import ClientCompatibilityError
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.core.context import RequestContext
 from gpt2giga.protocol.request.params import sanitize_openai_chat_parameters
 from gpt2giga.protocols.normalized import (
@@ -309,7 +310,7 @@ def _normalize_tool(tool: Mapping[str, Any]) -> NormalizedTool:
         type=str(tool.get("type", "function")),
         name=str(function_data.get("name", "")),
         description=_string_or_none(function_data.get("description")),
-        parameters=dict(parameters),
+        parameters=normalize_tool_parameters_schema(parameters),
         raw_extensions=raw_extensions,
     )
 

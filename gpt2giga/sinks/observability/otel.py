@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 from collections.abc import Mapping, Sequence
@@ -32,6 +33,8 @@ CONTENT_ATTRIBUTE_KEYS = frozenset(
         "response_body",
     }
 )
+
+DEFAULT_FORCE_FLUSH_TIMEOUT_SECONDS = 5.0
 
 
 class OpenTelemetryObservabilitySink:
@@ -65,7 +68,16 @@ class OpenTelemetryObservabilitySink:
         """Record one observability event as an OTel span."""
         if not self._should_sample():
             return
+        await asyncio.to_thread(self._emit_sync, name, attributes, context, events)
 
+    def _emit_sync(
+        self,
+        name: str,
+        attributes: Mapping[str, Any] | None,
+        context: RequestContext | None,
+        events: Sequence[Mapping[str, Any]] | None,
+    ) -> None:
+        """Record one OpenTelemetry span without blocking the event loop."""
         ended_at = datetime.now(timezone.utc)
         span_attributes = build_otel_attributes(
             attributes,
@@ -100,7 +112,10 @@ class OpenTelemetryObservabilitySink:
         """Flush pending spans best effort."""
         force_flush = getattr(self.tracer_provider, "force_flush", None)
         if force_flush is not None:
-            force_flush()
+            await asyncio.wait_for(
+                asyncio.to_thread(_force_flush, force_flush),
+                timeout=DEFAULT_FORCE_FLUSH_TIMEOUT_SECONDS,
+            )
 
     def _should_sample(self) -> bool:
         if self.sample_rate <= 0:
@@ -289,3 +304,12 @@ def _set_span_status(
             set_status("ERROR" if failed else "OK")
         except Exception:
             return
+
+
+def _force_flush(force_flush: Any) -> Any:
+    try:
+        return force_flush(
+            timeout_millis=int(DEFAULT_FORCE_FLUSH_TIMEOUT_SECONDS * 1000)
+        )
+    except TypeError:
+        return force_flush()

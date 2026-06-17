@@ -5,14 +5,15 @@ from pathlib import Path
 
 from anthropic import Anthropic
 
-client = Anthropic(base_url="http://localhost:8090/v1", api_key="any-key")
+api_version = "v2"
+client = Anthropic(base_url=f"http://localhost:8090/{api_version}/", api_key="any-key")
 
 
 def encode_image(image_path: Path) -> str:
     return base64.b64encode(image_path.read_bytes()).decode("utf-8")
 
 
-image_path = Path(__file__).resolve().parents[3] / "image.png"
+image_path = Path("image.png")
 base64_image = encode_image(image_path)
 
 message = client.messages.create(

@@ -22,7 +22,8 @@ from contextlib import suppress
 from openai import APIStatusError, AsyncOpenAI
 
 
-BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8090")
+api_version = "v2"
+BASE_URL = os.getenv("OPENAI_BASE_URL", f"http://localhost:8090/{api_version}/")
 API_KEY = os.getenv("OPENAI_API_KEY", "0")
 MODEL = os.getenv("GPT2GIGA_EXAMPLE_MODEL", "GigaChat-2")
 HOLD_SECONDS = float(os.getenv("GPT2GIGA_EXAMPLE_HOLD_SECONDS", "3"))
@@ -52,7 +53,13 @@ async def _wait_until_stream_slot_is_held(
 
     while not first_chunk_seen.is_set():
         if holder.done():
-            await holder
+            if holder.cancelled():
+                raise RuntimeError("holder stream was cancelled before the first chunk")
+            error = holder.exception()
+            if error is not None:
+                raise RuntimeError(
+                    "holder stream failed before the first chunk"
+                ) from error
             raise RuntimeError("holder stream finished before the first chunk")
         if loop.time() >= deadline:
             holder.cancel()
@@ -146,12 +153,12 @@ async def main() -> None:
         ]
         results = await asyncio.gather(*requests)
         print_summary(results)
-        await holder
+        _ = await holder
     finally:
         if not holder.done():
             holder.cancel()
             with suppress(asyncio.CancelledError):
-                await holder
+                _ = await holder
         await client.close()
 
 

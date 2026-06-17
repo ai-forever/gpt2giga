@@ -1,6 +1,6 @@
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8090", api_key="0")
+client = OpenAI(base_url="http://localhost:8090/v2", api_key="0")
 
 instructions = """
 You are a personal math tutor. When asked a math question,

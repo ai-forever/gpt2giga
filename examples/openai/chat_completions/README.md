@@ -13,14 +13,18 @@ uv run python examples/openai/chat_completions/basic/chat_completion.py
 
 ## Про `base_url`
 
-В примерах чаще используется:
+В примерах версия выбирается явно через строку `api_version`:
 
-- `OpenAI(base_url="http://localhost:8090", api_key="0")`
+```python
+api_version = "v1"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
+```
 
-Некоторые примеры используют `.../v1` или `.../v2`. Root `base_url`
-следует `GPT2GIGA_GIGACHAT_API_MODE`; `/v1` и `/v2` явно выбирают
-соответствующий GigaChat backend contract. Если вы поменяли порт прокси,
-обновите `base_url` соответственно.
+`/v1` всегда выбирает GigaChat v1 backend contract, `/v2` всегда выбирает
+GigaChat v2 backend contract. Root `base_url` без версии тоже поддерживается и
+следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`, но runnable-примеры показывают
+явный contract. Если вы поменяли порт прокси, обновите `base_url`
+соответственно.
 
 Если включена защита API-ключом (`GPT2GIGA_ENABLE_API_KEY_AUTH=True`), передавайте ваш ключ как `api_key`.
 

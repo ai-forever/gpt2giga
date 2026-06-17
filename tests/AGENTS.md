@@ -37,6 +37,7 @@ uv run pytest -m integration
 | `tests/test_golden/` | Compatibility fixtures for stable OpenAI/Anthropic shapes |
 | `tests/common/` | Shared behavioral tests for common utilities such as model concurrency |
 | `tests/integration/` | Integration-style tests that still run hermetically |
+| `tests/live/` | Opt-in live tests that call real GigaChat; skipped unless `GPT2GIGA_RUN_LIVE_TESTS=1` |
 | `tests/fixtures/` | JSON fixtures for debug translation and protocol compatibility |
 | `tests/golden/` | Expected wire shapes for golden tests |
 | `tests/test_auth.py` | API-key auth dependency |
@@ -49,7 +50,8 @@ uv run pytest -m integration
 
 - Mirror the source behavior being tested; keep router, protocol, and helper coverage separated when practical.
 - Prefer standalone `test_*` functions over test classes.
-- Mock all upstream GigaChat interactions; tests should stay hermetic.
+- Mock upstream GigaChat interactions by default; only `tests/live/` may call real
+  upstream GigaChat, and those tests must be opt-in and secret-free in git.
 - Build small `FastAPI()` apps in router tests and mount only the routers under test.
 - Reuse existing dummy-client and mocked-response patterns instead of introducing live API calls.
 - When testing app-wide behavior, prefer `create_app()` plus explicit `ProxyConfig` rather than relying on ambient environment.
@@ -82,14 +84,12 @@ def test_health_endpoint():
 ### Async Protocol Tests
 
 ```python
-import pytest
 from loguru import logger
 
 from gpt2giga.models.config import ProxyConfig
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer
 
 
-@pytest.mark.asyncio
 async def test_transformer_merges_messages():
     config = ProxyConfig()
     attachments = AttachmentProcessor(logger)
@@ -112,12 +112,13 @@ Defined in `pytest.ini`:
 - `unit`
 - `integration`
 - `slow`
+- `live_gigachat`
 
 ## Quick Find Commands
 
 ```bash
 # Find async tests
-rg -n "@pytest.mark.asyncio|async def test_" tests
+rg -n "async def test_" tests
 
 # Find router tests for a route family
 rg -n "batches|anthropic|responses|embeddings|metrics|admin|debug" tests/test_router
@@ -137,7 +138,7 @@ rg -n "mocker|MagicMock|AsyncMock|patch" tests
 
 ## Common Gotchas
 
-- Async auto-mode is enabled in `pytest.ini`, but explicit `@pytest.mark.asyncio` is still preferred for clarity.
+- Async auto-mode is enabled in `pytest.ini`; do not add `@pytest.mark.asyncio` unless a test needs explicit pytest-asyncio options.
 - There is no root-level shared `conftest.py`; package-specific fixtures live close to the tests that use them, such as under `tests/test_api_server/` and `tests/test_cli/`.
 - Coverage omits `tests/`, `scripts/`, `docs/`, `examples/`, migrations, `__pycache__`, and `.local/` according to `pyproject.toml`.
 - Batch and file helpers rely on in-memory stores in app state; router tests should initialize or mock that state explicitly when covering those disabled modules.

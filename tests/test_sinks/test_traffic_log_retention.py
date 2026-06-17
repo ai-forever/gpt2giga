@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-import pytest
 
 from gpt2giga.models.config import ProxySettings
 from gpt2giga.sinks.logs.postgres import PostgresTrafficLogQueryStore
@@ -58,7 +57,6 @@ def test_retention_cutoff_uses_utc_window():
     assert cutoff == datetime(2026, 5, 8, 12, 30, tzinfo=timezone.utc)
 
 
-@pytest.mark.asyncio
 async def test_purge_expired_traffic_logs_calls_store():
     calls = []
 

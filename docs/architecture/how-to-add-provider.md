@@ -140,9 +140,10 @@ traffic logs без включения prompt capture.
   если request/response уже normalized;
 - добавьте отдельный helper в `gpt2giga/sinks/observability/<protocol>.py`,
   если public protocol имеет особый output/event формат;
-- задайте span name, если нужен новый root span, например `Gemini`;
+- задайте span name, если нужен новый root span, например `Gemini-Content`;
 - выставляйте `gpt2giga.api_format` в bounded значение: `chat_completions`,
-  `responses`, `messages`, `embeddings` или новый explicit format;
+  `responses`, `messages`, `generate_content`, `embeddings` или новый explicit
+  format;
 - маппьте stream milestones в span events через `NormalizedStreamEvent`, где
   возможно;
 - сохраняйте tool visibility: counts/names по умолчанию, args/schema только

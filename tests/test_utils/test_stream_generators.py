@@ -8,10 +8,10 @@ import pytest
 from gigachat.models.chat_completions import ChatCompletionChunk
 
 from gpt2giga.common.streaming import (
-    stream_chat_generator,
     stream_chat_completion_generator,
-    stream_responses_generator,
+    stream_chat_generator,
     stream_responses_chat_completion_generator,
+    stream_responses_generator,
 )
 from gpt2giga.protocol import ResponseProcessor
 
@@ -112,6 +112,27 @@ class FakeClientThinkTags:
         return gen()
 
 
+class FakeClientNullReasoning:
+    def astream(self, chat):
+        async def gen():
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [{"delta": {"content": "A", "reasoning_content": None}}],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+            yield SimpleNamespace(
+                model_dump=lambda: {
+                    "choices": [{"delta": {"content": "B", "reasoning_content": None}}],
+                    "usage": None,
+                    "model": "giga",
+                }
+            )
+
+        return gen()
+
+
 class FakeClientError:
     def astream(self, chat):
         async def gen():
@@ -185,7 +206,6 @@ class FakeRequest:
         return self._disconnected
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_generator_exception_path():
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
@@ -197,7 +217,6 @@ async def test_stream_chat_generator_exception_path():
     assert lines[1].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_exception_path():
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
@@ -213,7 +232,6 @@ async def test_stream_responses_generator_exception_path():
     assert "event: error" in lines[2]
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_generator_gigachat_exception():
     """Тест обработки GigaChatException с правильным типом ошибки"""
     logger = MagicMock()
@@ -229,7 +247,6 @@ async def test_stream_chat_generator_gigachat_exception():
     assert lines[1].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_generator_preserves_input_called_tools():
     req = FakeRequest(FakeClientV1TerminalChunk())
     req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
@@ -287,7 +304,6 @@ async def test_stream_chat_generator_preserves_input_called_tools():
     assert lines[1].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_completion_generator_text_chunks():
     chunks = [
         ChatCompletionChunk.model_validate(
@@ -311,7 +327,52 @@ async def test_stream_chat_completion_generator_text_chunks():
     assert lines[2].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
+async def test_stream_chat_completion_generator_named_done_event_finishes_stream():
+    done_payload = {
+        "model": "GigaChat-3-Ultra:32.3.18.5",
+        "created_at": 1781352508,
+        "messages": [
+            {
+                "role": "assistant",
+                "tool_state_id": "019ec0e2-2bc1-7cf4-86fb-0280fd4c7cb9",
+            }
+        ],
+        "finish_reason": "stop",
+        "usage": {
+            "input_tokens": 27221,
+            "input_tokens_details": {"prompt_tokens": 27221, "cached_tokens": 0},
+            "output_tokens": 16,
+            "total_tokens": 27237,
+        },
+    }
+    chunks = [
+        ChatCompletionChunk.model_validate(
+            {"messages": [{"role": "assistant", "content": [{"text": "A"}]}]}
+        ),
+        (
+            "event: response.message.done\n"
+            f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+        ),
+    ]
+    req = FakeRequest(FakeClientV2Stream(chunks=chunks))
+    req.app.state.response_processor = ResponseProcessor(logger=MagicMock())
+    lines = []
+
+    async for line in stream_chat_completion_generator(
+        req, "gpt-x", {"contract": "v2"}, response_id="v2"
+    ):
+        lines.append(line)
+
+    final_payload = json.loads(lines[1].removeprefix("data: "))
+    assert len(lines) == 3
+    assert final_payload["choices"][0]["finish_reason"] == "stop"
+    assert final_payload["usage"]["prompt_tokens"] == 27221
+    assert final_payload["metadata"]["gigachat_tool_state_id"] == (
+        "019ec0e2-2bc1-7cf4-86fb-0280fd4c7cb9"
+    )
+    assert lines[2].strip() == "data: [DONE]"
+
+
 async def test_stream_chat_completion_generator_reasoning_chunks():
     chunks = [
         ChatCompletionChunk.model_validate(
@@ -336,7 +397,6 @@ async def test_stream_chat_completion_generator_reasoning_chunks():
     assert lines[2].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_completion_generator_usage_only_chunk():
     chunks = [
         ChatCompletionChunk.model_validate(
@@ -362,7 +422,6 @@ async def test_stream_chat_completion_generator_usage_only_chunk():
     assert lines[1].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_completion_generator_preserves_input_called_tools():
     chunks = [
         ChatCompletionChunk.model_validate(
@@ -439,7 +498,6 @@ async def test_stream_chat_completion_generator_preserves_input_called_tools():
     assert lines[1].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_completion_generator_gigachat_exception():
     logger = MagicMock()
     req = FakeRequest(
@@ -461,7 +519,6 @@ async def test_stream_chat_completion_generator_gigachat_exception():
     assert lines[1].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_generator_propagates_cancellation():
     req = FakeRequest(FakeClientCancelled())
     chat = SimpleNamespace(model="giga")
@@ -471,7 +528,6 @@ async def test_stream_chat_generator_propagates_cancellation():
         await anext(gen)
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_gigachat_exception():
     """Тест обработки GigaChatException в responses generator"""
     logger = MagicMock()
@@ -490,7 +546,6 @@ async def test_stream_responses_generator_gigachat_exception():
     assert "event: error" in lines[2]
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_chat_completion_generator_text_and_usage():
     chunks = [
         ChatCompletionChunk.model_validate(
@@ -525,10 +580,7 @@ async def test_stream_responses_chat_completion_generator_text_and_usage():
     assert '"output_tokens": 2' in completed
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_chat_completion_generator_builtin_tool_outputs():
-    import json
-
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -624,7 +676,6 @@ async def test_stream_responses_chat_completion_generator_builtin_tool_outputs()
     assert content["annotations"][0]["url"] == "https://example.test/source"
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_chat_completion_generator_emits_source_annotation_event():
     chunks = [
         ChatCompletionChunk.model_validate(
@@ -696,6 +747,14 @@ async def test_stream_responses_chat_completion_generator_emits_source_annotatio
         for event_type, data in events
         if event_type == "response.output_text.annotation.added"
     ]
+    delta_text = "".join(
+        data["delta"]
+        for event_type, data in events
+        if event_type == "response.output_text.delta"
+    )
+    text_done = [
+        data for event_type, data in events if event_type == "response.output_text.done"
+    ][-1]
     completed = [
         data for event_type, data in events if event_type == "response.completed"
     ][-1]
@@ -711,14 +770,17 @@ async def test_stream_responses_chat_completion_generator_emits_source_annotatio
     assert annotation["start_index"] == len("Answer. ")
     assert annotation["url"] == "https://example.test/source"
     assert annotation["title"] == "Example Source"
+    assert delta_text == (
+        "Answer.\n\nSources:\n- [Example Source](https://example.test/source)"
+    )
+    assert "[sources=" not in delta_text
+    assert text_done["text"] == delta_text
+    assert content["text"] == delta_text
     assert content["annotations"] == [annotation]
     assert content["inline_data"]["sources"]["1"]["title"] == "Example Source"
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_chat_completion_generator_emits_builtin_tool_progress_events():
-    import json
-
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -898,10 +960,7 @@ async def test_stream_responses_chat_completion_generator_emits_builtin_tool_pro
     assert image_call["result"] == "aW1n"
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_chat_completion_generator_maps_reasoning_role_to_output_item():
-    import json
-
     chunks = [
         ChatCompletionChunk.model_validate(
             {
@@ -951,7 +1010,6 @@ async def test_stream_responses_chat_completion_generator_maps_reasoning_role_to
     assert output[1]["content"][0]["text"] == "Paris"
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_chat_completion_generator_gigachat_exception():
     logger = MagicMock()
     req = FakeRequest(
@@ -977,7 +1035,6 @@ async def test_stream_responses_chat_completion_generator_gigachat_exception():
     assert "event: error" in lines[2]
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_propagates_cancellation():
     req = FakeRequest(FakeClientCancelled())
     chat = SimpleNamespace(model="giga")
@@ -992,7 +1049,6 @@ async def test_stream_responses_generator_propagates_cancellation():
         await anext(gen)
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_generator_success_with_disconnect():
     """Тест корректного завершения при отключении клиента"""
 
@@ -1036,11 +1092,8 @@ async def test_stream_chat_generator_success_with_disconnect():
     assert lines[1].strip() == "data: [DONE]"
 
 
-@pytest.mark.asyncio
 async def test_stream_chat_completion_error_response_format():
     """Тест формата ответа об ошибке в стриминге"""
-    import json
-
     req = FakeRequest(FakeClientError())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1058,11 +1111,8 @@ async def test_stream_chat_completion_error_response_format():
     assert error_data["error"]["code"] == "internal_error"
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_success():
     """Test successful streaming with all proper SSE events"""
-    import json
-
     req = FakeRequest(FakeClient())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1136,10 +1186,22 @@ async def test_stream_responses_generator_success():
     assert data["response"]["output"][0]["content"][0]["text"] == "AB"
 
 
-@pytest.mark.asyncio
-async def test_stream_responses_generator_preserves_reasoning_config():
-    import json
+async def test_stream_responses_generator_ignores_null_reasoning_content():
+    req = FakeRequest(FakeClientNullReasoning())
+    chat = SimpleNamespace(model="giga")
+    lines = []
+    async for line in stream_responses_generator(req, chat, response_id="null-reason"):
+        lines.append(line)
 
+    completed = [line for line in lines if "event: response.completed" in line][-1]
+    data = json.loads(completed.strip().split("\n")[1].replace("data: ", ""))
+    output = data["response"]["output"]
+
+    assert [item["type"] for item in output] == ["message"]
+    assert output[0]["content"][0]["text"] == "AB"
+
+
+async def test_stream_responses_generator_preserves_reasoning_config():
     req = FakeRequest(FakeClient())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1169,10 +1231,7 @@ async def test_stream_responses_generator_preserves_reasoning_config():
     assert data["response"]["reasoning"] == {"effort": "high", "summary": "auto"}
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_extracts_think_tags():
-    import json
-
     req = FakeRequest(FakeClientThinkTags())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1403,11 +1462,8 @@ class FakeClientFunctionCallReservedWebSearch:
         return gen()
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_function_call():
     """Test streaming with function call (single chunk)"""
-    import json
-
     req = FakeRequest(FakeClientFunctionCall())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1472,7 +1528,6 @@ async def test_stream_responses_generator_function_call():
     ]
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_function_call_restores_namespace():
     req = FakeRequest(FakeClientNamespacedFunctionCall())
     chat = SimpleNamespace(model="giga")
@@ -1532,11 +1587,8 @@ async def test_stream_responses_generator_function_call_restores_namespace():
     ]
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_function_call_streamed_args():
     """Test streaming with function call arguments split across multiple chunks"""
-    import json
-
     req = FakeRequest(FakeClientFunctionCallStreamed())
     chat = SimpleNamespace(model="giga")
     lines = []
@@ -1591,11 +1643,8 @@ async def test_stream_responses_generator_function_call_streamed_args():
     ]
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_generator_unmaps_reserved_web_search_name():
     """Reserved tool name coming from GigaChat must be mapped back for client."""
-    import json
-
     req = FakeRequest(FakeClientFunctionCallReservedWebSearch())
     chat = SimpleNamespace(model="giga")
     lines = []

@@ -4,7 +4,7 @@
 
 ## Подключение Xcode к GigaChat
 
-Для работы Xcode с GigaChat используется утилита `gpt2giga`, которая предоставляет OpenAI-совместимые эндпоинты, включая `/v1/models` и `/v1/chat/completions`.
+Для работы Xcode с GigaChat используется утилита `gpt2giga`, которая предоставляет OpenAI-совместимые эндпоинты, включая `/v1/models` и `/v1/chat/completions`. `/v1` всегда выбирает GigaChat v1 contract, `/v2` — GigaChat v2 contract, а root URL без версии следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 ### Предварительные требования
 

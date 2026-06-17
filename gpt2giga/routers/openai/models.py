@@ -15,6 +15,10 @@ from gpt2giga.common.gigachat_options import (
     gigachat_request_options,
 )
 from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_MODELS
+from gpt2giga.routers.gemini.models import (
+    build_gemini_model,
+    build_gemini_model_list,
+)
 
 router = APIRouter(tags=[OPENAPI_TAG_OPENAI_MODELS])
 
@@ -25,6 +29,18 @@ def _is_anthropic_models_request(request: Request) -> bool:
         "anthropic-version" in request.headers
         or "anthropic-beta" in request.headers
         or user_agent.lower().startswith("anthropic/")
+    )
+
+
+def _is_gemini_models_request(request: Request) -> bool:
+    user_agent = request.headers.get("user-agent", "").lower()
+    return (
+        "x-goog-api-client" in request.headers
+        or "x-goog-api-key" in request.headers
+        or "x-goog-user-project" in request.headers
+        or request.query_params.get("key") is not None
+        or "google-generative-ai" in user_agent
+        or user_agent.startswith(("google-genai", "genai/"))
     )
 
 
@@ -120,6 +136,8 @@ async def show_available_models(request: Request):
     models = [_dump_model(item) for item in response.data]
     if _is_anthropic_models_request(request):
         return _build_anthropic_model_list(models, request)
+    if _is_gemini_models_request(request):
+        return build_gemini_model_list(models)
 
     current_timestamp = int(time.time())
     for model in models:
@@ -142,6 +160,8 @@ async def get_model(model: str, request: Request):
     model_data = _dump_model(response)
     if _is_anthropic_models_request(request):
         return _build_anthropic_model(model_data)
+    if _is_gemini_models_request(request):
+        return build_gemini_model(model_data)
 
     model_data["created"] = int(time.time())
     return OpenAIModel(**model_data)

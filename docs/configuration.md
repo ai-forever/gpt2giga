@@ -31,7 +31,7 @@ gpt2giga \
 gpt2giga --help
 ```
 
-Env template для копирования: [.env.example](../.env.example).
+Env template для копирования: [.env.example](https://github.com/ai-forever/gpt2giga/blob/main/.env.example).
 
 ## Как читать этот документ
 
@@ -82,16 +82,17 @@ GIGACHAT_MODEL=GigaChat-2-Max
 GIGACHAT_VERIFY_SSL_CERTS=True
 ```
 
-Явный GigaChat v2 для клиентов:
+Явный выбор GigaChat v2 на стороне клиента:
 
 ```dotenv
 GPT2GIGA_GIGACHAT_API_MODE=v1
-GPT2GIGA_RESPONSES_API_MODE=inherit
 ```
 
-При таком env root routes остаются на v1, а клиент может выбрать v2 через
-`base_url="http://localhost:8090/v2"`. Если хотите, чтобы root routes тоже
-использовали v2, задайте `GPT2GIGA_GIGACHAT_API_MODE=v2`.
+При таком env root routes без `/v1` или `/v2` остаются на v1, а клиент может
+выбрать v2 через `base_url="http://localhost:8090/v2"`. `/v1` всегда
+принудительно выбирает GigaChat v1 contract, `/v2` — GigaChat v2 contract.
+Если хотите, чтобы root routes тоже использовали v2, задайте
+`GPT2GIGA_GIGACHAT_API_MODE=v2`.
 
 ## Формат значений
 
@@ -207,21 +208,24 @@ GPT2GIGA_STRUCTURED_OUTPUT_MODE=function_call
 - `function_call`: compatibility fallback через function calling;
 - `native`: передаёт JSON Schema через GigaChat `response_format`, если model/API это поддерживает.
 
+Оба режима рассчитаны на schema-based structured output. OpenAI
+`response_format.type=json_object` и Gemini `responseMimeType=application/json`
+без `responseJsonSchema` / `responseSchema` не проксируются в GigaChat, потому
+что upstream не поддерживает отдельный schema-less JSON mode.
+
 ## Backend API mode
 
 ```dotenv
 GPT2GIGA_GIGACHAT_API_MODE=v1
-GPT2GIGA_RESPONSES_API_MODE=inherit
 ```
 
-| `GPT2GIGA_GIGACHAT_API_MODE` | `GPT2GIGA_RESPONSES_API_MODE` | `/chat/completions` backend | `/responses` backend |
-|---|---|---|---|
-| `v1` | `inherit` | `v1` | `v1` |
-| `v2` | `inherit` | `v2` | `v2` |
-| `v1` | `v2` | `v1` | `v2` |
-| `v2` | `v1` | `v2` | `v1` |
+| `GPT2GIGA_GIGACHAT_API_MODE` | `/chat/completions` backend | `/responses` backend |
+|---|---|---|
+| `v1` | `v1` | `v1` |
+| `v2` | `v2` | `v2` |
 
-Root URLs (`/chat/completions`, `/responses`, `/messages`) используют эти flags.
+Root URLs (`/chat/completions`, `/responses`, `/messages`) без `/v1` или `/v2`
+используют этот flag.
 Versioned prefixes являются явным per-request override:
 
 - `/v1/chat/completions`, `/v1/responses`, `/v1/messages` используют GigaChat v1 contract;
@@ -248,6 +252,9 @@ GPT2GIGA_LEGACY_CHAT_FALLBACK=True
 Conversation stitching - opt-in in-memory state для stateless chat-like
 клиентов, которые передают стабильный conversation identifier. По умолчанию
 выключено и не влияет на совместимость.
+Поддержаны OpenAI Chat Completions, Anthropic Messages и Gemini GenerateContent.
+Conversation identifier берётся из `conversation`, `metadata.conversation_id`,
+`x-gpt2giga-conversation-id` или, если включено, `x-session-id`.
 
 ```dotenv
 GPT2GIGA_CONVERSATION_STITCHING_ENABLED=False

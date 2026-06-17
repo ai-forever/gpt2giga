@@ -21,9 +21,9 @@ from gpt2giga.protocols.normalized import (
 
 NORMALIZE_REQUEST_SPAN_NAME = "protocol.normalize.request"
 NORMALIZE_RESPONSE_SPAN_NAME = "protocol.normalize.response"
-CHAT_COMPLETION_SPAN_NAME = "ChatCompletion"
-RESPONSES_SPAN_NAME = "Responses"
-MESSAGES_SPAN_NAME = "Messages"
+CHAT_COMPLETION_SPAN_NAME = "OpenAI-Completions"
+RESPONSES_SPAN_NAME = "OpenAI-Responses"
+MESSAGES_SPAN_NAME = "Anthropic-Messages"
 EMBEDDINGS_SPAN_NAME = "Embeddings"
 STREAM_SPAN_NAME = "stream.emit"
 OPENINFERENCE_SPAN_KIND = "LLM"
@@ -89,6 +89,11 @@ def build_llm_request_attributes(
         attrs["llm.invocation_parameters"] = _json_attribute(invocation, policy)
     if request.response_format is not None:
         attrs["llm.response_format"] = request.response_format.type
+    if request.raw_extensions:
+        attrs["llm.request.extensions"] = _json_attribute(
+            request.raw_extensions,
+            policy,
+        )
 
     if policy.capture_messages:
         attrs["llm.input_messages"] = _json_attribute(
@@ -618,6 +623,8 @@ def _input_item_count(value: Any) -> int:
 def _chat_api_format(request: NormalizedChatRequest) -> str:
     if request.protocol == "anthropic":
         return "messages"
+    if request.protocol == "gemini":
+        return "generate_content"
     if request.operation == "responses":
         return "responses"
     return "chat_completions"

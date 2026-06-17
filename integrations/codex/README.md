@@ -33,7 +33,7 @@ GPT2GIGA_DISABLE_REASONING=True
 
 Рекомендуемые параметры для Codex:
 
-- `GPT2GIGA_GIGACHAT_API_MODE=v2` — включает режим `v2`, который нужен для встроенных инструментов GigaChat, например `web_search` и `image_generate`.
+- `GPT2GIGA_GIGACHAT_API_MODE=v2` — включает режим `v2` для root routes без `/v1` или `/v2`; он нужен для встроенных инструментов GigaChat, например `web_search` и `image_generate`.
 - `GPT2GIGA_PASS_MODEL=False` — заставляет прокси использовать модель из `GIGACHAT_MODEL`, даже если Codex передал в запросе имя модели OpenAI.
 - `GPT2GIGA_DISABLE_REASONING=True` — удаляет `reasoning` и `reasoning_effort` из запроса к GigaChat, чтобы клиентские reasoning-поля не мешали обработке.
 
@@ -72,7 +72,7 @@ supports_websockets = false
 Ключевые настройки:
 
 - `model` — имя модели, которое будет отображаться и передаваться в Codex.
-- `base_url` — OpenAI-совместимый адрес `gpt2giga`; для Codex с built-in tools указывайте путь с `/v2`.
+- `base_url` — OpenAI-совместимый адрес `gpt2giga`; для Codex с built-in tools указывайте путь с `/v2`. URL с `/v1` всегда идёт в GigaChat v1 contract, URL с `/v2` — в GigaChat v2 contract, а root URL без версии следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 - `env_key` — имя переменной окружения, из которой Codex берёт API-ключ.
 - `wire_api = "responses"` — использовать OpenAI Responses API, который поддерживается `gpt2giga`.
 
@@ -100,7 +100,50 @@ Codex будет отправлять запросы через `gpt2giga` в Gi
 
 ---
 
-## 3. Codex App на macOS
+## 3. Headless / non-interactive mode
+
+Для запуска без TUI используйте `codex exec`. Codex возьмёт `model_provider`,
+`base_url` и `env_key` из `~/.codex/config.toml`, описанного выше:
+
+```shell
+export GPT2GIGA_API_KEY=0
+codex exec -m GigaChat-3-Ultra "Что ты умеешь?"
+```
+
+Если на `gpt2giga` включена авторизация, вместо `0` укажите реальный
+`GPT2GIGA_API_KEY`:
+
+```shell
+export GPT2GIGA_API_KEY=<ваш_api_ключ>
+codex exec -m GigaChat-3-Ultra "Проверь текущий проект и предложи следующие шаги"
+```
+
+Полезные флаги для автоматизации:
+
+- `--json` — выводить события как JSON Lines.
+- `--ephemeral` — не сохранять rollout/session files на диск.
+- `--sandbox workspace-write` — разрешить правки в рабочем дереве, если задача
+  должна менять файлы.
+- `--output-last-message <path>` или `-o <path>` — записать финальный ответ в
+  файл и одновременно вывести его в stdout.
+
+Примеры:
+
+```shell
+codex exec --json -m GigaChat-3-Ultra "Суммируй структуру репозитория"
+
+codex exec --ephemeral --sandbox workspace-write \
+  -m GigaChat-3-Ultra \
+  "Исправь простую опечатку в документации и покажи diff"
+```
+
+`codex exec` по умолчанию работает в read-only sandbox. Для новых скриптов
+предпочитайте явный `--sandbox workspace-write`; старый `--full-auto` оставлен
+только для совместимости и в новых автоматизациях не рекомендуется.
+
+---
+
+## 4. Codex App на macOS
 
 Если Codex App не видит `GPT2GIGA_API_KEY`, добавьте переменную в профиль вашей оболочки. Узнать текущую оболочку можно командой:
 
@@ -126,7 +169,7 @@ source ~/.bashrc
 
 ---
 
-## 4. Использование удалённого сервера
+## 5. Использование удалённого сервера
 
 Если `gpt2giga` развёрнут на удалённом сервере, например за nginx с TLS, укажите адрес сервера в `config.toml`:
 
@@ -147,7 +190,7 @@ supports_websockets = false
 
 ---
 
-## 5. Доверенные проекты
+## 6. Доверенные проекты
 
 Codex требует явно доверять проектам перед выполнением команд. Обычно Codex предлагает добавить проект автоматически, но это можно сделать вручную в `config.toml`:
 
@@ -158,7 +201,7 @@ trust_level = "trusted"
 
 ---
 
-## 6. Пример полного `config.toml`
+## 7. Пример полного `config.toml`
 
 ```toml
 model = "GigaChat-3-Ultra"

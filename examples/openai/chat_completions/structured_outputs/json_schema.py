@@ -1,7 +1,8 @@
 from openai import OpenAI
 import json
 
-client = OpenAI(base_url="http://localhost:8090/v1", api_key="0")
+api_version = "v1"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 json_schema = {
     "name": "math_response",
     "strict": True,

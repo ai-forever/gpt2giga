@@ -364,15 +364,25 @@ def _sanitize_functions(data: dict[str, Any]) -> None:
         data.pop("functions", None)
         return
 
-    sanitized_functions = [
-        dict(function)
-        for function in functions
-        if isinstance(function, Mapping) and _is_non_empty_string(function.get("name"))
-    ]
+    sanitized_functions = []
+    for function in functions:
+        payload = _dump_mapping(function)
+        if payload and _is_non_empty_string(payload.get("name")):
+            sanitized_functions.append(payload)
+
     if sanitized_functions:
         data["functions"] = sanitized_functions
     else:
         data.pop("functions", None)
+
+
+def _dump_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if hasattr(value, "model_dump"):
+        dumped = value.model_dump(exclude_none=True, by_alias=True)
+        return dict(dumped) if isinstance(dumped, Mapping) else {}
+    return {}
 
 
 def _is_function_tool(tool: Mapping[str, Any]) -> bool:

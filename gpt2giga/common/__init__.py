@@ -8,7 +8,11 @@ from gpt2giga.common.gigachat_auth import (
     create_gigachat_client_for_request,
     pass_token_to_gigachat,
 )
-from gpt2giga.common.json_schema import normalize_json_schema, resolve_schema_refs
+from gpt2giga.common.json_schema import (
+    normalize_json_schema,
+    normalize_tool_parameters_schema,
+    resolve_schema_refs,
+)
 from gpt2giga.common.logs_access import verify_logs_ip_allowlist
 from gpt2giga.common.request_json import read_request_json
 from gpt2giga.common.streaming import (
@@ -28,6 +32,7 @@ __all__ = [
     "stream_responses_generator",
     "resolve_schema_refs",
     "normalize_json_schema",
+    "normalize_tool_parameters_schema",
     "convert_tool_to_giga_functions",
     "create_gigachat_client_for_request",
     "pass_token_to_gigachat",

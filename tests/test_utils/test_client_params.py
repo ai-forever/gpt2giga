@@ -53,6 +53,7 @@ def test_header_policy_blocks_secrets_transport_and_sdk_headers():
     assert is_blocked_client_header("X-Stainless-Lang") is True
     assert is_blocked_client_header("Anthropic-Beta") is True
     assert is_blocked_client_header("OpenAI-Organization") is True
+    assert is_blocked_client_header("X-Goog-Api-Key") is True
     assert is_blocked_client_header("X-Request-ID") is False
 
 
@@ -85,6 +86,7 @@ def test_filter_safe_extra_headers_allows_gigachat_context_and_custom_headers():
             "Content-Type": "application/json",
             "X-Stainless-Lang": "python",
             "OpenAI-Organization": "org_test",
+            "X-Goog-Api-Key": "google-secret",
             "X-None": None,
         }
     ) == {
@@ -188,7 +190,6 @@ def test_client_compatibility_error_rejects_unknown_provider():
         raise ClientCompatibilityError("bad provider", provider="gemini")
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_renders_openai_client_compatibility_error():
     @exceptions_handler
     async def boom():
@@ -201,7 +202,6 @@ async def test_exceptions_handler_renders_openai_client_compatibility_error():
     assert exc_info.value.detail["error"]["param"] == "n"
 
 
-@pytest.mark.asyncio
 async def test_exceptions_handler_renders_anthropic_client_compatibility_error():
     token = rquid_context.set("rq-anthropic")
 

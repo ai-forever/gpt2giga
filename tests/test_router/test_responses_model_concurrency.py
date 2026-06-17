@@ -146,7 +146,6 @@ async def _wait_for_call_count(gigachat: GateGigachat, count: int) -> None:
         await asyncio.sleep(0)
 
 
-@pytest.mark.asyncio
 async def test_responses_non_stream_serializes_same_model() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1})
     gigachat = GateGigachat()
@@ -175,7 +174,6 @@ async def test_responses_non_stream_serializes_same_model() -> None:
     assert gigachat.max_active["GigaChat"] == 1
 
 
-@pytest.mark.asyncio
 async def test_responses_non_stream_timeout_returns_429() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
     gigachat = GateGigachat()
@@ -195,7 +193,6 @@ async def test_responses_non_stream_timeout_returns_429() -> None:
     assert limited.json()["error"]["code"] == "model_concurrency_limit"
 
 
-@pytest.mark.asyncio
 async def test_responses_stream_timeout_returns_http_429_before_sse() -> None:
     limiter = ModelConcurrencyLimiter({"GigaChat": 1}, acquire_timeout=0)
     gigachat = GateGigachat()
@@ -213,7 +210,6 @@ async def test_responses_stream_timeout_returns_http_429_before_sse() -> None:
     assert gigachat.call_count == 0
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_holds_slot_until_completion() -> None:
     from gpt2giga.common.streaming import stream_responses_generator
 
@@ -245,7 +241,6 @@ async def test_stream_responses_holds_slot_until_completion() -> None:
         pass
 
 
-@pytest.mark.asyncio
 async def test_stream_responses_timeout_does_not_call_upstream() -> None:
     from gpt2giga.common.streaming import stream_responses_generator
 

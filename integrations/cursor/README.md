@@ -36,6 +36,9 @@ https://ваш-сервер.example.com/
 
 Подробнее о развёртывании с nginx и TLS — в [integrations/nginx/README.md](../nginx/README.md).
 > **Примечание:** Cursor добавляет `/v1` автоматически к некоторым запросам.
+> Такой путь всегда выбирает GigaChat v1 contract. Если используете base URL с
+> `/v2`, запросы идут в GigaChat v2 contract; root URL без версии следует
+> `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 ### Проверка подключения
 

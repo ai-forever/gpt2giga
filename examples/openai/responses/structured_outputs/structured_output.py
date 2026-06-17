@@ -1,7 +1,8 @@
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-client = OpenAI(base_url="http://localhost:8090", api_key="0")
+api_version = "v2"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
 
 class ResponseFormat(BaseModel):

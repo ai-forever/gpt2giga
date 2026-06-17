@@ -1,14 +1,15 @@
 import json
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from loguru import logger
-import pytest
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.protocol import RequestTransformer, ResponseProcessor
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
 from gpt2giga.routers.openai import router
+import gpt2giga.routers.openai.chat_completions as chat_module
 
 
 class MockResponse:
@@ -117,6 +118,76 @@ def test_chat_completions_non_stream_basic():
     assert body["object"] == "chat.completion"
 
 
+def test_chat_completions_legacy_keeps_assistant_function_call_replay():
+    class RecordingGigachat(FakeGigachat):
+        def __init__(self):
+            self.chat_calls = []
+
+        async def achat(self, chat):
+            self.chat_calls.append(chat)
+            return await super().achat(chat)
+
+    state_id = "019ed0fe-194e-7e50-87b1-16acc2509040"
+    app = make_app_with_real_transformer()
+    app.state.gigachat_client = RecordingGigachat()
+    client = TestClient(app)
+
+    response = client.post(
+        "/chat/completions",
+        json={
+            "model": "GigaChat-2-Max",
+            "messages": [
+                {"role": "user", "content": "Какая погода в Москве?"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "function_call": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Москва"},
+                    },
+                    "functions_state_id": state_id,
+                },
+                {
+                    "role": "function",
+                    "content": (
+                        '{"city": "Москва", "temp": "+5°C", "conditions": "облачно"}'
+                    ),
+                    "name": "get_weather",
+                    "functions_state_id": state_id,
+                },
+            ],
+            "functions": [
+                {
+                    "name": "get_weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"city": {"type": "string"}},
+                        "required": ["city"],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    sent_messages = app.state.gigachat_client.chat_calls[0]["messages"]
+    assert [message["role"] for message in sent_messages] == [
+        "user",
+        "assistant",
+        "function",
+    ]
+    assert sent_messages[1]["function_call"] == {
+        "name": "get_weather",
+        "arguments": {"city": "Москва"},
+    }
+    assert "functions_state_id" not in sent_messages[1]
+    assert "functions_state_id" not in sent_messages[2]
+    assert [
+        function.name
+        for function in app.state.gigachat_client.chat_calls[0]["functions"]
+    ] == ["get_weather"]
+
+
 def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
     class FakeGigachatWithHeaders(FakeGigachat):
         async def achat(self, chat):
@@ -156,7 +227,7 @@ def test_chat_completions_legacy_non_stream_emits_phoenix_input_output_span():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    attributes = emitted["ChatCompletion"]
+    attributes = emitted["OpenAI-Completions"]
     assert attributes["gpt2giga.api_format"] == "chat_completions"
     assert "secret prompt" in attributes["input.value"]
     assert "ok" in attributes["output.value"]
@@ -233,7 +304,7 @@ def test_chat_completions_legacy_stream_emits_phoenix_input_output_span():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    attributes = emitted["ChatCompletion"]
+    attributes = emitted["OpenAI-Completions"]
 
     assert response.status_code == 200
     assert attributes["gpt2giga.api_format"] == "chat_completions"
@@ -303,10 +374,10 @@ def test_chat_completions_normalization_on_emits_safe_llm_observability_spans():
         name: attributes
         for name, attributes, _context, _events in app.state.observability_sink.events
     }
-    assert list(emitted) == ["ChatCompletion"]
-    assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
-    assert emitted["ChatCompletion"]["llm.input_messages.count"] == 1
-    assert emitted["ChatCompletion"]["llm.finish_reason"] == "tool_calls"
+    assert list(emitted) == ["OpenAI-Completions"]
+    assert emitted["OpenAI-Completions"]["gpt2giga.api_format"] == "chat_completions"
+    assert emitted["OpenAI-Completions"]["llm.input_messages.count"] == 1
+    assert emitted["OpenAI-Completions"]["llm.finish_reason"] == "tool_calls"
     assert "secret prompt" not in json.dumps(emitted)
 
 
@@ -362,7 +433,7 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     event_names = [
         event["name"]
         for name, _attributes, _context, events in app.state.observability_sink.events
-        if name == "ChatCompletion"
+        if name == "OpenAI-Completions"
         for event in events
     ]
     emitted = {
@@ -375,9 +446,50 @@ def test_chat_completions_normalization_on_emits_stream_span_events():
     assert "stream.start" in event_names
     assert "stream.completed" in event_names
     assert "stream.emit" not in emitted
-    assert "ChatCompletion" in emitted
-    assert emitted["ChatCompletion"]["gpt2giga.api_format"] == "chat_completions"
-    assert "hi" in emitted["ChatCompletion"]["input.value"]
+    assert "OpenAI-Completions" in emitted
+    assert emitted["OpenAI-Completions"]["gpt2giga.api_format"] == "chat_completions"
+    assert "hi" in emitted["OpenAI-Completions"]["input.value"]
+
+
+def test_chat_completions_stream_span_event_failure_does_not_break_sse(monkeypatch):
+    def fail_stream_span_events(*args, **kwargs):
+        raise RuntimeError("span event failed")
+
+    monkeypatch.setattr(
+        chat_module, "build_stream_span_events", fail_stream_span_events
+    )
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            normalization_mode="on",
+            gigachat_api_mode="v1",
+            observability_capture_content=True,
+            observability_capture_messages=True,
+            observability_capture_responses=True,
+        )
+    )
+    app.state.observability_sink = RecordingObservabilitySink()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt-x",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    emitted = {
+        name: attributes
+        for name, attributes, _context, _events in app.state.observability_sink.events
+    }
+
+    assert response.status_code == 200
+    assert "data: [DONE]" in body
+    assert "OpenAI-Completions" in emitted
 
 
 def test_chat_completions_normalization_on_stream_falls_back_before_sse_start():

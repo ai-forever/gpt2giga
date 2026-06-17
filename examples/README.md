@@ -8,16 +8,33 @@
 2. По умолчанию прокси слушает `http://localhost:8090` (если вы меняли порт через `GPT2GIGA_PORT` / `--proxy.port`, обновите `base_url` в примерах).
 3. Если включена защита API-ключом (`GPT2GIGA_ENABLE_API_KEY_AUTH=True`), передавайте ключ как `api_key` (OpenAI SDK) или через заголовок `x-api-key`.
 
+OpenAI и Anthropic SDK выбирают GigaChat backend contract через версионный
+`base_url`: `http://localhost:8090/v1` всегда идёт в GigaChat v1 contract,
+`http://localhost:8090/v2` всегда идёт в GigaChat v2 contract.
+Root `base_url` без версии (`http://localhost:8090`) использует
+`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+Gemini-примеры используют нативный для `google-genai` вариант:
+`types.HttpOptions(base_url="http://localhost:8090", ...)` с
+`api_version="v1"` или `api_version="v2"`.
+
+В runnable-примерах версия вынесена отдельной строкой, например:
+
+```python
+api_version = "v1"
+client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
+```
+
 ## Быстрые ссылки
 
 - OpenAI Python SDK:
   - Chat Completions API: [`examples/openai/chat_completions/README.md`](openai/chat_completions/README.md)
   - Responses API: [`examples/openai/responses/README.md`](openai/responses/README.md)
 - Anthropic Python SDK (Messages API): [`examples/anthropic/README.md`](./anthropic/README.md)
+- Gemini-like REST API: [`examples/gemini/README.md`](./gemini/README.md)
 
 ## Логика папок
 
-Примеры сгруппированы сначала по SDK/API (`openai`, `anthropic`, `chat_completions`, `responses`, `messages`), а внутри — по capability: `basic`, `tools`, `batches`, `files`, `multimodal`, `structured_outputs`, `reasoning`, `concurrency`.
+Примеры сгруппированы сначала по SDK/API (`openai`, `anthropic`, `gemini`, `chat_completions`, `responses`, `messages`), а внутри — по capability: `basic`, `tools`, `batches`, `files`, `multimodal`, `structured_outputs`, `reasoning`, `concurrency`.
 
 ## Запуск примеров (из корня репозитория)
 
@@ -34,14 +51,54 @@ uv run python examples/openai/responses/basic/single_prompt.py
 # Anthropic Messages API
 uv run python examples/anthropic/messages/basic/messages.py
 
+# Anthropic stateful Messages API
+uv run python examples/anthropic/messages/basic/stateful.py
+
 # Anthropic structured output
 uv run python examples/anthropic/messages/structured_outputs/structured_output.py
+
+# Gemini-like GenerateContent
+uv run python examples/gemini/content/generate_content.py
+
+# Gemini-like stateful GenerateContent
+uv run python examples/gemini/content/stateful.py
+
+# Gemini-like streaming
+uv run python examples/gemini/content/stream_generate_content.py
 
 # Additional Responses API examples
 uv run python examples/openai/responses/tools/function_calling.py
 ```
 
-Files API, OpenAI Batches API и Anthropic Message Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
+## E2E smoke всех runnable-примеров
+
+Для быстрой проверки примеров на локально запущенном прокси используйте:
+
+```bash
+uv run python scripts/run_examples_smoke.py --api-versions v1,v2 -n 4
+```
+
+Скрипт запускает каждый runnable `examples/**/*.py` отдельным процессом,
+подставляет `api_version` из матрицы `v1/v2`, проверяет
+`http://localhost:8090/health` перед стартом и в конце группирует ошибки по
+версии API и файлу. Флаг `-n` / `--concurrency` задает количество одновременно
+запущенных examples. Чтобы сохранить отчет:
+
+```bash
+uv run python scripts/run_examples_smoke.py \
+  --api-versions v1,v2 \
+  --concurrency 4 \
+  --report-json .local/examples-smoke-report.json
+```
+
+По умолчанию пропускаются подготовленные, но пока не смонтированные Files/Batches
+examples и OpenAI Agents example с внешними HTTP API. Для принудительного запуска
+всего набора добавьте `--include-known-unsupported`.
+
+Files API, OpenAI Batches API, Anthropic Message Batches API и Gemini Files/Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
+
+Stateful Anthropic/Gemini examples require the proxy process to be started with
+`GPT2GIGA_CONVERSATION_STITCHING_ENABLED=True`.
 
 ## Дополнительно
 
@@ -51,7 +108,18 @@ Files API, OpenAI Batches API и Anthropic Message Batches API примеры у
 - `examples/openai/batches/basic.py`: OpenAI Batches API (router подготовлен, но временно не смонтирован)
 - `examples/anthropic/messages/structured_outputs/structured_output.py`: Anthropic Messages structured output
 - `examples/anthropic/messages/structured_outputs/structured_output_stream.py`: Anthropic streaming structured output
+- `examples/anthropic/messages/basic/stateful.py`: Anthropic stateful Messages через conversation stitching
 - `examples/anthropic/message_batches/structured_output.py`: Anthropic Message Batches structured output
 - `examples/anthropic/message_batches/basic.py`: Anthropic Message Batches API (router подготовлен, но временно не смонтирован)
 - `examples/openai/responses/tools/function_calling.py`: function calling через Responses API
 - `examples/openai/agents/weather_handoff.py`: интеграция с OpenAI Agents SDK (потребуются доп. зависимости, см. `examples/AGENTS.md`)
+- `examples/gemini/content/generate_content.py`: Gemini-like `generateContent`
+- `examples/gemini/content/stream_generate_content.py`: Gemini-like `streamGenerateContent`
+- `examples/gemini/content/chat.py`: Gemini chat-session через официальный SDK
+- `examples/gemini/content/stateful.py`: Gemini-like stateful `generateContent` через conversation stitching
+- `examples/gemini/content/function_calling.py`: Gemini-like function declarations
+- `examples/gemini/content/structured_output.py`: Gemini-like structured output
+- `examples/gemini/count_tokens/count_tokens.py`: Gemini-like `countTokens`
+- `examples/gemini/embeddings/embeddings.py`: Gemini-like `embedContent` и batch-style embeddings
+- `examples/gemini/files/files.py`: Gemini Files API (router подготовлен, но временно не смонтирован)
+- `examples/gemini/batches/batches.py`: Gemini Batch API (router подготовлен, но временно не смонтирован)

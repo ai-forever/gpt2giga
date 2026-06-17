@@ -127,6 +127,32 @@ def test_convert_tool_to_giga_functions_tools_format():
     assert funcs[0].name == "func1"
 
 
+def test_convert_tool_to_giga_functions_adds_properties_to_empty_schema():
+    data = {
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "no_args",
+                    "description": "No args.",
+                    "parameters": {},
+                },
+            }
+        ]
+    }
+
+    funcs = convert_tool_to_giga_functions(data)
+
+    assert len(funcs) == 1
+    params = (
+        funcs[0].parameters.model_dump(by_alias=True)
+        if hasattr(funcs[0].parameters, "model_dump")
+        else dict(funcs[0].parameters)
+    )
+    assert params["type"] == "object"
+    assert params["properties"] == {}
+
+
 def test_convert_tool_to_giga_functions_functions_format():
     # Deprecated format support
     data = {

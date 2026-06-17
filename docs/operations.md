@@ -196,15 +196,17 @@ GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 
 Traffic logs и Phoenix spans связываются через gateway identifiers:
 `request_id`, `trace_id`, protocol, route, model metadata. Для LLM routes
-Phoenix получает один root span на формат: `ChatCompletion` для Chat
-Completions, `Responses` для Responses API, `Messages` для Anthropic Messages
-и `Embeddings` для OpenAI Embeddings. Streaming milestones прикрепляются к
+Phoenix получает один root span на формат: `OpenAI-Completions` для Chat
+Completions, `OpenAI-Responses` для Responses API, `Anthropic-Messages` для
+Anthropic Messages, `Gemini-Content` для Gemini GenerateContent и `Embeddings`
+для OpenAI Embeddings. Streaming milestones прикрепляются к
 соответствующему root span как span events. Для non-LLM routes используется
 один lifecycle span `gpt2giga.request`.
 
 Для фильтрации и группировки по совместимому API-формату model spans получают
-атрибут `gpt2giga.api_format`: `chat_completions`, `responses`, `messages` или
-`embeddings`. Stateful Responses дополнительно получают `session.id` и
+атрибут `gpt2giga.api_format`: `chat_completions`, `responses`, `messages`,
+`generate_content` или `embeddings`. Stateful Responses дополнительно получают
+`session.id` и
 `conversation.id` из GigaChat `thread_id`; если upstream thread id ещё не
 доступен, используется `previous_response_id` без префикса `resp_`.
 

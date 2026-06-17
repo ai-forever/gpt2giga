@@ -10,7 +10,6 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_DISABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
-    monkeypatch.delenv("GPT2GIGA_RESPONSES_API_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER", raising=False)
     monkeypatch.delenv("GPT2GIGA_NORMALIZATION_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", raising=False)
@@ -62,8 +61,6 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.disable_reasoning is False
     assert s.structured_output_mode == "function_call"
     assert s.gigachat_api_mode == "v1"
-    assert s.responses_api_mode == "inherit"
-    assert s.resolve_responses_api_mode() == "v1"
     assert s.experimental_normalized_layer is False
     assert s.normalization_mode == "off"
     assert s.legacy_chat_fallback is True
@@ -225,22 +222,6 @@ def test_proxy_settings_gigachat_api_mode_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_GIGACHAT_API_MODE", "v2")
     s = ProxySettings()
     assert s.gigachat_api_mode == "v2"
-    assert s.resolve_responses_api_mode() == "v2"
-
-
-@pytest.mark.parametrize("mode", ["v1", "v2", "inherit"])
-def test_proxy_settings_responses_api_mode_from_env(monkeypatch, mode):
-    monkeypatch.setenv("GPT2GIGA_RESPONSES_API_MODE", mode)
-    s = ProxySettings()
-    assert s.responses_api_mode == mode
-
-
-def test_proxy_settings_responses_api_mode_empty_env_inherits(monkeypatch):
-    monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
-    monkeypatch.setenv("GPT2GIGA_RESPONSES_API_MODE", "")
-    s = ProxySettings()
-    assert s.responses_api_mode == "inherit"
-    assert s.resolve_responses_api_mode() == "v1"
 
 
 def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
@@ -411,13 +392,10 @@ def test_proxy_settings_invalid_normalization_mode(monkeypatch):
         ProxySettings()
 
 
-def test_proxy_settings_api_modes_normalized(monkeypatch):
+def test_proxy_settings_api_mode_normalized(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_GIGACHAT_API_MODE", " V2 ")
-    monkeypatch.setenv("GPT2GIGA_RESPONSES_API_MODE", " V1 ")
     s = ProxySettings()
     assert s.gigachat_api_mode == "v2"
-    assert s.responses_api_mode == "v1"
-    assert s.resolve_responses_api_mode() == "v1"
 
 
 @pytest.mark.parametrize(
@@ -425,7 +403,6 @@ def test_proxy_settings_api_modes_normalized(monkeypatch):
     [
         ("GPT2GIGA_GIGACHAT_API_MODE", "inherit"),
         ("GPT2GIGA_GIGACHAT_API_MODE", "unsupported"),
-        ("GPT2GIGA_RESPONSES_API_MODE", "unsupported"),
     ],
 )
 def test_proxy_settings_invalid_api_modes(monkeypatch, env_name, env_value):

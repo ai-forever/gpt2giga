@@ -11,8 +11,24 @@ from gpt2giga.common.reasoning import (
     extract_reasoning_from_content,
     merge_reasoning_text,
 )
+from gpt2giga.common.sources import render_text_with_sources
 from gpt2giga.common.tools import map_tool_name_from_gigachat
 from gpt2giga.logger import rquid_context
+
+
+def _backend_tool_state_id(payload: Dict[str, Any]) -> Optional[str]:
+    """Extract a GigaChat tool-state identifier from a message or tool call."""
+    for field_name in (
+        "tools_state_id",
+        "tool_state_id",
+        "functions_state_id",
+        "function_state_id",
+        "tool_call_id",
+    ):
+        value = payload.get(field_name)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _map_stop_reason(finish_reason: Optional[str]) -> str:
@@ -59,11 +75,18 @@ def _build_anthropic_response(
     if reasoning:
         content_blocks.append({"type": "thinking", "thinking": reasoning})
 
-    text_content = parsed_content.content
+    text_content = render_text_with_sources(
+        parsed_content.content,
+        message.get("inline_data") or {},
+    )
 
     tool_calls = list(message.get("tool_calls") or [])
     if message.get("function_call"):
-        tool_calls.append({"function": message["function_call"]})
+        function_tool_call: Dict[str, Any] = {"function": message["function_call"]}
+        state_id = _backend_tool_state_id(message)
+        if state_id:
+            function_tool_call["id"] = state_id
+        tool_calls.append(function_tool_call)
 
     if is_structured_output and tool_calls:
         content_blocks.append(
@@ -76,7 +99,8 @@ def _build_anthropic_response(
     elif tool_calls:
         if text_content:
             content_blocks.append({"type": "text", "text": text_content})
-        for tool_call in tool_calls:
+        message_state_id = _backend_tool_state_id(message)
+        for index, tool_call in enumerate(tool_calls):
             function = tool_call.get("function", {})
             arguments = function.get("arguments", {})
             if isinstance(arguments, str):
@@ -90,7 +114,12 @@ def _build_anthropic_response(
             content_blocks.append(
                 {
                     "type": "tool_use",
-                    "id": tool_call.get("id") or f"toolu_{uuid.uuid4().hex[:24]}",
+                    "id": (
+                        tool_call.get("id")
+                        or _backend_tool_state_id(tool_call)
+                        or (message_state_id if index == 0 else None)
+                        or f"toolu_{uuid.uuid4().hex[:24]}"
+                    ),
                     "name": map_tool_name_from_gigachat(function.get("name", "")),
                     "input": arguments,
                 }

@@ -4,7 +4,8 @@ import json
 
 from anthropic import Anthropic
 
-client = Anthropic(base_url="http://localhost:8090/v1", api_key="any-key")
+api_version = "v1"
+client = Anthropic(base_url=f"http://localhost:8090/{api_version}/", api_key="any-key")
 
 # 1. Define tools
 tools = [
