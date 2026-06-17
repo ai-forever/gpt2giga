@@ -53,6 +53,8 @@ uv run python examples/anthropic/messages/basic/messages_stream.py
 uv run python examples/anthropic/messages/basic/stateful.py
 uv run python examples/anthropic/messages/structured_outputs/structured_output.py
 uv run python examples/anthropic/messages/structured_outputs/structured_output_stream.py
+uv run python examples/anthropic/messages/tools/gigachat_tools/code_interpreter.py
+uv run python examples/anthropic/messages/tools/gigachat_tools/image_generate.py
 uv run python examples/anthropic/message_batches/basic.py
 uv run python examples/anthropic/message_batches/structured_output.py
 ```
@@ -68,6 +70,8 @@ uv run python examples/anthropic/message_batches/structured_output.py
 - `messages/basic/stateful.py`: stateful диалог через `x-gpt2giga-conversation-id` и GigaChat v2 chat completions
 - `messages/basic/system_prompt.py`: системный промпт
 - `messages/tools/function_calling.py`: tool use / function calling
+- `messages/tools/gigachat_tools/code_interpreter.py`: GigaChat v2 built-in code interpreter через Anthropic Messages API
+- `messages/tools/gigachat_tools/image_generate.py`: GigaChat v2 built-in image generation через Anthropic Messages API
 - `messages/reasoning/reasoning.py`: extended thinking (`thinking`) → `reasoning_effort`
 - `messages/structured_outputs/structured_output.py`: structured output (`output_config.format`)
 - `messages/structured_outputs/structured_output_stream.py`: streaming structured output

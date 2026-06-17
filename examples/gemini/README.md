@@ -79,6 +79,8 @@ uv run python examples/gemini/content/generate_content.py
 uv run python examples/gemini/content/stream_generate_content.py
 uv run python examples/gemini/content/chat.py
 uv run python examples/gemini/content/stateful.py
+uv run python examples/gemini/content/gigachat_tools/code_interpreter.py
+uv run python examples/gemini/content/gigachat_tools/image_generate.py
 uv run python examples/gemini/count_tokens/count_tokens.py
 uv run python examples/gemini/embeddings/embeddings.py
 ```
@@ -98,7 +100,7 @@ uv run python examples/gemini/batches/batches.py
 
 | Capability | Каталог | Что внутри |
 |---|---|---|
-| content generation | [content/README.md](./content/README.md) | `generate_content`, stream, chat-session, stateful, function calling, structured output |
+| content generation | [content/README.md](./content/README.md) | `generate_content`, stream, chat-session, stateful, function calling, GigaChat built-in tools, structured output |
 | `countTokens` | [count_tokens/README.md](./count_tokens/README.md) | Подсчёт токенов для `models.count_tokens(...)` |
 | files | [files/README.md](./files/README.md) | Prepared upload, list, get, download, delete |
 | batches | [batches/README.md](./batches/README.md) | Prepared `batchGenerateContent` и bundled JSONL source |
@@ -115,8 +117,9 @@ uv run python examples/gemini/batches/batches.py
   routes.
 - Совместимость в этой итерации сфокусирована на text, function calling,
   embeddings и подготовленных files/batchGenerateContent handlers.
-- Built-in Gemini tools, safety enforcement, `cachedContent`, non-text
-  embeddings content и часть мультимодальных/file-backed сценариев всё ещё
-  остаются вне scope.
+- GigaChat v2 built-in tools поддержаны для Gemini-compatible `generateContent`
+  там, где SDK или raw Gemini-compatible payload может передать соответствующее
+  поле tool. Safety enforcement, `cachedContent`, non-text embeddings content и
+  часть мультимодальных/file-backed сценариев всё ещё остаются вне scope.
 - `countTokens` использует GigaChat token counting по извлеченному тексту и
   является compatibility approximation, а не точным Gemini tokenizer.
