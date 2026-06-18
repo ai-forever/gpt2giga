@@ -2,13 +2,16 @@ import json
 import os
 import warnings
 from functools import cached_property
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from gigachat.settings import Settings as GigachatSettings
 from pydantic import (
+    BaseModel,
+    ConfigDict,
     Field,
     NonNegativeFloat,
     PositiveInt,
+    PositiveFloat,
     field_validator,
     model_validator,
 )
@@ -25,6 +28,153 @@ from gpt2giga.models.security import DEFAULT_MAX_REQUEST_BODY_BYTES
 
 TrafficLogSinkName = Literal["noop", "jsonl", "postgres", "opensearch"]
 ObservabilityBackendName = Literal["noop", "phoenix"]
+FusionToolsMode = Literal["off", "schema_only", "final_arbitration"]
+FusionStreamingMode = Literal["off", "buffered"]
+FusionPipelineMode = Literal["compact", "strict"]
+
+
+DEFAULT_FUSION_ALIASES = [
+    "gpt2giga/fusion",
+    "gpt2giga/fusion-general",
+    "gpt2giga/fusion-code",
+    "gpt2giga/fusion-code-budget",
+    "gpt2giga/fusion-code-high",
+    "GigaChat-Fusion-Code",
+]
+
+
+def _parse_list_env(value: Any) -> Any:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            return json.loads(text)
+        return [item.strip() for item in text.split(",") if item.strip()]
+    if isinstance(value, list):
+        return [item.strip() if isinstance(item, str) else item for item in value]
+    return value
+
+
+def _parse_dict_env(value: Any) -> Any:
+    if value in (None, ""):
+        return {}
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _normalize_string(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip()
+    return value
+
+
+def _normalize_lower_string(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.strip().lower()
+    return value
+
+
+class FusionPresetSettings(BaseModel):
+    """Describe one Fusion deliberation preset."""
+
+    analysis_models: list[str] = Field(min_length=1, max_length=8)
+    judge_model: str
+    final_model: Optional[str] = None
+    panel_roles: list[str] = Field(default_factory=list)
+    temperature: Optional[float] = 0.2
+    max_completion_tokens: Optional[PositiveInt] = None
+    reasoning: Optional[dict[str, Any]] = None
+    min_successful_panels: PositiveInt = 1
+    timeout_seconds: PositiveFloat = 120.0
+    tools_mode: FusionToolsMode = "schema_only"
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("analysis_models", "panel_roles", mode="before")
+    @classmethod
+    def normalize_string_lists(cls, value):
+        return _parse_list_env(value)
+
+    @field_validator("tools_mode", mode="before")
+    @classmethod
+    def normalize_tools_mode(cls, value):
+        return _normalize_lower_string(value)
+
+    @field_validator("judge_model", "final_model", mode="before")
+    @classmethod
+    def normalize_model_names(cls, value):
+        return _normalize_string(value)
+
+    @model_validator(mode="after")
+    def validate_success_threshold(self):
+        """Ensure the preset can satisfy its own quorum."""
+        if self.min_successful_panels > len(self.analysis_models):
+            raise ValueError(
+                "min_successful_panels cannot exceed analysis_models length"
+            )
+        return self
+
+
+class FusionSettings(BaseModel):
+    """Feature-flagged Fusion settings view."""
+
+    enabled: bool = False
+    default_preset: str = "code-high"
+    aliases: list[str] = Field(default_factory=lambda: list(DEFAULT_FUSION_ALIASES))
+    presets: dict[str, FusionPresetSettings] = Field(default_factory=dict)
+    max_panel_models: int = Field(default=4, ge=1, le=8)
+    max_panel_concurrency: int = Field(default=4, ge=1)
+    max_tool_calls: int = Field(default=0, ge=0, le=16)
+    streaming_mode: FusionStreamingMode = "buffered"
+    pipeline_mode: FusionPipelineMode = "compact"
+    expose_analysis_metadata: bool = False
+    expose_panel_responses: bool = False
+    debug_trace_enabled: bool = False
+    fail_on_all_panels_failed: bool = True
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("aliases", mode="before")
+    @classmethod
+    def normalize_aliases(cls, value):
+        return _parse_list_env(value)
+
+    @field_validator("presets", mode="before")
+    @classmethod
+    def normalize_presets(cls, value):
+        return _parse_dict_env(value)
+
+    @field_validator("default_preset", mode="before")
+    @classmethod
+    def normalize_default_preset(cls, value):
+        return _normalize_string(value)
+
+    @field_validator("streaming_mode", "pipeline_mode", mode="before")
+    @classmethod
+    def normalize_modes(cls, value):
+        return _normalize_lower_string(value)
+
+    @model_validator(mode="after")
+    def validate_aliases_and_presets(self):
+        """Reject recursive Fusion aliases inside concrete model slots."""
+        aliases = {alias.removeprefix("models/") for alias in self.aliases}
+        for preset_name, preset in self.presets.items():
+            concrete_models = [
+                *preset.analysis_models,
+                preset.judge_model,
+                *(model for model in [preset.final_model] if model),
+            ]
+            for model in concrete_models:
+                if model.removeprefix("models/") in aliases:
+                    raise ValueError(
+                        f"Fusion preset {preset_name!r} references Fusion alias "
+                        f"{model!r}; recursive Fusion is not allowed"
+                    )
+        return self
 
 
 class ProxySettings(BaseSettings):
@@ -97,6 +247,63 @@ class ProxySettings(BaseSettings):
     model_max_connections_acquire_timeout: Optional[NonNegativeFloat] = Field(
         default=None,
         description="Seconds to wait for a free per-model slot; None means wait indefinitely.",
+    )
+    fusion_enabled: bool = Field(
+        default=False,
+        description="Enable local GigaFusion multi-model deliberation provider.",
+    )
+    fusion_default_preset: str = Field(
+        default="code-high",
+        description="Default Fusion preset used when a request does not name one.",
+    )
+    fusion_aliases: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_FUSION_ALIASES),
+        description="Virtual model aliases that trigger Fusion when enabled.",
+    )
+    fusion_presets: Annotated[dict[str, FusionPresetSettings], NoDecode] = Field(
+        default_factory=dict,
+        description="Fusion preset map encoded as JSON object in env.",
+    )
+    fusion_max_panel_models: int = Field(
+        default=4,
+        ge=1,
+        le=8,
+        description="Maximum number of parallel analysis models per Fusion request.",
+    )
+    fusion_max_panel_concurrency: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum concurrent analysis calls inside one Fusion request.",
+    )
+    fusion_max_tool_calls: int = Field(
+        default=0,
+        ge=0,
+        le=16,
+        description="Maximum tool calls Fusion may return when tool arbitration is enabled.",
+    )
+    fusion_streaming_mode: FusionStreamingMode = Field(
+        default="buffered",
+        description="Fusion streaming behavior: off or buffered SSE after deliberation.",
+    )
+    fusion_pipeline_mode: FusionPipelineMode = Field(
+        default="compact",
+        description="Fusion pipeline mode: compact combines judge and finalizer.",
+    )
+    fusion_expose_analysis_metadata: bool = Field(
+        default=False,
+        description="Expose safe structured Fusion analysis metadata in responses.",
+    )
+    fusion_expose_panel_responses: bool = Field(
+        default=False,
+        description="Expose raw panel responses in Fusion metadata; unsafe unless debug-only.",
+    )
+    fusion_debug_trace_enabled: bool = Field(
+        default=False,
+        description="Enable bounded Fusion debug trace support.",
+    )
+    fusion_fail_on_all_panels_failed: bool = Field(
+        default=True,
+        description="Return an error when no Fusion analysis panel succeeds.",
     )
     structured_output_mode: Literal["function_call", "native"] = Field(
         default="function_call",
@@ -398,6 +605,8 @@ class ProxySettings(BaseSettings):
         "conversation_on_divergence",
         "traffic_log_sink",
         "observability_backend",
+        "fusion_streaming_mode",
+        "fusion_pipeline_mode",
         mode="before",
     )
     @classmethod
@@ -405,6 +614,16 @@ class ProxySettings(BaseSettings):
         if isinstance(value, str):
             return value.strip().lower()
         return value
+
+    @field_validator("fusion_aliases", mode="before")
+    @classmethod
+    def normalize_fusion_aliases(cls, value):
+        return _parse_list_env(value)
+
+    @field_validator("fusion_presets", mode="before")
+    @classmethod
+    def normalize_fusion_presets(cls, value):
+        return _parse_dict_env(value)
 
     @field_validator("traffic_log_sinks", mode="before")
     @classmethod
@@ -438,6 +657,12 @@ class ProxySettings(BaseSettings):
         return path.rstrip("/") or "/metrics"
 
     @model_validator(mode="after")
+    def _validate_fusion_settings(self):
+        """Validate the nested Fusion settings view built from flat env fields."""
+        _ = self.fusion
+        return self
+
+    @model_validator(mode="after")
     def _validate_prod_security(self):
         """Emit warnings when PROD mode has insecure defaults."""
         if self.mode != "PROD":
@@ -463,6 +688,25 @@ class ProxySettings(BaseSettings):
                 stacklevel=2,
             )
         return self
+
+    @cached_property
+    def fusion(self) -> FusionSettings:
+        """Build a nested Fusion settings view from flat GPT2GIGA_FUSION_* envs."""
+        return FusionSettings(
+            enabled=self.fusion_enabled,
+            default_preset=self.fusion_default_preset,
+            aliases=self.fusion_aliases,
+            presets=self.fusion_presets,
+            max_panel_models=self.fusion_max_panel_models,
+            max_panel_concurrency=self.fusion_max_panel_concurrency,
+            max_tool_calls=self.fusion_max_tool_calls,
+            streaming_mode=self.fusion_streaming_mode,
+            pipeline_mode=self.fusion_pipeline_mode,
+            expose_analysis_metadata=self.fusion_expose_analysis_metadata,
+            expose_panel_responses=self.fusion_expose_panel_responses,
+            debug_trace_enabled=self.fusion_debug_trace_enabled,
+            fail_on_all_panels_failed=self.fusion_fail_on_all_panels_failed,
+        )
 
     @cached_property
     def security(self):

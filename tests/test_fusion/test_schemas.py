@@ -1,0 +1,62 @@
+import pytest
+from pydantic import ValidationError
+
+from gpt2giga.providers.fusion.schemas import (
+    FusionAnalysis,
+    FusionPanelResult,
+    FusionRunResult,
+)
+from gpt2giga.protocols.normalized.models import NormalizedToolCall, NormalizedUsage
+
+
+def test_fusion_panel_result_defaults_are_isolated():
+    first = FusionPanelResult(model="A", status="ok")
+    second = FusionPanelResult(model="B", status="ok")
+
+    first.tool_calls.append(NormalizedToolCall(name="search"))
+
+    assert len(first.tool_calls) == 1
+    assert second.tool_calls == []
+
+
+def test_fusion_analysis_accepts_final_tool_call():
+    analysis = FusionAnalysis(
+        consensus=["Use the smaller change."],
+        final_tool_call=NormalizedToolCall(
+            id="call-1",
+            name="apply_patch",
+            arguments={"patch": "..."},
+        ),
+    )
+
+    assert analysis.final_tool_call is not None
+    assert analysis.final_tool_call.name == "apply_patch"
+    assert analysis.blind_spots == []
+
+
+def test_fusion_run_result_tracks_failed_models_and_usage():
+    failed = FusionPanelResult(
+        model="A",
+        status="timeout",
+        error_type="timeout",
+        latency_ms=1000,
+    )
+    result = FusionRunResult(
+        status="ok",
+        requested_model="gpt2giga/fusion-code",
+        preset="code-high",
+        analysis_models=["A", "B"],
+        judge_model="Judge",
+        panel_results=[failed, FusionPanelResult(model="B", status="ok")],
+        failed_models=[failed],
+        usage=NormalizedUsage(input_tokens=10, output_tokens=20, total_tokens=30),
+    )
+
+    assert result.failed_models[0].model == "A"
+    assert result.usage is not None
+    assert result.usage.total_tokens == 30
+
+
+def test_fusion_schemas_forbid_unknown_fields():
+    with pytest.raises(ValidationError):
+        FusionAnalysis(unexpected=True)

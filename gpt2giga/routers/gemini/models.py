@@ -14,6 +14,11 @@ from gpt2giga.common.gigachat_options import (
 )
 from gpt2giga.openapi_specs.gemini import gemini_models_openapi_extra
 from gpt2giga.openapi_tags import OPENAPI_TAG_GEMINI_MODELS
+from gpt2giga.providers.fusion.model_discovery import (
+    build_fusion_gemini_models,
+    find_fusion_gemini_model,
+    get_request_fusion_settings,
+)
 
 router = APIRouter(tags=[OPENAPI_TAG_GEMINI_MODELS])
 
@@ -37,17 +42,28 @@ async def list_models(request: Request):
     request_options = extract_gigachat_request_options(request)
     async with gigachat_request_options(giga_client, request_options):
         response = await giga_client.aget_models()
-    return build_gemini_model_list([dump_model_payload(item) for item in response.data])
+    models = [dump_model_payload(item) for item in response.data]
+    return build_gemini_model_list(
+        models,
+        fusion_settings=get_request_fusion_settings(request),
+    )
 
 
 @router.get(
-    "/models/{model}",
+    "/models/{model:path}",
     openapi_extra=gemini_models_openapi_extra(list_models=False),
 )
 @exceptions_handler
 async def get_model(model: str, request: Request):
     """Return one model in Gemini-compatible form."""
     requested_model = model.removeprefix("models/")
+    fusion_model = find_fusion_gemini_model(
+        requested_model,
+        get_request_fusion_settings(request),
+    )
+    if fusion_model is not None:
+        return fusion_model
+
     giga_client = get_gigachat_client(request)
     request_options = extract_gigachat_request_options(request)
     async with gigachat_request_options(giga_client, request_options):
@@ -64,10 +80,17 @@ def dump_model_payload(model: Any) -> dict[str, Any]:
     return {key: value for key, value in vars(model).items() if not key.startswith("_")}
 
 
-def build_gemini_model_list(models: list[dict[str, Any]]) -> dict[str, Any]:
+def build_gemini_model_list(
+    models: list[dict[str, Any]],
+    *,
+    fusion_settings=None,
+) -> dict[str, Any]:
     """Build a Gemini-compatible model list payload."""
+    gemini_models = [build_gemini_model(model) for model in models]
+    if fusion_settings is not None:
+        gemini_models.extend(build_fusion_gemini_models(fusion_settings))
     return {
-        "models": [build_gemini_model(model) for model in models],
+        "models": gemini_models,
         "nextPageToken": "",
     }
 

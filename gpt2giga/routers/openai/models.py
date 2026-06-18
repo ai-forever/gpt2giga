@@ -15,6 +15,11 @@ from gpt2giga.common.gigachat_options import (
     gigachat_request_options,
 )
 from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_MODELS
+from gpt2giga.providers.fusion.model_discovery import (
+    build_fusion_openai_models,
+    find_fusion_openai_model,
+    get_request_fusion_settings,
+)
 from gpt2giga.routers.gemini.models import (
     build_gemini_model,
     build_gemini_model_list,
@@ -134,6 +139,8 @@ async def show_available_models(request: Request):
     async with gigachat_request_options(giga_client, request_options):
         response = await giga_client.aget_models()
     models = [_dump_model(item) for item in response.data]
+    fusion_settings = get_request_fusion_settings(request)
+    models.extend(build_fusion_openai_models(fusion_settings))
     if _is_anthropic_models_request(request):
         return _build_anthropic_model_list(models, request)
     if _is_gemini_models_request(request):
@@ -149,10 +156,18 @@ async def show_available_models(request: Request):
     return model_page
 
 
-@router.get("/models/{model}")
+@router.get("/models/{model:path}")
 @exceptions_handler
 async def get_model(model: str, request: Request):
     """Return a single model."""
+    fusion_model = find_fusion_openai_model(model, get_request_fusion_settings(request))
+    if fusion_model is not None:
+        if _is_anthropic_models_request(request):
+            return _build_anthropic_model(fusion_model)
+        if _is_gemini_models_request(request):
+            return build_gemini_model(fusion_model)
+        return OpenAIModel(**fusion_model)
+
     giga_client = get_gigachat_client(request)
     request_options = extract_gigachat_request_options(request)
     async with gigachat_request_options(giga_client, request_options):
