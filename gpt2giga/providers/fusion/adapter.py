@@ -129,6 +129,17 @@ class FusionProviderAdapter:
         ]
         failed_panels = [result for result in panel_results if result.status != "ok"]
         if len(successful_panels) < fusion_config.min_successful_panels:
+            if not self.settings.fail_on_all_panels_failed:
+                return await self._direct_fallback_after_panel_failure(
+                    request,
+                    requested_model=requested_model,
+                    panel_results=panel_results,
+                    failed_panels=failed_panels,
+                    started=started,
+                    context=context,
+                    fusion_config=fusion_config,
+                    is_disconnected=is_disconnected,
+                )
             usage = aggregate_usage(result.usage for result in panel_results)
             run_result = self._build_run_result(
                 status="error",
@@ -519,6 +530,111 @@ class FusionProviderAdapter:
             timeout=fusion_config.timeout_seconds,
         )
 
+    async def _run_direct_fallback(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        fallback_request = _build_direct_fallback_request(
+            request,
+            fusion_config=fusion_config,
+        )
+        await _raise_if_disconnected(is_disconnected)
+        return await asyncio.wait_for(
+            self.upstream_provider.chat(fallback_request, context=context),
+            timeout=fusion_config.timeout_seconds,
+        )
+
+    async def _direct_fallback_after_panel_failure(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        requested_model: str,
+        panel_results: list[FusionPanelResult],
+        failed_panels: list[FusionPanelResult],
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        fallback_reason = _panel_failure_fallback_reason(
+            panel_results,
+        )
+        fallback_started = time.perf_counter()
+        fallback_response: NormalizedResponse | None = None
+        fallback_error_reason: str | None = None
+        try:
+            fallback_response = await self._run_direct_fallback(
+                request,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+            if fallback_response.error is not None:
+                fallback_error_reason = (
+                    f"direct_fallback_error:{fallback_response.error.type}"
+                )
+            elif not fallback_response.choices:
+                fallback_error_reason = "direct_fallback_empty_response"
+        except asyncio.TimeoutError:
+            fallback_error_reason = "direct_fallback_timeout"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            fallback_error_reason = f"direct_fallback_failed:{type(exc).__name__}"
+
+        usage = aggregate_usage(
+            [
+                *(result.usage for result in panel_results),
+                fallback_response.usage if fallback_response is not None else None,
+            ]
+        )
+        run_result = self._build_run_result(
+            status="error" if fallback_error_reason else "ok",
+            requested_model=requested_model,
+            fusion_config=fusion_config,
+            panel_results=panel_results,
+            failed_models=failed_panels,
+            usage=usage,
+            judge_usage=_response_usage(fallback_response),
+            latency_ms=_elapsed_ms(started),
+            judge_latency_ms=_elapsed_ms(fallback_started),
+            fallback_reason=(
+                fallback_error_reason
+                if fallback_error_reason is not None
+                else fallback_reason
+            ),
+        )
+        await self._emit_telemetry(run_result, context, fusion_config)
+
+        if fallback_response is None or fallback_error_reason is not None:
+            return self._error_response(
+                requested_model=requested_model,
+                message="Fusion panel stage failed and direct fallback failed",
+                code="direct_fallback_failed",
+                run_result=run_result,
+                usage=usage,
+            )
+
+        return NormalizedResponse(
+            id=context.request_id if context is not None else fallback_response.id,
+            created_at=fallback_response.created_at,
+            model=requested_model,
+            provider=self.name,
+            choices=fallback_response.choices,
+            usage=usage,
+            metadata=_public_metadata(run_result),
+            provider_metadata={
+                "fusion": _provider_metadata(
+                    run_result,
+                    settings=self.settings,
+                )
+            },
+        )
+
     def _build_run_result(
         self,
         *,
@@ -713,6 +829,22 @@ def _build_judge_repair_request(
         "gpt2giga_fusion_stage": "judge_repair",
     }
     return repair_request
+
+
+def _build_direct_fallback_request(
+    request: NormalizedChatRequest,
+    *,
+    fusion_config: FusionRequestConfig,
+) -> NormalizedChatRequest:
+    fallback_request = request.model_copy(deep=True)
+    fallback_request.model = fusion_config.judge_model
+    fallback_request.stream = False
+    _apply_generation_overrides(fallback_request, fusion_config)
+    fallback_request.metadata = {
+        **fallback_request.metadata,
+        "gpt2giga_fusion_stage": "direct_fallback",
+    }
+    return fallback_request
 
 
 def _build_judge_repair_prompt(
@@ -985,6 +1117,15 @@ def _final_tool_call_is_required(
     ):
         return False
     return message is None or not message.tool_calls
+
+
+def _panel_failure_fallback_reason(
+    panel_results: list[FusionPanelResult],
+) -> str:
+    successful = sum(1 for result in panel_results if result.status == "ok")
+    if successful == 0:
+        return "all_panels_failed_direct_fallback"
+    return "min_successful_panels_not_met_direct_fallback"
 
 
 def _public_metadata(run_result: FusionRunResult) -> dict[str, str]:

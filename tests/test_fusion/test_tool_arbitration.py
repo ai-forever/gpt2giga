@@ -144,6 +144,107 @@ def test_tool_call_validation_rejects_malformed_and_missing_arguments():
     assert wrong_type.reason == "arguments.q.type"
 
 
+def test_tool_call_validation_uses_original_json_schema_constraints():
+    tool = NormalizedTool(
+        name="submit",
+        description="Submit structured data",
+        parameters={
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "pattern": "^[A-Z]+$"},
+                "count": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "multipleOf": 2,
+                },
+                "mode": {"oneOf": [{"const": "fast"}, {"const": "safe"}]},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "uniqueItems": True,
+                },
+                "note": {"type": ["string", "null"]},
+            },
+            "required": ["code", "count", "mode", "tags"],
+            "additionalProperties": False,
+        },
+    )
+    valid = validate_tool_call_arguments(
+        NormalizedToolCall(
+            name="submit",
+            arguments={
+                "code": "ABC",
+                "count": 2,
+                "mode": "safe",
+                "tags": ["a", "b"],
+                "note": None,
+            },
+        ),
+        request_tools=[tool],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+    bad_pattern = validate_tool_call_arguments(
+        NormalizedToolCall(
+            name="submit",
+            arguments={"code": "abc", "count": 2, "mode": "fast", "tags": ["a"]},
+        ),
+        request_tools=[tool],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+    duplicate_tags = validate_tool_call_arguments(
+        NormalizedToolCall(
+            name="submit",
+            arguments={
+                "code": "ABC",
+                "count": 2,
+                "mode": "fast",
+                "tags": ["a", "a"],
+            },
+        ),
+        request_tools=[tool],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+    extra_property = validate_tool_call_arguments(
+        NormalizedToolCall(
+            name="submit",
+            arguments={
+                "code": "ABC",
+                "count": 2,
+                "mode": "fast",
+                "tags": ["a"],
+                "extra": True,
+            },
+        ),
+        request_tools=[tool],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+    bad_one_of = validate_tool_call_arguments(
+        NormalizedToolCall(
+            name="submit",
+            arguments={"code": "ABC", "count": 2, "mode": "slow", "tags": ["a"]},
+        ),
+        request_tools=[tool],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+
+    assert valid.valid
+    assert valid.tool_call is not None
+    assert valid.tool_call.arguments["note"] is None
+    assert not bad_pattern.valid
+    assert bad_pattern.reason == "arguments.code.pattern"
+    assert not duplicate_tags.valid
+    assert duplicate_tags.reason == "arguments.tags.uniqueItems"
+    assert not extra_property.valid
+    assert extra_property.reason == "arguments.extra.additionalProperties"
+    assert not bad_one_of.valid
+    assert bad_one_of.reason == "arguments.mode.oneOf"
+
+
 def test_panel_tool_candidates_parse_actual_calls_and_json_candidate_text():
     panel_results = [
         FusionPanelResult(

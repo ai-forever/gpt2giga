@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.protocols.normalized import NormalizedTool, NormalizedToolCall
 from gpt2giga.providers.fusion.schemas import FusionPanelResult
 
@@ -251,7 +252,7 @@ def validate_tool_call_arguments(
     if len(serialized) > MAX_TOOL_ARGUMENTS_JSON_LENGTH:
         return ToolValidationResult(valid=False, reason="arguments_too_large")
 
-    schema = normalize_tool_parameters_schema(tool.parameters)
+    schema = _tool_parameters_validation_schema(tool.parameters)
     schema_error = _validate_schema_value(arguments, schema, path="arguments")
     if schema_error is not None:
         return ToolValidationResult(valid=False, reason=schema_error)
@@ -442,6 +443,25 @@ def _normalized_tool_arguments(value: Any) -> tuple[Any, str | None]:
     return value, None
 
 
+def _tool_parameters_validation_schema(schema: Any) -> Mapping[str, Any]:
+    if not isinstance(schema, Mapping) or not schema:
+        return {"type": "object", "properties": {}}
+    if not any(
+        key in schema
+        for key in (
+            "type",
+            "properties",
+            "required",
+            "additionalProperties",
+            "allOf",
+            "anyOf",
+            "oneOf",
+        )
+    ):
+        return {"type": "object", "properties": {}, **schema}
+    return schema
+
+
 def _validate_schema_value(
     value: Any,
     schema: Mapping[str, Any],
@@ -450,6 +470,10 @@ def _validate_schema_value(
 ) -> str | None:
     if not isinstance(schema, Mapping):
         return None
+
+    composition_error = _validate_composition_keywords(value, schema, path=path)
+    if composition_error is not None:
+        return composition_error
 
     if "const" in schema and value != schema["const"]:
         return f"{path}.const"
@@ -460,6 +484,8 @@ def _validate_schema_value(
     schema_type = _schema_type(schema)
     if schema_type is not None and not _matches_schema_type(value, schema_type):
         return f"{path}.type"
+    if isinstance(schema_type, list) and value is None and "null" in schema_type:
+        return None
 
     effective_type = _single_non_null_type(schema_type)
     if effective_type == "object":
@@ -481,6 +507,13 @@ def _validate_object_schema(
 ) -> str | None:
     if not isinstance(value, Mapping):
         return f"{path}.type"
+
+    min_properties = schema.get("minProperties")
+    if isinstance(min_properties, int) and len(value) < min_properties:
+        return f"{path}.minProperties"
+    max_properties = schema.get("maxProperties")
+    if isinstance(max_properties, int) and len(value) > max_properties:
+        return f"{path}.maxProperties"
 
     required = schema.get("required")
     if isinstance(required, list):
@@ -508,9 +541,10 @@ def _validate_object_schema(
         for key in value:
             if str(key) not in allowed:
                 return f"{path}.{key}.additionalProperties"
-    if isinstance(additional, Mapping) and isinstance(properties, Mapping):
+    if isinstance(additional, Mapping):
+        known_properties = set(properties) if isinstance(properties, Mapping) else set()
         for key, item in value.items():
-            if key in properties:
+            if key in known_properties:
                 continue
             error = _validate_schema_value(item, additional, path=f"{path}.{key}")
             if error is not None:
@@ -532,6 +566,8 @@ def _validate_array_schema(
     max_items = schema.get("maxItems")
     if isinstance(max_items, int) and len(value) > max_items:
         return f"{path}.maxItems"
+    if schema.get("uniqueItems") is True and not _array_items_are_unique(value):
+        return f"{path}.uniqueItems"
     items = schema.get("items")
     if isinstance(items, Mapping):
         for index, item in enumerate(value):
@@ -555,6 +591,13 @@ def _validate_string_schema(
     max_length = schema.get("maxLength")
     if isinstance(max_length, int) and len(value) > max_length:
         return f"{path}.maxLength"
+    pattern = schema.get("pattern")
+    if isinstance(pattern, str):
+        try:
+            if re.search(pattern, value) is None:
+                return f"{path}.pattern"
+        except re.error:
+            return f"{path}.pattern"
     return None
 
 
@@ -572,7 +615,84 @@ def _validate_number_schema(
     maximum = schema.get("maximum")
     if isinstance(maximum, (int, float)) and value > maximum:
         return f"{path}.maximum"
+    exclusive_minimum = schema.get("exclusiveMinimum")
+    if isinstance(exclusive_minimum, (int, float)) and value <= exclusive_minimum:
+        return f"{path}.exclusiveMinimum"
+    exclusive_maximum = schema.get("exclusiveMaximum")
+    if isinstance(exclusive_maximum, (int, float)) and value >= exclusive_maximum:
+        return f"{path}.exclusiveMaximum"
+    multiple_of = schema.get("multipleOf")
+    if (
+        isinstance(multiple_of, (int, float))
+        and not isinstance(multiple_of, bool)
+        and multiple_of > 0
+    ):
+        quotient = value / multiple_of
+        if not math.isclose(quotient, round(quotient), rel_tol=1e-12, abs_tol=1e-12):
+            return f"{path}.multipleOf"
     return None
+
+
+def _validate_composition_keywords(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    path: str,
+) -> str | None:
+    all_of = schema.get("allOf")
+    if isinstance(all_of, list):
+        for subschema in all_of:
+            if not isinstance(subschema, Mapping):
+                continue
+            error = _validate_schema_value(value, subschema, path=path)
+            if error is not None:
+                return error
+
+    any_of = schema.get("anyOf")
+    if isinstance(any_of, list):
+        valid_count = _matching_subschema_count(value, any_of, path=path)
+        if valid_count == 0:
+            return f"{path}.anyOf"
+
+    one_of = schema.get("oneOf")
+    if isinstance(one_of, list):
+        valid_count = _matching_subschema_count(value, one_of, path=path)
+        if valid_count != 1:
+            return f"{path}.oneOf"
+
+    not_schema = schema.get("not")
+    if isinstance(not_schema, Mapping):
+        if _validate_schema_value(value, not_schema, path=path) is None:
+            return f"{path}.not"
+
+    return None
+
+
+def _matching_subschema_count(
+    value: Any,
+    schemas: list[Any],
+    *,
+    path: str,
+) -> int:
+    return sum(
+        1
+        for subschema in schemas
+        if isinstance(subschema, Mapping)
+        and _validate_schema_value(value, subschema, path=path) is None
+    )
+
+
+def _array_items_are_unique(value: list[Any]) -> bool:
+    seen: set[str] = set()
+    for item in value:
+        try:
+            marker = json.dumps(item, ensure_ascii=True, sort_keys=True)
+        except (TypeError, ValueError):
+            marker = repr(item)
+        if marker in seen:
+            return False
+        seen.add(marker)
+    return True
 
 
 def _schema_type(schema: Mapping[str, Any]) -> str | list[str] | None:

@@ -386,6 +386,42 @@ async def test_fusion_adapter_returns_error_when_success_threshold_not_met():
     assert [call.model for call in provider.calls] == ["PanelA", "PanelB"]
 
 
+async def test_fusion_adapter_direct_fallback_when_panel_stage_fails_and_flag_disabled():
+    provider = FakeProvider(
+        responses={
+            "Judge": _text_response(
+                "Judge",
+                "single model fallback",
+                usage=NormalizedUsage(input_tokens=3, output_tokens=4),
+            ),
+        },
+        errors={
+            "PanelA": RuntimeError("boom"),
+            "PanelB": RuntimeError("boom"),
+        },
+    )
+
+    response = await _adapter(provider, fail_on_all_panels_failed=False).chat(
+        _request(),
+        context=_context(),
+        fusion_config=_fusion_config(min_successful_panels=1),
+    )
+
+    assert response.error is None
+    assert response.model == "gpt2giga/fusion-code"
+    assert response.provider == "fusion"
+    assert response.choices[0].message.content == "single model fallback"
+    assert response.usage.input_tokens == 3
+    assert response.usage.output_tokens == 4
+    assert [call.model for call in provider.calls] == ["PanelA", "PanelB", "Judge"]
+    assert provider.calls[-1].stream is False
+    assert provider.calls[-1].metadata["gpt2giga_fusion_stage"] == "direct_fallback"
+    assert response.metadata["gpt2giga_fusion_failed_panels"] == "2"
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
+        "all_panels_failed_direct_fallback"
+    )
+
+
 async def test_fusion_adapter_falls_back_to_panel_when_judge_json_is_invalid():
     provider = FakeProvider(
         responses={
