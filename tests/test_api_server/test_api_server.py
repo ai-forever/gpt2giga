@@ -220,6 +220,39 @@ def test_ui_routes_require_admin_key_by_default():
     assert "gpt2giga playground" in response.text
 
 
+def test_ui_playground_serves_multi_protocol_request_builder():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    client = TestClient(app)
+
+    response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+
+    assert response.status_code == 200
+    assert '<select id="protocol" name="protocol">' in response.text
+    assert '<option value="openai">OpenAI</option>' in response.text
+    assert '<option value="anthropic">Anthropic</option>' in response.text
+    assert '<option value="gemini">Gemini</option>' in response.text
+    assert 'id="operation" name="operation"' in response.text
+    assert 'id="stream" name="stream" type="checkbox"' in response.text
+    assert 'id="messages" spellcheck="false"' in response.text
+    assert 'id="tools" spellcheck="false"' in response.text
+    assert 'id="response-config" spellcheck="false"' in response.text
+    assert 'id="metadata" spellcheck="false"' in response.text
+    assert 'id="headers" spellcheck="false"' in response.text
+    assert 'data-example="openai-chat"' in response.text
+    assert 'data-example="anthropic-messages"' in response.text
+    assert 'data-example="gemini-generate"' in response.text
+    assert 'data-example="gemini-stream"' in response.text
+    assert 'data-example="structured-output"' in response.text
+    assert 'data-example="embeddings"' in response.text
+    assert "streamGenerateContent" in response.text
+    assert "x-goog-api-key" in response.text
+    assert "secretHeaderNames" in response.text
+    assert "Request preview" in response.text
+    assert "Redacted headers" in response.text
+
+
 def test_ui_routes_can_disable_auth_in_dev():
     app = create_app(
         config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, ui_require_auth=False))
@@ -229,6 +262,7 @@ def test_ui_routes_can_disable_auth_in_dev():
     response = client.get("/ui/playground")
 
     assert response.status_code == 200
+    assert "Build request" in response.text
 
 
 def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
