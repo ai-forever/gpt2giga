@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any, Optional
 
 from fastapi import Request
@@ -11,6 +10,7 @@ from gpt2giga.models.config import FusionSettings, ProxySettings
 
 FUSION_MODEL_OWNER = "gpt2giga"
 FUSION_MODEL_DESCRIPTION = "Fusion model exposed through gpt2giga."
+FUSION_MODEL_CREATED = 1_781_740_800  # 2026-06-18T00:00:00Z
 
 
 def get_request_fusion_settings(request: Request) -> FusionSettings:
@@ -30,7 +30,7 @@ def build_fusion_openai_models(
     """Build OpenAI-compatible virtual Fusion model objects."""
     if not settings.enabled:
         return []
-    timestamp = int(time.time()) if created is None else created
+    timestamp = FUSION_MODEL_CREATED if created is None else created
     return [
         {
             "id": alias,

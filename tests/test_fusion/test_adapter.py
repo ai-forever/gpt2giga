@@ -182,6 +182,7 @@ def _tool_response(
 def _judge_json(final_answer="final answer", final_tool_call=None) -> str:
     return json.dumps(
         {
+            "schema_version": "gpt2giga.fusion.analysis.v1",
             "consensus": ["Both panels agree."],
             "contradictions": [],
             "partial_coverage": [],
@@ -371,6 +372,79 @@ async def test_fusion_adapter_falls_back_to_panel_when_judge_json_is_invalid():
     assert response.metadata["gpt2giga_fusion_fallback_reason"] == "invalid_judge_json"
 
 
+async def test_fusion_adapter_repairs_malformed_judge_json_once():
+    judge_calls = 0
+
+    def judge_response(request):
+        nonlocal judge_calls
+        judge_calls += 1
+        if request.metadata["gpt2giga_fusion_stage"] == "judge_repair":
+            return _text_response("Judge", _judge_json("repaired final"))
+        return _text_response(
+            "Judge",
+            '{"schema_version":"gpt2giga.fusion.analysis.v1","final_answer":"bad",}',
+        )
+
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A usable answer"),
+            "PanelB": _text_response("PanelB", "B usable answer"),
+            "Judge": judge_response,
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        fusion_config=_fusion_config(),
+    )
+
+    assert judge_calls == 2
+    assert response.choices[0].message.content == "repaired final"
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
+        "judge_repaired:invalid_judge_json"
+    )
+
+
+async def test_fusion_adapter_accepts_fenced_judge_json():
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A usable answer"),
+            "PanelB": _text_response("PanelB", "B usable answer"),
+            "Judge": _text_response(
+                "Judge",
+                f"```json\n{_judge_json('fenced final')}\n```",
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        fusion_config=_fusion_config(),
+    )
+
+    assert response.choices[0].message.content == "fenced final"
+
+
+async def test_fusion_adapter_accepts_prefixed_judge_json():
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A usable answer"),
+            "PanelB": _text_response("PanelB", "B usable answer"),
+            "Judge": _text_response(
+                "Judge",
+                f"Here is the JSON:\n{_judge_json('prefixed final')}\nDone.",
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        fusion_config=_fusion_config(),
+    )
+
+    assert response.choices[0].message.content == "prefixed final"
+
+
 async def test_fusion_adapter_strips_tools_from_panels_and_allows_final_tool_call():
     tool = NormalizedTool(
         name="lookup",
@@ -419,6 +493,97 @@ async def test_fusion_adapter_strips_tools_from_panels_and_allows_final_tool_cal
         )
     ]
     assert response.choices[0].finish_reason == "tool_calls"
+
+
+async def test_fusion_adapter_invalid_final_tool_args_returns_text_when_available():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+            "required": ["q"],
+        },
+    )
+    request = _request()
+    request.tools = [tool]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A answer"),
+            "PanelB": _text_response("PanelB", "B answer"),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json(
+                    final_answer="fallback text",
+                    final_tool_call={
+                        "id": "call-1",
+                        "type": "function",
+                        "name": "lookup",
+                        "arguments": {"q": 123},
+                    },
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.content == "fallback text"
+    assert response.choices[0].message.tool_calls == []
+    assert (
+        response.metadata["gpt2giga_fusion_fallback_reason"]
+        == "invalid_final_tool_call"
+    )
+
+
+async def test_fusion_adapter_required_tool_choice_errors_on_invalid_args():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+            "required": ["q"],
+        },
+    )
+    request = _request()
+    request.tools = [tool]
+    request.tool_choice = "required"
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A answer"),
+            "PanelB": _text_response("PanelB", "B answer"),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json(
+                    final_answer=None,
+                    final_tool_call={
+                        "id": "call-1",
+                        "type": "function",
+                        "name": "lookup",
+                        "arguments": {"q": 123},
+                    },
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    assert response.error is not None
+    assert response.error.code == "fusion_tool_required"
+    assert response.choices == []
+    assert (
+        response.metadata["gpt2giga_fusion_fallback_reason"]
+        == "invalid_final_tool_call"
+    )
 
 
 async def test_fusion_adapter_tools_mode_off_strips_judge_tools_and_ignores_tool_call():

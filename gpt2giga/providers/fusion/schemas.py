@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gpt2giga.protocols.normalized.models import NormalizedToolCall, NormalizedUsage
 
+FUSION_ANALYSIS_SCHEMA_VERSION = "gpt2giga.fusion.analysis.v1"
+
 
 class FusionPanelResult(BaseModel):
     """Represent one analysis model result."""
@@ -55,6 +57,9 @@ class FusionUniqueInsight(BaseModel):
 class FusionAnalysis(BaseModel):
     """Structured judge analysis over panel responses."""
 
+    schema_version: Literal["gpt2giga.fusion.analysis.v1"] = (
+        FUSION_ANALYSIS_SCHEMA_VERSION
+    )
     consensus: list[str] = Field(default_factory=list)
     contradictions: list[FusionContradiction] = Field(default_factory=list)
     partial_coverage: list[FusionPartialCoverage] = Field(default_factory=list)

@@ -150,6 +150,36 @@ def test_responses_fusion_model_alias_returns_buffered_stream():
     assert completed["response"]["metadata"]["gpt2giga_fusion"] == "true"
 
 
+def test_responses_fusion_error_returns_http_502():
+    class FailingFusionGigachat:
+        def __init__(self):
+            self.chat_calls = []
+
+        async def achat(self, chat):
+            self.chat_calls.append(chat)
+            raise RuntimeError("upstream unavailable")
+
+    app = make_app(gigachat=FailingFusionGigachat())
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        json={
+            "model": "gpt2giga/fusion-code",
+            "input": "hello",
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 502
+    assert body["status"] == "failed"
+    assert body["error"]["code"] == "all_panels_failed"
+    assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
+        "GigaChat-2-Pro",
+        "GigaChat-2-Max",
+    ]
+
+
 def test_responses_fusion_openrouter_tool_strips_artifacts_and_returns_tool_call():
     gigachat = FusionGigachat(
         judge_payload={

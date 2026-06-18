@@ -256,8 +256,10 @@ GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES=False
 ```
 
 Используйте `GPT2GIGA_FUSION_PRESETS` для JSON-карты custom presets с
-`analysis_models`, `judge_model`, optional `final_model`, `panel_roles`,
-generation limits, `min_successful_panels`, `timeout_seconds` и `tools_mode`.
+`analysis_models`, `judge_model`, `panel_roles`, generation limits,
+`min_successful_panels`, `timeout_seconds` и `tools_mode`. `final_model`
+зарезервирован для будущего strict pipeline и должен быть `null`; текущий
+runtime поддерживает только compact `panel -> judge/finalizer`.
 
 Подробно: [GigaFusion](fusion.md).
 

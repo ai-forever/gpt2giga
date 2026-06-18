@@ -10,6 +10,7 @@ from gpt2giga.providers.fusion.tool_arbitration import (
     resolve_tool_call_policy,
     tool_call_allowed,
     tool_choice_requires_tool,
+    validate_tool_call_arguments,
 )
 
 
@@ -20,6 +21,7 @@ def _tool(name="lookup") -> NormalizedTool:
         parameters={
             "type": "object",
             "properties": {"q": {"type": "string"}},
+            "required": ["q"],
         },
     )
 
@@ -63,7 +65,7 @@ def test_tool_policy_respects_none_required_and_forced_function_choice():
 def test_tool_call_validation_rejects_wrong_or_disabled_tool_choice():
     lookup = _tool("lookup")
     wrong_call = NormalizedToolCall(name="other", arguments={})
-    lookup_call = NormalizedToolCall(name="lookup", arguments={})
+    lookup_call = NormalizedToolCall(name="lookup", arguments={"q": "hello"})
 
     assert not tool_call_allowed(
         lookup_call,
@@ -99,6 +101,47 @@ def test_first_allowed_tool_call_selects_only_valid_final_call():
     )
 
     assert selected == calls[1]
+
+
+def test_tool_call_validation_parses_string_arguments_and_checks_schema():
+    result = validate_tool_call_arguments(
+        NormalizedToolCall(name="lookup", arguments='{"q": "hello"}'),
+        request_tools=[_tool("lookup")],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+
+    assert result.valid
+    assert result.tool_call is not None
+    assert result.tool_call.arguments == {"q": "hello"}
+
+
+def test_tool_call_validation_rejects_malformed_and_missing_arguments():
+    malformed = validate_tool_call_arguments(
+        NormalizedToolCall(name="lookup", arguments="{not-json"),
+        request_tools=[_tool("lookup")],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+    missing_required = validate_tool_call_arguments(
+        NormalizedToolCall(name="lookup", arguments={}),
+        request_tools=[_tool("lookup")],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+    wrong_type = validate_tool_call_arguments(
+        NormalizedToolCall(name="lookup", arguments={"q": 123}),
+        request_tools=[_tool("lookup")],
+        tools_mode="schema_only",
+        tool_choice="auto",
+    )
+
+    assert not malformed.valid
+    assert malformed.reason == "arguments_malformed_json"
+    assert not missing_required.valid
+    assert missing_required.reason == "arguments.q.required"
+    assert not wrong_type.valid
+    assert wrong_type.reason == "arguments.q.type"
 
 
 def test_panel_tool_candidates_parse_actual_calls_and_json_candidate_text():

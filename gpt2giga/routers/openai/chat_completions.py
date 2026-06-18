@@ -283,6 +283,19 @@ async def _try_fusion_chat_completion(
     requested_model = str(
         payload.get("model") or normalized_response.model or "GigaChat"
     )
+    if normalized_response.error is not None:
+        openai_response = normalized_chat_response_to_openai(
+            normalized_response,
+            requested_model=requested_model,
+            context=context,
+        )
+        await _emit_chat_completion_observability(
+            state,
+            normalized_request,
+            normalized_response,
+            context=context,
+        )
+        return JSONResponse(status_code=502, content=openai_response)
 
     if not stream:
         openai_response = normalized_chat_response_to_openai(

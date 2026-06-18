@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 
 from gpt2giga.models.config import ProxyConfig, ProxySettings
+from gpt2giga.providers.fusion.model_discovery import FUSION_MODEL_CREATED
 from gpt2giga.routers.gemini.models import router as gemini_models_router
 from gpt2giga.routers.litellm.models import router as litellm_models_router
 from gpt2giga.routers.openai import router as openai_router
@@ -61,8 +62,11 @@ def test_openai_models_list_includes_fusion_aliases():
     response = TestClient(_make_openai_app()).get("/models")
 
     assert response.status_code == 200
-    ids = [item["id"] for item in response.json()["data"]]
+    data = response.json()["data"]
+    ids = [item["id"] for item in data]
     assert ids == ["GigaChat", "gpt2giga/fusion-code", "GigaChat-Fusion-Code"]
+    assert data[1]["created"] == FUSION_MODEL_CREATED
+    assert data[2]["created"] == FUSION_MODEL_CREATED
 
 
 def test_openai_model_retrieve_returns_fusion_alias_without_upstream_call():
@@ -71,6 +75,7 @@ def test_openai_model_retrieve_returns_fusion_alias_without_upstream_call():
 
     assert response.status_code == 200
     assert response.json()["id"] == "gpt2giga/fusion-code"
+    assert response.json()["created"] == FUSION_MODEL_CREATED
     assert app.state.gigachat_client.model_calls == []
 
 

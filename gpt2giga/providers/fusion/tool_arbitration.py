@@ -7,8 +7,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from gpt2giga.common.json_schema import normalize_tool_parameters_schema
 from gpt2giga.protocols.normalized import NormalizedTool, NormalizedToolCall
 from gpt2giga.providers.fusion.schemas import FusionPanelResult
+
+MAX_TOOL_ARGUMENTS_JSON_LENGTH = 65_536
 
 
 @dataclass(frozen=True)
@@ -20,6 +23,15 @@ class ToolCallPolicy:
     forced_tool_name: str | None
     allowed_tool_names: frozenset[str]
     max_tool_calls: int
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolValidationResult:
+    """Result of validating one final Fusion tool call."""
+
+    valid: bool
+    tool_call: NormalizedToolCall | None = None
     reason: str | None = None
 
 
@@ -93,7 +105,7 @@ def resolve_tool_call_policy(
     tools: list[NormalizedTool],
     tools_mode: str,
     tool_choice: Any,
-    max_tool_calls: int = 0,
+    max_tool_calls: int = 1,
 ) -> ToolCallPolicy:
     """Resolve whether Fusion may or must emit a final tool call."""
     allowed_names = frozenset(tool.name for tool in tools if tool.name)
@@ -165,18 +177,19 @@ def first_allowed_tool_call(
     request_tools: list[NormalizedTool],
     tools_mode: str,
     tool_choice: Any,
-    max_tool_calls: int = 0,
+    max_tool_calls: int = 1,
 ) -> NormalizedToolCall | None:
     """Return the first final tool call allowed by the request policy."""
     for tool_call in tool_calls:
-        if tool_call_allowed(
+        result = validate_tool_call_arguments(
             tool_call,
             request_tools=request_tools,
             tools_mode=tools_mode,
             tool_choice=tool_choice,
             max_tool_calls=max_tool_calls,
-        ):
-            return tool_call
+        )
+        if result.valid:
+            return result.tool_call
     return None
 
 
@@ -186,9 +199,27 @@ def tool_call_allowed(
     request_tools: list[NormalizedTool],
     tools_mode: str,
     tool_choice: Any,
-    max_tool_calls: int = 0,
+    max_tool_calls: int = 1,
 ) -> bool:
     """Return whether a final tool call satisfies Fusion arbitration policy."""
+    return validate_tool_call_arguments(
+        tool_call,
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    ).valid
+
+
+def validate_tool_call_arguments(
+    tool_call: NormalizedToolCall,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int = 1,
+) -> ToolValidationResult:
+    """Validate a final tool call name and arguments against request schemas."""
     policy = resolve_tool_call_policy(
         tools=request_tools,
         tools_mode=tools_mode,
@@ -196,10 +227,39 @@ def tool_call_allowed(
         max_tool_calls=max_tool_calls,
     )
     if not policy.allow_tool_calls:
-        return False
+        return ToolValidationResult(valid=False, reason=policy.reason or "forbidden")
     if not tool_call.name or tool_call.name not in policy.allowed_tool_names:
-        return False
-    return not policy.forced_tool_name or tool_call.name == policy.forced_tool_name
+        return ToolValidationResult(valid=False, reason="tool_not_allowed")
+    if policy.forced_tool_name and tool_call.name != policy.forced_tool_name:
+        return ToolValidationResult(valid=False, reason="forced_tool_mismatch")
+
+    tool = next(
+        (candidate for candidate in request_tools if candidate.name == tool_call.name),
+        None,
+    )
+    if tool is None:
+        return ToolValidationResult(valid=False, reason="tool_not_found")
+
+    arguments, parse_error = _normalized_tool_arguments(tool_call.arguments)
+    if parse_error is not None:
+        return ToolValidationResult(valid=False, reason=parse_error)
+
+    try:
+        serialized = json.dumps(arguments, ensure_ascii=True, sort_keys=True)
+    except (TypeError, ValueError):
+        return ToolValidationResult(valid=False, reason="arguments_not_json")
+    if len(serialized) > MAX_TOOL_ARGUMENTS_JSON_LENGTH:
+        return ToolValidationResult(valid=False, reason="arguments_too_large")
+
+    schema = normalize_tool_parameters_schema(tool.parameters)
+    schema_error = _validate_schema_value(arguments, schema, path="arguments")
+    if schema_error is not None:
+        return ToolValidationResult(valid=False, reason=schema_error)
+
+    return ToolValidationResult(
+        valid=True,
+        tool_call=tool_call.model_copy(update={"arguments": arguments}),
+    )
 
 
 def tool_choice_requires_tool(
@@ -207,7 +267,7 @@ def tool_choice_requires_tool(
     request_tools: list[NormalizedTool],
     tools_mode: str,
     tool_choice: Any,
-    max_tool_calls: int = 0,
+    max_tool_calls: int = 1,
 ) -> bool:
     """Return whether the client requested a required final tool call."""
     policy = resolve_tool_call_policy(
@@ -369,3 +429,196 @@ def _string_or_none(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _normalized_tool_arguments(value: Any) -> tuple[Any, str | None]:
+    if value is None:
+        return {}, None
+    if isinstance(value, str):
+        try:
+            return json.loads(value), None
+        except json.JSONDecodeError:
+            return None, "arguments_malformed_json"
+    return value, None
+
+
+def _validate_schema_value(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    path: str,
+) -> str | None:
+    if not isinstance(schema, Mapping):
+        return None
+
+    if "const" in schema and value != schema["const"]:
+        return f"{path}.const"
+    enum = schema.get("enum")
+    if isinstance(enum, list) and value not in enum:
+        return f"{path}.enum"
+
+    schema_type = _schema_type(schema)
+    if schema_type is not None and not _matches_schema_type(value, schema_type):
+        return f"{path}.type"
+
+    effective_type = _single_non_null_type(schema_type)
+    if effective_type == "object":
+        return _validate_object_schema(value, schema, path=path)
+    if effective_type == "array":
+        return _validate_array_schema(value, schema, path=path)
+    if effective_type == "string":
+        return _validate_string_schema(value, schema, path=path)
+    if effective_type in {"integer", "number"}:
+        return _validate_number_schema(value, schema, path=path)
+    return None
+
+
+def _validate_object_schema(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    path: str,
+) -> str | None:
+    if not isinstance(value, Mapping):
+        return f"{path}.type"
+
+    required = schema.get("required")
+    if isinstance(required, list):
+        for key in required:
+            if isinstance(key, str) and key not in value:
+                return f"{path}.{key}.required"
+
+    properties = schema.get("properties")
+    if isinstance(properties, Mapping):
+        for key, property_schema in properties.items():
+            if key not in value:
+                continue
+            if isinstance(property_schema, Mapping):
+                error = _validate_schema_value(
+                    value[key],
+                    property_schema,
+                    path=f"{path}.{key}",
+                )
+                if error is not None:
+                    return error
+
+    additional = schema.get("additionalProperties")
+    if additional is False and isinstance(properties, Mapping):
+        allowed = {str(key) for key in properties}
+        for key in value:
+            if str(key) not in allowed:
+                return f"{path}.{key}.additionalProperties"
+    if isinstance(additional, Mapping) and isinstance(properties, Mapping):
+        for key, item in value.items():
+            if key in properties:
+                continue
+            error = _validate_schema_value(item, additional, path=f"{path}.{key}")
+            if error is not None:
+                return error
+    return None
+
+
+def _validate_array_schema(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    path: str,
+) -> str | None:
+    if not isinstance(value, list):
+        return f"{path}.type"
+    min_items = schema.get("minItems")
+    if isinstance(min_items, int) and len(value) < min_items:
+        return f"{path}.minItems"
+    max_items = schema.get("maxItems")
+    if isinstance(max_items, int) and len(value) > max_items:
+        return f"{path}.maxItems"
+    items = schema.get("items")
+    if isinstance(items, Mapping):
+        for index, item in enumerate(value):
+            error = _validate_schema_value(item, items, path=f"{path}[{index}]")
+            if error is not None:
+                return error
+    return None
+
+
+def _validate_string_schema(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    path: str,
+) -> str | None:
+    if not isinstance(value, str):
+        return f"{path}.type"
+    min_length = schema.get("minLength")
+    if isinstance(min_length, int) and len(value) < min_length:
+        return f"{path}.minLength"
+    max_length = schema.get("maxLength")
+    if isinstance(max_length, int) and len(value) > max_length:
+        return f"{path}.maxLength"
+    return None
+
+
+def _validate_number_schema(
+    value: Any,
+    schema: Mapping[str, Any],
+    *,
+    path: str,
+) -> str | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return f"{path}.type"
+    minimum = schema.get("minimum")
+    if isinstance(minimum, (int, float)) and value < minimum:
+        return f"{path}.minimum"
+    maximum = schema.get("maximum")
+    if isinstance(maximum, (int, float)) and value > maximum:
+        return f"{path}.maximum"
+    return None
+
+
+def _schema_type(schema: Mapping[str, Any]) -> str | list[str] | None:
+    value = schema.get("type")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return value
+    if "properties" in schema or "required" in schema:
+        return "object"
+    if "items" in schema:
+        return "array"
+    return None
+
+
+def _matches_schema_type(value: Any, schema_type: str | list[str]) -> bool:
+    candidates = schema_type if isinstance(schema_type, list) else [schema_type]
+    return any(
+        _matches_single_schema_type(value, candidate) for candidate in candidates
+    )
+
+
+def _matches_single_schema_type(value: Any, schema_type: str) -> bool:
+    if schema_type == "null":
+        return value is None
+    if schema_type == "object":
+        return isinstance(value, Mapping)
+    if schema_type == "array":
+        return isinstance(value, list)
+    if schema_type == "string":
+        return isinstance(value, str)
+    if schema_type == "boolean":
+        return isinstance(value, bool)
+    if schema_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if schema_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return True
+
+
+def _single_non_null_type(schema_type: str | list[str] | None) -> str | None:
+    if schema_type is None:
+        return None
+    if isinstance(schema_type, str):
+        return schema_type
+    for item in schema_type:
+        if item != "null":
+            return item
+    return schema_type[0] if schema_type else None

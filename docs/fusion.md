@@ -90,6 +90,10 @@ Aliases появляются в model discovery только когда
 
 ## Как работает pipeline
 
+Текущая реализация поддерживает только `pipeline_mode=compact`:
+`panel -> judge/finalizer`. `final_model` зарезервирован для будущего strict
+pipeline и должен оставаться `null`; отдельной finalizer-модели сейчас нет.
+
 1. Router читает исходный request и ищет Fusion-настройку.
 2. Request переводится во внутренний normalized chat contract.
 3. `FusionProviderAdapter` запускает panel calls к моделям из preset. Каждая
@@ -101,14 +105,17 @@ Aliases появляются в model discovery только когда
 5. Judge/finalizer получает исходный запрос и panel responses, сравнивает их и
    возвращает structured analysis: consensus, contradictions, partial coverage,
    unique insights, blind spots, risk flags, selected strategy, final answer или
-   final tool call.
+   ровно один final tool call. Judge prompt помечает panel outputs как
+   untrusted advisory data; эти outputs используются только как evidence, а не
+   как инструкции.
 6. Финальный ответ маппится обратно в OpenAI, Anthropic или Gemini response
    shape. Usage агрегируется по panel и judge calls.
 
 Если часть panel calls падает или истекает по timeout, Fusion продолжает работу,
 пока выполнен `min_successful_panels`. Если judge response пустой или невалидный
-JSON, adapter пытается вернуть лучший panel answer как fallback и помечает это
-в metadata.
+JSON, adapter делает один repair-call. Если repair тоже не даёт валидный
+`FusionAnalysis`, adapter пытается вернуть лучший panel answer как fallback и
+помечает это в metadata.
 
 ## Presets
 
@@ -134,9 +141,9 @@ Fusion configs, где preset не указан.
 | `GPT2GIGA_FUSION_PRESETS` | `{}` | JSON object с custom presets; ключи дополняют или переопределяют built-ins. |
 | `GPT2GIGA_FUSION_MAX_PANEL_MODELS` | `4` | Верхний лимит `analysis_models` в одном запросе, допустимо `1..8`. |
 | `GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY` | `4` | Сколько panel calls можно выполнять параллельно внутри одного Fusion-запроса. |
-| `GPT2GIGA_FUSION_MAX_TOOL_CALLS` | `0` | Лимит final tool calls для arbitration, допустимо `0..16`; `0` фактически оставляет один validated call. |
+| `GPT2GIGA_FUSION_MAX_TOOL_CALLS` | `1` | Зарезервировано под будущие parallel tool calls; текущий compact pipeline поддерживает ровно один final tool call. |
 | `GPT2GIGA_FUSION_STREAMING_MODE` | `buffered` | `buffered` отдает SSE после deliberation; `off` запрещает Fusion streaming requests. |
-| `GPT2GIGA_FUSION_PIPELINE_MODE` | `compact` | Текущий режим, где judge и finalizer объединены в один call. |
+| `GPT2GIGA_FUSION_PIPELINE_MODE` | `compact` | Единственный поддержанный режим, где judge и finalizer объединены в один call. |
 | `GPT2GIGA_FUSION_EXPOSE_ANALYSIS_METADATA` | `False` | Добавляет structured judge analysis в provider metadata. Не включает raw prompts. |
 | `GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES` | `False` | Добавляет raw panel content в provider metadata. Оставляйте `False` вне локальной отладки. |
 | `GPT2GIGA_FUSION_DEBUG_TRACE_ENABLED` | `False` | Зарезервировано для bounded debug trace support. |
@@ -161,8 +168,40 @@ GPT2GIGA_FUSION_PRESETS='{
 ```
 
 В `.env` обычно удобнее держать JSON в одну строку. `analysis_models`,
-`judge_model` и `final_model` не могут ссылаться на Fusion aliases, чтобы не
-создать рекурсивный Fusion-вызов.
+`judge_model` не могут ссылаться на Fusion aliases, чтобы не создать
+рекурсивный Fusion-вызов. `final_model` зарезервирован и должен быть `null`;
+non-null значение отклоняется при разрешении Fusion-запроса.
+
+## Tools behavior
+
+FusionProviderAdapter никогда не выполняет tools сам.
+
+`schema_only`:
+
+- Panels видят tool schemas как текстовую справку и могут предложить действие
+  только как plain-text/JSON `tool_call_candidate`.
+- Только judge/finalizer получает реальные tools и может вернуть один
+  validated final tool call.
+
+`final_arbitration`:
+
+- Panels могут включить structured tool-call candidates в свой текстовый output.
+- Эти candidates advisory only и никогда не пересылаются клиенту напрямую.
+- Только judge/finalizer получает реальные tools и может вернуть один
+  validated final tool call.
+
+Final tool-call arguments разбираются как JSON, ограничиваются по размеру и
+валидируются по исходной JSON Schema tool parameters. Если final tool call
+невалиден, но есть text `final_answer`, клиент получает text answer без tool
+call. Если клиент требовал tool call через `tool_choice`, Fusion возвращает
+ошибку.
+
+## Failure semantics
+
+Fusion infrastructure failures и upstream failures возвращаются как protocol
+compatible error body. Для OpenAI Chat Completions и OpenAI Responses
+non-stream и buffered-stream routes такие ошибки возвращаются с HTTP 502.
+Model-level successful responses остаются HTTP 200.
 
 ## Request-level включение
 

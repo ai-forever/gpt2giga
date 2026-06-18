@@ -153,3 +153,74 @@ def test_extract_fusion_rejects_too_many_panel_models():
             },
             _settings(max_panel_models=2),
         )
+
+
+def test_extract_fusion_rejects_reserved_final_model():
+    with pytest.raises(FusionConfigurationError):
+        extract_fusion_request(
+            {
+                "tools": [
+                    {
+                        "type": "openrouter:fusion",
+                        "parameters": {
+                            "analysis_models": ["A"],
+                            "judge_model": "Judge",
+                            "final_model": "Finalizer",
+                        },
+                    }
+                ]
+            },
+            _settings(),
+        )
+
+
+def test_extract_fusion_rejects_preset_reserved_final_model():
+    with pytest.raises(FusionConfigurationError):
+        extract_fusion_request(
+            {"model": "gpt2giga/fusion-code"},
+            _settings(
+                default_preset="custom",
+                presets={
+                    "custom": {
+                        "analysis_models": ["A"],
+                        "judge_model": "Judge",
+                        "final_model": "Finalizer",
+                    }
+                },
+            ),
+        )
+
+
+def test_extract_fusion_rejects_parallel_final_tool_calls():
+    with pytest.raises(FusionConfigurationError):
+        extract_fusion_request(
+            {
+                "tools": [
+                    {
+                        "type": "openrouter:fusion",
+                        "parameters": {
+                            "analysis_models": ["A"],
+                            "judge_model": "Judge",
+                            "max_tool_calls": 2,
+                        },
+                    }
+                ]
+            },
+            _settings(),
+        )
+
+
+def test_extract_fusion_rejects_settings_parallel_final_tool_calls():
+    with pytest.raises(FusionConfigurationError):
+        extract_fusion_request(
+            {"model": "gpt2giga/fusion-code"},
+            _settings(max_tool_calls=2),
+        )
+
+
+def test_extract_fusion_rejects_reserved_strict_pipeline():
+    with pytest.raises(FusionConfigurationError):
+        extract_fusion_request(
+            {"model": "gpt2giga/fusion-code"},
+            _settings(pipeline_mode="strict"),
+        )

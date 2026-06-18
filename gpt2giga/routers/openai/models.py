@@ -148,7 +148,7 @@ async def show_available_models(request: Request):
 
     current_timestamp = int(time.time())
     for model in models:
-        model["created"] = current_timestamp
+        model.setdefault("created", current_timestamp)
     model_page = AsyncPage(
         data=[OpenAIModel(**model) for model in models],
         object=response.object_,

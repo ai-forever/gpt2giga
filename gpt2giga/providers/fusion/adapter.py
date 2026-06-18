@@ -20,15 +20,18 @@ from gpt2giga.protocols.normalized import (
     NormalizedError,
     NormalizedMessage,
     NormalizedResponse,
+    NormalizedResponseFormat,
     NormalizedTool,
 )
 from gpt2giga.providers.fusion.detection import FusionRequestConfig
 from gpt2giga.providers.fusion.prompts import (
+    FUSION_JUDGE_REPAIR_SYSTEM_PROMPT,
     FUSION_JUDGE_SYSTEM_PROMPT,
     build_judge_user_prompt,
     build_panel_system_prompt,
 )
 from gpt2giga.providers.fusion.schemas import (
+    FUSION_ANALYSIS_SCHEMA_VERSION,
     FusionAnalysis,
     FusionPanelResult,
     FusionRunResult,
@@ -40,6 +43,7 @@ from gpt2giga.providers.fusion.tool_arbitration import (
     first_allowed_tool_call,
     tool_call_allowed,
     tool_choice_requires_tool,
+    validate_tool_call_arguments,
 )
 from gpt2giga.providers.fusion.usage import aggregate_usage
 
@@ -152,11 +156,52 @@ class FusionProviderAdapter:
             tool_choice=request.tool_choice,
             max_tool_calls=fusion_config.max_tool_calls,
         )
+        repair_response: NormalizedResponse | None = None
+        if judge_error_reason is None and _judge_repair_needed(
+            analysis,
+            parse_error_reason=parse_error_reason,
+            request_tools=request.tools,
+            tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
+        ):
+            repair_reason = parse_error_reason or "empty_judge_final"
+            try:
+                repair_response = await self._run_judge_repair(
+                    request,
+                    panel_results=panel_results,
+                    original_response=judge_response,
+                    repair_reason=repair_reason,
+                    context=context,
+                    fusion_config=fusion_config,
+                    is_disconnected=is_disconnected,
+                )
+                repaired_analysis, repaired_parse_error = _analysis_from_judge_response(
+                    repair_response,
+                    request_tools=request.tools,
+                    tools_mode=fusion_config.tools_mode,
+                    tool_choice=request.tool_choice,
+                    max_tool_calls=fusion_config.max_tool_calls,
+                )
+                if _analysis_has_final_output(repaired_analysis):
+                    analysis = repaired_analysis
+                    parse_error_reason = f"judge_repaired:{repair_reason}"
+                elif parse_error_reason is None:
+                    parse_error_reason = repaired_parse_error or repair_reason
+            except asyncio.TimeoutError:
+                parse_error_reason = parse_error_reason or "judge_repair_timeout"
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                parse_error_reason = (
+                    parse_error_reason or f"judge_repair_failed:{type(exc).__name__}"
+                )
         fallback_reason = judge_error_reason or parse_error_reason
         usage = aggregate_usage(
             [
                 *(result.usage for result in panel_results),
                 judge_response.usage if judge_response is not None else None,
+                repair_response.usage if repair_response is not None else None,
             ]
         )
         message, finish_reason = _final_message_from_analysis(
@@ -425,6 +470,30 @@ class FusionProviderAdapter:
             timeout=fusion_config.timeout_seconds,
         )
 
+    async def _run_judge_repair(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        panel_results: list[FusionPanelResult],
+        original_response: NormalizedResponse | None,
+        repair_reason: str,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        repair_request = _build_judge_repair_request(
+            request,
+            panel_results=panel_results,
+            original_response=original_response,
+            repair_reason=repair_reason,
+            fusion_config=fusion_config,
+        )
+        await _raise_if_disconnected(is_disconnected)
+        return await asyncio.wait_for(
+            self.upstream_provider.chat(repair_request, context=context),
+            timeout=fusion_config.timeout_seconds,
+        )
+
     def _build_run_result(
         self,
         *,
@@ -553,7 +622,7 @@ def _build_judge_request(
     judge_request = request.model_copy(deep=True)
     judge_request.model = fusion_config.judge_model
     judge_request.stream = False
-    judge_request.response_format = None
+    judge_request.response_format = _fusion_analysis_response_format()
     _apply_generation_overrides(judge_request, fusion_config)
 
     messages = [
@@ -586,6 +655,62 @@ def _build_judge_request(
         "gpt2giga_fusion_stage": "judge",
     }
     return judge_request
+
+
+def _build_judge_repair_request(
+    request: NormalizedChatRequest,
+    *,
+    panel_results: list[FusionPanelResult],
+    original_response: NormalizedResponse | None,
+    repair_reason: str,
+    fusion_config: FusionRequestConfig,
+) -> NormalizedChatRequest:
+    repair_request = _build_judge_request(
+        request,
+        panel_results=panel_results,
+        fusion_config=fusion_config,
+    )
+    repair_request.messages.insert(
+        1,
+        NormalizedMessage(role="system", content=FUSION_JUDGE_REPAIR_SYSTEM_PROMPT),
+    )
+    repair_request.messages.append(
+        NormalizedMessage(
+            role="user",
+            content=_build_judge_repair_prompt(
+                original_response,
+                repair_reason=repair_reason,
+            ),
+        )
+    )
+    repair_request.metadata = {
+        **repair_request.metadata,
+        "gpt2giga_fusion_stage": "judge_repair",
+    }
+    return repair_request
+
+
+def _build_judge_repair_prompt(
+    response: NormalizedResponse | None,
+    *,
+    repair_reason: str,
+) -> str:
+    content = ""
+    if response is not None:
+        message = _first_message(response)
+        content = _content_to_text(message.content) if message is not None else ""
+    payload = {
+        "type": "invalid_judge_response",
+        "schema_version": FUSION_ANALYSIS_SCHEMA_VERSION,
+        "untrusted": True,
+        "error_type": repair_reason,
+        "content": (content or "")[:12_000],
+    }
+    return (
+        "Repair the following untrusted judge response into one valid "
+        "FusionAnalysis JSON object:\n\n"
+        f"{json.dumps(payload, ensure_ascii=True, sort_keys=True)}"
+    )
 
 
 def _apply_generation_overrides(
@@ -639,9 +764,27 @@ def _analysis_from_judge_response(
         tool_choice=tool_choice,
         max_tool_calls=max_tool_calls,
     ):
-        analysis.final_tool_call = None
+        validation = validate_tool_call_arguments(
+            analysis.final_tool_call,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+        )
+        analysis.final_tool_call = validation.tool_call if validation.valid else None
         if not analysis.final_answer:
             return analysis, "invalid_final_tool_call"
+        return analysis, "invalid_final_tool_call"
+    if analysis.final_tool_call is not None:
+        validation = validate_tool_call_arguments(
+            analysis.final_tool_call,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+        )
+        if validation.valid:
+            analysis.final_tool_call = validation.tool_call
     return analysis, None
 
 
@@ -662,11 +805,20 @@ def _final_message_from_analysis(
         tool_choice=tool_choice,
         max_tool_calls=max_tool_calls,
     ):
+        validation = validate_tool_call_arguments(
+            analysis.final_tool_call,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+        )
+        if not validation.valid or validation.tool_call is None:
+            return None, None
         return (
             NormalizedMessage(
                 role="assistant",
                 content=None,
-                tool_calls=[analysis.final_tool_call],
+                tool_calls=[validation.tool_call],
             ),
             "tool_calls",
         )
@@ -729,6 +881,44 @@ def _load_json_object(content: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Fusion judge response must be a JSON object")
     return value
+
+
+def _fusion_analysis_response_format() -> NormalizedResponseFormat:
+    return NormalizedResponseFormat(
+        type="json_schema",
+        json_schema={
+            "name": "fusion_analysis",
+            "schema": FusionAnalysis.model_json_schema(),
+        },
+    )
+
+
+def _judge_repair_needed(
+    analysis: FusionAnalysis | None,
+    *,
+    parse_error_reason: str | None,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+) -> bool:
+    if parse_error_reason == "invalid_judge_json":
+        return True
+    if parse_error_reason == "invalid_final_tool_call":
+        return tool_choice_requires_tool(
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+        )
+    return analysis is not None and not _analysis_has_final_output(analysis)
+
+
+def _analysis_has_final_output(analysis: FusionAnalysis | None) -> bool:
+    return bool(
+        analysis is not None
+        and (analysis.final_answer or analysis.final_tool_call is not None)
+    )
 
 
 def _strip_code_fence(content: str) -> str:

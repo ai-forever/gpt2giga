@@ -83,7 +83,10 @@ class FusionPresetSettings(BaseModel):
 
     analysis_models: list[str] = Field(min_length=1, max_length=8)
     judge_model: str
-    final_model: Optional[str] = None
+    final_model: Optional[str] = Field(
+        default=None,
+        description="Reserved for a future strict pipeline; must be null today.",
+    )
     panel_roles: list[str] = Field(default_factory=list)
     temperature: Optional[float] = 0.2
     max_completion_tokens: Optional[PositiveInt] = None
@@ -128,7 +131,7 @@ class FusionSettings(BaseModel):
     presets: dict[str, FusionPresetSettings] = Field(default_factory=dict)
     max_panel_models: int = Field(default=4, ge=1, le=8)
     max_panel_concurrency: int = Field(default=4, ge=1)
-    max_tool_calls: int = Field(default=0, ge=0, le=16)
+    max_tool_calls: int = Field(default=1, ge=0, le=16)
     streaming_mode: FusionStreamingMode = "buffered"
     pipeline_mode: FusionPipelineMode = "compact"
     expose_analysis_metadata: bool = False
@@ -260,7 +263,7 @@ class ProxySettings(BaseSettings):
         default_factory=lambda: list(DEFAULT_FUSION_ALIASES),
         description="Virtual model aliases that trigger Fusion when enabled.",
     )
-    fusion_presets: Annotated[dict[str, FusionPresetSettings], NoDecode] = Field(
+    fusion_presets: Annotated[dict[str, Any], NoDecode] = Field(
         default_factory=dict,
         description="Fusion preset map encoded as JSON object in env.",
     )
@@ -276,10 +279,13 @@ class ProxySettings(BaseSettings):
         description="Maximum concurrent analysis calls inside one Fusion request.",
     )
     fusion_max_tool_calls: int = Field(
-        default=0,
+        default=1,
         ge=0,
         le=16,
-        description="Maximum tool calls Fusion may return when tool arbitration is enabled.",
+        description=(
+            "Maximum tool calls Fusion may return when tool arbitration is enabled. "
+            "Current compact pipeline supports exactly one final tool call."
+        ),
     )
     fusion_streaming_mode: FusionStreamingMode = Field(
         default="buffered",
@@ -287,7 +293,10 @@ class ProxySettings(BaseSettings):
     )
     fusion_pipeline_mode: FusionPipelineMode = Field(
         default="compact",
-        description="Fusion pipeline mode: compact combines judge and finalizer.",
+        description=(
+            "Fusion pipeline mode. Current implementation supports only compact, "
+            "where judge and finalizer are one call."
+        ),
     )
     fusion_expose_analysis_metadata: bool = Field(
         default=False,
@@ -659,7 +668,8 @@ class ProxySettings(BaseSettings):
     @model_validator(mode="after")
     def _validate_fusion_settings(self):
         """Validate the nested Fusion settings view built from flat env fields."""
-        _ = self.fusion
+        if self.fusion_enabled:
+            _ = self.fusion
         return self
 
     @model_validator(mode="after")
@@ -692,6 +702,8 @@ class ProxySettings(BaseSettings):
     @cached_property
     def fusion(self) -> FusionSettings:
         """Build a nested Fusion settings view from flat GPT2GIGA_FUSION_* envs."""
+        if not self.fusion_enabled:
+            return FusionSettings(enabled=False)
         return FusionSettings(
             enabled=self.fusion_enabled,
             default_preset=self.fusion_default_preset,

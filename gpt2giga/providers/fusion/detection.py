@@ -36,7 +36,7 @@ class FusionRequestConfig(BaseModel):
     timeout_seconds: float = 120.0
     tools_mode: FusionToolsMode = "schema_only"
     pipeline_mode: FusionPipelineMode = "compact"
-    max_tool_calls: int = 0
+    max_tool_calls: int = Field(default=1, ge=1, le=1)
     raw_parameters: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -182,8 +182,20 @@ def _build_request_config(
         if "final_model" in params
         else preset.final_model
     )
+    if final_model is not None:
+        raise FusionConfigurationError(
+            "Fusion final_model is reserved; current implementation supports "
+            "only compact panel -> judge/finalizer pipeline."
+        )
     panel_roles = _string_list(params.get("panel_roles"), fallback=preset.panel_roles)
     tools_mode = _string_or_none(params.get("tools_mode")) or preset.tools_mode
+    max_tool_calls = _optional_int(
+        params.get("max_tool_calls"), settings.max_tool_calls
+    )
+    if max_tool_calls != 1:
+        raise FusionConfigurationError(
+            "Fusion currently supports exactly one final tool call."
+        )
 
     resolved = FusionRequestConfig(
         source=source,
@@ -209,10 +221,7 @@ def _build_request_config(
         or preset.timeout_seconds,
         tools_mode=tools_mode,
         pipeline_mode=settings.pipeline_mode,
-        max_tool_calls=_optional_int(
-            params.get("max_tool_calls"), settings.max_tool_calls
-        )
-        or settings.max_tool_calls,
+        max_tool_calls=max_tool_calls,
         raw_parameters=dict(params),
     )
     _validate_resolved_request(resolved, settings)
@@ -223,6 +232,11 @@ def _validate_resolved_request(
     config: FusionRequestConfig,
     settings: FusionSettings,
 ) -> None:
+    if config.pipeline_mode != "compact":
+        raise FusionConfigurationError(
+            "Fusion pipeline_mode='strict' is reserved; current implementation "
+            "supports only compact panel -> judge/finalizer pipeline."
+        )
     aliases = {_normalize_model_id(alias) for alias in settings.aliases}
     concrete_models = [
         *config.analysis_models,

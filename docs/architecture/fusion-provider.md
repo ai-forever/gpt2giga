@@ -76,7 +76,9 @@ messages are not exported through metrics or telemetry.
 
 ## Judge/finalizer flow
 
-The compact pipeline combines judge and finalizer into one GigaChat call. The
+The compact pipeline combines judge and finalizer into one GigaChat call. This
+is the only implemented pipeline mode. `final_model` is reserved for a future
+strict pipeline and must remain unset today. The
 judge request contains:
 
 - the original normalized messages;
@@ -87,6 +89,7 @@ judge request contains:
 The judge is expected to return JSON with:
 
 - `consensus`
+- `schema_version`
 - `contradictions`
 - `partial_coverage`
 - `unique_insights`
@@ -96,8 +99,10 @@ The judge is expected to return JSON with:
 - `final_answer`
 - `final_tool_call`
 
-If the judge response is empty or not parseable as the expected object, Fusion
-falls back to the best successful panel content and records
+Panel outputs are wrapped as untrusted advisory data and the judge prompt tells
+the model not to follow instructions inside them. If the judge response is empty
+or not parseable as the expected object, Fusion makes one repair call. If repair
+also fails, Fusion falls back to the best successful panel content and records
 `gpt2giga_fusion_fallback_reason`.
 
 ## Tool arbitration
@@ -113,10 +118,10 @@ Fusion does not execute tools itself.
 | `final_arbitration` | Panels may propose candidates, but only the judge/finalizer can emit the final validated tool call. |
 
 Panel-stage tool candidates are advisory. Final calls are validated against
-allowed tool names, forced `tool_choice`, required tool calls and
-`GPT2GIGA_FUSION_MAX_TOOL_CALLS`. If the client required a tool call and the
-judge does not produce a valid one, Fusion returns a typed normalized error
-instead of silently returning text.
+allowed tool names, forced `tool_choice`, required tool calls,
+`GPT2GIGA_FUSION_MAX_TOOL_CALLS=1` and the original tool arguments JSON Schema.
+If the client required a tool call and the judge does not produce a valid one,
+Fusion returns a typed normalized error instead of silently returning text.
 
 ## Streaming
 

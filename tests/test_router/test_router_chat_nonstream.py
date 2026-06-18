@@ -242,6 +242,45 @@ def test_chat_completions_fusion_model_alias_returns_buffered_stream():
     ]
 
 
+def test_chat_completions_fusion_error_returns_http_502():
+    class FailingFusionGigachat:
+        def __init__(self):
+            self.chat_calls = []
+
+        async def achat(self, chat):
+            self.chat_calls.append(chat)
+            raise RuntimeError("upstream unavailable")
+
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="code-budget",
+            fusion_aliases=["gpt2giga/fusion-code"],
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = FailingFusionGigachat()
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-code",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    body = resp.json()
+    assert resp.status_code == 502
+    assert body["error"]["code"] == "all_panels_failed"
+    assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
+        "GigaChat-2-Pro",
+        "GigaChat-2-Max",
+    ]
+
+
 def test_chat_completions_fusion_openrouter_tool_artifacts_are_not_forwarded():
     app = make_app()
     app.state.config = ProxyConfig(

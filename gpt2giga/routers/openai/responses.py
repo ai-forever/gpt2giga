@@ -258,6 +258,21 @@ async def _try_fusion_responses(
         response_id = context.request_id if context is not None else rquid_context.get()
     response_id = response_id or "fusion"
 
+    if normalized_response.error is not None:
+        openai_response = normalized_response_to_openai_response(
+            normalized_response,
+            request_payload=payload,
+            requested_model=requested_model,
+            response_id=response_id,
+        )
+        await emit_openai_response_observability(
+            state,
+            payload,
+            openai_response,
+            context=context,
+        )
+        return JSONResponse(status_code=502, content=openai_response)
+
     if not stream:
         openai_response = normalized_response_to_openai_response(
             normalized_response,

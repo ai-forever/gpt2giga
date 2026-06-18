@@ -41,6 +41,7 @@ def test_fusion_settings_defaults_are_disabled(monkeypatch):
     assert settings.fusion.presets == {}
     assert settings.fusion.streaming_mode == "buffered"
     assert settings.fusion.pipeline_mode == "compact"
+    assert settings.fusion.max_tool_calls == 1
 
 
 def test_fusion_settings_parse_json_env(monkeypatch):
@@ -90,6 +91,7 @@ def test_fusion_settings_parse_json_env(monkeypatch):
 
 def test_fusion_aliases_parse_comma_env(monkeypatch):
     _clear_fusion_env(monkeypatch)
+    monkeypatch.setenv("GPT2GIGA_FUSION_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_FUSION_ALIASES", "a, b, c")
 
     settings = ProxySettings()
@@ -111,6 +113,7 @@ def test_fusion_preset_rejects_too_many_analysis_models():
 
 def test_fusion_preset_rejects_recursive_alias(monkeypatch):
     _clear_fusion_env(monkeypatch)
+    monkeypatch.setenv("GPT2GIGA_FUSION_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_FUSION_ALIASES", '["gpt2giga/fusion-code"]')
     monkeypatch.setenv(
         "GPT2GIGA_FUSION_PRESETS",
@@ -152,3 +155,59 @@ def test_fusion_preset_rejects_zero_timeout():
                 }
             }
         )
+
+
+def test_fusion_settings_loads_reserved_strict_pipeline(monkeypatch):
+    _clear_fusion_env(monkeypatch)
+    monkeypatch.setenv("GPT2GIGA_FUSION_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_FUSION_PIPELINE_MODE", "strict")
+
+    settings = ProxySettings()
+
+    assert settings.fusion.pipeline_mode == "strict"
+
+
+def test_fusion_settings_loads_parallel_max_tool_calls(monkeypatch):
+    _clear_fusion_env(monkeypatch)
+    monkeypatch.setenv("GPT2GIGA_FUSION_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_FUSION_MAX_TOOL_CALLS", "2")
+
+    settings = ProxySettings()
+
+    assert settings.fusion.max_tool_calls == 2
+
+
+def test_fusion_settings_loads_reserved_final_model():
+    settings = FusionSettings(
+        presets={
+            "bad": {
+                "analysis_models": ["GigaChat"],
+                "judge_model": "GigaChat",
+                "final_model": "GigaChat-Pro",
+            }
+        }
+    )
+
+    assert settings.presets["bad"].final_model == "GigaChat-Pro"
+
+
+def test_disabled_fusion_ignores_stale_reserved_env(monkeypatch):
+    _clear_fusion_env(monkeypatch)
+    monkeypatch.setenv("GPT2GIGA_FUSION_ENABLED", "false")
+    monkeypatch.setenv("GPT2GIGA_FUSION_MAX_TOOL_CALLS", "16")
+    monkeypatch.setenv(
+        "GPT2GIGA_FUSION_PRESETS",
+        """
+        {
+          "stale": {
+            "analysis_models": ["GigaChat"],
+            "judge_model": "GigaChat",
+            "final_model": "GigaChat-Pro"
+          }
+        }
+        """,
+    )
+
+    settings = ProxySettings()
+
+    assert settings.fusion.enabled is False
