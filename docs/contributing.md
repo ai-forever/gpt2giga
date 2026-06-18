@@ -1,6 +1,6 @@
 # Документация
 
-Этот сайт собирается из Markdown-файлов в `docs/` через Docusaurus wrapper в `docs-site/` и публикуется на GitHub Pages.
+Этот сайт собирается из Markdown-файлов в `docs/` через обёртку Docusaurus в `docs-site/` и публикуется на GitHub Pages.
 
 ## Локальная сборка
 
@@ -24,7 +24,7 @@ npm run start
 ```
 
 По умолчанию Docusaurus откроет сайт на `http://127.0.0.1:3000/`.
-Для проверки production artifact после сборки:
+Для проверки готового артефакта после сборки:
 
 ```sh
 npm run serve
@@ -34,15 +34,15 @@ npm run serve
 
 Публичный сайт включает:
 
-- пользовательские guides из `docs/*.md`;
-- architecture notes из `docs/architecture/`;
-- ссылки на runnable examples и integration guides в репозитории;
-- GitHub links на deployment manifests и другие файлы вне `docs/`.
+- пользовательские руководства из `docs/*.md`;
+- заметки по архитектуре из `docs/architecture/`;
+- ссылки на запускаемые примеры и руководства по интеграциям в репозитории;
+- ссылки на GitHub на манифесты развёртывания и другие файлы вне `docs/`.
 
 ## Правила обновления
 
 - Держите README и `docs-site/sidebars.ts` согласованными по списку основных документов.
-- Для ссылок на файлы вне `docs/` используйте GitHub URLs, иначе опубликованный сайт может вести за пределы Pages artifact.
-- Не публикуйте secrets, локальные `.env`, credentials, keys или raw traffic payloads.
-- При изменении deployment behavior обновляйте одновременно `docs/deployment.md`, `deploy/README.md` и relevant compose manifests.
-- При изменении compatibility behavior обновляйте `docs/api-compatibility.md` и `docs/client-parameter-compatibility.md`.
+- Для ссылок на файлы вне `docs/` используйте URL-адреса GitHub, иначе опубликованный сайт может вести за пределы артефакта Pages.
+- Не публикуйте секреты, локальные `.env`, учётные данные, ключи или необработанные полезные нагрузки трафика.
+- При изменении поведения развёртывания обновляйте одновременно `docs/deployment.md`, `deploy/README.md` и соответствующие манифесты compose.
+- При изменении поведения совместимости обновляйте `docs/api-compatibility.md` и `docs/client-parameter-compatibility.md`.
