@@ -23,8 +23,12 @@ const config: Config = {
   },
 
   i18n: {
-    defaultLocale: 'ru',
-    locales: ['ru'],
+    defaultLocale: 'en',
+    locales: ['en', 'ru'],
+    localeConfigs: {
+      en: {label: 'English', htmlLang: 'en'},
+      ru: {label: 'Русский', htmlLang: 'ru'},
+    },
   },
 
   presets: [
@@ -58,11 +62,12 @@ const config: Config = {
           type: 'docSidebar',
           sidebarId: 'docs',
           position: 'left',
-          label: 'Документация',
+          label: 'Documentation',
         },
-        {to: '/quickstart', label: 'Быстрый старт', position: 'left'},
-        {to: '/api-compatibility', label: 'Совместимость', position: 'left'},
-        {to: '/operations', label: 'Операции', position: 'left'},
+        {to: '/quickstart', label: 'Quickstart', position: 'left'},
+        {to: '/api-compatibility', label: 'Compatibility', position: 'left'},
+        {to: '/operations', label: 'Operations', position: 'left'},
+        {type: 'localeDropdown', position: 'right'},
         {
           href: 'https://github.com/ai-forever/gpt2giga',
           label: 'GitHub',
@@ -74,23 +79,23 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Документация',
+          title: 'Documentation',
           items: [
-            {label: 'Обзор', to: '/'},
-            {label: 'Быстрый старт', to: '/quickstart'},
-            {label: 'Конфигурация', to: '/configuration'},
+            {label: 'Overview', to: '/'},
+            {label: 'Quickstart', to: '/quickstart'},
+            {label: 'Configuration', to: '/configuration'},
           ],
         },
         {
-          title: 'Совместимость',
+          title: 'Compatibility',
           items: [
             {label: 'API compatibility', to: '/api-compatibility'},
             {label: 'Client parameters', to: '/client-parameter-compatibility'},
-            {label: 'Встроенные инструменты', to: '/builtin-tools'},
+            {label: 'Built-in tools', to: '/builtin-tools'},
           ],
         },
         {
-          title: 'Проект',
+          title: 'Project',
           items: [
             {label: 'GitHub', href: 'https://github.com/ai-forever/gpt2giga'},
             {label: 'Examples', href: 'https://github.com/ai-forever/gpt2giga/tree/main/examples'},

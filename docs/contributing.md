@@ -1,48 +1,48 @@
-# Документация
+# Documentation
 
-Этот сайт собирается из Markdown-файлов в `docs/` через обёртку Docusaurus в `docs-site/` и публикуется на GitHub Pages.
+This site is built from the Markdown files in `docs/` through the Docusaurus wrapper in `docs-site/` and is published to GitHub Pages.
 
-## Локальная сборка
+## Local build
 
-Установите Node.js `20+`, затем зависимости Docusaurus:
+Install Node.js `20+`, then the Docusaurus dependencies:
 
 ```sh
 cd docs-site
 npm ci
 ```
 
-Соберите сайт:
+Build the site:
 
 ```sh
 npm run build
 ```
 
-Для локального предпросмотра:
+For a local preview:
 
 ```sh
 npm run start
 ```
 
-По умолчанию Docusaurus откроет сайт на `http://127.0.0.1:3000/`.
-Для проверки готового артефакта после сборки:
+By default, Docusaurus opens the site at `http://127.0.0.1:3000/`.
+To check the production artifact after the build:
 
 ```sh
 npm run serve
 ```
 
-## Что публикуется
+## What gets published
 
-Публичный сайт включает:
+The public site includes:
 
-- пользовательские руководства из `docs/*.md`;
-- заметки по архитектуре из `docs/architecture/`;
-- ссылки на запускаемые примеры и руководства по интеграциям в репозитории;
-- ссылки на GitHub на манифесты развёртывания и другие файлы вне `docs/`.
+- user guides from `docs/*.md`;
+- architecture notes from `docs/architecture/`;
+- links to runnable examples and integration guides in the repository;
+- GitHub links to deployment manifests and other files outside `docs/`.
 
-## Правила обновления
+## Update rules
 
-- Держите README и `docs-site/sidebars.ts` согласованными по списку основных документов.
-- Для ссылок на файлы вне `docs/` используйте URL-адреса GitHub, иначе опубликованный сайт может вести за пределы артефакта Pages.
-- Не публикуйте секреты, локальные `.env`, учётные данные, ключи или необработанные полезные нагрузки трафика.
-- При изменении поведения развёртывания обновляйте одновременно `docs/deployment.md`, `deploy/README.md` и соответствующие манифесты compose.
-- При изменении поведения совместимости обновляйте `docs/api-compatibility.md` и `docs/client-parameter-compatibility.md`.
+- Keep README and `docs-site/sidebars.ts` consistent with the list of core documents.
+- For links to files outside `docs/`, use GitHub URLs; otherwise the published site may lead beyond the Pages artifact.
+- Do not publish secrets, local `.env`, credentials, keys, or raw traffic payloads.
+- When deployment behavior changes, update `docs/deployment.md`, `deploy/README.md`, and the relevant Compose manifests together.
+- When compatibility behavior changes, update `docs/api-compatibility.md` and `docs/client-parameter-compatibility.md`.

@@ -4,13 +4,13 @@ const sidebars: SidebarsConfig = {
   docs: [
     {
       type: 'category',
-      label: 'Обзор',
+      label: 'Overview',
       collapsible: false,
       items: ['index', 'quickstart', 'configuration'],
     },
     {
       type: 'category',
-      label: 'Совместимость',
+      label: 'Compatibility',
       collapsible: false,
       items: [
         'api-compatibility',
@@ -21,13 +21,13 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Эксплуатация',
+      label: 'Operations',
       collapsible: false,
       items: ['deployment', 'operations', 'live-integration-tests'],
     },
     {
       type: 'category',
-      label: 'Архитектура',
+      label: 'Architecture',
       collapsible: false,
       items: [
         'architecture/normalized-messages',
@@ -37,7 +37,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Участие',
+      label: 'Contributing',
       collapsible: false,
       items: ['contributing'],
     },
