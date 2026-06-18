@@ -131,8 +131,11 @@ class FusionSettings(BaseModel):
     presets: dict[str, FusionPresetSettings] = Field(default_factory=dict)
     max_panel_models: int = Field(default=4, ge=1, le=8)
     max_panel_concurrency: int = Field(default=4, ge=1)
+    max_concurrent_requests: int = Field(default=4, ge=1)
+    max_total_upstream_calls_per_request: int = Field(default=5, ge=0)
     max_tool_calls: int = Field(default=1, ge=0, le=16)
     streaming_mode: FusionStreamingMode = "buffered"
+    stream_heartbeat_seconds: float = Field(default=0.0, ge=0.0)
     pipeline_mode: FusionPipelineMode = "compact"
     expose_analysis_metadata: bool = False
     expose_panel_responses: bool = False
@@ -278,6 +281,19 @@ class ProxySettings(BaseSettings):
         ge=1,
         description="Maximum concurrent analysis calls inside one Fusion request.",
     )
+    fusion_max_concurrent_requests: int = Field(
+        default=4,
+        ge=1,
+        description="Maximum concurrently running Fusion requests per process.",
+    )
+    fusion_max_total_upstream_calls_per_request: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "Maximum planned upstream calls in one Fusion request. "
+            "Use 0 to disable the per-request call budget."
+        ),
+    )
     fusion_max_tool_calls: int = Field(
         default=1,
         ge=0,
@@ -290,6 +306,14 @@ class ProxySettings(BaseSettings):
     fusion_streaming_mode: FusionStreamingMode = Field(
         default="buffered",
         description="Fusion streaming behavior: off or buffered SSE after deliberation.",
+    )
+    fusion_stream_heartbeat_seconds: float = Field(
+        default=0.0,
+        ge=0.0,
+        description=(
+            "Seconds between opt-in OpenAI Chat SSE heartbeat comment frames "
+            "while buffered Fusion deliberation is running. 0 disables heartbeats."
+        ),
     )
     fusion_pipeline_mode: FusionPipelineMode = Field(
         default="compact",
@@ -711,8 +735,13 @@ class ProxySettings(BaseSettings):
             presets=self.fusion_presets,
             max_panel_models=self.fusion_max_panel_models,
             max_panel_concurrency=self.fusion_max_panel_concurrency,
+            max_concurrent_requests=self.fusion_max_concurrent_requests,
+            max_total_upstream_calls_per_request=(
+                self.fusion_max_total_upstream_calls_per_request
+            ),
             max_tool_calls=self.fusion_max_tool_calls,
             streaming_mode=self.fusion_streaming_mode,
+            stream_heartbeat_seconds=self.fusion_stream_heartbeat_seconds,
             pipeline_mode=self.fusion_pipeline_mode,
             expose_analysis_metadata=self.fusion_expose_analysis_metadata,
             expose_panel_responses=self.fusion_expose_panel_responses,

@@ -252,6 +252,15 @@ def _validate_resolved_request(
         raise FusionConfigurationError(
             "Fusion analysis_models exceeds GPT2GIGA_FUSION_MAX_PANEL_MODELS"
         )
+    if (
+        settings.max_total_upstream_calls_per_request > 0
+        and len(config.analysis_models) + 1
+        > settings.max_total_upstream_calls_per_request
+    ):
+        raise FusionConfigurationError(
+            "Fusion planned upstream calls exceed "
+            "GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST"
+        )
     if config.min_successful_panels > len(config.analysis_models):
         raise FusionConfigurationError(
             "Fusion min_successful_panels cannot exceed analysis_models length"

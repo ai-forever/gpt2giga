@@ -18,6 +18,7 @@ from gpt2giga.protocols.normalized import (
 )
 from gpt2giga.providers.fusion.adapter import FusionProviderAdapter
 from gpt2giga.providers.fusion.detection import FusionRequestConfig
+from gpt2giga.providers.fusion.limiter import FusionRequestLimiter
 
 
 class FakeProvider:
@@ -111,6 +112,7 @@ def _adapter(
     *,
     metrics_sink=None,
     observability_sink=None,
+    request_limiter=None,
     **settings_overrides,
 ) -> FusionProviderAdapter:
     settings = {
@@ -123,6 +125,7 @@ def _adapter(
         upstream_provider=provider,
         metrics_sink=metrics_sink,
         observability_sink=observability_sink,
+        request_limiter=request_limiter,
     )
 
 
@@ -251,6 +254,35 @@ async def test_fusion_adapter_runs_panels_in_parallel_and_judges_result():
     assert "likely files" in provider.calls[0].messages[0].content
     assert "Panel responses" in provider.calls[-1].messages[-1].content
     assert response.metadata["gpt2giga_fusion_successful_panels"] == "2"
+
+
+async def test_fusion_adapter_uses_shared_request_limiter():
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A answer"),
+            "PanelB": _text_response("PanelB", "B answer"),
+            "Judge": _text_response("Judge", _judge_json("merged final")),
+        },
+        delays={"PanelA": 0.05, "PanelB": 0.05},
+    )
+    limiter = FusionRequestLimiter(max_concurrent_requests=1)
+    adapter = _adapter(provider, request_limiter=limiter)
+
+    responses = await asyncio.gather(
+        adapter.chat(_request(), context=_context(), fusion_config=_fusion_config()),
+        adapter.chat(_request(), context=_context(), fusion_config=_fusion_config()),
+    )
+
+    assert [response.error for response in responses] == [None, None]
+    assert provider.max_in_flight == 2
+    assert [call.model for call in provider.calls] == [
+        "PanelA",
+        "PanelB",
+        "Judge",
+        "PanelA",
+        "PanelB",
+        "Judge",
+    ]
 
 
 async def test_fusion_adapter_emits_safe_telemetry_without_prompt_leakage():
@@ -403,6 +435,31 @@ async def test_fusion_adapter_repairs_malformed_judge_json_once():
     assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
         "judge_repaired:invalid_judge_json"
     )
+
+
+async def test_fusion_adapter_skips_repair_when_call_budget_is_exhausted():
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A usable answer"),
+            "PanelB": _text_response("PanelB", "B usable answer"),
+            "Judge": _text_response(
+                "Judge",
+                '{"schema_version":"gpt2giga.fusion.analysis.v1","final_answer":"bad",}',
+            ),
+        }
+    )
+
+    response = await _adapter(
+        provider,
+        max_total_upstream_calls_per_request=3,
+    ).chat(
+        _request(),
+        fusion_config=_fusion_config(),
+    )
+
+    assert [call.model for call in provider.calls] == ["PanelA", "PanelB", "Judge"]
+    assert response.choices[0].message.content == "A usable answer"
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == "invalid_judge_json"
 
 
 async def test_fusion_adapter_accepts_fenced_judge_json():

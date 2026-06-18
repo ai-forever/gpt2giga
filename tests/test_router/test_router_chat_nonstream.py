@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -240,6 +241,43 @@ def test_chat_completions_fusion_model_alias_returns_buffered_stream():
         "GigaChat-2-Max",
         "GigaChat-2-Max",
     ]
+
+
+def test_chat_completions_fusion_stream_can_emit_heartbeat_comments():
+    class SlowFusionGigachat(FusionGigachat):
+        async def achat(self, chat):
+            await asyncio.sleep(0.01)
+            return await super().achat(chat)
+
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="code-budget",
+            fusion_aliases=["gpt2giga/fusion-code"],
+            fusion_stream_heartbeat_seconds=0.001,
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = SlowFusionGigachat()
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-code",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert ": gpt2giga-fusion heartbeat" in body
+    assert "fused answer" in body
+    assert "data: [DONE]" in body
 
 
 def test_chat_completions_fusion_error_returns_http_502():

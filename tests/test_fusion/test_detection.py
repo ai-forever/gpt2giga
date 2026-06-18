@@ -155,6 +155,24 @@ def test_extract_fusion_rejects_too_many_panel_models():
         )
 
 
+def test_extract_fusion_rejects_upstream_call_budget_exceeded():
+    with pytest.raises(FusionConfigurationError):
+        extract_fusion_request(
+            {
+                "tools": [
+                    {
+                        "type": "openrouter:fusion",
+                        "parameters": {
+                            "analysis_models": ["A", "B", "C"],
+                            "judge_model": "Judge",
+                        },
+                    }
+                ]
+            },
+            _settings(max_total_upstream_calls_per_request=3),
+        )
+
+
 def test_extract_fusion_rejects_reserved_final_model():
     with pytest.raises(FusionConfigurationError):
         extract_fusion_request(

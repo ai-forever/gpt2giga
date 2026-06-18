@@ -1,5 +1,6 @@
 """OpenAI chat completions endpoint."""
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
 from copy import deepcopy
@@ -9,7 +10,11 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.app_state import (
+    get_fusion_request_limiter,
+    get_gigachat_client,
+    get_model_concurrency_limiter,
+)
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.conversation import (
     commit_chat_completion_response,
@@ -273,7 +278,24 @@ async def _try_fusion_chat_completion(
         metrics_sink=getattr(state, "metrics_sink", None),
         observability_sink=getattr(state, "observability_sink", None),
         logger=getattr(state, "logger", None),
+        request_limiter=get_fusion_request_limiter(request),
     )
+    if stream and fusion_settings.stream_heartbeat_seconds > 0:
+        return StreamingResponse(
+            _buffered_openai_chat_sse_with_fusion_heartbeat(
+                request,
+                conversation_turn,
+                payload=payload,
+                normalized_request=normalized_request,
+                fusion_adapter=fusion_adapter,
+                fusion_config=fusion_config,
+                context=context,
+                requested_model=str(payload.get("model") or "GigaChat"),
+                heartbeat_seconds=fusion_settings.stream_heartbeat_seconds,
+            ),
+            media_type="text/event-stream",
+        )
+
     normalized_response = await fusion_adapter.chat(
         normalized_request,
         context=context,
@@ -338,6 +360,64 @@ async def _try_fusion_chat_completion(
         ),
         media_type="text/event-stream",
     )
+
+
+async def _buffered_openai_chat_sse_with_fusion_heartbeat(
+    request: Request,
+    conversation_turn,
+    *,
+    payload: dict,
+    normalized_request: NormalizedChatRequest,
+    fusion_adapter: FusionProviderAdapter,
+    fusion_config,
+    context,
+    requested_model: str,
+    heartbeat_seconds: float,
+) -> AsyncIterator[str]:
+    state = request.app.state
+    response_id = context.request_id if context is not None else rquid_context.get()
+    response_id = response_id or "fusion"
+    task = asyncio.create_task(
+        fusion_adapter.chat(
+            normalized_request,
+            context=context,
+            fusion_config=fusion_config,
+            is_disconnected=request.is_disconnected,
+        )
+    )
+    try:
+        while not task.done():
+            done, _ = await asyncio.wait({task}, timeout=heartbeat_seconds)
+            if done:
+                break
+            yield ": gpt2giga-fusion heartbeat\n\n"
+        normalized_response = await task
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        raise
+
+    requested_model = str(
+        payload.get("model") or normalized_response.model or requested_model
+    )
+    response_id = normalized_response.id or response_id
+    body_iterator = stitch_chat_completion_stream(
+        request,
+        conversation_turn,
+        _buffered_openai_chat_sse_from_normalized_response(
+            normalized_response,
+            requested_model=requested_model,
+            response_id=response_id,
+        ),
+    )
+    async for chunk in _observe_chat_completion_stream(
+        state,
+        body_iterator,
+        request_payload=payload,
+        context=context,
+        normalized_request=normalized_request,
+    ):
+        yield chunk
 
 
 async def _buffered_openai_chat_sse_from_normalized_response(

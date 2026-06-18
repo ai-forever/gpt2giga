@@ -6,7 +6,11 @@ from typing import Dict, List
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.app_state import (
+    get_fusion_request_limiter,
+    get_gigachat_client,
+    get_model_concurrency_limiter,
+)
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
@@ -306,6 +310,7 @@ async def _try_fusion_anthropic_messages(
         metrics_sink=getattr(state, "metrics_sink", None),
         observability_sink=getattr(state, "observability_sink", None),
         logger=getattr(state, "logger", None),
+        request_limiter=get_fusion_request_limiter(request),
     )
     normalized_response = await fusion_adapter.chat(
         normalized_request,

@@ -14,8 +14,11 @@ _FUSION_ENV_KEYS = [
     "GPT2GIGA_FUSION_PRESETS",
     "GPT2GIGA_FUSION_MAX_PANEL_MODELS",
     "GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY",
+    "GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS",
+    "GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST",
     "GPT2GIGA_FUSION_MAX_TOOL_CALLS",
     "GPT2GIGA_FUSION_STREAMING_MODE",
+    "GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS",
     "GPT2GIGA_FUSION_PIPELINE_MODE",
     "GPT2GIGA_FUSION_EXPOSE_ANALYSIS_METADATA",
     "GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES",
@@ -40,7 +43,10 @@ def test_fusion_settings_defaults_are_disabled(monkeypatch):
     assert settings.fusion.aliases == DEFAULT_FUSION_ALIASES
     assert settings.fusion.presets == {}
     assert settings.fusion.streaming_mode == "buffered"
+    assert settings.fusion.stream_heartbeat_seconds == 0.0
     assert settings.fusion.pipeline_mode == "compact"
+    assert settings.fusion.max_concurrent_requests == 4
+    assert settings.fusion.max_total_upstream_calls_per_request == 5
     assert settings.fusion.max_tool_calls == 1
 
 
@@ -70,8 +76,11 @@ def test_fusion_settings_parse_json_env(monkeypatch):
     )
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_PANEL_MODELS", "3")
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY", "2")
+    monkeypatch.setenv("GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS", "7")
+    monkeypatch.setenv("GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST", "6")
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_TOOL_CALLS", "1")
     monkeypatch.setenv("GPT2GIGA_FUSION_STREAMING_MODE", "BUFFERED")
+    monkeypatch.setenv("GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS", "1.5")
 
     settings = ProxySettings()
 
@@ -82,7 +91,10 @@ def test_fusion_settings_parse_json_env(monkeypatch):
     ]
     assert settings.fusion.max_panel_models == 3
     assert settings.fusion.max_panel_concurrency == 2
+    assert settings.fusion.max_concurrent_requests == 7
+    assert settings.fusion.max_total_upstream_calls_per_request == 6
     assert settings.fusion.max_tool_calls == 1
+    assert settings.fusion.stream_heartbeat_seconds == 1.5
     preset = settings.fusion.presets["code-high"]
     assert preset.analysis_models == ["GigaChat-3-Ultra", "GigaChat-2-Max"]
     assert preset.panel_roles == ["architect", "reviewer"]

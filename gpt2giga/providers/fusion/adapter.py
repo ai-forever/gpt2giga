@@ -6,7 +6,8 @@ import asyncio
 import inspect
 import json
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any, Protocol
 
 from pydantic import ValidationError
@@ -24,6 +25,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedTool,
 )
 from gpt2giga.providers.fusion.detection import FusionRequestConfig
+from gpt2giga.providers.fusion.limiter import FusionRequestLimiter
 from gpt2giga.providers.fusion.prompts import (
     FUSION_JUDGE_REPAIR_SYSTEM_PROMPT,
     FUSION_JUDGE_SYSTEM_PROMPT,
@@ -75,12 +77,14 @@ class FusionProviderAdapter:
         metrics_sink: Any | None = None,
         observability_sink: Any | None = None,
         logger: Any | None = None,
+        request_limiter: FusionRequestLimiter | None = None,
     ) -> None:
         self.settings = settings
         self.upstream_provider = upstream_provider
         self.metrics_sink = metrics_sink
         self.observability_sink = observability_sink
         self.logger = logger
+        self.request_limiter = request_limiter
 
     async def chat(
         self,
@@ -91,6 +95,23 @@ class FusionProviderAdapter:
         is_disconnected: DisconnectChecker | None = None,
     ) -> NormalizedResponse:
         """Execute a compact Fusion panel plus judge/finalizer pipeline."""
+        async with _limit_fusion_request(self.request_limiter):
+            return await self._chat_unlimited(
+                request,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+
+    async def _chat_unlimited(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        context: RequestContext | None = None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None = None,
+    ) -> NormalizedResponse:
+        """Execute a Fusion run after the global request slot is acquired."""
         started = time.perf_counter()
         requested_model = fusion_config.requested_model or request.model or "fusion"
 
@@ -157,13 +178,17 @@ class FusionProviderAdapter:
             max_tool_calls=fusion_config.max_tool_calls,
         )
         repair_response: NormalizedResponse | None = None
-        if judge_error_reason is None and _judge_repair_needed(
-            analysis,
-            parse_error_reason=parse_error_reason,
-            request_tools=request.tools,
-            tools_mode=fusion_config.tools_mode,
-            tool_choice=request.tool_choice,
-            max_tool_calls=fusion_config.max_tool_calls,
+        if (
+            judge_error_reason is None
+            and _judge_repair_needed(
+                analysis,
+                parse_error_reason=parse_error_reason,
+                request_tools=request.tools,
+                tools_mode=fusion_config.tools_mode,
+                tool_choice=request.tool_choice,
+                max_tool_calls=fusion_config.max_tool_calls,
+            )
+            and _repair_retry_fits_budget(fusion_config, self.settings)
         ):
             repair_reason = parse_error_reason or "empty_judge_final"
             try:
@@ -914,6 +939,17 @@ def _judge_repair_needed(
     return analysis is not None and not _analysis_has_final_output(analysis)
 
 
+def _repair_retry_fits_budget(
+    fusion_config: FusionRequestConfig,
+    settings: FusionSettings,
+) -> bool:
+    limit = settings.max_total_upstream_calls_per_request
+    if limit <= 0:
+        return True
+    calls_with_repair = len(fusion_config.analysis_models) + 2
+    return calls_with_repair <= limit
+
+
 def _analysis_has_final_output(analysis: FusionAnalysis | None) -> bool:
     return bool(
         analysis is not None
@@ -1062,6 +1098,17 @@ async def _is_disconnected(is_disconnected: DisconnectChecker | None) -> bool:
     if inspect.isawaitable(result):
         result = await result
     return bool(result)
+
+
+@asynccontextmanager
+async def _limit_fusion_request(
+    limiter: FusionRequestLimiter | None,
+) -> AsyncIterator[None]:
+    if limiter is None:
+        yield
+        return
+    async with limiter.limit():
+        yield
 
 
 def _panel_role(

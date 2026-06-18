@@ -66,9 +66,13 @@ then deep-copies that request for each panel model:
 - tools are not forwarded for execution in panel calls.
 
 Panel calls run concurrently with `GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY`, bounded
-by the number of analysis models. Each call has the preset timeout. Disconnect
-checks cancel in-flight panel tasks when the client connection goes away before
-the buffered response is produced.
+by the number of analysis models. The whole Fusion request also enters the
+application-scoped `GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS` limiter, and request
+detection rejects plans whose panel calls plus judge call exceed
+`GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST` when that limit is
+positive. Each upstream call has the preset timeout. Disconnect checks cancel
+in-flight panel tasks when the client connection goes away before the buffered
+response is produced.
 
 After panels complete, the adapter requires at least `min_successful_panels`.
 Failed panels remain in run metadata as `error` or `timeout`, but raw error
@@ -133,6 +137,11 @@ shape:
 - OpenAI Responses events;
 - Anthropic Messages events;
 - Gemini `GenerateContentResponse` SSE chunks.
+
+`GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS` is disabled by default. When set to a
+positive value, OpenAI Chat Completions streaming sends SSE comment heartbeat
+frames while Fusion deliberation is still running. Other protocol streams remain
+strict buffered streams until their client SDK compatibility is verified.
 
 `GPT2GIGA_FUSION_STREAMING_MODE=off` makes streaming Fusion requests fail with a
 configuration error. Non-streaming Fusion requests continue to work.

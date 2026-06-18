@@ -34,7 +34,7 @@ tools = [
 ]
 
 response = client.models.generate_content(
-    model="GigaChat-2-Max",
+    model="gpt2giga/fusion-code",
     contents="Какая погода в Москве?",
     config=types.GenerateContentConfig(
         tools=tools,
@@ -59,7 +59,7 @@ if response.function_calls:
         "conditions": "облачно",
     }
     final = client.models.generate_content(
-        model="GigaChat-2-Max",
+        model="gpt2giga/fusion-code",
         contents=[
             types.Content(
                 role="user",
