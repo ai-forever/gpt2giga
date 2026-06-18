@@ -1,0 +1,371 @@
+"""Tool-call arbitration helpers for Fusion runs."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+from gpt2giga.protocols.normalized import NormalizedTool, NormalizedToolCall
+from gpt2giga.providers.fusion.schemas import FusionPanelResult
+
+
+@dataclass(frozen=True)
+class ToolCallPolicy:
+    """Resolved Fusion tool-call policy for one request."""
+
+    allow_tool_calls: bool
+    require_tool_call: bool
+    forced_tool_name: str | None
+    allowed_tool_names: frozenset[str]
+    max_tool_calls: int
+    reason: str | None = None
+
+
+def build_panel_tool_reference(
+    tools: list[NormalizedTool],
+    tools_mode: str,
+) -> str | None:
+    """Build reference-only tool schema text for panel-stage prompts."""
+    if not tools or tools_mode == "off":
+        return None
+    return (
+        "Tool schemas are reference-only in the panel stage. Do not execute "
+        "tools or emit real tool calls. If a tool is necessary, propose one "
+        "tool_call_candidate JSON object for the judge/finalizer.\n"
+        f"{_json_dumps(_tool_schema_payload(tools))}"
+    )
+
+
+def build_judge_tool_arbitration_prompt(
+    *,
+    tools: list[NormalizedTool],
+    panel_results: list[FusionPanelResult],
+    tool_choice: Any,
+    tools_mode: str,
+    max_tool_calls: int,
+) -> str | None:
+    """Build judge/finalizer tool arbitration instructions."""
+    policy = resolve_tool_call_policy(
+        tools=tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    )
+    if not tools and not policy.require_tool_call:
+        return None
+
+    if not policy.allow_tool_calls:
+        return (
+            "Tool arbitration mode forbids final tool calls. Return "
+            "final_tool_call=null and provide a text final_answer."
+        )
+
+    payload = {
+        "mode": tools_mode,
+        "tool_choice": tool_choice,
+        "require_tool_call": policy.require_tool_call,
+        "forced_tool_name": policy.forced_tool_name,
+        "max_tool_calls": policy.max_tool_calls,
+        "allowed_tool_names": sorted(policy.allowed_tool_names),
+        "tool_schemas": _tool_schema_payload(tools),
+        "panel_tool_candidates": [
+            candidate.to_json_dict()
+            for candidate in panel_tool_candidates(panel_results)
+        ],
+    }
+    return (
+        "Tool arbitration instructions:\n"
+        "- Only the judge/finalizer may return a real final_tool_call.\n"
+        "- Panel candidates are advisory only and must not be forwarded "
+        "without validation.\n"
+        "- If returning final_tool_call, choose a tool from allowed_tool_names "
+        "and satisfy tool_choice.\n"
+        "- If no valid tool call is needed and require_tool_call=false, return "
+        "final_tool_call=null and a text final_answer.\n"
+        f"{_json_dumps(payload)}"
+    )
+
+
+def resolve_tool_call_policy(
+    *,
+    tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int = 0,
+) -> ToolCallPolicy:
+    """Resolve whether Fusion may or must emit a final tool call."""
+    allowed_names = frozenset(tool.name for tool in tools if tool.name)
+    effective_max_tool_calls = max_tool_calls if max_tool_calls > 0 else 1
+    require_tool_call = _tool_choice_requires_tool(tool_choice)
+    forced_name = _forced_tool_name(tool_choice)
+
+    if tools_mode == "off":
+        return ToolCallPolicy(
+            allow_tool_calls=False,
+            require_tool_call=require_tool_call,
+            forced_tool_name=forced_name,
+            allowed_tool_names=allowed_names,
+            max_tool_calls=effective_max_tool_calls,
+            reason="tools_mode_off",
+        )
+    if not allowed_names:
+        return ToolCallPolicy(
+            allow_tool_calls=False,
+            require_tool_call=require_tool_call,
+            forced_tool_name=forced_name,
+            allowed_tool_names=allowed_names,
+            max_tool_calls=effective_max_tool_calls,
+            reason="no_tools",
+        )
+    if _tool_choice_disables_tools(tool_choice):
+        return ToolCallPolicy(
+            allow_tool_calls=False,
+            require_tool_call=False,
+            forced_tool_name=None,
+            allowed_tool_names=allowed_names,
+            max_tool_calls=effective_max_tool_calls,
+            reason="tool_choice_none",
+        )
+
+    return ToolCallPolicy(
+        allow_tool_calls=True,
+        require_tool_call=require_tool_call,
+        forced_tool_name=forced_name,
+        allowed_tool_names=allowed_names,
+        max_tool_calls=effective_max_tool_calls,
+    )
+
+
+def panel_tool_candidates(
+    panel_results: list[FusionPanelResult],
+) -> list[NormalizedToolCall]:
+    """Extract advisory tool candidates from panel results."""
+    candidates: list[NormalizedToolCall] = []
+    for result in panel_results:
+        if result.status != "ok":
+            continue
+        candidates.extend(
+            _annotated_candidate(tool_call, panel=result)
+            for tool_call in result.tool_calls
+            if tool_call.name
+        )
+        candidates.extend(
+            _annotated_candidate(tool_call, panel=result)
+            for tool_call in _tool_candidates_from_text(result.content)
+            if tool_call.name
+        )
+    return candidates
+
+
+def first_allowed_tool_call(
+    tool_calls: list[NormalizedToolCall],
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int = 0,
+) -> NormalizedToolCall | None:
+    """Return the first final tool call allowed by the request policy."""
+    for tool_call in tool_calls:
+        if tool_call_allowed(
+            tool_call,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+        ):
+            return tool_call
+    return None
+
+
+def tool_call_allowed(
+    tool_call: NormalizedToolCall,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int = 0,
+) -> bool:
+    """Return whether a final tool call satisfies Fusion arbitration policy."""
+    policy = resolve_tool_call_policy(
+        tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    )
+    if not policy.allow_tool_calls:
+        return False
+    if not tool_call.name or tool_call.name not in policy.allowed_tool_names:
+        return False
+    return not policy.forced_tool_name or tool_call.name == policy.forced_tool_name
+
+
+def tool_choice_requires_tool(
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int = 0,
+) -> bool:
+    """Return whether the client requested a required final tool call."""
+    policy = resolve_tool_call_policy(
+        tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    )
+    return policy.require_tool_call
+
+
+def _tool_schema_payload(tools: list[NormalizedTool]) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": tool.type,
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        }
+        for tool in tools
+    ]
+
+
+def _tool_candidates_from_text(content: str | None) -> list[NormalizedToolCall]:
+    if not content:
+        return []
+    payload = _load_json_candidate_payload(content)
+    if payload is None:
+        return []
+
+    raw_candidates: list[Any]
+    if isinstance(payload, Mapping):
+        if "tool_call_candidates" in payload:
+            value = payload["tool_call_candidates"]
+            raw_candidates = value if isinstance(value, list) else [value]
+        elif "tool_call_candidate" in payload:
+            raw_candidates = [payload["tool_call_candidate"]]
+        else:
+            raw_candidates = [payload]
+    elif isinstance(payload, list):
+        raw_candidates = payload
+    else:
+        return []
+
+    candidates: list[NormalizedToolCall] = []
+    for item in raw_candidates:
+        if not isinstance(item, Mapping):
+            continue
+        candidate = _tool_call_from_mapping(item)
+        if candidate is not None:
+            candidates.append(candidate)
+    return candidates
+
+
+def _load_json_candidate_payload(content: str) -> Any:
+    text = _strip_code_fence(content)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+
+
+def _tool_call_from_mapping(value: Mapping[str, Any]) -> NormalizedToolCall | None:
+    function = value.get("function")
+    function_data = function if isinstance(function, Mapping) else {}
+    name = value.get("name") or function_data.get("name")
+    if not isinstance(name, str) or not name:
+        return None
+    arguments = value.get("arguments")
+    if arguments is None:
+        arguments = value.get("input")
+    if arguments is None:
+        arguments = function_data.get("arguments")
+    return NormalizedToolCall(
+        id=_string_or_none(value.get("id") or value.get("call_id")),
+        type=_string_or_none(value.get("type")) or "function",
+        name=name,
+        arguments=arguments,
+    )
+
+
+def _annotated_candidate(
+    tool_call: NormalizedToolCall,
+    *,
+    panel: FusionPanelResult,
+) -> NormalizedToolCall:
+    candidate = tool_call.model_copy(deep=True)
+    candidate.raw_extensions = {
+        **candidate.raw_extensions,
+        "fusion_panel_model": panel.model,
+        "fusion_panel_role": panel.role,
+    }
+    return candidate
+
+
+def _tool_choice_disables_tools(tool_choice: Any) -> bool:
+    if isinstance(tool_choice, str):
+        return tool_choice.strip().lower() == "none"
+    if isinstance(tool_choice, Mapping):
+        choice_type = _string_or_none(tool_choice.get("type"))
+        return choice_type is not None and choice_type.lower() == "none"
+    return False
+
+
+def _tool_choice_requires_tool(tool_choice: Any) -> bool:
+    if isinstance(tool_choice, str):
+        return tool_choice.strip().lower() in {"any", "required"}
+    if isinstance(tool_choice, Mapping):
+        choice_type = _string_or_none(tool_choice.get("type"))
+        if choice_type is None:
+            return False
+        choice_type = choice_type.lower()
+        if choice_type in {"any", "required", "function", "tool"}:
+            return True
+    return False
+
+
+def _forced_tool_name(tool_choice: Any) -> str | None:
+    if isinstance(tool_choice, Mapping):
+        function = tool_choice.get("function")
+        if isinstance(function, Mapping):
+            name = _string_or_none(function.get("name"))
+            if name:
+                return name
+        name = _string_or_none(tool_choice.get("name"))
+        if name:
+            return name
+    if isinstance(tool_choice, str):
+        choice = tool_choice.strip()
+        if choice and choice.lower() not in {"auto", "none", "any", "required"}:
+            return choice
+    return None
+
+
+def _strip_code_fence(content: str) -> str:
+    text = content.strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, default=str)
+
+
+def _string_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)

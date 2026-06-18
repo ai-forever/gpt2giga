@@ -21,7 +21,6 @@ from gpt2giga.protocols.normalized import (
     NormalizedMessage,
     NormalizedResponse,
     NormalizedTool,
-    NormalizedToolCall,
 )
 from gpt2giga.providers.fusion.detection import FusionRequestConfig
 from gpt2giga.providers.fusion.prompts import (
@@ -33,6 +32,13 @@ from gpt2giga.providers.fusion.schemas import (
     FusionAnalysis,
     FusionPanelResult,
     FusionRunResult,
+)
+from gpt2giga.providers.fusion.tool_arbitration import (
+    build_judge_tool_arbitration_prompt,
+    build_panel_tool_reference,
+    first_allowed_tool_call,
+    tool_call_allowed,
+    tool_choice_requires_tool,
 )
 from gpt2giga.providers.fusion.usage import aggregate_usage
 
@@ -131,6 +137,8 @@ class FusionProviderAdapter:
             judge_response,
             request_tools=request.tools,
             tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
         )
         fallback_reason = judge_error_reason or parse_error_reason
         usage = aggregate_usage(
@@ -143,7 +151,34 @@ class FusionProviderAdapter:
             analysis,
             request_tools=request.tools,
             tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
         )
+        if _final_tool_call_is_required(
+            message,
+            request_tools=request.tools,
+            tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
+        ):
+            run_result = self._build_run_result(
+                status="error",
+                requested_model=requested_model,
+                fusion_config=fusion_config,
+                panel_results=panel_results,
+                failed_models=failed_panels,
+                analysis=analysis,
+                usage=usage,
+                latency_ms=_elapsed_ms(started),
+                fallback_reason=fallback_reason or "required_tool_call_missing",
+            )
+            return self._error_response(
+                requested_model=requested_model,
+                message="Fusion finalizer did not produce the required tool call",
+                code="fusion_tool_required",
+                run_result=run_result,
+                usage=usage,
+            )
         if message is None:
             fallback = _fallback_panel_message(successful_panels)
             if fallback is None:
@@ -444,7 +479,7 @@ def _build_panel_request(
             content=build_panel_system_prompt(role, code=code_prompt),
         )
     ]
-    tool_reference = _tool_schema_reference(
+    tool_reference = build_panel_tool_reference(
         panel_request.tools, fusion_config.tools_mode
     )
     if tool_reference is not None:
@@ -475,14 +510,28 @@ def _build_judge_request(
     judge_request.response_format = None
     _apply_generation_overrides(judge_request, fusion_config)
 
-    judge_request.messages = [
+    messages = [
         NormalizedMessage(role="system", content=FUSION_JUDGE_SYSTEM_PROMPT),
-        *request.messages,
-        NormalizedMessage(
-            role="user",
-            content=build_judge_user_prompt(panel_results),
-        ),
     ]
+    tool_prompt = build_judge_tool_arbitration_prompt(
+        tools=request.tools,
+        panel_results=panel_results,
+        tool_choice=request.tool_choice,
+        tools_mode=fusion_config.tools_mode,
+        max_tool_calls=fusion_config.max_tool_calls,
+    )
+    if tool_prompt is not None:
+        messages.append(NormalizedMessage(role="system", content=tool_prompt))
+    messages.extend(
+        [
+            *request.messages,
+            NormalizedMessage(
+                role="user",
+                content=build_judge_user_prompt(panel_results),
+            ),
+        ]
+    )
+    judge_request.messages = messages
     if fusion_config.tools_mode == "off":
         judge_request.tools = []
         judge_request.tool_choice = None
@@ -503,33 +552,13 @@ def _apply_generation_overrides(
         request.generation_config.max_tokens = fusion_config.max_completion_tokens
 
 
-def _tool_schema_reference(
-    tools: list[NormalizedTool],
-    tools_mode: str,
-) -> str | None:
-    if not tools or tools_mode == "off":
-        return None
-    payload = [
-        {
-            "type": tool.type,
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": tool.parameters,
-        }
-        for tool in tools
-    ]
-    return (
-        "Tool schemas are reference-only in the panel stage. Do not execute "
-        "tools. If needed, propose one tool_call_candidate.\n"
-        f"{json.dumps(payload, ensure_ascii=True, sort_keys=True)}"
-    )
-
-
 def _analysis_from_judge_response(
     response: NormalizedResponse | None,
     *,
     request_tools: list[NormalizedTool],
     tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
 ) -> tuple[FusionAnalysis | None, str | None]:
     if response is None:
         return None, "judge_failed"
@@ -538,10 +567,12 @@ def _analysis_from_judge_response(
     message = _first_message(response)
     if message is None:
         return None, "judge_empty_response"
-    direct_tool_call = _first_allowed_tool_call(
+    direct_tool_call = first_allowed_tool_call(
         message.tool_calls,
         request_tools=request_tools,
         tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
     )
     if direct_tool_call is not None and not _content_to_text(message.content):
         return FusionAnalysis(final_tool_call=direct_tool_call), None
@@ -555,10 +586,12 @@ def _analysis_from_judge_response(
     except (json.JSONDecodeError, TypeError, ValueError, ValidationError):
         return None, "invalid_judge_json"
 
-    if analysis.final_tool_call is not None and not _tool_call_allowed(
+    if analysis.final_tool_call is not None and not tool_call_allowed(
         analysis.final_tool_call,
         request_tools=request_tools,
         tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
     ):
         analysis.final_tool_call = None
         if not analysis.final_answer:
@@ -571,13 +604,17 @@ def _final_message_from_analysis(
     *,
     request_tools: list[NormalizedTool],
     tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
 ) -> tuple[NormalizedMessage | None, str | None]:
     if analysis is None:
         return None, None
-    if analysis.final_tool_call is not None and _tool_call_allowed(
+    if analysis.final_tool_call is not None and tool_call_allowed(
         analysis.final_tool_call,
         request_tools=request_tools,
         tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
     ):
         return (
             NormalizedMessage(
@@ -601,12 +638,6 @@ def _fallback_panel_message(
     for result in panel_results:
         if result.content:
             return NormalizedMessage(role="assistant", content=result.content)
-        if result.tool_calls:
-            return NormalizedMessage(
-                role="assistant",
-                content=None,
-                tool_calls=result.tool_calls[:1],
-            )
     return None
 
 
@@ -662,32 +693,22 @@ def _strip_code_fence(content: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _first_allowed_tool_call(
-    tool_calls: list[NormalizedToolCall],
+def _final_tool_call_is_required(
+    message: NormalizedMessage | None,
     *,
     request_tools: list[NormalizedTool],
     tools_mode: str,
-) -> NormalizedToolCall | None:
-    for tool_call in tool_calls:
-        if _tool_call_allowed(
-            tool_call,
-            request_tools=request_tools,
-            tools_mode=tools_mode,
-        ):
-            return tool_call
-    return None
-
-
-def _tool_call_allowed(
-    tool_call: NormalizedToolCall,
-    *,
-    request_tools: list[NormalizedTool],
-    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
 ) -> bool:
-    if tools_mode == "off" or not request_tools:
+    if not tool_choice_requires_tool(
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    ):
         return False
-    allowed_names = {tool.name for tool in request_tools}
-    return bool(tool_call.name and tool_call.name in allowed_names)
+    return message is None or not message.tool_calls
 
 
 def _public_metadata(run_result: FusionRunResult) -> dict[str, str]:

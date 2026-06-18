@@ -124,6 +124,27 @@ def _text_response(
     )
 
 
+def _tool_response(
+    model: str | None,
+    tool_call: NormalizedToolCall,
+) -> NormalizedResponse:
+    return NormalizedResponse(
+        model=model,
+        provider="fake",
+        choices=[
+            NormalizedChoice(
+                index=0,
+                message=NormalizedMessage(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[tool_call],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+    )
+
+
 def _judge_json(final_answer="final answer", final_tool_call=None) -> str:
     return json.dumps(
         {
@@ -306,6 +327,157 @@ async def test_fusion_adapter_strips_tools_from_panels_and_allows_final_tool_cal
         )
     ]
     assert response.choices[0].finish_reason == "tool_calls"
+
+
+async def test_fusion_adapter_tools_mode_off_strips_judge_tools_and_ignores_tool_call():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [tool]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A answer"),
+            "PanelB": _text_response("PanelB", "B answer"),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json(
+                    final_answer="text answer",
+                    final_tool_call={
+                        "id": "call-1",
+                        "type": "function",
+                        "name": "lookup",
+                        "arguments": {"q": "ping"},
+                    },
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(tools_mode="off"),
+    )
+
+    judge_call = provider.calls[-1]
+    assert judge_call.tools == []
+    assert judge_call.tool_choice is None
+    assert response.choices[0].message.content == "text answer"
+    assert response.choices[0].message.tool_calls == []
+    assert response.choices[0].finish_reason == "stop"
+
+
+async def test_fusion_adapter_final_arbitration_passes_panel_candidates_to_judge():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [tool]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _tool_response(
+                "PanelA",
+                NormalizedToolCall(
+                    id="call-panel",
+                    name="lookup",
+                    arguments={"q": "from call"},
+                ),
+            ),
+            "PanelB": _text_response(
+                "PanelB",
+                '{"tool_call_candidate": {"name": "lookup", "arguments": {"q": "text"}}}',
+            ),
+            "Judge": _text_response("Judge", _judge_json("final text")),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(tools_mode="final_arbitration"),
+    )
+
+    panel_calls = provider.calls[:2]
+    judge_call = provider.calls[-1]
+    assert panel_calls[0].tools == []
+    assert panel_calls[1].tools == []
+    assert judge_call.tools == [tool]
+    judge_prompt = "\n\n".join(message.content or "" for message in judge_call.messages)
+    assert "panel_tool_candidates" in judge_prompt
+    assert "call-panel" in judge_prompt
+    assert "from call" in judge_prompt
+    assert "text" in judge_prompt
+    assert response.choices[0].message.content == "final text"
+
+
+async def test_fusion_adapter_required_tool_choice_errors_when_finalizer_returns_text():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [tool]
+    request.tool_choice = "required"
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A answer"),
+            "PanelB": _text_response("PanelB", "B answer"),
+            "Judge": _text_response("Judge", _judge_json("text only")),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    assert response.error is not None
+    assert response.error.code == "fusion_tool_required"
+    assert response.choices == []
+    assert (
+        response.metadata["gpt2giga_fusion_fallback_reason"]
+        == "required_tool_call_missing"
+    )
+
+
+async def test_fusion_adapter_never_forwards_panel_tool_call_as_fallback():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [tool]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _tool_response(
+                "PanelA",
+                NormalizedToolCall(
+                    id="call-panel",
+                    name="lookup",
+                    arguments={"q": "from call"},
+                ),
+            ),
+            "Judge": _text_response("Judge", "not json"),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["implementer"],
+        ),
+    )
+
+    assert response.error is not None
+    assert response.error.code == "empty_fusion_result"
+    assert response.choices == []
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == "invalid_judge_json"
 
 
 async def test_fusion_adapter_cancels_panel_tasks_on_disconnect():
