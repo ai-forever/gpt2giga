@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
@@ -34,18 +34,24 @@ from gpt2giga.openapi_tags import OPENAPI_TAG_OPENAI_CHAT_COMPLETIONS
 from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
 from gpt2giga.protocols.normalized import run_openai_chat_shadow_normalization
 from gpt2giga.protocols.normalized.models import (
+    NormalizedChatRequest,
     NormalizedChoice,
     NormalizedError,
     NormalizedMessage,
     NormalizedResponse,
+    NormalizedStreamEvent,
     NormalizedToolCall,
     NormalizedUsage,
 )
 from gpt2giga.protocols.openai import (
+    OpenAIProtocolAdapter,
     normalized_chat_response_to_openai,
     normalized_stream_done_sse,
     normalized_stream_event_to_openai_sse,
 )
+from gpt2giga.providers.fusion.adapter import FusionProviderAdapter
+from gpt2giga.providers.fusion.detection import extract_fusion_request
+from gpt2giga.providers.fusion.errors import FusionConfigurationError
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.routers.openai.helpers import populate_giga_functions
 from gpt2giga.sinks.observability.factory import emit_observability_event
@@ -73,6 +79,17 @@ async def chat_completions(request: Request):
     giga_client = get_gigachat_client(request)
     model_limiter = get_model_concurrency_limiter(request)
     mode = resolve_gigachat_api_mode(request)
+
+    fusion_response = await _try_fusion_chat_completion(
+        request,
+        request_data,
+        request_options,
+        giga_client,
+        model_limiter,
+        conversation_turn,
+    )
+    if fusion_response is not None:
+        return fusion_response
 
     normalized_response = await _try_normalized_non_stream_chat(
         request,
@@ -196,6 +213,271 @@ async def chat_completions(request: Request):
             context=get_request_context(),
         ),
         media_type="text/event-stream",
+    )
+
+
+async def _try_fusion_chat_completion(
+    request: Request,
+    payload: dict,
+    request_options,
+    giga_client,
+    model_limiter,
+    conversation_turn,
+) -> dict | JSONResponse | StreamingResponse | None:
+    state = request.app.state
+    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+    if settings is None:
+        return None
+
+    fusion_settings = settings.fusion
+    try:
+        fusion_config = extract_fusion_request(payload, fusion_settings)
+    except FusionConfigurationError as exc:
+        return _openai_invalid_request_response(
+            str(exc),
+            code="fusion_configuration_error",
+        )
+    if fusion_config is None:
+        return None
+
+    stream = bool(payload.get("stream", False))
+    if stream and fusion_settings.streaming_mode != "buffered":
+        return _openai_invalid_request_response(
+            "Fusion streaming is disabled.",
+            code="fusion_streaming_disabled",
+        )
+
+    protocol_adapter = getattr(state, "openai_protocol_adapter", None)
+    if protocol_adapter is None:
+        protocol_adapter = OpenAIProtocolAdapter()
+    context = get_request_context()
+    normalized_request = await protocol_adapter.to_normalized(
+        payload,
+        context=context,
+    )
+    _strip_fusion_request_artifacts(normalized_request)
+    upstream_provider = GigaChatProviderAdapter(
+        config=state.config,
+        request_transformer=state.request_transformer,
+        giga_client=giga_client,
+        model_limiter=model_limiter,
+        request_options=request_options,
+        response_processor=getattr(state, "response_processor", None),
+        api_mode=resolve_gigachat_api_mode(request),
+        provider_label="openai",
+        force_request_model=True,
+    )
+    fusion_adapter = FusionProviderAdapter(
+        settings=fusion_settings,
+        upstream_provider=upstream_provider,
+    )
+    normalized_response = await fusion_adapter.chat(
+        normalized_request,
+        context=context,
+        fusion_config=fusion_config,
+        is_disconnected=request.is_disconnected,
+    )
+    requested_model = str(
+        payload.get("model") or normalized_response.model or "GigaChat"
+    )
+
+    if not stream:
+        openai_response = normalized_chat_response_to_openai(
+            normalized_response,
+            requested_model=requested_model,
+            context=context,
+        )
+        await commit_chat_completion_response(
+            request,
+            conversation_turn,
+            openai_response,
+        )
+        await _emit_chat_completion_observability(
+            state,
+            normalized_request,
+            normalized_response,
+            context=context,
+        )
+        return openai_response
+
+    response_id = normalized_response.id
+    if response_id is None:
+        response_id = context.request_id if context is not None else rquid_context.get()
+    body_iterator = stitch_chat_completion_stream(
+        request,
+        conversation_turn,
+        _buffered_openai_chat_sse_from_normalized_response(
+            normalized_response,
+            requested_model=requested_model,
+            response_id=response_id or "fusion",
+        ),
+    )
+    return StreamingResponse(
+        _observe_chat_completion_stream(
+            state,
+            body_iterator,
+            request_payload=payload,
+            context=context,
+            normalized_request=normalized_request,
+        ),
+        media_type="text/event-stream",
+    )
+
+
+async def _buffered_openai_chat_sse_from_normalized_response(
+    response: NormalizedResponse,
+    *,
+    requested_model: str,
+    response_id: str,
+) -> AsyncIterator[str]:
+    for event in _normalized_response_to_buffered_stream_events(
+        response,
+        requested_model=requested_model,
+        response_id=response_id,
+    ):
+        sse = normalized_stream_event_to_openai_sse(
+            event,
+            requested_model=requested_model,
+            response_id=response_id,
+        )
+        if sse is not None:
+            yield sse
+    yield normalized_stream_done_sse()
+
+
+def _normalized_response_to_buffered_stream_events(
+    response: NormalizedResponse,
+    *,
+    requested_model: str,
+    response_id: str,
+) -> list[NormalizedStreamEvent]:
+    sequence = 0
+    model = response.model or requested_model
+    if response.error is not None:
+        return [
+            NormalizedStreamEvent(
+                type="error",
+                id=response.id or response_id,
+                model=model,
+                sequence=sequence,
+                error=response.error,
+                metadata=dict(response.metadata),
+            )
+        ]
+
+    events: list[NormalizedStreamEvent] = []
+    for choice in response.choices:
+        message = choice.message
+        content_delta = _stream_message_content(message)
+        if content_delta:
+            events.append(
+                NormalizedStreamEvent(
+                    type="content_delta",
+                    id=response.id or response_id,
+                    model=model,
+                    sequence=sequence,
+                    choice_index=choice.index,
+                    delta=NormalizedMessage(
+                        role=message.role if message is not None else "assistant",
+                        content=content_delta,
+                    ),
+                    content_delta=content_delta,
+                    metadata=dict(response.metadata),
+                )
+            )
+            sequence += 1
+
+        for tool_index, tool_call in enumerate(
+            message.tool_calls if message is not None else []
+        ):
+            events.append(
+                NormalizedStreamEvent(
+                    type="tool_call_delta",
+                    id=response.id or response_id,
+                    model=model,
+                    sequence=sequence,
+                    choice_index=choice.index,
+                    tool_call=tool_call.model_copy(
+                        update={
+                            "raw_extensions": {
+                                **tool_call.raw_extensions,
+                                "index": tool_index,
+                            }
+                        }
+                    ),
+                    metadata=dict(response.metadata),
+                )
+            )
+            sequence += 1
+
+        events.append(
+            NormalizedStreamEvent(
+                type="message_end",
+                id=response.id or response_id,
+                model=model,
+                sequence=sequence,
+                choice_index=choice.index,
+                finish_reason=choice.finish_reason or "stop",
+                metadata=dict(response.metadata),
+            )
+        )
+        sequence += 1
+
+    if response.usage is not None:
+        events.append(
+            NormalizedStreamEvent(
+                type="usage",
+                id=response.id or response_id,
+                model=model,
+                sequence=sequence,
+                usage=response.usage,
+                metadata=dict(response.metadata),
+            )
+        )
+    return events
+
+
+def _stream_message_content(message: NormalizedMessage | None) -> str:
+    if message is None:
+        return ""
+    content = message.content
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "".join(part.text or "" for part in content if part.type == "text")
+
+
+def _strip_fusion_request_artifacts(normalized_request: NormalizedChatRequest) -> None:
+    normalized_request.tools = [
+        tool for tool in normalized_request.tools if tool.type != "openrouter:fusion"
+    ]
+    normalized_request.metadata.pop("gpt2giga_fusion", None)
+    gigachat_metadata = normalized_request.provider_metadata.get("gigachat")
+    if isinstance(gigachat_metadata, Mapping):
+        additional_fields = gigachat_metadata.get("additional_fields")
+        if isinstance(additional_fields, dict):
+            for key in ("plugins", "gpt2giga_fusion"):
+                additional_fields.pop(key, None)
+    for key in ("plugins", "gpt2giga_fusion"):
+        normalized_request.raw_extensions.pop(key, None)
+
+
+def _openai_invalid_request_response(
+    message: str,
+    *,
+    code: str,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": {
+                "message": message,
+                "type": "invalid_request_error",
+                "param": "model",
+                "code": code,
+            }
+        },
     )
 
 

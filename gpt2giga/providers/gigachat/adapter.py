@@ -56,6 +56,7 @@ class GigaChatProviderAdapter:
         response_processor: Any = None,
         api_mode: Literal["v1", "v2"] | None = None,
         provider_label: str = "openai",
+        force_request_model: bool = False,
     ) -> None:
         self.config = config
         self.request_transformer = request_transformer
@@ -65,6 +66,7 @@ class GigaChatProviderAdapter:
         self.response_processor = response_processor
         self.api_mode = api_mode
         self.provider_label = provider_label
+        self.force_request_model = force_request_model
 
     async def complete(
         self,
@@ -139,6 +141,8 @@ class GigaChatProviderAdapter:
                 payload,
                 self.giga_client,
             )
+        if self.force_request_model:
+            _force_chat_payload_model(chat_payload, request.model)
         effective_model = resolve_gigachat_model(chat_payload, self.config)
         update_request_context(model_effective=effective_model)
         async with self.model_limiter.limit(
@@ -165,6 +169,8 @@ class GigaChatProviderAdapter:
                 payload,
                 self.giga_client,
             )
+        if self.force_request_model:
+            _force_chat_payload_model(chat_payload, request.model)
         effective_model = resolve_gigachat_model(chat_payload, self.config)
         update_request_context(model_effective=effective_model)
         async with self.model_limiter.limit(
@@ -197,6 +203,8 @@ class GigaChatProviderAdapter:
                 payload,
                 self.giga_client,
             )
+        if self.force_request_model:
+            _force_chat_payload_model(chat_payload, request.model)
         effective_model = resolve_gigachat_model(chat_payload, self.config)
         update_request_context(model_effective=effective_model)
         mapper = self._stream_mapper(request, context)
@@ -257,6 +265,8 @@ class GigaChatProviderAdapter:
                 payload,
                 self.giga_client,
             )
+        if self.force_request_model:
+            _force_chat_payload_model(chat_payload, request.model)
         effective_model = resolve_gigachat_model(chat_payload, self.config)
         update_request_context(model_effective=effective_model)
         mapper = self._stream_mapper(request, context)
@@ -395,6 +405,16 @@ def gigachat_response_to_normalized(
             }
         },
     )
+
+
+def _force_chat_payload_model(chat_payload: Any, model: str | None) -> None:
+    if not model:
+        return
+    if isinstance(chat_payload, dict):
+        chat_payload["model"] = model
+        return
+    if hasattr(chat_payload, "model"):
+        setattr(chat_payload, "model", model)
 
 
 def _message_to_openai(message: NormalizedMessage) -> dict[str, Any]:

@@ -243,6 +243,33 @@ async def test_gigachat_provider_adapter_executes_chat_to_normalized_response():
     assert response.usage.output_tokens == 3
 
 
+async def test_gigachat_provider_adapter_can_force_request_model_after_transformer():
+    class StrippingTransformer(FakeTransformer):
+        async def prepare_chat(self, data, giga_client=None):
+            self.calls.append((data, giga_client))
+            return {"messages": data["messages"]}
+
+    client = FakeClient()
+    adapter = GigaChatProviderAdapter(
+        config=ProxyConfig(
+            proxy=ProxySettings(gigachat_api_mode="v1", pass_model=False)
+        ),
+        request_transformer=StrippingTransformer(),
+        giga_client=client,
+        model_limiter=ModelConcurrencyLimiter({}),
+        force_request_model=True,
+    )
+
+    await adapter.chat(
+        NormalizedChatRequest(
+            model="PanelModel",
+            messages=[NormalizedMessage(role="user", content="hello")],
+        )
+    )
+
+    assert client.achat.calls[0]["model"] == "PanelModel"
+
+
 async def test_gigachat_provider_adapter_executes_chat_completion_to_normalized_response():
     client = FakeClient()
     transformer = FakeTransformer()
