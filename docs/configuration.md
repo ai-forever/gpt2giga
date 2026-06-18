@@ -510,5 +510,14 @@ GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 Эти endpoints предназначены для локальной отладки и protected admin workflows.
 Не включайте их публично без reverse proxy controls и отдельного admin key.
 
-`GPT2GIGA_UI_ENABLED` зарезервирован для будущего built-in UI. Сейчас не
-используйте его как security control.
+Built-in UI выключен по умолчанию:
+
+```dotenv
+GPT2GIGA_UI_ENABLED=False
+GPT2GIGA_UI_REQUIRE_AUTH=True
+GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
+```
+
+Когда включён, `/ui` и `/ui/playground` используют отдельный admin key при
+`GPT2GIGA_UI_REQUIRE_AUTH=True`. В `PROD` UI всегда требует admin key, даже
+если `GPT2GIGA_UI_REQUIRE_AUTH=False`.

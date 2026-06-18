@@ -200,6 +200,57 @@ def test_docs_disabled_in_prod_mode():
     assert client.get("/openapi.json").status_code == 404
 
 
+def test_ui_routes_are_unmounted_by_default():
+    app = create_app()
+    client = TestClient(app)
+
+    assert client.get("/ui/playground").status_code == 404
+
+
+def test_ui_routes_require_admin_key_by_default():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    client = TestClient(app)
+
+    assert client.get("/ui/playground").status_code == 403
+    response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+
+    assert response.status_code == 200
+    assert "gpt2giga playground" in response.text
+
+
+def test_ui_routes_can_disable_auth_in_dev():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, ui_require_auth=False))
+    )
+    client = TestClient(app)
+
+    response = client.get("/ui/playground")
+
+    assert response.status_code == 200
+
+
+def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                mode="PROD",
+                api_key="proxy-key",
+                ui_enabled=True,
+                ui_require_auth=False,
+                admin_api_key="admin",
+            )
+        )
+    )
+    client = TestClient(app)
+
+    assert client.get("/ui/playground").status_code == 403
+    response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+
+    assert response.status_code == 200
+
+
 def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
     app = create_app(
         config=ProxyConfig(
