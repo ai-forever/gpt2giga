@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
@@ -30,6 +30,7 @@ from gpt2giga.protocols.gemini import (
     normalized_stream_event_to_gemini_sse,
 )
 from gpt2giga.protocols.normalized import (
+    NormalizedChatRequest,
     NormalizedChoice,
     NormalizedError,
     NormalizedMessage,
@@ -37,6 +38,9 @@ from gpt2giga.protocols.normalized import (
     NormalizedStreamEvent,
     NormalizedUsage,
 )
+from gpt2giga.providers.fusion.adapter import FusionProviderAdapter
+from gpt2giga.providers.fusion.detection import extract_fusion_request
+from gpt2giga.providers.fusion.errors import FusionConfigurationError
 from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.sinks.observability.factory import emit_observability_event
 from gpt2giga.sinks.observability.llm import (
@@ -50,6 +54,10 @@ router = APIRouter(tags=[OPENAPI_TAG_GEMINI_GENERATE_CONTENT])
 GEMINI_SPAN_NAME = "Gemini-Content"
 
 
+@router.post(
+    "/models/{model:path}:generateContent",
+    include_in_schema=False,
+)
 @router.post(
     "/models/{model}:generateContent",
     openapi_extra=gemini_generate_content_openapi_extra(streaming=False),
@@ -77,6 +85,18 @@ async def generate_content(model: str, request: Request):
         normalized_request,
     )
     request_options = extract_gigachat_request_options(request, data)
+    fusion_response = await _try_fusion_generate_content(
+        request,
+        data,
+        requested_model=requested_model,
+        normalized_request=normalized_request,
+        request_options=request_options,
+        conversation_turn=conversation_turn,
+        stream=False,
+    )
+    if fusion_response is not None:
+        return fusion_response
+
     provider_adapter = _provider_adapter(request, request_options=request_options)
     normalized_response = await provider_adapter.chat(
         normalized_request,
@@ -101,6 +121,10 @@ async def generate_content(model: str, request: Request):
     return result
 
 
+@router.post(
+    "/models/{model:path}:streamGenerateContent",
+    include_in_schema=False,
+)
 @router.post(
     "/models/{model}:streamGenerateContent",
     openapi_extra=gemini_generate_content_openapi_extra(streaming=True),
@@ -128,6 +152,18 @@ async def stream_generate_content(model: str, request: Request):
         normalized_request,
     )
     request_options = extract_gigachat_request_options(request, data)
+    fusion_response = await _try_fusion_generate_content(
+        request,
+        data,
+        requested_model=requested_model,
+        normalized_request=normalized_request,
+        request_options=request_options,
+        conversation_turn=conversation_turn,
+        stream=True,
+    )
+    if fusion_response is not None:
+        return fusion_response
+
     provider_adapter = _provider_adapter(
         request,
         request_options=request_options,
@@ -296,6 +332,10 @@ def _stream_empty_end_event(
 
 
 @router.post(
+    "/models/{model:path}:countTokens",
+    include_in_schema=False,
+)
+@router.post(
     "/models/{model}:countTokens",
     openapi_extra=gemini_count_tokens_openapi_extra(),
 )
@@ -332,6 +372,7 @@ def _provider_adapter(
     *,
     request_options: Any,
     require_streaming: bool = False,
+    force_request_model: bool = False,
 ) -> GigaChatProviderAdapter:
     state = request.app.state
     return GigaChatProviderAdapter(
@@ -343,6 +384,7 @@ def _provider_adapter(
         response_processor=state.response_processor if require_streaming else None,
         api_mode=resolve_gigachat_api_mode(request),
         provider_label="gemini",
+        force_request_model=force_request_model,
     )
 
 
@@ -379,6 +421,296 @@ def _normalized_response_messages(normalized_response) -> list[dict[str, Any]]:
         for choice in normalized_response.choices
         if choice.message is not None
     ]
+
+
+async def _try_fusion_generate_content(
+    request: Request,
+    payload: dict[str, Any],
+    *,
+    requested_model: str,
+    normalized_request: NormalizedChatRequest,
+    request_options: Any,
+    conversation_turn,
+    stream: bool,
+) -> dict[str, Any] | JSONResponse | StreamingResponse | None:
+    state = request.app.state
+    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+    if settings is None:
+        return None
+
+    fusion_settings = settings.fusion
+    detection_payload = {**payload, "model": requested_model}
+    try:
+        fusion_config = extract_fusion_request(detection_payload, fusion_settings)
+    except FusionConfigurationError as exc:
+        return _gemini_invalid_request_response(
+            str(exc),
+            code="fusion_configuration_error",
+        )
+    if fusion_config is None:
+        return None
+
+    if stream and fusion_settings.streaming_mode != "buffered":
+        return _gemini_invalid_request_response(
+            "Fusion streaming is disabled.",
+            code="fusion_streaming_disabled",
+        )
+
+    _strip_fusion_request_artifacts(normalized_request)
+    upstream_provider = _provider_adapter(
+        request,
+        request_options=request_options,
+        force_request_model=True,
+    )
+    fusion_adapter = FusionProviderAdapter(
+        settings=fusion_settings,
+        upstream_provider=upstream_provider,
+        metrics_sink=getattr(state, "metrics_sink", None),
+        observability_sink=getattr(state, "observability_sink", None),
+        logger=getattr(state, "logger", None),
+    )
+    context = get_request_context()
+    normalized_response = await fusion_adapter.chat(
+        normalized_request,
+        context=context,
+        fusion_config=fusion_config,
+        is_disconnected=request.is_disconnected,
+    )
+    response_id = normalized_response.id
+    if response_id is None:
+        response_id = context.request_id if context is not None else None
+    response_id = response_id or "fusion"
+
+    if not stream:
+        result = normalized_chat_response_to_gemini(
+            normalized_response,
+            requested_model=requested_model,
+            context=context,
+        )
+        await commit_conversation_turn(
+            request,
+            conversation_turn,
+            _normalized_response_messages(normalized_response),
+        )
+        await _emit_gemini_observability(
+            state,
+            normalized_request,
+            normalized_response,
+            context=context,
+        )
+        if normalized_response.error is not None:
+            return JSONResponse(status_code=502, content=result)
+        return result
+
+    return StreamingResponse(
+        _buffered_fusion_gemini_sse(
+            request,
+            conversation_turn,
+            normalized_request=normalized_request,
+            normalized_response=normalized_response,
+            requested_model=requested_model,
+            response_id=response_id,
+        ),
+        media_type="text/event-stream",
+    )
+
+
+async def _buffered_fusion_gemini_sse(
+    request: Request,
+    conversation_turn,
+    *,
+    normalized_request: NormalizedChatRequest,
+    normalized_response: NormalizedResponse,
+    requested_model: str,
+    response_id: str,
+) -> AsyncIterator[str]:
+    state = request.app.state
+    context = get_request_context()
+    observer = _GeminiStreamObserver(response_id=response_id, model=requested_model)
+    span_events: list[dict[str, Any]] = []
+    events = _normalized_response_to_buffered_stream_events(
+        normalized_response,
+        requested_model=requested_model,
+        response_id=response_id,
+    )
+    seen_content_delta = False
+    for event in events:
+        first_content_delta = (
+            event.type == "content_delta"
+            and bool(event.content_delta)
+            and not seen_content_delta
+        )
+        try:
+            span_events.extend(
+                build_stream_span_events(
+                    event,
+                    settings=state.config.proxy_settings,
+                    first_content_delta=first_content_delta,
+                )
+            )
+        except Exception as exc:
+            logger = getattr(state, "logger", None)
+            if logger is not None:
+                logger.warning("Gemini Fusion stream span event build failed: {}", exc)
+        try:
+            observer.observe(event)
+        except Exception as exc:
+            logger = getattr(state, "logger", None)
+            if logger is not None:
+                logger.warning("Gemini Fusion stream observe failed: {}", exc)
+        if event.type == "content_delta" and event.content_delta:
+            seen_content_delta = True
+        chunk = normalized_stream_event_to_gemini_sse(
+            event,
+            requested_model=requested_model,
+            response_id=response_id,
+        )
+        if chunk is not None:
+            yield chunk
+
+    await commit_conversation_turn(
+        request,
+        conversation_turn,
+        _normalized_response_messages(normalized_response),
+    )
+    await _emit_gemini_observability(
+        state,
+        normalized_request,
+        normalized_response,
+        context=context,
+        events=span_events,
+    )
+
+
+def _normalized_response_to_buffered_stream_events(
+    response: NormalizedResponse,
+    *,
+    requested_model: str,
+    response_id: str,
+) -> list[NormalizedStreamEvent]:
+    sequence = 0
+    model = response.model or requested_model
+    if response.error is not None:
+        return [
+            NormalizedStreamEvent(
+                type="error",
+                id=response.id or response_id,
+                model=model,
+                sequence=sequence,
+                error=response.error,
+                metadata=dict(response.metadata),
+            )
+        ]
+
+    events: list[NormalizedStreamEvent] = []
+    for choice in response.choices:
+        message = choice.message
+        content_delta = _stream_message_content(message)
+        if content_delta:
+            events.append(
+                NormalizedStreamEvent(
+                    type="content_delta",
+                    id=response.id or response_id,
+                    model=model,
+                    sequence=sequence,
+                    choice_index=choice.index,
+                    delta=NormalizedMessage(
+                        role=message.role if message is not None else "assistant",
+                        content=content_delta,
+                    ),
+                    content_delta=content_delta,
+                    metadata=dict(response.metadata),
+                )
+            )
+            sequence += 1
+
+        for tool_index, tool_call in enumerate(
+            message.tool_calls if message is not None else []
+        ):
+            events.append(
+                NormalizedStreamEvent(
+                    type="tool_call_delta",
+                    id=response.id or response_id,
+                    model=model,
+                    sequence=sequence,
+                    choice_index=choice.index,
+                    tool_call=tool_call.model_copy(
+                        update={
+                            "raw_extensions": {
+                                **tool_call.raw_extensions,
+                                "index": tool_index,
+                            }
+                        }
+                    ),
+                    metadata=dict(response.metadata),
+                )
+            )
+            sequence += 1
+
+        events.append(
+            NormalizedStreamEvent(
+                type="message_end",
+                id=response.id or response_id,
+                model=model,
+                sequence=sequence,
+                choice_index=choice.index,
+                finish_reason=choice.finish_reason or "stop",
+                usage=response.usage,
+                metadata=dict(response.metadata),
+            )
+        )
+        sequence += 1
+    return events
+
+
+def _stream_message_content(message: NormalizedMessage | None) -> str:
+    if message is None:
+        return ""
+    content = message.content
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "".join(part.text or "" for part in content if part.type == "text")
+
+
+def _strip_fusion_request_artifacts(
+    normalized_request: NormalizedChatRequest,
+) -> None:
+    normalized_request.tools = [
+        tool for tool in normalized_request.tools if tool.type != "openrouter:fusion"
+    ]
+    normalized_request.metadata.pop("gpt2giga_fusion", None)
+    normalized_request.raw_extensions.pop("plugins", None)
+    normalized_request.raw_extensions.pop("gpt2giga_fusion", None)
+    unsupported_tools = normalized_request.raw_extensions.get("unsupportedTools")
+    if isinstance(unsupported_tools, list):
+        normalized_request.raw_extensions["unsupportedTools"] = [
+            tool
+            for tool in unsupported_tools
+            if not (
+                isinstance(tool, Mapping) and tool.get("type") == "openrouter:fusion"
+            )
+        ]
+        if not normalized_request.raw_extensions["unsupportedTools"]:
+            normalized_request.raw_extensions.pop("unsupportedTools", None)
+
+
+def _gemini_invalid_request_response(
+    message: str,
+    *,
+    code: str,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "status": "INVALID_ARGUMENT",
+            }
+        },
+    )
 
 
 async def _emit_gemini_observability(
