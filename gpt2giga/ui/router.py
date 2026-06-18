@@ -334,6 +334,137 @@ _PLAYGROUND_HTML = """<!doctype html>
       gap: 14px;
     }
 
+    .response-shell {
+      display: grid;
+      gap: 14px;
+      padding-top: 2px;
+    }
+
+    .tabbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 6px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+
+    .response-tab {
+      min-height: 34px;
+      padding: 0 11px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted-strong);
+      cursor: pointer;
+      font-size: 12.5px;
+      font-weight: 750;
+      transition:
+        background 140ms ease,
+        border-color 140ms ease,
+        color 140ms ease;
+    }
+
+    .response-tab:hover {
+      background: #ffffff;
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    .response-tab.is-active {
+      background: #ffffff;
+      border-color: var(--border-strong);
+      color: var(--accent-strong);
+      box-shadow: 0 1px 2px rgb(17 24 39 / 7%);
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .meta-item {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+      padding: 10px 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .meta-label {
+      color: var(--muted);
+      font-size: 11.5px;
+      font-weight: 750;
+      line-height: 1.2;
+    }
+
+    .meta-value {
+      overflow: hidden;
+      color: var(--text);
+      font-family:
+        "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.35;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .meta-value a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+
+    .response-panel {
+      display: none;
+      gap: 8px;
+    }
+
+    .response-panel.is-active {
+      display: grid;
+    }
+
+    .snippet-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .snippet-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .copy-button {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #ffffff;
+      color: var(--muted-strong);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .copy-button:hover {
+      border-color: var(--border-strong);
+      color: var(--text);
+    }
+
+    .copy-status {
+      min-height: 18px;
+      color: var(--accent-strong);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
     .error {
       color: var(--danger);
     }
@@ -370,7 +501,12 @@ _PLAYGROUND_HTML = """<!doctype html>
       header,
       .workspace,
       .editor-grid,
+      .meta-grid,
       .preview-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .snippet-grid {
         grid-template-columns: 1fr;
       }
 
@@ -586,6 +722,166 @@ _PLAYGROUND_HTML = """<!doctype html>
             <pre id="headers-preview"></pre>
           </div>
         </div>
+
+        <div class="response-shell" aria-label="Response panels">
+          <div class="tabbar" role="tablist" aria-label="Response views">
+            <button
+              class="response-tab is-active"
+              type="button"
+              data-panel="stream-panel"
+            >
+              Stream output
+            </button>
+            <button
+              class="response-tab"
+              type="button"
+              data-panel="raw-request-panel"
+            >
+              Raw request
+            </button>
+            <button
+              class="response-tab"
+              type="button"
+              data-panel="raw-response-panel"
+            >
+              Raw response
+            </button>
+            <button
+              class="response-tab"
+              type="button"
+              data-panel="normalized-request-panel"
+            >
+              Normalized request
+            </button>
+            <button
+              class="response-tab"
+              type="button"
+              data-panel="normalized-response-panel"
+            >
+              Normalized response
+            </button>
+            <button
+              class="response-tab"
+              type="button"
+              data-panel="provider-request-panel"
+            >
+              Provider request
+            </button>
+            <button
+              class="response-tab"
+              type="button"
+              data-panel="provider-response-panel"
+            >
+              Provider response
+            </button>
+            <button
+              class="response-tab"
+              type="button"
+              data-panel="snippets-panel"
+            >
+              Snippets
+            </button>
+          </div>
+
+          <div class="meta-grid" aria-label="Request metadata">
+            <div class="meta-item">
+              <span class="meta-label">request_id</span>
+              <span class="meta-value" id="request-id">draft-request</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">trace_id</span>
+              <span class="meta-value" id="trace-id">not emitted</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">traffic_log_id</span>
+              <span class="meta-value" id="traffic-log-id">not stored</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Phoenix</span>
+              <span class="meta-value" id="phoenix-link">not configured</span>
+            </div>
+          </div>
+
+          <div class="response-panel is-active" id="stream-panel">
+            <div class="field-label">Stream output</div>
+            <pre id="stream-output"></pre>
+          </div>
+
+          <div class="response-panel" id="raw-request-panel">
+            <div class="field-label">Raw request</div>
+            <pre id="raw-request"></pre>
+          </div>
+
+          <div class="response-panel" id="raw-response-panel">
+            <div class="field-label">Raw response</div>
+            <pre id="raw-response"></pre>
+          </div>
+
+          <div class="response-panel" id="normalized-request-panel">
+            <div class="field-label">Normalized request</div>
+            <pre id="normalized-request"></pre>
+          </div>
+
+          <div class="response-panel" id="normalized-response-panel">
+            <div class="field-label">Normalized response</div>
+            <pre id="normalized-response"></pre>
+          </div>
+
+          <div class="response-panel" id="provider-request-panel">
+            <div class="field-label">Provider request</div>
+            <pre id="provider-request"></pre>
+          </div>
+
+          <div class="response-panel" id="provider-response-panel">
+            <div class="field-label">Provider response</div>
+            <pre id="provider-response"></pre>
+          </div>
+
+          <div class="response-panel" id="snippets-panel">
+            <div class="snippet-grid">
+              <div class="editor-field">
+                <div class="snippet-head">
+                  <div class="field-label">curl</div>
+                  <button
+                    class="copy-button"
+                    type="button"
+                    data-copy-target="curl-snippet"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <pre id="curl-snippet"></pre>
+              </div>
+              <div class="editor-field">
+                <div class="snippet-head">
+                  <div class="field-label">Python SDK</div>
+                  <button
+                    class="copy-button"
+                    type="button"
+                    data-copy-target="python-snippet"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <pre id="python-snippet"></pre>
+              </div>
+              <div class="editor-field">
+                <div class="snippet-head">
+                  <div class="field-label">Google GenAI</div>
+                  <button
+                    class="copy-button"
+                    type="button"
+                    data-copy-target="google-genai-snippet"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <pre id="google-genai-snippet"></pre>
+              </div>
+            </div>
+            <div class="copy-status" id="copy-status" aria-live="polite"></div>
+          </div>
+        </div>
       </section>
     </div>
   </main>
@@ -796,7 +1092,22 @@ _PLAYGROUND_HTML = """<!doctype html>
       endpoint: document.getElementById("endpoint"),
       protocolPill: document.getElementById("protocol-pill"),
       requestPreview: document.getElementById("request-preview"),
-      headersPreview: document.getElementById("headers-preview")
+      headersPreview: document.getElementById("headers-preview"),
+      requestId: document.getElementById("request-id"),
+      traceId: document.getElementById("trace-id"),
+      trafficLogId: document.getElementById("traffic-log-id"),
+      phoenixLink: document.getElementById("phoenix-link"),
+      streamOutput: document.getElementById("stream-output"),
+      rawRequest: document.getElementById("raw-request"),
+      rawResponse: document.getElementById("raw-response"),
+      normalizedRequest: document.getElementById("normalized-request"),
+      normalizedResponse: document.getElementById("normalized-response"),
+      providerRequest: document.getElementById("provider-request"),
+      providerResponse: document.getElementById("provider-response"),
+      curlSnippet: document.getElementById("curl-snippet"),
+      pythonSnippet: document.getElementById("python-snippet"),
+      googleGenaiSnippet: document.getElementById("google-genai-snippet"),
+      copyStatus: document.getElementById("copy-status")
     };
 
     function pretty(value) {
@@ -972,21 +1283,493 @@ _PLAYGROUND_HTML = """<!doctype html>
       return safe;
     }
 
+    function endpointPath(endpoint) {
+      return endpoint.replace(/^POST\\s+/, "");
+    }
+
+    function draftRequestId() {
+      const protocol = fields.protocol.value;
+      const operation = fields.operation.value;
+      return `draft-${protocol}-${operation}`;
+    }
+
+    function extractPromptText(value) {
+      if (typeof value === "string") {
+        return value;
+      }
+      if (Array.isArray(value)) {
+        return value.map(extractPromptText).filter(Boolean).join("\\n");
+      }
+      if (!value || typeof value !== "object") {
+        return "";
+      }
+      if (typeof value.content === "string") {
+        return value.content;
+      }
+      if (Array.isArray(value.parts)) {
+        return value.parts.map(extractPromptText).filter(Boolean).join("\\n");
+      }
+      if (typeof value.text === "string") {
+        return value.text;
+      }
+      return "";
+    }
+
+    function buildPayload() {
+      const endpoint = currentEndpoint();
+      const headers = parseJson("headers", {});
+      const body = buildBody();
+      return {
+        method: "POST",
+        path: endpointPath(endpoint),
+        endpoint,
+        headers,
+        redactedHeaders: redactHeaders(headers),
+        body
+      };
+    }
+
+    function buildNormalizedRequest(payload) {
+      const protocol = fields.protocol.value;
+      const operation = fields.operation.value;
+      const body = payload.body;
+      return {
+        protocol,
+        operation,
+        model: fields.model.value || "GigaChat-2-Max",
+        stream: fields.stream.checked,
+        messages:
+          body.messages ||
+          body.input ||
+          body.contents ||
+          body.content ||
+          body.requests ||
+          [],
+        tools: body.tools || [],
+        generation_config:
+          body.generationConfig ||
+          body.response_format ||
+          {},
+        metadata: body.metadata || {}
+      };
+    }
+
+    function buildProviderRequest(normalizedRequest) {
+      return {
+        provider: "gigachat",
+        model: normalizedRequest.model,
+        stream: normalizedRequest.stream,
+        messages: normalizedRequest.messages,
+        tools: normalizedRequest.tools,
+        generation_config: normalizedRequest.generation_config
+      };
+    }
+
+    function buildNormalizedResponse(normalizedRequest) {
+      return {
+        id: draftRequestId(),
+        model: normalizedRequest.model,
+        role: "assistant",
+        content: "Draft response preview.",
+        finish_reason: "stop",
+        tool_calls: [],
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          total_tokens: 0
+        }
+      };
+    }
+
+    function buildRawResponse(normalizedResponse) {
+      const protocol = fields.protocol.value;
+      const operation = fields.operation.value;
+      if (protocol === "gemini" && operation === "countTokens") {
+        return { totalTokens: 0 };
+      }
+      if (protocol === "gemini" && operation.includes("embed")) {
+        return { embedding: { values: [] } };
+      }
+      if (protocol === "gemini") {
+        return {
+          candidates: [
+            {
+              content: {
+                role: "model",
+                parts: [{ text: normalizedResponse.content }]
+              },
+              finishReason: "STOP",
+              index: 0
+            }
+          ],
+          usageMetadata: {
+            promptTokenCount: 0,
+            candidatesTokenCount: 0,
+            totalTokenCount: 0
+          }
+        };
+      }
+      if (protocol === "anthropic" && operation === "count_tokens") {
+        return { input_tokens: 0 };
+      }
+      if (protocol === "anthropic") {
+        return {
+          id: normalizedResponse.id,
+          type: "message",
+          role: "assistant",
+          model: normalizedResponse.model,
+          content: [{ type: "text", text: normalizedResponse.content }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 0, output_tokens: 0 }
+        };
+      }
+      if (protocol === "openai" && operation === "responses") {
+        return {
+          id: normalizedResponse.id,
+          object: "response",
+          status: "completed",
+          model: normalizedResponse.model,
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [
+                { type: "output_text", text: normalizedResponse.content }
+              ]
+            }
+          ],
+          usage: normalizedResponse.usage
+        };
+      }
+      if (protocol === "openai" && operation === "embeddings") {
+        return {
+          object: "list",
+          data: [{ object: "embedding", index: 0, embedding: [] }],
+          model: normalizedResponse.model,
+          usage: normalizedResponse.usage
+        };
+      }
+      return {
+        id: normalizedResponse.id,
+        object: "chat.completion",
+        model: normalizedResponse.model,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: normalizedResponse.content
+            },
+            finish_reason: "stop"
+          }
+        ],
+        usage: normalizedResponse.usage
+      };
+    }
+
+    function buildStreamOutput(rawResponse) {
+      const protocol = fields.protocol.value;
+      const operation = fields.operation.value;
+      const isStream =
+        fields.stream.checked || operation === "streamGenerateContent";
+      if (!isStream) {
+        return "stream=false";
+      }
+      if (protocol === "gemini") {
+        return [
+          "data: " + pretty(rawResponse),
+          "",
+          "data: [DONE]"
+        ].join("\\n");
+      }
+      if (protocol === "anthropic") {
+        return [
+          'event: message_start',
+          'data: {"type":"message_start"}',
+          '',
+          'event: content_block_delta',
+          'data: {"type":"content_block_delta"}',
+          '',
+          'event: message_stop',
+          'data: {"type":"message_stop"}'
+        ].join("\\n");
+      }
+      return [
+        "data: " + pretty(rawResponse),
+        "",
+        "data: [DONE]"
+      ].join("\\n");
+    }
+
+    function shellQuote(value) {
+      return "'" + String(value).replaceAll("'", "'\\\\''") + "'";
+    }
+
+    function buildCurlSnippet(payload) {
+      const baseUrl = "http://localhost:8090";
+      const headers = {
+        "Content-Type": "application/json",
+        ...payload.redactedHeaders
+      };
+      const headerLines = Object.entries(headers)
+        .map(([key, value]) => `  -H ${shellQuote(`${key}: ${value}`)} \\\\`)
+        .join("\\n");
+      return [
+        `curl -sS ${shellQuote(baseUrl + payload.path)} \\\\`,
+        headerLines,
+        `  --data-binary ${shellQuote(pretty(payload.body))}`
+      ].join("\\n");
+    }
+
+    function buildPythonSnippet(payload) {
+      const protocol = fields.protocol.value;
+      const operation = fields.operation.value;
+      const body = pretty(payload.body);
+      if (protocol === "gemini") {
+        return [
+          "import json",
+          "import requests",
+          "",
+          'url = "http://localhost:8090' + payload.path + '"',
+          "headers = " + pretty({
+            "Content-Type": "application/json",
+            ...payload.redactedHeaders
+          }),
+          `body = json.loads(${JSON.stringify(body)})`,
+          "response = requests.post(url, headers=headers, json=body, timeout=60)",
+          "response.raise_for_status()",
+          "print(response.json())"
+        ].join("\\n");
+      }
+      if (protocol === "anthropic") {
+        const method = operation === "count_tokens"
+          ? "messages.count_tokens"
+          : "messages.create";
+        return [
+          "import json",
+          "from anthropic import Anthropic",
+          "",
+          'client = Anthropic(',
+          '    base_url="http://localhost:8090",',
+          '    api_key="<GPT2GIGA_API_KEY>",',
+          ")",
+          `body = json.loads(${JSON.stringify(body)})`,
+          `response = client.${method}(**body)`,
+          "print(response)"
+        ].join("\\n");
+      }
+      const methodMap = {
+        chat: "chat.completions.create",
+        responses: "responses.create",
+        embeddings: "embeddings.create"
+      };
+      return [
+        "import json",
+        "from openai import OpenAI",
+        "",
+        'client = OpenAI(',
+        '    base_url="http://localhost:8090/v1",',
+        '    api_key="<GPT2GIGA_API_KEY>",',
+        ")",
+        `body = json.loads(${JSON.stringify(body)})`,
+        `response = client.${methodMap[operation] || "chat.completions.create"}(**body)`,
+        "print(response)"
+      ].join("\\n");
+    }
+
+    function buildGoogleGenaiSnippet(payload) {
+      if (fields.protocol.value !== "gemini") {
+        return "Select Gemini to generate a Google GenAI snippet.";
+      }
+      const operation = fields.operation.value;
+      const model = fields.model.value || "GigaChat-2-Max";
+      const body = payload.body;
+      const config = body.generationConfig || {};
+      if (operation === "embedContent") {
+        return [
+          "from google import genai",
+          "",
+          'client = genai.Client(',
+          '    api_key="<GPT2GIGA_API_KEY>",',
+          '    http_options={"base_url": "http://localhost:8090/v1beta"},',
+          ")",
+          "response = client.models.embed_content(",
+          `    model=${JSON.stringify(model)},`,
+          `    contents=${JSON.stringify(body.content)},`,
+          ")",
+          "print(response)"
+        ].join("\\n");
+      }
+      if (operation === "countTokens") {
+        return [
+          "from google import genai",
+          "",
+          'client = genai.Client(',
+          '    api_key="<GPT2GIGA_API_KEY>",',
+          '    http_options={"base_url": "http://localhost:8090/v1beta"},',
+          ")",
+          "response = client.models.count_tokens(",
+          `    model=${JSON.stringify(model)},`,
+          `    contents=${JSON.stringify(body.contents)},`,
+          ")",
+          "print(response)"
+        ].join("\\n");
+      }
+      const method = operation === "streamGenerateContent"
+        ? "generate_content_stream"
+        : "generate_content";
+      return [
+        "from google import genai",
+        "",
+        'client = genai.Client(',
+        '    api_key="<GPT2GIGA_API_KEY>",',
+        '    http_options={"base_url": "http://localhost:8090/v1beta"},',
+        ")",
+        `response = client.models.${method}(`,
+        `    model=${JSON.stringify(model)},`,
+        `    contents=${JSON.stringify(body.contents || [])},`,
+        `    config=${JSON.stringify(config)},`,
+        ")",
+        "print(response)"
+      ].join("\\n");
+    }
+
+    function updateResponsePanels(payload) {
+      const normalizedRequest = buildNormalizedRequest(payload);
+      const providerRequest = buildProviderRequest(normalizedRequest);
+      const normalizedResponse = buildNormalizedResponse(normalizedRequest);
+      const rawResponse = buildRawResponse(normalizedResponse);
+      fields.requestId.textContent = draftRequestId();
+      fields.traceId.textContent = "not emitted";
+      fields.trafficLogId.textContent = "not stored";
+      fields.phoenixLink.textContent = "not configured";
+      fields.streamOutput.textContent = buildStreamOutput(rawResponse);
+      fields.rawRequest.textContent = pretty({
+        method: payload.method,
+        path: payload.path,
+        headers: payload.redactedHeaders,
+        body: payload.body
+      });
+      fields.rawResponse.textContent = pretty(rawResponse);
+      fields.normalizedRequest.textContent = pretty(normalizedRequest);
+      fields.normalizedResponse.textContent = pretty(normalizedResponse);
+      fields.providerRequest.textContent = pretty(providerRequest);
+      fields.providerResponse.textContent = pretty({
+        provider: "gigachat",
+        status: "draft",
+        response: normalizedResponse
+      });
+      fields.curlSnippet.textContent = buildCurlSnippet(payload);
+      fields.pythonSnippet.textContent = buildPythonSnippet(payload);
+      fields.googleGenaiSnippet.textContent = buildGoogleGenaiSnippet(payload);
+    }
+
+    function setActivePanel(panelId) {
+      document.querySelectorAll(".response-tab").forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.panel === panelId);
+      });
+      document.querySelectorAll(".response-panel").forEach((panel) => {
+        panel.classList.toggle("is-active", panel.id === panelId);
+      });
+    }
+
+    function fallbackCopy(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "readonly");
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.append(textarea);
+      textarea.select();
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } finally {
+        textarea.remove();
+      }
+      return copied;
+    }
+
+    function selectSnippet(target) {
+      if (!target) {
+        return false;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      const selection = window.getSelection();
+      if (!selection) {
+        return false;
+      }
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+
+    async function copySnippet(targetId) {
+      const target = document.getElementById(targetId);
+      const text = target ? target.textContent : "";
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else if (!fallbackCopy(text)) {
+          throw new Error("Clipboard unavailable");
+        }
+        fields.copyStatus.textContent = "Copied";
+      } catch (error) {
+        if (fallbackCopy(text)) {
+          fields.copyStatus.textContent = "Copied";
+        } else if (selectSnippet(target)) {
+          fields.copyStatus.textContent = "Selected";
+        } else {
+          fields.copyStatus.textContent = "Copy unavailable";
+        }
+      }
+    }
+
     function buildPreview() {
       try {
-        const headers = parseJson("headers", {});
+        const payload = buildPayload();
         fields.endpoint.textContent = currentEndpoint();
         fields.protocolPill.textContent =
           fields.protocol.options[fields.protocol.selectedIndex].text;
-        fields.requestPreview.classList.remove("error");
-        fields.headersPreview.classList.remove("error");
-        fields.requestPreview.textContent = pretty(buildBody());
-        fields.headersPreview.textContent = pretty(redactHeaders(headers));
+        [
+          fields.requestPreview,
+          fields.headersPreview,
+          fields.streamOutput,
+          fields.rawRequest,
+          fields.rawResponse,
+          fields.normalizedRequest,
+          fields.normalizedResponse,
+          fields.providerRequest,
+          fields.providerResponse,
+          fields.curlSnippet,
+          fields.pythonSnippet,
+          fields.googleGenaiSnippet
+        ].forEach((field) => field.classList.remove("error"));
+        fields.copyStatus.textContent = "";
+        fields.requestPreview.textContent = pretty(payload.body);
+        fields.headersPreview.textContent = pretty(payload.redactedHeaders);
+        updateResponsePanels(payload);
       } catch (error) {
-        fields.requestPreview.classList.add("error");
-        fields.headersPreview.classList.add("error");
-        fields.requestPreview.textContent = String(error.message || error);
-        fields.headersPreview.textContent = String(error.message || error);
+        const message = String(error.message || error);
+        [
+          fields.requestPreview,
+          fields.headersPreview,
+          fields.streamOutput,
+          fields.rawRequest,
+          fields.rawResponse,
+          fields.normalizedRequest,
+          fields.normalizedResponse,
+          fields.providerRequest,
+          fields.providerResponse,
+          fields.curlSnippet,
+          fields.pythonSnippet,
+          fields.googleGenaiSnippet
+        ].forEach((field) => {
+          field.classList.add("error");
+          field.textContent = message;
+        });
+        fields.copyStatus.textContent = "";
       }
     }
 
@@ -1023,6 +1806,12 @@ _PLAYGROUND_HTML = """<!doctype html>
 
     document.querySelectorAll(".example-button").forEach((button) => {
       button.addEventListener("click", () => applyExample(button.dataset.example));
+    });
+    document.querySelectorAll(".response-tab").forEach((button) => {
+      button.addEventListener("click", () => setActivePanel(button.dataset.panel));
+    });
+    document.querySelectorAll(".copy-button").forEach((button) => {
+      button.addEventListener("click", () => copySnippet(button.dataset.copyTarget));
     });
     document.getElementById("build").addEventListener("click", buildPreview);
     document.getElementById("format-json").addEventListener("click", formatEditors);

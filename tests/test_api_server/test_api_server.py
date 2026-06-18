@@ -251,6 +251,25 @@ def test_ui_playground_serves_multi_protocol_request_builder():
     assert "secretHeaderNames" in response.text
     assert "Request preview" in response.text
     assert "Redacted headers" in response.text
+    assert "Stream output" in response.text
+    assert "Raw request" in response.text
+    assert "Raw response" in response.text
+    assert "Normalized request" in response.text
+    assert "Normalized response" in response.text
+    assert "Provider request" in response.text
+    assert "Provider response" in response.text
+    assert "Snippets" in response.text
+    assert 'id="request-id"' in response.text
+    assert 'id="trace-id"' in response.text
+    assert 'id="traffic-log-id"' in response.text
+    assert 'id="phoenix-link"' in response.text
+    assert 'id="curl-snippet"' in response.text
+    assert 'id="python-snippet"' in response.text
+    assert 'id="google-genai-snippet"' in response.text
+    assert "buildRawResponse" in response.text
+    assert "buildGoogleGenaiSnippet" in response.text
+    assert "selectSnippet" in response.text
+    assert "copySnippet" in response.text
 
 
 def test_ui_routes_can_disable_auth_in_dev():
