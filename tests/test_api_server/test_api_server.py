@@ -240,6 +240,10 @@ def test_ui_playground_serves_multi_protocol_request_builder():
     assert 'id="response-config" spellcheck="false"' in response.text
     assert 'id="metadata" spellcheck="false"' in response.text
     assert 'id="headers" spellcheck="false"' in response.text
+    assert 'id="admin-key"' in response.text
+    assert 'id="load-examples"' in response.text
+    assert 'id="translate"' in response.text
+    assert 'id="send"' in response.text
     assert 'data-example="openai-chat"' in response.text
     assert 'data-example="anthropic-messages"' in response.text
     assert 'data-example="gemini-generate"' in response.text
@@ -268,6 +272,12 @@ def test_ui_playground_serves_multi_protocol_request_builder():
     assert 'id="google-genai-snippet"' in response.text
     assert "buildRawResponse" in response.text
     assert "buildGoogleGenaiSnippet" in response.text
+    assert "loadServerExamples" in response.text
+    assert "translateRequest" in response.text
+    assert "sendRequest" in response.text
+    assert "/_admin/playground/send" in response.text
+    assert "/_admin/playground/translate" in response.text
+    assert "/_admin/playground/examples" in response.text
     assert "selectSnippet" in response.text
     assert "copySnippet" in response.text
 

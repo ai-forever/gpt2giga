@@ -295,6 +295,23 @@ _PLAYGROUND_HTML = """<!doctype html>
       gap: 8px;
     }
 
+    .admin-key-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: min(100%, 260px);
+    }
+
+    .admin-key-field label {
+      white-space: nowrap;
+    }
+
+    .admin-key-field input {
+      width: 160px;
+      height: 36px;
+      font-size: 13px;
+    }
+
     .action-button {
       text-align: center;
     }
@@ -547,7 +564,10 @@ _PLAYGROUND_HTML = """<!doctype html>
         <div class="brand">gpt2giga</div>
         <h1>Playground</h1>
       </div>
-      <div class="status"><span class="dot"></span>Local request draft</div>
+      <div class="status">
+        <span class="dot"></span>
+        <span id="status-label">Local request draft</span>
+      </div>
     </header>
 
     <div class="workspace">
@@ -674,11 +694,29 @@ _PLAYGROUND_HTML = """<!doctype html>
         <div class="toolbar">
           <div class="endpoint" id="endpoint">POST /v1/chat/completions</div>
           <div class="actions">
+            <div class="admin-key-field">
+              <label for="admin-key">Admin key</label>
+              <input
+                id="admin-key"
+                name="admin-key"
+                type="password"
+                autocomplete="off"
+              >
+            </div>
+            <button class="action-button" type="button" id="load-examples">
+              Examples
+            </button>
             <button class="action-button" type="button" id="format-json">
               Format JSON
             </button>
+            <button class="action-button" type="button" id="translate">
+              Translate
+            </button>
             <button class="action-button primary" type="button" id="build">
               Build request
+            </button>
+            <button class="action-button primary" type="button" id="send">
+              Send
             </button>
           </div>
         </div>
@@ -906,7 +944,7 @@ _PLAYGROUND_HTML = """<!doctype html>
       ]
     };
 
-    const examples = {
+    let examples = {
       "openai-chat": {
         protocol: "openai",
         operation: "chat",
@@ -1089,8 +1127,10 @@ _PLAYGROUND_HTML = """<!doctype html>
       responseConfig: document.getElementById("response-config"),
       metadata: document.getElementById("metadata"),
       headers: document.getElementById("headers"),
+      adminKey: document.getElementById("admin-key"),
       endpoint: document.getElementById("endpoint"),
       protocolPill: document.getElementById("protocol-pill"),
+      statusLabel: document.getElementById("status-label"),
       requestPreview: document.getElementById("request-preview"),
       headersPreview: document.getElementById("headers-preview"),
       requestId: document.getElementById("request-id"),
@@ -1327,6 +1367,161 @@ _PLAYGROUND_HTML = """<!doctype html>
         redactedHeaders: redactHeaders(headers),
         body
       };
+    }
+
+    function setStatus(text) {
+      fields.statusLabel.textContent = text;
+    }
+
+    function adminHeaders() {
+      const key = fields.adminKey.value.trim();
+      return key ? { "x-admin-api-key": key } : {};
+    }
+
+    function redactText(value) {
+      return String(value)
+        .replace(/(Bearer\\s+)\\S+/gi, "$1[REDACTED]")
+        .replace(
+          /(authorization|x-api-key|x-goog-api-key|api[_-]?key|key)(["']?\\s*[:=]\\s*["']?)[^"',&\\s}]+/gi,
+          "$1$2[REDACTED]"
+        );
+    }
+
+    function helperErrorMessage(response, data, fallbackText) {
+      const detail = data && (data.detail || data.error || data.message);
+      if (typeof detail === "string") {
+        return redactText(detail);
+      }
+      if (detail) {
+        return redactText(pretty(detail));
+      }
+      return redactText(fallbackText || `HTTP ${response.status}`);
+    }
+
+    async function helperFetch(path, options = {}) {
+      const method = options.method || "POST";
+      const fetchOptions = {
+        method,
+        headers: {
+          ...adminHeaders()
+        }
+      };
+      if (options.body !== undefined) {
+        fetchOptions.headers["Content-Type"] = "application/json";
+        fetchOptions.body = JSON.stringify(options.body);
+      }
+      const response = await fetch(path, fetchOptions);
+      const text = await response.text();
+      let data = null;
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch (error) {
+          data = { text };
+        }
+      }
+      if (!response.ok) {
+        throw new Error(helperErrorMessage(response, data, text));
+      }
+      return data || {};
+    }
+
+    function showHelperError(error) {
+      const message = redactText(error.message || error);
+      [
+        fields.rawResponse,
+        fields.normalizedRequest,
+        fields.normalizedResponse,
+        fields.providerRequest,
+        fields.providerResponse
+      ].forEach((field) => {
+        field.classList.add("error");
+      });
+      fields.rawResponse.textContent = message;
+      fields.providerResponse.textContent = message;
+      setActivePanel("raw-response-panel");
+      setStatus("Helper error");
+    }
+
+    async function loadServerExamples() {
+      try {
+        setStatus("Loading examples");
+        const data = await helperFetch("/_admin/playground/examples", {
+          method: "GET"
+        });
+        const items = Array.isArray(data.data) ? data.data : [];
+        items.forEach((item) => {
+          if (item && item.id && item.request) {
+            examples[item.id] = item.request;
+          }
+        });
+        setStatus(`Examples loaded (${items.length})`);
+      } catch (error) {
+        showHelperError(error);
+      }
+    }
+
+    async function translateRequest() {
+      try {
+        const payload = buildPayload();
+        setStatus("Translating");
+        const result = await helperFetch("/_admin/playground/translate", {
+          body: {
+            from: fields.protocol.value,
+            to: "normalized",
+            payload: payload.body,
+            requested_model: fields.model.value || "GigaChat-2-Max"
+          }
+        });
+        fields.normalizedRequest.classList.remove("error");
+        fields.providerRequest.classList.remove("error");
+        fields.normalizedRequest.textContent = pretty(result.payload || {});
+        fields.providerRequest.textContent = pretty(result.intermediate || {});
+        fields.requestId.textContent = "translated";
+        fields.traceId.textContent = "not emitted";
+        fields.trafficLogId.textContent = "not stored";
+        fields.phoenixLink.textContent = "not configured";
+        setActivePanel("normalized-request-panel");
+        setStatus("Translated");
+      } catch (error) {
+        showHelperError(error);
+      }
+    }
+
+    async function sendRequest() {
+      try {
+        const payload = buildPayload();
+        setStatus("Sending");
+        const result = await helperFetch("/_admin/playground/send", {
+          body: {
+            method: payload.method,
+            path: payload.path,
+            headers: payload.headers,
+            body: payload.body
+          }
+        });
+        const response = result.response || {};
+        const responseBody = response.body;
+        fields.rawRequest.classList.remove("error");
+        fields.rawResponse.classList.remove("error");
+        fields.providerResponse.classList.remove("error");
+        fields.requestId.textContent = result.request_id || "not emitted";
+        fields.traceId.textContent = result.trace_id || "not emitted";
+        fields.trafficLogId.textContent =
+          result.traffic_log_id || "not stored";
+        fields.phoenixLink.textContent = "not configured";
+        fields.rawRequest.textContent = pretty(result.request || {});
+        fields.rawResponse.textContent = pretty(response);
+        fields.providerResponse.textContent = pretty(response);
+        fields.streamOutput.textContent =
+          typeof responseBody === "string"
+            ? responseBody
+            : pretty(responseBody || {});
+        setActivePanel("raw-response-panel");
+        setStatus(`Sent ${response.status_code || ""}`.trim());
+      } catch (error) {
+        showHelperError(error);
+      }
     }
 
     function buildNormalizedRequest(payload) {
@@ -1747,6 +1942,7 @@ _PLAYGROUND_HTML = """<!doctype html>
           fields.googleGenaiSnippet
         ].forEach((field) => field.classList.remove("error"));
         fields.copyStatus.textContent = "";
+        setStatus("Local request draft");
         fields.requestPreview.textContent = pretty(payload.body);
         fields.headersPreview.textContent = pretty(payload.redactedHeaders);
         updateResponsePanels(payload);
@@ -1770,6 +1966,7 @@ _PLAYGROUND_HTML = """<!doctype html>
           field.textContent = message;
         });
         fields.copyStatus.textContent = "";
+        setStatus("Invalid draft");
       }
     }
 
@@ -1813,7 +2010,12 @@ _PLAYGROUND_HTML = """<!doctype html>
     document.querySelectorAll(".copy-button").forEach((button) => {
       button.addEventListener("click", () => copySnippet(button.dataset.copyTarget));
     });
+    document
+      .getElementById("load-examples")
+      .addEventListener("click", loadServerExamples);
     document.getElementById("build").addEventListener("click", buildPreview);
+    document.getElementById("translate").addEventListener("click", translateRequest);
+    document.getElementById("send").addEventListener("click", sendRequest);
     document.getElementById("format-json").addEventListener("click", formatEditors);
 
     syncOperations();

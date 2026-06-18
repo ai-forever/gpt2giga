@@ -12,7 +12,11 @@ from gpt2giga.app.settings import (
     load_app_config,
     validate_app_config,
 )
-from gpt2giga.api.admin import debug_router, logs_router as admin_logs_router
+from gpt2giga.api.admin import (
+    debug_router,
+    logs_router as admin_logs_router,
+    playground_router,
+)
 from gpt2giga.api.admin.access import verify_admin_key
 from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.gemini import (
@@ -198,6 +202,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         if prod_mode or config.proxy_settings.ui_require_auth:
             ui_dependencies.append(Depends(verify_admin_key))
         app.include_router(ui_router, dependencies=ui_dependencies)
+        app.include_router(playground_router)
     if config.proxy_settings.debug_translate_enabled:
         app.include_router(debug_router)
     if config.proxy_settings.admin_api_enabled:
