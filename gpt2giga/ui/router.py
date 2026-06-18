@@ -2025,6 +2025,887 @@ _PLAYGROUND_HTML = """<!doctype html>
 </html>"""
 
 
+_LOGS_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gpt2giga logs</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f9fafb;
+      --text: #111827;
+      --muted: #667085;
+      --muted-strong: #475467;
+      --border: #d6dae3;
+      --border-strong: #b8c0cc;
+      --accent: #0f766e;
+      --accent-strong: #115e59;
+      --blue: #1d4ed8;
+      --amber: #b45309;
+      --danger: #b42318;
+      --success: #047857;
+      --code: #101828;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    main {
+      width: min(1360px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    .title-group {
+      display: grid;
+      gap: 4px;
+    }
+
+    .brand {
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .nav a,
+    .action-button,
+    .pager-button {
+      min-height: 36px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #ffffff;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+      text-decoration: none;
+      transition:
+        background 140ms ease,
+        border-color 140ms ease,
+        color 140ms ease;
+    }
+
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .nav a:hover,
+    .action-button:hover,
+    .pager-button:hover:not(:disabled) {
+      border-color: var(--border-strong);
+      background: var(--panel-soft);
+    }
+
+    .nav a.is-active,
+    .action-button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+    }
+
+    .action-button.primary:hover {
+      border-color: var(--accent-strong);
+      background: var(--accent-strong);
+    }
+
+    .pager-button:disabled {
+      cursor: not-allowed;
+      opacity: 0.52;
+    }
+
+    .shell {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    .panel {
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 14px 34px rgb(17 24 39 / 7%);
+    }
+
+    .filters,
+    .table-panel {
+      min-width: 0;
+      padding: 20px;
+    }
+
+    .filter-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .field-wide {
+      grid-column: span 2;
+    }
+
+    label,
+    .field-label {
+      color: var(--muted-strong);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    input,
+    select {
+      width: 100%;
+      height: 38px;
+      padding: 0 10px;
+      color: var(--text);
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      outline: none;
+      font-size: 14px;
+      transition:
+        border-color 140ms ease,
+        box-shadow 140ms ease;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgb(15 118 110 / 14%);
+    }
+
+    .filter-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 0 12px;
+      color: var(--accent-strong);
+      border: 1px solid rgb(15 118 110 / 28%);
+      border-radius: 999px;
+      background: rgb(15 118 110 / 8%);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .status.error {
+      color: var(--danger);
+      border-color: rgb(180 35 24 / 28%);
+      background: rgb(180 35 24 / 8%);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .status.error .dot {
+      background: var(--danger);
+    }
+
+    .pager {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pager-label {
+      color: var(--muted);
+      font-size: 12.5px;
+      font-weight: 700;
+    }
+
+    .table-scroll {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    table {
+      width: 100%;
+      min-width: 1160px;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 10px 11px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--panel-soft);
+      color: var(--muted-strong);
+      font-size: 11.5px;
+      font-weight: 800;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+
+    td {
+      color: var(--text);
+      font-size: 12.5px;
+      line-height: 1.38;
+    }
+
+    tbody tr:hover {
+      background: rgb(15 118 110 / 4%);
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .mono {
+      font-family:
+        "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .route-cell {
+      max-width: 260px;
+      overflow-wrap: anywhere;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .badge.ok {
+      color: var(--success);
+      background: rgb(4 120 87 / 9%);
+    }
+
+    .badge.warn {
+      color: var(--amber);
+      background: rgb(180 83 9 / 9%);
+    }
+
+    .badge.error {
+      color: var(--danger);
+      background: rgb(180 35 24 / 9%);
+    }
+
+    .empty {
+      display: none;
+      margin-top: 12px;
+      padding: 14px;
+      color: var(--muted-strong);
+      border: 1px dashed var(--border-strong);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .empty.is-visible {
+      display: block;
+    }
+
+    @media (max-width: 1120px) {
+      .filter-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 760px) {
+      main {
+        width: min(100vw - 20px, 1360px);
+        padding: 18px 0 28px;
+      }
+
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .nav {
+        justify-content: flex-start;
+      }
+
+      .filter-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .field-wide {
+        grid-column: auto;
+      }
+
+      .filters,
+      .table-panel {
+        padding: 14px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="title-group">
+        <div class="brand">gpt2giga</div>
+        <h1>Traffic logs</h1>
+      </div>
+      <nav class="nav" aria-label="UI navigation">
+        <a href="/ui/playground">Playground</a>
+        <a class="is-active" href="/ui/logs">Logs</a>
+      </nav>
+    </header>
+
+    <div class="shell">
+      <section class="panel filters" aria-label="Log filters">
+        <form id="filters">
+          <div class="filter-grid">
+            <div class="field">
+              <label for="admin-key">Admin key</label>
+              <input
+                id="admin-key"
+                name="admin-key"
+                type="password"
+                autocomplete="off"
+              >
+            </div>
+
+            <div class="field">
+              <label for="from">From</label>
+              <input id="from" name="from" type="datetime-local">
+            </div>
+
+            <div class="field">
+              <label for="to">To</label>
+              <input id="to" name="to" type="datetime-local">
+            </div>
+
+            <div class="field">
+              <label for="protocol">Protocol</label>
+              <select id="protocol" name="protocol">
+                <option value="">Any</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="gemini">Gemini</option>
+                <option value="litellm">LiteLLM</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="status-code">Status</label>
+              <input
+                id="status-code"
+                name="status-code"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                placeholder="200"
+              >
+            </div>
+
+            <div class="field">
+              <label for="has-error">Error</label>
+              <select id="has-error" name="has-error">
+                <option value="">Any</option>
+                <option value="true">Errors</option>
+                <option value="false">Clean</option>
+              </select>
+            </div>
+
+            <div class="field field-wide">
+              <label for="model">Model</label>
+              <input id="model" name="model" placeholder="GigaChat-2-Max">
+            </div>
+
+            <div class="field field-wide">
+              <label for="route">Route</label>
+              <input id="route" name="route" placeholder="/v1/chat/completions">
+            </div>
+
+            <div class="field">
+              <label for="request-id">request_id</label>
+              <input id="request-id" name="request-id">
+            </div>
+
+            <div class="field">
+              <label for="trace-id">trace_id</label>
+              <input id="trace-id" name="trace-id">
+            </div>
+
+            <div class="field">
+              <label for="api-key-hash">api_key_hash</label>
+              <input id="api-key-hash" name="api-key-hash">
+            </div>
+
+            <div class="field">
+              <label for="limit">Limit</label>
+              <select id="limit" name="limit">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="250">250</option>
+              </select>
+            </div>
+
+            <div class="filter-actions">
+              <button class="action-button primary" type="submit" id="apply">
+                Apply
+              </button>
+              <button class="action-button" type="button" id="reset">
+                Reset
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel table-panel" aria-label="Traffic log list">
+        <div class="status-row">
+          <div class="status" id="status-label" aria-live="polite">
+            <span class="dot"></span>
+            <span id="status-text">Enter admin key to load logs</span>
+          </div>
+          <div class="pager">
+            <button class="pager-button" type="button" id="prev-page" disabled>
+              Prev
+            </button>
+            <span class="pager-label" id="page-label">Page 1</span>
+            <button class="pager-button" type="button" id="next-page" disabled>
+              Next
+            </button>
+          </div>
+        </div>
+
+        <div class="table-scroll">
+          <table aria-label="Traffic logs">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Status</th>
+                <th>Protocol</th>
+                <th>Route</th>
+                <th>Operation</th>
+                <th>Model requested</th>
+                <th>Model effective</th>
+                <th>Latency</th>
+                <th>Upstream</th>
+                <th>Tokens</th>
+                <th>request_id</th>
+                <th>trace_id</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody id="log-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="empty is-visible" id="empty-state">
+          Enter an admin key and apply filters.
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const fields = {
+      form: document.getElementById("filters"),
+      adminKey: document.getElementById("admin-key"),
+      from: document.getElementById("from"),
+      to: document.getElementById("to"),
+      protocol: document.getElementById("protocol"),
+      statusCode: document.getElementById("status-code"),
+      hasError: document.getElementById("has-error"),
+      model: document.getElementById("model"),
+      route: document.getElementById("route"),
+      requestId: document.getElementById("request-id"),
+      traceId: document.getElementById("trace-id"),
+      apiKeyHash: document.getElementById("api-key-hash"),
+      limit: document.getElementById("limit"),
+      statusLabel: document.getElementById("status-label"),
+      statusText: document.getElementById("status-text"),
+      rows: document.getElementById("log-rows"),
+      empty: document.getElementById("empty-state"),
+      previous: document.getElementById("prev-page"),
+      next: document.getElementById("next-page"),
+      pageLabel: document.getElementById("page-label")
+    };
+
+    let currentCursor = "";
+    let nextCursor = null;
+    let previousCursors = [];
+
+    function redactText(value) {
+      return String(value || "")
+        .replace(/(Bearer\\s+)\\S+/gi, "$1[REDACTED]")
+        .replace(
+          /(authorization|x-api-key|x-goog-api-key|api[_-]?key|key)(["']?\\s*[:=]\\s*["']?)[^"',&\\s}]+/gi,
+          "$1$2[REDACTED]"
+        );
+    }
+
+    function adminHeaders() {
+      const key = fields.adminKey.value.trim();
+      return key ? { "x-admin-api-key": key } : {};
+    }
+
+    function setStatus(text, mode = "ready") {
+      fields.statusText.textContent = text;
+      fields.statusLabel.classList.toggle("error", mode === "error");
+    }
+
+    function setEmpty(text, visible) {
+      fields.empty.textContent = text;
+      fields.empty.classList.toggle("is-visible", visible);
+    }
+
+    function addParam(params, key, value) {
+      const text = String(value || "").trim();
+      if (text) {
+        params.set(key, text);
+      }
+    }
+
+    function queryParams(cursor) {
+      const params = new URLSearchParams();
+      addParam(params, "from", fields.from.value);
+      addParam(params, "to", fields.to.value);
+      addParam(params, "protocol", fields.protocol.value);
+      addParam(params, "status_code", fields.statusCode.value);
+      addParam(params, "has_error", fields.hasError.value);
+      addParam(params, "model", fields.model.value);
+      addParam(params, "route", fields.route.value);
+      addParam(params, "request_id", fields.requestId.value);
+      addParam(params, "trace_id", fields.traceId.value);
+      addParam(params, "api_key_hash", fields.apiKeyHash.value);
+      addParam(params, "limit", fields.limit.value);
+      if (cursor) {
+        params.set("cursor", cursor);
+      }
+      return params;
+    }
+
+    function formatDate(value) {
+      if (!value) {
+        return "-";
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return String(value);
+      }
+      return date.toLocaleString();
+    }
+
+    function valueOrDash(value) {
+      if (value === null || value === undefined || value === "") {
+        return "-";
+      }
+      return String(value);
+    }
+
+    function statusKind(code, errorType) {
+      const statusCode = Number(code);
+      if (errorType || statusCode >= 500) {
+        return "error";
+      }
+      if (statusCode >= 400) {
+        return "warn";
+      }
+      return "ok";
+    }
+
+    function operationLabel(row) {
+      const metadata = row && typeof row.metadata === "object"
+        ? row.metadata
+        : {};
+      if (metadata.operation) {
+        return String(metadata.operation);
+      }
+      const route = String(row.route || "");
+      const geminiMatch = route.match(/:([A-Za-z0-9_]+)(?:\\?|$)/);
+      if (geminiMatch) {
+        return geminiMatch[1];
+      }
+      if (route.includes("/chat/completions")) {
+        return "chat";
+      }
+      if (route.includes("/responses")) {
+        return "responses";
+      }
+      if (route.includes("/embeddings")) {
+        return "embeddings";
+      }
+      if (route.includes("/messages/count_tokens")) {
+        return "count_tokens";
+      }
+      if (route.includes("/messages")) {
+        return "messages";
+      }
+      if (route.includes("/model/info")) {
+        return "model_info";
+      }
+      return "-";
+    }
+
+    function latencyLabel(value) {
+      return value === null || value === undefined ? "-" : `${value} ms`;
+    }
+
+    function tokensLabel(row) {
+      if (row.total_tokens !== null && row.total_tokens !== undefined) {
+        return String(row.total_tokens);
+      }
+      const input = valueOrDash(row.input_tokens);
+      const output = valueOrDash(row.output_tokens);
+      return input === "-" && output === "-" ? "-" : `${input}/${output}`;
+    }
+
+    function appendCell(row, value, className) {
+      const cell = document.createElement("td");
+      cell.textContent = valueOrDash(value);
+      if (className) {
+        cell.className = className;
+      }
+      row.append(cell);
+      return cell;
+    }
+
+    function appendStatusCell(row, record) {
+      const cell = document.createElement("td");
+      const badge = document.createElement("span");
+      badge.className = `badge ${statusKind(record.status_code, record.error_type)}`;
+      badge.textContent = valueOrDash(record.status_code);
+      cell.append(badge);
+      row.append(cell);
+    }
+
+    function renderRows(
+      records,
+      emptyText = "No traffic logs matched the current filters."
+    ) {
+      fields.rows.replaceChildren();
+      records.forEach((record) => {
+        const row = document.createElement("tr");
+        appendCell(row, formatDate(record.created_at), "mono");
+        appendStatusCell(row, record);
+        appendCell(row, record.protocol);
+        appendCell(row, record.route, "mono route-cell");
+        appendCell(row, operationLabel(record));
+        appendCell(row, record.model_requested);
+        appendCell(row, record.model_effective);
+        appendCell(row, latencyLabel(record.latency_ms));
+        appendCell(row, latencyLabel(record.upstream_latency_ms));
+        appendCell(row, tokensLabel(record));
+        appendCell(row, record.request_id, "mono");
+        appendCell(row, record.trace_id, "mono");
+        appendCell(row, record.error_type || "");
+        fields.rows.append(row);
+      });
+      setEmpty(emptyText, records.length === 0);
+    }
+
+    async function parseResponse(response) {
+      const text = await response.text();
+      if (!text) {
+        return {};
+      }
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        return { text };
+      }
+    }
+
+    function errorMessage(response, data) {
+      const detail = data && (data.detail || data.error || data.message || data.text);
+      if (response.status === 404) {
+        return "Admin logs API unavailable";
+      }
+      if (response.status === 503) {
+        return "Log store unavailable";
+      }
+      if (typeof detail === "string") {
+        return redactText(detail);
+      }
+      if (detail) {
+        return redactText(JSON.stringify(detail));
+      }
+      return `HTTP ${response.status}`;
+    }
+
+    function updatePager(data) {
+      nextCursor = data.next_cursor || null;
+      fields.previous.disabled = previousCursors.length === 0;
+      fields.next.disabled = !nextCursor;
+      fields.pageLabel.textContent = `Page ${previousCursors.length + 1}`;
+    }
+
+    async function loadLogs(cursor = "", direction = "replace") {
+      if (!fields.adminKey.value.trim()) {
+        renderRows([], "Enter an admin key and apply filters.");
+        setStatus("Admin key required", "error");
+        updatePager({ next_cursor: null });
+        return;
+      }
+
+      setStatus("Loading logs");
+      const response = await fetch(`/_admin/logs?${queryParams(cursor)}`, {
+        headers: adminHeaders()
+      });
+      const data = await parseResponse(response);
+      if (!response.ok) {
+        const message = errorMessage(response, data);
+        renderRows([], message);
+        setStatus(message, "error");
+        updatePager({ next_cursor: null });
+        return;
+      }
+
+      if (direction === "next") {
+        previousCursors.push(currentCursor);
+      } else if (direction === "replace") {
+        previousCursors = [];
+      }
+      currentCursor = cursor;
+      const records = Array.isArray(data.data) ? data.data : [];
+      renderRows(records);
+      updatePager(data);
+      setStatus(`Loaded ${records.length} log rows`);
+    }
+
+    function resetFilters() {
+      [
+        fields.from,
+        fields.to,
+        fields.protocol,
+        fields.statusCode,
+        fields.hasError,
+        fields.model,
+        fields.route,
+        fields.requestId,
+        fields.traceId,
+        fields.apiKeyHash
+      ].forEach((field) => {
+        field.value = "";
+      });
+      fields.limit.value = "50";
+      renderRows([], "Enter an admin key and apply filters.");
+      setStatus("Filters reset");
+      currentCursor = "";
+      nextCursor = null;
+      previousCursors = [];
+      updatePager({ next_cursor: null });
+    }
+
+    fields.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      loadLogs();
+    });
+    document.getElementById("reset").addEventListener("click", resetFilters);
+    fields.next.addEventListener("click", () => {
+      if (nextCursor) {
+        loadLogs(nextCursor, "next");
+      }
+    });
+    fields.previous.addEventListener("click", () => {
+      const cursor = previousCursors.pop();
+      loadLogs(cursor || "", "previous");
+    });
+
+    renderRows([], "Enter an admin key and apply filters.");
+  </script>
+</body>
+</html>"""
+
+
 @router.get("", response_class=HTMLResponse)
 async def ui_root():
     """Redirect the UI root to the playground shell."""
@@ -2041,3 +2922,9 @@ async def ui_root_slash():
 async def playground():
     """Serve the built-in playground shell."""
     return HTMLResponse(_PLAYGROUND_HTML)
+
+
+@router.get("/logs", response_class=HTMLResponse)
+async def logs():
+    """Serve the built-in traffic logs list shell."""
+    return HTMLResponse(_LOGS_HTML)

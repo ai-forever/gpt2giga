@@ -205,6 +205,7 @@ def test_ui_routes_are_unmounted_by_default():
     client = TestClient(app)
 
     assert client.get("/ui/playground").status_code == 404
+    assert client.get("/ui/logs").status_code == 404
 
 
 def test_ui_routes_require_admin_key_by_default():
@@ -214,10 +215,14 @@ def test_ui_routes_require_admin_key_by_default():
     client = TestClient(app)
 
     assert client.get("/ui/playground").status_code == 403
+    assert client.get("/ui/logs").status_code == 403
     response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+    logs_response = client.get("/ui/logs", headers={"x-admin-api-key": "admin"})
 
     assert response.status_code == 200
     assert "gpt2giga playground" in response.text
+    assert logs_response.status_code == 200
+    assert "gpt2giga logs" in logs_response.text
 
 
 def test_ui_playground_serves_multi_protocol_request_builder():
@@ -282,6 +287,56 @@ def test_ui_playground_serves_multi_protocol_request_builder():
     assert "copySnippet" in response.text
 
 
+def test_ui_logs_serves_protocol_aware_list_page():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    client = TestClient(app)
+
+    response = client.get("/ui/logs", headers={"x-admin-api-key": "admin"})
+
+    assert response.status_code == 200
+    assert "<h1>Traffic logs</h1>" in response.text
+    assert 'id="admin-key"' in response.text
+    assert 'id="from" name="from" type="datetime-local"' in response.text
+    assert 'id="to" name="to" type="datetime-local"' in response.text
+    assert '<select id="protocol" name="protocol">' in response.text
+    assert '<option value="openai">OpenAI</option>' in response.text
+    assert '<option value="anthropic">Anthropic</option>' in response.text
+    assert '<option value="gemini">Gemini</option>' in response.text
+    assert '<option value="litellm">LiteLLM</option>' in response.text
+    assert 'id="status-code"' in response.text
+    assert 'name="status-code"' in response.text
+    assert 'id="has-error" name="has-error"' in response.text
+    assert 'id="model" name="model"' in response.text
+    assert 'id="route" name="route"' in response.text
+    assert 'id="request-id" name="request-id"' in response.text
+    assert 'id="trace-id" name="trace-id"' in response.text
+    assert 'id="api-key-hash" name="api-key-hash"' in response.text
+    assert 'id="limit" name="limit"' in response.text
+    assert "<th>Time</th>" in response.text
+    assert "<th>Status</th>" in response.text
+    assert "<th>Protocol</th>" in response.text
+    assert "<th>Route</th>" in response.text
+    assert "<th>Operation</th>" in response.text
+    assert "<th>Model requested</th>" in response.text
+    assert "<th>Model effective</th>" in response.text
+    assert "<th>Latency</th>" in response.text
+    assert "<th>Upstream</th>" in response.text
+    assert "<th>Tokens</th>" in response.text
+    assert "<th>request_id</th>" in response.text
+    assert "<th>trace_id</th>" in response.text
+    assert "<th>Error</th>" in response.text
+    assert 'id="prev-page" disabled' in response.text
+    assert 'id="next-page" disabled' in response.text
+    assert "/_admin/logs" in response.text
+    assert "queryParams(cursor)" in response.text
+    assert "Admin logs API unavailable" in response.text
+    assert "Log store unavailable" in response.text
+    assert "request_body" not in response.text
+    assert "response_body" not in response.text
+
+
 def test_ui_routes_can_disable_auth_in_dev():
     app = create_app(
         config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, ui_require_auth=False))
@@ -289,9 +344,12 @@ def test_ui_routes_can_disable_auth_in_dev():
     client = TestClient(app)
 
     response = client.get("/ui/playground")
+    logs_response = client.get("/ui/logs")
 
     assert response.status_code == 200
     assert "Build request" in response.text
+    assert logs_response.status_code == 200
+    assert "Traffic logs" in logs_response.text
 
 
 def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
@@ -309,9 +367,12 @@ def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
     client = TestClient(app)
 
     assert client.get("/ui/playground").status_code == 403
+    assert client.get("/ui/logs").status_code == 403
     response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+    logs_response = client.get("/ui/logs", headers={"x-admin-api-key": "admin"})
 
     assert response.status_code == 200
+    assert logs_response.status_code == 200
 
 
 def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
