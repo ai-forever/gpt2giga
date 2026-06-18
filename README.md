@@ -87,18 +87,20 @@ print(response.content[0].text)
 
 Полная документация публикуется на [GitHub Pages](https://ai-forever.github.io/gpt2giga/).
 
-Локально проверить docs можно так:
+Локально проверить docs можно через Docusaurus wrapper в `docs-site/`:
 
 ```sh
-uv sync --all-extras --dev --group docs
-uv run --group docs mkdocs build --strict
-uv run --group docs mkdocs serve
+cd docs-site
+npm ci
+npm run build
+npm run start
 ```
 
-После `mkdocs serve` сайт доступен на `http://127.0.0.1:8000/`. Если порт занят:
+После `npm run start` сайт доступен на `http://127.0.0.1:3000/`. Для проверки production artifact:
 
 ```sh
-uv run --group docs mkdocs serve -a 127.0.0.1:8001
+cd docs-site
+npm run serve
 ```
 
 | Тема | Документ |
@@ -170,7 +172,8 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 | `gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
 | `tests/` | Unit, router, protocol, sink и integration tests |
 | `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
-| `docs/` | Пользовательская документация и architecture notes |
+| `docs/` | Markdown-контент пользовательской документации и architecture notes |
+| `docs-site/` | Docusaurus wrapper, sidebar/theme config и npm tooling для GitHub Pages |
 | `integrations/` | Editor/agent/reverse-proxy integration guides |
 | `deploy/` | Docker Compose deployment manifests |
 | `traefik/` | Traefik config для `deploy/traefik.yaml` |

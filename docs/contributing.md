@@ -1,32 +1,33 @@
 # Документация
 
-Этот сайт собирается из Markdown-файлов в `docs/` через MkDocs Material и публикуется на GitHub Pages.
+Этот сайт собирается из Markdown-файлов в `docs/` через Docusaurus wrapper в `docs-site/` и публикуется на GitHub Pages.
 
 ## Локальная сборка
 
-Установите зависимости проекта и docs-группы:
+Установите Node.js `20+`, затем зависимости Docusaurus:
 
 ```sh
-uv sync --all-extras --dev --group docs
+cd docs-site
+npm ci
 ```
 
 Соберите сайт:
 
 ```sh
-uv run --group docs mkdocs build --strict
+npm run build
 ```
 
 Для локального предпросмотра:
 
 ```sh
-uv run --group docs mkdocs serve
+npm run start
 ```
 
-По умолчанию MkDocs откроет сайт на `http://127.0.0.1:8000/`.
-Если порт занят, задайте другой адрес:
+По умолчанию Docusaurus откроет сайт на `http://127.0.0.1:3000/`.
+Для проверки production artifact после сборки:
 
 ```sh
-uv run --group docs mkdocs serve -a 127.0.0.1:8001
+npm run serve
 ```
 
 ## Что публикуется
@@ -40,7 +41,7 @@ uv run --group docs mkdocs serve -a 127.0.0.1:8001
 
 ## Правила обновления
 
-- Держите README и `mkdocs.yml` согласованными по списку основных документов.
+- Держите README и `docs-site/sidebars.ts` согласованными по списку основных документов.
 - Для ссылок на файлы вне `docs/` используйте GitHub URLs, иначе опубликованный сайт может вести за пределы Pages artifact.
 - Не публикуйте secrets, локальные `.env`, credentials, keys или raw traffic payloads.
 - При изменении deployment behavior обновляйте одновременно `docs/deployment.md`, `deploy/README.md` и relevant compose manifests.
