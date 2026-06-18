@@ -16,6 +16,7 @@ http://localhost:8090
 | Поддержанные OpenAI, Anthropic, Gemini и LiteLLM routes | [API compatibility](api-compatibility.md) |
 | Поведение `extra_headers`, `extra_query`, `extra_body` и optional fields | [Client parameters](client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
+| Multi-model deliberation через локальный GigaFusion | [GigaFusion](fusion.md) |
 | Переменные окружения, auth, limits, metrics, observability | [Конфигурация](configuration.md) |
 | Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развертывание](deployment.md) |
 | Runtime logs, traffic logs, admin API, debug translate | [Операции](operations.md) |

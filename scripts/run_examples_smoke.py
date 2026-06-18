@@ -78,6 +78,14 @@ DEFAULT_SKIP_RULES = (
         "examples/openai/agents/*",
         "OpenAI Agents example needs the integrations group and external APIs.",
     ),
+    SkipRule(
+        "examples/openai/*/fusion/*",
+        "Fusion examples require GPT2GIGA_FUSION_ENABLED=True.",
+    ),
+    SkipRule(
+        "examples/anthropic/messages/fusion/*",
+        "Fusion examples require GPT2GIGA_FUSION_ENABLED=True.",
+    ),
 )
 
 

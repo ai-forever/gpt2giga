@@ -82,6 +82,7 @@ nav:
       - API compatibility: api-compatibility.md
       - Client parameters: client-parameter-compatibility.md
       - Встроенные инструменты: builtin-tools.md
+      - GigaFusion: fusion.md
       - Интеграции: integrations.md
   - Эксплуатация:
       - Развертывание: deployment.md
@@ -89,6 +90,7 @@ nav:
       - Live-тесты: live-integration-tests.md
   - Архитектура:
       - Normalized messages: architecture/normalized-messages.md
+      - Fusion provider: architecture/fusion-provider.md
       - Logging и observability: architecture/logging-and-observability.md
       - Добавление provider/protocol: architecture/how-to-add-provider.md
   - Участие:

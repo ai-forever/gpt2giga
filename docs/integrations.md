@@ -39,6 +39,23 @@ http://localhost:8090
 Если `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, используйте `GPT2GIGA_API_KEY` как client API key. Для Gemini clients поддерживается также заголовок
 `x-goog-api-key`.
 
+## Fusion aliases
+
+Когда `GPT2GIGA_FUSION_ENABLED=True`, agent/IDE clients могут использовать
+multi-model deliberation без отдельной plugin-интеграции: достаточно поставить
+model id на virtual alias, например `gpt2giga/fusion-code`.
+
+Типичные overrides:
+
+- OpenAI/Codex/Responses clients: `model = "gpt2giga/fusion-code"`;
+- Anthropic/Claude Code clients: `--model gpt2giga/fusion-code`;
+- Gemini/Qwen-like clients: model id `gpt2giga/fusion-code`, route
+  `/models/gpt2giga/fusion-code:generateContent`.
+
+Fusion делает несколько внутренних GigaChat calls, поэтому ожидайте больше
+latency и token usage, чем у обычного single-model request. Подробности и
+env settings: [GigaFusion](fusion.md).
+
 ## Запускаемые примеры
 
 - OpenAI examples: [examples/openai/](https://github.com/ai-forever/gpt2giga/tree/main/examples/openai)
@@ -54,12 +71,15 @@ http://localhost:8090
 |---|---|
 | OpenHands | [integrations/openhands/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/openhands/README.md) |
 | OpenAI Codex | [integrations/codex/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/codex/README.md) |
+| OpenAI Codex + GigaFusion | [integrations/codex/fusion.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/codex/fusion.md) |
 | Aider | [integrations/aider/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/aider/README.md) |
 | Claude Code | [integrations/claude-code/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/claude-code/README.md) |
+| Claude Code + GigaFusion | [integrations/claude-code/fusion.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/claude-code/fusion.md) |
 | Claude Desktop App | [integrations/claude-desktop/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/claude-desktop/README.md) |
 | Gemini CLI | [integrations/gemini/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/gemini/README.md) |
 | Cursor | [integrations/cursor/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/cursor/README.md) |
 | Qwen Code | [integrations/qwen-code/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/qwen-code/README.md) |
+| Qwen Code + GigaFusion | [integrations/qwen-code/fusion.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/qwen-code/fusion.md) |
 | Xcode | [integrations/xcode/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/xcode/README.md) |
 | nginx reverse proxy | [integrations/nginx/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/nginx/README.md) |
 

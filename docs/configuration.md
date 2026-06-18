@@ -231,6 +231,36 @@ Versioned prefixes являются явным per-request override:
 - `/v1/chat/completions`, `/v1/responses`, `/v1/messages` используют GigaChat v1 contract;
 - `/v2/chat/completions`, `/v2/responses`, `/v2/messages` используют GigaChat v2 contract.
 
+## Fusion / multi-model deliberation
+
+GigaFusion - локальный режим, в котором один client request запускает несколько
+внутренних GigaChat panel calls и один judge/finalizer call. Он выключен по
+умолчанию и не обращается к OpenRouter или другим внешним upstream.
+
+Минимальное включение:
+
+```dotenv
+GPT2GIGA_FUSION_ENABLED=True
+GPT2GIGA_FUSION_DEFAULT_PRESET=code-high
+```
+
+Частые overrides:
+
+```dotenv
+GPT2GIGA_FUSION_ALIASES='["gpt2giga/fusion","gpt2giga/fusion-code","GigaChat-Fusion-Code"]'
+GPT2GIGA_FUSION_STREAMING_MODE=buffered
+GPT2GIGA_FUSION_MAX_PANEL_MODELS=4
+GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY=3
+GPT2GIGA_FUSION_EXPOSE_ANALYSIS_METADATA=False
+GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES=False
+```
+
+Используйте `GPT2GIGA_FUSION_PRESETS` для JSON-карты custom presets с
+`analysis_models`, `judge_model`, optional `final_model`, `panel_roles`,
+generation limits, `min_successful_panels`, `timeout_seconds` и `tools_mode`.
+
+Подробно: [GigaFusion](fusion.md).
+
 ## Normalized layer flags
 
 Экспериментальные flags, которые по умолчанию сохраняют legacy behavior:

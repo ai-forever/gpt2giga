@@ -150,5 +150,6 @@ GIGACHAT_MODEL=GigaChat-2-Pro
 
 ## Полезные ссылки
 
+- [Qwen Code + GigaFusion](fusion.md)
 - [Документация Qwen Code](https://github.com/QwenLM/qwen-code)
 - [Документация GigaChat API](https://developers.sber.ru/docs/ru/gigachat/overview)

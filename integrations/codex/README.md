@@ -243,5 +243,6 @@ trust_level = "trusted"
 
 ## Полезные ссылки
 
+- [Codex + GigaFusion](fusion.md)
 - [Документация OpenAI Codex](https://github.com/openai/codex)
 - [Документация GigaChat API](https://developers.sber.ru/docs/ru/gigachat/overview)

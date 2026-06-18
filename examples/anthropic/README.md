@@ -65,6 +65,7 @@ uv run python examples/anthropic/message_batches/structured_output.py
 ## Что есть в папке
 
 - `messages/basic/messages.py`: базовый запрос (не стрим)
+- `messages/fusion/fusion_message.py`: локальный GigaFusion alias `gpt2giga/fusion-code`
 - `messages/basic/messages_stream.py`: streaming
 - `messages/basic/multi_turn.py`: многоходовый диалог
 - `messages/basic/stateful.py`: stateful диалог через `x-gpt2giga-conversation-id` и GigaChat v2 chat completions

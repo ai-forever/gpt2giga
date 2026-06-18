@@ -17,6 +17,7 @@
 | Tools и structured output | Function/tool schemas и JSON-schema controls отличаются между провайдерами и backend modes. | Маппит local tools/functions и даёт function-call fallback для structured outputs. |
 | Авторизация | OpenAI/Anthropic клиенты работают с API keys, а GigaChat требует другой credentials/scope механизм. | Разделяет proxy API-key auth и upstream GigaChat auth, при необходимости поддерживает per-request pass-through. |
 | Model discovery | GigaChat model responses не совпадают с OpenAI/Anthropic/LiteLLM shape. | Переупаковывает список и описание моделей под нужный клиент. |
+| Multi-model deliberation | Клиенты обычно умеют выбрать только один `model`, без OpenRouter plugins. | При включенном Fusion публикует virtual model aliases и выполняет локальный GigaChat panel + judge pipeline. |
 | OpenAI/Anthropic/Gemini batch routes | У установленного GigaChat SDK/backend нет полного create/list/retrieve/cancel flow для batch APIs. | Держит Files/Batches routers отключёнными, пока они не смогут работать end-to-end. |
 
 ## Смонтированные routes
@@ -33,6 +34,17 @@ backend одинаковое для OpenAI-, Anthropic- и Gemini-compatible rou
 - `/responses`, `/v1/responses` и `/v2/responses`
 - `/messages`, `/v1/messages` и `/v2/messages`
 - `/models/{model}:generateContent`, `/v1/models/{model}:generateContent`, `/v2/models/{model}:generateContent` и `/v1beta/models/{model}:generateContent`
+
+## GigaFusion virtual models
+
+Если `GPT2GIGA_FUSION_ENABLED=True`, model discovery добавляет virtual aliases,
+например `gpt2giga/fusion-code` и `GigaChat-Fusion-Code`. Эти aliases
+поддерживаются на OpenAI Chat Completions, OpenAI Responses, Anthropic Messages
+и Gemini GenerateContent routes. Fusion не является OpenRouter passthrough:
+все внутренние panel и judge calls выполняются через GigaChat.
+
+Подробная схема работы, env settings и client examples описаны в
+[GigaFusion](fusion.md).
 
 ## OpenAI-compatible routes
 
