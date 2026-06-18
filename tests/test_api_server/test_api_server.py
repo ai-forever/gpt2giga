@@ -206,6 +206,9 @@ def test_ui_routes_are_unmounted_by_default():
 
     assert client.get("/ui/playground").status_code == 404
     assert client.get("/ui/logs").status_code == 404
+    assert (
+        client.get("/ui/logs/00000000-0000-0000-0000-000000000000").status_code == 404
+    )
 
 
 def test_ui_routes_require_admin_key_by_default():
@@ -216,13 +219,22 @@ def test_ui_routes_require_admin_key_by_default():
 
     assert client.get("/ui/playground").status_code == 403
     assert client.get("/ui/logs").status_code == 403
+    assert (
+        client.get("/ui/logs/00000000-0000-0000-0000-000000000000").status_code == 403
+    )
     response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
     logs_response = client.get("/ui/logs", headers={"x-admin-api-key": "admin"})
+    detail_response = client.get(
+        "/ui/logs/00000000-0000-0000-0000-000000000000",
+        headers={"x-admin-api-key": "admin"},
+    )
 
     assert response.status_code == 200
     assert "gpt2giga playground" in response.text
     assert logs_response.status_code == 200
     assert "gpt2giga logs" in logs_response.text
+    assert detail_response.status_code == 200
+    assert "gpt2giga log detail" in detail_response.text
 
 
 def test_ui_playground_serves_multi_protocol_request_builder():
@@ -329,12 +341,53 @@ def test_ui_logs_serves_protocol_aware_list_page():
     assert "<th>Error</th>" in response.text
     assert 'id="prev-page" disabled' in response.text
     assert 'id="next-page" disabled' in response.text
+    assert "/ui/logs/${encodeURIComponent(record.id)}" in response.text
     assert "/_admin/logs" in response.text
     assert "queryParams(cursor)" in response.text
     assert "Admin logs API unavailable" in response.text
     assert "Log store unavailable" in response.text
     assert "request_body" not in response.text
     assert "response_body" not in response.text
+
+
+def test_ui_logs_serves_traffic_log_detail_page():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/ui/logs/00000000-0000-0000-0000-000000000000",
+        headers={"x-admin-api-key": "admin"},
+    )
+
+    assert response.status_code == 200
+    assert "<h1>Traffic log detail</h1>" in response.text
+    assert 'id="admin-key"' in response.text
+    assert 'id="log-id" name="log-id" readonly' in response.text
+    assert 'id="load-detail"' in response.text
+    assert "request_id" in response.text
+    assert "trace_id" in response.text
+    assert 'data-copy-source="request-id"' in response.text
+    assert 'data-copy-source="trace-id"' in response.text
+    assert 'data-panel="summary-panel"' in response.text
+    assert 'data-panel="request-panel"' in response.text
+    assert 'data-panel="response-panel"' in response.text
+    assert 'data-panel="normalized-panel"' in response.text
+    assert 'data-panel="provider-panel"' in response.text
+    assert 'data-panel="observability-panel"' in response.text
+    assert 'data-panel="metrics-panel"' in response.text
+    assert 'id="gemini-contents"' in response.text
+    assert "Stored request headers and body appear here" in response.text
+    assert "Normalized snapshots are shown when present" in response.text
+    assert "Provider payloads are shown only when redacted copies are stored" in (
+        response.text
+    )
+    assert "/_admin/logs/${encoded}" in response.text
+    assert "/_admin/logs/${encoded}/request" in response.text
+    assert "/_admin/logs/${encoded}/response" in response.text
+    assert "Log store unavailable" in response.text
+    assert "Traffic log not found or admin logs API unavailable" in response.text
 
 
 def test_ui_routes_can_disable_auth_in_dev():
@@ -345,11 +398,14 @@ def test_ui_routes_can_disable_auth_in_dev():
 
     response = client.get("/ui/playground")
     logs_response = client.get("/ui/logs")
+    detail_response = client.get("/ui/logs/00000000-0000-0000-0000-000000000000")
 
     assert response.status_code == 200
     assert "Build request" in response.text
     assert logs_response.status_code == 200
     assert "Traffic logs" in logs_response.text
+    assert detail_response.status_code == 200
+    assert "Traffic log detail" in detail_response.text
 
 
 def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
@@ -368,11 +424,19 @@ def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
 
     assert client.get("/ui/playground").status_code == 403
     assert client.get("/ui/logs").status_code == 403
+    assert (
+        client.get("/ui/logs/00000000-0000-0000-0000-000000000000").status_code == 403
+    )
     response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
     logs_response = client.get("/ui/logs", headers={"x-admin-api-key": "admin"})
+    detail_response = client.get(
+        "/ui/logs/00000000-0000-0000-0000-000000000000",
+        headers={"x-admin-api-key": "admin"},
+    )
 
     assert response.status_code == 200
     assert logs_response.status_code == 200
+    assert detail_response.status_code == 200
 
 
 def test_openapi_tags_group_routes_by_provider_and_endpoint_type():

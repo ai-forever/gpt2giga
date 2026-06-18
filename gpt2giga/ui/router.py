@@ -2758,6 +2758,23 @@ _LOGS_HTML = """<!doctype html>
       return cell;
     }
 
+    function appendDetailLinkCell(row, record) {
+      const cell = document.createElement("td");
+      cell.className = "mono";
+      if (!record.id) {
+        cell.textContent = valueOrDash(record.request_id);
+        row.append(cell);
+        return cell;
+      }
+      const link = document.createElement("a");
+      link.href = `/ui/logs/${encodeURIComponent(record.id)}`;
+      link.textContent = valueOrDash(record.request_id || record.id);
+      link.rel = "noreferrer";
+      cell.append(link);
+      row.append(cell);
+      return cell;
+    }
+
     function appendStatusCell(row, record) {
       const cell = document.createElement("td");
       const badge = document.createElement("span");
@@ -2784,7 +2801,7 @@ _LOGS_HTML = """<!doctype html>
         appendCell(row, latencyLabel(record.latency_ms));
         appendCell(row, latencyLabel(record.upstream_latency_ms));
         appendCell(row, tokensLabel(record));
-        appendCell(row, record.request_id, "mono");
+        appendDetailLinkCell(row, record);
         appendCell(row, record.trace_id, "mono");
         appendCell(row, record.error_type || "");
         fields.rows.append(row);
@@ -2906,6 +2923,892 @@ _LOGS_HTML = """<!doctype html>
 </html>"""
 
 
+_LOG_DETAIL_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>gpt2giga log detail</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f9fafb;
+      --text: #111827;
+      --muted: #667085;
+      --muted-strong: #475467;
+      --border: #d6dae3;
+      --border-strong: #b8c0cc;
+      --accent: #0f766e;
+      --accent-strong: #115e59;
+      --blue: #1d4ed8;
+      --amber: #b45309;
+      --danger: #b42318;
+      --success: #047857;
+      --code: #101828;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    main {
+      width: min(1240px, calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    .title-group {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .brand {
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .nav a,
+    .action-button,
+    .tab-button,
+    .copy-button {
+      min-height: 36px;
+      padding: 0 12px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      background: #ffffff;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+      text-decoration: none;
+      transition:
+        background 140ms ease,
+        border-color 140ms ease,
+        color 140ms ease;
+    }
+
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .nav a:hover,
+    .action-button:hover,
+    .tab-button:hover,
+    .copy-button:hover {
+      border-color: var(--border-strong);
+      background: var(--panel-soft);
+    }
+
+    .nav a.is-active,
+    .action-button.primary,
+    .tab-button.is-active {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+    }
+
+    .action-button.primary:hover,
+    .tab-button.is-active:hover {
+      border-color: var(--accent-strong);
+      background: var(--accent-strong);
+    }
+
+    .shell {
+      display: grid;
+      gap: 16px;
+      min-width: 0;
+    }
+
+    .panel {
+      min-width: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 14px 34px rgb(17 24 39 / 7%);
+    }
+
+    .controls,
+    .detail-panel {
+      padding: 20px;
+    }
+
+    .control-grid {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(260px, 2fr) auto;
+      gap: 12px;
+      align-items: end;
+    }
+
+    .field {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    label,
+    .field-label {
+      color: var(--muted-strong);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    input {
+      width: 100%;
+      height: 38px;
+      padding: 0 10px;
+      color: var(--text);
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      outline: none;
+      font-size: 14px;
+      transition:
+        border-color 140ms ease,
+        box-shadow 140ms ease;
+    }
+
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgb(15 118 110 / 14%);
+    }
+
+    input[readonly] {
+      color: var(--muted-strong);
+      background: var(--panel-soft);
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 32px;
+      padding: 0 12px;
+      color: var(--accent-strong);
+      border: 1px solid rgb(15 118 110 / 28%);
+      border-radius: 999px;
+      background: rgb(15 118 110 / 8%);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .status.error {
+      color: var(--danger);
+      border-color: rgb(180 35 24 / 28%);
+      background: rgb(180 35 24 / 8%);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent);
+    }
+
+    .status.error .dot {
+      background: var(--danger);
+    }
+
+    .identity-row,
+    .tab-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .copy-button {
+      min-height: 30px;
+      padding: 0 9px;
+      font-size: 12px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .summary-item {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+
+    .summary-label {
+      color: var(--muted-strong);
+      font-size: 11.5px;
+      font-weight: 800;
+      line-height: 1.2;
+      text-transform: uppercase;
+    }
+
+    .summary-value {
+      min-height: 18px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .summary-value.mono,
+    .mono {
+      font-family:
+        "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 12px;
+    }
+
+    .tab-panels {
+      margin-top: 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    .tab-panel {
+      display: none;
+      padding: 16px;
+    }
+
+    .tab-panel.is-active {
+      display: grid;
+      gap: 12px;
+    }
+
+    pre {
+      min-height: 220px;
+      max-height: 520px;
+      margin: 0;
+      padding: 14px;
+      overflow: auto;
+      color: #f8fafc;
+      background: var(--code);
+      border-radius: 7px;
+      font-family:
+        "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .empty {
+      padding: 13px 14px;
+      color: var(--muted-strong);
+      border: 1px dashed var(--border-strong);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    a {
+      color: var(--blue);
+      font-weight: 700;
+    }
+
+    @media (max-width: 980px) {
+      .control-grid,
+      .summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 720px) {
+      main {
+        width: min(100vw - 20px, 1240px);
+        padding: 18px 0 28px;
+      }
+
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .nav {
+        justify-content: flex-start;
+      }
+
+      .control-grid,
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .controls,
+      .detail-panel {
+        padding: 14px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      .tab-button {
+        flex: 1 1 140px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="title-group">
+        <div class="brand">gpt2giga</div>
+        <h1>Traffic log detail</h1>
+      </div>
+      <nav class="nav" aria-label="UI navigation">
+        <a href="/ui/playground">Playground</a>
+        <a class="is-active" href="/ui/logs">Logs</a>
+      </nav>
+    </header>
+
+    <div class="shell">
+      <section class="panel controls" aria-label="Log detail controls">
+        <form id="detail-form">
+          <div class="control-grid">
+            <div class="field">
+              <label for="admin-key">Admin key</label>
+              <input
+                id="admin-key"
+                name="admin-key"
+                type="password"
+                autocomplete="off"
+              >
+            </div>
+            <div class="field">
+              <label for="log-id">Traffic log id</label>
+              <input id="log-id" name="log-id" readonly>
+            </div>
+            <button class="action-button primary" type="submit" id="load-detail">
+              Load detail
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel detail-panel" aria-label="Traffic log detail">
+        <div class="status-row">
+          <div class="status" id="status-label" aria-live="polite">
+            <span class="dot"></span>
+            <span id="status-text">Enter admin key to load detail</span>
+          </div>
+          <div class="identity-row">
+            <span class="field-label">request_id</span>
+            <span class="mono" id="request-id">-</span>
+            <button class="copy-button" type="button" data-copy-source="request-id">
+              Copy
+            </button>
+            <span class="field-label">trace_id</span>
+            <span class="mono" id="trace-id">-</span>
+            <button class="copy-button" type="button" data-copy-source="trace-id">
+              Copy
+            </button>
+          </div>
+        </div>
+
+        <div class="summary-grid" id="summary-grid"></div>
+
+        <div class="tab-row" role="tablist" aria-label="Log detail tabs">
+          <button class="tab-button is-active" type="button" data-panel="summary-panel">
+            Summary
+          </button>
+          <button class="tab-button" type="button" data-panel="request-panel">
+            Request
+          </button>
+          <button class="tab-button" type="button" data-panel="response-panel">
+            Response
+          </button>
+          <button class="tab-button" type="button" data-panel="normalized-panel">
+            Normalized
+          </button>
+          <button class="tab-button" type="button" data-panel="provider-panel">
+            Provider
+          </button>
+          <button class="tab-button" type="button" data-panel="observability-panel">
+            Observability
+          </button>
+          <button class="tab-button" type="button" data-panel="metrics-panel">
+            Metrics context
+          </button>
+        </div>
+
+        <div class="tab-panels">
+          <div class="tab-panel is-active" id="summary-panel">
+            <div class="empty" id="summary-empty">
+              Load one traffic log to inspect summary metadata.
+            </div>
+            <pre id="summary-json">{}</pre>
+          </div>
+          <div class="tab-panel" id="request-panel">
+            <div class="empty" id="request-empty">
+              Stored request headers and body appear here when content capture is enabled.
+            </div>
+            <div class="field-label">Gemini contents / parts</div>
+            <pre id="gemini-contents">not available</pre>
+            <div class="field-label">Redacted request</div>
+            <pre id="request-json">{}</pre>
+          </div>
+          <div class="tab-panel" id="response-panel">
+            <div class="empty" id="response-empty">
+              Stored response body appears here when response capture is enabled.
+            </div>
+            <pre id="response-json">{}</pre>
+          </div>
+          <div class="tab-panel" id="normalized-panel">
+            <div class="empty" id="normalized-empty">
+              Normalized snapshots are shown when present in traffic metadata.
+            </div>
+            <pre id="normalized-json">{}</pre>
+          </div>
+          <div class="tab-panel" id="provider-panel">
+            <div class="empty" id="provider-empty">
+              Provider payloads are shown only when redacted copies are stored in metadata.
+            </div>
+            <pre id="provider-json">{}</pre>
+          </div>
+          <div class="tab-panel" id="observability-panel">
+            <div class="empty" id="observability-empty">
+              Trace identifiers and safe span context appear here.
+            </div>
+            <pre id="observability-json">{}</pre>
+          </div>
+          <div class="tab-panel" id="metrics-panel">
+            <div class="empty" id="metrics-empty">
+              Bounded protocol, route, model, and status labels appear here.
+            </div>
+            <pre id="metrics-json">{}</pre>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const fields = {
+      form: document.getElementById("detail-form"),
+      adminKey: document.getElementById("admin-key"),
+      logId: document.getElementById("log-id"),
+      statusLabel: document.getElementById("status-label"),
+      statusText: document.getElementById("status-text"),
+      requestId: document.getElementById("request-id"),
+      traceId: document.getElementById("trace-id"),
+      summaryGrid: document.getElementById("summary-grid"),
+      summaryJson: document.getElementById("summary-json"),
+      requestJson: document.getElementById("request-json"),
+      responseJson: document.getElementById("response-json"),
+      normalizedJson: document.getElementById("normalized-json"),
+      providerJson: document.getElementById("provider-json"),
+      observabilityJson: document.getElementById("observability-json"),
+      metricsJson: document.getElementById("metrics-json"),
+      geminiContents: document.getElementById("gemini-contents"),
+      summaryEmpty: document.getElementById("summary-empty"),
+      requestEmpty: document.getElementById("request-empty"),
+      responseEmpty: document.getElementById("response-empty"),
+      normalizedEmpty: document.getElementById("normalized-empty"),
+      providerEmpty: document.getElementById("provider-empty"),
+      observabilityEmpty: document.getElementById("observability-empty"),
+      metricsEmpty: document.getElementById("metrics-empty")
+    };
+
+    const sensitivePattern =
+      /(authorization|x-api-key|x-goog-api-key|api[_-]?key|cookie|set-cookie|key)(["']?\\s*[:=]\\s*["']?)[^"',&\\s}]+/gi;
+
+    function eventIdFromPath() {
+      const parts = window.location.pathname.split("/").filter(Boolean);
+      return decodeURIComponent(parts[parts.length - 1] || "");
+    }
+
+    function redactText(value) {
+      return String(value || "")
+        .replace(/(Bearer\\s+)\\S+/gi, "$1[REDACTED]")
+        .replace(sensitivePattern, "$1$2[REDACTED]");
+    }
+
+    function pretty(value) {
+      return redactText(JSON.stringify(value ?? {}, null, 2));
+    }
+
+    function adminHeaders() {
+      const key = fields.adminKey.value.trim();
+      return key ? { "x-admin-api-key": key } : {};
+    }
+
+    function setStatus(text, mode = "ready") {
+      fields.statusText.textContent = text;
+      fields.statusLabel.classList.toggle("error", mode === "error");
+    }
+
+    function valueOrDash(value) {
+      if (value === null || value === undefined || value === "") {
+        return "-";
+      }
+      return String(value);
+    }
+
+    function formatDate(value) {
+      if (!value) {
+        return "-";
+      }
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) {
+        return String(value);
+      }
+      return date.toLocaleString();
+    }
+
+    function tokensLabel(row) {
+      if (row.total_tokens !== null && row.total_tokens !== undefined) {
+        return String(row.total_tokens);
+      }
+      const input = valueOrDash(row.input_tokens);
+      const output = valueOrDash(row.output_tokens);
+      return input === "-" && output === "-" ? "-" : `${input}/${output}`;
+    }
+
+    function operationLabel(row) {
+      const metadata = row && typeof row.metadata === "object"
+        ? row.metadata
+        : {};
+      if (metadata.operation) {
+        return String(metadata.operation);
+      }
+      const route = String(row.route || "");
+      const geminiMatch = route.match(/:([A-Za-z0-9_]+)(?:\\?|$)/);
+      if (geminiMatch) {
+        return geminiMatch[1];
+      }
+      if (route.includes("/chat/completions")) {
+        return "chat";
+      }
+      if (route.includes("/responses")) {
+        return "responses";
+      }
+      if (route.includes("/embeddings")) {
+        return "embeddings";
+      }
+      if (route.includes("/messages/count_tokens")) {
+        return "count_tokens";
+      }
+      if (route.includes("/messages")) {
+        return "messages";
+      }
+      if (route.includes("/model/info")) {
+        return "model_info";
+      }
+      return "-";
+    }
+
+    function setEmpty(node, visible) {
+      node.hidden = !visible;
+    }
+
+    function safeObject(value) {
+      return value && typeof value === "object" && !Array.isArray(value)
+        ? value
+        : {};
+    }
+
+    function pickFirstObject(...values) {
+      for (const value of values) {
+        if (value && typeof value === "object") {
+          return value;
+        }
+      }
+      return null;
+    }
+
+    function metadataPath(metadata, ...keys) {
+      let current = metadata;
+      for (const key of keys) {
+        if (!current || typeof current !== "object" || !(key in current)) {
+          return null;
+        }
+        current = current[key];
+      }
+      return current && typeof current === "object" ? current : null;
+    }
+
+    function renderSummary(summary) {
+      const items = [
+        ["created_at", formatDate(summary.created_at)],
+        ["status", summary.status_code],
+        ["protocol", summary.protocol],
+        ["route", summary.route],
+        ["operation", operationLabel(summary)],
+        ["method", summary.method],
+        ["provider", summary.provider],
+        ["model requested", summary.model_requested],
+        ["model effective", summary.model_effective],
+        ["latency", summary.latency_ms == null ? "-" : `${summary.latency_ms} ms`],
+        [
+          "upstream latency",
+          summary.upstream_latency_ms == null ? "-" : `${summary.upstream_latency_ms} ms`
+        ],
+        ["tokens", tokensLabel(summary)],
+        ["upstream status", summary.upstream_status_code],
+        ["api_key_hash", summary.api_key_hash],
+        ["span_id", summary.span_id],
+        ["error", summary.error_type || summary.error_message]
+      ];
+      fields.summaryGrid.replaceChildren();
+      items.forEach(([label, value]) => {
+        const item = document.createElement("div");
+        item.className = "summary-item";
+        const labelNode = document.createElement("div");
+        labelNode.className = "summary-label";
+        labelNode.textContent = label;
+        const valueNode = document.createElement("div");
+        valueNode.className = "summary-value";
+        if (String(label).includes("id") || label === "route" || label === "api_key_hash") {
+          valueNode.classList.add("mono");
+        }
+        valueNode.textContent = valueOrDash(value);
+        item.append(labelNode, valueNode);
+        fields.summaryGrid.append(item);
+      });
+    }
+
+    function renderRequest(summary, requestPayload) {
+      const request = {
+        headers: requestPayload.request_headers ?? null,
+        body: requestPayload.request_body ?? null
+      };
+      fields.requestJson.textContent = pretty(request);
+      const body = requestPayload.request_body;
+      const contents = body && typeof body === "object"
+        ? body.contents || body.requests || body.parts || null
+        : null;
+      fields.geminiContents.textContent = contents ? pretty(contents) : "not available";
+      setEmpty(fields.requestEmpty, !summary.has_request_body && !request.headers);
+    }
+
+    function renderResponse(summary, responsePayload) {
+      const response = { body: responsePayload.response_body ?? null };
+      fields.responseJson.textContent = pretty(response);
+      setEmpty(fields.responseEmpty, !summary.has_response_body);
+    }
+
+    function renderMetadataPanels(summary) {
+      const metadata = safeObject(summary.metadata);
+      const normalized = pickFirstObject(
+        metadataPath(metadata, "normalized"),
+        metadataPath(metadata, "diagnostics", "normalized"),
+        metadataPath(metadata, "snapshots", "normalized")
+      );
+      const provider = pickFirstObject(
+        metadataPath(metadata, "provider"),
+        metadataPath(metadata, "provider_payload"),
+        metadataPath(metadata, "snapshots", "provider")
+      );
+      const observability = {
+        request_id: summary.request_id ?? null,
+        trace_id: summary.trace_id ?? null,
+        span_id: summary.span_id ?? null,
+        protocol: summary.protocol ?? null,
+        provider: summary.provider ?? null,
+        model: summary.model_effective || summary.model_requested || null,
+        route: summary.route ?? null
+      };
+      const metrics = {
+        protocol: summary.protocol ?? null,
+        route: summary.route ?? null,
+        model: summary.model_effective || summary.model_requested || null,
+        provider: summary.provider ?? null,
+        status_code: summary.status_code ?? null,
+        error_type: summary.error_type ?? null
+      };
+
+      fields.normalizedJson.textContent = pretty(normalized || {});
+      fields.providerJson.textContent = pretty(provider || {});
+      fields.observabilityJson.textContent = pretty(observability);
+      fields.metricsJson.textContent = pretty(metrics);
+      setEmpty(fields.normalizedEmpty, !normalized);
+      setEmpty(fields.providerEmpty, !provider);
+      setEmpty(fields.observabilityEmpty, false);
+      setEmpty(fields.metricsEmpty, false);
+    }
+
+    async function parseResponse(response) {
+      const text = await response.text();
+      if (!text) {
+        return {};
+      }
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        return { text };
+      }
+    }
+
+    function errorMessage(response, data) {
+      const detail = data && (data.detail || data.error || data.message || data.text);
+      if (response.status === 404) {
+        return "Traffic log not found or admin logs API unavailable";
+      }
+      if (response.status === 503) {
+        return "Log store unavailable";
+      }
+      if (typeof detail === "string") {
+        return redactText(detail);
+      }
+      if (detail) {
+        return redactText(JSON.stringify(detail));
+      }
+      return `HTTP ${response.status}`;
+    }
+
+    async function fetchJson(path) {
+      const response = await fetch(path, { headers: adminHeaders() });
+      const data = await parseResponse(response);
+      if (!response.ok) {
+        throw new Error(errorMessage(response, data));
+      }
+      return data;
+    }
+
+    async function loadDetail() {
+      const id = fields.logId.value.trim();
+      if (!id) {
+        setStatus("Traffic log id missing", "error");
+        return;
+      }
+      if (!fields.adminKey.value.trim()) {
+        setStatus("Admin key required", "error");
+        return;
+      }
+
+      setStatus("Loading detail");
+      try {
+        const encoded = encodeURIComponent(id);
+        const summary = await fetchJson(`/_admin/logs/${encoded}`);
+        const [requestPayload, responsePayload] = await Promise.all([
+          fetchJson(`/_admin/logs/${encoded}/request`).catch((error) => ({
+            error: error.message
+          })),
+          fetchJson(`/_admin/logs/${encoded}/response`).catch((error) => ({
+            error: error.message
+          }))
+        ]);
+        fields.requestId.textContent = valueOrDash(summary.request_id);
+        fields.traceId.textContent = valueOrDash(summary.trace_id);
+        renderSummary(summary);
+        fields.summaryJson.textContent = pretty(summary);
+        renderRequest(summary, requestPayload);
+        renderResponse(summary, responsePayload);
+        renderMetadataPanels(summary);
+        setEmpty(fields.summaryEmpty, false);
+        setStatus(`Loaded ${valueOrDash(summary.request_id)}`);
+      } catch (error) {
+        setStatus(error.message || "Failed to load detail", "error");
+      }
+    }
+
+    function setActivePanel(panelId) {
+      document.querySelectorAll(".tab-button").forEach((button) => {
+        button.classList.toggle("is-active", button.dataset.panel === panelId);
+      });
+      document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("is-active", panel.id === panelId);
+      });
+    }
+
+    async function copyValue(sourceId) {
+      const node = document.getElementById(sourceId);
+      const value = node ? node.textContent.trim() : "";
+      if (!value || value === "-") {
+        setStatus("Nothing to copy", "error");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(value);
+        setStatus(`Copied ${sourceId}`);
+      } catch (error) {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        setStatus(`Selected ${sourceId}`);
+      }
+    }
+
+    fields.logId.value = eventIdFromPath();
+    fields.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      loadDetail();
+    });
+    document.querySelectorAll(".tab-button").forEach((button) => {
+      button.addEventListener("click", () => setActivePanel(button.dataset.panel));
+    });
+    document.querySelectorAll(".copy-button").forEach((button) => {
+      button.addEventListener("click", () => copyValue(button.dataset.copySource));
+    });
+  </script>
+</body>
+</html>"""
+
+
 @router.get("", response_class=HTMLResponse)
 async def ui_root():
     """Redirect the UI root to the playground shell."""
@@ -2928,3 +3831,9 @@ async def playground():
 async def logs():
     """Serve the built-in traffic logs list shell."""
     return HTMLResponse(_LOGS_HTML)
+
+
+@router.get("/logs/{event_id}", response_class=HTMLResponse)
+async def log_detail(event_id: str):
+    """Serve the built-in traffic log detail shell."""
+    return HTMLResponse(_LOG_DETAIL_HTML)
