@@ -119,6 +119,16 @@ def test_anthropic_messages_fusion_model_alias_returns_non_stream_message():
         "GigaChat-2-Max",
         "GigaChat-2-Max",
     ]
+    sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
+    panel_messages = sent_payloads[0]["messages"]
+    assert (
+        '<client_harness_contract source="anthropic_messages">'
+        in (panel_messages[0]["content"])
+    )
+    assert "Be direct." in panel_messages[0]["content"]
+    assert "Be direct." not in "\n".join(
+        message.get("content", "") for message in panel_messages[1:]
+    )
 
 
 def test_anthropic_messages_fusion_model_alias_returns_buffered_stream():

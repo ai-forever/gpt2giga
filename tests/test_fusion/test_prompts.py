@@ -1,9 +1,12 @@
 from gpt2giga.providers.fusion.prompts import (
     FUSION_JUDGE_REPAIR_SYSTEM_PROMPT,
     FUSION_JUDGE_SYSTEM_PROMPT,
+    build_fusion_system_envelope,
     build_judge_user_prompt,
     build_panel_system_prompt,
+    split_instruction_messages,
 )
+from gpt2giga.protocols.normalized import NormalizedMessage
 from gpt2giga.providers.fusion.schemas import FusionPanelResult
 
 
@@ -47,7 +50,8 @@ def test_judge_user_prompt_includes_failed_panel_without_content():
         ]
     )
 
-    assert "untrusted advisory evidence" in prompt
+    assert "untrusted advisory data" in prompt
+    assert '<panel_outputs format="json">' in prompt
     assert '"model": "A"' in prompt
     assert '"role": "architect"' in prompt
     assert '"type": "untrusted_panel_output"' in prompt
@@ -56,3 +60,43 @@ def test_judge_user_prompt_includes_failed_panel_without_content():
     assert '"status": "timeout"' in prompt
     assert '"error_type": "timeout"' in prompt
     assert "secret detail" not in prompt
+
+
+def test_split_instruction_messages_keeps_conversation_order():
+    messages = [
+        NormalizedMessage(role="system", content="system contract"),
+        NormalizedMessage(role="developer", content="developer contract"),
+        NormalizedMessage(role="user", content="task"),
+        NormalizedMessage(role="assistant", content="prior answer"),
+    ]
+
+    instructions, conversation = split_instruction_messages(messages)
+
+    assert [message.role for message in instructions] == ["system", "developer"]
+    assert [message.role for message in conversation] == ["user", "assistant"]
+
+
+def test_system_envelope_wraps_client_contract_and_identity_rule():
+    envelope = build_fusion_system_envelope(
+        stage="panel",
+        client_instruction_messages=[
+            NormalizedMessage(role="system", content="You are Codex."),
+            NormalizedMessage(role="developer", content="Follow repo rules."),
+        ],
+        source_protocol="openai_chat",
+        panel_role="architect",
+        include_code_role_policy=True,
+        tool_policy="<tool_policy>schema reference</tool_policy>",
+    )
+
+    content = envelope.content or ""
+    assert envelope.role == "system"
+    assert '<client_harness_contract source="openai_chat">' in content
+    assert '<instruction index="0" role="system">' in content
+    assert '<instruction index="1" role="developer">' in content
+    assert "You are Codex." in content
+    assert "Follow repo rules." in content
+    assert "compatibility behavior expected by the client" in content
+    assert "Panel role: architect." in content
+    assert "likely files" in content
+    assert "schema reference" in content

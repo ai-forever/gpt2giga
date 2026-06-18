@@ -28,9 +28,9 @@ from gpt2giga.providers.fusion.detection import FusionRequestConfig
 from gpt2giga.providers.fusion.limiter import FusionRequestLimiter
 from gpt2giga.providers.fusion.prompts import (
     FUSION_JUDGE_REPAIR_SYSTEM_PROMPT,
-    FUSION_JUDGE_SYSTEM_PROMPT,
+    build_fusion_system_envelope,
     build_judge_user_prompt,
-    build_panel_system_prompt,
+    split_instruction_messages,
 )
 from gpt2giga.providers.fusion.schemas import (
     FUSION_ANALYSIS_SCHEMA_VERSION,
@@ -729,18 +729,23 @@ def _build_panel_request(
     _apply_generation_overrides(panel_request, fusion_config)
 
     code_prompt = _is_code_preset(fusion_config)
-    system_messages = [
-        NormalizedMessage(
-            role="system",
-            content=build_panel_system_prompt(role, code=code_prompt),
-        )
-    ]
+    instruction_messages, conversation_messages = split_instruction_messages(
+        panel_request.messages
+    )
     tool_reference = build_panel_tool_reference(
         panel_request.tools, fusion_config.tools_mode
     )
-    if tool_reference is not None:
-        system_messages.append(NormalizedMessage(role="system", content=tool_reference))
-    panel_request.messages = [*system_messages, *panel_request.messages]
+    panel_request.messages = [
+        build_fusion_system_envelope(
+            stage="panel",
+            client_instruction_messages=instruction_messages,
+            source_protocol=_source_protocol(panel_request),
+            panel_role=role,
+            include_code_role_policy=code_prompt,
+            tool_policy=tool_reference,
+        ),
+        *conversation_messages,
+    ]
 
     if fusion_config.tools_mode in {"off", "schema_only", "final_arbitration"}:
         panel_request.tools = []
@@ -766,9 +771,9 @@ def _build_judge_request(
     judge_request.response_format = _fusion_analysis_response_format()
     _apply_generation_overrides(judge_request, fusion_config)
 
-    messages = [
-        NormalizedMessage(role="system", content=FUSION_JUDGE_SYSTEM_PROMPT),
-    ]
+    instruction_messages, conversation_messages = split_instruction_messages(
+        judge_request.messages
+    )
     tool_prompt = build_judge_tool_arbitration_prompt(
         tools=request.tools,
         panel_results=panel_results,
@@ -776,18 +781,19 @@ def _build_judge_request(
         tools_mode=fusion_config.tools_mode,
         max_tool_calls=fusion_config.max_tool_calls,
     )
-    if tool_prompt is not None:
-        messages.append(NormalizedMessage(role="system", content=tool_prompt))
-    messages.extend(
-        [
-            *request.messages,
-            NormalizedMessage(
-                role="user",
-                content=build_judge_user_prompt(panel_results),
-            ),
-        ]
-    )
-    judge_request.messages = messages
+    judge_request.messages = [
+        build_fusion_system_envelope(
+            stage="judge",
+            client_instruction_messages=instruction_messages,
+            source_protocol=_source_protocol(judge_request),
+            tool_policy=tool_prompt,
+        ),
+        *conversation_messages,
+        NormalizedMessage(
+            role="user",
+            content=build_judge_user_prompt(panel_results),
+        ),
+    ]
     if fusion_config.tools_mode == "off":
         judge_request.tools = []
         judge_request.tool_choice = None
@@ -868,6 +874,17 @@ def _build_judge_repair_prompt(
         "FusionAnalysis JSON object:\n\n"
         f"{json.dumps(payload, ensure_ascii=True, sort_keys=True)}"
     )
+
+
+def _source_protocol(request: NormalizedChatRequest) -> str:
+    source_protocol = request.metadata.get("source_protocol")
+    if isinstance(source_protocol, str) and source_protocol:
+        return source_protocol
+    if request.protocol == "gemini" and request.operation == "chat":
+        return "gemini_generate_content"
+    if request.protocol and request.operation:
+        return f"{request.protocol}_{request.operation}"
+    return request.protocol or "unknown"
 
 
 def _apply_generation_overrides(

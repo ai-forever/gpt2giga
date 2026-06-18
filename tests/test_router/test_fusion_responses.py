@@ -122,6 +122,16 @@ def test_responses_fusion_model_alias_returns_non_stream_response():
         "GigaChat-2-Max",
         "GigaChat-2-Max",
     ]
+    sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
+    panel_messages = sent_payloads[0]["messages"]
+    assert (
+        '<client_harness_contract source="openai_responses">'
+        in (panel_messages[0]["content"])
+    )
+    assert "Be direct." in panel_messages[0]["content"]
+    assert "Be direct." not in "\n".join(
+        message.get("content", "") for message in panel_messages[1:]
+    )
     assert not app.state.request_transformer.response_calls
 
 

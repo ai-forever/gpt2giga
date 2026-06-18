@@ -137,6 +137,15 @@ def test_gemini_generate_content_fusion_model_alias_returns_non_stream_response(
     sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
     assert sent_payloads[0]["metadata"]["tenant"] == "test"
     assert "gpt2giga_fusion" not in sent_payloads[0]["metadata"]
+    panel_messages = sent_payloads[0]["messages"]
+    assert (
+        '<client_harness_contract source="gemini_generate_content">'
+        in (panel_messages[0]["content"])
+    )
+    assert "Be direct." in panel_messages[0]["content"]
+    assert "Be direct." not in "\n".join(
+        message.get("content", "") for message in panel_messages[1:]
+    )
 
 
 def test_gemini_stream_generate_content_fusion_model_alias_returns_buffered_sse():
