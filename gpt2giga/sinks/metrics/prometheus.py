@@ -35,7 +35,12 @@ ALLOWED_LABELS = frozenset(
         "provider",
         "error_type",
         "model",
+        "input_output",
+        "phase",
+        "preset",
+        "reason",
         "sink",
+        "status",
     }
 )
 METRIC_DEFINITIONS: dict[str, tuple[str, str]] = {
@@ -70,6 +75,34 @@ METRIC_DEFINITIONS: dict[str, tuple[str, str]] = {
     "gpt2giga_traffic_log_dropped_total": (
         "counter",
         "Total number of traffic log events dropped under backpressure.",
+    ),
+    "gpt2giga_fusion_requests_total": (
+        "counter",
+        "Total number of Fusion requests.",
+    ),
+    "gpt2giga_fusion_panel_calls_total": (
+        "counter",
+        "Total number of Fusion panel model calls.",
+    ),
+    "gpt2giga_fusion_latency_seconds": (
+        "histogram",
+        "Fusion request duration in seconds.",
+    ),
+    "gpt2giga_fusion_panel_latency_seconds": (
+        "histogram",
+        "Fusion panel model call duration in seconds.",
+    ),
+    "gpt2giga_fusion_judge_latency_seconds": (
+        "histogram",
+        "Fusion judge model call duration in seconds.",
+    ),
+    "gpt2giga_fusion_tokens_total": (
+        "counter",
+        "Total number of tokens reported by Fusion phases.",
+    ),
+    "gpt2giga_fusion_failures_total": (
+        "counter",
+        "Total number of Fusion degradation or failure reasons.",
     ),
 }
 

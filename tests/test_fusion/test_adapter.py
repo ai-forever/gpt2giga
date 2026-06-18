@@ -54,6 +54,32 @@ class FakeProvider:
             self.in_flight -= 1
 
 
+class RecordingMetricsSink:
+    def __init__(self):
+        self.increments = []
+        self.observations = []
+
+    async def increment(self, name, value=1, attributes=None):
+        self.increments.append((name, value, attributes or {}))
+
+    async def observe(self, name, value, attributes=None):
+        self.observations.append((name, value, attributes or {}))
+
+    async def flush(self):
+        return None
+
+
+class RecordingObservabilitySink:
+    def __init__(self):
+        self.events = []
+
+    async def emit(self, name, attributes=None, *, context=None, events=None):
+        self.events.append((name, attributes or {}, context, events or []))
+
+    async def flush(self):
+        return None
+
+
 def _request() -> NormalizedChatRequest:
     return NormalizedChatRequest(
         model="gpt2giga/fusion-code",
@@ -80,7 +106,13 @@ def _fusion_config(**overrides) -> FusionRequestConfig:
     return FusionRequestConfig(**values)
 
 
-def _adapter(provider, **settings_overrides) -> FusionProviderAdapter:
+def _adapter(
+    provider,
+    *,
+    metrics_sink=None,
+    observability_sink=None,
+    **settings_overrides,
+) -> FusionProviderAdapter:
     settings = {
         "enabled": True,
         "max_panel_concurrency": 2,
@@ -89,6 +121,8 @@ def _adapter(provider, **settings_overrides) -> FusionProviderAdapter:
     return FusionProviderAdapter(
         settings=FusionSettings(**settings),
         upstream_provider=provider,
+        metrics_sink=metrics_sink,
+        observability_sink=observability_sink,
     )
 
 
@@ -216,6 +250,64 @@ async def test_fusion_adapter_runs_panels_in_parallel_and_judges_result():
     assert "likely files" in provider.calls[0].messages[0].content
     assert "Panel responses" in provider.calls[-1].messages[-1].content
     assert response.metadata["gpt2giga_fusion_successful_panels"] == "2"
+
+
+async def test_fusion_adapter_emits_safe_telemetry_without_prompt_leakage():
+    metrics = RecordingMetricsSink()
+    observability = RecordingObservabilitySink()
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response(
+                "PanelA",
+                "SECRET_PANEL_A",
+                usage=NormalizedUsage(input_tokens=1, output_tokens=2),
+            ),
+            "PanelB": _text_response("PanelB", "SECRET_PANEL_B"),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json("final answer"),
+                usage=NormalizedUsage(input_tokens=3, output_tokens=4),
+            ),
+        }
+    )
+    adapter = _adapter(
+        provider,
+        metrics_sink=metrics,
+        observability_sink=observability,
+    )
+    request = _request()
+    request.messages[0].content = "SECRET_PROMPT"
+
+    response = await adapter.chat(
+        request,
+        context=_context(),
+        fusion_config=_fusion_config(),
+    )
+
+    assert response.error is None
+    assert [event[0] for event in observability.events] == ["GigaFusion"]
+    _name, attributes, emitted_context, span_events = observability.events[0]
+    assert emitted_context is not None
+    dumped = json.dumps(
+        {"attributes": attributes, "events": span_events},
+        sort_keys=True,
+        default=str,
+    )
+    assert attributes["gpt2giga.provider"] == "fusion"
+    assert attributes["gpt2giga.fusion.successful_panel_count"] == 2
+    assert "SECRET_PROMPT" not in dumped
+    assert "SECRET_PANEL_A" not in dumped
+    assert "SECRET_PANEL_B" not in dumped
+    assert any(
+        name == "gpt2giga_fusion_requests_total"
+        and labels == {"preset": "code-budget", "status": "ok"}
+        for name, _value, labels in metrics.increments
+    )
+    assert any(
+        name == "gpt2giga_fusion_judge_latency_seconds"
+        and labels == {"model": "Judge", "status": "ok"}
+        for name, _value, labels in metrics.observations
+    )
 
 
 async def test_fusion_adapter_times_out_one_panel_and_continues():

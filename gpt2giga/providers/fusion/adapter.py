@@ -33,6 +33,7 @@ from gpt2giga.providers.fusion.schemas import (
     FusionPanelResult,
     FusionRunResult,
 )
+from gpt2giga.providers.fusion.telemetry import emit_fusion_telemetry
 from gpt2giga.providers.fusion.tool_arbitration import (
     build_judge_tool_arbitration_prompt,
     build_panel_tool_reference,
@@ -67,9 +68,15 @@ class FusionProviderAdapter:
         *,
         settings: FusionSettings,
         upstream_provider: FusionUpstreamProvider,
+        metrics_sink: Any | None = None,
+        observability_sink: Any | None = None,
+        logger: Any | None = None,
     ) -> None:
         self.settings = settings
         self.upstream_provider = upstream_provider
+        self.metrics_sink = metrics_sink
+        self.observability_sink = observability_sink
+        self.logger = logger
 
     async def chat(
         self,
@@ -108,6 +115,7 @@ class FusionProviderAdapter:
                 latency_ms=_elapsed_ms(started),
                 fallback_reason="all_panels_failed",
             )
+            await self._emit_telemetry(run_result, context, fusion_config)
             return self._error_response(
                 requested_model=requested_model,
                 message="Fusion panel stage did not produce enough successful results",
@@ -118,6 +126,8 @@ class FusionProviderAdapter:
 
         judge_response: NormalizedResponse | None = None
         judge_error_reason: str | None = None
+        judge_latency_ms: int | None = None
+        judge_started = time.perf_counter()
         try:
             judge_response = await self._run_judge(
                 request,
@@ -132,6 +142,8 @@ class FusionProviderAdapter:
             raise
         except Exception as exc:
             judge_error_reason = f"judge_failed:{type(exc).__name__}"
+        finally:
+            judge_latency_ms = _elapsed_ms(judge_started)
 
         analysis, parse_error_reason = _analysis_from_judge_response(
             judge_response,
@@ -169,9 +181,12 @@ class FusionProviderAdapter:
                 failed_models=failed_panels,
                 analysis=analysis,
                 usage=usage,
+                judge_usage=_response_usage(judge_response),
                 latency_ms=_elapsed_ms(started),
+                judge_latency_ms=judge_latency_ms,
                 fallback_reason=fallback_reason or "required_tool_call_missing",
             )
+            await self._emit_telemetry(run_result, context, fusion_config)
             return self._error_response(
                 requested_model=requested_model,
                 message="Fusion finalizer did not produce the required tool call",
@@ -190,9 +205,14 @@ class FusionProviderAdapter:
                     failed_models=failed_panels,
                     analysis=analysis,
                     usage=usage,
+                    judge_usage=(
+                        judge_response.usage if judge_response is not None else None
+                    ),
                     latency_ms=_elapsed_ms(started),
+                    judge_latency_ms=judge_latency_ms,
                     fallback_reason=fallback_reason or "empty_fusion_result",
                 )
+                await self._emit_telemetry(run_result, context, fusion_config)
                 return self._error_response(
                     requested_model=requested_model,
                     message="Fusion did not produce a final answer",
@@ -212,9 +232,12 @@ class FusionProviderAdapter:
             failed_models=failed_panels,
             analysis=analysis,
             usage=usage,
+            judge_usage=_response_usage(judge_response),
             latency_ms=_elapsed_ms(started),
+            judge_latency_ms=judge_latency_ms,
             fallback_reason=fallback_reason,
         )
+        await self._emit_telemetry(run_result, context, fusion_config)
         return NormalizedResponse(
             id=context.request_id if context is not None else None,
             model=requested_model,
@@ -411,7 +434,9 @@ class FusionProviderAdapter:
         panel_results: list[FusionPanelResult],
         failed_models: list[FusionPanelResult],
         usage: Any = None,
+        judge_usage: Any = None,
         latency_ms: int | None = None,
+        judge_latency_ms: int | None = None,
         analysis: FusionAnalysis | None = None,
         fallback_reason: str | None = None,
     ) -> FusionRunResult:
@@ -427,8 +452,29 @@ class FusionProviderAdapter:
             analysis=analysis,
             fallback_reason=fallback_reason,
             usage=usage,
+            judge_usage=judge_usage,
             latency_ms=latency_ms,
+            judge_latency_ms=judge_latency_ms,
         )
+
+    async def _emit_telemetry(
+        self,
+        run_result: FusionRunResult,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+    ) -> None:
+        try:
+            await emit_fusion_telemetry(
+                metrics_sink=self.metrics_sink,
+                observability_sink=self.observability_sink,
+                run_result=run_result,
+                fusion_config=fusion_config,
+                context=context,
+                logger=self.logger,
+            )
+        except Exception as exc:
+            if self.logger is not None:
+                self.logger.warning("Fusion telemetry emission failed: {}", exc)
 
     def _error_response(
         self,
@@ -666,6 +712,10 @@ def _content_to_text(
     return text or None
 
 
+def _response_usage(response: NormalizedResponse | None) -> Any:
+    return response.usage if response is not None else None
+
+
 def _load_json_object(content: str) -> dict[str, Any]:
     text = _strip_code_fence(content)
     try:
@@ -744,6 +794,12 @@ def _provider_metadata(
         "final_model": run_result.final_model,
         "fallback_reason": run_result.fallback_reason,
         "latency_ms": run_result.latency_ms,
+        "judge_latency_ms": run_result.judge_latency_ms,
+        "judge_usage": (
+            run_result.judge_usage.to_json_dict()
+            if run_result.judge_usage is not None
+            else None
+        ),
         "panel_results": [
             _panel_metadata(result, expose_content=settings.expose_panel_responses)
             for result in run_result.panel_results

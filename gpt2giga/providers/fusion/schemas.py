@@ -82,6 +82,8 @@ class FusionRunResult(BaseModel):
     analysis: Optional[FusionAnalysis] = None
     fallback_reason: Optional[str] = None
     usage: Optional[NormalizedUsage] = None
+    judge_usage: Optional[NormalizedUsage] = None
     latency_ms: Optional[int] = None
+    judge_latency_ms: Optional[int] = None
 
     model_config = ConfigDict(extra="forbid")

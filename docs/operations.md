@@ -49,7 +49,7 @@ GPT2GIGA_METRICS_PATH=/metrics
 
 Если API-key auth включена, передавайте `Authorization: Bearer <GPT2GIGA_API_KEY>` или `x-api-key`.
 
-Метрики не содержат prompt/response content, API keys, request ids, trace ids или raw payloads. Labels ограничены bounded operational fields: protocol, route, method, status, lifecycle, provider, model.
+Метрики не содержат prompt/response content, API keys, request ids, trace ids или raw payloads. Labels ограничены bounded operational fields: protocol, route, method, status, lifecycle, provider, model, preset, phase и failure reason.
 
 Базовые series:
 
@@ -61,6 +61,17 @@ GPT2GIGA_METRICS_PATH=/metrics
 - `gpt2giga_tokens_output_total`
 - `gpt2giga_stream_disconnects_total`
 - `gpt2giga_traffic_log_dropped_total`
+
+Fusion series включаются тем же `/metrics` endpoint и не экспортируют panel
+responses, prompt content или tool arguments:
+
+- `gpt2giga_fusion_requests_total`
+- `gpt2giga_fusion_panel_calls_total`
+- `gpt2giga_fusion_latency_seconds`
+- `gpt2giga_fusion_panel_latency_seconds`
+- `gpt2giga_fusion_judge_latency_seconds`
+- `gpt2giga_fusion_tokens_total`
+- `gpt2giga_fusion_failures_total`
 
 ## Traffic Logs
 
@@ -202,6 +213,11 @@ Anthropic Messages, `Gemini-Content` для Gemini GenerateContent и `Embedding
 для OpenAI Embeddings. Streaming milestones прикрепляются к
 соответствующему root span как span events. Для non-LLM routes используется
 один lifecycle span `gpt2giga.request`.
+
+Fusion requests дополнительно получают span `GigaFusion` с bounded attributes:
+preset, panel counts, judge/final model ids, pipeline/tools mode, latency и token
+usage. Panel events содержат только model, role, status, latency и error type;
+raw panel responses, prompt content и tool arguments не пишутся.
 
 Для фильтрации и группировки по совместимому API-формату model spans получают
 атрибут `gpt2giga.api_format`: `chat_completions`, `responses`, `messages`,

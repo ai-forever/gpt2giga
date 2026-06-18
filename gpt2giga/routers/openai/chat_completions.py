@@ -270,6 +270,9 @@ async def _try_fusion_chat_completion(
     fusion_adapter = FusionProviderAdapter(
         settings=fusion_settings,
         upstream_provider=upstream_provider,
+        metrics_sink=getattr(state, "metrics_sink", None),
+        observability_sink=getattr(state, "observability_sink", None),
+        logger=getattr(state, "logger", None),
     )
     normalized_response = await fusion_adapter.chat(
         normalized_request,
