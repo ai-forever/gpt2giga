@@ -1,88 +1,88 @@
-# Logging и observability
+# Логирование и наблюдаемость
 
-Документ определяет термины logging, которые используются в modular roadmap.
-Они намеренно разделены, потому что у них разные требования к security, storage
-и operations.
+Документ определяет термины логирования, которые используются в модульной дорожной карте.
+Они намеренно разделены, потому что у них разные требования к безопасности, хранению
+и эксплуатации.
 
-## Runtime Logs
+## Журналы выполнения
 
-Runtime logs — это process logs, которые пишет запущенный service gpt2giga.
-Сейчас их обрабатывает существующий Loguru-based logger; они пишутся в stdout
-и настроенный log file.
+Журналы выполнения — это журналы процесса, которые пишет запущенный сервис gpt2giga.
+Сейчас их обрабатывает существующий логгер на базе Loguru; они пишутся в stdout
+и настроенный файл журнала.
 
-Runtime logs используются для:
+Журналы выполнения используются для:
 
-- статуса startup и shutdown;
-- operational warnings и errors;
-- request-scoped diagnostics с внутренним request id;
-- development-only debug payload logging, если это разрешено configuration.
+- статуса запуска и остановки;
+- операционных предупреждений и ошибок;
+- диагностики в рамках запроса с внутренним идентификатором запроса;
+- логирования отладочной полезной нагрузки только для разработки, если это разрешено конфигурацией.
 
-Runtime logs не должны содержать raw API keys, credentials, cookies, tokens или
-другие secrets. Sensitive field redaction остаётся включённой по умолчанию.
+Журналы выполнения не должны содержать необработанных API-ключей, учётных данных, cookie, токенов или
+других секретов. Маскирование чувствительных полей остаётся включённым по умолчанию.
 
-## Traffic Logs
+## Журналы трафика
 
-Traffic logs — это structured records для LLM request/response traffic. Они
-отделены от runtime logs и предназначены для controlled storage sinks: JSONL,
+Журналы трафика — это структурированные записи трафика запросов и ответов LLM. Они
+отделены от журналов выполнения и предназначены для контролируемых приёмников хранилища: JSONL,
 Postgres или OpenSearch.
 
-Traffic logs могут содержать:
+Журналы трафика могут содержать:
 
-- request id, trace id, protocol, route, method и timing metadata;
-- hashed client или API-key identifiers;
-- requested и effective model names;
-- status и token usage;
-- prompts и responses, если это явно разрешено opt-in settings.
+- идентификатор запроса, идентификатор трейса, protocol, route, method и метаданные тайминга;
+- хешированные идентификаторы клиента или API-ключа;
+- запрошенное и фактическое имена модели;
+- статус и использование токенов;
+- промпты и ответы, если это явно разрешено включаемыми настройками.
 
-Content capture должен оставаться выключенным по умолчанию. Redaction должна
-оставаться включённой по умолчанию. Raw authorization headers, `x-api-key`,
-cookies, credentials и local certificate material никогда не должны сохраняться.
+Захват содержимого должен оставаться выключенным по умолчанию. Маскирование должно
+оставаться включённым по умолчанию. Необработанные заголовки авторизации, `x-api-key`,
+cookie, учётные данные и локальный материал сертификатов никогда не должны сохраняться.
 
-## Observability
+## Наблюдаемость
 
-Observability включает traces, spans и metrics, которые отправляются через
-OpenTelemetry/OpenInference-compatible integrations. Arize Phoenix — optional
-destination, а не замена runtime logs или traffic logs.
+Наблюдаемость включает трейсы, спаны и метрики, которые отправляются через
+интеграции, совместимые с OpenTelemetry/OpenInference. Arize Phoenix — необязательное
+место назначения, а не замена журналов выполнения или журналов трафика.
 
-Observability events должны использовать request context fields для correlation:
+События наблюдаемости должны использовать поля контекста запроса для корреляции:
 
 - `request_id`;
 - `trace_id`;
-- optional `span_id`;
-- metadata protocol и route;
-- metadata model, если доступна.
+- необязательный `span_id`;
+- метаданные protocol и route;
+- метаданные model, если доступны.
 
-Prompt и response capture для observability должны быть opt-in и следовать тем
-же redaction rules, что и traffic logs.
+Захват промптов и ответов для наблюдаемости должен быть включаемым и следовать тем
+же правилам маскирования, что и журналы трафика.
 
-LLM-specific observability строится вокруг normalized request/response models,
+Наблюдаемость, специфичная для LLM, строится вокруг нормализованных моделей запроса/ответа,
 где это возможно: Chat Completions использует `NormalizedChatRequest` и
-`NormalizedResponse`, Responses и Anthropic helpers приводят public payloads к
-chat-like normalized representation для spans, а streaming milestones могут
+`NormalizedResponse`, помощники Responses и Anthropic приводят публичные полезные нагрузки к
+нормализованному чат-подобному представлению для спанов, а вехи потока могут
 строиться из `NormalizedStreamEvent`. Это позволяет добавлять новый
-protocol/provider без копирования всей OpenInference/Phoenix mapping logic.
-Подробности: [Normalized messages architecture](./normalized-messages.md).
+протокол/провайдер без копирования всей логики сопоставления OpenInference/Phoenix.
+Подробности: [Нормализованные сообщения](./normalized-messages.md).
 
-## Metrics
+## Метрики
 
-Metrics — это aggregate counters и histograms для operational health. Они
-выключены по умолчанию и могут публиковаться через Prometheus-compatible
-endpoint `/metrics` при `GPT2GIGA_METRICS_ENABLED=True`.
+Метрики — это агрегированные счётчики и гистограммы для контроля работоспособности. Они
+выключены по умолчанию и могут публиковаться через эндпоинт `/metrics`, совместимый с
+Prometheus, при `GPT2GIGA_METRICS_ENABLED=True`.
 
-Metrics должны описывать aggregate behavior, например:
+Метрики должны описывать агрегированное поведение, например:
 
-- request counts по protocol, route, status и model;
-- latency histograms;
-- upstream error counts;
-- stream disconnect counts;
-- сбои traffic-log и observability sinks.
+- число запросов по protocol, route, status и model;
+- гистограммы задержки;
+- число ошибок вышестоящего сервиса;
+- число отключений потока;
+- сбои приёмников журналов трафика и наблюдаемости.
 
-Metrics не должны включать prompt или response content. Labels должны избегать
-high-cardinality raw identifiers; по возможности используйте bounded значения
+Метрики не должны включать содержимое промптов или ответов. Метки должны избегать
+необработанных идентификаторов с высокой кардинальностью; по возможности используйте ограниченные значения
 protocol, route, status и model.
 
-Metrics endpoint следует той же API-key policy, что и public API routes. В
+Эндпоинт метрик следует той же политике API-ключа, что и публичные API-маршруты. В
 `PROD` он требует `GPT2GIGA_API_KEY`; в `DEV` он открыт только при выключенной
-global API-key auth. Он экспортирует baseline service series для request counts,
-request/upstream latency, upstream errors, token totals, stream disconnects и
-traffic-log queue drops.
+глобальной аутентификации по API-ключу. Он экспортирует базовые серии сервиса для числа запросов,
+задержки запроса/вышестоящего сервиса, ошибок вышестоящего сервиса, суммарных токенов, отключений потока и
+отбрасываний из очереди журналов трафика.

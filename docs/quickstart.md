@@ -1,15 +1,15 @@
 # Быстрый старт
 
-Этот документ помогает быстро запустить OpenAI/Anthropic-compatible прокси к GigaChat.
+Этот документ помогает быстро запустить прокси к GigaChat, совместимый с OpenAI и Anthropic.
 
 ## Требования
 
 - Python 3.10–3.14 для локального запуска.
 - `uv` для локальной разработки.
-- Docker с Compose plugin для контейнерного запуска.
-- GigaChat credentials и scope для нужного аккаунта.
+- Docker с плагином Compose для контейнерного запуска.
+- Учётные данные и scope GigaChat для нужного аккаунта.
 
-## Настройка credentials
+## Настройка учётных данных
 
 Создайте локальный env-файл:
 
@@ -34,19 +34,19 @@ GIGACHAT_MODEL=GigaChat-2-Max
 
 ## Запуск через Docker Compose
 
-DEV profile:
+Профиль DEV:
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-PROD profile:
+Профиль PROD:
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
 ```
 
-В `PROD` compose-файл по умолчанию привязывает service только к `127.0.0.1`. Для внешнего доступа поставьте nginx, Traefik, Caddy или другой reverse proxy.
+В `PROD` compose-файл по умолчанию привязывает сервис только к `127.0.0.1`. Для внешнего доступа поставьте nginx, Traefik, Caddy или другой обратный прокси.
 
 Проверка:
 
@@ -56,7 +56,7 @@ curl http://localhost:8090/health
 
 ## Локальный запуск
 
-Установить как tool:
+Установить как инструмент:
 
 ```sh
 uv tool install gpt2giga
@@ -70,7 +70,7 @@ uv sync --all-extras --dev
 uv run gpt2giga
 ```
 
-В `DEV` FastAPI docs доступны на `http://localhost:8090/docs`. В `PROD` они отключены.
+В `DEV` документация FastAPI доступна на `http://localhost:8090/docs`. В `PROD` она отключена.
 
 ## OpenAI SDK
 
@@ -90,9 +90,9 @@ completion = client.chat.completions.create(
 print(completion.choices[0].message.content)
 ```
 
-Для явного выбора GigaChat backend contract используйте `api_version = "v1"`
-или `api_version = "v2"` и прокидывайте его в `base_url`. `/v1` всегда
-выбирает GigaChat v1 contract, `/v2` — GigaChat v2 contract.
+Для явного выбора контракта бэкенда GigaChat используйте `api_version = "v1"`
+или `api_version = "v2"` и подставляйте его в `base_url`. `/v1` всегда
+выбирает контракт GigaChat v1, `/v2` — контракт GigaChat v2.
 `http://localhost:8090` без версии следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 ## Anthropic SDK
@@ -114,21 +114,21 @@ message = client.messages.create(
 print(message.content[0].text)
 ```
 
-## GigaChat auth для каждого request
+## Авторизация GigaChat для каждого запроса
 
-Если клиент должен передавать GigaChat auth через `Authorization`, включите:
+Если клиент должен передавать авторизацию GigaChat через `Authorization`, включите:
 
 ```dotenv
 GPT2GIGA_PASS_TOKEN=True
 ```
 
-Поддержанные значения заголовка:
+Поддерживаемые значения заголовка:
 
-- `giga-cred-<credentials>:<scope>` для GigaChat authorization key credentials;
-- `giga-auth-<access_token>` для готового access token;
-- `giga-user-<user>:<password>` для user/password auth.
+- `giga-cred-<credentials>:<scope>` для учётных данных по ключу авторизации GigaChat;
+- `giga-auth-<access_token>` для готового access-токена;
+- `giga-user-<user>:<password>` для авторизации по логину и паролю.
 
-Для типовых deployment-сценариев предпочтительнее серверные `GIGACHAT_*` credentials. Включайте `GPT2GIGA_PASS_TOKEN=True`, только если нужны client-specific upstream credentials.
+Для типовых сценариев развёртывания предпочтительнее серверные учётные данные `GIGACHAT_*`. Включайте `GPT2GIGA_PASS_TOKEN=True`, только если нужны учётные данные вышестоящего сервиса, специфичные для клиента.
 
 ## Примеры
 
