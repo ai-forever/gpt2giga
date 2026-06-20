@@ -23,6 +23,15 @@ FUSION_PANEL_LATENCY_SECONDS = "gpt2giga_fusion_panel_latency_seconds"
 FUSION_JUDGE_LATENCY_SECONDS = "gpt2giga_fusion_judge_latency_seconds"
 FUSION_TOKENS_TOTAL = "gpt2giga_fusion_tokens_total"
 FUSION_FAILURES_TOTAL = "gpt2giga_fusion_failures_total"
+FUSION_SELECTED_CANDIDATE_TOTAL = "gpt2giga_fusion_selected_candidate_total"
+FUSION_REWRITE_TOTAL = "gpt2giga_fusion_rewrite_total"
+FUSION_JUDGE_PARSE_ERRORS_TOTAL = "gpt2giga_fusion_judge_parse_errors_total"
+FUSION_REPAIR_CALLS_TOTAL = "gpt2giga_fusion_repair_calls_total"
+FUSION_FALLBACK_TOTAL = "gpt2giga_fusion_fallback_total"
+FUSION_STAGE_LATENCY_SECONDS = "gpt2giga_fusion_stage_latency_seconds"
+FUSION_STAGE_INPUT_TOKENS = "gpt2giga_fusion_stage_input_tokens"
+FUSION_STAGE_OUTPUT_TOKENS = "gpt2giga_fusion_stage_output_tokens"
+FUSION_PANEL_TRUNCATED_TOTAL = "gpt2giga_fusion_panel_truncated_total"
 
 
 async def emit_fusion_telemetry(
@@ -94,6 +103,14 @@ async def emit_fusion_metrics(
             request_labels,
             logger=logger,
         )
+    if run_result.direct_latency_ms is not None:
+        await _emit_stage_latency(
+            sink,
+            "direct",
+            _direct_model(run_result),
+            run_result.direct_latency_ms,
+            logger=logger,
+        )
 
     for panel in run_result.panel_results:
         panel_labels = {"model": panel.model, "status": panel.status}
@@ -112,10 +129,26 @@ async def emit_fusion_metrics(
                 panel_labels,
                 logger=logger,
             )
+            await _emit_stage_latency(
+                sink,
+                "panel",
+                panel.model,
+                panel.latency_ms,
+                logger=logger,
+            )
         if panel.status != "ok":
             await _emit_failure(
                 sink,
                 _failure_reason(panel.error_type or panel.status),
+                logger=logger,
+            )
+    for candidate in run_result.candidates:
+        if candidate.truncated:
+            await emit_metric_increment(
+                sink,
+                FUSION_PANEL_TRUNCATED_TOTAL,
+                1,
+                {"model": candidate.model, "role": candidate.role or ""},
                 logger=logger,
             )
 
@@ -127,12 +160,99 @@ async def emit_fusion_metrics(
             {"model": run_result.judge_model, "status": run_result.status},
             logger=logger,
         )
+        await _emit_stage_latency(
+            sink,
+            "judge",
+            run_result.judge_model,
+            run_result.judge_latency_ms,
+            logger=logger,
+        )
+    if run_result.finalizer_latency_ms is not None:
+        await _emit_stage_latency(
+            sink,
+            "finalizer",
+            run_result.final_model or run_result.judge_model,
+            run_result.finalizer_latency_ms,
+            logger=logger,
+        )
 
     await _emit_usage(sink, "panel", _panel_usage(run_result), logger=logger)
+    await _emit_stage_usage(
+        sink,
+        "direct",
+        _direct_model(run_result),
+        _direct_usage(run_result),
+        logger=logger,
+    )
+    for panel in run_result.panel_results:
+        await _emit_stage_usage(
+            sink,
+            "panel",
+            panel.model,
+            panel.usage,
+            logger=logger,
+        )
     await _emit_usage(sink, "judge", run_result.judge_usage, logger=logger)
+    await _emit_stage_usage(
+        sink,
+        "judge",
+        run_result.judge_model,
+        run_result.judge_usage,
+        logger=logger,
+    )
+    await _emit_usage(sink, "finalizer", run_result.finalizer_usage, logger=logger)
+    await _emit_stage_usage(
+        sink,
+        "finalizer",
+        run_result.final_model or run_result.judge_model,
+        run_result.finalizer_usage,
+        logger=logger,
+    )
     await _emit_usage(sink, "total", run_result.usage, logger=logger)
 
+    if run_result.selected_candidate_id and run_result.selected_candidate_source:
+        await emit_metric_increment(
+            sink,
+            FUSION_SELECTED_CANDIDATE_TOTAL,
+            1,
+            {
+                "candidate_type": run_result.selected_candidate_source,
+                "candidate_id": run_result.selected_candidate_id,
+            },
+            logger=logger,
+        )
+    if run_result.needs_rewrite:
+        await emit_metric_increment(
+            sink,
+            FUSION_REWRITE_TOTAL,
+            1,
+            {"mode": run_result.decision_mode},
+            logger=logger,
+        )
+    if run_result.judge_parse_error:
+        await emit_metric_increment(
+            sink,
+            FUSION_JUDGE_PARSE_ERRORS_TOTAL,
+            1,
+            {},
+            logger=logger,
+        )
+    if run_result.repair_used:
+        await emit_metric_increment(
+            sink,
+            FUSION_REPAIR_CALLS_TOTAL,
+            1,
+            {},
+            logger=logger,
+        )
     if run_result.fallback_reason:
+        await emit_metric_increment(
+            sink,
+            FUSION_FALLBACK_TOTAL,
+            1,
+            {"reason": _failure_reason(run_result.fallback_reason)},
+            logger=logger,
+        )
         await _emit_failure(
             sink,
             _failure_reason(run_result.fallback_reason),
@@ -162,9 +282,24 @@ def build_fusion_observability_attributes(
         "gpt2giga.fusion.judge_model": run_result.judge_model,
         "gpt2giga.fusion.final_model": final_model,
         "gpt2giga.fusion.pipeline_mode": fusion_config.pipeline_mode,
+        "gpt2giga.fusion.decision_mode": run_result.decision_mode,
+        "gpt2giga.fusion.prompt_mode": run_result.prompt_mode,
         "gpt2giga.fusion.tools_mode": fusion_config.tools_mode,
+        "gpt2giga.fusion.include_direct_candidate": (
+            fusion_config.include_direct_candidate
+        ),
+        "gpt2giga.fusion.selected_candidate_id": run_result.selected_candidate_id,
+        "gpt2giga.fusion.selected_candidate_source": (
+            run_result.selected_candidate_source
+        ),
+        "gpt2giga.fusion.needs_rewrite": run_result.needs_rewrite,
+        "gpt2giga.fusion.judge_parse_error": run_result.judge_parse_error,
+        "gpt2giga.fusion.repair_used": run_result.repair_used,
+        "gpt2giga.fusion.panel_truncated": run_result.panel_truncated,
         "gpt2giga.fusion.latency_ms": run_result.latency_ms,
+        "gpt2giga.fusion.direct_latency_ms": run_result.direct_latency_ms,
         "gpt2giga.fusion.judge_latency_ms": run_result.judge_latency_ms,
+        "gpt2giga.fusion.finalizer_latency_ms": run_result.finalizer_latency_ms,
     }
     if run_result.fallback_reason:
         attributes["gpt2giga.fusion.fallback_reason"] = _failure_reason(
@@ -196,6 +331,7 @@ def build_fusion_span_events(run_result: FusionRunResult) -> list[dict[str, Any]
             "gpt2giga.fusion.panel.status": panel.status,
             "gpt2giga.fusion.panel.error_type": panel.error_type,
             "gpt2giga.fusion.panel.latency_ms": panel.latency_ms,
+            "gpt2giga.fusion.panel.truncated": panel.truncated,
         }
         events.append(
             {
@@ -214,6 +350,32 @@ def build_fusion_span_events(run_result: FusionRunResult) -> list[dict[str, Any]
                     "gpt2giga.fusion.judge.model": run_result.judge_model,
                     "gpt2giga.fusion.judge.status": run_result.status,
                     "gpt2giga.fusion.judge.latency_ms": run_result.judge_latency_ms,
+                },
+            }
+        )
+    if run_result.direct_latency_ms is not None:
+        events.append(
+            {
+                "name": "fusion.direct",
+                "attributes": {
+                    "gpt2giga.fusion.phase": "direct",
+                    "gpt2giga.fusion.direct.model": _direct_model(run_result),
+                    "gpt2giga.fusion.direct.latency_ms": (run_result.direct_latency_ms),
+                },
+            }
+        )
+    if run_result.finalizer_latency_ms is not None:
+        events.append(
+            {
+                "name": "fusion.finalizer",
+                "attributes": {
+                    "gpt2giga.fusion.phase": "finalizer",
+                    "gpt2giga.fusion.finalizer.model": (
+                        run_result.final_model or run_result.judge_model
+                    ),
+                    "gpt2giga.fusion.finalizer.latency_ms": (
+                        run_result.finalizer_latency_ms
+                    ),
                 },
             }
         )
@@ -260,8 +422,67 @@ async def _emit_failure(
     )
 
 
+async def _emit_stage_latency(
+    sink: Any,
+    stage: str,
+    model: str,
+    latency_ms: int,
+    *,
+    logger: Any | None,
+) -> None:
+    await emit_metric_observation(
+        sink,
+        FUSION_STAGE_LATENCY_SECONDS,
+        latency_ms / 1000,
+        {"stage": stage, "model": model},
+        logger=logger,
+    )
+
+
+async def _emit_stage_usage(
+    sink: Any,
+    stage: str,
+    model: str,
+    usage: NormalizedUsage | None,
+    *,
+    logger: Any | None,
+) -> None:
+    if usage is None:
+        return
+    if usage.input_tokens is not None and usage.input_tokens > 0:
+        await emit_metric_increment(
+            sink,
+            FUSION_STAGE_INPUT_TOKENS,
+            int(usage.input_tokens),
+            {"stage": stage, "model": model},
+            logger=logger,
+        )
+    if usage.output_tokens is not None and usage.output_tokens > 0:
+        await emit_metric_increment(
+            sink,
+            FUSION_STAGE_OUTPUT_TOKENS,
+            int(usage.output_tokens),
+            {"stage": stage, "model": model},
+            logger=logger,
+        )
+
+
 def _panel_usage(run_result: FusionRunResult) -> NormalizedUsage | None:
     return aggregate_usage(panel.usage for panel in run_result.panel_results)
+
+
+def _direct_usage(run_result: FusionRunResult) -> NormalizedUsage | None:
+    for candidate in run_result.candidates:
+        if candidate.source == "direct":
+            return candidate.usage
+    return None
+
+
+def _direct_model(run_result: FusionRunResult) -> str:
+    for candidate in run_result.candidates:
+        if candidate.source == "direct":
+            return candidate.model
+    return run_result.judge_model
 
 
 def _failure_reason(value: str | None) -> str:

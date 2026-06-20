@@ -30,13 +30,17 @@ from gpt2giga.providers.fusion.prompts import (
     FUSION_JUDGE_REPAIR_SYSTEM_PROMPT,
     build_fusion_system_envelope,
     build_judge_user_prompt,
+    build_selector_finalizer_user_prompt,
+    build_selector_judge_user_prompt,
     split_instruction_messages,
 )
 from gpt2giga.providers.fusion.schemas import (
     FUSION_ANALYSIS_SCHEMA_VERSION,
     FusionAnalysis,
+    FusionCandidate,
     FusionPanelResult,
     FusionRunResult,
+    FusionSelection,
 )
 from gpt2giga.providers.fusion.telemetry import emit_fusion_telemetry
 from gpt2giga.providers.fusion.tool_arbitration import (
@@ -116,7 +120,7 @@ class FusionProviderAdapter:
         requested_model = fusion_config.requested_model or request.model or "fusion"
 
         await _raise_if_disconnected(is_disconnected)
-        panel_results = await self._run_panels(
+        direct_candidate, panel_results = await self._run_candidate_stages(
             request,
             context=context,
             fusion_config=fusion_config,
@@ -124,42 +128,76 @@ class FusionProviderAdapter:
         )
         await _raise_if_disconnected(is_disconnected)
 
+        candidates = _build_candidates(
+            direct_candidate=direct_candidate,
+            panel_results=panel_results,
+        )
         successful_panels = [
             result for result in panel_results if result.status == "ok"
         ]
         failed_panels = [result for result in panel_results if result.status != "ok"]
         if len(successful_panels) < fusion_config.min_successful_panels:
-            if not self.settings.fail_on_all_panels_failed:
-                return await self._direct_fallback_after_panel_failure(
-                    request,
-                    requested_model=requested_model,
-                    panel_results=panel_results,
-                    failed_panels=failed_panels,
-                    started=started,
-                    context=context,
-                    fusion_config=fusion_config,
-                    is_disconnected=is_disconnected,
-                )
-            usage = aggregate_usage(result.usage for result in panel_results)
-            run_result = self._build_run_result(
-                status="error",
+            return await self._panel_threshold_response(
+                request,
                 requested_model=requested_model,
-                fusion_config=fusion_config,
+                direct_candidate=direct_candidate,
                 panel_results=panel_results,
-                failed_models=failed_panels,
-                usage=usage,
-                latency_ms=_elapsed_ms(started),
-                fallback_reason="all_panels_failed",
-            )
-            await self._emit_telemetry(run_result, context, fusion_config)
-            return self._error_response(
-                requested_model=requested_model,
-                message="Fusion panel stage did not produce enough successful results",
-                code="all_panels_failed",
-                run_result=run_result,
-                usage=usage,
+                failed_panels=failed_panels,
+                candidates=candidates,
+                started=started,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
             )
 
+        if fusion_config.decision_mode == "selector":
+            return await self._chat_selector(
+                request,
+                requested_model=requested_model,
+                direct_candidate=direct_candidate,
+                panel_results=panel_results,
+                failed_panels=failed_panels,
+                candidates=candidates,
+                started=started,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+
+        return await self._chat_synthesize(
+            request,
+            requested_model=requested_model,
+            direct_candidate=direct_candidate,
+            panel_results=panel_results,
+            failed_panels=failed_panels,
+            candidates=candidates,
+            started=started,
+            context=context,
+            fusion_config=fusion_config,
+            is_disconnected=is_disconnected,
+        )
+
+    async def _chat_synthesize(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        requested_model: str,
+        direct_candidate: FusionCandidate | None,
+        panel_results: list[FusionPanelResult],
+        failed_panels: list[FusionPanelResult],
+        candidates: list[FusionCandidate],
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        judge_panel_results = _budget_panel_results_for_judge(
+            _panel_results_for_judge(
+                direct_candidate=direct_candidate,
+                panel_results=panel_results,
+            ),
+            fusion_config,
+        )
         judge_response: NormalizedResponse | None = None
         judge_error_reason: str | None = None
         judge_latency_ms: int | None = None
@@ -167,7 +205,7 @@ class FusionProviderAdapter:
         try:
             judge_response = await self._run_judge(
                 request,
-                panel_results=panel_results,
+                panel_results=judge_panel_results,
                 context=context,
                 fusion_config=fusion_config,
                 is_disconnected=is_disconnected,
@@ -205,7 +243,7 @@ class FusionProviderAdapter:
             try:
                 repair_response = await self._run_judge_repair(
                     request,
-                    panel_results=panel_results,
+                    panel_results=judge_panel_results,
                     original_response=judge_response,
                     repair_reason=repair_reason,
                     context=context,
@@ -235,6 +273,7 @@ class FusionProviderAdapter:
         fallback_reason = judge_error_reason or parse_error_reason
         usage = aggregate_usage(
             [
+                direct_candidate.usage if direct_candidate is not None else None,
                 *(result.usage for result in panel_results),
                 judge_response.usage if judge_response is not None else None,
                 repair_response.usage if repair_response is not None else None,
@@ -260,11 +299,20 @@ class FusionProviderAdapter:
                 fusion_config=fusion_config,
                 panel_results=panel_results,
                 failed_models=failed_panels,
+                candidates=candidates,
                 analysis=analysis,
                 usage=usage,
                 judge_usage=_response_usage(judge_response),
                 latency_ms=_elapsed_ms(started),
                 judge_latency_ms=judge_latency_ms,
+                direct_latency_ms=(
+                    direct_candidate.latency_ms
+                    if direct_candidate is not None
+                    else None
+                ),
+                judge_parse_error=parse_error_reason == "invalid_judge_json",
+                repair_used=repair_response is not None,
+                panel_truncated=_any_truncated(judge_panel_results),
                 fallback_reason=fallback_reason or "required_tool_call_missing",
             )
             await self._emit_telemetry(run_result, context, fusion_config)
@@ -276,7 +324,14 @@ class FusionProviderAdapter:
                 usage=usage,
             )
         if message is None:
-            fallback = _fallback_panel_message(successful_panels)
+            fallback_candidate = _fallback_candidate(candidates)
+            fallback = _message_from_candidate(
+                fallback_candidate,
+                request_tools=request.tools,
+                tools_mode=fusion_config.tools_mode,
+                tool_choice=request.tool_choice,
+                max_tool_calls=fusion_config.max_tool_calls,
+            )
             if fallback is None:
                 run_result = self._build_run_result(
                     status="error",
@@ -284,6 +339,7 @@ class FusionProviderAdapter:
                     fusion_config=fusion_config,
                     panel_results=panel_results,
                     failed_models=failed_panels,
+                    candidates=candidates,
                     analysis=analysis,
                     usage=usage,
                     judge_usage=(
@@ -291,6 +347,14 @@ class FusionProviderAdapter:
                     ),
                     latency_ms=_elapsed_ms(started),
                     judge_latency_ms=judge_latency_ms,
+                    direct_latency_ms=(
+                        direct_candidate.latency_ms
+                        if direct_candidate is not None
+                        else None
+                    ),
+                    judge_parse_error=parse_error_reason == "invalid_judge_json",
+                    repair_used=repair_response is not None,
+                    panel_truncated=_any_truncated(judge_panel_results),
                     fallback_reason=fallback_reason or "empty_fusion_result",
                 )
                 await self._emit_telemetry(run_result, context, fusion_config)
@@ -302,7 +366,7 @@ class FusionProviderAdapter:
                     usage=usage,
                 )
             message = fallback
-            finish_reason = "stop"
+            finish_reason = fallback_candidate.finish_reason or "stop"
             fallback_reason = fallback_reason or "judge_empty_final"
 
         run_result = self._build_run_result(
@@ -311,11 +375,18 @@ class FusionProviderAdapter:
             fusion_config=fusion_config,
             panel_results=panel_results,
             failed_models=failed_panels,
+            candidates=candidates,
             analysis=analysis,
             usage=usage,
             judge_usage=_response_usage(judge_response),
             latency_ms=_elapsed_ms(started),
             judge_latency_ms=judge_latency_ms,
+            direct_latency_ms=(
+                direct_candidate.latency_ms if direct_candidate is not None else None
+            ),
+            judge_parse_error=parse_error_reason == "invalid_judge_json",
+            repair_used=repair_response is not None,
+            panel_truncated=_any_truncated(judge_panel_results),
             fallback_reason=fallback_reason,
         )
         await self._emit_telemetry(run_result, context, fusion_config)
@@ -339,6 +410,387 @@ class FusionProviderAdapter:
                 )
             },
         )
+
+    async def _chat_selector(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        requested_model: str,
+        direct_candidate: FusionCandidate | None,
+        panel_results: list[FusionPanelResult],
+        failed_panels: list[FusionPanelResult],
+        candidates: list[FusionCandidate],
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        judge_candidates = _budget_candidates_for_judge(candidates, fusion_config)
+        judge_response: NormalizedResponse | None = None
+        judge_error_reason: str | None = None
+        judge_latency_ms: int | None = None
+        judge_started = time.perf_counter()
+        try:
+            judge_response = await self._run_selector_judge(
+                request,
+                candidates=judge_candidates,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+        except asyncio.TimeoutError:
+            judge_error_reason = "judge_timeout"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            judge_error_reason = f"judge_failed:{type(exc).__name__}"
+        finally:
+            judge_latency_ms = _elapsed_ms(judge_started)
+
+        selection, parse_error_reason = _selection_from_judge_response(
+            judge_response,
+            candidates=candidates,
+        )
+        fallback_reason = judge_error_reason or parse_error_reason
+        selected_candidate = _candidate_by_id(
+            candidates,
+            selection.selected_candidate_id if selection is not None else None,
+        )
+        if fallback_reason is not None or selected_candidate is None:
+            selected_candidate = _fallback_candidate(
+                candidates,
+                preferred_id=(
+                    selection.selected_candidate_id if selection is not None else None
+                ),
+            )
+
+        needs_rewrite = (
+            bool(selection.needs_rewrite) if selection is not None else False
+        )
+        finalizer_response: NormalizedResponse | None = None
+        finalizer_latency_ms: int | None = None
+        message: NormalizedMessage | None = None
+        finish_reason: str | None = None
+
+        if selected_candidate is not None and not (
+            needs_rewrite or not fusion_config.return_selected_candidate
+        ):
+            message = _message_from_candidate(
+                selected_candidate,
+                request_tools=request.tools,
+                tools_mode=fusion_config.tools_mode,
+                tool_choice=request.tool_choice,
+                max_tool_calls=fusion_config.max_tool_calls,
+            )
+            finish_reason = selected_candidate.finish_reason or (
+                "tool_calls" if message is not None and message.tool_calls else "stop"
+            )
+
+        if selected_candidate is not None and message is None:
+            finalizer_started = time.perf_counter()
+            try:
+                finalizer_response = await self._run_selector_finalizer(
+                    request,
+                    candidate=selected_candidate,
+                    selection=selection
+                    or FusionSelection(
+                        selected_candidate_id=selected_candidate.candidate_id,
+                        confidence=0.0,
+                        needs_rewrite=True,
+                        correction=fallback_reason or "Produce a valid final answer.",
+                    ),
+                    context=context,
+                    fusion_config=fusion_config,
+                    is_disconnected=is_disconnected,
+                )
+                if finalizer_response.error is not None:
+                    fallback_reason = (
+                        fallback_reason
+                        or f"finalizer_error:{finalizer_response.error.type}"
+                    )
+                message, finish_reason = _message_from_response(
+                    finalizer_response,
+                    request_tools=request.tools,
+                    tools_mode=fusion_config.tools_mode,
+                    tool_choice=request.tool_choice,
+                    max_tool_calls=fusion_config.max_tool_calls,
+                )
+            except asyncio.TimeoutError:
+                fallback_reason = fallback_reason or "finalizer_timeout"
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                fallback_reason = (
+                    fallback_reason or f"finalizer_failed:{type(exc).__name__}"
+                )
+            finally:
+                finalizer_latency_ms = _elapsed_ms(finalizer_started)
+
+        usage = aggregate_usage(
+            [
+                direct_candidate.usage if direct_candidate is not None else None,
+                *(result.usage for result in panel_results),
+                judge_response.usage if judge_response is not None else None,
+                finalizer_response.usage if finalizer_response is not None else None,
+            ]
+        )
+        if _final_tool_call_is_required(
+            message,
+            request_tools=request.tools,
+            tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
+        ):
+            run_result = self._build_run_result(
+                status="error",
+                requested_model=requested_model,
+                fusion_config=fusion_config,
+                panel_results=panel_results,
+                failed_models=failed_panels,
+                candidates=judge_candidates,
+                selection=selection,
+                selected_candidate=selected_candidate,
+                usage=usage,
+                judge_usage=_response_usage(judge_response),
+                finalizer_usage=_response_usage(finalizer_response),
+                latency_ms=_elapsed_ms(started),
+                judge_latency_ms=judge_latency_ms,
+                direct_latency_ms=(
+                    direct_candidate.latency_ms
+                    if direct_candidate is not None
+                    else None
+                ),
+                finalizer_latency_ms=finalizer_latency_ms,
+                judge_parse_error=parse_error_reason == "invalid_judge_json",
+                panel_truncated=_any_truncated(judge_candidates),
+                fallback_reason=fallback_reason or "required_tool_call_missing",
+            )
+            await self._emit_telemetry(run_result, context, fusion_config)
+            return self._error_response(
+                requested_model=requested_model,
+                message="Fusion selector finalizer did not produce the required tool call",
+                code="fusion_tool_required",
+                run_result=run_result,
+                usage=usage,
+            )
+
+        if message is None:
+            run_result = self._build_run_result(
+                status="error",
+                requested_model=requested_model,
+                fusion_config=fusion_config,
+                panel_results=panel_results,
+                failed_models=failed_panels,
+                candidates=judge_candidates,
+                selection=selection,
+                selected_candidate=selected_candidate,
+                usage=usage,
+                judge_usage=_response_usage(judge_response),
+                finalizer_usage=_response_usage(finalizer_response),
+                latency_ms=_elapsed_ms(started),
+                judge_latency_ms=judge_latency_ms,
+                direct_latency_ms=(
+                    direct_candidate.latency_ms
+                    if direct_candidate is not None
+                    else None
+                ),
+                finalizer_latency_ms=finalizer_latency_ms,
+                judge_parse_error=parse_error_reason == "invalid_judge_json",
+                panel_truncated=_any_truncated(judge_candidates),
+                fallback_reason=fallback_reason or "empty_fusion_result",
+            )
+            await self._emit_telemetry(run_result, context, fusion_config)
+            return self._error_response(
+                requested_model=requested_model,
+                message="Fusion selector did not produce a final answer",
+                code="empty_fusion_result",
+                run_result=run_result,
+                usage=usage,
+            )
+
+        run_result = self._build_run_result(
+            status="ok",
+            requested_model=requested_model,
+            fusion_config=fusion_config,
+            panel_results=panel_results,
+            failed_models=failed_panels,
+            candidates=judge_candidates,
+            selection=selection,
+            selected_candidate=selected_candidate,
+            usage=usage,
+            judge_usage=_response_usage(judge_response),
+            finalizer_usage=_response_usage(finalizer_response),
+            latency_ms=_elapsed_ms(started),
+            judge_latency_ms=judge_latency_ms,
+            direct_latency_ms=(
+                direct_candidate.latency_ms if direct_candidate is not None else None
+            ),
+            finalizer_latency_ms=finalizer_latency_ms,
+            judge_parse_error=parse_error_reason == "invalid_judge_json",
+            panel_truncated=_any_truncated(judge_candidates),
+            fallback_reason=fallback_reason,
+        )
+        await self._emit_telemetry(run_result, context, fusion_config)
+        return NormalizedResponse(
+            id=context.request_id if context is not None else None,
+            model=requested_model,
+            provider=self.name,
+            choices=[
+                NormalizedChoice(
+                    index=0,
+                    message=message,
+                    finish_reason=finish_reason,
+                )
+            ],
+            usage=usage,
+            metadata=_public_metadata(run_result),
+            provider_metadata={
+                "fusion": _provider_metadata(
+                    run_result,
+                    settings=self.settings,
+                )
+            },
+        )
+
+    async def _panel_threshold_response(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        requested_model: str,
+        direct_candidate: FusionCandidate | None,
+        panel_results: list[FusionPanelResult],
+        failed_panels: list[FusionPanelResult],
+        candidates: list[FusionCandidate],
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        fallback_reason = _panel_failure_fallback_reason(panel_results)
+        direct_message = _message_from_candidate(
+            direct_candidate,
+            request_tools=request.tools,
+            tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
+        )
+        usage = aggregate_usage(
+            [
+                direct_candidate.usage if direct_candidate is not None else None,
+                *(result.usage for result in panel_results),
+            ]
+        )
+        if direct_message is not None:
+            run_result = self._build_run_result(
+                status="ok",
+                requested_model=requested_model,
+                fusion_config=fusion_config,
+                panel_results=panel_results,
+                failed_models=failed_panels,
+                candidates=candidates,
+                selected_candidate=direct_candidate,
+                usage=usage,
+                latency_ms=_elapsed_ms(started),
+                direct_latency_ms=direct_candidate.latency_ms,
+                fallback_reason=fallback_reason,
+            )
+            await self._emit_telemetry(run_result, context, fusion_config)
+            return NormalizedResponse(
+                id=context.request_id if context is not None else None,
+                model=requested_model,
+                provider=self.name,
+                choices=[
+                    NormalizedChoice(
+                        index=0,
+                        message=direct_message,
+                        finish_reason=direct_candidate.finish_reason or "stop",
+                    )
+                ],
+                usage=usage,
+                metadata=_public_metadata(run_result),
+                provider_metadata={
+                    "fusion": _provider_metadata(
+                        run_result,
+                        settings=self.settings,
+                    )
+                },
+            )
+
+        if not self.settings.fail_on_all_panels_failed:
+            return await self._direct_fallback_after_panel_failure(
+                request,
+                requested_model=requested_model,
+                panel_results=panel_results,
+                failed_panels=failed_panels,
+                started=started,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+
+        run_result = self._build_run_result(
+            status="error",
+            requested_model=requested_model,
+            fusion_config=fusion_config,
+            panel_results=panel_results,
+            failed_models=failed_panels,
+            candidates=candidates,
+            usage=usage,
+            latency_ms=_elapsed_ms(started),
+            direct_latency_ms=(
+                direct_candidate.latency_ms if direct_candidate is not None else None
+            ),
+            fallback_reason="all_panels_failed",
+        )
+        await self._emit_telemetry(run_result, context, fusion_config)
+        return self._error_response(
+            requested_model=requested_model,
+            message="Fusion panel stage did not produce enough successful results",
+            code="all_panels_failed",
+            run_result=run_result,
+            usage=usage,
+        )
+
+    async def _run_candidate_stages(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> tuple[FusionCandidate | None, list[FusionPanelResult]]:
+        panel_task = asyncio.create_task(
+            self._run_panels(
+                request,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+        )
+        direct_task: asyncio.Task[FusionCandidate] | None = None
+        if fusion_config.include_direct_candidate:
+            direct_task = asyncio.create_task(
+                self._run_direct_candidate(
+                    request,
+                    context=context,
+                    fusion_config=fusion_config,
+                    is_disconnected=is_disconnected,
+                )
+            )
+        tasks = [panel_task, *(task for task in [direct_task] if task is not None)]
+        try:
+            if direct_task is None:
+                return None, await panel_task
+            panel_results, direct_candidate = await asyncio.gather(
+                panel_task,
+                direct_task,
+            )
+            return direct_candidate, panel_results
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
     async def _run_panels(
         self,
@@ -486,6 +938,94 @@ class FusionProviderAdapter:
                 latency_ms=_elapsed_ms(started),
             )
 
+    async def _run_direct_candidate(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> FusionCandidate:
+        started = time.perf_counter()
+        direct_model = fusion_config.direct_model or fusion_config.judge_model
+        direct_request = _build_direct_candidate_request(
+            request,
+            model=direct_model,
+            fusion_config=fusion_config,
+        )
+        try:
+            await _raise_if_disconnected(is_disconnected)
+            response = await asyncio.wait_for(
+                self.upstream_provider.chat(direct_request, context=context),
+                timeout=fusion_config.timeout_seconds,
+            )
+            if response.error is not None:
+                return FusionCandidate(
+                    candidate_id="direct",
+                    source="direct",
+                    model=direct_model,
+                    status="error",
+                    usage=response.usage,
+                    error_type=response.error.type,
+                    error_message=response.error.message,
+                    latency_ms=_elapsed_ms(started),
+                )
+            choice = _first_choice(response)
+            message = choice.message if choice is not None else None
+            if message is None:
+                return FusionCandidate(
+                    candidate_id="direct",
+                    source="direct",
+                    model=direct_model,
+                    status="error",
+                    usage=response.usage,
+                    error_type="empty_response",
+                    latency_ms=_elapsed_ms(started),
+                )
+            content = _content_to_text(message.content)
+            if not content and not message.tool_calls:
+                return FusionCandidate(
+                    candidate_id="direct",
+                    source="direct",
+                    model=direct_model,
+                    status="error",
+                    usage=response.usage,
+                    error_type="empty_response",
+                    latency_ms=_elapsed_ms(started),
+                )
+            return FusionCandidate(
+                candidate_id="direct",
+                source="direct",
+                model=direct_model,
+                status="ok",
+                content=content,
+                tool_calls=list(message.tool_calls),
+                usage=response.usage,
+                latency_ms=_elapsed_ms(started),
+                finish_reason=choice.finish_reason if choice is not None else None,
+            )
+        except asyncio.TimeoutError:
+            return FusionCandidate(
+                candidate_id="direct",
+                source="direct",
+                model=direct_model,
+                status="timeout",
+                error_type="timeout",
+                latency_ms=_elapsed_ms(started),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return FusionCandidate(
+                candidate_id="direct",
+                source="direct",
+                model=direct_model,
+                status="error",
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                latency_ms=_elapsed_ms(started),
+            )
+
     async def _run_judge(
         self,
         request: NormalizedChatRequest,
@@ -503,6 +1043,48 @@ class FusionProviderAdapter:
         await _raise_if_disconnected(is_disconnected)
         return await asyncio.wait_for(
             self.upstream_provider.chat(judge_request, context=context),
+            timeout=fusion_config.timeout_seconds,
+        )
+
+    async def _run_selector_judge(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        candidates: list[FusionCandidate],
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        judge_request = _build_selector_judge_request(
+            request,
+            candidates=candidates,
+            fusion_config=fusion_config,
+        )
+        await _raise_if_disconnected(is_disconnected)
+        return await asyncio.wait_for(
+            self.upstream_provider.chat(judge_request, context=context),
+            timeout=fusion_config.timeout_seconds,
+        )
+
+    async def _run_selector_finalizer(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        candidate: FusionCandidate,
+        selection: FusionSelection,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        finalizer_request = _build_selector_finalizer_request(
+            request,
+            candidate=candidate,
+            selection=selection,
+            fusion_config=fusion_config,
+        )
+        await _raise_if_disconnected(is_disconnected)
+        return await asyncio.wait_for(
+            self.upstream_provider.chat(finalizer_request, context=context),
             timeout=fusion_config.timeout_seconds,
         )
 
@@ -643,11 +1225,20 @@ class FusionProviderAdapter:
         fusion_config: FusionRequestConfig,
         panel_results: list[FusionPanelResult],
         failed_models: list[FusionPanelResult],
+        candidates: list[FusionCandidate] | None = None,
         usage: Any = None,
         judge_usage: Any = None,
+        finalizer_usage: Any = None,
         latency_ms: int | None = None,
         judge_latency_ms: int | None = None,
+        direct_latency_ms: int | None = None,
+        finalizer_latency_ms: int | None = None,
         analysis: FusionAnalysis | None = None,
+        selection: FusionSelection | None = None,
+        selected_candidate: FusionCandidate | None = None,
+        judge_parse_error: bool = False,
+        repair_used: bool = False,
+        panel_truncated: bool = False,
         fallback_reason: str | None = None,
     ) -> FusionRunResult:
         return FusionRunResult(
@@ -657,14 +1248,33 @@ class FusionProviderAdapter:
             analysis_models=list(fusion_config.analysis_models),
             judge_model=fusion_config.judge_model,
             final_model=fusion_config.final_model,
+            decision_mode=fusion_config.decision_mode,
+            prompt_mode=fusion_config.prompt_mode,
             panel_results=panel_results,
             failed_models=failed_models,
+            candidates=list(candidates or []),
             analysis=analysis,
+            selection=selection,
+            selected_candidate_id=(
+                selected_candidate.candidate_id
+                if selected_candidate is not None
+                else None
+            ),
+            selected_candidate_source=(
+                selected_candidate.source if selected_candidate is not None else None
+            ),
+            needs_rewrite=selection.needs_rewrite if selection is not None else None,
+            judge_parse_error=judge_parse_error,
+            repair_used=repair_used,
+            panel_truncated=panel_truncated,
             fallback_reason=fallback_reason,
             usage=usage,
             judge_usage=judge_usage,
+            finalizer_usage=finalizer_usage,
             latency_ms=latency_ms,
             judge_latency_ms=judge_latency_ms,
+            direct_latency_ms=direct_latency_ms,
+            finalizer_latency_ms=finalizer_latency_ms,
         )
 
     async def _emit_telemetry(
@@ -743,6 +1353,8 @@ def _build_panel_request(
             panel_role=role,
             include_code_role_policy=code_prompt,
             tool_policy=tool_reference,
+            prompt_mode=fusion_config.prompt_mode,
+            decision_mode=fusion_config.decision_mode,
         ),
         *conversation_messages,
     ]
@@ -757,6 +1369,26 @@ def _build_panel_request(
         "gpt2giga_fusion_role": role or "",
     }
     return panel_request
+
+
+def _build_direct_candidate_request(
+    request: NormalizedChatRequest,
+    *,
+    model: str,
+    fusion_config: FusionRequestConfig,
+) -> NormalizedChatRequest:
+    direct_request = request.model_copy(deep=True)
+    direct_request.model = model
+    direct_request.stream = False
+    _apply_generation_overrides(direct_request, fusion_config)
+    if fusion_config.tools_mode == "off":
+        direct_request.tools = []
+        direct_request.tool_choice = None
+    direct_request.metadata = {
+        **direct_request.metadata,
+        "gpt2giga_fusion_stage": "direct_candidate",
+    }
+    return direct_request
 
 
 def _build_judge_request(
@@ -787,6 +1419,8 @@ def _build_judge_request(
             client_instruction_messages=instruction_messages,
             source_protocol=_source_protocol(judge_request),
             tool_policy=tool_prompt,
+            prompt_mode=fusion_config.prompt_mode,
+            decision_mode="synthesize",
         ),
         *conversation_messages,
         NormalizedMessage(
@@ -802,6 +1436,88 @@ def _build_judge_request(
         "gpt2giga_fusion_stage": "judge",
     }
     return judge_request
+
+
+def _build_selector_judge_request(
+    request: NormalizedChatRequest,
+    *,
+    candidates: list[FusionCandidate],
+    fusion_config: FusionRequestConfig,
+) -> NormalizedChatRequest:
+    judge_request = request.model_copy(deep=True)
+    judge_request.model = fusion_config.judge_model
+    judge_request.stream = False
+    judge_request.response_format = _fusion_selection_response_format()
+    _apply_generation_overrides(judge_request, fusion_config)
+
+    instruction_messages, conversation_messages = split_instruction_messages(
+        judge_request.messages
+    )
+    judge_request.messages = [
+        build_fusion_system_envelope(
+            stage="judge",
+            client_instruction_messages=instruction_messages,
+            source_protocol=_source_protocol(judge_request),
+            prompt_mode=fusion_config.prompt_mode,
+            decision_mode="selector",
+        ),
+        *conversation_messages,
+        NormalizedMessage(
+            role="user",
+            content=build_selector_judge_user_prompt(candidates),
+        ),
+    ]
+    judge_request.tools = []
+    judge_request.tool_choice = None
+    judge_request.metadata = {
+        **judge_request.metadata,
+        "gpt2giga_fusion_stage": "selector_judge",
+    }
+    return judge_request
+
+
+def _build_selector_finalizer_request(
+    request: NormalizedChatRequest,
+    *,
+    candidate: FusionCandidate,
+    selection: FusionSelection,
+    fusion_config: FusionRequestConfig,
+) -> NormalizedChatRequest:
+    finalizer_request = request.model_copy(deep=True)
+    finalizer_request.model = fusion_config.final_model or fusion_config.judge_model
+    finalizer_request.stream = False
+    finalizer_request.response_format = None
+    _apply_generation_overrides(finalizer_request, fusion_config)
+
+    instruction_messages, conversation_messages = split_instruction_messages(
+        finalizer_request.messages
+    )
+    finalizer_request.messages = [
+        build_fusion_system_envelope(
+            stage="final",
+            client_instruction_messages=instruction_messages,
+            source_protocol=_source_protocol(finalizer_request),
+            prompt_mode=fusion_config.prompt_mode,
+            decision_mode="selector",
+        ),
+        *conversation_messages,
+        NormalizedMessage(
+            role="user",
+            content=build_selector_finalizer_user_prompt(
+                candidate=candidate,
+                selection=selection,
+            ),
+        ),
+    ]
+    if fusion_config.tools_mode == "off":
+        finalizer_request.tools = []
+        finalizer_request.tool_choice = None
+    finalizer_request.metadata = {
+        **finalizer_request.metadata,
+        "gpt2giga_fusion_stage": "selector_finalizer",
+        "gpt2giga_fusion_selected_candidate_id": candidate.candidate_id,
+    }
+    return finalizer_request
 
 
 def _build_judge_repair_request(
@@ -843,7 +1559,7 @@ def _build_direct_fallback_request(
     fusion_config: FusionRequestConfig,
 ) -> NormalizedChatRequest:
     fallback_request = request.model_copy(deep=True)
-    fallback_request.model = fusion_config.judge_model
+    fallback_request.model = fusion_config.direct_model or fusion_config.judge_model
     fallback_request.stream = False
     _apply_generation_overrides(fallback_request, fusion_config)
     fallback_request.metadata = {
@@ -872,7 +1588,7 @@ def _build_judge_repair_prompt(
     return (
         "Repair the following untrusted judge response into one valid "
         "FusionAnalysis JSON object:\n\n"
-        f"{json.dumps(payload, ensure_ascii=True, sort_keys=True)}"
+        f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
     )
 
 
@@ -962,6 +1678,31 @@ def _analysis_from_judge_response(
     return analysis, None
 
 
+def _selection_from_judge_response(
+    response: NormalizedResponse | None,
+    *,
+    candidates: list[FusionCandidate],
+) -> tuple[FusionSelection | None, str | None]:
+    if response is None:
+        return None, "judge_failed"
+    if response.error is not None:
+        return None, f"judge_error:{response.error.type}"
+    message = _first_message(response)
+    if message is None:
+        return None, "judge_empty_response"
+    content = _content_to_text(message.content)
+    if not content:
+        return None, "judge_empty_response"
+    try:
+        payload = _load_json_object(content)
+        selection = FusionSelection.model_validate(payload)
+    except (json.JSONDecodeError, TypeError, ValueError, ValidationError):
+        return None, "invalid_judge_json"
+    if _candidate_by_id(candidates, selection.selected_candidate_id) is None:
+        return selection, "unknown_selected_candidate"
+    return selection, None
+
+
 def _final_message_from_analysis(
     analysis: FusionAnalysis | None,
     *,
@@ -1004,12 +1745,88 @@ def _final_message_from_analysis(
     return None, None
 
 
-def _fallback_panel_message(
-    panel_results: list[FusionPanelResult],
+def _message_from_response(
+    response: NormalizedResponse | None,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+) -> tuple[NormalizedMessage | None, str | None]:
+    if response is None or response.error is not None:
+        return None, None
+    choice = _first_choice(response)
+    if choice is None or choice.message is None:
+        return None, None
+    message = _normalize_final_message(
+        choice.message,
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+        allow_tool_calls=True,
+    )
+    return message, choice.finish_reason
+
+
+def _message_from_candidate(
+    candidate: FusionCandidate | None,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
 ) -> NormalizedMessage | None:
-    for result in panel_results:
-        if result.content:
-            return NormalizedMessage(role="assistant", content=result.content)
+    if candidate is None or candidate.status != "ok":
+        return None
+    return _normalize_final_message(
+        NormalizedMessage(
+            role="assistant",
+            content=candidate.content,
+            tool_calls=list(candidate.tool_calls),
+        ),
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+        allow_tool_calls=candidate.source == "direct",
+    )
+
+
+def _normalize_final_message(
+    message: NormalizedMessage,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+    allow_tool_calls: bool,
+) -> NormalizedMessage | None:
+    content = _content_to_text(message.content)
+    if allow_tool_calls:
+        direct_tool_call = first_allowed_tool_call(
+            message.tool_calls,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+        )
+        if direct_tool_call is not None:
+            validation = validate_tool_call_arguments(
+                direct_tool_call,
+                request_tools=request_tools,
+                tools_mode=tools_mode,
+                tool_choice=tool_choice,
+                max_tool_calls=max_tool_calls,
+            )
+            if validation.valid and validation.tool_call is not None:
+                return NormalizedMessage(
+                    role="assistant",
+                    content=None if not content else content,
+                    tool_calls=[validation.tool_call],
+                )
+    if content:
+        return NormalizedMessage(role="assistant", content=content)
     return None
 
 
@@ -1017,6 +1834,13 @@ def _first_message(response: NormalizedResponse) -> NormalizedMessage | None:
     for choice in response.choices:
         if choice.message is not None:
             return choice.message
+    return None
+
+
+def _first_choice(response: NormalizedResponse) -> NormalizedChoice | None:
+    for choice in response.choices:
+        if choice.message is not None:
+            return choice
     return None
 
 
@@ -1033,7 +1857,7 @@ def _content_to_text(
         if part.text:
             parts.append(part.text)
         elif part.data is not None:
-            parts.append(json.dumps(part.data, ensure_ascii=True, sort_keys=True))
+            parts.append(json.dumps(part.data, ensure_ascii=False, sort_keys=True))
     text = "\n".join(parts).strip()
     return text or None
 
@@ -1067,6 +1891,16 @@ def _fusion_analysis_response_format() -> NormalizedResponseFormat:
     )
 
 
+def _fusion_selection_response_format() -> NormalizedResponseFormat:
+    return NormalizedResponseFormat(
+        type="json_schema",
+        json_schema={
+            "name": "fusion_selection",
+            "schema": FusionSelection.model_json_schema(),
+        },
+    )
+
+
 def _judge_repair_needed(
     analysis: FusionAnalysis | None,
     *,
@@ -1096,6 +1930,8 @@ def _repair_retry_fits_budget(
     if limit <= 0:
         return True
     calls_with_repair = len(fusion_config.analysis_models) + 2
+    if fusion_config.include_direct_candidate:
+        calls_with_repair += 1
     return calls_with_repair <= limit
 
 
@@ -1145,6 +1981,186 @@ def _panel_failure_fallback_reason(
     return "min_successful_panels_not_met_direct_fallback"
 
 
+def _build_candidates(
+    *,
+    direct_candidate: FusionCandidate | None,
+    panel_results: list[FusionPanelResult],
+) -> list[FusionCandidate]:
+    candidates: list[FusionCandidate] = []
+    if direct_candidate is not None:
+        candidates.append(direct_candidate)
+    for index, result in enumerate(panel_results, start=1):
+        candidates.append(
+            FusionCandidate(
+                candidate_id=f"panel_{index}",
+                source="panel",
+                model=result.model,
+                role=result.role,
+                status=result.status,
+                content=result.content,
+                tool_calls=list(result.tool_calls),
+                usage=result.usage,
+                latency_ms=result.latency_ms,
+                truncated=result.truncated,
+                error_type=result.error_type,
+                error_message=result.error_message,
+            )
+        )
+    return candidates
+
+
+def _panel_results_for_judge(
+    *,
+    direct_candidate: FusionCandidate | None,
+    panel_results: list[FusionPanelResult],
+) -> list[FusionPanelResult]:
+    results: list[FusionPanelResult] = []
+    if direct_candidate is not None:
+        results.append(
+            FusionPanelResult(
+                model=direct_candidate.model,
+                role="direct_candidate",
+                status=direct_candidate.status,
+                content=direct_candidate.content,
+                tool_calls=list(direct_candidate.tool_calls),
+                usage=direct_candidate.usage,
+                error_type=direct_candidate.error_type,
+                error_message=direct_candidate.error_message,
+                latency_ms=direct_candidate.latency_ms,
+                truncated=direct_candidate.truncated,
+            )
+        )
+    results.extend(panel_results)
+    return results
+
+
+def _budget_candidates_for_judge(
+    candidates: list[FusionCandidate],
+    fusion_config: FusionRequestConfig,
+) -> list[FusionCandidate]:
+    remaining = fusion_config.max_total_panel_output_chars
+    budgeted: list[FusionCandidate] = []
+    for candidate in candidates:
+        max_chars = _candidate_content_budget(
+            remaining=remaining,
+            per_candidate=fusion_config.max_panel_output_chars,
+        )
+        content, truncated = _truncate_panel_content(
+            candidate.content,
+            max_chars=max_chars,
+        )
+        if candidate.content:
+            remaining = max(0, remaining - len(content or ""))
+        budgeted.append(
+            candidate.model_copy(
+                update={
+                    "content": content,
+                    "truncated": candidate.truncated or truncated,
+                },
+                deep=True,
+            )
+        )
+    return budgeted
+
+
+def _budget_panel_results_for_judge(
+    panel_results: list[FusionPanelResult],
+    fusion_config: FusionRequestConfig,
+) -> list[FusionPanelResult]:
+    remaining = fusion_config.max_total_panel_output_chars
+    budgeted: list[FusionPanelResult] = []
+    for result in panel_results:
+        max_chars = _candidate_content_budget(
+            remaining=remaining,
+            per_candidate=fusion_config.max_panel_output_chars,
+        )
+        content, truncated = _truncate_panel_content(
+            result.content,
+            max_chars=max_chars,
+        )
+        if result.content:
+            remaining = max(0, remaining - len(content or ""))
+        budgeted.append(
+            result.model_copy(
+                update={
+                    "content": content,
+                    "truncated": result.truncated or truncated,
+                },
+                deep=True,
+            )
+        )
+    return budgeted
+
+
+def _candidate_content_budget(*, remaining: int, per_candidate: int) -> int:
+    if per_candidate <= 0 or remaining <= 0:
+        return 0
+    return min(per_candidate, remaining)
+
+
+def _truncate_panel_content(
+    text: str | None,
+    *,
+    max_chars: int,
+) -> tuple[str | None, bool]:
+    if text is None:
+        return None, False
+    stripped = text.strip()
+    if max_chars <= 0:
+        return "", bool(stripped)
+    if len(stripped) <= max_chars:
+        return stripped, False
+    marker = "\n\n...[truncated by gpt2giga fusion]...\n\n"
+    if max_chars <= len(marker) + 2:
+        return stripped[:max_chars], True
+    remaining = max_chars - len(marker)
+    head_chars = remaining // 2
+    tail_chars = remaining - head_chars
+    return stripped[:head_chars] + marker + stripped[-tail_chars:], True
+
+
+def _candidate_by_id(
+    candidates: list[FusionCandidate],
+    candidate_id: str | None,
+) -> FusionCandidate | None:
+    if candidate_id is None:
+        return None
+    for candidate in candidates:
+        if candidate.candidate_id == candidate_id and candidate.status == "ok":
+            return candidate
+    return None
+
+
+def _fallback_candidate(
+    candidates: list[FusionCandidate],
+    *,
+    preferred_id: str | None = None,
+) -> FusionCandidate | None:
+    for candidate in candidates:
+        if candidate.source == "direct" and candidate.status == "ok":
+            return candidate
+    preferred = _candidate_by_id(candidates, preferred_id)
+    if preferred is not None:
+        return preferred
+    for candidate in candidates:
+        if (
+            candidate.source == "panel"
+            and candidate.status == "ok"
+            and candidate.role == "solver"
+        ):
+            return candidate
+    for candidate in candidates:
+        if candidate.status == "ok":
+            return candidate
+    return None
+
+
+def _any_truncated(
+    items: list[FusionPanelResult] | list[FusionCandidate],
+) -> bool:
+    return any(item.truncated for item in items)
+
+
 def _public_metadata(run_result: FusionRunResult) -> dict[str, str]:
     metadata = {
         "gpt2giga_fusion": "true",
@@ -1152,11 +2168,29 @@ def _public_metadata(run_result: FusionRunResult) -> dict[str, str]:
         "gpt2giga_fusion_requested_model": run_result.requested_model,
         "gpt2giga_fusion_analysis_models": ",".join(run_result.analysis_models),
         "gpt2giga_fusion_judge_model": run_result.judge_model,
+        "gpt2giga_fusion_decision_mode": run_result.decision_mode,
+        "gpt2giga_fusion_prompt_mode": run_result.prompt_mode,
         "gpt2giga_fusion_successful_panels": str(
             len(run_result.panel_results) - len(run_result.failed_models)
         ),
         "gpt2giga_fusion_failed_panels": str(len(run_result.failed_models)),
     }
+    if run_result.selected_candidate_id:
+        metadata["gpt2giga_fusion_selected_candidate_id"] = (
+            run_result.selected_candidate_id
+        )
+    if run_result.selected_candidate_source:
+        metadata["gpt2giga_fusion_selected_candidate_source"] = (
+            run_result.selected_candidate_source
+        )
+    if run_result.needs_rewrite is not None:
+        metadata["gpt2giga_fusion_needs_rewrite"] = str(
+            run_result.needs_rewrite
+        ).lower()
+    if run_result.judge_parse_error:
+        metadata["gpt2giga_fusion_judge_parse_error"] = "true"
+    if run_result.panel_truncated:
+        metadata["gpt2giga_fusion_panel_truncated"] = "true"
     if run_result.final_model:
         metadata["gpt2giga_fusion_final_model"] = run_result.final_model
     if run_result.fallback_reason:
@@ -1176,14 +2210,36 @@ def _provider_metadata(
         "analysis_models": list(run_result.analysis_models),
         "judge_model": run_result.judge_model,
         "final_model": run_result.final_model,
+        "decision_mode": run_result.decision_mode,
+        "prompt_mode": run_result.prompt_mode,
+        "selected_candidate_id": run_result.selected_candidate_id,
+        "selected_candidate_source": run_result.selected_candidate_source,
+        "needs_rewrite": run_result.needs_rewrite,
+        "judge_parse_error": run_result.judge_parse_error,
+        "repair_used": run_result.repair_used,
+        "panel_truncated": run_result.panel_truncated,
         "fallback_reason": run_result.fallback_reason,
         "latency_ms": run_result.latency_ms,
+        "direct_latency_ms": run_result.direct_latency_ms,
         "judge_latency_ms": run_result.judge_latency_ms,
+        "finalizer_latency_ms": run_result.finalizer_latency_ms,
         "judge_usage": (
             run_result.judge_usage.to_json_dict()
             if run_result.judge_usage is not None
             else None
         ),
+        "finalizer_usage": (
+            run_result.finalizer_usage.to_json_dict()
+            if run_result.finalizer_usage is not None
+            else None
+        ),
+        "candidates": [
+            _candidate_metadata(
+                candidate,
+                expose_content=settings.expose_panel_responses,
+            )
+            for candidate in run_result.candidates
+        ],
         "panel_results": [
             _panel_metadata(result, expose_content=settings.expose_panel_responses)
             for result in run_result.panel_results
@@ -1191,6 +2247,11 @@ def _provider_metadata(
     }
     if settings.expose_analysis_metadata and run_result.analysis is not None:
         metadata["analysis"] = run_result.analysis.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+    if settings.expose_analysis_metadata and run_result.selection is not None:
+        metadata["selection"] = run_result.selection.model_dump(
             mode="json",
             exclude_none=True,
         )
@@ -1208,6 +2269,7 @@ def _panel_metadata(
         "status": result.status,
         "error_type": result.error_type,
         "latency_ms": result.latency_ms,
+        "truncated": result.truncated,
         "usage": result.usage.to_json_dict() if result.usage is not None else None,
     }
     if expose_content:
@@ -1216,6 +2278,33 @@ def _panel_metadata(
             tool_call.to_json_dict() for tool_call in result.tool_calls
         ]
         metadata["error_message"] = result.error_message
+    return metadata
+
+
+def _candidate_metadata(
+    candidate: FusionCandidate,
+    *,
+    expose_content: bool,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "candidate_id": candidate.candidate_id,
+        "source": candidate.source,
+        "model": candidate.model,
+        "role": candidate.role,
+        "status": candidate.status,
+        "error_type": candidate.error_type,
+        "latency_ms": candidate.latency_ms,
+        "truncated": candidate.truncated,
+        "usage": (
+            candidate.usage.to_json_dict() if candidate.usage is not None else None
+        ),
+    }
+    if expose_content:
+        metadata["content"] = candidate.content
+        metadata["tool_calls"] = [
+            tool_call.to_json_dict() for tool_call in candidate.tool_calls
+        ]
+        metadata["error_message"] = candidate.error_message
     return metadata
 
 

@@ -3,8 +3,10 @@ from pydantic import ValidationError
 
 from gpt2giga.providers.fusion.schemas import (
     FusionAnalysis,
+    FusionCandidate,
     FusionPanelResult,
     FusionRunResult,
+    FusionSelection,
 )
 from gpt2giga.protocols.normalized.models import NormalizedToolCall, NormalizedUsage
 
@@ -34,6 +36,19 @@ def test_fusion_analysis_accepts_final_tool_call():
     assert analysis.blind_spots == []
 
 
+def test_fusion_selection_requires_bounded_confidence():
+    selection = FusionSelection(
+        selected_candidate_id="direct",
+        confidence=0.75,
+    )
+
+    assert selection.schema_version == "gpt2giga.fusion.selection.v1"
+    assert selection.needs_rewrite is False
+
+    with pytest.raises(ValidationError):
+        FusionSelection(selected_candidate_id="direct", confidence=1.5)
+
+
 def test_fusion_run_result_tracks_failed_models_and_usage():
     failed = FusionPanelResult(
         model="A",
@@ -49,10 +64,22 @@ def test_fusion_run_result_tracks_failed_models_and_usage():
         judge_model="Judge",
         panel_results=[failed, FusionPanelResult(model="B", status="ok")],
         failed_models=[failed],
+        candidates=[
+            FusionCandidate(
+                candidate_id="direct",
+                source="direct",
+                model="Judge",
+                status="ok",
+            )
+        ],
+        selection=FusionSelection(selected_candidate_id="direct", confidence=0.8),
+        selected_candidate_id="direct",
+        selected_candidate_source="direct",
         usage=NormalizedUsage(input_tokens=10, output_tokens=20, total_tokens=30),
     )
 
     assert result.failed_models[0].model == "A"
+    assert result.selected_candidate_source == "direct"
     assert result.usage is not None
     assert result.usage.total_tokens == 30
 

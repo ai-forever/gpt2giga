@@ -8,8 +8,11 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from gpt2giga.models.config import (
+    FusionDecisionMode,
+    FusionPanelOutputTruncation,
     FusionPipelineMode,
     FusionPresetSettings,
+    FusionPromptMode,
     FusionSettings,
     FusionToolsMode,
 )
@@ -28,10 +31,18 @@ class FusionRequestConfig(BaseModel):
     analysis_models: list[str] = Field(min_length=1, max_length=8)
     judge_model: str
     final_model: Optional[str] = None
+    direct_model: Optional[str] = None
     panel_roles: list[str] = Field(default_factory=list)
-    temperature: Optional[float] = 0.2
+    temperature: Optional[float] = None
     max_completion_tokens: Optional[int] = None
     reasoning: Optional[dict[str, Any]] = None
+    include_direct_candidate: bool = False
+    return_selected_candidate: bool = True
+    decision_mode: FusionDecisionMode = "synthesize"
+    prompt_mode: FusionPromptMode = "full"
+    max_panel_output_chars: int = Field(default=6000, ge=0)
+    max_total_panel_output_chars: int = Field(default=16000, ge=0)
+    panel_output_truncation: FusionPanelOutputTruncation = "head_tail"
     min_successful_panels: int = 1
     timeout_seconds: float = 120.0
     tools_mode: FusionToolsMode = "schema_only"
@@ -157,7 +168,11 @@ def _build_request_config(
     requested_model: str | None,
     settings: FusionSettings,
 ) -> FusionRequestConfig:
-    preset_name = _string_or_none(params.get("preset")) or settings.default_preset
+    preset_name = (
+        _string_or_none(params.get("preset"))
+        or _preset_from_model_alias(requested_model)
+        or settings.default_preset
+    )
     presets = get_fusion_presets(settings.presets)
     preset = presets.get(preset_name)
     if preset is None:
@@ -167,6 +182,7 @@ def _build_request_config(
             analysis_models=_string_list(params.get("analysis_models")),
             judge_model=_required_model(params, "model", "judge_model"),
             final_model=_string_or_none(params.get("final_model")),
+            direct_model=_string_or_none(params.get("direct_model")),
         )
 
     analysis_models = _string_list(
@@ -182,11 +198,11 @@ def _build_request_config(
         if "final_model" in params
         else preset.final_model
     )
-    if final_model is not None:
-        raise FusionConfigurationError(
-            "Fusion final_model is reserved; current implementation supports "
-            "only compact panel -> judge/finalizer pipeline."
-        )
+    direct_model = (
+        _string_or_none(params.get("direct_model"))
+        if "direct_model" in params
+        else preset.direct_model
+    )
     panel_roles = _string_list(params.get("panel_roles"), fallback=preset.panel_roles)
     tools_mode = _string_or_none(params.get("tools_mode")) or preset.tools_mode
     max_tool_calls = _optional_int(
@@ -204,6 +220,7 @@ def _build_request_config(
         analysis_models=analysis_models,
         judge_model=judge_model,
         final_model=final_model,
+        direct_model=direct_model,
         panel_roles=panel_roles,
         temperature=_optional_float(params.get("temperature"), preset.temperature),
         max_completion_tokens=_optional_int(
@@ -211,6 +228,31 @@ def _build_request_config(
             preset.max_completion_tokens,
         ),
         reasoning=_optional_mapping(params.get("reasoning"), preset.reasoning),
+        include_direct_candidate=_optional_bool(
+            params.get("include_direct_candidate"),
+            preset.include_direct_candidate,
+        ),
+        return_selected_candidate=_optional_bool(
+            params.get("return_selected_candidate"),
+            preset.return_selected_candidate,
+        ),
+        decision_mode=_optional_mode(
+            params.get("decision_mode"),
+            preset.decision_mode,
+        ),
+        prompt_mode=_optional_mode(params.get("prompt_mode"), preset.prompt_mode),
+        max_panel_output_chars=_optional_int(
+            params.get("max_panel_output_chars"),
+            preset.max_panel_output_chars,
+        ),
+        max_total_panel_output_chars=_optional_int(
+            params.get("max_total_panel_output_chars"),
+            preset.max_total_panel_output_chars,
+        ),
+        panel_output_truncation=_optional_mode(
+            params.get("panel_output_truncation"),
+            preset.panel_output_truncation,
+        ),
         min_successful_panels=_optional_int(
             params.get("min_successful_panels"), preset.min_successful_panels
         )
@@ -241,7 +283,7 @@ def _validate_resolved_request(
     concrete_models = [
         *config.analysis_models,
         config.judge_model,
-        *(model for model in [config.final_model] if model),
+        *(model for model in [config.final_model, config.direct_model] if model),
     ]
     for model in concrete_models:
         if _normalize_model_id(model) in aliases:
@@ -254,7 +296,7 @@ def _validate_resolved_request(
         )
     if (
         settings.max_total_upstream_calls_per_request > 0
-        and len(config.analysis_models) + 1
+        and _planned_upstream_calls(config)
         > settings.max_total_upstream_calls_per_request
     ):
         raise FusionConfigurationError(
@@ -317,6 +359,55 @@ def _optional_int(value: Any, fallback: int | None) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _optional_bool(value: Any, fallback: bool) -> bool:
+    if value is None:
+        return fallback
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+    return fallback
+
+
+def _optional_mode(value: Any, fallback: str) -> str:
+    if value is None:
+        return fallback
+    text = _string_or_none(value)
+    return text.lower() if text else fallback
+
+
+def _preset_from_model_alias(model: str | None) -> str | None:
+    if model is None:
+        return None
+    normalized = _normalize_model_id(model).lower()
+    if normalized.endswith("fusion-code-budget"):
+        return "code-budget"
+    if normalized.endswith("fusion-code-high"):
+        return "code-high"
+    if normalized.endswith("fusion-general"):
+        return "general"
+    if normalized.endswith(("fusion-accuracy", "fusion-benchmark")):
+        return "accuracy-ultra-selector"
+    if normalized.endswith("fusion-accuracy-verifier"):
+        return "accuracy-ultra-verifier"
+    if normalized.endswith("fusion-code-agent-safe"):
+        return "code-agent-safe"
+    return None
+
+
+def _planned_upstream_calls(config: FusionRequestConfig) -> int:
+    calls = len(config.analysis_models) + 1
+    if config.include_direct_candidate:
+        calls += 1
+    if config.decision_mode == "selector":
+        calls += 1
+    return calls
 
 
 def _string_or_none(value: Any) -> str | None:

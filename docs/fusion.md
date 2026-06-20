@@ -6,8 +6,8 @@ GigaFusion - локальный режим multi-model deliberation внутри
 возвращает один финальный ответ в исходном API-формате.
 
 Это не прокси в OpenRouter Fusion и не точная копия OpenRouter behavior.
-Внешний OpenRouter не вызывается: все panel и judge/finalizer calls идут через
-настроенный GigaChat backend.
+Внешний OpenRouter не вызывается: все direct, panel, judge/selector и
+finalizer calls идут через настроенный GigaChat backend.
 
 ## Когда использовать
 
@@ -18,10 +18,18 @@ Fusion полезен для задач, где качество важнее la
 - задачи, где нужно сравнить несколько подходов;
 - ответы, где полезно явно отловить противоречия, неполное покрытие и риски.
 
-Не включайте Fusion по умолчанию для дешевых коротких completions, autocomplete
-и latency-sensitive UI. Один Fusion-запрос делает несколько upstream model calls:
-по умолчанию `code-high` запускает три panel calls и один judge/finalizer call.
-Panel calls идут параллельно, но расходуют больше upstream concurrency и tokens.
+Не включайте Fusion по умолчанию для coding harnesses, дешевых коротких
+completions, autocomplete и latency-sensitive UI без отдельной проверки. Один
+Fusion-запрос делает несколько upstream model calls: `code-high` запускает три
+panel calls и один judge/finalizer call, а selector presets могут добавлять
+baseline-like direct candidate и optional finalizer. Panel и direct calls идут
+параллельно, но расходуют больше upstream concurrency и tokens.
+
+Перед включением Fusion как default для Codex/Claude Code/Qwen Code-style
+клиентов проверьте отдельный tool-enabled agent preset и убедитесь, что
+`direct_candidate + selector` близок к single Ultra baseline, p95 latency
+понятен, judge parse errors почти отсутствуют, fallback/rewrite rates низкие, а
+selected candidate distribution объяснима.
 
 ## Поддержанные API
 
@@ -80,11 +88,20 @@ gpt2giga/fusion-general
 gpt2giga/fusion-code
 gpt2giga/fusion-code-budget
 gpt2giga/fusion-code-high
+gpt2giga/fusion-accuracy
+gpt2giga/fusion-benchmark
+gpt2giga/fusion-accuracy-verifier
+gpt2giga/fusion-code-agent-safe
 GigaChat-Fusion-Code
 ```
 
 Aliases появляются в model discovery только когда
 `GPT2GIGA_FUSION_ENABLED=True`.
+
+Specific aliases such as `gpt2giga/fusion-accuracy` and
+`gpt2giga/fusion-code-agent-safe` select the matching built-in preset unless a
+request-level `preset` override is provided. Generic aliases such as
+`gpt2giga/fusion-code` continue to use `GPT2GIGA_FUSION_DEFAULT_PRESET`.
 
 Для Gemini path можно использовать alias как model id:
 
@@ -94,46 +111,71 @@ Aliases появляются в model discovery только когда
 
 ## Как работает pipeline
 
-Текущая реализация поддерживает только `pipeline_mode=compact`:
-`panel -> judge/finalizer`. `final_model` зарезервирован для будущего strict
-pipeline и должен оставаться `null`; отдельной finalizer-модели сейчас нет.
+Текущая реализация поддерживает только `pipeline_mode=compact`. Внутри него
+есть два decision modes:
+
+- `decision_mode="synthesize"`: старый путь `panel -> judge/finalizer`, где
+  judge возвращает structured `FusionAnalysis` с final answer или tool call.
+- `decision_mode="selector"`: direct/panel candidates -> selector judge ->
+  selected candidate as-is, если rewrite не нужен, или optional finalizer.
+
+`final_model` используется только как optional selector finalizer model; если он
+не задан, finalizer использует `judge_model`.
 
 1. Router читает исходный request и ищет Fusion-настройку.
 2. Request переводится во внутренний normalized chat contract.
-3. `FusionProviderAdapter` запускает panel calls к моделям из preset. Каждая
+3. Если `include_direct_candidate=true`, adapter параллельно запускает direct
+   candidate: исходный normalized request без Fusion prompt envelope, через
+   `direct_model` или `judge_model`.
+4. `FusionProviderAdapter` запускает panel calls к моделям из preset. Каждая
    panel получает исходный запрос, служебный system prompt и optional role,
    например `architect`, `implementer`, `reviewer`.
-4. Panel calls не выполняют tools. Если tools переданы и режим это разрешает,
+5. Panel calls не выполняют tools. Если tools переданы и режим это разрешает,
    panel видит schemas только как reference и может предложить
    `tool_call_candidate`.
-5. Judge/finalizer получает исходный запрос и panel responses, сравнивает их и
-   возвращает structured analysis: consensus, contradictions, partial coverage,
-   unique insights, blind spots, risk flags, selected strategy, final answer или
-   ровно один final tool call. Judge prompt помечает panel outputs как
-   untrusted advisory data; эти outputs используются только как evidence, а не
-   как инструкции.
-6. Финальный ответ маппится обратно в OpenAI, Anthropic или Gemini response
-   shape. Usage агрегируется по panel и judge calls.
+6. Перед judge prompt candidate outputs ограничиваются
+   `max_panel_output_chars` и `max_total_panel_output_chars`; начало и конец
+   ответа сохраняются, truncation явно помечается.
+7. В `synthesize` judge/finalizer получает исходный запрос и candidate
+   responses, сравнивает их и возвращает structured analysis: consensus,
+   contradictions, partial coverage, unique insights, blind spots, risk flags,
+   selected strategy, final answer или ровно один final tool call.
+8. В `selector` judge возвращает `FusionSelection`: selected candidate id,
+   confidence, `needs_rewrite`, correction и brief reason. Если
+   `needs_rewrite=false` и `return_selected_candidate=true`, proxy возвращает
+   выбранного кандидата без переписывания.
+9. Финальный ответ маппится обратно в OpenAI, Anthropic или Gemini response
+   shape. Usage агрегируется по direct, panel, judge и finalizer calls.
 
 Если часть panel calls падает или истекает по timeout, Fusion продолжает работу,
 пока выполнен `min_successful_panels`. Если judge response пустой или невалидный
 JSON, adapter делает один repair-call. Если repair тоже не даёт валидный
-`FusionAnalysis`, adapter пытается вернуть лучший panel answer как fallback и
-помечает это в metadata.
+`FusionAnalysis`, adapter пытается вернуть fallback в порядке: direct candidate,
+выбранный candidate, solver panel, первый успешный panel. В selector mode
+невалидный `FusionSelection` также попадает в observable fallback.
 
 ## Presets
 
 Встроенные presets используются, если `GPT2GIGA_FUSION_PRESETS` не переопределил
 их:
 
-| Preset | Panel models | Judge model | Roles | Tools mode |
-|---|---|---|---|---|
-| `general` | `GigaChat-2-Max`, `GigaChat-2-Pro` | `GigaChat-2-Max` | `planner`, `critic` | `off` |
-| `code-budget` | `GigaChat-2-Pro`, `GigaChat-2-Max` | `GigaChat-2-Max` | `implementer`, `reviewer` | `schema_only` |
-| `code-high` | `GigaChat-3-Ultra`, `GigaChat-2-Max`, `GigaChat-2-Pro` | `GigaChat-3-Ultra` | `architect`, `implementer`, `reviewer` | `schema_only` |
+| Preset | Panel models | Judge model | Direct | Decision / prompt | Roles | Tools mode |
+|---|---|---|---|---|---|---|
+| `general` | `GigaChat-2-Max`, `GigaChat-2-Pro` | `GigaChat-2-Max` | no | `synthesize` / `full` | `planner`, `critic` | `off` |
+| `code-budget` | `GigaChat-2-Pro`, `GigaChat-2-Max` | `GigaChat-2-Max` | no | `synthesize` / `full` | `implementer`, `reviewer` | `schema_only` |
+| `code-high` | `GigaChat-3-Ultra`, `GigaChat-2-Max`, `GigaChat-2-Pro` | `GigaChat-3-Ultra` | no | `synthesize` / `full` | `architect`, `implementer`, `reviewer` | `schema_only` |
+| `accuracy-ultra-selector` | `GigaChat-3-Ultra` | `GigaChat-3-Ultra` | yes | `selector` / `minimal` | `solver` | `off` |
+| `accuracy-ultra-verifier` | `GigaChat-3-Ultra` | `GigaChat-3-Ultra` | yes | `selector` / `minimal` | `verifier` | `off` |
+| `code-agent-safe` | `GigaChat-3-Ultra`, `GigaChat-2-Max` | `GigaChat-3-Ultra` | yes | `selector` / `full` | `solver`, `reviewer` | `schema_only` |
 
 `GPT2GIGA_FUSION_DEFAULT_PRESET` выбирает preset для aliases и request-level
 Fusion configs, где preset не указан.
+
+Accuracy presets are for simple benchmark/QA validation and intentionally use
+`tools_mode="off"`. `code-agent-safe` keeps a full harness envelope and
+`return_selected_candidate=false`, so tool-enabled agent runs still pass through
+the finalizer/tool arbitration path instead of blindly forwarding a selected
+panel response.
 
 ## Env reference
 
@@ -146,11 +188,11 @@ Fusion configs, где preset не указан.
 | `GPT2GIGA_FUSION_MAX_PANEL_MODELS` | `4` | Верхний лимит `analysis_models` в одном запросе, допустимо `1..8`. |
 | `GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY` | `4` | Сколько panel calls можно выполнять параллельно внутри одного Fusion-запроса. |
 | `GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS` | `4` | Глобальный для процесса лимит одновременно выполняющихся Fusion-запросов. |
-| `GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST` | `5` | Максимум планируемых upstream calls на один Fusion-запрос: panel calls плюс judge call. `0` отключает лимит. |
+| `GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST` | `5` | Максимум планируемых upstream calls на один Fusion-запрос: direct candidate, panel calls, judge call и обязательный selector finalizer. `0` отключает лимит. |
 | `GPT2GIGA_FUSION_MAX_TOOL_CALLS` | `1` | Зарезервировано под будущие parallel tool calls; текущий compact pipeline поддерживает ровно один final tool call. |
 | `GPT2GIGA_FUSION_STREAMING_MODE` | `buffered` | `buffered` отдает SSE после deliberation; `off` запрещает Fusion streaming requests. |
 | `GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS` | `0` | Если больше `0`, OpenAI Chat Completions stream отдает SSE comment heartbeat frames, пока buffered Fusion deliberation еще выполняется. |
-| `GPT2GIGA_FUSION_PIPELINE_MODE` | `compact` | Единственный поддержанный режим, где judge и finalizer объединены в один call. |
+| `GPT2GIGA_FUSION_PIPELINE_MODE` | `compact` | Единственный поддержанный pipeline mode; decision behavior выбирается preset key `decision_mode`. |
 | `GPT2GIGA_FUSION_EXPOSE_ANALYSIS_METADATA` | `False` | Добавляет structured judge analysis в provider metadata. Не включает raw prompts. |
 | `GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES` | `False` | Добавляет raw panel content в provider metadata. Оставляйте `False` вне локальной отладки. |
 | `GPT2GIGA_FUSION_DEBUG_TRACE_ENABLED` | `False` | Зарезервировано для bounded debug trace support. |
@@ -163,10 +205,17 @@ GPT2GIGA_FUSION_PRESETS='{
   "code-review": {
     "analysis_models": ["GigaChat-3-Ultra", "GigaChat-2-Max"],
     "judge_model": "GigaChat-3-Ultra",
+    "direct_model": null,
     "final_model": null,
     "panel_roles": ["reviewer", "risk-checker"],
     "temperature": 0.2,
     "max_completion_tokens": 4096,
+    "include_direct_candidate": true,
+    "return_selected_candidate": true,
+    "decision_mode": "selector",
+    "prompt_mode": "full",
+    "max_panel_output_chars": 6000,
+    "max_total_panel_output_chars": 16000,
     "min_successful_panels": 1,
     "timeout_seconds": 180,
     "tools_mode": "schema_only"
@@ -175,9 +224,9 @@ GPT2GIGA_FUSION_PRESETS='{
 ```
 
 В `.env` обычно удобнее держать JSON в одну строку. `analysis_models`,
-`judge_model` не могут ссылаться на Fusion aliases, чтобы не создать
-рекурсивный Fusion-вызов. `final_model` зарезервирован и должен быть `null`;
-non-null значение отклоняется при разрешении Fusion-запроса.
+`judge_model`, `direct_model` и `final_model` не могут ссылаться на Fusion
+aliases, чтобы не создать рекурсивный Fusion-вызов. `temperature=null` и
+`max_completion_tokens=null` означают preserve client generation settings.
 
 ## Tools behavior
 
@@ -202,6 +251,11 @@ Final tool-call arguments разбираются как JSON, ограничив
 невалиден, но есть text `final_answer`, клиент получает text answer без tool
 call. Если клиент требовал tool call через `tool_choice`, Fusion возвращает
 ошибку.
+
+For tool-enabled agent presets prefer `return_selected_candidate=false`, so the
+selector decision still goes through finalizer/tool arbitration. Returning a
+selected candidate as-is is intended for tool-free accuracy presets until the
+tool-enabled preset has separate validation.
 
 ## Failure semantics
 
@@ -379,12 +433,21 @@ gateway metadata, it includes only safe operational markers by default:
 - panel model ids;
 - judge/final model ids;
 - successful and failed panel counts;
+- decision mode and prompt mode;
+- selected candidate id/source;
+- rewrite, judge parse error and panel truncation flags;
 - fallback reason, if fallback happened.
 
 Metrics and Phoenix span events do not include prompts, raw panel responses,
 tool arguments, API keys or GigaChat credentials. Raw panel content is exposed
 only when `GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES=True`; keep it disabled in
 shared and production environments.
+
+Fusion metrics include request and stage latency, panel calls, token usage,
+selected candidate distribution, rewrite count, judge parse errors, repair
+calls, fallback reasons and panel/candidate truncation counters. These are the
+primary signals for checking p95 latency, fallback rate, rewrite rate and
+selector distribution before using Fusion as a default coding-harness preset.
 
 More operational details: [Операции](operations.md#metrics) and
 [Phoenix / OpenTelemetry](operations.md#phoenix-opentelemetry).

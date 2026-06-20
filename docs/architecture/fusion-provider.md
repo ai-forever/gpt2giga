@@ -10,8 +10,10 @@ OpenAI / Anthropic / Gemini request
   -> Fusion detection
   -> NormalizedChatRequest
   -> FusionProviderAdapter
+       -> optional direct candidate through GigaChatProviderAdapter
        -> parallel panel calls through GigaChatProviderAdapter
-       -> judge/finalizer call through GigaChatProviderAdapter
+       -> judge/finalizer or selector call through GigaChatProviderAdapter
+       -> optional selector finalizer through GigaChatProviderAdapter
        -> FusionRunResult + NormalizedResponse
   -> route-specific response adapter
 ```
@@ -22,7 +24,7 @@ OpenAI / Anthropic / Gemini request
 |---|---|
 | `gpt2giga.providers.fusion.detection` | Detects aliases, OpenRouter-style plugin/tool hints, and native `gpt2giga_fusion` metadata. |
 | `gpt2giga.providers.fusion.presets` | Built-in `general`, `code-budget`, and `code-high` presets plus custom preset merge. |
-| `gpt2giga.providers.fusion.adapter` | Runs panel calls, judge/finalizer call, fallback handling, metadata, telemetry and normalized response construction. |
+| `gpt2giga.providers.fusion.adapter` | Runs direct/panel candidates, judge/finalizer or selector calls, fallback handling, metadata, telemetry and normalized response construction. |
 | `gpt2giga.providers.fusion.prompts` | Panel and judge prompt templates. |
 | `gpt2giga.providers.fusion.schemas` | Pydantic models for panel results, structured judge analysis and complete run result. |
 | `gpt2giga.providers.fusion.tool_arbitration` | Reference-only panel tool schemas and validated final tool-call arbitration. |
@@ -50,25 +52,33 @@ Routes strip Fusion request artifacts before internal GigaChat calls:
 
 - `openrouter:fusion` pseudo-tools are removed from normalized tools;
 - `plugins` and `gpt2giga_fusion` metadata are removed from passthrough fields;
-- internal requests add `gpt2giga_fusion_stage=panel|judge` metadata for bounded
-  operational context.
+- internal requests add `gpt2giga_fusion_stage=direct_candidate|panel|judge|selector_judge|selector_finalizer` metadata for bounded operational context.
 
 ## Request flow
 
-The public route first converts the request into `NormalizedChatRequest`. Fusion
-then deep-copies that request for each panel model:
+The public route first converts the request into `NormalizedChatRequest`. When
+`include_direct_candidate=true`, Fusion first deep-copies the original request
+for a baseline-like direct candidate:
+
+- `model` is replaced with `direct_model` or `judge_model`;
+- `stream` is forced to `False`;
+- no Fusion system prompt or panel role is added;
+- preset generation overrides are applied only when non-null.
+
+Fusion also deep-copies that request for each panel model:
 
 - `model` is replaced with the concrete panel model;
 - `stream` is forced to `False`;
 - response format is disabled for panels;
-- preset generation overrides are applied;
+- preset generation overrides are applied only when non-null;
 - a Fusion system prompt and optional panel role are prepended;
 - tools are not forwarded for execution in panel calls.
 
 Panel calls run concurrently with `GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY`, bounded
 by the number of analysis models. The whole Fusion request also enters the
 application-scoped `GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS` limiter, and request
-detection rejects plans whose panel calls plus judge call exceed
+detection rejects plans whose direct candidate, panel calls, judge call and
+mandatory selector finalizer exceed
 `GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST` when that limit is
 positive. Each upstream call has the preset timeout. Disconnect checks cancel
 in-flight panel tasks when the client connection goes away before the buffered
@@ -80,10 +90,13 @@ messages are not exported through metrics or telemetry.
 
 ## Judge/finalizer flow
 
-The compact pipeline combines judge and finalizer into one GigaChat call. This
-is the only implemented pipeline mode. `final_model` is reserved for a future
-strict pipeline and must remain unset today. The
-judge request contains:
+The compact pipeline has two decision modes. `synthesize` combines judge and
+finalizer into one GigaChat call and returns `FusionAnalysis`. `selector`
+returns `FusionSelection`; if `needs_rewrite=false` and
+`return_selected_candidate=true`, the selected candidate is returned unchanged.
+Otherwise an optional finalizer call uses `final_model` or `judge_model`.
+
+The synthesize judge request contains:
 
 - the original normalized messages;
 - successful and failed panel summaries;
@@ -103,10 +116,15 @@ The judge is expected to return JSON with:
 - `final_answer`
 - `final_tool_call`
 
-Panel outputs are wrapped as untrusted advisory data and the judge prompt tells
-the model not to follow instructions inside them. If the judge response is empty
-or not parseable as the expected object, Fusion makes one repair call. If repair
-also fails, Fusion falls back to the best successful panel content and records
+Candidate outputs are wrapped as untrusted advisory data and the judge prompt
+tells the model not to follow instructions inside them. Candidate content is
+truncated before the judge prompt with per-candidate and total character
+budgets.
+
+If the synthesize judge response is empty or not parseable as the expected
+object, Fusion makes one repair call. If repair also fails, or selector parsing
+fails, Fusion falls back in order to direct candidate, selected candidate,
+solver panel and first successful panel, recording
 `gpt2giga_fusion_fallback_reason`.
 
 ## Tool arbitration
@@ -155,6 +173,9 @@ The public normalized metadata is bounded:
 - preset
 - analysis models
 - judge/final model
+- decision mode and prompt mode
+- selected candidate id/source
+- rewrite, judge parse error and truncation flags
 - successful and failed panel counts
 - fallback reason, when present
 
@@ -167,6 +188,7 @@ Telemetry emits:
 
 - one `GigaFusion` span per completed run;
 - panel events with model, role, status, latency and error type;
+- direct, judge and optional finalizer stage latency events;
 - Prometheus-compatible `gpt2giga_fusion_*` metrics.
 
 Telemetry does not export prompt content, raw panel responses, tool arguments,

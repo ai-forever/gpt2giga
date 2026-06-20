@@ -233,8 +233,9 @@ Versioned prefixes являются явным per-request override:
 
 ## Fusion / multi-model deliberation
 
-GigaFusion - локальный режим, в котором один client request запускает несколько
-внутренних GigaChat panel calls и один judge/finalizer call. Он выключен по
+GigaFusion - локальный режим, в котором один client request запускает direct
+candidate и/или несколько внутренних GigaChat panel calls, затем judge/selector
+и при необходимости finalizer call. Он выключен по
 умолчанию и не обращается к OpenRouter или другим внешним upstream.
 
 Минимальное включение:
@@ -247,7 +248,7 @@ GPT2GIGA_FUSION_DEFAULT_PRESET=code-high
 Частые overrides:
 
 ```dotenv
-GPT2GIGA_FUSION_ALIASES='["gpt2giga/fusion","gpt2giga/fusion-code","GigaChat-Fusion-Code"]'
+GPT2GIGA_FUSION_ALIASES='["gpt2giga/fusion","gpt2giga/fusion-code","gpt2giga/fusion-accuracy","gpt2giga/fusion-benchmark","GigaChat-Fusion-Code"]'
 GPT2GIGA_FUSION_STREAMING_MODE=buffered
 GPT2GIGA_FUSION_MAX_PANEL_MODELS=4
 GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY=3
@@ -259,10 +260,13 @@ GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES=False
 ```
 
 Используйте `GPT2GIGA_FUSION_PRESETS` для JSON-карты custom presets с
-`analysis_models`, `judge_model`, `panel_roles`, generation limits,
-`min_successful_panels`, `timeout_seconds` и `tools_mode`. `final_model`
-зарезервирован для будущего strict pipeline и должен быть `null`; текущий
-runtime поддерживает только compact `panel -> judge/finalizer`.
+`analysis_models`, `judge_model`, `direct_model`, `final_model`, `panel_roles`,
+generation limits, `include_direct_candidate`, `return_selected_candidate`,
+`decision_mode`, `prompt_mode`, output budgets, `min_successful_panels`,
+`timeout_seconds` и `tools_mode`. `decision_mode="selector"` выбирает лучший
+candidate и возвращает его без переписывания, если `needs_rewrite=false` и
+`return_selected_candidate=true`; `decision_mode="synthesize"` сохраняет
+старый compact `panel -> judge/finalizer` путь.
 
 Подробно: [GigaFusion](fusion.md).
 

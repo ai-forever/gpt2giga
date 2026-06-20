@@ -64,9 +64,17 @@ def test_fusion_settings_parse_json_env(monkeypatch):
           "code-high": {
             "analysis_models": ["GigaChat-3-Ultra", "GigaChat-2-Max"],
             "judge_model": "GigaChat-3-Ultra",
+            "direct_model": "GigaChat-3-Ultra",
+            "final_model": "GigaChat-3-Ultra",
             "panel_roles": ["architect", "reviewer"],
             "temperature": 0.1,
             "max_completion_tokens": 2048,
+            "include_direct_candidate": true,
+            "return_selected_candidate": false,
+            "decision_mode": "SELECTOR",
+            "prompt_mode": "MINIMAL",
+            "max_panel_output_chars": 1234,
+            "max_total_panel_output_chars": 5678,
             "min_successful_panels": 1,
             "timeout_seconds": 90,
             "tools_mode": "SCHEMA_ONLY"
@@ -98,6 +106,14 @@ def test_fusion_settings_parse_json_env(monkeypatch):
     preset = settings.fusion.presets["code-high"]
     assert preset.analysis_models == ["GigaChat-3-Ultra", "GigaChat-2-Max"]
     assert preset.panel_roles == ["architect", "reviewer"]
+    assert preset.direct_model == "GigaChat-3-Ultra"
+    assert preset.final_model == "GigaChat-3-Ultra"
+    assert preset.include_direct_candidate is True
+    assert preset.return_selected_candidate is False
+    assert preset.decision_mode == "selector"
+    assert preset.prompt_mode == "minimal"
+    assert preset.max_panel_output_chars == 1234
+    assert preset.max_total_panel_output_chars == 5678
     assert preset.tools_mode == "schema_only"
 
 

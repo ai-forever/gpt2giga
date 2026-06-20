@@ -199,6 +199,25 @@ def _judge_json(final_answer="final answer", final_tool_call=None) -> str:
     )
 
 
+def _selection_json(
+    selected_candidate_id="direct",
+    *,
+    confidence=0.9,
+    needs_rewrite=False,
+    correction=None,
+) -> str:
+    return json.dumps(
+        {
+            "schema_version": "gpt2giga.fusion.selection.v1",
+            "selected_candidate_id": selected_candidate_id,
+            "confidence": confidence,
+            "needs_rewrite": needs_rewrite,
+            "correction": correction,
+            "reason_brief": "best candidate",
+        }
+    )
+
+
 async def test_fusion_adapter_runs_panels_in_parallel_and_judges_result():
     provider = FakeProvider(
         responses={
@@ -256,6 +275,165 @@ async def test_fusion_adapter_runs_panels_in_parallel_and_judges_result():
         provider.calls[-1].messages[-1].content
     )
     assert response.metadata["gpt2giga_fusion_successful_panels"] == "2"
+
+
+async def test_fusion_adapter_direct_candidate_has_no_fusion_prompt_and_can_be_selected():
+    provider = FakeProvider(
+        responses={
+            "Direct": _text_response("Direct", "direct answer"),
+            "PanelA": _text_response("PanelA", "panel answer"),
+            "Judge": _text_response("Judge", _selection_json("direct")),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        context=_context(),
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            direct_model="Direct",
+            include_direct_candidate=True,
+            decision_mode="selector",
+            prompt_mode="minimal",
+            tools_mode="off",
+        ),
+    )
+
+    assert response.choices[0].message.content == "direct answer"
+    assert response.metadata["gpt2giga_fusion_selected_candidate_id"] == "direct"
+    assert response.metadata["gpt2giga_fusion_selected_candidate_source"] == "direct"
+    assert response.metadata["gpt2giga_fusion_needs_rewrite"] == "false"
+    assert provider.calls[-1].model == "Judge"
+    first_models = {provider.calls[0].model, provider.calls[1].model}
+    assert first_models == {"Direct", "PanelA"}
+    direct_call = next(call for call in provider.calls if call.model == "Direct")
+    panel_call = next(call for call in provider.calls if call.model == "PanelA")
+    assert [message.role for message in direct_call.messages] == ["user"]
+    assert "gpt2giga_fusion_runtime" not in (direct_call.messages[0].content or "")
+    assert "You are solving the user's task independently." in (
+        panel_call.messages[0].content or ""
+    )
+
+
+async def test_fusion_adapter_selector_runs_finalizer_only_when_rewrite_needed():
+    provider = FakeProvider(
+        responses={
+            "Direct": _text_response("Direct", "direct answer"),
+            "PanelA": _text_response("PanelA", "panel answer"),
+            "Judge": _text_response(
+                "Judge",
+                _selection_json(
+                    "direct",
+                    needs_rewrite=True,
+                    correction="Make the answer explicit.",
+                ),
+            ),
+            "Final": _text_response("Final", "rewritten answer"),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            direct_model="Direct",
+            include_direct_candidate=True,
+            decision_mode="selector",
+            final_model="Final",
+            tools_mode="off",
+        ),
+    )
+
+    assert response.choices[0].message.content == "rewritten answer"
+    assert {provider.calls[0].model, provider.calls[1].model} == {"PanelA", "Direct"}
+    assert [call.model for call in provider.calls[2:]] == ["Judge", "Final"]
+    finalizer_call = provider.calls[-1]
+    assert finalizer_call.metadata["gpt2giga_fusion_stage"] == "selector_finalizer"
+    assert "Make the answer explicit." in finalizer_call.messages[-1].content
+    assert response.metadata["gpt2giga_fusion_needs_rewrite"] == "true"
+
+
+async def test_fusion_adapter_preserves_generation_settings_when_preset_values_are_none():
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "panel answer"),
+            "Judge": _text_response("Judge", _judge_json("final answer")),
+        }
+    )
+    request = _request()
+    request.generation_config.temperature = 0.7
+    request.generation_config.max_tokens = 123
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            temperature=None,
+            max_completion_tokens=None,
+        ),
+    )
+
+    assert response.choices[0].message.content == "final answer"
+    for call in provider.calls:
+        assert call.generation_config.temperature == 0.7
+        assert call.generation_config.max_tokens == 123
+
+
+async def test_fusion_adapter_truncates_panel_outputs_before_judge_prompt():
+    long_answer = "A" * 200 + "TAIL"
+
+    def judge_response(request):
+        prompt = request.messages[-1].content
+        assert "...[truncated by gpt2giga fusion]..." in prompt
+        assert len(prompt) < 1200
+        assert "TAIL" in prompt
+        return _text_response("Judge", _judge_json("final answer"))
+
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", long_answer),
+            "Judge": judge_response,
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            max_panel_output_chars=80,
+            max_total_panel_output_chars=80,
+        ),
+    )
+
+    assert response.choices[0].message.content == "final answer"
+    assert response.provider_metadata["fusion"]["panel_truncated"] is True
+
+
+async def test_fusion_adapter_fallback_prefers_direct_candidate_over_panel_answer():
+    provider = FakeProvider(
+        responses={
+            "Direct": _text_response("Direct", "direct usable answer"),
+            "PanelA": _text_response("PanelA", "panel usable answer"),
+            "Judge": _text_response("Judge", "not json"),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            direct_model="Direct",
+            include_direct_candidate=True,
+        ),
+    )
+
+    assert response.choices[0].message.content == "direct usable answer"
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == "invalid_judge_json"
 
 
 async def test_fusion_adapter_wraps_client_instructions_without_duplication():

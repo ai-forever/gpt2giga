@@ -31,6 +31,9 @@ ObservabilityBackendName = Literal["noop", "phoenix"]
 FusionToolsMode = Literal["off", "schema_only", "final_arbitration"]
 FusionStreamingMode = Literal["off", "buffered"]
 FusionPipelineMode = Literal["compact", "strict"]
+FusionDecisionMode = Literal["synthesize", "selector"]
+FusionPromptMode = Literal["full", "minimal"]
+FusionPanelOutputTruncation = Literal["head_tail"]
 
 
 DEFAULT_FUSION_ALIASES = [
@@ -39,6 +42,10 @@ DEFAULT_FUSION_ALIASES = [
     "gpt2giga/fusion-code",
     "gpt2giga/fusion-code-budget",
     "gpt2giga/fusion-code-high",
+    "gpt2giga/fusion-accuracy",
+    "gpt2giga/fusion-benchmark",
+    "gpt2giga/fusion-accuracy-verifier",
+    "gpt2giga/fusion-code-agent-safe",
     "GigaChat-Fusion-Code",
 ]
 
@@ -83,14 +90,19 @@ class FusionPresetSettings(BaseModel):
 
     analysis_models: list[str] = Field(min_length=1, max_length=8)
     judge_model: str
-    final_model: Optional[str] = Field(
-        default=None,
-        description="Reserved for a future strict pipeline; must be null today.",
-    )
+    final_model: Optional[str] = None
+    direct_model: Optional[str] = None
     panel_roles: list[str] = Field(default_factory=list)
-    temperature: Optional[float] = 0.2
+    temperature: Optional[float] = None
     max_completion_tokens: Optional[PositiveInt] = None
     reasoning: Optional[dict[str, Any]] = None
+    include_direct_candidate: bool = False
+    return_selected_candidate: bool = True
+    decision_mode: FusionDecisionMode = "synthesize"
+    prompt_mode: FusionPromptMode = "full"
+    max_panel_output_chars: int = Field(default=6000, ge=0)
+    max_total_panel_output_chars: int = Field(default=16000, ge=0)
+    panel_output_truncation: FusionPanelOutputTruncation = "head_tail"
     min_successful_panels: PositiveInt = 1
     timeout_seconds: PositiveFloat = 120.0
     tools_mode: FusionToolsMode = "schema_only"
@@ -102,12 +114,18 @@ class FusionPresetSettings(BaseModel):
     def normalize_string_lists(cls, value):
         return _parse_list_env(value)
 
-    @field_validator("tools_mode", mode="before")
+    @field_validator(
+        "tools_mode",
+        "decision_mode",
+        "prompt_mode",
+        "panel_output_truncation",
+        mode="before",
+    )
     @classmethod
-    def normalize_tools_mode(cls, value):
+    def normalize_string_modes(cls, value):
         return _normalize_lower_string(value)
 
-    @field_validator("judge_model", "final_model", mode="before")
+    @field_validator("judge_model", "final_model", "direct_model", mode="before")
     @classmethod
     def normalize_model_names(cls, value):
         return _normalize_string(value)
@@ -172,7 +190,11 @@ class FusionSettings(BaseModel):
             concrete_models = [
                 *preset.analysis_models,
                 preset.judge_model,
-                *(model for model in [preset.final_model] if model),
+                *(
+                    model
+                    for model in [preset.final_model, preset.direct_model]
+                    if model
+                ),
             ]
             for model in concrete_models:
                 if model.removeprefix("models/") in aliases:

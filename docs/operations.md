@@ -49,7 +49,10 @@ GPT2GIGA_METRICS_PATH=/metrics
 
 Если API-key auth включена, передавайте `Authorization: Bearer <GPT2GIGA_API_KEY>` или `x-api-key`.
 
-Метрики не содержат prompt/response content, API keys, request ids, trace ids или raw payloads. Labels ограничены bounded operational fields: protocol, route, method, status, lifecycle, provider, model, preset, phase и failure reason.
+Метрики не содержат prompt/response content, API keys, request ids, trace ids
+или raw payloads. Labels ограничены bounded operational fields: protocol,
+route, method, status, lifecycle, provider, model, preset, phase, stage, role,
+candidate id/type, decision mode и failure reason.
 
 Базовые series:
 
@@ -72,6 +75,15 @@ responses, prompt content или tool arguments:
 - `gpt2giga_fusion_judge_latency_seconds`
 - `gpt2giga_fusion_tokens_total`
 - `gpt2giga_fusion_failures_total`
+- `gpt2giga_fusion_selected_candidate_total`
+- `gpt2giga_fusion_rewrite_total`
+- `gpt2giga_fusion_judge_parse_errors_total`
+- `gpt2giga_fusion_repair_calls_total`
+- `gpt2giga_fusion_fallback_total`
+- `gpt2giga_fusion_stage_latency_seconds`
+- `gpt2giga_fusion_stage_input_tokens`
+- `gpt2giga_fusion_stage_output_tokens`
+- `gpt2giga_fusion_panel_truncated_total`
 
 ## Traffic Logs
 

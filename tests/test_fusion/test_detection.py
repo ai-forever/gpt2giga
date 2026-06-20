@@ -173,7 +173,55 @@ def test_extract_fusion_rejects_upstream_call_budget_exceeded():
         )
 
 
-def test_extract_fusion_rejects_reserved_final_model():
+def test_extract_fusion_accepts_selector_final_model_and_direct_candidate_options():
+    config = extract_fusion_request(
+        {
+            "tools": [
+                {
+                    "type": "openrouter:fusion",
+                    "parameters": {
+                        "analysis_models": ["A"],
+                        "judge_model": "Judge",
+                        "direct_model": "Direct",
+                        "final_model": "Finalizer",
+                        "include_direct_candidate": True,
+                        "return_selected_candidate": False,
+                        "decision_mode": "selector",
+                        "prompt_mode": "minimal",
+                        "max_panel_output_chars": 123,
+                        "max_total_panel_output_chars": 456,
+                    },
+                }
+            ]
+        },
+        _settings(max_total_upstream_calls_per_request=4),
+    )
+
+    assert config is not None
+    assert config.direct_model == "Direct"
+    assert config.final_model == "Finalizer"
+    assert config.include_direct_candidate is True
+    assert config.return_selected_candidate is False
+    assert config.decision_mode == "selector"
+    assert config.prompt_mode == "minimal"
+    assert config.max_panel_output_chars == 123
+    assert config.max_total_panel_output_chars == 456
+
+
+def test_extract_fusion_model_alias_can_select_accuracy_preset():
+    config = extract_fusion_request(
+        {"model": "gpt2giga/fusion-accuracy"},
+        _settings(aliases=["gpt2giga/fusion-accuracy"]),
+    )
+
+    assert config is not None
+    assert config.preset == "accuracy-ultra-selector"
+    assert config.include_direct_candidate is True
+    assert config.decision_mode == "selector"
+    assert config.prompt_mode == "minimal"
+
+
+def test_extract_fusion_rejects_recursive_direct_model():
     with pytest.raises(FusionConfigurationError):
         extract_fusion_request(
             {
@@ -183,29 +231,12 @@ def test_extract_fusion_rejects_reserved_final_model():
                         "parameters": {
                             "analysis_models": ["A"],
                             "judge_model": "Judge",
-                            "final_model": "Finalizer",
+                            "direct_model": "gpt2giga/fusion-code",
                         },
                     }
                 ]
             },
             _settings(),
-        )
-
-
-def test_extract_fusion_rejects_preset_reserved_final_model():
-    with pytest.raises(FusionConfigurationError):
-        extract_fusion_request(
-            {"model": "gpt2giga/fusion-code"},
-            _settings(
-                default_preset="custom",
-                presets={
-                    "custom": {
-                        "analysis_models": ["A"],
-                        "judge_model": "Judge",
-                        "final_model": "Finalizer",
-                    }
-                },
-            ),
         )
 
 
