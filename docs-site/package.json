@@ -44,6 +44,7 @@
     "node": ">=20.0"
   },
   "overrides": {
+    "http-proxy-middleware": "3.0.7",
     "serialize-javascript": "7.0.5"
   }
 }
