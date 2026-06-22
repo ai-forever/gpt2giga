@@ -7,28 +7,36 @@ This site is built from the Markdown files in `docs/` through the Docusaurus wra
 Install Node.js `20+`, then the Docusaurus dependencies:
 
 ```sh
-cd docs-site
-npm ci
+make docs-install
 ```
 
 Build the site:
 
 ```sh
-npm run build
+make docs-build
 ```
 
 For a local preview:
 
 ```sh
-npm run start
+make docs
 ```
 
 By default, Docusaurus opens the site at `http://127.0.0.1:3000/`.
-To check the production artifact after the build:
+This builds and serves all configured locales, so the language switcher works locally.
+For faster one-locale development with hot reload:
 
 ```sh
-npm run serve
+make docs-dev
 ```
+
+Docusaurus dev server serves one locale per run. To preview the Russian locale in dev mode:
+
+```sh
+make docs-dev-ru
+```
+
+Use `make docs` or `make docs-preview` when checking the locale switcher between English and Russian.
 
 ## What gets published
 

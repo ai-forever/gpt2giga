@@ -90,18 +90,24 @@ print(response.content[0].text)
 Локально проверить docs можно через Docusaurus wrapper в `docs-site/`:
 
 ```sh
-cd docs-site
-npm ci
-npm run build
-npm run start
+make docs-install
+make docs
 ```
 
-После `npm run start` сайт доступен на `http://127.0.0.1:3000/`. Для проверки production artifact:
+После `make docs` сайт доступен на `http://127.0.0.1:3000/` и включает локали `en`/`ru`.
+Для быстрой разработки с hot reload:
 
 ```sh
-cd docs-site
-npm run serve
+make docs-dev
 ```
+
+Docusaurus dev server обслуживает одну локаль за запуск. Для русского dev preview:
+
+```sh
+make docs-dev-ru
+```
+
+Чтобы проверить переключатель языков между `en` и `ru`, используйте full preview через `make docs` или `make docs-preview`.
 
 | Тема | Документ |
 |---|---|
