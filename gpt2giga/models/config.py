@@ -35,6 +35,12 @@ FusionInvocationMode = Literal["outer_auto", "classifier_auto", "force", "off"]
 FusionDecisionMode = Literal["tool_result", "synthesize", "selector"]
 FusionPromptMode = Literal["full", "minimal"]
 FusionPanelOutputTruncation = Literal["head_tail"]
+FusionPostToolMode = Literal[
+    "direct_continuation",
+    "fusion_continuation",
+    "finalize",
+]
+FusionDirectToolCallPolicy = Literal["return_immediately", "selector"]
 
 
 DEFAULT_FUSION_ALIASES = [
@@ -112,6 +118,9 @@ class FusionPresetSettings(BaseModel):
     min_successful_panels: PositiveInt = 1
     timeout_seconds: PositiveFloat = 120.0
     tools_mode: FusionToolsMode = "schema_only"
+    max_client_tool_rounds: Optional[int] = Field(default=None, ge=0, le=64)
+    post_tool_mode: Optional[FusionPostToolMode] = None
+    direct_tool_call_policy: Optional[FusionDirectToolCallPolicy] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -126,6 +135,8 @@ class FusionPresetSettings(BaseModel):
         "decision_mode",
         "prompt_mode",
         "panel_output_truncation",
+        "post_tool_mode",
+        "direct_tool_call_policy",
         mode="before",
     )
     @classmethod
@@ -162,6 +173,9 @@ class FusionSettings(BaseModel):
     max_server_tool_calls: int = Field(default=16, ge=0, le=16)
     max_client_final_tool_calls: int = Field(default=1, ge=0, le=1)
     max_tool_calls: int = Field(default=1, ge=0, le=16)
+    max_client_tool_rounds: int = Field(default=8, ge=0, le=64)
+    post_tool_mode: FusionPostToolMode = "direct_continuation"
+    direct_tool_call_policy: FusionDirectToolCallPolicy = "return_immediately"
     streaming_mode: FusionStreamingMode = "buffered"
     stream_heartbeat_seconds: float = Field(default=0.0, ge=0.0)
     pipeline_mode: FusionPipelineMode = "compact"
@@ -190,7 +204,13 @@ class FusionSettings(BaseModel):
     def normalize_default_preset(cls, value):
         return _normalize_string(value)
 
-    @field_validator("streaming_mode", "pipeline_mode", mode="before")
+    @field_validator(
+        "streaming_mode",
+        "pipeline_mode",
+        "post_tool_mode",
+        "direct_tool_call_policy",
+        mode="before",
+    )
     @classmethod
     def normalize_modes(cls, value):
         return _normalize_lower_string(value)
@@ -338,6 +358,29 @@ class ProxySettings(BaseSettings):
         description=(
             "Maximum tool calls Fusion may return when tool arbitration is enabled. "
             "Current compact pipeline supports exactly one final tool call."
+        ),
+    )
+    fusion_max_client_tool_rounds: int = Field(
+        default=8,
+        ge=0,
+        le=64,
+        description=(
+            "Maximum client-visible tool result rounds Fusion may continue before "
+            "forcing a final post-tool answer."
+        ),
+    )
+    fusion_post_tool_mode: FusionPostToolMode = Field(
+        default="direct_continuation",
+        description=(
+            "Post-tool Fusion behavior: direct_continuation, fusion_continuation, "
+            "or finalize."
+        ),
+    )
+    fusion_direct_tool_call_policy: FusionDirectToolCallPolicy = Field(
+        default="return_immediately",
+        description=(
+            "How Fusion handles a valid native direct tool call before panels: "
+            "return_immediately or selector."
         ),
     )
     fusion_streaming_mode: FusionStreamingMode = Field(
@@ -684,6 +727,8 @@ class ProxySettings(BaseSettings):
         "observability_backend",
         "fusion_streaming_mode",
         "fusion_pipeline_mode",
+        "fusion_post_tool_mode",
+        "fusion_direct_tool_call_policy",
         mode="before",
     )
     @classmethod
@@ -790,6 +835,9 @@ class ProxySettings(BaseSettings):
             ),
             max_server_tool_calls=self.fusion_max_tool_calls,
             max_tool_calls=self.fusion_max_tool_calls,
+            max_client_tool_rounds=self.fusion_max_client_tool_rounds,
+            post_tool_mode=self.fusion_post_tool_mode,
+            direct_tool_call_policy=self.fusion_direct_tool_call_policy,
             streaming_mode=self.fusion_streaming_mode,
             stream_heartbeat_seconds=self.fusion_stream_heartbeat_seconds,
             pipeline_mode=self.fusion_pipeline_mode,

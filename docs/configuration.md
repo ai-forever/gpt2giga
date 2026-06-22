@@ -254,6 +254,9 @@ GPT2GIGA_FUSION_MAX_PANEL_MODELS=4
 GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY=3
 GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS=4
 GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST=5
+GPT2GIGA_FUSION_MAX_CLIENT_TOOL_ROUNDS=8
+GPT2GIGA_FUSION_POST_TOOL_MODE=direct_continuation
+GPT2GIGA_FUSION_DIRECT_TOOL_CALL_POLICY=return_immediately
 GPT2GIGA_FUSION_META_TOOL_NAMES=update_topic,update_plan,todo_write
 GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS=0
 GPT2GIGA_FUSION_EXPOSE_ANALYSIS_METADATA=False
@@ -264,10 +267,12 @@ GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES=False
 `analysis_models`, `judge_model`, `direct_model`, `final_model`, `panel_roles`,
 generation limits, `include_direct_candidate`, `return_selected_candidate`,
 `decision_mode`, `prompt_mode`, output budgets, `min_successful_panels`,
-`timeout_seconds` и `tools_mode`. `decision_mode="selector"` выбирает лучший
-candidate и возвращает его без переписывания, если `needs_rewrite=false` и
-`return_selected_candidate=true`; `decision_mode="synthesize"` сохраняет
-старый compact `panel -> judge/finalizer` путь.
+`timeout_seconds`, `tools_mode`, `post_tool_mode`,
+`direct_tool_call_policy` и `max_client_tool_rounds`.
+`decision_mode="selector"` выбирает лучший candidate и возвращает его без
+переписывания, если `needs_rewrite=false` и `return_selected_candidate=true`;
+`decision_mode="synthesize"` сохраняет старый compact `panel -> judge/finalizer`
+путь.
 
 Подробно: [GigaFusion](fusion.md).
 

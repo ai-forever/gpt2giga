@@ -18,6 +18,9 @@ _FUSION_ENV_KEYS = [
     "GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS",
     "GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST",
     "GPT2GIGA_FUSION_MAX_TOOL_CALLS",
+    "GPT2GIGA_FUSION_MAX_CLIENT_TOOL_ROUNDS",
+    "GPT2GIGA_FUSION_POST_TOOL_MODE",
+    "GPT2GIGA_FUSION_DIRECT_TOOL_CALL_POLICY",
     "GPT2GIGA_FUSION_STREAMING_MODE",
     "GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS",
     "GPT2GIGA_FUSION_PIPELINE_MODE",
@@ -50,6 +53,9 @@ def test_fusion_settings_defaults_are_disabled(monkeypatch):
     assert settings.fusion.max_concurrent_requests == 4
     assert settings.fusion.max_total_upstream_calls_per_request == 5
     assert settings.fusion.max_tool_calls == 1
+    assert settings.fusion.max_client_tool_rounds == 8
+    assert settings.fusion.post_tool_mode == "direct_continuation"
+    assert settings.fusion.direct_tool_call_policy == "return_immediately"
     assert settings.fusion.meta_tool_names == DEFAULT_FUSION_META_TOOL_NAMES
 
 
@@ -90,6 +96,9 @@ def test_fusion_settings_parse_json_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS", "7")
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST", "6")
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_TOOL_CALLS", "1")
+    monkeypatch.setenv("GPT2GIGA_FUSION_MAX_CLIENT_TOOL_ROUNDS", "5")
+    monkeypatch.setenv("GPT2GIGA_FUSION_POST_TOOL_MODE", "FUSION_CONTINUATION")
+    monkeypatch.setenv("GPT2GIGA_FUSION_DIRECT_TOOL_CALL_POLICY", "SELECTOR")
     monkeypatch.setenv("GPT2GIGA_FUSION_META_TOOL_NAMES", "update_topic,done")
     monkeypatch.setenv("GPT2GIGA_FUSION_STREAMING_MODE", "BUFFERED")
     monkeypatch.setenv("GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS", "1.5")
@@ -106,6 +115,9 @@ def test_fusion_settings_parse_json_env(monkeypatch):
     assert settings.fusion.max_concurrent_requests == 7
     assert settings.fusion.max_total_upstream_calls_per_request == 6
     assert settings.fusion.max_tool_calls == 1
+    assert settings.fusion.max_client_tool_rounds == 5
+    assert settings.fusion.post_tool_mode == "fusion_continuation"
+    assert settings.fusion.direct_tool_call_policy == "selector"
     assert settings.fusion.meta_tool_names == ["update_topic", "done"]
     assert settings.fusion.stream_heartbeat_seconds == 1.5
     preset = settings.fusion.presets["code-high"]

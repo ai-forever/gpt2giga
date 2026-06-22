@@ -200,6 +200,37 @@ def _write_file_tool() -> NormalizedTool:
     )
 
 
+def _weather_tool() -> NormalizedTool:
+    return NormalizedTool(
+        name="get_weather",
+        description="Get weather",
+        parameters={
+            "type": "object",
+            "properties": {
+                "city": {"type": "string"},
+                "date": {"type": "string"},
+            },
+            "required": ["city", "date"],
+        },
+    )
+
+
+def _hotel_tool() -> NormalizedTool:
+    return NormalizedTool(
+        name="find_hotel",
+        description="Find a hotel",
+        parameters={
+            "type": "object",
+            "properties": {
+                "city": {"type": "string"},
+                "nights": {"type": "integer"},
+                "max_price_rub": {"type": "integer"},
+            },
+            "required": ["city", "nights", "max_price_rub"],
+        },
+    )
+
+
 def _judge_json(
     final_answer="final answer", final_tool_call=None, task_status=None
 ) -> str:
@@ -545,6 +576,117 @@ async def test_fusion_adapter_direct_candidate_has_no_fusion_prompt_and_can_be_s
     assert "gpt2giga_fusion_runtime" not in (direct_call.messages[0].content or "")
     assert "You are solving the user's task independently." in (
         panel_call.messages[0].content or ""
+    )
+
+
+async def test_direct_native_tool_call_short_circuits_panels_and_selector():
+    request = _request()
+    request.tools = [_weather_tool()]
+    direct_call = NormalizedToolCall(
+        id="call-weather",
+        name="get_weather",
+        arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+    )
+    provider = FakeProvider(
+        responses={
+            "Direct": _tool_response("Direct", direct_call),
+            "PanelA": _text_response(
+                "PanelA",
+                json.dumps(
+                    {
+                        "tool_call_candidate": {
+                            "name": "get_weather",
+                            "arguments": {
+                                "city": "Saint Pyotrsburg",
+                                "date": "tomorrow",
+                            },
+                        }
+                    }
+                ),
+            ),
+            "Judge": _text_response("Judge", _selection_json("panel_1")),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        context=_context(),
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            direct_model="Direct",
+            include_direct_candidate=True,
+            decision_mode="selector",
+        ),
+    )
+
+    message = response.choices[0].message
+    assert [call.model for call in provider.calls] == ["Direct"]
+    assert message.content is None
+    assert message.tool_calls == [direct_call]
+    assert response.choices[0].finish_reason == "tool_calls"
+    assert response.metadata["gpt2giga_fusion_selected_candidate_id"] == "direct"
+
+
+async def test_selector_prefers_valid_direct_native_tool_over_panel_advisory_tool():
+    request = _request()
+    request.tools = [_weather_tool()]
+    direct_call = NormalizedToolCall(
+        id="call-weather",
+        name="get_weather",
+        arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+    )
+
+    def judge_response(selector_request):
+        prompt = selector_request.messages[-1].content
+        assert '"city": "Saint Petersburg"' in prompt
+        assert '"city": "Saint Pyotrsburg"' in prompt
+        assert '"native": true' in prompt
+        assert '"advisory": true' in prompt
+        assert '"valid": true' in prompt
+        return _text_response("Judge", _selection_json("panel_1"))
+
+    provider = FakeProvider(
+        responses={
+            "Direct": _tool_response("Direct", direct_call),
+            "PanelA": _text_response(
+                "PanelA",
+                json.dumps(
+                    {
+                        "tool_call_candidate": {
+                            "name": "get_weather",
+                            "arguments": {
+                                "city": "Saint Pyotrsburg",
+                                "date": "tomorrow",
+                            },
+                        }
+                    }
+                ),
+            ),
+            "Judge": judge_response,
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        context=_context(),
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            direct_model="Direct",
+            include_direct_candidate=True,
+            decision_mode="selector",
+            direct_tool_call_policy="selector",
+        ),
+    )
+
+    message = response.choices[0].message
+    assert [call.model for call in provider.calls] == ["Direct", "PanelA", "Judge"]
+    assert message.tool_calls == [direct_call]
+    assert response.metadata["gpt2giga_fusion_selected_candidate_id"] == "direct"
+    assert response.metadata["gpt2giga_fusion_selected_candidate_source"] == "direct"
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
+        "direct_native_tool_call_preferred"
     )
 
 
@@ -1380,7 +1522,114 @@ async def test_fusion_adapter_required_meta_tool_only_returns_safe_error():
     )
 
 
-async def test_fusion_adapter_post_tool_turn_runs_single_finalizer_with_tools_disabled():
+async def test_post_tool_turn_uses_direct_continuation_with_tools_enabled():
+    request = _request()
+    request.tools = [_weather_tool(), _hotel_tool()]
+    request.messages = [
+        NormalizedMessage(
+            role="user",
+            content=(
+                "Plan a 2-night trip to Saint Petersburg tomorrow using weather "
+                "and hotel data."
+            ),
+        ),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-weather",
+                    name="get_weather",
+                    arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+                )
+            ],
+        ),
+        NormalizedMessage(
+            role="tool",
+            content="weather result",
+            tool_call_id="call-weather",
+        ),
+    ]
+    hotel_call = NormalizedToolCall(
+        id="call-hotel",
+        name="find_hotel",
+        arguments={
+            "city": "Saint Petersburg",
+            "nights": 2,
+            "max_price_rub": 15000,
+        },
+    )
+    provider = FakeProvider(
+        responses={
+            "Direct": _tool_response("Direct", hotel_call),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(direct_model="Direct"),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.tool_calls == [hotel_call]
+    assert response.choices[0].finish_reason == "tool_calls"
+    assert [call.model for call in provider.calls] == ["Direct"]
+    assert [tool.name for tool in provider.calls[0].tools] == [
+        "get_weather",
+        "find_hotel",
+    ]
+    assert provider.calls[0].metadata["gpt2giga_fusion_stage"] == "outer_direct"
+
+
+async def test_post_tool_repeated_direct_tool_call_falls_back_to_finalizer():
+    request = _request()
+    request.tools = [_weather_tool()]
+    request.messages = [
+        NormalizedMessage(role="user", content="Check weather."),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-weather",
+                    name="get_weather",
+                    arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+                )
+            ],
+        ),
+        NormalizedMessage(
+            role="tool",
+            content="weather result",
+            tool_call_id="call-weather",
+        ),
+    ]
+    repeated_call = NormalizedToolCall(
+        id="call-weather-repeat",
+        name="get_weather",
+        arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+    )
+    provider = FakeProvider(
+        responses={
+            "Direct": _tool_response("Direct", repeated_call),
+            "Judge": _text_response("Judge", "safe partial answer"),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(direct_model="Direct"),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.content == "safe partial answer"
+    assert response.choices[0].message.tool_calls == []
+    assert [call.model for call in provider.calls] == ["Direct", "Judge"]
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
+        "post_tool_finalizer"
+    )
+
+
+async def test_fusion_adapter_post_tool_finalize_mode_disables_tools():
     tool = NormalizedTool(
         name="lookup",
         description="Lookup data",
@@ -1415,7 +1664,7 @@ async def test_fusion_adapter_post_tool_turn_runs_single_finalizer_with_tools_di
 
     response = await _adapter(provider).chat(
         request,
-        fusion_config=_fusion_config(),
+        fusion_config=_fusion_config(post_tool_mode="finalize"),
     )
 
     assert response.error is None

@@ -190,6 +190,9 @@ panel response.
 | `GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS` | `4` | Глобальный для процесса лимит одновременно выполняющихся Fusion-запросов. |
 | `GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST` | `5` | Максимум планируемых upstream calls на один Fusion-запрос: direct candidate, panel calls, judge call и обязательный selector finalizer. `0` отключает лимит. |
 | `GPT2GIGA_FUSION_MAX_TOOL_CALLS` | `1` | Зарезервировано под будущие parallel tool calls; текущий compact pipeline поддерживает ровно один final tool call. |
+| `GPT2GIGA_FUSION_MAX_CLIENT_TOOL_ROUNDS` | `8` | Сколько client-visible tool-result rounds можно продолжать с включенными tools перед forced finalization. |
+| `GPT2GIGA_FUSION_POST_TOOL_MODE` | `direct_continuation` | Поведение после client tool result: `direct_continuation`, `fusion_continuation` или `finalize`. |
+| `GPT2GIGA_FUSION_DIRECT_TOOL_CALL_POLICY` | `return_immediately` | Что делать с валидным native direct tool call до panel stage: вернуть сразу или отправить в `selector`. |
 | `GPT2GIGA_FUSION_META_TOOL_NAMES` | `update_topic,update_plan,todo_write` | Comma-separated или JSON list tool names, которые считаются meta/state tools и не используются как final progress actions. |
 | `GPT2GIGA_FUSION_STREAMING_MODE` | `buffered` | `buffered` отдает SSE после deliberation; `off` запрещает Fusion streaming requests. |
 | `GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS` | `0` | Если больше `0`, OpenAI Chat Completions stream отдает SSE comment heartbeat frames, пока buffered Fusion deliberation еще выполняется. |

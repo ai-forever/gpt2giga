@@ -9,9 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from gpt2giga.models.config import (
     FusionDecisionMode,
+    FusionDirectToolCallPolicy,
     FusionInvocationMode,
     FusionPanelOutputTruncation,
     FusionPipelineMode,
+    FusionPostToolMode,
     FusionPresetSettings,
     FusionPromptMode,
     FusionSettings,
@@ -63,6 +65,9 @@ class FusionRequestConfig(BaseModel):
     max_server_tool_calls: int = Field(default=16, ge=0, le=16)
     max_client_final_tool_calls: int = Field(default=1, ge=0, le=1)
     max_tool_calls: int = Field(default=1, ge=0, le=1)
+    max_client_tool_rounds: int = Field(default=8, ge=0, le=64)
+    post_tool_mode: FusionPostToolMode = "direct_continuation"
+    direct_tool_call_policy: FusionDirectToolCallPolicy = "return_immediately"
     stop_server_tools_when: FusionStopServerToolsWhen | None = None
     raw_parameters: dict[str, Any] = Field(default_factory=dict)
 
@@ -246,6 +251,22 @@ def _build_request_config(
         params.get("max_client_final_tool_calls"),
         settings.max_client_final_tool_calls,
     )
+    max_client_tool_rounds = _optional_int(
+        params.get("max_client_tool_rounds"),
+        (
+            preset.max_client_tool_rounds
+            if preset.max_client_tool_rounds is not None
+            else settings.max_client_tool_rounds
+        ),
+    )
+    post_tool_mode = _optional_mode(
+        params.get("post_tool_mode"),
+        preset.post_tool_mode or settings.post_tool_mode,
+    )
+    direct_tool_call_policy = _optional_mode(
+        params.get("direct_tool_call_policy"),
+        preset.direct_tool_call_policy or settings.direct_tool_call_policy,
+    )
 
     resolved = FusionRequestConfig(
         source=source,
@@ -310,6 +331,11 @@ def _build_request_config(
         max_tool_calls=max_client_final_tool_calls
         if max_client_final_tool_calls is not None
         else settings.max_client_final_tool_calls,
+        max_client_tool_rounds=max_client_tool_rounds
+        if max_client_tool_rounds is not None
+        else settings.max_client_tool_rounds,
+        post_tool_mode=post_tool_mode,
+        direct_tool_call_policy=direct_tool_call_policy,
         stop_server_tools_when=stop_server_tools_when,
         raw_parameters=dict(params),
     )

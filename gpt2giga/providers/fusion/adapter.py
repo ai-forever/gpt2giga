@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import time
 import json
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -151,7 +151,7 @@ class FusionProviderAdapter:
 
         post_tool_call = _latest_post_tool_call(request.messages)
         if post_tool_call is not None:
-            return await self._chat_post_tool_finalizer(
+            return await self._chat_after_tool_result(
                 request,
                 requested_model=requested_model,
                 post_tool_call=post_tool_call,
@@ -161,8 +161,59 @@ class FusionProviderAdapter:
                 is_disconnected=is_disconnected,
             )
 
+        return await self._chat_forced_pipeline(
+            request,
+            requested_model=requested_model,
+            started=started,
+            context=context,
+            fusion_config=fusion_config,
+            is_disconnected=is_disconnected,
+        )
+
+    async def _chat_forced_pipeline(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        requested_model: str,
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        """Execute the forced Fusion panel/selector pipeline."""
         await _raise_if_disconnected(is_disconnected)
-        direct_candidate, panel_results = await self._run_candidate_stages(
+        direct_candidate: FusionCandidate | None = None
+        if fusion_config.include_direct_candidate:
+            direct_candidate = await self._run_direct_candidate(
+                request,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+            valid_direct_tool_call = _valid_client_tool_call_from_candidate(
+                direct_candidate,
+                request_tools=request.tools,
+                tools_mode=fusion_config.tools_mode,
+                tool_choice=request.tool_choice,
+                max_tool_calls=fusion_config.max_tool_calls,
+                request_messages=request.messages,
+                meta_tool_names=self.settings.meta_tool_names,
+            )
+            if (
+                valid_direct_tool_call is not None
+                and fusion_config.direct_tool_call_policy == "return_immediately"
+            ):
+                return await self._response_from_tool_call_candidate(
+                    request=request,
+                    requested_model=requested_model,
+                    candidate=direct_candidate,
+                    tool_call=valid_direct_tool_call,
+                    started=started,
+                    context=context,
+                    fusion_config=fusion_config,
+                )
+
+        panel_results = await self._run_panels(
             request,
             context=context,
             fusion_config=fusion_config,
@@ -523,6 +574,184 @@ class FusionProviderAdapter:
         return await asyncio.wait_for(
             self.upstream_provider.chat(judge_request, context=context),
             timeout=fusion_config.timeout_seconds,
+        )
+
+    async def _chat_after_tool_result(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        requested_model: str,
+        post_tool_call: NormalizedToolCall,
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        if _should_force_post_tool_final_answer(request, fusion_config):
+            return await self._chat_post_tool_finalizer(
+                request,
+                requested_model=requested_model,
+                post_tool_call=post_tool_call,
+                started=started,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+
+        if fusion_config.post_tool_mode == "fusion_continuation":
+            return await self._chat_forced_pipeline(
+                request,
+                requested_model=requested_model,
+                started=started,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+
+        direct_started = time.perf_counter()
+        direct_response: NormalizedResponse | None = None
+        fallback_reason: str | None = None
+        try:
+            outer_request = _build_outer_direct_request(
+                request,
+                model=_outer_model_for_config(fusion_config, self.settings),
+                fusion_config=fusion_config,
+            )
+            await _raise_if_disconnected(is_disconnected)
+            direct_response = await asyncio.wait_for(
+                self.upstream_provider.chat(outer_request, context=context),
+                timeout=fusion_config.timeout_seconds,
+            )
+            if direct_response.error is not None:
+                fallback_reason = f"post_tool_direct_error:{direct_response.error.type}"
+        except asyncio.TimeoutError:
+            fallback_reason = "post_tool_direct_timeout"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            fallback_reason = f"post_tool_direct_failed:{type(exc).__name__}"
+
+        usage = aggregate_usage(
+            [direct_response.usage if direct_response is not None else None]
+        )
+        message, finish_reason = _message_from_response(
+            direct_response,
+            request_tools=request.tools,
+            tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
+            request_messages=request.messages,
+            meta_tool_names=self.settings.meta_tool_names,
+        )
+        if fallback_reason is None and message is None:
+            if _response_has_repeated_client_tool_call(
+                direct_response,
+                request_messages=request.messages,
+            ):
+                fallback_reason = "repeated_client_tool_call"
+            else:
+                fallback_reason = "post_tool_direct_empty_response"
+
+        run_result = self._build_run_result(
+            status="error" if fallback_reason else "ok",
+            requested_model=requested_model,
+            fusion_config=fusion_config,
+            panel_results=[],
+            failed_models=[],
+            usage=usage,
+            latency_ms=_elapsed_ms(started),
+            direct_latency_ms=_elapsed_ms(direct_started),
+            fallback_reason=fallback_reason,
+        )
+        await self._emit_telemetry(run_result, context, fusion_config)
+
+        if message is not None and fallback_reason is None:
+            assert direct_response is not None
+            return NormalizedResponse(
+                id=context.request_id if context is not None else direct_response.id,
+                created_at=direct_response.created_at,
+                model=requested_model,
+                provider=self.name,
+                choices=[
+                    NormalizedChoice(
+                        index=0,
+                        message=message,
+                        finish_reason=finish_reason
+                        or ("tool_calls" if message.tool_calls else "stop"),
+                    )
+                ],
+                usage=usage,
+                metadata=_public_metadata(run_result),
+                provider_metadata={
+                    "fusion": _provider_metadata(
+                        run_result,
+                        settings=self.settings,
+                    )
+                },
+            )
+
+        return await self._chat_post_tool_finalizer(
+            request,
+            requested_model=requested_model,
+            post_tool_call=post_tool_call,
+            started=started,
+            context=context,
+            fusion_config=fusion_config,
+            is_disconnected=is_disconnected,
+        )
+
+    async def _response_from_tool_call_candidate(
+        self,
+        *,
+        request: NormalizedChatRequest,
+        requested_model: str,
+        candidate: FusionCandidate,
+        tool_call: NormalizedToolCall,
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+    ) -> NormalizedResponse:
+        visible_content = candidate.content
+        if looks_like_tool_candidate_json(visible_content):
+            visible_content = None
+        message = NormalizedMessage(
+            role="assistant",
+            content=visible_content,
+            tool_calls=[tool_call],
+        )
+        usage = aggregate_usage([candidate.usage])
+        run_result = self._build_run_result(
+            status="ok",
+            requested_model=requested_model,
+            fusion_config=fusion_config,
+            panel_results=[],
+            failed_models=[],
+            candidates=[candidate],
+            selected_candidate=candidate,
+            usage=usage,
+            latency_ms=_elapsed_ms(started),
+            direct_latency_ms=candidate.latency_ms,
+        )
+        await self._emit_telemetry(run_result, context, fusion_config)
+        return NormalizedResponse(
+            id=context.request_id if context is not None else None,
+            model=requested_model,
+            provider=self.name,
+            choices=[
+                NormalizedChoice(
+                    index=0,
+                    message=message,
+                    finish_reason=candidate.finish_reason or "tool_calls",
+                )
+            ],
+            usage=usage,
+            metadata=_public_metadata(run_result),
+            provider_metadata={
+                "fusion": _provider_metadata(
+                    run_result,
+                    settings=self.settings,
+                )
+            },
         )
 
     async def _chat_post_tool_finalizer(
@@ -912,10 +1141,31 @@ class FusionProviderAdapter:
                     selection.selected_candidate_id if selection is not None else None
                 ),
             )
+        selection_override_reason: str | None = None
+        direct_tool_call = _valid_client_tool_call_from_candidate(
+            direct_candidate,
+            request_tools=request.tools,
+            tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
+            request_messages=request.messages,
+            meta_tool_names=self.settings.meta_tool_names,
+        )
+        if (
+            direct_tool_call is not None
+            and direct_candidate is not None
+            and selected_candidate is not None
+            and selected_candidate.source != "direct"
+        ):
+            selected_candidate = direct_candidate
+            selection_override_reason = "direct_native_tool_call_preferred"
+            fallback_reason = fallback_reason or selection_override_reason
 
         needs_rewrite = (
             bool(selection.needs_rewrite) if selection is not None else False
         )
+        if selection_override_reason is not None:
+            needs_rewrite = False
         finalizer_response: NormalizedResponse | None = None
         finalizer_latency_ms: int | None = None
         message: NormalizedMessage | None = None
@@ -2167,7 +2417,13 @@ def _build_selector_judge_request(
         *conversation_messages,
         NormalizedMessage(
             role="user",
-            content=build_selector_judge_user_prompt(candidates),
+            content=build_selector_judge_user_prompt(
+                candidates,
+                request_tools=request.tools,
+                tools_mode=fusion_config.tools_mode,
+                tool_choice=request.tool_choice,
+                max_tool_calls=fusion_config.max_tool_calls,
+            ),
         ),
     ]
     judge_request.tools = []
@@ -2644,6 +2900,57 @@ def _message_from_candidate(
     )
 
 
+def _valid_client_tool_call_from_candidate(
+    candidate: FusionCandidate | None,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+    request_messages: list[NormalizedMessage],
+    meta_tool_names: list[str],
+) -> NormalizedToolCall | None:
+    if candidate is None or candidate.status != "ok":
+        return None
+    direct_tool_call = first_allowed_tool_call(
+        candidate.tool_calls,
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    )
+    if direct_tool_call is None:
+        return None
+    if _is_meta_tool_call(direct_tool_call, meta_tool_names):
+        return None
+    if _tool_call_repeated_without_new_user(request_messages, direct_tool_call):
+        return None
+    validation = validate_tool_call_arguments(
+        direct_tool_call,
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    )
+    if validation.valid:
+        return validation.tool_call
+    return None
+
+
+def _response_has_repeated_client_tool_call(
+    response: NormalizedResponse | None,
+    *,
+    request_messages: list[NormalizedMessage],
+) -> bool:
+    message = _first_message(response) if response is not None else None
+    if message is None:
+        return False
+    return any(
+        _tool_call_repeated_without_new_user(request_messages, tool_call)
+        for tool_call in message.tool_calls
+    )
+
+
 def _normalize_final_message(
     message: NormalizedMessage,
     *,
@@ -3005,6 +3312,40 @@ def _latest_post_tool_call(
             if tool_call.id == tool_call_id or tool_call.name == tool_call_id:
                 return tool_call
     return None
+
+
+def _should_force_post_tool_final_answer(
+    request: NormalizedChatRequest,
+    fusion_config: FusionRequestConfig,
+) -> bool:
+    if fusion_config.post_tool_mode == "finalize":
+        return True
+    if fusion_config.tools_mode == "off":
+        return True
+    if not _client_visible_tools(request.tools):
+        return True
+    if _tool_choice_disables_client_tools(request.tool_choice):
+        return True
+    return (
+        _client_tool_round_count(request.messages)
+        >= fusion_config.max_client_tool_rounds
+    )
+
+
+def _client_tool_round_count(messages: list[NormalizedMessage]) -> int:
+    last_user_index = _last_user_index(messages)
+    return sum(
+        1 for message in messages[last_user_index + 1 :] if message.role == "tool"
+    )
+
+
+def _tool_choice_disables_client_tools(tool_choice: Any) -> bool:
+    if isinstance(tool_choice, str):
+        return tool_choice.strip().lower() == "none"
+    if isinstance(tool_choice, Mapping):
+        choice_type = tool_choice.get("type")
+        return isinstance(choice_type, str) and choice_type.strip().lower() == "none"
+    return False
 
 
 def _tool_call_repeated_without_new_user(
