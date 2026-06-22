@@ -198,11 +198,10 @@ def test_chat_completions_fusion_model_alias_returns_non_stream_response():
     assert resp.status_code == 200
     body = resp.json()
     assert body["model"] == "gpt2giga/fusion-code"
-    assert body["choices"][0]["message"]["content"] == "fused answer"
-    assert body["metadata"]["gpt2giga_fusion_preset"] == "code-budget"
+    assert body["choices"][0]["message"]["content"] == (
+        "panel answer from GigaChat-2-Max"
+    )
     assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
-        "GigaChat-2-Pro",
-        "GigaChat-2-Max",
         "GigaChat-2-Max",
     ]
 
@@ -234,11 +233,9 @@ def test_chat_completions_fusion_model_alias_returns_buffered_stream():
 
     assert response.status_code == 200
     assert '"object": "chat.completion.chunk"' in body
-    assert "fused answer" in body
+    assert "panel answer from GigaChat-2-Max" in body
     assert "data: [DONE]" in body
     assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
-        "GigaChat-2-Pro",
-        "GigaChat-2-Max",
         "GigaChat-2-Max",
     ]
 
@@ -276,7 +273,7 @@ def test_chat_completions_fusion_stream_can_emit_heartbeat_comments():
 
     assert response.status_code == 200
     assert ": gpt2giga-fusion heartbeat" in body
-    assert "fused answer" in body
+    assert "panel answer from GigaChat-2-Max" in body
     assert "data: [DONE]" in body
 
 
@@ -312,9 +309,8 @@ def test_chat_completions_fusion_error_returns_http_502():
 
     body = resp.json()
     assert resp.status_code == 502
-    assert body["error"]["code"] == "all_panels_failed"
+    assert body["error"]["code"] == "outer_model_failed"
     assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
-        "GigaChat-2-Pro",
         "GigaChat-2-Max",
     ]
 
@@ -346,6 +342,10 @@ def test_chat_completions_fusion_openrouter_tool_artifacts_are_not_forwarded():
                 "gpt2giga_fusion": {"preset": "general"},
             },
             "plugins": [{"id": "fusion", "preset": "general"}],
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": "openrouter:fusion"},
+            },
             "tools": [
                 {
                     "type": "openrouter:fusion",
@@ -368,14 +368,26 @@ def test_chat_completions_fusion_openrouter_tool_artifacts_are_not_forwarded():
 
     assert resp.status_code == 200
     sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
-    assert [payload["model"] for payload in sent_payloads] == ["PanelA", "Judge"]
+    assert [payload["model"] for payload in sent_payloads] == [
+        "GigaChat",
+        "PanelA",
+        "Judge",
+        "GigaChat",
+    ]
     for payload in sent_payloads:
         assert "plugins" not in payload
         assert payload.get("metadata", {}).get("tenant") == "test"
         assert "gpt2giga_fusion" not in payload.get("metadata", {})
         assert payload.get("additional_fields") == {"safe": "kept"}
-    judge_tools = sent_payloads[-1]["tools"]
-    assert [tool["function"]["name"] for tool in judge_tools] == ["lookup"]
+    assert [tool["function"]["name"] for tool in sent_payloads[0]["tools"]] == [
+        "lookup",
+        "openrouter.fusion",
+    ]
+    assert "tools" not in sent_payloads[1]
+    assert "tools" not in sent_payloads[2]
+    assert [tool["function"]["name"] for tool in sent_payloads[-1]["tools"]] == [
+        "lookup"
+    ]
 
 
 def test_chat_completions_fusion_alias_is_legacy_model_when_disabled():

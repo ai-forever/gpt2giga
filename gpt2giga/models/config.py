@@ -31,7 +31,8 @@ ObservabilityBackendName = Literal["noop", "phoenix"]
 FusionToolsMode = Literal["off", "schema_only", "final_arbitration"]
 FusionStreamingMode = Literal["off", "buffered"]
 FusionPipelineMode = Literal["compact", "strict"]
-FusionDecisionMode = Literal["synthesize", "selector"]
+FusionInvocationMode = Literal["outer_auto", "classifier_auto", "force", "off"]
+FusionDecisionMode = Literal["tool_result", "synthesize", "selector"]
 FusionPromptMode = Literal["full", "minimal"]
 FusionPanelOutputTruncation = Literal["head_tail"]
 
@@ -46,6 +47,8 @@ DEFAULT_FUSION_ALIASES = [
     "gpt2giga/fusion-benchmark",
     "gpt2giga/fusion-accuracy-verifier",
     "gpt2giga/fusion-code-agent-safe",
+    "gpt2giga/fusion-force-selector",
+    "gpt2giga/fusion-force-synthesize",
     "GigaChat-Fusion-Code",
 ]
 
@@ -100,8 +103,9 @@ class FusionPresetSettings(BaseModel):
     reasoning: Optional[dict[str, Any]] = None
     include_direct_candidate: bool = False
     return_selected_candidate: bool = True
-    decision_mode: FusionDecisionMode = "synthesize"
-    prompt_mode: FusionPromptMode = "full"
+    invocation_mode: FusionInvocationMode = "outer_auto"
+    decision_mode: FusionDecisionMode = "tool_result"
+    prompt_mode: FusionPromptMode = "minimal"
     max_panel_output_chars: int = Field(default=6000, ge=0)
     max_total_panel_output_chars: int = Field(default=16000, ge=0)
     panel_output_truncation: FusionPanelOutputTruncation = "head_tail"
@@ -118,6 +122,7 @@ class FusionPresetSettings(BaseModel):
 
     @field_validator(
         "tools_mode",
+        "invocation_mode",
         "decision_mode",
         "prompt_mode",
         "panel_output_truncation",
@@ -153,6 +158,9 @@ class FusionSettings(BaseModel):
     max_panel_concurrency: int = Field(default=4, ge=1)
     max_concurrent_requests: int = Field(default=4, ge=1)
     max_total_upstream_calls_per_request: int = Field(default=5, ge=0)
+    max_fusion_invocations_per_turn: int = Field(default=1, ge=0, le=1)
+    max_server_tool_calls: int = Field(default=16, ge=0, le=16)
+    max_client_final_tool_calls: int = Field(default=1, ge=0, le=1)
     max_tool_calls: int = Field(default=1, ge=0, le=16)
     streaming_mode: FusionStreamingMode = "buffered"
     stream_heartbeat_seconds: float = Field(default=0.0, ge=0.0)
@@ -190,6 +198,8 @@ class FusionSettings(BaseModel):
     @model_validator(mode="after")
     def validate_aliases_and_presets(self):
         """Reject recursive Fusion aliases inside concrete model slots."""
+        if self.max_tool_calls != 1 and self.max_server_tool_calls == 16:
+            self.max_server_tool_calls = self.max_tool_calls
         aliases = {alias.removeprefix("models/") for alias in self.aliases}
         for preset_name, preset in self.presets.items():
             concrete_models = [
@@ -778,6 +788,7 @@ class ProxySettings(BaseSettings):
             max_total_upstream_calls_per_request=(
                 self.fusion_max_total_upstream_calls_per_request
             ),
+            max_server_tool_calls=self.fusion_max_tool_calls,
             max_tool_calls=self.fusion_max_tool_calls,
             streaming_mode=self.fusion_streaming_mode,
             stream_heartbeat_seconds=self.fusion_stream_heartbeat_seconds,

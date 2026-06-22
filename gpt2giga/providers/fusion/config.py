@@ -3,6 +3,7 @@
 from gpt2giga.models.config import (
     DEFAULT_FUSION_META_TOOL_NAMES,
     FusionDecisionMode,
+    FusionInvocationMode,
     FusionPanelOutputTruncation,
     FusionPipelineMode,
     FusionPresetSettings,
@@ -14,6 +15,7 @@ from gpt2giga.models.config import (
 
 __all__ = [
     "FusionDecisionMode",
+    "FusionInvocationMode",
     "FusionPanelOutputTruncation",
     "FusionPipelineMode",
     "FusionPresetSettings",

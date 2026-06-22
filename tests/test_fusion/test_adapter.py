@@ -99,6 +99,9 @@ def _fusion_config(**overrides) -> FusionRequestConfig:
         "panel_roles": ["implementer", "reviewer"],
         "temperature": 0.1,
         "max_completion_tokens": 512,
+        "invocation_mode": "force",
+        "decision_mode": "synthesize",
+        "prompt_mode": "full",
         "min_successful_panels": 1,
         "timeout_seconds": 1.0,
         "tools_mode": "schema_only",
@@ -202,6 +205,21 @@ def _judge_json(
     return json.dumps(payload)
 
 
+def _judge_analysis_json(recommendation="Use the combined answer.") -> str:
+    return json.dumps(
+        {
+            "schema_version": "gpt2giga.fusion.analysis.v1",
+            "consensus": ["Panels agree on the main answer."],
+            "contradictions": [],
+            "partial_coverage": [],
+            "unique_insights": [],
+            "blind_spots": [],
+            "risk_flags": [],
+            "recommendation": recommendation,
+        }
+    )
+
+
 def _selection_json(
     selected_candidate_id="direct",
     *,
@@ -218,6 +236,202 @@ def _selection_json(
             "correction": correction,
             "reason_brief": "best candidate",
         }
+    )
+
+
+async def test_fusion_adapter_outer_auto_simple_prompt_skips_panels():
+    provider = FakeProvider(
+        responses={"Outer": _text_response("Outer", "direct answer")}
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        context=_context(),
+        fusion_config=_fusion_config(
+            invocation_mode="outer_auto",
+            decision_mode="tool_result",
+            prompt_mode="minimal",
+            direct_model="Outer",
+        ),
+    )
+
+    assert response.choices[0].message.content == "direct answer"
+    assert [call.model for call in provider.calls] == ["Outer"]
+    assert [tool.name for tool in provider.calls[0].tools] == ["openrouter.fusion"]
+    assert response.choices[0].message.tool_calls == []
+
+
+async def test_fusion_adapter_outer_auto_complex_prompt_invokes_fusion():
+    provider = FakeProvider(
+        responses={
+            "Outer": _tool_response(
+                "Outer",
+                NormalizedToolCall(
+                    id="fusion-call",
+                    name="openrouter:fusion",
+                    arguments={},
+                ),
+            ),
+            "PanelA": _text_response("PanelA", "A analysis"),
+            "PanelB": _text_response("PanelB", "B analysis"),
+            "Judge": _text_response("Judge", _judge_analysis_json()),
+            "Final": _text_response("Final", "final answer"),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        context=_context(),
+        fusion_config=_fusion_config(
+            invocation_mode="outer_auto",
+            decision_mode="tool_result",
+            prompt_mode="minimal",
+            direct_model="Outer",
+            final_model="Final",
+        ),
+    )
+
+    assert response.choices[0].message.content == "final answer"
+    assert provider.calls[0].model == "Outer"
+    assert {provider.calls[1].model, provider.calls[2].model} == {"PanelA", "PanelB"}
+    assert [call.model for call in provider.calls[3:]] == ["Judge", "Final"]
+    final_call = provider.calls[-1]
+    assert all(tool.name != "openrouter.fusion" for tool in final_call.tools)
+    tool_result = json.loads(final_call.messages[-1].content)
+    assert tool_result["status"] == "ok"
+    assert tool_result["analysis"]["recommendation"] == "Use the combined answer."
+    assert "final_answer" not in tool_result["analysis"]
+    assert response.choices[0].message.tool_calls == []
+
+
+async def test_fusion_adapter_outer_auto_forced_tool_choice_invokes_fusion():
+    provider = FakeProvider(
+        responses={
+            "Outer": _text_response("Outer", "ignored direct answer"),
+            "PanelA": _text_response("PanelA", "A analysis"),
+            "Judge": _text_response("Judge", _judge_analysis_json()),
+            "Final": _text_response("Final", "forced final"),
+        }
+    )
+    request = _request()
+    request.tool_choice = {
+        "type": "function",
+        "function": {"name": "openrouter:fusion"},
+    }
+
+    response = await _adapter(provider).chat(
+        request,
+        context=_context(),
+        fusion_config=_fusion_config(
+            invocation_mode="outer_auto",
+            decision_mode="tool_result",
+            prompt_mode="minimal",
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            direct_model="Outer",
+            final_model="Final",
+        ),
+    )
+
+    assert response.choices[0].message.content == "forced final"
+    assert [call.model for call in provider.calls] == [
+        "Outer",
+        "PanelA",
+        "Judge",
+        "Final",
+    ]
+
+
+async def test_fusion_adapter_outer_auto_judge_failure_returns_ok_tool_result():
+    def final_response(request):
+        tool_result = json.loads(request.messages[-1].content)
+        assert tool_result["status"] == "ok"
+        assert tool_result.get("analysis") is None
+        assert [item["content"] for item in tool_result["responses"]] == ["A analysis"]
+        return _text_response("Final", "used raw panels")
+
+    provider = FakeProvider(
+        responses={
+            "Outer": _tool_response(
+                "Outer",
+                NormalizedToolCall(name="openrouter:fusion", arguments={}),
+            ),
+            "PanelA": _text_response("PanelA", "A analysis"),
+            "Judge": _text_response("Judge", "not json"),
+            "Final": final_response,
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        context=_context(),
+        fusion_config=_fusion_config(
+            invocation_mode="outer_auto",
+            decision_mode="tool_result",
+            prompt_mode="minimal",
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            direct_model="Outer",
+            final_model="Final",
+        ),
+    )
+
+    assert response.choices[0].message.content == "used raw panels"
+    assert response.metadata["gpt2giga_fusion_judge_parse_error"] == "true"
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == "invalid_judge_json"
+
+
+async def test_fusion_adapter_outer_auto_blocks_recursive_fusion_tool_call():
+    final_calls = 0
+
+    def final_response(request):
+        nonlocal final_calls
+        final_calls += 1
+        if final_calls == 1:
+            return _tool_response(
+                "Final",
+                NormalizedToolCall(name="openrouter:fusion", arguments={}),
+            )
+        assert "not available again" in request.messages[-1].content
+        return _text_response("Final", "recovered final")
+
+    provider = FakeProvider(
+        responses={
+            "Outer": _tool_response(
+                "Outer",
+                NormalizedToolCall(name="openrouter:fusion", arguments={}),
+            ),
+            "PanelA": _text_response("PanelA", "A analysis"),
+            "Judge": _text_response("Judge", _judge_analysis_json()),
+            "Final": final_response,
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        _request(),
+        context=_context(),
+        fusion_config=_fusion_config(
+            invocation_mode="outer_auto",
+            decision_mode="tool_result",
+            prompt_mode="minimal",
+            analysis_models=["PanelA"],
+            panel_roles=["solver"],
+            direct_model="Outer",
+            final_model="Final",
+        ),
+    )
+
+    assert [call.model for call in provider.calls] == [
+        "Outer",
+        "PanelA",
+        "Judge",
+        "Final",
+        "Final",
+    ]
+    assert response.choices[0].message.tool_calls == []
+    assert response.choices[0].message.content == "recovered final"
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
+        "recursive_fusion_tool_call"
     )
 
 

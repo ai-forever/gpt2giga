@@ -40,6 +40,8 @@ def test_extract_fusion_model_alias_uses_default_preset():
     assert config.preset == "code-budget"
     assert config.analysis_models == ["GigaChat-2-Pro", "GigaChat-2-Max"]
     assert config.judge_model == "GigaChat-2-Max"
+    assert config.invocation_mode == "outer_auto"
+    assert config.decision_mode == "tool_result"
 
 
 def test_extract_fusion_plugin_overrides_model_alias():
@@ -80,7 +82,8 @@ def test_extract_fusion_tool_has_highest_priority():
     assert config.source == "tool"
     assert config.analysis_models == ["A", "B"]
     assert config.judge_model == "Judge"
-    assert config.max_tool_calls == 1
+    assert config.max_server_tool_calls == 1
+    assert config.max_client_final_tool_calls == 1
 
 
 def test_extract_fusion_metadata_config():
@@ -217,7 +220,8 @@ def test_extract_fusion_model_alias_can_select_accuracy_preset():
     assert config is not None
     assert config.preset == "accuracy-ultra-selector"
     assert config.include_direct_candidate is True
-    assert config.decision_mode == "selector"
+    assert config.invocation_mode == "outer_auto"
+    assert config.decision_mode == "tool_result"
     assert config.prompt_mode == "minimal"
 
 
@@ -240,31 +244,69 @@ def test_extract_fusion_rejects_recursive_direct_model():
         )
 
 
-def test_extract_fusion_rejects_parallel_final_tool_calls():
-    with pytest.raises(FusionConfigurationError):
-        extract_fusion_request(
-            {
-                "tools": [
-                    {
-                        "type": "openrouter:fusion",
-                        "parameters": {
-                            "analysis_models": ["A"],
-                            "judge_model": "Judge",
-                            "max_tool_calls": 2,
-                        },
-                    }
-                ]
-            },
-            _settings(),
-        )
+def test_extract_fusion_accepts_parallel_server_tool_budget():
+    config = extract_fusion_request(
+        {
+            "tools": [
+                {
+                    "type": "openrouter:fusion",
+                    "parameters": {
+                        "analysis_models": ["A"],
+                        "judge_model": "Judge",
+                        "max_tool_calls": 8,
+                    },
+                }
+            ]
+        },
+        _settings(),
+    )
+
+    assert config is not None
+    assert config.max_server_tool_calls == 8
+    assert config.max_client_final_tool_calls == 1
 
 
-def test_extract_fusion_rejects_settings_parallel_final_tool_calls():
-    with pytest.raises(FusionConfigurationError):
-        extract_fusion_request(
-            {"model": "gpt2giga/fusion-code"},
-            _settings(max_tool_calls=2),
-        )
+def test_extract_fusion_maps_settings_max_tool_calls_to_server_tools():
+    config = extract_fusion_request(
+        {"model": "gpt2giga/fusion-code"},
+        _settings(max_tool_calls=2),
+    )
+
+    assert config is not None
+    assert config.max_server_tool_calls == 2
+    assert config.max_client_final_tool_calls == 1
+
+
+def test_extract_fusion_applies_stop_server_tools_when_to_server_tools_only():
+    config = extract_fusion_request(
+        {
+            "model": "gpt2giga/fusion-code",
+            "stop_server_tools_when": {"max_tool_calls": 0},
+        },
+        _settings(max_server_tool_calls=8),
+    )
+
+    assert config is not None
+    assert config.max_server_tool_calls == 0
+    assert config.max_client_final_tool_calls == 1
+
+
+def test_extract_fusion_forced_aliases_use_force_mode():
+    selector = extract_fusion_request(
+        {"model": "gpt2giga/fusion-force-selector"},
+        _settings(aliases=["gpt2giga/fusion-force-selector"]),
+    )
+    synthesize = extract_fusion_request(
+        {"model": "gpt2giga/fusion-force-synthesize"},
+        _settings(aliases=["gpt2giga/fusion-force-synthesize"]),
+    )
+
+    assert selector is not None
+    assert selector.invocation_mode == "force"
+    assert selector.decision_mode == "selector"
+    assert synthesize is not None
+    assert synthesize.invocation_mode == "force"
+    assert synthesize.decision_mode == "synthesize"
 
 
 def test_extract_fusion_rejects_reserved_strict_pipeline():

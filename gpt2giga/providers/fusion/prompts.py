@@ -19,7 +19,7 @@ from gpt2giga.providers.fusion.schemas import (
 )
 
 InstructionStage = Literal["panel", "judge", "final"]
-DecisionMode = Literal["synthesize", "selector"]
+DecisionMode = Literal["tool_result", "synthesize", "selector"]
 PromptMode = Literal["full", "minimal"]
 
 INSTRUCTION_ROLES = {"system", "developer"}

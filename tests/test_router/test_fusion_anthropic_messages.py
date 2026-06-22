@@ -82,7 +82,10 @@ def make_app(*, gigachat=None):
         proxy=ProxySettings(
             fusion_enabled=True,
             fusion_default_preset="code-budget",
-            fusion_aliases=["gpt2giga/fusion-code"],
+            fusion_aliases=[
+                "gpt2giga/fusion-code",
+                "gpt2giga/fusion-force-synthesize",
+            ],
             gigachat_api_mode="v1",
             structured_output_mode="function_call",
         )
@@ -111,24 +114,17 @@ def test_anthropic_messages_fusion_model_alias_returns_non_stream_message():
     assert body["type"] == "message"
     assert body["role"] == "assistant"
     assert body["model"] == "gpt2giga/fusion-code"
-    assert body["content"] == [{"type": "text", "text": "fused anthropic answer"}]
+    assert body["content"] == [
+        {"type": "text", "text": "panel answer from GigaChat-2-Max"}
+    ]
     assert body["stop_reason"] == "end_turn"
-    assert body["usage"] == {"input_tokens": 3, "output_tokens": 3}
+    assert body["usage"] == {"input_tokens": 1, "output_tokens": 1}
     assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
-        "GigaChat-2-Pro",
-        "GigaChat-2-Max",
         "GigaChat-2-Max",
     ]
     sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
-    panel_messages = sent_payloads[0]["messages"]
-    assert (
-        '<client_harness_contract source="anthropic_messages">'
-        in (panel_messages[0]["content"])
-    )
-    assert "Be direct." in panel_messages[0]["content"]
-    assert "Be direct." not in "\n".join(
-        message.get("content", "") for message in panel_messages[1:]
-    )
+    assert len(sent_payloads) == 1
+    assert "gpt2giga_fusion_runtime" not in sent_payloads[0]["messages"][0]["content"]
 
 
 def test_anthropic_messages_fusion_model_alias_returns_buffered_stream():
@@ -150,11 +146,11 @@ def test_anthropic_messages_fusion_model_alias_returns_buffered_stream():
     assert response.status_code == 200
     assert "event: message_start" in body
     assert "event: content_block_delta" in body
-    assert "fused anthropic answer" in body
+    assert "panel answer from GigaChat-2-Max" in body
     assert "event: message_stop" in body
     message_delta = _last_sse_payload(body, "message_delta")
     assert message_delta["delta"]["stop_reason"] == "end_turn"
-    assert message_delta["usage"]["output_tokens"] == 3
+    assert message_delta["usage"]["output_tokens"] == 1
 
 
 def test_anthropic_messages_fusion_returns_final_tool_use_and_strips_artifacts():
@@ -182,16 +178,16 @@ def test_anthropic_messages_fusion_returns_final_tool_use_and_strips_artifacts()
     response = client.post(
         "/messages",
         json={
-            "model": "GigaChat",
+            "model": "gpt2giga/fusion-force-synthesize",
             "messages": [{"role": "user", "content": "lookup hello"}],
             "max_tokens": 128,
             "metadata": {
                 "tenant": "test",
-                "gpt2giga_fusion": {"preset": "code-budget"},
+                "gpt2giga_fusion": {"preset": "force-synthesize"},
             },
             "extra_body": {
                 "safe": "kept",
-                "gpt2giga_fusion": {"preset": "code-budget"},
+                "gpt2giga_fusion": {"preset": "force-synthesize"},
             },
             "tools": [
                 {
@@ -217,9 +213,9 @@ def test_anthropic_messages_fusion_returns_final_tool_use_and_strips_artifacts()
 
     sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
     assert [payload["model"] for payload in sent_payloads] == [
-        "GigaChat-2-Pro",
+        "GigaChat-3-Ultra",
         "GigaChat-2-Max",
-        "GigaChat-2-Max",
+        "GigaChat-3-Ultra",
     ]
     for payload in sent_payloads:
         assert payload.get("metadata", {}).get("tenant") == "test"

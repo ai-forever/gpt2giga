@@ -99,7 +99,10 @@ def make_app(*, gigachat=None):
         proxy=ProxySettings(
             fusion_enabled=True,
             fusion_default_preset="code-budget",
-            fusion_aliases=["gpt2giga/fusion-code"],
+            fusion_aliases=[
+                "gpt2giga/fusion-code",
+                "gpt2giga/fusion-force-synthesize",
+            ],
             gigachat_api_mode="v1",
         )
     )
@@ -125,27 +128,17 @@ def test_gemini_generate_content_fusion_model_alias_returns_non_stream_response(
     assert response.status_code == 200
     assert body["modelVersion"] == "gpt2giga/fusion-code"
     assert body["candidates"][0]["content"]["parts"] == [
-        {"text": "fused gemini answer"}
+        {"text": "panel answer from GigaChat-2-Max"}
     ]
-    assert body["usageMetadata"]["totalTokenCount"] == 6
-    assert body["gpt2gigaMetadata"]["gpt2giga_fusion_preset"] == "code-budget"
+    assert body["usageMetadata"]["totalTokenCount"] == 2
+    assert "gpt2gigaMetadata" not in body
     assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
-        "GigaChat-2-Pro",
-        "GigaChat-2-Max",
         "GigaChat-2-Max",
     ]
     sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
     assert sent_payloads[0]["metadata"]["tenant"] == "test"
     assert "gpt2giga_fusion" not in sent_payloads[0]["metadata"]
-    panel_messages = sent_payloads[0]["messages"]
-    assert (
-        '<client_harness_contract source="gemini_generate_content">'
-        in (panel_messages[0]["content"])
-    )
-    assert "Be direct." in panel_messages[0]["content"]
-    assert "Be direct." not in "\n".join(
-        message.get("content", "") for message in panel_messages[1:]
-    )
+    assert "gpt2giga_fusion_runtime" not in sent_payloads[0]["messages"][0]["content"]
 
 
 def test_gemini_stream_generate_content_fusion_model_alias_returns_buffered_sse():
@@ -164,13 +157,13 @@ def test_gemini_stream_generate_content_fusion_model_alias_returns_buffered_sse(
     chunks = _gemini_sse_chunks(body)
     assert response.status_code == 200
     assert chunks[0]["candidates"][0]["content"]["parts"] == [
-        {"text": "fused gemini answer"}
+        {"text": "panel answer from GigaChat-2-Max"}
     ]
     assert chunks[-1]["candidates"][0]["finishReason"] == "STOP"
     assert chunks[-1]["usageMetadata"] == {
-        "promptTokenCount": 3,
-        "candidatesTokenCount": 3,
-        "totalTokenCount": 6,
+        "promptTokenCount": 1,
+        "candidatesTokenCount": 1,
+        "totalTokenCount": 2,
     }
     assert "[DONE]" not in body
 
@@ -198,18 +191,18 @@ def test_gemini_fusion_returns_final_function_call_and_strips_artifacts():
     client = TestClient(app)
 
     response = client.post(
-        "/models/GigaChat:generateContent",
+        "/models/gpt2giga/fusion-force-synthesize:generateContent",
         json={
             "contents": [{"parts": [{"text": "lookup hello"}]}],
             "metadata": {
                 "tenant": "test",
-                "gpt2giga_fusion": {"preset": "code-budget"},
+                "gpt2giga_fusion": {"preset": "force-synthesize"},
             },
-            "plugins": [{"id": "fusion", "preset": "code-budget"}],
+            "plugins": [{"id": "fusion", "preset": "force-synthesize"}],
             "tools": [
                 {
                     "type": "openrouter:fusion",
-                    "parameters": {"preset": "code-budget"},
+                    "parameters": {"preset": "force-synthesize"},
                 },
                 {
                     "functionDeclarations": [

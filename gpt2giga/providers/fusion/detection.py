@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from gpt2giga.models.config import (
     FusionDecisionMode,
+    FusionInvocationMode,
     FusionPanelOutputTruncation,
     FusionPipelineMode,
     FusionPresetSettings,
@@ -20,6 +21,17 @@ from gpt2giga.providers.fusion.errors import FusionConfigurationError
 from gpt2giga.providers.fusion.presets import get_fusion_presets
 
 FusionSource = Literal["tool", "plugin", "metadata", "model"]
+
+
+class FusionStopServerToolsWhen(BaseModel):
+    """OpenRouter-compatible server-tool stop policy."""
+
+    max_steps: int | None = Field(default=None, ge=0)
+    max_tool_calls: int | None = Field(default=None, ge=0)
+    max_cost: float | None = Field(default=None, ge=0)
+    max_time_ms: int | None = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="ignore")
 
 
 class FusionRequestConfig(BaseModel):
@@ -38,8 +50,9 @@ class FusionRequestConfig(BaseModel):
     reasoning: Optional[dict[str, Any]] = None
     include_direct_candidate: bool = False
     return_selected_candidate: bool = True
-    decision_mode: FusionDecisionMode = "synthesize"
-    prompt_mode: FusionPromptMode = "full"
+    invocation_mode: FusionInvocationMode = "outer_auto"
+    decision_mode: FusionDecisionMode = "tool_result"
+    prompt_mode: FusionPromptMode = "minimal"
     max_panel_output_chars: int = Field(default=6000, ge=0)
     max_total_panel_output_chars: int = Field(default=16000, ge=0)
     panel_output_truncation: FusionPanelOutputTruncation = "head_tail"
@@ -47,7 +60,10 @@ class FusionRequestConfig(BaseModel):
     timeout_seconds: float = 120.0
     tools_mode: FusionToolsMode = "schema_only"
     pipeline_mode: FusionPipelineMode = "compact"
-    max_tool_calls: int = Field(default=1, ge=1, le=1)
+    max_server_tool_calls: int = Field(default=16, ge=0, le=16)
+    max_client_final_tool_calls: int = Field(default=1, ge=0, le=1)
+    max_tool_calls: int = Field(default=1, ge=0, le=1)
+    stop_server_tools_when: FusionStopServerToolsWhen | None = None
     raw_parameters: dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(extra="forbid")
@@ -78,7 +94,7 @@ def extract_fusion_request(
             return None
         return _build_request_config(
             source="tool",
-            params=tool_config,
+            params=_with_top_level_server_tool_params(tool_config, payload),
             requested_model=requested_model,
             settings=settings,
         )
@@ -89,7 +105,7 @@ def extract_fusion_request(
             return None
         return _build_request_config(
             source="plugin",
-            params=plugin_config,
+            params=_with_top_level_server_tool_params(plugin_config, payload),
             requested_model=requested_model,
             settings=settings,
         )
@@ -100,7 +116,7 @@ def extract_fusion_request(
             return None
         return _build_request_config(
             source="metadata",
-            params=metadata_config,
+            params=_with_top_level_server_tool_params(metadata_config, payload),
             requested_model=requested_model,
             settings=settings,
         )
@@ -108,7 +124,7 @@ def extract_fusion_request(
     if is_fusion_model(requested_model, settings):
         return _build_request_config(
             source="model",
-            params={},
+            params=_with_top_level_server_tool_params({}, payload),
             requested_model=requested_model,
             settings=settings,
         )
@@ -161,6 +177,17 @@ def _extract_metadata_config(payload: Mapping[str, Any]) -> dict[str, Any] | Non
     return None
 
 
+def _with_top_level_server_tool_params(
+    params: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged = dict(params)
+    for key in ("max_tool_calls", "stop_server_tools_when"):
+        if key in payload and key not in merged:
+            merged[key] = payload[key]
+    return merged
+
+
 def _build_request_config(
     *,
     source: FusionSource,
@@ -205,13 +232,20 @@ def _build_request_config(
     )
     panel_roles = _string_list(params.get("panel_roles"), fallback=preset.panel_roles)
     tools_mode = _string_or_none(params.get("tools_mode")) or preset.tools_mode
-    max_tool_calls = _optional_int(
-        params.get("max_tool_calls"), settings.max_tool_calls
+    max_server_tool_calls = _optional_int(
+        params.get("max_tool_calls"), settings.max_server_tool_calls
     )
-    if max_tool_calls != 1:
-        raise FusionConfigurationError(
-            "Fusion currently supports exactly one final tool call."
-        )
+    stop_server_tools_when = parse_stop_server_tools_when(
+        params.get("stop_server_tools_when")
+    )
+    max_server_tool_calls = _apply_stop_policy_to_server_tool_limit(
+        max_server_tool_calls,
+        stop_server_tools_when,
+    )
+    max_client_final_tool_calls = _optional_int(
+        params.get("max_client_final_tool_calls"),
+        settings.max_client_final_tool_calls,
+    )
 
     resolved = FusionRequestConfig(
         source=source,
@@ -235,6 +269,10 @@ def _build_request_config(
         return_selected_candidate=_optional_bool(
             params.get("return_selected_candidate"),
             preset.return_selected_candidate,
+        ),
+        invocation_mode=_optional_mode(
+            params.get("invocation_mode"),
+            preset.invocation_mode,
         ),
         decision_mode=_optional_mode(
             params.get("decision_mode"),
@@ -263,7 +301,16 @@ def _build_request_config(
         or preset.timeout_seconds,
         tools_mode=tools_mode,
         pipeline_mode=settings.pipeline_mode,
-        max_tool_calls=max_tool_calls,
+        max_server_tool_calls=max_server_tool_calls
+        if max_server_tool_calls is not None
+        else settings.max_server_tool_calls,
+        max_client_final_tool_calls=max_client_final_tool_calls
+        if max_client_final_tool_calls is not None
+        else settings.max_client_final_tool_calls,
+        max_tool_calls=max_client_final_tool_calls
+        if max_client_final_tool_calls is not None
+        else settings.max_client_final_tool_calls,
+        stop_server_tools_when=stop_server_tools_when,
         raw_parameters=dict(params),
     )
     _validate_resolved_request(resolved, settings)
@@ -361,6 +408,67 @@ def _optional_int(value: Any, fallback: int | None) -> int | None:
         return fallback
 
 
+def parse_stop_server_tools_when(value: Any) -> FusionStopServerToolsWhen | None:
+    """Safely parse OpenRouter SDK-compatible server-tool stop policies."""
+    if value in (None, "", False):
+        return None
+    raw_items: list[Any]
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        raw_items = list(value)
+    else:
+        raw_items = [value]
+
+    merged: dict[str, Any] = {}
+    for item in raw_items:
+        data = _mapping_from_stop_policy(item)
+        if data is None:
+            continue
+        for key in ("max_steps", "max_tool_calls", "max_cost", "max_time_ms"):
+            if key in data and data[key] is not None:
+                merged[key] = data[key]
+    if not merged:
+        return None
+    try:
+        return FusionStopServerToolsWhen.model_validate(merged)
+    except ValidationError:
+        return None
+
+
+def _mapping_from_stop_policy(value: Any) -> Mapping[str, Any] | None:
+    if isinstance(value, Mapping):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, Mapping):
+            return dumped
+    dict_method = getattr(value, "dict", None)
+    if callable(dict_method):
+        dumped = dict_method()
+        if isinstance(dumped, Mapping):
+            return dumped
+    data = {
+        key: getattr(value, key)
+        for key in ("max_steps", "max_tool_calls", "max_cost", "max_time_ms")
+        if hasattr(value, key)
+    }
+    return data or None
+
+
+def _apply_stop_policy_to_server_tool_limit(
+    max_server_tool_calls: int | None,
+    stop_policy: FusionStopServerToolsWhen | None,
+) -> int | None:
+    limit = max_server_tool_calls
+    if stop_policy is None:
+        return limit
+    for value in (stop_policy.max_tool_calls, stop_policy.max_steps):
+        if value is None:
+            continue
+        limit = value if limit is None else min(limit, value)
+    return limit
+
+
 def _optional_bool(value: Any, fallback: bool) -> bool:
     if value is None:
         return fallback
@@ -386,6 +494,10 @@ def _preset_from_model_alias(model: str | None) -> str | None:
     if model is None:
         return None
     normalized = _normalize_model_id(model).lower()
+    if normalized.endswith("fusion-force-selector"):
+        return "force-selector"
+    if normalized.endswith("fusion-force-synthesize"):
+        return "force-synthesize"
     if normalized.endswith("fusion-code-budget"):
         return "code-budget"
     if normalized.endswith("fusion-code-high"):

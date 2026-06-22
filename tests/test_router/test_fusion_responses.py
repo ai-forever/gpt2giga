@@ -85,7 +85,10 @@ def make_app(*, gigachat=None):
         proxy=ProxySettings(
             fusion_enabled=True,
             fusion_default_preset="code-budget",
-            fusion_aliases=["gpt2giga/fusion-code"],
+            fusion_aliases=[
+                "gpt2giga/fusion-code",
+                "gpt2giga/fusion-force-synthesize",
+            ],
             gigachat_api_mode="v1",
         )
     )
@@ -112,26 +115,19 @@ def test_responses_fusion_model_alias_returns_non_stream_response():
     assert body["object"] == "response"
     assert body["status"] == "completed"
     assert body["model"] == "gpt2giga/fusion-code"
-    assert body["output"][0]["content"][0]["text"] == "fused response answer"
-    assert body["output_text"] == "fused response answer"
+    assert body["output"][0]["content"][0]["text"] == (
+        "panel answer from GigaChat-2-Max"
+    )
+    assert body["output_text"] == "panel answer from GigaChat-2-Max"
     assert body["metadata"]["tenant"] == "test"
-    assert body["metadata"]["gpt2giga_fusion_preset"] == "code-budget"
-    assert body["usage"]["total_tokens"] == 6
+    assert "gpt2giga_fusion_preset" not in body["metadata"]
+    assert body["usage"]["total_tokens"] == 2
     assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
-        "GigaChat-2-Pro",
-        "GigaChat-2-Max",
         "GigaChat-2-Max",
     ]
     sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
-    panel_messages = sent_payloads[0]["messages"]
-    assert (
-        '<client_harness_contract source="openai_responses">'
-        in (panel_messages[0]["content"])
-    )
-    assert "Be direct." in panel_messages[0]["content"]
-    assert "Be direct." not in "\n".join(
-        message.get("content", "") for message in panel_messages[1:]
-    )
+    assert len(sent_payloads) == 1
+    assert "gpt2giga_fusion_runtime" not in sent_payloads[0]["messages"][0]["content"]
     assert not app.state.request_transformer.response_calls
 
 
@@ -153,11 +149,11 @@ def test_responses_fusion_model_alias_returns_buffered_stream():
     assert response.status_code == 200
     assert "event: response.created" in body
     assert "event: response.output_text.delta" in body
-    assert "fused response answer" in body
+    assert "panel answer from GigaChat-2-Max" in body
     assert "event: response.completed" in body
     completed = _last_sse_payload(body, "response.completed")
-    assert completed["response"]["output_text"] == "fused response answer"
-    assert completed["response"]["metadata"]["gpt2giga_fusion"] == "true"
+    assert completed["response"]["output_text"] == "panel answer from GigaChat-2-Max"
+    assert "gpt2giga_fusion" not in completed["response"]["metadata"]
 
 
 def test_responses_fusion_error_returns_http_502():
@@ -183,9 +179,8 @@ def test_responses_fusion_error_returns_http_502():
     body = response.json()
     assert response.status_code == 502
     assert body["status"] == "failed"
-    assert body["error"]["code"] == "all_panels_failed"
+    assert body["error"]["code"] == "outer_model_failed"
     assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
-        "GigaChat-2-Pro",
         "GigaChat-2-Max",
     ]
 
@@ -215,7 +210,7 @@ def test_responses_fusion_openrouter_tool_strips_artifacts_and_returns_tool_call
     response = client.post(
         "/responses",
         json={
-            "model": "GigaChat",
+            "model": "gpt2giga/fusion-force-synthesize",
             "input": "lookup hello",
             "metadata": {
                 "tenant": "test",

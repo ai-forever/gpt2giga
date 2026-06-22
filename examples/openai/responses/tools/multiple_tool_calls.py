@@ -6,8 +6,8 @@ from openai import OpenAI
 api_version = "v2"
 client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
-# MODEL = "gpt2giga/fusion-code"
-MODEL = "GigaChat-2-Max"
+MODEL = "gpt2giga/fusion-code"
+# MODEL = "GigaChat-2-Max"
 tools = [
     {
         "type": "function",

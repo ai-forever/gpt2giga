@@ -77,6 +77,23 @@ class FusionUniqueInsight(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class FusionJudgeAnalysis(BaseModel):
+    """Structured server-tool judge analysis over panel responses."""
+
+    schema_version: Literal["gpt2giga.fusion.analysis.v1"] = (
+        FUSION_ANALYSIS_SCHEMA_VERSION
+    )
+    consensus: list[str] = Field(default_factory=list)
+    contradictions: list[FusionContradiction] = Field(default_factory=list)
+    partial_coverage: list[FusionPartialCoverage] = Field(default_factory=list)
+    unique_insights: list[FusionUniqueInsight] = Field(default_factory=list)
+    blind_spots: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    recommendation: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class FusionAnalysis(BaseModel):
     """Structured judge analysis over panel responses."""
 
@@ -141,7 +158,7 @@ class FusionRunResult(BaseModel):
     analysis_models: list[str] = Field(default_factory=list)
     judge_model: str
     final_model: Optional[str] = None
-    decision_mode: Literal["synthesize", "selector"] = "synthesize"
+    decision_mode: Literal["tool_result", "synthesize", "selector"] = "tool_result"
     prompt_mode: Literal["full", "minimal"] = "full"
     panel_results: list[FusionPanelResult] = Field(default_factory=list)
     failed_models: list[FusionPanelResult] = Field(default_factory=list)
@@ -162,5 +179,28 @@ class FusionRunResult(BaseModel):
     judge_latency_ms: Optional[int] = None
     direct_latency_ms: Optional[int] = None
     finalizer_latency_ms: Optional[int] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FusionToolError(BaseModel):
+    """Represent an internal Fusion server-tool error."""
+
+    reason: str
+    message: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FusionToolResult(BaseModel):
+    """Result returned to the outer model from openrouter:fusion."""
+
+    status: Literal["ok", "error"]
+    analysis: Optional[FusionJudgeAnalysis] = None
+    responses: list[FusionPanelResult] = Field(default_factory=list)
+    failed_models: list[FusionPanelResult] = Field(default_factory=list)
+    usage: Optional[NormalizedUsage] = None
+    metadata: dict[str, object] = Field(default_factory=dict)
+    error: Optional[FusionToolError] = None
 
     model_config = ConfigDict(extra="forbid")

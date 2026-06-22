@@ -39,6 +39,8 @@ class RequestContext:
     caller_agent_id: Optional[str] = None
     model_requested: Optional[str] = None
     model_effective: Optional[str] = None
+    fusion_depth: int = 0
+    fusion_invocations_this_turn: int = 0
     llm_observability_emitted: bool = False
     request_headers_redacted: Any | None = None
     request_body_redacted: Any | None = None
