@@ -1,55 +1,54 @@
 # gpt2giga documentation
 
-`gpt2giga` - FastAPI compatibility gateway, который принимает OpenAI-, Anthropic- и Gemini-shaped запросы и отправляет их в GigaChat. Он нужен, когда клиент, редактор, агентный framework или SDK умеет работать с OpenAI/Anthropic/Gemini API, а реальный backend должен быть GigaChat.
+`gpt2giga` is a FastAPI compatibility gateway that accepts requests in the OpenAI, Anthropic, and Gemini formats and forwards them to GigaChat. It is useful when a client, editor, agent framework, or SDK can talk to the OpenAI/Anthropic/Gemini API, but the real backend must be GigaChat.
 
-Локальный адрес по умолчанию:
+Default local address:
 
 ```text
 http://localhost:8090
 ```
 
-## Что закрывает прокси
+## What the proxy covers
 
-| Возможность | Где читать |
+| Capability | Where to read |
 |---|---|
-| Быстрый запуск через Docker Compose или `uv` | [Быстрый старт](quickstart.md) |
-| Поддержанные OpenAI, Anthropic, Gemini и LiteLLM routes | [API compatibility](api-compatibility.md) |
-| Поведение `extra_headers`, `extra_query`, `extra_body` и optional fields | [Client parameters](client-parameter-compatibility.md) |
-| Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
-| Multi-model deliberation через локальный GigaFusion | [GigaFusion](fusion.md) |
-| Переменные окружения, auth, limits, metrics, observability | [Конфигурация](configuration.md) |
-| Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развертывание](deployment.md) |
-| Runtime logs, traffic logs, admin API, debug translate | [Операции](operations.md) |
-| Editor, agent, SDK и reverse-proxy setup | [Интеграции](integrations.md) |
+| Quick start via Docker Compose or `uv` | [Quickstart](quickstart.md) |
+| Supported OpenAI, Anthropic, Gemini, and LiteLLM routes | [API compatibility](api-compatibility.md) |
+| Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
+| GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |
+| Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
+| Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |
+| Runtime logs, traffic logs, admin API, debug translate | [Operations](operations.md) |
+| Editor, agent, SDK, and reverse-proxy setup | [Integrations](integrations.md) |
 
-## Текущая API-поверхность
+## Current API surface
 
-Публичные routes доступны в корне и под versioned prefixes:
+Public routes are available at the root and under versioned prefixes:
 
 - `/chat/completions`, `/v1/chat/completions`, `/v2/chat/completions`
 - `/responses`, `/v1/responses`, `/v2/responses`
 - `/embeddings`, `/v1/embeddings`, `/v2/embeddings`
 - `/messages`, `/v1/messages`, `/v2/messages`
-- `/v1beta/models/{model}:generateContent` и совместимые Gemini paths
+- `/v1beta/models/{model}:generateContent` and compatible Gemini paths
 - `/models`, `/model/info`, `/health`, `/ping`
 
-Правило выбора backend одинаковое для OpenAI-, Anthropic- и Gemini-compatible
-routes: `/v1/...` всегда отправляет chat-like запросы в GigaChat v1 contract,
-`/v2/...` всегда отправляет их в GigaChat v2 contract, а root path без `/v1`
-или `/v2` использует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+The backend selection rule is the same for OpenAI-, Anthropic-, and
+Gemini-compatible routes: `/v1/...` always sends chat-like requests to the
+GigaChat v1 contract, `/v2/...` sends them to the GigaChat v2 contract, and the
+root path without `/v1` or `/v2` uses `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
-OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подготовлены в коде, но намеренно не смонтированы до появления end-to-end execution в upstream SDK/backend.
+OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are prepared in the code but intentionally not mounted until end-to-end execution is available in the upstream SDK/backend.
 
-## Быстрый путь
+## Fast path
 
-1. Скопируйте `.env.example` в `.env`.
-2. Заполните `GIGACHAT_CREDENTIALS`, `GIGACHAT_SCOPE`, `GIGACHAT_MODEL`.
-3. Запустите `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
-4. Проверьте `curl http://localhost:8090/health`.
-5. Подключите SDK к `http://localhost:8090/v1` или `http://localhost:8090/v2` для явного backend contract, либо к `http://localhost:8090`, если root должен следовать `GPT2GIGA_GIGACHAT_API_MODE`.
+1. Copy `.env.example` to `.env`.
+2. Fill in `GIGACHAT_CREDENTIALS`, `GIGACHAT_SCOPE`, `GIGACHAT_MODEL`.
+3. Run `docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d`.
+4. Check `curl http://localhost:8090/health`.
+5. Point the SDK at `http://localhost:8090/v1` or `http://localhost:8090/v2` for an explicit backend contract, or at `http://localhost:8090` if the root should follow `GPT2GIGA_GIGACHAT_API_MODE`.
 
-## Для разработчиков
+## For developers
 
-- [Normalized messages](architecture/normalized-messages.md) описывает экспериментальный слой protocol-independent моделей.
-- [Logging и observability](architecture/logging-and-observability.md) фиксирует границы runtime logs, traffic logs, metrics и traces.
-- [Добавление provider/protocol](architecture/how-to-add-provider.md) дает checklist для расширения public protocol surface и upstream providers.
+- [Normalized messages](architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
+- [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
+- [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.

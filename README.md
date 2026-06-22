@@ -87,19 +87,27 @@ print(response.content[0].text)
 
 Полная документация публикуется на [GitHub Pages](https://ai-forever.github.io/gpt2giga/).
 
-Локально проверить docs можно так:
+Локально проверить docs можно через Docusaurus wrapper в `docs-site/`:
 
 ```sh
-uv sync --all-extras --dev --group docs
-uv run --group docs mkdocs build --strict
-uv run --group docs mkdocs serve
+make docs-install
+make docs
 ```
 
-После `mkdocs serve` сайт доступен на `http://127.0.0.1:8000/`. Если порт занят:
+После `make docs` сайт доступен на `http://127.0.0.1:3000/` и включает локали `en`/`ru`.
+Для быстрой разработки с hot reload:
 
 ```sh
-uv run --group docs mkdocs serve -a 127.0.0.1:8001
+make docs-dev
 ```
+
+Docusaurus dev server обслуживает одну локаль за запуск. Для русского dev preview:
+
+```sh
+make docs-dev-ru
+```
+
+Чтобы проверить переключатель языков между `en` и `ru`, используйте full preview через `make docs` или `make docs-preview`.
 
 | Тема | Документ |
 |---|---|
@@ -142,7 +150,8 @@ v1 contract, `/v2` принудительно выбирает GigaChat v2 contr
 Сейчас не является целью проекта:
 
 - полная OpenAI parity для audio, image generation/editing, fine-tuning, assistants, threads, runs, vector stores, uploads, moderations, realtime;
-- полная Anthropic parity для Files beta, Skills beta, Agents beta, Sessions, Environments или Admin API.
+- полная Anthropic parity для Files beta, Skills beta, Agents beta, Sessions, Environments или Admin API;
+- полная Gemini parity для Files, batchGenerateContent, cached content, Vertex/RAG tools и non-text embeddings content.
 
 ## Деплой
 
@@ -170,8 +179,9 @@ Compose profiles, reverse proxies, TLS и hardening описаны в [Deploymen
 |---|---|
 | `gpt2giga/` | FastAPI app, routers, protocol transforms, config, middleware |
 | `tests/` | Unit, router, protocol, sink и integration tests |
-| `examples/` | Runnable OpenAI, Anthropic, embeddings, files/batches, agents examples |
-| `docs/` | Пользовательская документация и architecture notes |
+| `examples/` | Runnable OpenAI, Anthropic, Gemini, embeddings and agents examples; files/batches examples are prepared but not mounted |
+| `docs/` | Markdown-контент пользовательской документации и architecture notes |
+| `docs-site/` | Docusaurus wrapper, sidebar/theme config и npm tooling для GitHub Pages |
 | `integrations/` | Editor/agent/reverse-proxy integration guides |
 | `deploy/` | Docker Compose deployment manifests |
 | `traefik/` | Traefik config для `deploy/traefik.yaml` |

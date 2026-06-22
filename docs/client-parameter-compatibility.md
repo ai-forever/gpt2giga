@@ -1,44 +1,45 @@
-# Совместимость параметров клиентов
+# Client parameter compatibility
 
-Этот документ служит публичным справочником совместимости параметров клиентских
-SDK OpenAI, Anthropic и Gemini-like clients в gpt2giga. Он отражает текущую
-структуру исходного кода:
+This document is a public reference for the parameter compatibility of the OpenAI,
+Anthropic, and Gemini-like client SDKs in gpt2giga. It reflects the current
+structure of the source code:
 
-- роутеры OpenAI: `gpt2giga/routers/openai/`
-- роутеры Anthropic: `gpt2giga/routers/anthropic/`
-- роутеры Gemini: `gpt2giga/routers/gemini/`
-- общие политики запросов: `gpt2giga/common/client_params.py`
-- классификация запросов OpenAI: `gpt2giga/protocol/request/params.py`
-- классификация запросов Anthropic: `gpt2giga/protocol/anthropic/params.py`
+- OpenAI routers: `gpt2giga/routers/openai/`
+- Anthropic routers: `gpt2giga/routers/anthropic/`
+- Gemini routers: `gpt2giga/routers/gemini/`
+- shared request policies: `gpt2giga/common/client_params.py`
+- OpenAI request classification: `gpt2giga/protocol/request/params.py`
+- Anthropic request classification: `gpt2giga/protocol/anthropic/params.py`
 - Gemini adapter: `gpt2giga/protocols/gemini/`
 
-Другие семейства клиентов в этой проверке совместимости не рассматриваются.
+Other client families are not covered by this compatibility check.
 
-## Статусы совместимости
+## Compatibility statuses
 
-| Статус | Значение |
+| Status | Meaning |
 |---|---|
-| `supported` | Параметр влияет на запрос или ответ и покрыт тестами. |
-| `accepted_ignored` | Параметр принимается для совместимости с SDK, но не отправляется upstream. |
-| `rejected` | Запрос имеет неисполняемую форму, например отсутствует обязательный `input` или `extra_body` не является объектом. Optional client feature-флаги не используют этот статус. |
-| `not_applicable` | Опция относится к клиентской настройке транспорта, а не к серверному параметру тела запроса. |
+| `supported` | The parameter affects the request or response and is covered by tests. |
+| `accepted_ignored` | The parameter is accepted for SDK compatibility but is not sent upstream. |
+| `rejected` | The request has an unexecutable shape, for example a missing required `input` or an `extra_body` that is not an object. Optional client feature flags do not use this status. |
+| `not_applicable` | The option relates to client-side transport configuration, not to a server-side request body parameter. |
 
-## Транспортные опции SDK
+## SDK transport options
 
-`base_url`, `api_key`, `timeout`, настройки повторных попыток, пользовательский
-`http_client`, конфигурация прокси и низкоуровневые транспортные настройки
-являются клиентскими опциями SDK. gpt2giga не назначает им серверную семантику.
+`base_url`, `api_key`, `timeout`, retry settings, a custom
+`http_client`, proxy configuration, and low-level transport settings are
+client-side SDK options. gpt2giga does not assign them server-side semantics.
 
-Учетные данные и транспортные заголовки не пересылаются в GigaChat как
-произвольные upstream-метаданные. Это касается `Authorization`, `x-api-key`,
-cookie, `host`, заголовков содержимого и передачи, `x-stainless-*`,
-`openai-*` и `anthropic-*`. Для намеренной передачи авторизации GigaChat
-используйте отдельный режим `GPT2GIGA_PASS_TOKEN=True`.
+Credentials and transport headers are not forwarded to GigaChat as arbitrary
+upstream metadata. This applies to `Authorization`, `x-api-key`, cookies,
+`host`, content and transfer headers, `x-stainless-*`, `openai-*`, and
+`anthropic-*`. To intentionally pass GigaChat authorization, use the separate
+`GPT2GIGA_PASS_TOKEN=True` mode.
 
-## `extra_headers` и `extra_query`
+## `extra_headers` and `extra_query`
 
-`extra_headers` из SDK приходит на сервер как обычные HTTP headers. gpt2giga
-переносит безопасные заголовки в request-scoped contextvars SDK GigaChat:
+`extra_headers` from an SDK arrives at the server as regular HTTP headers.
+gpt2giga moves safe headers into the request-scoped contextvars of the GigaChat
+SDK:
 
 - `x-request-id`
 - `x-session-id`
@@ -48,146 +49,129 @@ cookie, `host`, заголовков содержимого и передачи,
 - `x-trace-id`
 - `x-agent-id`
 
-Остальные безопасные пользовательские заголовки передаются через
-`custom_headers_cvar`. Диагностические `x-correlation-id` и `traceparent` также
-могут быть переданы как custom headers. `Authorization`, `x-api-key`, transport
-headers и SDK-internal заголовки `x-stainless-*`, `openai-*`, `anthropic-*`
-остаются заблокированными.
+Other safe custom headers are passed through `custom_headers_cvar`. The
+diagnostic `x-correlation-id` and `traceparent` can also be passed as custom
+headers. `Authorization`, `x-api-key`, transport headers, and the SDK-internal
+`x-stainless-*`, `openai-*`, `anthropic-*` headers remain blocked.
 
-URL contextvars SDK, например `chat_url_cvar` и
-`chat_completions_url_cvar`, не заполняются из `extra_headers`.
+The SDK URL contextvars, for example `chat_url_cvar` and
+`chat_completions_url_cvar`, are not populated from `extra_headers`.
 
-`extra_query` по умолчанию не прокидывает произвольные query-параметры upstream:
-список разрешенных upstream query-параметров пуст.
+`extra_query` does not forward arbitrary query parameters upstream by default:
+the list of allowed upstream query parameters is empty.
 
 ## `extra_body`
 
-SDK OpenAI и Anthropic обычно объединяют `extra_body` с исходящим JSON-телом как
-поля верхнего уровня. HTTP-клиенты, работающие напрямую, также могут отправлять
-буквальный объект `extra_body`. gpt2giga обрабатывает обе формы.
+The OpenAI and Anthropic SDKs usually merge `extra_body` with the outgoing JSON
+body as top-level fields. HTTP clients that work directly can also send a literal
+`extra_body` object. gpt2giga handles both forms.
 
-Для OpenAI Chat Completions, OpenAI Responses и Anthropic Messages объект
-`extra_body` переносится в GigaChat `additional_fields` целиком. SDK-style
-unknown top-level поля, которые появляются после разворачивания `extra_body`
-клиентом, обрабатываются так же.
+For OpenAI Chat Completions, OpenAI Responses, and Anthropic Messages, the
+`extra_body` object is moved into GigaChat `additional_fields` in full. SDK-style
+unknown top-level fields that appear after the client expands `extra_body` are
+handled the same way.
 
-Известные unsupported optional параметры клиентов принимаются и игнорируются, если
-отправлены как top-level поля: например `logprobs`, `audio`, `container` или
-`mcp_servers`. `previous_response_id` поддерживается для OpenAI Responses в
-GigaChat v2 mode и маппится в `storage.thread_id`; в Responses v1 mode он
-принимается и игнорируется.
-Если такой же ключ явно положить внутрь literal `extra_body`, gpt2giga передаст
-его в `additional_fields`, а итоговую поддержку определит GigaChat upstream.
+Known unsupported optional client parameters are accepted and ignored if sent as
+top-level fields: for example `logprobs`, `audio`, `container`, or
+`mcp_servers`. `previous_response_id` is supported for OpenAI Responses in
+GigaChat v2 mode and is mapped to `storage.thread_id`; in Responses v1 mode it is
+accepted and ignored.
+If the same key is explicitly placed inside a literal `extra_body`, gpt2giga
+passes it to `additional_fields`, and the GigaChat upstream determines the final
+support.
 
-OpenAI Embeddings принимает и игнорирует `extra_body`, неизвестные top-level
-поля и `dimensions`; на данный момент для embeddings нет разрешенных полей,
-специфичных для GigaChat.
+OpenAI Embeddings accepts and ignores `extra_body`, unknown top-level fields, and
+`dimensions`; at the moment there are no GigaChat-specific allowed fields for
+embeddings.
 
-## Fusion request parameters
+## OpenAI body parameters
 
-При `GPT2GIGA_FUSION_ENABLED=True` прокси дополнительно распознает
-Fusion-specific request hints до обычной передачи payload upstream:
-
-| Shape | Статус | Назначение |
-|---|---|---|
-| `model` равен Fusion alias | `supported` | Запускает Fusion через virtual model, например `gpt2giga/fusion-code`. |
-| `plugins: [{"id": "fusion", ...}]` | `supported` | OpenRouter-style plugin shape; параметры используются только gpt2giga Fusion adapter и не передаются в GigaChat. |
-| `tools: [{"type": "openrouter:fusion", "parameters": {...}}]` | `supported` | OpenRouter-style server-tool shape; tool удаляется перед внутренними GigaChat calls. |
-| `metadata.gpt2giga_fusion` | `supported` | Native per-request Fusion config для OpenAI-like clients. |
-| `extra_body.gpt2giga_fusion` | `supported` | То же, если SDK умеет передать literal `extra_body`. |
-| `"enabled": false` внутри plugin/tool/metadata config | `supported` | Явно отключает Fusion для этого request shape. |
-
-Detection priority: `tools`, затем `plugins`, затем `metadata` / `extra_body`,
-затем model alias. Подробные presets, env settings и examples описаны в
-[GigaFusion](fusion.md).
-
-## Параметры тела OpenAI
-
-| Эндпоинт | Поддерживается |
+| Endpoint | Supported |
 |---|---|
-| Chat Completions | `model`, `messages`, `stream`, `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, функциональные `tools`, `functions`, `function_call`, поддерживаемый `tool_choice`, built-in tools в GigaChat v2 mode (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`), `response_format`, `reasoning`, `reasoning_effort`, `extra_body` passthrough |
-| Responses | `model`, `input`, `instructions`, `stream`, `temperature`, `top_p`, `max_output_tokens`, функциональные `tools`, built-in tools в GigaChat v2 mode (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`; нормализованные output items и stream progress events сейчас строятся для `web_search*` и `image_generation` / `image_generate`), поддерживаемый `tool_choice`, `text.format`, `response_format`, `reasoning`, `reasoning_effort`, `extra_body` passthrough |
+| Chat Completions | `model`, `messages`, `stream`, `temperature`, `top_p`, `max_tokens`, `max_completion_tokens`, `stop`, function `tools`, `functions`, `function_call`, supported `tool_choice`, built-in tools in GigaChat v2 mode (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`), `response_format`, `reasoning`, `reasoning_effort`, `extra_body` passthrough |
+| Responses | `model`, `input`, `instructions`, `stream`, `temperature`, `top_p`, `max_output_tokens`, function `tools`, built-in tools in GigaChat v2 mode (`web_search*`, `code_interpreter`, `image_generation` / `image_generate`, `url_content_extraction`, `model_3d_generate`; normalized output items and stream progress events are currently built for `web_search*` and `image_generation` / `image_generate`), supported `tool_choice`, `text.format`, `response_format`, `reasoning`, `reasoning_effort`, `extra_body` passthrough |
 | Embeddings | `input`, `model`, `dimensions`, `encoding_format`, `user`, `extra_headers`, `extra_query` |
 | Models | `GET /models`, `GET /models/{model}` |
 
-Structured output поддерживается через `json_schema`. Schema-less JSON mode
-(`response_format.type=json_object` у OpenAI или Gemini
-`responseMimeType=application/json` без `responseJsonSchema` / `responseSchema`)
-отклоняется, потому что GigaChat upstream не поддерживает отдельный JSON mode.
+Structured output is supported through `json_schema`. Schema-less JSON mode
+(`response_format.type=json_object` in OpenAI or Gemini
+`responseMimeType=application/json` without `responseJsonSchema` / `responseSchema`)
+is rejected, because the GigaChat upstream does not support a separate JSON mode.
 
-При `GPT2GIGA_DISABLE_REASONING=True` прокси принимает `reasoning` и
-`reasoning_effort`, но не передает их в upstream payload к GigaChat.
+With `GPT2GIGA_DISABLE_REASONING=True`, the proxy accepts `reasoning` and
+`reasoning_effort` but does not pass them to the upstream payload sent to GigaChat.
 
-Поля метаданных OpenAI, такие как `user`, `metadata`, `service_tier`,
-`safety_identifier`, `seed`, `prompt_cache_key` и `prompt_cache_retention`,
-принимаются и игнорируются там, где они классифицированы.
+OpenAI metadata fields such as `user`, `metadata`, `service_tier`,
+`safety_identifier`, `seed`, `prompt_cache_key`, and `prompt_cache_retention` are
+accepted and ignored where they are classified.
 
-Неподдерживаемые optional параметры OpenAI принимаются и игнорируются. Примеры:
-`logprobs`, `top_logprobs`, `logit_bias`, аудиовывод, `prediction`,
-`web_search_options`, built-in tools вне GigaChat v2 mode, `n > 1`,
-`parallel_tool_calls=true`, сохраненные запросы completions, `conversation`, а
-также `previous_response_id` в Responses v1 mode. `/chat/completions` v1
-остаётся поддержанным compatibility route, но новые tool/built-in-tool
-возможности развиваются для GigaChat `v2/chat/completions`.
+Unsupported optional OpenAI parameters are accepted and ignored. Examples:
+`logprobs`, `top_logprobs`, `logit_bias`, audio output, `prediction`,
+`web_search_options`, built-in tools outside GigaChat v2 mode, `n > 1`,
+`parallel_tool_calls=true`, stored completions requests, `conversation`, and
+`previous_response_id` in Responses v1 mode. `/chat/completions` v1
+remains a supported compatibility route, but new tool/built-in-tool
+capabilities evolve for GigaChat `v2/chat/completions`.
 
-## Параметры тела Anthropic
+## Anthropic body parameters
 
-| Эндпоинт | Поддерживается |
+| Endpoint | Supported |
 |---|---|
-| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, локальные функциональные `tools`, Anthropic provider tools в GigaChat v2 mode (`web_search*`, `web_fetch*` как `url_content_extraction`, `code_execution*` как `code_interpreter`), значения `tool_choice` `auto`/`none`/принудительный `tool`, `thinking`, `output_config.format`, `output_format`, `extra_body` passthrough |
-| Count Tokens | `model`, `messages`, `system`, `tools`, текст схемы structured output, совместимая валидация содержимого сообщений |
-| Models | `GET /models`, `GET /models/{model_id}`, когда запрос содержит заголовки Anthropic SDK, например `anthropic-version` |
+| Messages | `model`, `messages`, `system`, `max_tokens`, `stream`, `temperature`, `top_p`, `stop_sequences`, local function `tools`, Anthropic provider tools in GigaChat v2 mode (`web_search*`, `web_fetch*` as `url_content_extraction`, `code_execution*` as `code_interpreter`), `tool_choice` values `auto`/`none`/forced `tool`, `thinking`, `output_config.format`, `output_format`, `extra_body` passthrough |
+| Count Tokens | `model`, `messages`, `system`, `tools`, structured-output schema text, compatible message content validation |
+| Models | `GET /models`, `GET /models/{model_id}`, when the request contains Anthropic SDK headers, for example `anthropic-version` |
 
-Anthropic `metadata`, `service_tier`, `top_k`, beta-заголовки и `betas`
-принимаются и игнорируются там, где они классифицированы.
+Anthropic `metadata`, `service_tier`, `top_k`, beta headers, and `betas`
+are accepted and ignored where they are classified.
 
-Неподдерживаемые optional параметры или возможности Anthropic принимаются и
-игнорируются. Примеры: `container`, `context_management`, `mcp_servers`,
+Unsupported optional Anthropic parameters or features are accepted and
+ignored. Examples: `container`, `context_management`, `mcp_servers`,
 unsupported provider tools (`advisor`, `tool_search`, `mcp_toolset`, `memory`,
-`bash`, `text_editor`, `computer`), управление компьютером, блоки содержимого
-document/file, загрузки в container, блоки результатов поиска, citations, а
-также входные блоки `thinking`/`redacted_thinking`.
+`bash`, `text_editor`, `computer`), computer use, document/file content
+blocks, container uploads, search result blocks, citations, and
+`thinking`/`redacted_thinking` input blocks.
 
-Код Anthropic Message Batches существует, но публичный роутер не подключается,
-пока в GigaChat SDK или backend не появится поддержка batch-операций.
+The Anthropic Message Batches code exists, but the public router is not mounted
+until batch operation support appears in the GigaChat SDK or backend.
 
-## Параметры тела Gemini
+## Gemini body parameters
 
-Gemini-like operation routes доступны в корне, под `/v1`, `/v2` и `/v1beta`,
-например `/v1/models/{model}:generateContent`. Также поддержаны Gemini SDK/CLI
-пути `/v1/v1beta/...` и `/v2/v1beta/...`, когда клиент сам добавляет
-`/v1beta` к versioned base URL. `/v1` и `/v1/v1beta` принудительно выбирают
-GigaChat v1 backend contract, `/v2` и `/v2/v1beta` — GigaChat v2 backend
-contract. Корневые paths без `/v1` или `/v2`, включая `/v1beta/...`, выбирают
-backend по `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+Gemini-like operation routes are available at the root, under `/v1`, `/v2`, and `/v1beta`,
+for example `/v1/models/{model}:generateContent`. The Gemini SDK/CLI paths
+`/v1/v1beta/...` and `/v2/v1beta/...` are also supported when the client itself
+adds `/v1beta` to a versioned base URL. `/v1` and `/v1/v1beta` force the
+GigaChat v1 backend contract, `/v2` and `/v2/v1beta` force the GigaChat v2 backend
+contract. Root paths without `/v1` or `/v2`, including `/v1beta/...`, select the
+backend by `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
-| Эндпоинт | Поддерживается |
+| Endpoint | Supported |
 |---|---|
-| Generate Content | `contents`, `systemInstruction`, `generationConfig.temperature`, `generationConfig.topP`, `generationConfig.maxOutputTokens`, `generationConfig.stopSequences`, `generationConfig.seed`, `generationConfig.presencePenalty`, `generationConfig.frequencyPenalty`, function `tools.functionDeclarations`, Gemini provider tools в GigaChat v2 mode (`googleSearch` / `googleSearchRetrieval` как `web_search`, `urlContext` как `url_content_extraction`, `codeExecution` как `code_interpreter`), базовый `toolConfig.functionCallingConfig`, text/image/file parts |
-| Stream Generate Content | Те же поля, что Generate Content; ответ отдаётся как Gemini `GenerateContentResponse` SSE chunks. |
-| Count Tokens | Текстовые части `contents`, `systemInstruction` и имена/описания function declarations. |
-| Embeddings | `content.parts[].text`, `requests[].content.parts[].text` для batch embeddings, `outputDimensionality` принимается как compatibility metadata. |
-| Models | `GET /v1beta/models`, `GET /v1/v1beta/models`, `GET /v2/v1beta/models` и `{model}` variants; общие `/models`, `/v1/models`, `/v2/models` возвращают Gemini форму для Google/Gemini requests, например с `X-Goog-Api-Client` |
+| Generate Content | `contents`, `systemInstruction`, `generationConfig.temperature`, `generationConfig.topP`, `generationConfig.maxOutputTokens`, `generationConfig.stopSequences`, `generationConfig.seed`, `generationConfig.presencePenalty`, `generationConfig.frequencyPenalty`, function `tools.functionDeclarations`, Gemini provider tools in GigaChat v2 mode (`googleSearch` / `googleSearchRetrieval` as `web_search`, `urlContext` as `url_content_extraction`, `codeExecution` as `code_interpreter`), basic `toolConfig.functionCallingConfig`, text/image/file parts |
+| Stream Generate Content | The same fields as Generate Content; the response is returned as Gemini `GenerateContentResponse` SSE chunks. |
+| Count Tokens | Text parts of `contents`, `systemInstruction`, and function declaration names/descriptions. |
+| Embeddings | `content.parts[].text`, `requests[].content.parts[].text` for batch embeddings, `outputDimensionality` accepted as compatibility metadata. |
+| Models | `GET /v1beta/models`, `GET /v1/v1beta/models`, `GET /v2/v1beta/models` and `{model}` variants; the shared `/models`, `/v1/models`, `/v2/models` return the Gemini form for Google/Gemini requests, for example with `X-Goog-Api-Client` |
 
-Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store` и
-неподдержанные subfields `generationConfig` принимаются и сохраняются в normalized extensions
-для диагностики, но не передаются в GigaChat как исполняемые параметры и не
-применяются прокси. Non-function provider tools, которые не соответствуют
-встроенным инструментам GigaChat SDK (`fileSearch`, `googleMaps`, `computerUse`,
-MCP, RAG/retrieval/Vertex tools), также сохраняются только для диагностики.
-Полный список канонических встроенных инструментов и aliases провайдеров описан в
-[Встроенных инструментах](builtin-tools.md).
+Gemini `safetySettings`, `cachedContent`, `serviceTier`, `store`, and
+unsupported `generationConfig` subfields are accepted and kept in normalized extensions
+for diagnostics, but are not passed to GigaChat as executable parameters and are
+not applied by the proxy. Non-function provider tools that do not match the
+GigaChat SDK built-in tools (`fileSearch`, `googleMaps`, `computerUse`,
+MCP, RAG/retrieval/Vertex tools) are also kept for diagnostics only.
+The full list of canonical built-in tools and provider aliases is described in
+[Built-in tools](builtin-tools.md).
 
-Код Gemini Files и Batches существует, но публичный роутер не подключается,
-пока file/batch execution не будет проверен end-to-end.
+The Gemini Files and Batches code exists, but the public router is not mounted
+until file/batch execution is verified end-to-end.
 
-## Область маршрутов
+## Route scope
 
-Подключенные OpenAI, Anthropic, LiteLLM и Gemini operation routes доступны в
-корне, под `/v1` и под `/v2` через роутер приложения. Gemini-compatible routes
-также доступны под `/v1beta`, `/v1/v1beta` и `/v2/v1beta`.
-`/v1` всегда выбирает GigaChat v1 backend contract, `/v2` всегда выбирает
-GigaChat v2 backend contract, а root без versioned prefix следует
+The mounted OpenAI, Anthropic, LiteLLM, and Gemini operation routes are available
+at the root, under `/v1`, and under `/v2` via the application router.
+Gemini-compatible routes are also available under `/v1beta`, `/v1/v1beta`, and
+`/v2/v1beta`.
+`/v1` always selects the GigaChat v1 backend contract, `/v2` always selects the
+GigaChat v2 backend contract, and the root without a versioned prefix follows
 `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
-Подготовленные, но отключенные маршруты OpenAI Files/Batches, Anthropic Message
-Batches и Gemini Files/Batches намеренно исключены из схемы OpenAPI по умолчанию.
+The prepared but disabled OpenAI Files/Batches, Anthropic Message
+Batches, and Gemini Files/Batches routes are intentionally excluded from the OpenAPI schema by default.

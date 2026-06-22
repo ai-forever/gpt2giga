@@ -1,27 +1,27 @@
-# Операции
+# Operations
 
-Документ описывает runtime logs, traffic logs, metrics, observability и admin/debug endpoints.
+This document describes runtime logs, traffic logs, metrics, observability, and admin/debug endpoints.
 
 ## System endpoints
 
-Всегда смонтированы:
+Always mounted:
 
 - `GET /health`
 - `GET | POST /ping`
 
-Только в `DEV`:
+`DEV` only:
 
 - `GET /logs/{last_n_lines}`
 - `GET /logs/stream`
 - `GET /logs/html`
 
-`/logs*` endpoints отключены в `PROD`.
+The `/logs*` endpoints are disabled in `PROD`.
 
-## Runtime Logs
+## Runtime logs
 
-Runtime logs — это process logs. Они пишутся в stdout и настроенный log file.
+Runtime logs are process logs. They are written to stdout and the configured log file.
 
-Частые настройки:
+Common settings:
 
 ```dotenv
 GPT2GIGA_LOG_LEVEL=INFO
@@ -29,32 +29,29 @@ GPT2GIGA_LOG_FILENAME=gpt2giga.log
 GPT2GIGA_LOG_MAX_SIZE=10485760
 ```
 
-Не используйте `DEBUG` в production. Debug logs могут содержать чувствительный operational context даже при включённой redaction.
+Do not use `DEBUG` in production. Debug logs may contain sensitive operational context even with redaction enabled.
 
 ## Metrics
 
-Prometheus-compatible metrics выключены по умолчанию:
+Prometheus-compatible metrics are disabled by default:
 
 ```dotenv
 GPT2GIGA_METRICS_ENABLED=False
 GPT2GIGA_METRICS_PATH=/metrics
 ```
 
-Локальное включение:
+Local enablement:
 
 ```dotenv
 GPT2GIGA_METRICS_ENABLED=True
 GPT2GIGA_METRICS_PATH=/metrics
 ```
 
-Если API-key auth включена, передавайте `Authorization: Bearer <GPT2GIGA_API_KEY>` или `x-api-key`.
+If API-key authentication is enabled, pass `Authorization: Bearer <GPT2GIGA_API_KEY>` or `x-api-key`.
 
-Метрики не содержат prompt/response content, API keys, request ids, trace ids
-или raw payloads. Labels ограничены bounded operational fields: protocol,
-route, method, status, lifecycle, provider, model, preset, phase, stage, role,
-candidate id/type, decision mode и failure reason.
+Metrics do not contain prompt/response content, API keys, request ids, trace ids, or raw payloads. Labels are limited to a bounded set of operational fields: protocol, route, method, status, lifecycle, provider, model.
 
-Базовые series:
+Baseline series:
 
 - `gpt2giga_requests_total`
 - `gpt2giga_request_duration_seconds`
@@ -65,36 +62,16 @@ candidate id/type, decision mode и failure reason.
 - `gpt2giga_stream_disconnects_total`
 - `gpt2giga_traffic_log_dropped_total`
 
-Fusion series включаются тем же `/metrics` endpoint и не экспортируют panel
-responses, prompt content или tool arguments:
+## Traffic logs
 
-- `gpt2giga_fusion_requests_total`
-- `gpt2giga_fusion_panel_calls_total`
-- `gpt2giga_fusion_latency_seconds`
-- `gpt2giga_fusion_panel_latency_seconds`
-- `gpt2giga_fusion_judge_latency_seconds`
-- `gpt2giga_fusion_tokens_total`
-- `gpt2giga_fusion_failures_total`
-- `gpt2giga_fusion_selected_candidate_total`
-- `gpt2giga_fusion_rewrite_total`
-- `gpt2giga_fusion_judge_parse_errors_total`
-- `gpt2giga_fusion_repair_calls_total`
-- `gpt2giga_fusion_fallback_total`
-- `gpt2giga_fusion_stage_latency_seconds`
-- `gpt2giga_fusion_stage_input_tokens`
-- `gpt2giga_fusion_stage_output_tokens`
-- `gpt2giga_fusion_panel_truncated_total`
-
-## Traffic Logs
-
-Traffic logs — это structured records для request/response traffic. По умолчанию выключены:
+Traffic logs are structured records of request/response traffic. They are disabled by default:
 
 ```dotenv
 GPT2GIGA_TRAFFIC_LOG_ENABLED=False
 GPT2GIGA_TRAFFIC_LOG_SINK=noop
 ```
 
-Локальная JSONL-проверка:
+Local JSONL check:
 
 ```dotenv
 GPT2GIGA_TRAFFIC_LOG_ENABLED=True
@@ -102,7 +79,7 @@ GPT2GIGA_TRAFFIC_LOG_SINK=jsonl
 GPT2GIGA_TRAFFIC_LOG_JSONL_PATH=traffic_logs.jsonl
 ```
 
-Durable backend в Postgres:
+Durable backend in Postgres:
 
 ```dotenv
 GPT2GIGA_TRAFFIC_LOG_ENABLED=True
@@ -110,7 +87,7 @@ GPT2GIGA_TRAFFIC_LOG_SINK=postgres
 GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2giga
 ```
 
-Postgres плюс OpenSearch mirror:
+Postgres plus an OpenSearch mirror:
 
 ```dotenv
 GPT2GIGA_TRAFFIC_LOG_ENABLED=True
@@ -119,24 +96,24 @@ GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2
 GPT2GIGA_OPENSEARCH_URL=http://localhost:9200
 ```
 
-Content capture — opt-in и проходит redaction:
+Content capture is opt-in and goes through redaction:
 
 ```dotenv
 GPT2GIGA_TRAFFIC_LOG_CAPTURE_CONTENT=False
 GPT2GIGA_TRAFFIC_LOG_REDACT_SENSITIVE=True
 ```
 
-Держите content capture выключенным, пока не утверждены storage, retention, redaction и access policies.
+Keep content capture disabled until storage, retention, redaction, and access policies are approved.
 
 ## Admin Traffic Logs API
 
-Admin endpoints выключены по умолчанию:
+Admin endpoints are disabled by default:
 
 ```dotenv
 GPT2GIGA_ADMIN_API_ENABLED=False
 ```
 
-Включение с отдельным admin key:
+Enablement with a separate admin key:
 
 ```dotenv
 GPT2GIGA_ADMIN_API_ENABLED=True
@@ -145,7 +122,7 @@ GPT2GIGA_TRAFFIC_LOG_SINK=postgres
 GPT2GIGA_TRAFFIC_LOG_POSTGRES_DSN=postgresql://user:password@localhost:5432/gpt2giga
 ```
 
-Варианты auth headers:
+Authorization header options:
 
 - `x-admin-api-key: <secret>`
 - `Authorization: Bearer <secret>`
@@ -163,7 +140,7 @@ Endpoints:
 - `POST /_admin/logs/{id}/replay`
 - `POST /_admin/logs/{id}/redact`
 
-Replay требует:
+Replay requires:
 
 ```dotenv
 GPT2GIGA_REPLAY_ENABLED=True
@@ -171,32 +148,32 @@ GPT2GIGA_REPLAY_ENABLED=True
 
 ## Debug Translate API
 
-Debug translation endpoints предназначены для локальной отладки и protected admin workflows:
+The debug translation endpoints are intended for local debugging and protected admin workflows:
 
 ```dotenv
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=True
 GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 ```
 
-Основной endpoint:
+Main endpoint:
 
 - `POST /_debug/translate`
 
-Короткие endpoints:
+Short endpoints:
 
 - `POST /_debug/translate/openai-to-normalized`
 - `POST /_debug/translate/anthropic-to-normalized`
 - `POST /_debug/translate/normalized-to-gigachat`
 - `POST /_debug/translate/gigachat-to-openai`
 
-Поддерживаемые payload families: `openai`, `anthropic`, `normalized`, `gigachat`, в зависимости от направления.
+Supported payload families: `openai`, `anthropic`, `normalized`, `gigachat`, depending on the direction.
 
-Как эти форматы проходят через внутренний normalized contract, описано в
+How these formats pass through the internal normalized contract is described in
 [Normalized messages architecture](./architecture/normalized-messages.md).
 
 ## Phoenix / OpenTelemetry
 
-Phoenix observability выключена по умолчанию:
+Phoenix observability is disabled by default:
 
 ```dotenv
 GPT2GIGA_OBSERVABILITY_ENABLED=False
@@ -205,9 +182,9 @@ PHOENIX_COLLECTOR_ENDPOINT=http://localhost:4317
 PHOENIX_PROJECT_NAME=gpt2giga
 ```
 
-Включайте после установки optional extra `phoenix` или через Phoenix compose profile.
+Enable it after installing the optional `phoenix` extra or via the Phoenix Compose profile.
 
-LLM payload attributes требуют двойной opt-in:
+LLM payload attributes require a double opt-in:
 
 ```dotenv
 GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True
@@ -217,62 +194,57 @@ GPT2GIGA_OBSERVABILITY_CAPTURE_RESPONSES=True
 GPT2GIGA_OBSERVABILITY_REDACTION_ENABLED=True
 ```
 
-Traffic logs и Phoenix spans связываются через gateway identifiers:
-`request_id`, `trace_id`, protocol, route, model metadata. Для LLM routes
-Phoenix получает один root span на формат: `OpenAI-Completions` для Chat
-Completions, `OpenAI-Responses` для Responses API, `Anthropic-Messages` для
-Anthropic Messages, `Gemini-Content` для Gemini GenerateContent и `Embeddings`
-для OpenAI Embeddings. Streaming milestones прикрепляются к
-соответствующему root span как span events. Для non-LLM routes используется
-один lifecycle span `gpt2giga.request`.
+Traffic logs and Phoenix spans are linked through gateway identifiers:
+`request_id`, `trace_id`, protocol, route, model metadata. For LLM routes,
+Phoenix gets one root span per format: `OpenAI-Completions` for Chat
+Completions, `OpenAI-Responses` for the Responses API, `Anthropic-Messages` for
+Anthropic Messages, `Gemini-Content` for Gemini GenerateContent, and `Embeddings`
+for OpenAI Embeddings. Streaming milestones are attached to the corresponding
+root span as span events. For non-LLM routes, a single lifecycle span
+`gpt2giga.request` is used.
 
-Fusion requests дополнительно получают span `GigaFusion` с bounded attributes:
-preset, panel counts, judge/final model ids, pipeline/tools mode, latency и token
-usage. Panel events содержат только model, role, status, latency и error type;
-raw panel responses, prompt content и tool arguments не пишутся.
+For filtering and grouping by the compatible API format, model spans get the
+attribute `gpt2giga.api_format`: `chat_completions`, `responses`, `messages`,
+`generate_content`, or `embeddings`. Stateful Responses additionally get
+`session.id` and `conversation.id` from the GigaChat `thread_id`; if the upstream
+thread id is not yet available, `previous_response_id` is used without the
+`resp_` prefix.
 
-Для фильтрации и группировки по совместимому API-формату model spans получают
-атрибут `gpt2giga.api_format`: `chat_completions`, `responses`, `messages`,
-`generate_content` или `embeddings`. Stateful Responses дополнительно получают
-`session.id` и
-`conversation.id` из GigaChat `thread_id`; если upstream thread id ещё не
-доступен, используется `previous_response_id` без префикса `resp_`.
+The OpenTelemetry span start time is taken from the gateway
+`RequestContext.started_at`, so Phoenix `Latency` reflects the full request/stream
+time, not just the time of the final observability span emission. The same value
+is additionally written to the `latency_ms` attribute.
 
-OpenTelemetry span start time берётся из gateway `RequestContext.started_at`,
-поэтому Phoenix `Latency` отражает полное время request/stream, а не только
-время финальной отправки observability span. То же значение дополнительно
-пишется в атрибут `latency_ms`.
+LLM spans set an explicit OpenTelemetry status (`OK` or `ERROR`) and duplicate
+it in the safe `status` / `llm.response.status` attributes. Token usage is
+written as the OpenInference fields `llm.token_count.*` and as the gateway
+aliases `input_tokens`, `output_tokens`, `total_tokens`.
 
-LLM spans выставляют явный OpenTelemetry status (`OK` или `ERROR`) и дублируют
-его в безопасных атрибутах `status` / `llm.response.status`. Token usage
-пишется как OpenInference-поля `llm.token_count.*` и как gateway aliases
-`input_tokens`, `output_tokens`, `total_tokens`.
+Tool visibility is safe by default: Phoenix gets `llm.tools.count`,
+`llm.tools.names`, `llm.tool_calls.count`, `llm.tool_calls.names`, plus
+`llm.tool_call` events without arguments. Tool call arguments and full tool
+schemas are written only with a double opt-in:
+`GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True` and
+`GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=True`; they go through redaction before
+being sent.
 
-Tool visibility по умолчанию безопасная: Phoenix получает `llm.tools.count`,
-`llm.tools.names`, `llm.tool_calls.count`, `llm.tool_calls.names`, а также
-события `llm.tool_call` без аргументов. Аргументы tool calls и полные схемы
-tools пишутся только при двойном opt-in:
-`GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True` и
-`GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=True`; перед отправкой они проходят
-redaction.
-
-Phoenix spans также получают безопасную caller-классификацию из входящих
+Phoenix spans also get a safe caller classification from the incoming
 headers:
 
-- `caller.name`: например `swagger-ui`, `redoc-ui`, `openai-python`,
+- `caller.name`: for example `swagger-ui`, `redoc-ui`, `openai-python`,
   `anthropic-compatible`, `claude-code`, `codex`, `qwen-code`, `browser`;
-- `caller.category`: `ui`, `sdk`, `agent`, `browser`, `http_client` или
+- `caller.category`: `ui`, `sdk`, `agent`, `browser`, `http_client`, or
   `unknown`;
-- `caller.client_family`: `openai` или `anthropic`, когда это можно вывести из
-  SDK headers или `User-Agent`;
-- `caller.sdk`, `caller.agent`, `caller.ui`: более точные подтипы, когда они
-  известны.
+- `caller.client_family`: `openai` or `anthropic`, when it can be inferred from
+  the SDK headers or `User-Agent`;
+- `caller.sdk`, `caller.agent`, `caller.ui`: more precise subtypes, when they are
+  known.
 
-Подробный объект дублируется в `annotations.caller`, чтобы в Phoenix можно было
-открыть structured context без включения payload capture. Для Swagger UI
-источник определяется по `Referer: .../docs`, для ReDoc — по `.../redoc`; raw
-prompt/response content в annotations не добавляется.
+The detailed object is duplicated in `annotations.caller`, so that in Phoenix you
+can open the structured context without enabling payload capture. For Swagger UI
+the source is determined by `Referer: .../docs`, for ReDoc by `.../redoc`; raw
+prompt/response content is not added to annotations.
 
-Термины и design constraints описаны в [архитектуре logging и observability](./architecture/logging-and-observability.md).
-Checklist для добавления новых providers/protocols и связанных observability
-изменений: [How to add a provider or protocol](./architecture/how-to-add-provider.md).
+Terms and design constraints are described in [Logging and observability](./architecture/logging-and-observability.md).
+A checklist for adding new providers/protocols and the related observability
+changes: [Adding a provider or protocol](./architecture/how-to-add-provider.md).

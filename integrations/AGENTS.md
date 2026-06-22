@@ -32,7 +32,7 @@
 - Document required dependency groups when an integration needs extras, such as `uv sync --group integrations`.
 - Keep auth guidance aligned with current proxy behavior: API-key auth is optional in `DEV` and effectively required in `PROD`.
 - When a guide refers to reverse proxying or `/v1`, verify the exact path behavior against the current routers and middleware.
-- Clearly mark unsupported API families. OpenAI Files/Batches and Anthropic Message Batches router code exists but is not mounted in the current public API.
+- Clearly mark unsupported API families. OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches router code exists but is not mounted in the current public API.
 - For tool-specific `.env.example` files, include only placeholders and safe defaults; never copy local credentials from a real `.env`.
 
 ## Touch Points
@@ -66,7 +66,7 @@ rg -n "files|batches|not mounted|не смонт" integrations docs examples
 ## Common Gotchas
 
 - `integrations/aider/.env.example` is checked in; keep it template-only and align broader config guidance with the repo-root `.env.example`.
-- `gpt2giga` supports root, `/v1`, and `/v2` mounted API routes for OpenAI and Anthropic-compatible endpoints; docs should only require a versioned prefix when the client tooling needs an explicit backend contract.
+- `gpt2giga` supports root, `/v1`, and `/v2` mounted API routes for OpenAI-, Anthropic-, and Gemini-compatible operation endpoints; Gemini-style routes also support `/v1beta`, `/v1/v1beta`, and `/v2/v1beta`. Docs should only require a versioned prefix when the client tooling needs an explicit backend contract.
 - This folder should not become a dumping ground for ad hoc experiments; keep runnable examples in `examples/`.
 - Reverse-proxy guides should keep `Host`, `X-Forwarded-*`, and path-prefix behavior aligned with `PathNormalizationMiddleware`.
 
