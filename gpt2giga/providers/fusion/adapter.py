@@ -30,15 +30,18 @@ from gpt2giga.providers.fusion.detection import FusionRequestConfig
 from gpt2giga.providers.fusion.limiter import FusionRequestLimiter
 from gpt2giga.providers.fusion.prompts import (
     FUSION_JUDGE_REPAIR_SYSTEM_PROMPT,
+    build_action_judge_user_prompt,
     build_client_harness_contract,
     build_fusion_system_envelope,
     build_judge_user_prompt,
     build_selector_finalizer_user_prompt,
     build_selector_judge_user_prompt,
+    build_verifier_panel_user_prompt,
     split_instruction_messages,
 )
 from gpt2giga.providers.fusion.schemas import (
     FUSION_ANALYSIS_SCHEMA_VERSION,
+    FusionActionDecision,
     FusionAnalysis,
     FusionCandidate,
     FusionJudgeAnalysis,
@@ -47,6 +50,7 @@ from gpt2giga.providers.fusion.schemas import (
     FusionSelection,
     FusionToolError,
     FusionToolResult,
+    FusionVerification,
 )
 from gpt2giga.providers.fusion.telemetry import emit_fusion_telemetry
 from gpt2giga.providers.fusion.tool_arbitration import (
@@ -161,6 +165,16 @@ class FusionProviderAdapter:
                 is_disconnected=is_disconnected,
             )
 
+        if fusion_config.decision_mode == "action":
+            return await self._chat_verified_tool_loop(
+                request,
+                requested_model=requested_model,
+                started=started,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+
         return await self._chat_forced_pipeline(
             request,
             requested_model=requested_model,
@@ -183,7 +197,10 @@ class FusionProviderAdapter:
         """Execute the forced Fusion panel/selector pipeline."""
         await _raise_if_disconnected(is_disconnected)
         direct_candidate: FusionCandidate | None = None
-        if fusion_config.include_direct_candidate:
+        if (
+            fusion_config.include_direct_candidate
+            and fusion_config.direct_tool_call_policy == "return_immediately"
+        ):
             direct_candidate = await self._run_direct_candidate(
                 request,
                 context=context,
@@ -213,12 +230,20 @@ class FusionProviderAdapter:
                     fusion_config=fusion_config,
                 )
 
-        panel_results = await self._run_panels(
-            request,
-            context=context,
-            fusion_config=fusion_config,
-            is_disconnected=is_disconnected,
-        )
+        if direct_candidate is None:
+            direct_candidate, panel_results = await self._run_candidate_stages(
+                request,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+        else:
+            panel_results = await self._run_panels(
+                request,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
         await _raise_if_disconnected(is_disconnected)
 
         candidates = _build_candidates(
@@ -268,6 +293,215 @@ class FusionProviderAdapter:
             context=context,
             fusion_config=fusion_config,
             is_disconnected=is_disconnected,
+        )
+
+    async def _chat_verified_tool_loop(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        requested_model: str,
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        """Execute one verified client-visible tool-loop step."""
+        await _raise_if_disconnected(is_disconnected)
+        direct_candidate = await self._run_direct_candidate(
+            request,
+            context=context,
+            fusion_config=fusion_config,
+            is_disconnected=is_disconnected,
+        )
+        already_called_tools = _called_tool_history(request.messages)
+        missing_requirements = _infer_missing_requirements(
+            request,
+            fusion_config=fusion_config,
+        )
+        verification_result = await self._run_verifier_panel(
+            request,
+            direct_candidate=direct_candidate,
+            already_called_tools=already_called_tools,
+            missing_requirements=missing_requirements,
+            context=context,
+            fusion_config=fusion_config,
+            is_disconnected=is_disconnected,
+        )
+        verification, verification_error_reason = _verification_from_panel_result(
+            verification_result
+        )
+
+        judge_response: NormalizedResponse | None = None
+        judge_error_reason: str | None = None
+        judge_latency_ms: int | None = None
+        judge_started = time.perf_counter()
+        try:
+            judge_response = await self._run_action_judge(
+                request,
+                direct_candidate=direct_candidate,
+                verification=verification,
+                already_called_tools=already_called_tools,
+                missing_requirements=missing_requirements,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+        except asyncio.TimeoutError:
+            judge_error_reason = "action_judge_timeout"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            judge_error_reason = f"action_judge_failed:{type(exc).__name__}"
+        finally:
+            judge_latency_ms = _elapsed_ms(judge_started)
+
+        action_decision, action_error_reason = _action_decision_from_judge_response(
+            judge_response,
+            request_tools=request.tools,
+            tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
+            request_messages=request.messages,
+            meta_tool_names=self.settings.meta_tool_names,
+        )
+        fallback_reason = (
+            judge_error_reason or action_error_reason or verification_error_reason
+        )
+        direct_tool_call = _valid_client_tool_call_from_candidate(
+            direct_candidate,
+            request_tools=request.tools,
+            tools_mode=fusion_config.tools_mode,
+            tool_choice=request.tool_choice,
+            max_tool_calls=fusion_config.max_tool_calls,
+            request_messages=request.messages,
+            meta_tool_names=self.settings.meta_tool_names,
+        )
+        message: NormalizedMessage | None = None
+        finish_reason: str | None = None
+        selected_candidate: FusionCandidate | None = None
+
+        if action_decision is not None and action_error_reason is None:
+            if action_decision.action_type == "tool_call":
+                tool_call, override_reason = _select_verified_action_tool_call(
+                    action_decision,
+                    direct_tool_call=direct_tool_call,
+                    verification=verification,
+                )
+                if tool_call is not None:
+                    message = NormalizedMessage(
+                        role="assistant",
+                        content=None,
+                        tool_calls=[tool_call],
+                    )
+                    finish_reason = "tool_calls"
+                    if direct_tool_call is not None and _same_tool_call(
+                        tool_call,
+                        direct_tool_call,
+                    ):
+                        selected_candidate = direct_candidate
+                    if override_reason is not None:
+                        fallback_reason = fallback_reason or override_reason
+                else:
+                    fallback_reason = fallback_reason or "invalid_action_tool_call"
+            elif action_decision.action_type == "answer":
+                message = NormalizedMessage(
+                    role="assistant",
+                    content=action_decision.final_answer,
+                )
+                finish_reason = "stop"
+            else:
+                fallback_reason = fallback_reason or "action_blocked"
+
+        if message is None and direct_tool_call is not None:
+            if _verification_allows_direct_tool_call(verification):
+                message = NormalizedMessage(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[direct_tool_call],
+                )
+                finish_reason = "tool_calls"
+                selected_candidate = direct_candidate
+                fallback_reason = fallback_reason or "direct_tool_call_fallback"
+
+        usage = aggregate_usage(
+            [
+                direct_candidate.usage,
+                verification_result.usage,
+                judge_response.usage if judge_response is not None else None,
+            ]
+        )
+        candidates = [direct_candidate]
+
+        if message is None:
+            run_result = self._build_run_result(
+                status="error",
+                requested_model=requested_model,
+                fusion_config=fusion_config,
+                panel_results=[verification_result],
+                failed_models=[]
+                if verification_result.status == "ok"
+                else [verification_result],
+                candidates=candidates,
+                usage=usage,
+                judge_usage=_response_usage(judge_response),
+                latency_ms=_elapsed_ms(started),
+                judge_latency_ms=judge_latency_ms,
+                direct_latency_ms=direct_candidate.latency_ms,
+                verification=verification,
+                action_decision=action_decision,
+                judge_parse_error=action_error_reason == "invalid_action_judge_json",
+                fallback_reason=fallback_reason or "empty_action_decision",
+            )
+            await self._emit_telemetry(run_result, context, fusion_config)
+            return self._error_response(
+                requested_model=requested_model,
+                message="Fusion verified tool loop did not produce a valid next action",
+                code="fusion_action_failed",
+                run_result=run_result,
+                usage=usage,
+            )
+
+        run_result = self._build_run_result(
+            status="ok",
+            requested_model=requested_model,
+            fusion_config=fusion_config,
+            panel_results=[verification_result],
+            failed_models=[]
+            if verification_result.status == "ok"
+            else [verification_result],
+            candidates=candidates,
+            selected_candidate=selected_candidate,
+            usage=usage,
+            judge_usage=_response_usage(judge_response),
+            latency_ms=_elapsed_ms(started),
+            judge_latency_ms=judge_latency_ms,
+            direct_latency_ms=direct_candidate.latency_ms,
+            verification=verification,
+            action_decision=action_decision,
+            judge_parse_error=action_error_reason == "invalid_action_judge_json",
+            fallback_reason=fallback_reason,
+        )
+        await self._emit_telemetry(run_result, context, fusion_config)
+        return NormalizedResponse(
+            id=context.request_id if context is not None else None,
+            model=requested_model,
+            provider=self.name,
+            choices=[
+                NormalizedChoice(
+                    index=0,
+                    message=message,
+                    finish_reason=finish_reason
+                    or ("tool_calls" if message.tool_calls else "stop"),
+                )
+            ],
+            usage=usage,
+            metadata=_public_metadata(run_result),
+            provider_metadata={
+                "fusion": _provider_metadata(
+                    run_result,
+                    settings=self.settings,
+                )
+            },
         )
 
     async def _chat_outer_direct(
@@ -592,6 +826,19 @@ class FusionProviderAdapter:
                 request,
                 requested_model=requested_model,
                 post_tool_call=post_tool_call,
+                started=started,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+
+        if (
+            fusion_config.post_tool_mode == "verified_continuation"
+            or fusion_config.decision_mode == "action"
+        ):
+            return await self._chat_verified_tool_loop(
+                request,
+                requested_model=requested_model,
                 started=started,
                 context=context,
                 fusion_config=fusion_config,
@@ -1469,6 +1716,23 @@ class FusionProviderAdapter:
         fusion_config: FusionRequestConfig,
         is_disconnected: DisconnectChecker | None,
     ) -> tuple[FusionCandidate | None, list[FusionPanelResult]]:
+        if fusion_config.candidate_stage_order != "parallel":
+            direct_candidate = None
+            if fusion_config.include_direct_candidate:
+                direct_candidate = await self._run_direct_candidate(
+                    request,
+                    context=context,
+                    fusion_config=fusion_config,
+                    is_disconnected=is_disconnected,
+                )
+            panel_results = await self._run_panels(
+                request,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+            return direct_candidate, panel_results
+
         panel_task = asyncio.create_task(
             self._run_panels(
                 request,
@@ -1648,6 +1912,94 @@ class FusionProviderAdapter:
                 latency_ms=_elapsed_ms(started),
             )
 
+    async def _run_verifier_panel(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        direct_candidate: FusionCandidate,
+        already_called_tools: list[dict[str, object]],
+        missing_requirements: list[str],
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> FusionPanelResult:
+        """Run the verifier panel over the direct candidate."""
+        started = time.perf_counter()
+        model = fusion_config.analysis_models[0]
+        role = _panel_role(fusion_config, 0) or "verifier"
+        verifier_request = _build_verifier_panel_request(
+            request,
+            model=model,
+            role=role,
+            direct_candidate=direct_candidate,
+            already_called_tools=already_called_tools,
+            missing_requirements=missing_requirements,
+            fusion_config=fusion_config,
+        )
+        try:
+            await _raise_if_disconnected(is_disconnected)
+            response = await asyncio.wait_for(
+                self.upstream_provider.chat(verifier_request, context=context),
+                timeout=fusion_config.timeout_seconds,
+            )
+            if response.error is not None:
+                return FusionPanelResult(
+                    model=model,
+                    role=role,
+                    status="error",
+                    usage=response.usage,
+                    error_type=response.error.type,
+                    error_message=response.error.message,
+                    latency_ms=_elapsed_ms(started),
+                )
+            message = _first_message(response)
+            if message is None:
+                return FusionPanelResult(
+                    model=model,
+                    role=role,
+                    status="error",
+                    usage=response.usage,
+                    error_type="empty_response",
+                    latency_ms=_elapsed_ms(started),
+                )
+            content = _content_to_text(message.content)
+            if not content:
+                return FusionPanelResult(
+                    model=model,
+                    role=role,
+                    status="error",
+                    usage=response.usage,
+                    error_type="empty_response",
+                    latency_ms=_elapsed_ms(started),
+                )
+            return FusionPanelResult(
+                model=model,
+                role=role,
+                status="ok",
+                content=content,
+                usage=response.usage,
+                latency_ms=_elapsed_ms(started),
+            )
+        except asyncio.TimeoutError:
+            return FusionPanelResult(
+                model=model,
+                role=role,
+                status="timeout",
+                error_type="timeout",
+                latency_ms=_elapsed_ms(started),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            return FusionPanelResult(
+                model=model,
+                role=role,
+                status="error",
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+                latency_ms=_elapsed_ms(started),
+            )
+
     async def _run_direct_candidate(
         self,
         request: NormalizedChatRequest,
@@ -1769,6 +2121,34 @@ class FusionProviderAdapter:
             request,
             candidates=candidates,
             fusion_config=fusion_config,
+            meta_tool_names=self.settings.meta_tool_names,
+        )
+        await _raise_if_disconnected(is_disconnected)
+        return await asyncio.wait_for(
+            self.upstream_provider.chat(judge_request, context=context),
+            timeout=fusion_config.timeout_seconds,
+        )
+
+    async def _run_action_judge(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        direct_candidate: FusionCandidate,
+        verification: FusionVerification | None,
+        already_called_tools: list[dict[str, object]],
+        missing_requirements: list[str],
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        judge_request = _build_action_judge_request(
+            request,
+            direct_candidate=direct_candidate,
+            verification=verification,
+            already_called_tools=already_called_tools,
+            missing_requirements=missing_requirements,
+            fusion_config=fusion_config,
+            meta_tool_names=self.settings.meta_tool_names,
         )
         await _raise_if_disconnected(is_disconnected)
         return await asyncio.wait_for(
@@ -1965,6 +2345,8 @@ class FusionProviderAdapter:
         finalizer_latency_ms: int | None = None,
         analysis: FusionAnalysis | None = None,
         selection: FusionSelection | None = None,
+        verification: FusionVerification | None = None,
+        action_decision: FusionActionDecision | None = None,
         selected_candidate: FusionCandidate | None = None,
         judge_parse_error: bool = False,
         repair_used: bool = False,
@@ -1985,6 +2367,8 @@ class FusionProviderAdapter:
             candidates=list(candidates or []),
             analysis=analysis,
             selection=selection,
+            verification=verification,
+            action_decision=action_decision,
             selected_candidate_id=(
                 selected_candidate.candidate_id
                 if selected_candidate is not None
@@ -2290,6 +2674,61 @@ def _build_direct_candidate_request(
     return direct_request
 
 
+def _build_verifier_panel_request(
+    request: NormalizedChatRequest,
+    *,
+    model: str,
+    role: str,
+    direct_candidate: FusionCandidate,
+    already_called_tools: list[dict[str, object]],
+    missing_requirements: list[str],
+    fusion_config: FusionRequestConfig,
+) -> NormalizedChatRequest:
+    verifier_request = request.model_copy(deep=True)
+    verifier_request.model = model
+    verifier_request.stream = False
+    verifier_request.response_format = _fusion_verification_response_format()
+    _apply_generation_overrides(verifier_request, fusion_config)
+
+    instruction_messages, conversation_messages = split_instruction_messages(
+        verifier_request.messages
+    )
+    tool_policy = (
+        "Verifier stage: tools are reference-only. Check the direct candidate "
+        "against the original task and current tool/result history. Do not emit "
+        "real tool calls."
+    )
+    verifier_request.messages = [
+        build_fusion_system_envelope(
+            stage="panel",
+            client_instruction_messages=instruction_messages,
+            source_protocol=_source_protocol(verifier_request),
+            panel_role=role,
+            tool_policy=tool_policy,
+            prompt_mode=fusion_config.prompt_mode,
+            decision_mode="action",
+        ),
+        *conversation_messages,
+        NormalizedMessage(
+            role="user",
+            content=build_verifier_panel_user_prompt(
+                direct_candidate=direct_candidate,
+                already_called_tools=already_called_tools,
+                missing_requirements=missing_requirements,
+                request_tools=request.tools,
+            ),
+        ),
+    ]
+    verifier_request.tools = []
+    verifier_request.tool_choice = None
+    verifier_request.metadata = {
+        **verifier_request.metadata,
+        "gpt2giga_fusion_stage": "verifier_panel",
+        "gpt2giga_fusion_role": role,
+    }
+    return verifier_request
+
+
 def _build_judge_request(
     request: NormalizedChatRequest,
     *,
@@ -2333,6 +2772,66 @@ def _build_judge_request(
     judge_request.metadata = {
         **judge_request.metadata,
         "gpt2giga_fusion_stage": "judge",
+    }
+    return judge_request
+
+
+def _build_action_judge_request(
+    request: NormalizedChatRequest,
+    *,
+    direct_candidate: FusionCandidate,
+    verification: FusionVerification | None,
+    already_called_tools: list[dict[str, object]],
+    missing_requirements: list[str],
+    fusion_config: FusionRequestConfig,
+    meta_tool_names: list[str],
+) -> NormalizedChatRequest:
+    judge_request = request.model_copy(deep=True)
+    judge_request.model = fusion_config.judge_model
+    judge_request.stream = False
+    judge_request.response_format = _fusion_action_decision_response_format()
+    _apply_generation_overrides(judge_request, fusion_config)
+
+    instruction_messages, conversation_messages = split_instruction_messages(
+        judge_request.messages
+    )
+    action_policy = (
+        "Action judge stage: return exactly one FusionActionDecision JSON object. "
+        "Do not emit native tool calls from this internal request. Never finalise "
+        "only because one tool result exists; finalise only when the task is "
+        "complete using observed tool results."
+    )
+    judge_request.messages = [
+        build_fusion_system_envelope(
+            stage="judge",
+            client_instruction_messages=instruction_messages,
+            source_protocol=_source_protocol(judge_request),
+            tool_policy=action_policy,
+            prompt_mode=fusion_config.prompt_mode,
+            decision_mode="action",
+        ),
+        *conversation_messages,
+        NormalizedMessage(
+            role="user",
+            content=build_action_judge_user_prompt(
+                direct_candidate=direct_candidate,
+                verification=verification,
+                already_called_tools=already_called_tools,
+                missing_requirements=missing_requirements,
+                request_tools=request.tools,
+                tools_mode=fusion_config.tools_mode,
+                tool_choice=request.tool_choice,
+                max_tool_calls=fusion_config.max_tool_calls,
+                request_messages=request.messages,
+                meta_tool_names=meta_tool_names,
+            ),
+        ),
+    ]
+    judge_request.tools = []
+    judge_request.tool_choice = None
+    judge_request.metadata = {
+        **judge_request.metadata,
+        "gpt2giga_fusion_stage": "action_judge",
     }
     return judge_request
 
@@ -2396,6 +2895,7 @@ def _build_selector_judge_request(
     *,
     candidates: list[FusionCandidate],
     fusion_config: FusionRequestConfig,
+    meta_tool_names: list[str],
 ) -> NormalizedChatRequest:
     judge_request = request.model_copy(deep=True)
     judge_request.model = fusion_config.judge_model
@@ -2423,6 +2923,8 @@ def _build_selector_judge_request(
                 tools_mode=fusion_config.tools_mode,
                 tool_choice=request.tool_choice,
                 max_tool_calls=fusion_config.max_tool_calls,
+                request_messages=request.messages,
+                meta_tool_names=meta_tool_names,
             ),
         ),
     ]
@@ -2789,6 +3291,103 @@ def _selection_from_judge_response(
     if _candidate_by_id(candidates, selection.selected_candidate_id) is None:
         return selection, "unknown_selected_candidate"
     return selection, None
+
+
+def _verification_from_panel_result(
+    result: FusionPanelResult,
+) -> tuple[FusionVerification | None, str | None]:
+    if result.status != "ok":
+        return None, f"verifier_{result.status}"
+    content = result.content
+    if not content:
+        return None, "verifier_empty_response"
+    try:
+        payload = _load_json_object(content)
+        verification = FusionVerification.model_validate(payload)
+    except (json.JSONDecodeError, TypeError, ValueError, ValidationError):
+        return None, "invalid_verifier_json"
+    return verification, None
+
+
+def _action_decision_from_judge_response(
+    response: NormalizedResponse | None,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+    request_messages: list[NormalizedMessage],
+    meta_tool_names: list[str],
+) -> tuple[FusionActionDecision | None, str | None]:
+    if response is None:
+        return None, "action_judge_failed"
+    if response.error is not None:
+        return None, f"action_judge_error:{response.error.type}"
+    message = _first_message(response)
+    if message is None:
+        return None, "action_judge_empty_response"
+    content = _content_to_text(message.content)
+    if not content:
+        return None, "action_judge_empty_response"
+    try:
+        payload = _load_json_object(content)
+        decision = FusionActionDecision.model_validate(payload)
+    except (json.JSONDecodeError, TypeError, ValueError, ValidationError):
+        return None, "invalid_action_judge_json"
+
+    if decision.tool_call is None:
+        return decision, None
+    if _is_meta_tool_call(decision.tool_call, meta_tool_names):
+        return decision, "meta_action_tool_call"
+    if _tool_call_repeated_without_new_user(request_messages, decision.tool_call):
+        return decision, "repeated_action_tool_call"
+    validation = validate_tool_call_arguments(
+        decision.tool_call,
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    )
+    if not validation.valid or validation.tool_call is None:
+        return decision, "invalid_action_tool_call"
+    decision.tool_call = validation.tool_call
+    return decision, None
+
+
+def _select_verified_action_tool_call(
+    decision: FusionActionDecision,
+    *,
+    direct_tool_call: NormalizedToolCall | None,
+    verification: FusionVerification | None,
+) -> tuple[NormalizedToolCall | None, str | None]:
+    if decision.tool_call is None:
+        return None, "missing_action_tool_call"
+    if (
+        direct_tool_call is not None
+        and not _same_tool_call(decision.tool_call, direct_tool_call)
+        and _verification_allows_direct_tool_call(verification)
+    ):
+        return direct_tool_call, "direct_native_tool_call_preferred"
+    return decision.tool_call, None
+
+
+def _verification_allows_direct_tool_call(
+    verification: FusionVerification | None,
+) -> bool:
+    if verification is None:
+        return False
+    if verification.verdict not in {"approve", "needs_tool"}:
+        return False
+    if verification.corrected_tool_call is not None:
+        return False
+    return not verification.concrete_issues
+
+
+def _same_tool_call(
+    left: NormalizedToolCall,
+    right: NormalizedToolCall,
+) -> bool:
+    return _tool_call_signature(left) == _tool_call_signature(right)
 
 
 def _final_message_from_analysis(
@@ -3240,6 +3839,26 @@ def _fusion_selection_response_format() -> NormalizedResponseFormat:
     )
 
 
+def _fusion_verification_response_format() -> NormalizedResponseFormat:
+    return NormalizedResponseFormat(
+        type="json_schema",
+        json_schema={
+            "name": "fusion_verification",
+            "schema": FusionVerification.model_json_schema(),
+        },
+    )
+
+
+def _fusion_action_decision_response_format() -> NormalizedResponseFormat:
+    return NormalizedResponseFormat(
+        type="json_schema",
+        json_schema={
+            "name": "fusion_action_decision",
+            "schema": FusionActionDecision.model_json_schema(),
+        },
+    )
+
+
 def _judge_repair_needed(
     analysis: FusionAnalysis | None,
     *,
@@ -3312,6 +3931,66 @@ def _latest_post_tool_call(
             if tool_call.id == tool_call_id or tool_call.name == tool_call_id:
                 return tool_call
     return None
+
+
+def _called_tool_history(messages: list[NormalizedMessage]) -> list[dict[str, object]]:
+    last_user_index = _last_user_index(messages)
+    calls: dict[str, dict[str, object]] = {}
+    ordered: list[dict[str, object]] = []
+    for message in messages[last_user_index + 1 :]:
+        if message.role == "assistant":
+            for tool_call in message.tool_calls:
+                call_id = tool_call.id or tool_call.name or f"call_{len(ordered) + 1}"
+                item: dict[str, object] = {
+                    "id": call_id,
+                    "name": tool_call.name or "",
+                    "arguments": _json_safe_tool_arguments(tool_call.arguments),
+                    "result_present": False,
+                }
+                calls[call_id] = item
+                ordered.append(item)
+        elif message.role == "tool":
+            call_id = message.tool_call_id or ""
+            target = calls.get(call_id)
+            if target is None:
+                target = {
+                    "id": call_id,
+                    "name": call_id,
+                    "arguments": {},
+                    "result_present": False,
+                }
+                calls[call_id] = target
+                ordered.append(target)
+            target["result_present"] = True
+            target["result"] = (_content_to_text(message.content) or "")[:4000]
+    return ordered
+
+
+def _infer_missing_requirements(
+    request: NormalizedChatRequest,
+    *,
+    fusion_config: FusionRequestConfig,
+) -> list[str]:
+    if fusion_config.required_tool_policy == "none":
+        return []
+    if not _client_visible_tools(request.tools):
+        return []
+    if not any(message.role == "tool" for message in request.messages):
+        return ["No client tool results are available yet."]
+    return []
+
+
+def _json_safe_tool_arguments(value: Any) -> object:
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    try:
+        json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(value)
+    return value if value is not None else {}
 
 
 def _should_force_post_tool_final_answer(
@@ -3924,6 +4603,16 @@ def _provider_metadata(
         )
     if settings.expose_analysis_metadata and run_result.selection is not None:
         metadata["selection"] = run_result.selection.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+    if settings.expose_analysis_metadata and run_result.verification is not None:
+        metadata["verification"] = run_result.verification.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+    if settings.expose_analysis_metadata and run_result.action_decision is not None:
+        metadata["action_decision"] = run_result.action_decision.model_dump(
             mode="json",
             exclude_none=True,
         )

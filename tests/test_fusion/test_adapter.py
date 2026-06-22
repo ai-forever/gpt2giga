@@ -231,6 +231,22 @@ def _hotel_tool() -> NormalizedTool:
     )
 
 
+def _currency_tool() -> NormalizedTool:
+    return NormalizedTool(
+        name="convert_currency",
+        description="Convert currency",
+        parameters={
+            "type": "object",
+            "properties": {
+                "amount": {"type": "number"},
+                "from_currency": {"type": "string"},
+                "to_currency": {"type": "string"},
+            },
+            "required": ["amount", "from_currency", "to_currency"],
+        },
+    )
+
+
 def _judge_json(
     final_answer="final answer", final_tool_call=None, task_status=None
 ) -> str:
@@ -262,6 +278,57 @@ def _judge_analysis_json(recommendation="Use the combined answer.") -> str:
             "blind_spots": [],
             "risk_flags": [],
             "recommendation": recommendation,
+        }
+    )
+
+
+def _verification_json(
+    *,
+    verdict="approve",
+    checked_candidate_id="direct",
+    concrete_issues=None,
+    corrected_tool_call=None,
+    missing_requirements_after_action=None,
+    all_required_data_present=False,
+) -> str:
+    return json.dumps(
+        {
+            "schema_version": "gpt2giga.fusion.verification.v1",
+            "checked_candidate_id": checked_candidate_id,
+            "verdict": verdict,
+            "concrete_issues": concrete_issues or [],
+            "corrected_tool_call": corrected_tool_call,
+            "missing_requirements_after_action": (
+                missing_requirements_after_action or []
+            ),
+            "all_required_data_present": all_required_data_present,
+            "reason_brief": "checked",
+        }
+    )
+
+
+def _action_json(
+    *,
+    action_type,
+    task_status,
+    tool_call=None,
+    final_answer=None,
+    missing_requirements=None,
+    selected_candidate_id="direct",
+) -> str:
+    return json.dumps(
+        {
+            "schema_version": "gpt2giga.fusion.action_decision.v1",
+            "task_status": task_status,
+            "action_type": action_type,
+            "selected_candidate_id": selected_candidate_id,
+            "tool_call": tool_call,
+            "final_answer": final_answer,
+            "missing_requirements": missing_requirements or [],
+            "verifier_findings": [],
+            "direct_candidate_errors": [],
+            "confidence": 1.0,
+            "reason_brief": "next action",
         }
     )
 
@@ -644,6 +711,8 @@ async def test_selector_prefers_valid_direct_native_tool_over_panel_advisory_too
         assert '"native": true' in prompt
         assert '"advisory": true' in prompt
         assert '"valid": true' in prompt
+        assert '"repeated": false' in prompt
+        assert '"meta": false' in prompt
         return _text_response("Judge", _selection_json("panel_1"))
 
     provider = FakeProvider(
@@ -1579,6 +1648,365 @@ async def test_post_tool_turn_uses_direct_continuation_with_tools_enabled():
         "find_hotel",
     ]
     assert provider.calls[0].metadata["gpt2giga_fusion_stage"] == "outer_direct"
+
+
+async def test_verified_tool_loop_first_turn_returns_direct_native_tool_call():
+    request = _request()
+    request.tools = [_weather_tool(), _hotel_tool(), _currency_tool()]
+    direct_call = NormalizedToolCall(
+        id="call-weather",
+        name="get_weather",
+        arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+    )
+
+    def action_judge_response(judge_request):
+        assert judge_request.metadata["gpt2giga_fusion_stage"] == "action_judge"
+        assert judge_request.tools == []
+        prompt = judge_request.messages[-1].content
+        assert '"already_called_tools": []' in prompt
+        assert '"name": "get_weather"' in prompt
+        return _text_response(
+            "Judge",
+            _action_json(
+                action_type="tool_call",
+                task_status="needs_tool",
+                tool_call=direct_call.model_dump(mode="json", exclude_none=True),
+                missing_requirements=["weather is needed"],
+            ),
+        )
+
+    provider = FakeProvider(
+        responses={
+            "Direct": _tool_response("Direct", direct_call),
+            "Verifier": _text_response(
+                "Verifier",
+                _verification_json(
+                    verdict="approve",
+                    missing_requirements_after_action=["hotel", "currency"],
+                ),
+            ),
+            "Judge": action_judge_response,
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["Verifier"],
+            judge_model="Judge",
+            direct_model="Direct",
+            panel_roles=["verifier"],
+            include_direct_candidate=True,
+            decision_mode="action",
+            post_tool_mode="verified_continuation",
+            direct_tool_call_policy="verify_before_return",
+        ),
+    )
+
+    assert response.error is None
+    assert [call.model for call in provider.calls] == ["Direct", "Verifier", "Judge"]
+    message = response.choices[0].message
+    assert message.tool_calls == [direct_call]
+    assert response.choices[0].finish_reason == "tool_calls"
+    assert response.metadata["gpt2giga_fusion_decision_mode"] == "action"
+    assert response.metadata["gpt2giga_fusion_selected_candidate_id"] == "direct"
+
+
+async def test_verified_tool_loop_post_tool_continues_with_tools_enabled():
+    request = _request()
+    request.tools = [_weather_tool(), _hotel_tool(), _currency_tool()]
+    request.messages = [
+        NormalizedMessage(role="user", content="Plan a trip"),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-weather",
+                    name="get_weather",
+                    arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+                )
+            ],
+        ),
+        NormalizedMessage(
+            role="tool",
+            tool_call_id="call-weather",
+            content='{"forecast":"snow"}',
+        ),
+    ]
+    hotel_call = NormalizedToolCall(
+        id="call-hotel",
+        name="find_hotel",
+        arguments={
+            "city": "Saint Petersburg",
+            "nights": 2,
+            "max_price_rub": 12000,
+        },
+    )
+
+    def direct_response(direct_request):
+        assert direct_request.metadata["gpt2giga_fusion_stage"] == "direct_candidate"
+        assert [tool.name for tool in direct_request.tools] == [
+            "get_weather",
+            "find_hotel",
+            "convert_currency",
+        ]
+        return _tool_response("Direct", hotel_call)
+
+    def action_judge_response(judge_request):
+        prompt = judge_request.messages[-1].content
+        assert '"name": "get_weather"' in prompt
+        assert '"result_present": true' in prompt
+        stages = {call.metadata.get("gpt2giga_fusion_stage") for call in provider.calls}
+        assert "post_tool_finalizer" not in stages
+        return _text_response(
+            "Judge",
+            _action_json(
+                action_type="tool_call",
+                task_status="needs_tool",
+                tool_call=hotel_call.model_dump(mode="json", exclude_none=True),
+                missing_requirements=["currency conversion is still needed"],
+            ),
+        )
+
+    provider = FakeProvider(
+        responses={
+            "Direct": direct_response,
+            "Verifier": _text_response(
+                "Verifier",
+                _verification_json(verdict="approve"),
+            ),
+            "Judge": action_judge_response,
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["Verifier"],
+            judge_model="Judge",
+            direct_model="Direct",
+            panel_roles=["verifier"],
+            include_direct_candidate=True,
+            decision_mode="action",
+            post_tool_mode="verified_continuation",
+            direct_tool_call_policy="verify_before_return",
+        ),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.tool_calls == [hotel_call]
+    assert [call.model for call in provider.calls] == ["Direct", "Verifier", "Judge"]
+
+
+async def test_verified_tool_loop_final_answer_uses_action_decision():
+    request = _request()
+    request.tools = [_weather_tool(), _hotel_tool(), _currency_tool()]
+    request.messages = [
+        NormalizedMessage(role="user", content="Plan a trip"),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-weather",
+                    name="get_weather",
+                    arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+                )
+            ],
+        ),
+        NormalizedMessage(role="tool", tool_call_id="call-weather", content="snow"),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-hotel",
+                    name="find_hotel",
+                    arguments={
+                        "city": "Saint Petersburg",
+                        "nights": 2,
+                        "max_price_rub": 12000,
+                    },
+                )
+            ],
+        ),
+        NormalizedMessage(role="tool", tool_call_id="call-hotel", content="Nevsky"),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-currency",
+                    name="convert_currency",
+                    arguments={
+                        "amount": 12000,
+                        "from_currency": "RUB",
+                        "to_currency": "USD",
+                    },
+                )
+            ],
+        ),
+        NormalizedMessage(role="tool", tool_call_id="call-currency", content="$150"),
+    ]
+
+    provider = FakeProvider(
+        responses={
+            "Direct": _text_response("Direct", "unsafe direct answer"),
+            "Verifier": _text_response(
+                "Verifier",
+                _verification_json(
+                    verdict="complete",
+                    all_required_data_present=True,
+                ),
+            ),
+            "Judge": _text_response(
+                "Judge",
+                _action_json(
+                    action_type="answer",
+                    task_status="complete",
+                    final_answer="Weather: snow. Hotel: Nevsky. Budget: $150.",
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["Verifier"],
+            judge_model="Judge",
+            direct_model="Direct",
+            panel_roles=["verifier"],
+            include_direct_candidate=True,
+            decision_mode="action",
+            post_tool_mode="verified_continuation",
+            direct_tool_call_policy="verify_before_return",
+        ),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.content == (
+        "Weather: snow. Hotel: Nevsky. Budget: $150."
+    )
+    assert response.choices[0].message.tool_calls == []
+    assert response.choices[0].finish_reason == "stop"
+
+
+async def test_verified_tool_loop_prefers_valid_direct_over_corrected_typo():
+    request = _request()
+    request.tools = [_weather_tool()]
+    direct_call = NormalizedToolCall(
+        id="call-weather",
+        name="get_weather",
+        arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+    )
+    typo_call = NormalizedToolCall(
+        id="call-weather-typo",
+        name="get_weather",
+        arguments={"city": "Saint Pyotrsburg", "date": "tomorrow"},
+    )
+    provider = FakeProvider(
+        responses={
+            "Direct": _tool_response("Direct", direct_call),
+            "Verifier": _text_response(
+                "Verifier",
+                _verification_json(verdict="approve"),
+            ),
+            "Judge": _text_response(
+                "Judge",
+                _action_json(
+                    action_type="tool_call",
+                    task_status="needs_tool",
+                    tool_call=typo_call.model_dump(mode="json", exclude_none=True),
+                    selected_candidate_id="verifier",
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["Verifier"],
+            judge_model="Judge",
+            direct_model="Direct",
+            panel_roles=["verifier"],
+            include_direct_candidate=True,
+            decision_mode="action",
+            post_tool_mode="verified_continuation",
+            direct_tool_call_policy="verify_before_return",
+        ),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.tool_calls == [direct_call]
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
+        "direct_native_tool_call_preferred"
+    )
+
+
+async def test_verified_tool_loop_blocks_repeated_identical_tool_call():
+    request = _request()
+    request.tools = [_weather_tool()]
+    repeated_call = NormalizedToolCall(
+        id="call-weather-repeat",
+        name="get_weather",
+        arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+    )
+    request.messages = [
+        NormalizedMessage(role="user", content="Check weather"),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-weather",
+                    name="get_weather",
+                    arguments={"city": "Saint Petersburg", "date": "tomorrow"},
+                )
+            ],
+        ),
+        NormalizedMessage(role="tool", tool_call_id="call-weather", content="snow"),
+    ]
+    provider = FakeProvider(
+        responses={
+            "Direct": _tool_response("Direct", repeated_call),
+            "Verifier": _text_response(
+                "Verifier",
+                _verification_json(verdict="approve"),
+            ),
+            "Judge": _text_response(
+                "Judge",
+                _action_json(
+                    action_type="tool_call",
+                    task_status="needs_tool",
+                    tool_call=repeated_call.model_dump(mode="json", exclude_none=True),
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["Verifier"],
+            judge_model="Judge",
+            direct_model="Direct",
+            panel_roles=["verifier"],
+            include_direct_candidate=True,
+            decision_mode="action",
+            post_tool_mode="verified_continuation",
+            direct_tool_call_policy="verify_before_return",
+        ),
+    )
+
+    assert response.error is not None
+    assert response.error.code == "fusion_action_failed"
+    assert response.choices == []
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
+        "repeated_action_tool_call"
+    )
 
 
 async def test_post_tool_repeated_direct_tool_call_falls_back_to_finalizer():

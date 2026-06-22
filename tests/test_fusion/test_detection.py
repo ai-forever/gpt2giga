@@ -29,7 +29,7 @@ def test_is_fusion_model_requires_enabled_flag():
     assert not is_fusion_model("GigaChat", _settings())
 
 
-def test_extract_fusion_model_alias_uses_default_preset():
+def test_extract_fusion_code_alias_uses_verified_tool_loop_preset():
     config = extract_fusion_request(
         {"model": "gpt2giga/fusion-code"},
         _settings(),
@@ -37,11 +37,14 @@ def test_extract_fusion_model_alias_uses_default_preset():
 
     assert config is not None
     assert config.source == "model"
-    assert config.preset == "code-budget"
-    assert config.analysis_models == ["GigaChat-2-Pro", "GigaChat-2-Max"]
-    assert config.judge_model == "GigaChat-2-Max"
-    assert config.invocation_mode == "outer_auto"
-    assert config.decision_mode == "tool_result"
+    assert config.preset == "verified-tool-loop-ultra"
+    assert config.analysis_models == ["GigaChat-3-Ultra"]
+    assert config.judge_model == "GigaChat-3-Ultra"
+    assert config.invocation_mode == "force"
+    assert config.decision_mode == "action"
+    assert config.candidate_stage_order == "direct_then_verify"
+    assert config.direct_tool_call_policy == "verify_before_return"
+    assert config.post_tool_mode == "verified_continuation"
 
 
 def test_extract_fusion_plugin_overrides_model_alias():
@@ -223,6 +226,21 @@ def test_extract_fusion_model_alias_can_select_accuracy_preset():
     assert config.invocation_mode == "outer_auto"
     assert config.decision_mode == "tool_result"
     assert config.prompt_mode == "minimal"
+
+
+def test_extract_fusion_benchmark_alias_uses_forced_selector_preset():
+    config = extract_fusion_request(
+        {"model": "gpt2giga/fusion-benchmark"},
+        _settings(aliases=["gpt2giga/fusion-benchmark"]),
+    )
+
+    assert config is not None
+    assert config.preset == "force-benchmark-selector"
+    assert config.include_direct_candidate is True
+    assert config.return_selected_candidate is True
+    assert config.invocation_mode == "force"
+    assert config.decision_mode == "selector"
+    assert config.tools_mode == "off"
 
 
 def test_extract_fusion_rejects_recursive_direct_model():

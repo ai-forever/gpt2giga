@@ -105,6 +105,7 @@ def make_app(*, gigachat=None):
             fusion_default_preset="code-budget",
             fusion_aliases=[
                 "gpt2giga/fusion-code",
+                "gpt2giga/fusion-code-budget",
                 "gpt2giga/fusion-force-synthesize",
                 "gpt2giga/fusion-force-selector",
             ],
@@ -120,7 +121,7 @@ def test_gemini_generate_content_fusion_model_alias_returns_non_stream_response(
     client = TestClient(app)
 
     response = client.post(
-        "/models/gpt2giga/fusion-code:generateContent",
+        "/models/gpt2giga/fusion-code-budget:generateContent",
         json={
             "systemInstruction": {"parts": [{"text": "Be direct."}]},
             "contents": [{"parts": [{"text": "hello from gemini"}]}],
@@ -131,7 +132,7 @@ def test_gemini_generate_content_fusion_model_alias_returns_non_stream_response(
 
     body = response.json()
     assert response.status_code == 200
-    assert body["modelVersion"] == "gpt2giga/fusion-code"
+    assert body["modelVersion"] == "gpt2giga/fusion-code-budget"
     assert body["candidates"][0]["content"]["parts"] == [
         {"text": "panel answer from GigaChat-2-Max"}
     ]
@@ -152,7 +153,7 @@ def test_gemini_stream_generate_content_fusion_model_alias_returns_buffered_sse(
 
     with client.stream(
         "POST",
-        "/models/gpt2giga/fusion-code:streamGenerateContent?alt=sse",
+        "/models/gpt2giga/fusion-code-budget:streamGenerateContent?alt=sse",
         json={
             "contents": [{"parts": [{"text": "hello"}]}],
         },

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from typing import Literal
+from typing import Any, Literal
 
 from gpt2giga.protocols.normalized import (
     NormalizedContentPart,
@@ -13,16 +13,20 @@ from gpt2giga.protocols.normalized import (
     NormalizedToolCall,
 )
 from gpt2giga.providers.fusion.schemas import (
+    FUSION_ACTION_DECISION_SCHEMA_VERSION,
     FUSION_ANALYSIS_SCHEMA_VERSION,
     FUSION_SELECTION_SCHEMA_VERSION,
+    FUSION_VERIFICATION_SCHEMA_VERSION,
+    FusionActionDecision,
     FusionCandidate,
     FusionPanelResult,
     FusionSelection,
+    FusionVerification,
 )
 from gpt2giga.providers.fusion.tool_arbitration import validate_tool_call_arguments
 
 InstructionStage = Literal["panel", "judge", "final"]
-DecisionMode = Literal["tool_result", "synthesize", "selector"]
+DecisionMode = Literal["tool_result", "synthesize", "selector", "action"]
 PromptMode = Literal["full", "minimal"]
 
 INSTRUCTION_ROLES = {"system", "developer"}
@@ -447,6 +451,8 @@ def build_selector_judge_user_prompt(
     tools_mode: str = "off",
     tool_choice: object | None = None,
     max_tool_calls: int = 1,
+    request_messages: list[NormalizedMessage] | None = None,
+    meta_tool_names: list[str] | None = None,
 ) -> str:
     """Build the selector judge payload without prompt or secret content."""
     rendered_candidates: list[dict[str, object]] = []
@@ -476,6 +482,8 @@ def build_selector_judge_user_prompt(
                             tools_mode=tools_mode,
                             tool_choice=tool_choice,
                             max_tool_calls=max_tool_calls,
+                            request_messages=request_messages,
+                            meta_tool_names=meta_tool_names,
                         )
                         for call in candidate.tool_calls
                         if call.name
@@ -544,6 +552,8 @@ def build_selector_finalizer_user_prompt(
                     tools_mode="off",
                     tool_choice=None,
                     max_tool_calls=1,
+                    request_messages=None,
+                    meta_tool_names=None,
                 )
                 for call in candidate.tool_calls
                 if call.name
@@ -561,6 +571,153 @@ def build_selector_finalizer_user_prompt(
     )
 
 
+def build_verifier_panel_user_prompt(
+    *,
+    direct_candidate: FusionCandidate,
+    already_called_tools: list[dict[str, object]],
+    missing_requirements: list[str],
+    request_tools: list[NormalizedTool],
+) -> str:
+    """Build verifier input that focuses on the direct candidate."""
+    payload = {
+        "schema_version": FUSION_VERIFICATION_SCHEMA_VERSION,
+        "verification_schema": FusionVerification.model_json_schema(),
+        "direct_candidate": _render_candidate_payload(
+            direct_candidate,
+            request_tools=request_tools,
+            tools_mode="schema_only",
+            tool_choice=None,
+            max_tool_calls=1,
+            request_messages=None,
+            meta_tool_names=None,
+        ),
+        "already_called_tools": already_called_tools,
+        "available_tools": _render_tool_schemas(request_tools),
+        "suspected_missing_requirements": missing_requirements,
+    }
+    return (
+        "Verify the direct candidate against the original user request, current "
+        "tool/result history, and available tools.\n"
+        "Do not solve independently unless the direct candidate has a concrete "
+        "defect. If a tool is still needed, say so and approve or correct the "
+        "candidate tool call. Never invent tool results.\n"
+        "Return only one FusionVerification JSON object.\n\n"
+        '<verification_input format="json">\n'
+        f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}\n"
+        "</verification_input>"
+    )
+
+
+def build_action_judge_user_prompt(
+    *,
+    direct_candidate: FusionCandidate,
+    verification: FusionVerification | None,
+    already_called_tools: list[dict[str, object]],
+    missing_requirements: list[str],
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: object | None,
+    max_tool_calls: int,
+    request_messages: list[NormalizedMessage],
+    meta_tool_names: list[str],
+) -> str:
+    """Build action judge input for the verified tool loop."""
+    payload = {
+        "schema_version": FUSION_ACTION_DECISION_SCHEMA_VERSION,
+        "action_decision_schema": FusionActionDecision.model_json_schema(),
+        "stop_policy": {
+            "if_required_data_missing": "return action_type=tool_call",
+            "if_all_required_data_present": "return action_type=answer",
+            "never_finalize_because_one_tool_returned": True,
+            "never_invent_missing_tool_data": True,
+        },
+        "direct_candidate": _render_candidate_payload(
+            direct_candidate,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+            request_messages=request_messages,
+            meta_tool_names=meta_tool_names,
+        ),
+        "verification": (
+            verification.model_dump(mode="json", exclude_none=True)
+            if verification is not None
+            else None
+        ),
+        "already_called_tools": already_called_tools,
+        "available_tools": _render_tool_schemas(request_tools),
+        "suspected_missing_requirements": missing_requirements,
+    }
+    return (
+        "Choose the next client-visible action for the verified tool loop.\n"
+        "If required data is missing, return action_type=tool_call with one "
+        "valid available tool call. Prefer a valid native direct tool call over "
+        "advisory corrections unless the verifier found a concrete defect.\n"
+        "If all required data is present, return action_type=answer and use only "
+        "observed tool results and conversation facts. Do not emit prose around "
+        "the JSON object.\n\n"
+        '<action_decision_input format="json">\n'
+        f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}\n"
+        "</action_decision_input>"
+    )
+
+
+def _render_candidate_payload(
+    candidate: FusionCandidate,
+    *,
+    request_tools: list[NormalizedTool] | None,
+    tools_mode: str,
+    tool_choice: object | None,
+    max_tool_calls: int,
+    request_messages: list[NormalizedMessage] | None,
+    meta_tool_names: list[str] | None,
+) -> dict[str, object]:
+    """Render one candidate for internal JSON prompts."""
+    payload: dict[str, object] = {
+        "candidate_id": candidate.candidate_id,
+        "source": candidate.source,
+        "model": candidate.model,
+        "role": candidate.role,
+        "status": candidate.status,
+        "truncated": candidate.truncated,
+    }
+    if candidate.status == "ok":
+        payload.update(
+            {
+                "type": "untrusted_candidate_output",
+                "untrusted": True,
+                "content": candidate.content or "",
+                "tool_call_names": [
+                    call.name for call in candidate.tool_calls if call.name
+                ],
+                "tool_calls": [
+                    _render_candidate_tool_call(
+                        call,
+                        native=candidate.source == "direct",
+                        request_tools=request_tools,
+                        tools_mode=tools_mode,
+                        tool_choice=tool_choice,
+                        max_tool_calls=max_tool_calls,
+                        request_messages=request_messages,
+                        meta_tool_names=meta_tool_names,
+                    )
+                    for call in candidate.tool_calls
+                    if call.name
+                ],
+            }
+        )
+    else:
+        payload.update(
+            {
+                "type": "candidate_status",
+                "error_type": candidate.error_type or "unknown",
+                "error_message": candidate.error_message or "",
+            }
+        )
+    return payload
+
+
 def _render_candidate_tool_call(
     tool_call: NormalizedToolCall,
     *,
@@ -569,6 +726,8 @@ def _render_candidate_tool_call(
     tools_mode: str,
     tool_choice: object | None,
     max_tool_calls: int,
+    request_messages: list[NormalizedMessage] | None,
+    meta_tool_names: list[str] | None,
 ) -> dict[str, object]:
     validation = None
     if request_tools is not None:
@@ -579,6 +738,12 @@ def _render_candidate_tool_call(
             tool_choice=tool_choice,
             max_tool_calls=max_tool_calls,
         )
+    repeated = (
+        _tool_call_repeated_without_new_user(request_messages, tool_call)
+        if request_messages is not None
+        else None
+    )
+    meta = _is_meta_tool_call(tool_call, meta_tool_names or [])
     return {
         "name": tool_call.name,
         "arguments": _json_safe_arguments(
@@ -589,7 +754,21 @@ def _render_candidate_tool_call(
         "valid": validation.valid if validation is not None else None,
         "native": native,
         "advisory": not native,
+        "repeated": repeated,
+        "meta": meta,
     }
+
+
+def _render_tool_schemas(tools: list[NormalizedTool]) -> list[dict[str, object]]:
+    return [
+        {
+            "type": tool.type,
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        }
+        for tool in tools
+    ]
 
 
 def _json_safe_arguments(value: object) -> object:
@@ -603,6 +782,71 @@ def _json_safe_arguments(value: object) -> object:
     except (TypeError, ValueError):
         return str(value)
     return value
+
+
+def _tool_call_repeated_without_new_user(
+    messages: list[NormalizedMessage] | None,
+    tool_call: NormalizedToolCall,
+) -> bool:
+    if messages is None:
+        return False
+    signature = _tool_call_signature(tool_call)
+    if signature is None:
+        return False
+    last_user_index = _last_user_index(messages)
+    for message in messages[last_user_index + 1 :]:
+        if message.role != "assistant":
+            continue
+        for existing_call in message.tool_calls:
+            if _tool_call_signature(existing_call) == signature:
+                return True
+    return False
+
+
+def _tool_call_signature(tool_call: NormalizedToolCall) -> tuple[str, str] | None:
+    name = (tool_call.name or "").strip()
+    if not name:
+        return None
+    return name, _canonical_tool_arguments(tool_call.arguments)
+
+
+def _canonical_tool_arguments(value: Any) -> str:
+    if value is None:
+        normalized: Any = {}
+    elif isinstance(value, str):
+        try:
+            normalized = json.loads(value)
+        except json.JSONDecodeError:
+            normalized = value
+    else:
+        normalized = value
+    return json.dumps(
+        normalized,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _last_user_index(messages: list[NormalizedMessage]) -> int:
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].role == "user":
+            return index
+    return -1
+
+
+def _is_meta_tool_call(
+    tool_call: NormalizedToolCall,
+    meta_tool_names: list[str],
+) -> bool:
+    name = (tool_call.name or "").strip().lower()
+    normalized_names = {
+        item.strip().lower()
+        for item in meta_tool_names
+        if isinstance(item, str) and item.strip()
+    }
+    return bool(name and name in normalized_names)
 
 
 def _render_instruction_message(*, index: int, message: NormalizedMessage) -> str:

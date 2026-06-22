@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from gpt2giga.models.config import (
+    FusionCandidateStageOrder,
     FusionDecisionMode,
     FusionDirectToolCallPolicy,
     FusionInvocationMode,
@@ -16,6 +17,7 @@ from gpt2giga.models.config import (
     FusionPostToolMode,
     FusionPresetSettings,
     FusionPromptMode,
+    FusionRequiredToolPolicy,
     FusionSettings,
     FusionToolsMode,
 )
@@ -68,6 +70,8 @@ class FusionRequestConfig(BaseModel):
     max_client_tool_rounds: int = Field(default=8, ge=0, le=64)
     post_tool_mode: FusionPostToolMode = "direct_continuation"
     direct_tool_call_policy: FusionDirectToolCallPolicy = "return_immediately"
+    candidate_stage_order: FusionCandidateStageOrder = "parallel"
+    required_tool_policy: FusionRequiredToolPolicy = "model_inferred"
     stop_server_tools_when: FusionStopServerToolsWhen | None = None
     raw_parameters: dict[str, Any] = Field(default_factory=dict)
 
@@ -267,6 +271,14 @@ def _build_request_config(
         params.get("direct_tool_call_policy"),
         preset.direct_tool_call_policy or settings.direct_tool_call_policy,
     )
+    candidate_stage_order = _optional_mode(
+        params.get("candidate_stage_order"),
+        preset.candidate_stage_order,
+    )
+    required_tool_policy = _optional_mode(
+        params.get("required_tool_policy"),
+        preset.required_tool_policy,
+    )
 
     resolved = FusionRequestConfig(
         source=source,
@@ -336,6 +348,8 @@ def _build_request_config(
         else settings.max_client_tool_rounds,
         post_tool_mode=post_tool_mode,
         direct_tool_call_policy=direct_tool_call_policy,
+        candidate_stage_order=candidate_stage_order,
+        required_tool_policy=required_tool_policy,
         stop_server_tools_when=stop_server_tools_when,
         raw_parameters=dict(params),
     )
@@ -530,7 +544,11 @@ def _preset_from_model_alias(model: str | None) -> str | None:
         return "code-high"
     if normalized.endswith("fusion-general"):
         return "general"
-    if normalized.endswith(("fusion-accuracy", "fusion-benchmark")):
+    if normalized.endswith("fusion-benchmark"):
+        return "force-benchmark-selector"
+    if normalized.endswith("fusion-code"):
+        return "verified-tool-loop-ultra"
+    if normalized.endswith("fusion-accuracy"):
         return "accuracy-ultra-selector"
     if normalized.endswith("fusion-accuracy-verifier"):
         return "accuracy-ultra-verifier"
@@ -540,6 +558,8 @@ def _preset_from_model_alias(model: str | None) -> str | None:
 
 
 def _planned_upstream_calls(config: FusionRequestConfig) -> int:
+    if config.decision_mode == "action":
+        return 3
     calls = len(config.analysis_models) + 1
     if config.include_direct_candidate:
         calls += 1

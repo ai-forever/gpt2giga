@@ -268,11 +268,14 @@ GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES=False
 generation limits, `include_direct_candidate`, `return_selected_candidate`,
 `decision_mode`, `prompt_mode`, output budgets, `min_successful_panels`,
 `timeout_seconds`, `tools_mode`, `post_tool_mode`,
-`direct_tool_call_policy` и `max_client_tool_rounds`.
+`direct_tool_call_policy`, `candidate_stage_order`, `required_tool_policy` и
+`max_client_tool_rounds`.
 `decision_mode="selector"` выбирает лучший candidate и возвращает его без
 переписывания, если `needs_rewrite=false` и `return_selected_candidate=true`;
 `decision_mode="synthesize"` сохраняет старый compact `panel -> judge/finalizer`
-путь.
+путь; `decision_mode="action"` включает verified tool loop, где direct model
+предлагает следующий tool call или answer, verifier проверяет direct candidate,
+а judge возвращает structured action decision.
 
 Подробно: [GigaFusion](fusion.md).
 

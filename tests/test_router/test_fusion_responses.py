@@ -79,6 +79,95 @@ class FusionGigachat:
         )
 
 
+class VerifiedLoopGigachat:
+    def __init__(self):
+        self.chat_calls = []
+
+    async def achat(self, chat):
+        self.chat_calls.append(chat)
+        stage = chat.get("metadata", {}).get("gpt2giga_fusion_stage")
+        if stage == "direct_candidate":
+            content = None
+            message = {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "id": "call-weather",
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "arguments": json.dumps(
+                                {
+                                    "city": "Saint Petersburg",
+                                    "date": "tomorrow",
+                                }
+                            ),
+                        },
+                    }
+                ],
+            }
+            finish_reason = "tool_calls"
+        elif stage == "verifier_panel":
+            message = {
+                "role": "assistant",
+                "content": json.dumps(
+                    {
+                        "schema_version": "gpt2giga.fusion.verification.v1",
+                        "checked_candidate_id": "direct",
+                        "verdict": "approve",
+                        "concrete_issues": [],
+                        "corrected_tool_call": None,
+                        "missing_requirements_after_action": ["hotel", "currency"],
+                        "all_required_data_present": False,
+                        "reason_brief": "direct tool call is valid",
+                    }
+                ),
+            }
+            finish_reason = "stop"
+        elif stage == "action_judge":
+            message = {
+                "role": "assistant",
+                "content": json.dumps(
+                    {
+                        "schema_version": "gpt2giga.fusion.action_decision.v1",
+                        "task_status": "needs_tool",
+                        "action_type": "tool_call",
+                        "selected_candidate_id": "direct",
+                        "tool_call": {
+                            "id": "call-weather",
+                            "type": "function",
+                            "name": "get_weather",
+                            "arguments": {
+                                "city": "Saint Petersburg",
+                                "date": "tomorrow",
+                            },
+                        },
+                        "final_answer": None,
+                        "missing_requirements": ["hotel", "currency"],
+                        "verifier_findings": [],
+                        "direct_candidate_errors": [],
+                        "confidence": 1.0,
+                        "reason_brief": "call weather first",
+                    }
+                ),
+            }
+            finish_reason = "stop"
+        else:
+            message = {"role": "assistant", "content": "unexpected stage"}
+            finish_reason = "stop"
+        return MockResponse(
+            {
+                "choices": [{"message": message, "finish_reason": finish_reason}],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        )
+
+
 def make_app(*, gigachat=None):
     app = FastAPI()
     app.include_router(router)
@@ -91,6 +180,7 @@ def make_app(*, gigachat=None):
             fusion_default_preset="code-budget",
             fusion_aliases=[
                 "gpt2giga/fusion-code",
+                "gpt2giga/fusion-code-budget",
                 "gpt2giga/fusion-force-synthesize",
                 "gpt2giga/fusion-force-selector",
             ],
@@ -107,7 +197,7 @@ def test_responses_fusion_model_alias_returns_non_stream_response():
     response = client.post(
         "/responses",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "instructions": "Be direct.",
             "input": "hello from codex",
             "metadata": {"tenant": "test"},
@@ -119,7 +209,7 @@ def test_responses_fusion_model_alias_returns_non_stream_response():
     assert response.status_code == 200
     assert body["object"] == "response"
     assert body["status"] == "completed"
-    assert body["model"] == "gpt2giga/fusion-code"
+    assert body["model"] == "gpt2giga/fusion-code-budget"
     assert body["output"][0]["content"][0]["text"] == (
         "panel answer from GigaChat-2-Max"
     )
@@ -144,7 +234,7 @@ def test_responses_fusion_model_alias_returns_buffered_stream():
         "POST",
         "/responses",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "input": "hello",
             "stream": True,
         },
@@ -176,7 +266,7 @@ def test_responses_fusion_error_returns_http_502():
     response = client.post(
         "/responses",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "input": "hello",
         },
     )
@@ -188,6 +278,51 @@ def test_responses_fusion_error_returns_http_502():
     assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
         "GigaChat-2-Max",
     ]
+
+
+def test_responses_fusion_code_verified_loop_returns_function_call():
+    gigachat = VerifiedLoopGigachat()
+    app = make_app(gigachat=gigachat)
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        json={
+            "model": "gpt2giga/fusion-code",
+            "input": "Check weather before planning the trip.",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string"},
+                            "date": {"type": "string"},
+                        },
+                        "required": ["city", "date"],
+                    },
+                }
+            ],
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["output"] == [
+        {
+            "id": "fc_call-weather",
+            "type": "function_call",
+            "status": "completed",
+            "call_id": "call-weather",
+            "name": "get_weather",
+            "arguments": '{"city": "Saint Petersburg", "date": "tomorrow"}',
+        }
+    ]
+    assert [
+        call["metadata"]["gpt2giga_fusion_stage"] for call in gigachat.chat_calls
+    ] == ["direct_candidate", "verifier_panel", "action_judge"]
 
 
 def test_responses_fusion_openrouter_tool_strips_artifacts_and_returns_tool_call():

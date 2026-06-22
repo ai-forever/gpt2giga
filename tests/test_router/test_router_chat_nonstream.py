@@ -183,7 +183,7 @@ def test_chat_completions_fusion_model_alias_returns_non_stream_response():
         proxy=ProxySettings(
             fusion_enabled=True,
             fusion_default_preset="code-budget",
-            fusion_aliases=["gpt2giga/fusion-code"],
+            fusion_aliases=["gpt2giga/fusion-code-budget"],
             gigachat_api_mode="v1",
         )
     )
@@ -194,14 +194,14 @@ def test_chat_completions_fusion_model_alias_returns_non_stream_response():
     resp = client.post(
         "/chat/completions",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "messages": [{"role": "user", "content": "hi"}],
         },
     )
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["model"] == "gpt2giga/fusion-code"
+    assert body["model"] == "gpt2giga/fusion-code-budget"
     assert body["choices"][0]["message"]["content"] == (
         "panel answer from GigaChat-2-Max"
     )
@@ -216,7 +216,7 @@ def test_chat_completions_fusion_model_alias_returns_buffered_stream():
         proxy=ProxySettings(
             fusion_enabled=True,
             fusion_default_preset="code-budget",
-            fusion_aliases=["gpt2giga/fusion-code"],
+            fusion_aliases=["gpt2giga/fusion-code-budget"],
             gigachat_api_mode="v1",
         )
     )
@@ -228,7 +228,7 @@ def test_chat_completions_fusion_model_alias_returns_buffered_stream():
         "POST",
         "/chat/completions",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "messages": [{"role": "user", "content": "hi"}],
             "stream": True,
         },
@@ -255,7 +255,7 @@ def test_chat_completions_fusion_stream_can_emit_heartbeat_comments():
         proxy=ProxySettings(
             fusion_enabled=True,
             fusion_default_preset="code-budget",
-            fusion_aliases=["gpt2giga/fusion-code"],
+            fusion_aliases=["gpt2giga/fusion-code-budget"],
             fusion_stream_heartbeat_seconds=0.001,
             gigachat_api_mode="v1",
         )
@@ -268,7 +268,7 @@ def test_chat_completions_fusion_stream_can_emit_heartbeat_comments():
         "POST",
         "/chat/completions",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "messages": [{"role": "user", "content": "hi"}],
             "stream": True,
         },
@@ -295,7 +295,7 @@ def test_chat_completions_fusion_error_returns_http_502():
         proxy=ProxySettings(
             fusion_enabled=True,
             fusion_default_preset="code-budget",
-            fusion_aliases=["gpt2giga/fusion-code"],
+            fusion_aliases=["gpt2giga/fusion-code-budget"],
             gigachat_api_mode="v1",
         )
     )
@@ -306,7 +306,7 @@ def test_chat_completions_fusion_error_returns_http_502():
     resp = client.post(
         "/chat/completions",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "messages": [{"role": "user", "content": "hi"}],
         },
     )

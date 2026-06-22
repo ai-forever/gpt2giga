@@ -32,15 +32,26 @@ FusionToolsMode = Literal["off", "schema_only", "final_arbitration"]
 FusionStreamingMode = Literal["off", "buffered"]
 FusionPipelineMode = Literal["compact", "strict"]
 FusionInvocationMode = Literal["outer_auto", "classifier_auto", "force", "off"]
-FusionDecisionMode = Literal["tool_result", "synthesize", "selector"]
+FusionDecisionMode = Literal["tool_result", "synthesize", "selector", "action"]
 FusionPromptMode = Literal["full", "minimal"]
 FusionPanelOutputTruncation = Literal["head_tail"]
 FusionPostToolMode = Literal[
     "direct_continuation",
     "fusion_continuation",
+    "verified_continuation",
     "finalize",
 ]
-FusionDirectToolCallPolicy = Literal["return_immediately", "selector"]
+FusionDirectToolCallPolicy = Literal[
+    "return_immediately",
+    "selector",
+    "verify_before_return",
+]
+FusionCandidateStageOrder = Literal[
+    "parallel",
+    "direct_then_verify",
+    "direct_and_solver_then_verify",
+]
+FusionRequiredToolPolicy = Literal["model_inferred", "none"]
 
 
 DEFAULT_FUSION_ALIASES = [
@@ -118,6 +129,8 @@ class FusionPresetSettings(BaseModel):
     min_successful_panels: PositiveInt = 1
     timeout_seconds: PositiveFloat = 120.0
     tools_mode: FusionToolsMode = "schema_only"
+    candidate_stage_order: FusionCandidateStageOrder = "parallel"
+    required_tool_policy: FusionRequiredToolPolicy = "model_inferred"
     max_client_tool_rounds: Optional[int] = Field(default=None, ge=0, le=64)
     post_tool_mode: Optional[FusionPostToolMode] = None
     direct_tool_call_policy: Optional[FusionDirectToolCallPolicy] = None
@@ -137,6 +150,8 @@ class FusionPresetSettings(BaseModel):
         "panel_output_truncation",
         "post_tool_mode",
         "direct_tool_call_policy",
+        "candidate_stage_order",
+        "required_tool_policy",
         mode="before",
     )
     @classmethod

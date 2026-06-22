@@ -88,6 +88,7 @@ def make_app(*, gigachat=None):
             fusion_default_preset="code-budget",
             fusion_aliases=[
                 "gpt2giga/fusion-code",
+                "gpt2giga/fusion-code-budget",
                 "gpt2giga/fusion-force-synthesize",
                 "gpt2giga/fusion-force-selector",
             ],
@@ -106,7 +107,7 @@ def test_anthropic_messages_fusion_model_alias_returns_non_stream_message():
     response = client.post(
         "/messages",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "system": "Be direct.",
             "messages": [{"role": "user", "content": "hello from claude"}],
             "max_tokens": 128,
@@ -118,7 +119,7 @@ def test_anthropic_messages_fusion_model_alias_returns_non_stream_message():
     assert response.status_code == 200
     assert body["type"] == "message"
     assert body["role"] == "assistant"
-    assert body["model"] == "gpt2giga/fusion-code"
+    assert body["model"] == "gpt2giga/fusion-code-budget"
     assert body["content"] == [
         {"type": "text", "text": "panel answer from GigaChat-2-Max"}
     ]
@@ -140,7 +141,7 @@ def test_anthropic_messages_fusion_model_alias_returns_buffered_stream():
         "POST",
         "/messages",
         json={
-            "model": "gpt2giga/fusion-code",
+            "model": "gpt2giga/fusion-code-budget",
             "messages": [{"role": "user", "content": "hello"}],
             "max_tokens": 128,
             "stream": True,

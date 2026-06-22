@@ -86,7 +86,11 @@ def test_fusion_settings_parse_json_env(monkeypatch):
             "max_total_panel_output_chars": 5678,
             "min_successful_panels": 1,
             "timeout_seconds": 90,
-            "tools_mode": "SCHEMA_ONLY"
+            "tools_mode": "SCHEMA_ONLY",
+            "candidate_stage_order": "DIRECT_THEN_VERIFY",
+            "required_tool_policy": "NONE",
+            "post_tool_mode": "VERIFIED_CONTINUATION",
+            "direct_tool_call_policy": "VERIFY_BEFORE_RETURN"
           }
         }
         """,
@@ -132,6 +136,10 @@ def test_fusion_settings_parse_json_env(monkeypatch):
     assert preset.max_panel_output_chars == 1234
     assert preset.max_total_panel_output_chars == 5678
     assert preset.tools_mode == "schema_only"
+    assert preset.candidate_stage_order == "direct_then_verify"
+    assert preset.required_tool_policy == "none"
+    assert preset.post_tool_mode == "verified_continuation"
+    assert preset.direct_tool_call_policy == "verify_before_return"
 
 
 def test_fusion_aliases_parse_comma_env(monkeypatch):

@@ -10,6 +10,8 @@ from gpt2giga.protocols.normalized.models import NormalizedToolCall, NormalizedU
 
 FUSION_ANALYSIS_SCHEMA_VERSION = "gpt2giga.fusion.analysis.v1"
 FUSION_SELECTION_SCHEMA_VERSION = "gpt2giga.fusion.selection.v1"
+FUSION_ACTION_DECISION_SCHEMA_VERSION = "gpt2giga.fusion.action_decision.v1"
+FUSION_VERIFICATION_SCHEMA_VERSION = "gpt2giga.fusion.verification.v1"
 FusionTaskStatus = Literal["needs_tool", "complete", "blocked", "answer_only"]
 
 
@@ -149,6 +151,62 @@ class FusionSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class FusionVerification(BaseModel):
+    """Structured verifier assessment of the direct candidate."""
+
+    schema_version: Literal["gpt2giga.fusion.verification.v1"] = (
+        FUSION_VERIFICATION_SCHEMA_VERSION
+    )
+    checked_candidate_id: str
+    verdict: Literal["approve", "reject", "needs_tool", "complete", "blocked"]
+    concrete_issues: list[str] = Field(default_factory=list)
+    corrected_tool_call: Optional[NormalizedToolCall] = None
+    missing_requirements_after_action: list[str] = Field(default_factory=list)
+    all_required_data_present: bool = False
+    reason_brief: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FusionActionDecision(BaseModel):
+    """Structured judge decision for the verified tool loop."""
+
+    schema_version: Literal["gpt2giga.fusion.action_decision.v1"] = (
+        FUSION_ACTION_DECISION_SCHEMA_VERSION
+    )
+    task_status: Literal["needs_tool", "complete", "blocked"]
+    action_type: Literal["tool_call", "answer", "blocked"]
+    selected_candidate_id: Optional[str] = None
+    tool_call: Optional[NormalizedToolCall] = None
+    final_answer: Optional[str] = None
+    missing_requirements: list[str] = Field(default_factory=list)
+    verifier_findings: list[str] = Field(default_factory=list)
+    direct_candidate_errors: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason_brief: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_action(self):
+        """Keep the action decision internally consistent."""
+        if self.action_type == "tool_call":
+            if self.task_status != "needs_tool":
+                raise ValueError("tool_call requires task_status=needs_tool")
+            if self.tool_call is None:
+                raise ValueError("tool_call action requires tool_call")
+            if self.final_answer:
+                raise ValueError("tool_call action forbids final_answer")
+        if self.action_type == "answer":
+            if self.task_status != "complete":
+                raise ValueError("answer requires task_status=complete")
+            if not self.final_answer:
+                raise ValueError("answer action requires final_answer")
+            if self.tool_call is not None:
+                raise ValueError("answer action forbids tool_call")
+        return self
+
+
 class FusionRunResult(BaseModel):
     """Represent one complete Fusion run."""
 
@@ -158,13 +216,17 @@ class FusionRunResult(BaseModel):
     analysis_models: list[str] = Field(default_factory=list)
     judge_model: str
     final_model: Optional[str] = None
-    decision_mode: Literal["tool_result", "synthesize", "selector"] = "tool_result"
+    decision_mode: Literal["tool_result", "synthesize", "selector", "action"] = (
+        "tool_result"
+    )
     prompt_mode: Literal["full", "minimal"] = "full"
     panel_results: list[FusionPanelResult] = Field(default_factory=list)
     failed_models: list[FusionPanelResult] = Field(default_factory=list)
     candidates: list[FusionCandidate] = Field(default_factory=list)
     analysis: Optional[FusionAnalysis] = None
     selection: Optional[FusionSelection] = None
+    verification: Optional[FusionVerification] = None
+    action_decision: Optional[FusionActionDecision] = None
     selected_candidate_id: Optional[str] = None
     selected_candidate_source: Optional[Literal["direct", "panel"]] = None
     needs_rewrite: Optional[bool] = None
