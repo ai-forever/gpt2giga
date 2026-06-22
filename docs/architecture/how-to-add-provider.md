@@ -1,236 +1,236 @@
-# Как добавить провайдера или протокол
+# How to add a provider or protocol
 
-Этот документ описывает практический чек-лист для расширения gpt2giga новым
-вышестоящим провайдером или новым публичным протоколом. Перед изменением набора API
-сначала нужно решить, что именно добавляется:
+This document describes a practical checklist for extending gpt2giga with a new
+upstream provider or a new public protocol. Before changing the API surface,
+first decide what exactly is being added:
 
-- новый публичный протокол: клиенты отправляют полезные нагрузки, совместимые с Gemini, а
-  вышестоящий сервис остаётся GigaChat;
-- новый вышестоящий провайдер: нормализованные запросы исполняются не только через
+- a new public protocol: clients send Gemini-compatible payloads, and the
+  upstream stays GigaChat;
+- a new upstream provider: normalized requests are executed not only through
   GigaChat;
-- оба слоя сразу.
+- both layers at once.
 
-Термины:
+Terms:
 
-- адаптер протокола переводит внешний сетевой формат в нормализованные модели и обратно;
-- адаптер провайдера исполняет нормализованный запрос в конкретном вышестоящем сервисе;
-- роутер подключает HTTP-поверхность и занимается авторизацией, контекстом запроса, потоковой передачей и
-  типом содержимого ответа;
-- наблюдаемость, журналы трафика и метрики получают безопасные нормализованные поля или
-  поля контекста запроса.
+- a protocol adapter translates an external wire format into normalized models and back;
+- a provider adapter executes a normalized request on a specific upstream;
+- a router mounts the HTTP surface and handles authorization, request context, streaming, and
+  the response media type;
+- observability, traffic logs, and metrics receive safe normalized or
+  request-context fields.
 
-## 1. Зафиксировать область
+## 1. Fix the scope
 
-Для нового протокола:
+For a new protocol:
 
-- определить маршруты, заголовки, ожидания по авторизации и политику псевдонима `/v1`;
-- описать минимальные поддерживаемые операции: chat/messages, embeddings,
-  эндпоинт типа responses, count tokens, models;
-- решить, какие необязательные поля принимаются и игнорируются для совместимости с
-  SDK.
+- define routes, headers, authorization expectations, and the `/v1` alias policy;
+- describe the minimal supported operations: chat/messages, embeddings,
+  a responses-like endpoint, count tokens, models;
+- decide which optional fields are accepted and ignored for SDK
+  compatibility.
 
-Для нового вышестоящего провайдера:
+For a new upstream provider:
 
-- определить настройки авторизации и обращение с секретами;
-- описать синхронные/без потоковой передачи и потоковые вызовы SDK;
-- определить разрешение модели, метку параллелизма по моделям и семантику
-  таймаута/повторов;
-- решить, какие специфичные для провайдера поля можно хранить в `provider_metadata`.
+- define authorization settings and secret handling;
+- describe sync/non-streaming and streaming SDK calls;
+- define model resolution, the per-model concurrency label, and timeout/retry
+  semantics;
+- decide which provider-specific fields can be stored in `provider_metadata`.
 
-## 2. Добавить конфигурацию
+## 2. Add configuration
 
-Обновите:
+Update:
 
-- `gpt2giga/models/config.py`: настройки, валидаторы, значения по умолчанию.
-- `.env.example`: новые переменные окружения и безопасные значения по умолчанию.
-- `docs/configuration.md`: описание для пользователя.
-- `tests/test_config/test_config.py`: значения по умолчанию, разбор окружения, некорректные значения.
+- `gpt2giga/models/config.py`: settings, validators, default values.
+- `.env.example`: new env vars and safe defaults.
+- `docs/configuration.md`: user-facing description.
+- `tests/test_config/test_config.py`: defaults, env parsing, invalid values.
 
-Секреты должны оставаться в окружении/менеджере секретов. Не добавляйте секреты провайдера
-в примеры CLI, журналы трафика, метки метрик или отладочный вывод.
+Secrets must stay in the env/secrets manager. Do not add provider secrets
+to CLI examples, traffic logs, metrics labels, or debug output.
 
-## 3. Добавить адаптер протокола
+## 3. Add a protocol adapter
 
-Файлы для нового публичного протокола обычно живут в
+The files for a new public protocol usually live in
 `gpt2giga/protocols/<protocol>/`.
 
-Минимальный набор:
+A minimal set:
 
-- `adapter.py` с реализацией `ProtocolAdapter` из `gpt2giga/core/interfaces.py`;
-- преобразователь запроса в `NormalizedChatRequest` или другую нормализованную модель;
-- преобразователь ответа из `NormalizedResponse` в публичную форму ответа;
-- преобразователь потока из `NormalizedStreamEvent` в публичный формат SSE/событий;
-- санитайзер/классификатор параметров, если SDK присылает много необязательных полей.
+- `adapter.py` with an implementation of `ProtocolAdapter` from `gpt2giga/core/interfaces.py`;
+- a request mapper to `NormalizedChatRequest` or another normalized model;
+- a response mapper from `NormalizedResponse` to the public response shape;
+- a streaming mapper from `NormalizedStreamEvent` to the public SSE/event format;
+- a parameter sanitizer/classifier if the SDK sends many optional fields.
 
-Правила сопоставления:
+Mapping rules:
 
-- канонические поля кладите в нормализованные поля;
-- неизвестные или принятые, но не исполняемые публичные поля кладите в
-  `raw_extensions`, если их нужно сохранить;
-- специфичный для провайдера проброс кладите в `provider_metadata`;
-- не смешивайте заголовки авторизации/транспорта с полезной нагрузкой модели;
-- схемы инструментов и вызовы инструментов приводите к `NormalizedTool` и
+- put canonical fields into normalized fields;
+- put unknown or accepted-but-not-executed public fields into
+  `raw_extensions`, if they need to be kept;
+- put provider-specific passthrough into `provider_metadata`;
+- do not mix authorization/transport headers with the model payload;
+- bring tool schemas and tool calls to `NormalizedTool` and
   `NormalizedToolCall`;
-- использование токенов приводите к `input_tokens`, `output_tokens`, `total_tokens`;
-- причины завершения приводите к общему набору вроде `stop`, `length`,
-  `tool_calls`, если это возможно.
+- bring usage to `input_tokens`, `output_tokens`, `total_tokens`;
+- bring finish reasons to a common set such as `stop`, `length`,
+  `tool_calls`, where possible.
 
-Для уже подключённого протокола Gemini это сделано отдельным
-преобразователем Gemini-в-нормализованное, а не новой веткой внутри адаптера OpenAI.
-Специфичные для Gemini настройки безопасности, кандидаты, части контента, объявления инструментов и
-события потока должны быть либо подняты в канонические поля, либо явно сохранены в
-расширениях. Для будущих протоколов сохраняйте тот же принцип изоляции сетевого формата
-от адаптера OpenAI.
+For the already mounted Gemini protocol, this is done with a dedicated
+Gemini-to-normalized mapper, not a new branch inside the OpenAI adapter.
+Gemini-specific safety settings, candidates, content parts, tool declarations, and
+stream events must be either promoted to canonical fields or explicitly stored in
+extensions. For future protocols, keep the same principle of isolating the wire format
+from the OpenAI adapter.
 
-## 4. Добавить адаптер провайдера
+## 4. Add a provider adapter
 
-Файлы для нового вышестоящего провайдера живут в `gpt2giga/providers/<provider>/`.
+The files for a new upstream provider live in `gpt2giga/providers/<provider>/`.
 
-Обычно нужны:
+Usually needed:
 
-- `adapter.py`: реализация для вызовов без потоковой передачи и потоковых;
-- `auth.py`: помощники для учётных данных/access-токена;
-- `client.py`: фабрика SDK/клиента;
-- `streaming.py`: фрагменты вышестоящего сервиса в `NormalizedStreamEvent`;
-- `types.py`: локальные Protocol/типы, если типы SDK неудобны для тестов.
+- `adapter.py`: an implementation for non-streaming and streaming calls;
+- `auth.py`: credentials/access-token helpers;
+- `client.py`: an SDK/client factory;
+- `streaming.py`: upstream chunks into `NormalizedStreamEvent`;
+- `types.py`: local Protocol/types if the SDK types are inconvenient for tests.
 
-Адаптер провайдера должен:
+The provider adapter must:
 
-- принимать `NormalizedChatRequest`;
-- вызывать вышестоящий сервис в первую очередь асинхронно;
-- обновлять фактическую модель в `RequestContext` через `update_request_context`;
-- использовать `ModelConcurrencyLimiter` с ограниченной меткой провайдера;
-- возвращать `NormalizedResponse` для вызовов без потоковой передачи;
-- возвращать `NormalizedStreamEvent` для потоковых;
-- нормализовать ошибки провайдера в `NormalizedError`;
-- сохранять только безопасные метаданные провайдера;
-- не писать необработанные учётные данные, API-ключи, cookie и заголовки авторизации.
+- accept a `NormalizedChatRequest`;
+- call the upstream async-first;
+- update the `RequestContext` effective model through `update_request_context`;
+- use `ModelConcurrencyLimiter` with a bounded provider label;
+- return a `NormalizedResponse` for non-streaming;
+- return a `NormalizedStreamEvent` for streaming;
+- normalize provider errors into `NormalizedError`;
+- store only safe provider metadata;
+- not write raw credentials, API keys, cookies, and authorization headers.
 
-Если вышестоящий провайдер умеет нативно принимать нормализованную полезную нагрузку, не
-нужно реконструировать форму OpenAI. Для GigaChat текущий адаптер пока
-переиспользует OpenAI-подобную полезную нагрузку и прежний `RequestTransformer`; это
-переходная деталь, а не требование для новых провайдеров.
+If the upstream provider can natively accept a normalized-like payload, there is no
+need to reconstruct the OpenAI shape. For GigaChat the current adapter still
+reuses an OpenAI-like payload and the legacy `RequestTransformer`; this is a
+transitional detail, not a requirement for new providers.
 
-## 5. Подключить маршруты
+## 5. Mount routes
 
-Обновите нужные слои:
+Update the necessary layers:
 
-- `gpt2giga/routers/<protocol>/`: конкретные HTTP-обработчики.
-- `gpt2giga/api/<protocol>/routes.py`: агрегация маршрутов.
-- `gpt2giga/app/factory.py`: подключение, зависимости авторизации, debug/admin-флаги.
-- `gpt2giga/openapi_specs/`: дополнения OpenAPI для новых эндпоинтов.
-- `gpt2giga/app_state.py` и настройка жизненного цикла, если нужен новый клиент.
+- `gpt2giga/routers/<protocol>/`: concrete HTTP handlers.
+- `gpt2giga/api/<protocol>/routes.py`: route aggregation.
+- `gpt2giga/app/factory.py`: mounting, auth dependencies, debug/admin flags.
+- `gpt2giga/openapi_specs/`: OpenAPI extras for new endpoints.
+- `gpt2giga/app_state.py` and lifecycle setup, if a new client is needed.
 
-Обработчик маршрута должен:
+The route handler must:
 
-- читать тело через общие помощники;
-- создавать или использовать контекст запроса;
-- применять политику авторизации прокси/admin;
-- вызывать адаптер протокола и адаптер провайдера;
-- оборачивать итератор потокового тела так, чтобы метрики, журналы трафика и
-  наблюдаемость видели финальный жизненный цикл;
-- сохранять склейку диалогов только там, где семантика совпадает.
+- read the body through shared helpers;
+- create or use a request context;
+- apply the proxy/admin authorization policy;
+- call the protocol adapter and the provider adapter;
+- wrap the streaming body iterator so that metrics, traffic logs, and
+  observability see the final lifecycle;
+- keep conversation stitching only where the semantics match.
 
-## 6. Добавить наблюдаемость
+## 6. Add observability
 
-Новый провайдер/протокол должен быть виден в Phoenix/OpenTelemetry, метриках и
-журналах трафика без включения захвата промптов.
+A new provider/protocol must be visible in Phoenix/OpenTelemetry, metrics, and
+traffic logs without enabling prompt capture.
 
-Обновите наблюдаемость LLM:
+Update LLM observability:
 
-- используйте `build_llm_chat_completion_attributes()` для чат-подобных сценариев,
-  если запрос/ответ уже нормализованы;
-- добавьте отдельный помощник в `gpt2giga/sinks/observability/<protocol>.py`,
-  если публичный протокол имеет особый формат вывода/событий;
-- задайте имя спана, если нужен новый корневой спан, например `Gemini-Content`;
-- выставляйте `gpt2giga.api_format` в ограниченное значение: `chat_completions`,
-  `responses`, `messages`, `generate_content`, `embeddings` или новый явный
-  формат;
-- сопоставляйте вехи потока с событиями спана через `NormalizedStreamEvent`, где
-  возможно;
-- сохраняйте видимость инструментов: количество/имена по умолчанию, аргументы/схема только
-  при `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True` и
+- use `build_llm_chat_completion_attributes()` for chat-like flows,
+  if the request/response is already normalized;
+- add a separate helper in `gpt2giga/sinks/observability/<protocol>.py`,
+  if the public protocol has a special output/event format;
+- set a span name if a new root span is needed, for example `Gemini-Content`;
+- set `gpt2giga.api_format` to a bounded value: `chat_completions`,
+  `responses`, `messages`, `generate_content`, `embeddings`, or a new explicit
+  format;
+- map stream milestones to span events through `NormalizedStreamEvent`, where
+  possible;
+- keep tool visibility: counts/names by default, args/schema only
+  with `GPT2GIGA_OBSERVABILITY_CAPTURE_CONTENT=True` and
   `GPT2GIGA_OBSERVABILITY_CAPTURE_TOOL_ARGS=True`;
-- не добавляйте промпты, ответы, аргументы инструментов или необработанную полезную нагрузку провайдера в
-  атрибуты без включения и маскирования.
+- do not add prompts, responses, tool args, or the raw provider payload to
+  attributes without opt-in and redaction.
 
-Обновите наблюдаемость жизненного цикла запроса:
+Update request lifecycle observability:
 
-- `RequestContext.protocol`, route, запрошенная/фактическая модель и провайдер
-  должны заполняться до отправки;
-- LLM-маршруты должны выставлять `context.llm_observability_emitted=True`, чтобы
-  не дублировать успешный спан жизненного цикла;
-- ошибки должны попадать в `error_type`, `error_message`, статус OpenTelemetry
-  и нормализованные поля ошибок.
+- `RequestContext.protocol`, route, requested/effective model, and provider
+  must be filled before emission;
+- LLM routes must set `context.llm_observability_emitted=True` so as
+  not to duplicate the successful lifecycle span;
+- errors must reach `error_type`, `error_message`, the OpenTelemetry status,
+  and the normalized error fields.
 
-Обновите метрики:
+Update metrics:
 
-- метки провайдера/протокола должны быть ограниченными;
-- не добавляйте идентификатор запроса, идентификатор трейса, идентификатор пользователя, хеш API-ключа или
-  необработанные варианты модели с высокой кардинальностью;
-- проверьте число запросов, задержку, задержку вышестоящего сервиса, ошибки вышестоящего сервиса, суммарные
-  токены, отключения потока и отброшенные события очереди.
+- provider/protocol labels must be bounded;
+- do not add request id, trace id, user id, API key hash, or raw model
+  variants with high cardinality;
+- check request counts, latency, upstream latency, upstream errors, token
+  totals, stream disconnects, and dropped queue events.
 
-Обновите журналы трафика:
+Update traffic logs:
 
-- захват содержимого запросов/ответов остаётся включаемым;
-- новые поля полезной нагрузки должны проходить маскирование;
-- если схема хранилища требует новые индексируемые поля, добавьте миграцию и
-  обновление шаблона OpenSearch;
-- фильтры admin-логов должны использовать ограниченные поля.
+- request/response content capture stays opt-in;
+- new payload fields must go through redaction;
+- if the storage schema requires new indexed fields, add a migration and
+  an OpenSearch template update;
+- admin log filters must use bounded fields.
 
-## 7. Добавить отладочную трансляцию
+## 7. Add debug translation
 
-Для нового протокола/провайдера расширьте защищённый debug API:
+For a new protocol/provider, extend the protected debug API:
 
-- `SUPPORTED_TRANSLATE_FORMATS` в `gpt2giga/api/admin/routes.py`;
-- эндпоинт `<protocol>-to-normalized`, если нужен короткий путь;
-- обработку универсальной пары `/_debug/translate`;
-- фикстуры в `tests/fixtures/debug_translate/`;
-- тесты на неподдерживаемые пары и безопасные ошибки.
+- `SUPPORTED_TRANSLATE_FORMATS` in `gpt2giga/api/admin/routes.py`;
+- a `<protocol>-to-normalized` endpoint, if a short path is needed;
+- generic `/_debug/translate` pair handling;
+- fixtures in `tests/fixtures/debug_translate/`;
+- tests for unsupported pairs and safe errors.
 
-Отладочная трансляция не должна требовать реальных учётных данных вышестоящего сервиса, кроме
-направлений, где нужно реально подготовить полезную нагрузку SDK провайдера. Необработанные секреты не
-должны попадать в ответ.
+Debug translation must not require real upstream credentials, except for
+directions where you need to actually prepare a provider SDK payload. Raw secrets must
+not end up in the response.
 
-## 8. Добавить тесты
+## 8. Add tests
 
-Минимальный набор:
+A minimal set:
 
-- модульные тесты адаптера: запрос, ответ, инструменты, мультимодальный контент, ошибки;
-- тесты преобразователя потока: события start/delta/tool/usage/end/error;
-- тесты роутера: без потоковой передачи, потоковые, авторизация, некорректные параметры, откат;
-- тесты наблюдаемости: спаны, атрибуты, флаги захвата, маскирование, события инструментов;
-- тесты метрик/журналов трафика, если меняются метки или отправляемые поля;
-- тесты OpenAPI;
-- эталонные фикстуры (golden) для публичного формата ответа/SSE;
-- smoke-тесты совместимости SDK, если есть доступный пакет клиента.
+- adapter unit tests: request, response, tools, multimodal content, errors;
+- streaming mapper tests: start/delta/tool/usage/end/error events;
+- router tests: non-streaming, streaming, auth, invalid params, fallback;
+- observability tests: spans, attributes, capture flags, redaction, tool events;
+- metrics/traffic-log tests, if labels or emitted fields change;
+- OpenAPI tests;
+- golden fixtures for the public response/SSE format;
+- SDK compatibility smoke tests, if a client package is available.
 
-Для протокола Gemini отдельно проверьте сопоставление кандидатов, причины завершения,
-поля, связанные с безопасностью, объявления инструментов/вызовы функций, мультимодальные части и
-порядок событий потока.
+For the Gemini protocol, separately check candidate mapping, finish reasons,
+safety-related fields, tool declarations/function calls, multimodal parts, and
+stream event order.
 
-## 9. Обновить документацию
+## 9. Update docs
 
-Обновите:
+Update:
 
-- `docs/api-compatibility.md`: статус маршрутов и ограничения.
-- `docs/client-parameter-compatibility.md`: принятые/поддерживаемые/игнорируемые поля.
-- `docs/configuration.md`: переменные окружения и режимы.
-- `docs/operations.md`: метрики, журналы трафика, наблюдаемость, debug-эндпоинты.
-- `docs/deployment.md`: изменения compose/окружения, если появились внешние сервисы.
-- `docs/architecture/normalized-messages.md`: если изменился нормализованный
-  контракт или статус выполнения.
-- таблицу документации в README, если появился новый документ для пользователя.
+- `docs/api-compatibility.md`: route status and limitations.
+- `docs/client-parameter-compatibility.md`: accepted/supported/ignored fields.
+- `docs/configuration.md`: env vars and modes.
+- `docs/operations.md`: metrics, traffic logs, observability, debug endpoints.
+- `docs/deployment.md`: compose/env changes, if external services appear.
+- `docs/architecture/normalized-messages.md`: if the normalized
+  contract or execution status changes.
+- the README documentation table, if a new user-facing document appears.
 
-Документация должна явно разделять «реализовано сейчас» и «подготовлено для
-следующего шага». Это особенно важно для частично подготовленных семейств API,
-например Files/Batches, чтобы не обещать публичный маршрут, пока он не подключён и
-не покрыт тестами.
+The documentation must clearly separate "implemented now" and "prepared for the
+next step." This is especially important for partially prepared API families,
+for example Files/Batches, so as not to promise a public route until it is mounted and
+covered by tests.
 
-## 10. Проверить качество
+## 10. Check quality
 
-Перед PR:
+Before the PR:
 
 ```sh
 uv run ruff check .
@@ -238,5 +238,5 @@ uv run ruff format --check .
 uv run pytest tests/ --cov=. --cov-report=term --cov-fail-under=80
 ```
 
-Если менялись зависимости, обновите `uv.lock`. Если менялись контракты deploy/окружения,
-проверьте `.env.example`, compose-файлы и документацию вместе.
+If dependencies changed, update `uv.lock`. If the deploy/env contracts changed,
+check `.env.example`, the Compose files, and the docs together.

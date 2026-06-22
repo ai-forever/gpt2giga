@@ -5,7 +5,7 @@
 - **Repo type:** Single Python package with examples, docs, CI workflows, and deployment assets
 - **What:** FastAPI compatibility gateway that translates OpenAI-, Anthropic-, and Gemini-shaped requests into GigaChat calls
 - **Stack:** Python 3.10-3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE, Docker, optional Postgres/OpenSearch/Phoenix backends
-- **Tooling:** `uv`, Ruff, pytest, Docker, GitHub Actions
+- **Tooling:** `uv`, Ruff, pytest, Docusaurus/Node.js, Docker, GitHub Actions
 - **Hierarchy:** Subfolders with their own `AGENTS.md` override this file
 
 ## Setup Commands
@@ -56,7 +56,8 @@ uv run pre-commit install
 | `gpt2giga/` | Main application package | App factory, API aggregation, routers, protocols, providers, sinks |
 | `tests/` | Test suite | Mirrors app, router, protocol, sink, and compatibility behavior |
 | `examples/` | Runnable SDK examples | OpenAI chat/responses/embeddings/models, Anthropic, Gemini, agents; files/batches examples are prepared but not mounted |
-| `docs/` | User documentation | Compatibility, configuration, deployment, operations, integrations |
+| `docs/` | User documentation content | Markdown guides and architecture notes rendered by Docusaurus |
+| `docs-site/` | Documentation site wrapper | Docusaurus config, sidebar/theme, npm lockfile, GitHub Pages artifact |
 | `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
@@ -117,6 +118,7 @@ uv run pytest tests/ --cov=. --cov-fail-under=80
 - Tests pass and coverage stays at or above `80%`
 - Ruff passes without warnings
 - Docs/config changes stay aligned with the real file layout
+- Docs-stack changes validate with `cd docs-site && npm run build`
 - `uv.lock` is updated if dependencies change
 
 ## Environment Notes

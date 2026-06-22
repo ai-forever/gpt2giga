@@ -7,9 +7,41 @@
 .PHONY: observe-prod observe-prod-d observe-dev observe-dev-d observe-down
 .PHONY: traefik traefik-up traefik-down
 .PHONY: observe-multiple observe-multiple-up observe-multiple-down
+.PHONY: docs docs-preview docs-dev docs-dev-ru docs-ru docs-install docs-build docs-start docs-start-ru docs-serve docs-clear
 
 COMPOSE_ENV_FILE = .env
 DOCKER_COMPOSE = docker compose --env-file $(COMPOSE_ENV_FILE)
+DOCS_SITE_DIR = docs-site
+DOCS_HOST ?= 127.0.0.1
+DOCS_PORT ?= 3000
+NPM = npm
+
+# --- docs-site (Docusaurus) ---
+docs: docs-preview
+
+docs-preview: docs-build docs-serve
+
+docs-dev: docs-start
+
+docs-dev-ru docs-ru: docs-start-ru
+
+docs-install:
+	$(NPM) --prefix $(DOCS_SITE_DIR) ci
+
+docs-build:
+	$(NPM) --prefix $(DOCS_SITE_DIR) run build
+
+docs-start:
+	$(NPM) --prefix $(DOCS_SITE_DIR) run docusaurus -- start --host $(DOCS_HOST) --port $(DOCS_PORT)
+
+docs-start-ru:
+	$(NPM) --prefix $(DOCS_SITE_DIR) run docusaurus -- start --host $(DOCS_HOST) --port $(DOCS_PORT) --locale ru
+
+docs-serve:
+	$(NPM) --prefix $(DOCS_SITE_DIR) run docusaurus -- serve --host $(DOCS_HOST) --port $(DOCS_PORT)
+
+docs-clear:
+	$(NPM) --prefix $(DOCS_SITE_DIR) run clear
 
 # --- deploy/base.yaml (базовый gpt2giga) ---
 COMPOSE_BASE = deploy/base.yaml

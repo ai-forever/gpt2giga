@@ -5,17 +5,13 @@ on:
     branches: [ main ]
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
-      - 'pyproject.toml'
-      - 'uv.lock'
+      - 'docs-site/**'
       - '.github/workflows/docs-pages.yaml'
   pull_request:
     branches: [ main ]
     paths:
       - 'docs/**'
-      - 'mkdocs.yml'
-      - 'pyproject.toml'
-      - 'uv.lock'
+      - 'docs-site/**'
       - '.github/workflows/docs-pages.yaml'
   workflow_dispatch:
 
@@ -33,22 +29,22 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
         with:
-          enable-cache: true
-          cache-dependency-glob: "uv.lock"
-
-      - name: Set up Python
-        run: uv python install 3.13
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
 
       - name: Install docs dependencies
-        run: uv sync --group docs --dev
+        working-directory: docs-site
+        run: npm ci
 
-      - name: Build MkDocs site
-        run: uv run --group docs mkdocs build --strict
+      - name: Build Docusaurus site
+        working-directory: docs-site
+        run: npm run build
 
       - name: Configure GitHub Pages
         if: github.event_name != 'pull_request'
@@ -58,7 +54,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
-          path: site
+          path: docs-site/build
 
   deploy:
     name: Deploy docs
@@ -76,4 +72,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
-

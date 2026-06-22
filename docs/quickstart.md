@@ -1,23 +1,23 @@
-# Быстрый старт
+# Quickstart
 
-Этот документ помогает быстро запустить прокси к GigaChat, совместимый с OpenAI и Anthropic.
+This document helps you quickly launch an OpenAI/Anthropic-compatible proxy to GigaChat.
 
-## Требования
+## Requirements
 
-- Python 3.10–3.14 для локального запуска.
-- `uv` для локальной разработки.
-- Docker с плагином Compose для контейнерного запуска.
-- Учётные данные и scope GigaChat для нужного аккаунта.
+- Python 3.10–3.14 for a local run.
+- `uv` for local development.
+- Docker with the Compose plugin for a container run.
+- GigaChat credentials and scope for the target account.
 
-## Настройка учётных данных
+## Setting up credentials
 
-Создайте локальный env-файл:
+Create a local env file:
 
 ```sh
 cp .env.example .env
 ```
 
-Минимально заполните:
+At a minimum, fill in:
 
 ```dotenv
 GPT2GIGA_MODE=DEV
@@ -30,47 +30,47 @@ GIGACHAT_SCOPE=GIGACHAT_API_PERS
 GIGACHAT_MODEL=GigaChat-2-Max
 ```
 
-Настройки GigaChat SDK используют префикс `GIGACHAT_`. Настройки прокси используют префикс `GPT2GIGA_`.
+The GigaChat SDK settings use the `GIGACHAT_` prefix. The proxy settings use the `GPT2GIGA_` prefix.
 
-## Запуск через Docker Compose
+## Running via Docker Compose
 
-Профиль DEV:
+DEV profile:
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile DEV up -d
 ```
 
-Профиль PROD:
+PROD profile:
 
 ```sh
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
 ```
 
-В `PROD` compose-файл по умолчанию привязывает сервис только к `127.0.0.1`. Для внешнего доступа поставьте nginx, Traefik, Caddy или другой обратный прокси.
+In `PROD`, the Compose file binds the service to `127.0.0.1` only by default. For external access, put nginx, Traefik, Caddy, or another reverse proxy in front.
 
-Проверка:
+Check:
 
 ```sh
 curl http://localhost:8090/health
 ```
 
-## Локальный запуск
+## Local run
 
-Установить как инструмент:
+Install as a tool:
 
 ```sh
 uv tool install gpt2giga
 gpt2giga
 ```
 
-Или запустить из репозитория:
+Or run from the repository:
 
 ```sh
 uv sync --all-extras --dev
 uv run gpt2giga
 ```
 
-В `DEV` документация FastAPI доступна на `http://localhost:8090/docs`. В `PROD` она отключена.
+In `DEV`, the FastAPI docs are available at `http://localhost:8090/docs`. In `PROD` they are disabled.
 
 ## OpenAI SDK
 
@@ -85,15 +85,15 @@ client = OpenAI(
 
 completion = client.chat.completions.create(
     model="GigaChat-2-Max",
-    messages=[{"role": "user", "content": "Кратко объясни SSE"}],
+    messages=[{"role": "user", "content": "Briefly explain SSE"}],
 )
 print(completion.choices[0].message.content)
 ```
 
-Для явного выбора контракта бэкенда GigaChat используйте `api_version = "v1"`
-или `api_version = "v2"` и подставляйте его в `base_url`. `/v1` всегда
-выбирает контракт GigaChat v1, `/v2` — контракт GigaChat v2.
-`http://localhost:8090` без версии следует `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+To explicitly select the GigaChat backend contract, use `api_version = "v1"`
+or `api_version = "v2"` and pass it into `base_url`. `/v1` always selects the
+GigaChat v1 contract, `/v2` selects the GigaChat v2 contract.
+`http://localhost:8090` without a version follows `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
 ## Anthropic SDK
 
@@ -109,30 +109,30 @@ client = Anthropic(
 message = client.messages.create(
     model="GigaChat-2-Max",
     max_tokens=512,
-    messages=[{"role": "user", "content": "Кратко объясни SSE"}],
+    messages=[{"role": "user", "content": "Briefly explain SSE"}],
 )
 print(message.content[0].text)
 ```
 
-## Авторизация GigaChat для каждого запроса
+## Per-request GigaChat authorization
 
-Если клиент должен передавать авторизацию GigaChat через `Authorization`, включите:
+If a client must pass GigaChat authorization via `Authorization`, enable:
 
 ```dotenv
 GPT2GIGA_PASS_TOKEN=True
 ```
 
-Поддерживаемые значения заголовка:
+Supported header values:
 
-- `giga-cred-<credentials>:<scope>` для учётных данных по ключу авторизации GigaChat;
-- `giga-auth-<access_token>` для готового access-токена;
-- `giga-user-<user>:<password>` для авторизации по логину и паролю.
+- `giga-cred-<credentials>:<scope>` for GigaChat authorization key credentials;
+- `giga-auth-<access_token>` for a ready access token;
+- `giga-user-<user>:<password>` for username/password authorization.
 
-Для типовых сценариев развёртывания предпочтительнее серверные учётные данные `GIGACHAT_*`. Включайте `GPT2GIGA_PASS_TOKEN=True`, только если нужны учётные данные вышестоящего сервиса, специфичные для клиента.
+For typical deployment scenarios, server-side `GIGACHAT_*` credentials are preferable. Enable `GPT2GIGA_PASS_TOKEN=True` only if you need client-specific upstream credentials.
 
-## Примеры
+## Examples
 
 - OpenAI Chat Completions: [examples/openai/chat_completions/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/chat_completions/README.md)
 - OpenAI Responses: [examples/openai/responses/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/responses/README.md)
 - Anthropic Messages: [examples/anthropic/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/anthropic/README.md)
-- Все примеры: [examples/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)
+- All examples: [examples/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/README.md)
