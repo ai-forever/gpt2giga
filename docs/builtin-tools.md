@@ -1,68 +1,67 @@
-# Встроенные инструменты
+# Built-in tools
 
-Этот документ фиксирует маппинг встроенных инструментов провайдеров в `tools`
-GigaChat Chat Completions v2. Источник истины для GigaChat здесь -
-установленный `gigachat` SDK, а не сайт или внешняя документация.
+This document records the mapping of provider built-in tools to the `tools` of
+GigaChat Chat Completions v2. The source of truth for GigaChat here is the
+installed `gigachat` SDK, not the website or external documentation.
 
-## Источник истины
+## Source of truth
 
-В `pyproject.toml` пакет ограничен диапазоном `gigachat>=0.2.2a1,<0.3.0`.
-Для этого диапазона канонический список встроенных инструментов берётся из
-SDK-моделей:
+In `pyproject.toml` the package is pinned to the range `gigachat>=0.2.2a1,<0.3.0`.
+For this range, the canonical list of built-in tools comes from the SDK models:
 
 - `gigachat.models.chat_completions.ChatTool`;
-- SDK-нормализатор короткой записи `_normalize_tool`;
-- локальный вспомогательный объект `gpt2giga.common.tools.GIGACHAT_BUILTIN_TOOL_TYPES`.
+- the SDK shorthand normalizer `_normalize_tool`;
+- the local helper object `gpt2giga.common.tools.GIGACHAT_BUILTIN_TOOL_TYPES`.
 
-SDK принимает ровно такие поля встроенных инструментов:
+The SDK accepts exactly these built-in tool fields:
 
-| Инструмент GigaChat | Поле SDK | Форма конфигурации |
+| GigaChat tool | SDK field | Configuration shape |
 |---|---|---|
-| Поиск в интернете | `web_search` | `ChatWebSearchTool`: `type`, `indexes`, `flags` плюс совместимые с SDK дополнительные поля |
-| Извлечение содержимого URL | `url_content_extraction` | `dict[str, Any]` |
-| Интерпретатор кода | `code_interpreter` | `dict[str, Any]` |
-| Генерация изображений | `image_generate` | `dict[str, Any]` |
-| Генерация 3D-моделей | `model_3d_generate` | `dict[str, Any]` |
+| Web search | `web_search` | `ChatWebSearchTool`: `type`, `indexes`, `flags` plus SDK-compatible extra fields |
+| URL content extraction | `url_content_extraction` | `dict[str, Any]` |
+| Code interpreter | `code_interpreter` | `dict[str, Any]` |
+| Image generation | `image_generate` | `dict[str, Any]` |
+| 3D model generation | `model_3d_generate` | `dict[str, Any]` |
 
-`functions` в `ChatTool` - это обёртка для пользовательских function tools.
-Это не встроенный инструмент GigaChat: он маппится отдельно из
+`functions` in `ChatTool` is a wrapper for user function tools.
+It is not a GigaChat built-in tool: it is mapped separately from
 OpenAI/Anthropic/Gemini function declarations.
 
-## Где исполняются инструменты
+## Where tools are executed
 
-Встроенные инструменты отправляются upstream только через контракт GigaChat
-Chat Completions v2. На публичных маршрутах это означает:
+Built-in tools are sent upstream only through the GigaChat Chat Completions v2
+contract. On public routes this means:
 
-- `/v2/...` всегда использует v2 backend contract;
-- корневые routes используют v2 только при `GPT2GIGA_GIGACHAT_API_MODE=v2`;
-- `/v1/...` использует legacy-контракт GigaChat chat, где встроенные
-  инструменты не передаются как исполняемые tools.
+- `/v2/...` always uses the v2 backend contract;
+- root routes use v2 only with `GPT2GIGA_GIGACHAT_API_MODE=v2`;
+- `/v1/...` uses the legacy GigaChat chat contract, where built-in tools are not
+  passed as executable tools.
 
-Если в одном запросе один и тот же встроенный инструмент передан несколько раз
-через разные aliases, в GigaChat payload попадает первое каноническое поле.
-Принудительный `tool_choice` для поддержанных встроенных инструментов превращается в
+If the same built-in tool is passed several times in one request through
+different aliases, the first canonical field reaches the GigaChat payload.
+A forced `tool_choice` for supported built-in tools turns into a
 GigaChat `ChatToolConfig(mode="tool", tool_name="<canonical tool>")`.
 
-## Маппинг OpenAI
+## OpenAI mapping
 
-OpenAI Chat Completions и Responses tools нормализуются по `type`.
+OpenAI Chat Completions and Responses tools are normalized by `type`.
 
-| Тип OpenAI tool | Инструмент GigaChat | Примечания |
+| OpenAI tool type | GigaChat tool | Notes |
 |---|---|---|
-| `web_search` | `web_search` | Прямой канонический маппинг |
-| `web_search_*` | `web_search` | Покрывает датированные типы OpenAI, например `web_search_2025_08_26` |
-| `web_search_preview` | `web_search` | Предварительный alias |
-| `web_search_preview_*` | `web_search` | Датированные предварительные aliases |
-| `code_interpreter` | `code_interpreter` | Прямой канонический маппинг |
-| `image_generation` | `image_generate` | Alias для генерации изображений OpenAI Responses |
-| `image_generate` | `image_generate` | Каноническая передача GigaChat без переименования |
-| `url_content_extraction` | `url_content_extraction` | Каноническая передача GigaChat без переименования |
-| `model_3d_generate` | `model_3d_generate` | Нативная передача GigaChat без переименования |
-| `function` | обёртка `functions` | Пользовательская function, не встроенный инструмент |
-| `namespace` | обёртка `functions` | Responses namespace tools разворачиваются в плоские имена функций GigaChat |
+| `web_search` | `web_search` | Direct canonical mapping |
+| `web_search_*` | `web_search` | Covers dated OpenAI types, for example `web_search_2025_08_26` |
+| `web_search_preview` | `web_search` | Preview alias |
+| `web_search_preview_*` | `web_search` | Dated preview aliases |
+| `code_interpreter` | `code_interpreter` | Direct canonical mapping |
+| `image_generation` | `image_generate` | Alias for OpenAI Responses image generation |
+| `image_generate` | `image_generate` | Canonical GigaChat passthrough without renaming |
+| `url_content_extraction` | `url_content_extraction` | Canonical GigaChat passthrough without renaming |
+| `model_3d_generate` | `model_3d_generate` | Native GigaChat passthrough without renaming |
+| `function` | `functions` wrapper | A user function, not a built-in tool |
+| `namespace` | `functions` wrapper | Responses namespace tools are flattened into GigaChat function names |
 
-Конфигурация читается из канонического поля, alias-поля и неструктурных
-верхнеуровневых ключей. Например:
+The configuration is read from the canonical field, the alias field, and
+non-structured top-level keys. For example:
 
 ```json
 {
@@ -72,81 +71,80 @@ OpenAI Chat Completions и Responses tools нормализуются по `type
 }
 ```
 
-превращается в:
+turns into:
 
 ```json
 {"web_search": {"indexes": ["web"], "flags": ["trusted"]}}
 ```
 
-## Маппинг Anthropic
+## Anthropic mapping
 
-Anthropic Messages tools используют версионированные имена provider tools.
-Прокси убирает suffixes провайдера/версии там, где смысл чисто маппится на
-встроенный инструмент GigaChat SDK.
+Anthropic Messages tools use versioned provider tool names.
+The proxy strips provider/version suffixes where the meaning maps cleanly to a
+GigaChat SDK built-in tool.
 
-| Тип Anthropic tool | Инструмент GigaChat | Примечания |
+| Anthropic tool type | GigaChat tool | Notes |
 |---|---|---|
-| `web_search` | `web_search` | Прямой alias провайдера |
-| `web_search_*` | `web_search` | Покрывает датированные SDK-имена, например `web_search_20250305` |
-| `web_fetch` | `url_content_extraction` | URL fetch маппится на извлечение URL |
-| `web_fetch_*` | `url_content_extraction` | Покрывает датированные SDK-имена, например `web_fetch_20250910` |
-| `code_execution` | `code_interpreter` | Code execution маппится на интерпретатор |
-| `code_execution_*` | `code_interpreter` | Покрывает датированные SDK-имена, например `code_execution_20250825` |
-| Custom tools с `input_schema` | обёртка `functions` | Пользовательская function, не встроенный инструмент |
+| `web_search` | `web_search` | Direct provider alias |
+| `web_search_*` | `web_search` | Covers dated SDK names, for example `web_search_20250305` |
+| `web_fetch` | `url_content_extraction` | URL fetch maps to URL content extraction |
+| `web_fetch_*` | `url_content_extraction` | Covers dated SDK names, for example `web_fetch_20250910` |
+| `code_execution` | `code_interpreter` | Code execution maps to the interpreter |
+| `code_execution_*` | `code_interpreter` | Covers dated SDK names, for example `code_execution_20250825` |
+| Custom tools with `input_schema` | `functions` wrapper | A user function, not a built-in tool |
 
-## Маппинг Gemini
+## Gemini mapping
 
-Записи Gemini `tools` не содержат поле `type`. Adapter маппит известные ключи
-объекта tool во встроенные инструменты GigaChat, а неподдержанные ключи сохраняет в
-`raw_extensions["unsupportedTools"]` для диагностики.
+Gemini `tools` entries do not contain a `type` field. The adapter maps known
+tool-object keys to GigaChat built-in tools, and keeps unsupported keys in
+`raw_extensions["unsupportedTools"]` for diagnostics.
 
-| Ключ Gemini tool | Инструмент GigaChat | Примечания |
+| Gemini tool key | GigaChat tool | Notes |
 |---|---|---|
-| `googleSearch` / `google_search` | `web_search` | Поиск Google маппится на web search |
-| `googleSearchRetrieval` / `google_search_retrieval` | `web_search` | Устаревшая/retrieval форма поиска best-effort маппится на web search |
-| `urlContext` / `url_context` | `url_content_extraction` | URL context маппится на извлечение URL |
-| `codeExecution` / `code_execution` | `code_interpreter` | Code execution маппится на интерпретатор |
-| `functionDeclarations` / `function_declarations` | обёртка `functions` | Пользовательские functions, не встроенные инструменты |
+| `googleSearch` / `google_search` | `web_search` | Google search maps to web search |
+| `googleSearchRetrieval` / `google_search_retrieval` | `web_search` | The legacy/retrieval search form is best-effort mapped to web search |
+| `urlContext` / `url_context` | `url_content_extraction` | URL context maps to URL content extraction |
+| `codeExecution` / `code_execution` | `code_interpreter` | Code execution maps to the interpreter |
+| `functionDeclarations` / `function_declarations` | `functions` wrapper | User functions, not built-in tools |
 
-Для Gemini requests в каноническое поле GigaChat передаётся только объект
-конфигурации из поддержанного ключа Gemini tool:
+For Gemini requests, only the configuration object from a supported Gemini tool
+key is passed into the canonical GigaChat field:
 
 ```json
 {"googleSearch": {"indexes": ["web"]}}
 ```
 
-превращается в:
+turns into:
 
 ```json
 {"type": "web_search", "web_search": {"indexes": ["web"]}}
 ```
 
-`toolConfig.functionCallingConfig` применяется только к Gemini function
-declarations. Он не форсирует, не фильтрует и не удаляет встроенные
-инструменты провайдера.
+`toolConfig.functionCallingConfig` applies only to Gemini function declarations.
+It does not force, filter, or remove provider built-in tools.
 
-## Не маппится
+## Not mapped
 
-Встроенные provider tools остаются unsupported, если GigaChat SDK не предоставляет
-семантически эквивалентное поле `ChatTool`.
+Provider built-in tools remain unsupported if the GigaChat SDK does not provide a
+semantically equivalent `ChatTool` field.
 
-| Провайдер | Примеры без маппинга | Поведение |
+| Provider | Examples without a mapping | Behavior |
 |---|---|---|
-| OpenAI | `file_search`, `computer`, `computer_use_preview`, `mcp`, `tool_search`, `shell`, `local_shell`, `apply_patch`, freeform `custom` | Игнорируются или сохраняются только в compatibility diagnostics в зависимости от route |
-| Anthropic | `tool_search*`, `memory*`, `bash*`, `text_editor*`, `advisor`, MCP tools, computer-use tools | Принимаются там, где это разрешено compatibility policy, но не отправляются в GigaChat как исполняемые встроенные инструменты |
-| Gemini | `fileSearch`, `googleMaps`, `computerUse`, `mcpServers`, `enterpriseWebSearch`, `parallelAiSearch`, Vertex/RAG/retrieval tools | Сохраняются в diagnostics `unsupportedTools` и не применяются GigaChat |
+| OpenAI | `file_search`, `computer`, `computer_use_preview`, `mcp`, `tool_search`, `shell`, `local_shell`, `apply_patch`, freeform `custom` | Ignored or kept only in compatibility diagnostics depending on the route |
+| Anthropic | `tool_search*`, `memory*`, `bash*`, `text_editor*`, `advisor`, MCP tools, computer-use tools | Accepted where allowed by the compatibility policy, but not sent to GigaChat as executable built-in tools |
+| Gemini | `fileSearch`, `googleMaps`, `computerUse`, `mcpServers`, `enterpriseWebSearch`, `parallelAiSearch`, Vertex/RAG/retrieval tools | Kept in the `unsupportedTools` diagnostics and not applied by GigaChat |
 
-Такой подход намеренно консервативный: похожих названий недостаточно для
-маппинга. Маппинг появляется только тогда, когда в GigaChat SDK есть
-исполняемое поле с тем же операционным смыслом.
+This approach is intentionally conservative: similar names are not enough for a
+mapping. A mapping appears only when the GigaChat SDK has an executable field
+with the same operational meaning.
 
-## Чеклист обновления
+## Update checklist
 
-Когда SDK провайдера добавляет или переименовывает встроенные инструменты:
+When a provider SDK adds or renames built-in tools:
 
-1. Проверить установленные SDK провайдера и модели GigaChat SDK.
-2. Обновить `gpt2giga.common.tools.normalize_gigachat_builtin_tool_type`.
-3. Для Gemini object-key tools обновить `gpt2giga.protocols.gemini.adapter`.
-4. Добавить тесты request-builder и adapter.
-5. Обновить этот документ, а также `api-compatibility.md` и
-   `client-parameter-compatibility.md`, если меняется публичное поведение.
+1. Check the installed provider SDKs and the GigaChat SDK models.
+2. Update `gpt2giga.common.tools.normalize_gigachat_builtin_tool_type`.
+3. For Gemini object-key tools, update `gpt2giga.protocols.gemini.adapter`.
+4. Add request-builder and adapter tests.
+5. Update this document, as well as `api-compatibility.md` and
+   `client-parameter-compatibility.md`, if the public behavior changes.
