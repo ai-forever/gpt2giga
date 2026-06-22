@@ -487,6 +487,14 @@ def build_selector_finalizer_user_prompt(
     selection: FusionSelection,
 ) -> str:
     """Build finalizer input for rewriting a selected candidate."""
+    tool_action_instruction = ""
+    if any(call.name for call in candidate.tool_calls):
+        tool_action_instruction = (
+            "The selected candidate is a tool action.\n"
+            "Return the same action as a real tool call using the available tools.\n"
+            "Do not describe the tool call in text.\n"
+            "Do not wrap JSON in Markdown.\n\n"
+        )
     payload = {
         "schema_version": selection.schema_version,
         "selected_candidate": {
@@ -504,6 +512,7 @@ def build_selector_finalizer_user_prompt(
     return (
         "Use the selected candidate and selector correction to produce the "
         "single final assistant response.\n\n"
+        f"{tool_action_instruction}"
         '<selected_candidate format="json">\n'
         f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}\n"
         "</selected_candidate>"

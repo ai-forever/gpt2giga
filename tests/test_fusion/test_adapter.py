@@ -185,6 +185,21 @@ def _tool_response(
     )
 
 
+def _write_file_tool() -> NormalizedTool:
+    return NormalizedTool(
+        name="write_file",
+        description="Write a file",
+        parameters={
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string"},
+                "content": {"type": "string"},
+            },
+            "required": ["file_path", "content"],
+        },
+    )
+
+
 def _judge_json(
     final_answer="final answer", final_tool_call=None, task_status=None
 ) -> str:
@@ -531,6 +546,118 @@ async def test_fusion_adapter_direct_candidate_has_no_fusion_prompt_and_can_be_s
     assert "You are solving the user's task independently." in (
         panel_call.messages[0].content or ""
     )
+
+
+async def test_selector_selected_panel_advisory_tool_returns_tool_call():
+    request = _request()
+    request.tools = [_write_file_tool()]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response(
+                "PanelA",
+                (
+                    "```json\n"
+                    '{"name":"write_file","parameters":'
+                    '{"file_path":"hello.py","content":"print(1)"}}'
+                    "\n```"
+                ),
+            ),
+            "Judge": _text_response("Judge", _selection_json("panel_1")),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["implementer"],
+            decision_mode="selector",
+        ),
+    )
+
+    message = response.choices[0].message
+    assert response.error is None
+    assert message.content is None
+    assert len(message.tool_calls) == 1
+    assert message.tool_calls[0].name == "write_file"
+    assert message.tool_calls[0].arguments == {
+        "file_path": "hello.py",
+        "content": "print(1)",
+    }
+    assert response.choices[0].finish_reason == "tool_calls"
+    assert response.metadata["gpt2giga_fusion_selected_candidate_id"] == "panel_1"
+
+
+async def test_selector_selected_panel_tool_survives_return_selected_candidate_false():
+    request = _request()
+    request.tools = [_write_file_tool()]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response(
+                "PanelA",
+                json.dumps(
+                    {
+                        "tool_call_candidate": {
+                            "name": "write_file",
+                            "arguments": {
+                                "file_path": "hello.py",
+                                "content": "print(1)",
+                            },
+                        }
+                    }
+                ),
+            ),
+            "Judge": _text_response("Judge", _selection_json("panel_1")),
+            "Final": _text_response("Final", "should not run"),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["implementer"],
+            decision_mode="selector",
+            final_model="Final",
+            return_selected_candidate=False,
+        ),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.content is None
+    assert response.choices[0].message.tool_calls[0].name == "write_file"
+    assert [call.model for call in provider.calls] == ["PanelA", "Judge"]
+
+
+async def test_selector_invalid_advisory_tool_json_does_not_leak_as_text():
+    request = _request()
+    request.tools = [_write_file_tool()]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response(
+                "PanelA",
+                '{"name":"unknown_tool","parameters":{"file_path":"hello.py"}}',
+            ),
+            "Judge": _text_response("Judge", _selection_json("panel_1")),
+            "Final": _text_response("Final", "safe fallback"),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["implementer"],
+            decision_mode="selector",
+            final_model="Final",
+        ),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.content == "safe fallback"
+    assert response.choices[0].message.tool_calls == []
+    assert response.choices[0].finish_reason == "stop"
+    assert [call.model for call in provider.calls] == ["PanelA", "Judge", "Final"]
 
 
 async def test_fusion_adapter_selector_runs_finalizer_only_when_rewrite_needed():

@@ -44,9 +44,11 @@ class FusionAChat:
 
 
 class FusionGigachat:
-    def __init__(self, judge_payload=None):
+    def __init__(self, judge_payload=None, panel_content=None, selector_payload=None):
         self.achat = FusionAChat(self)
         self.chat_calls = []
+        self.panel_content = panel_content
+        self.selector_payload = selector_payload
         self.judge_payload = judge_payload or {
             "consensus": ["Panels agree."],
             "contradictions": [],
@@ -67,10 +69,12 @@ class FusionGigachat:
             for message in messages
             if isinstance(message, dict)
         )
-        if "judge/finalizer" in joined_content:
+        if "<candidate_outputs" in joined_content and self.selector_payload:
+            content = json.dumps(self.selector_payload)
+        elif "judge/finalizer" in joined_content:
             content = json.dumps(self.judge_payload)
         else:
-            content = f"panel answer from {chat.get('model')}"
+            content = self.panel_content or f"panel answer from {chat.get('model')}"
         return MockResponse(
             {
                 "choices": [
@@ -102,6 +106,7 @@ def make_app(*, gigachat=None):
             fusion_aliases=[
                 "gpt2giga/fusion-code",
                 "gpt2giga/fusion-force-synthesize",
+                "gpt2giga/fusion-force-selector",
             ],
             gigachat_api_mode="v1",
         )
@@ -237,6 +242,68 @@ def test_gemini_fusion_returns_final_function_call_and_strips_artifacts():
     assert "tools" not in sent_payloads[0]
     assert "tools" not in sent_payloads[1]
     assert sent_payloads[-1]["tools"][0]["function"]["name"] == "lookup"
+
+
+def test_gemini_fusion_selector_panel_json_returns_function_call():
+    gigachat = FusionGigachat(
+        panel_content=(
+            '{"name":"write_file","parameters":'
+            '{"file_path":"hello.py","content":"print(1)"}}'
+        ),
+        selector_payload={
+            "schema_version": "gpt2giga.fusion.selection.v1",
+            "selected_candidate_id": "panel_1",
+            "confidence": 1.0,
+            "reason_brief": "Use the write_file action.",
+        },
+    )
+    app = make_app(gigachat=gigachat)
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gpt2giga/fusion-force-selector:generateContent",
+        json={
+            "contents": [{"parts": [{"text": "write hello.py"}]}],
+            "metadata": {
+                "gpt2giga_fusion": {
+                    "preset": "force-selector",
+                    "tools_mode": "schema_only",
+                }
+            },
+            "tools": [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": "write_file",
+                            "description": "Write a file",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "file_path": {"type": "string"},
+                                    "content": {"type": "string"},
+                                },
+                                "required": ["file_path", "content"],
+                            },
+                        }
+                    ]
+                }
+            ],
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["candidates"][0]["content"]["parts"] == [
+        {
+            "functionCall": {
+                "name": "write_file",
+                "args": {
+                    "file_path": "hello.py",
+                    "content": "print(1)",
+                },
+            }
+        }
+    ]
 
 
 def _gemini_sse_chunks(body: str):

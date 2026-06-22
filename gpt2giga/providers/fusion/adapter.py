@@ -53,6 +53,8 @@ from gpt2giga.providers.fusion.tool_arbitration import (
     build_judge_tool_arbitration_prompt,
     build_panel_tool_reference,
     first_allowed_tool_call,
+    looks_like_tool_candidate_json,
+    panel_tool_candidates_by_result,
     tool_call_allowed,
     tool_choice_requires_tool,
     validate_tool_call_arguments,
@@ -919,10 +921,8 @@ class FusionProviderAdapter:
         message: NormalizedMessage | None = None
         finish_reason: str | None = None
 
-        if selected_candidate is not None and not (
-            needs_rewrite or not fusion_config.return_selected_candidate
-        ):
-            message = _message_from_candidate(
+        if selected_candidate is not None and not needs_rewrite:
+            candidate_message = _message_from_candidate(
                 selected_candidate,
                 request_tools=request.tools,
                 tools_mode=fusion_config.tools_mode,
@@ -930,10 +930,17 @@ class FusionProviderAdapter:
                 max_tool_calls=fusion_config.max_tool_calls,
                 request_messages=request.messages,
                 meta_tool_names=self.settings.meta_tool_names,
+                allow_panel_tool_calls=True,
             )
-            finish_reason = selected_candidate.finish_reason or (
-                "tool_calls" if message is not None and message.tool_calls else "stop"
-            )
+            if fusion_config.return_selected_candidate or (
+                candidate_message is not None and candidate_message.tool_calls
+            ):
+                message = candidate_message
+                finish_reason = selected_candidate.finish_reason or (
+                    "tool_calls"
+                    if message is not None and message.tool_calls
+                    else "stop"
+                )
 
         if selected_candidate is not None and message is None:
             finalizer_started = time.perf_counter()
@@ -2208,6 +2215,23 @@ def _build_selector_finalizer_request(
     if fusion_config.tools_mode == "off":
         finalizer_request.tools = []
         finalizer_request.tool_choice = None
+    elif candidate.tool_calls:
+        request_tool_names = {
+            tool.name for tool in finalizer_request.tools if tool.name
+        }
+        selected_tool_call = next(
+            (
+                tool_call
+                for tool_call in candidate.tool_calls
+                if tool_call.name in request_tool_names
+            ),
+            None,
+        )
+        if selected_tool_call is not None:
+            finalizer_request.tool_choice = {
+                "type": "function",
+                "function": {"name": selected_tool_call.name},
+            }
     finalizer_request.metadata = {
         **finalizer_request.metadata,
         "gpt2giga_fusion_stage": "selector_finalizer",
@@ -2599,6 +2623,7 @@ def _message_from_candidate(
     max_tool_calls: int,
     request_messages: list[NormalizedMessage],
     meta_tool_names: list[str],
+    allow_panel_tool_calls: bool = False,
 ) -> NormalizedMessage | None:
     if candidate is None or candidate.status != "ok":
         return None
@@ -2614,7 +2639,8 @@ def _message_from_candidate(
         max_tool_calls=max_tool_calls,
         request_messages=request_messages,
         meta_tool_names=meta_tool_names,
-        allow_tool_calls=candidate.source == "direct",
+        allow_tool_calls=candidate.source == "direct" or allow_panel_tool_calls,
+        suppress_tool_candidate_json=True,
     )
 
 
@@ -2628,6 +2654,7 @@ def _normalize_final_message(
     request_messages: list[NormalizedMessage],
     meta_tool_names: list[str],
     allow_tool_calls: bool,
+    suppress_tool_candidate_json: bool = False,
 ) -> NormalizedMessage | None:
     content = _content_to_text(message.content)
     if allow_tool_calls:
@@ -2655,11 +2682,18 @@ def _normalize_final_message(
                 max_tool_calls=max_tool_calls,
             )
             if validation.valid and validation.tool_call is not None:
+                visible_content = content
+                if suppress_tool_candidate_json and looks_like_tool_candidate_json(
+                    content
+                ):
+                    visible_content = None
                 return NormalizedMessage(
                     role="assistant",
-                    content=None if not content else content,
+                    content=visible_content,
                     tool_calls=[validation.tool_call],
                 )
+    if suppress_tool_candidate_json and looks_like_tool_candidate_json(content):
+        return None
     if content:
         return NormalizedMessage(role="assistant", content=content)
     return None
@@ -3268,18 +3302,21 @@ def _build_candidates(
     candidates: list[FusionCandidate] = []
     if direct_candidate is not None:
         candidates.append(direct_candidate)
-    for index, result in enumerate(panel_results, start=1):
+    panel_tool_calls_by_result = panel_tool_candidates_by_result(panel_results)
+    for index, result in enumerate(panel_results):
+        tool_calls = panel_tool_calls_by_result.get(index, [])
         candidates.append(
             FusionCandidate(
-                candidate_id=f"panel_{index}",
+                candidate_id=f"panel_{index + 1}",
                 source="panel",
                 model=result.model,
                 role=result.role,
                 status=result.status,
                 content=result.content,
-                tool_calls=list(result.tool_calls),
+                tool_calls=tool_calls,
                 usage=result.usage,
                 latency_ms=result.latency_ms,
+                finish_reason="tool_calls" if tool_calls else "stop",
                 truncated=result.truncated,
                 error_type=result.error_type,
                 error_message=result.error_message,

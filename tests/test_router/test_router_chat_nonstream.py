@@ -84,8 +84,10 @@ class FusionRequestTransformer(FakeRequestTransformer):
 
 
 class FusionGigachat(FakeGigachat):
-    def __init__(self):
+    def __init__(self, *, panel_content=None, selector_payload=None):
         self.chat_calls = []
+        self.panel_content = panel_content
+        self.selector_payload = selector_payload
 
     async def achat(self, chat):
         self.chat_calls.append(chat)
@@ -95,7 +97,9 @@ class FusionGigachat(FakeGigachat):
             for message in messages
             if isinstance(message, dict)
         )
-        if "judge/finalizer" in joined_content:
+        if "<candidate_outputs" in joined_content and self.selector_payload:
+            content = json.dumps(self.selector_payload)
+        elif "judge/finalizer" in joined_content:
             content = json.dumps(
                 {
                     "consensus": ["Panels agree."],
@@ -110,7 +114,7 @@ class FusionGigachat(FakeGigachat):
                 }
             )
         else:
-            content = f"panel answer from {chat.get('model')}"
+            content = self.panel_content or f"panel answer from {chat.get('model')}"
         return MockResponse(
             {
                 "choices": [
@@ -388,6 +392,74 @@ def test_chat_completions_fusion_openrouter_tool_artifacts_are_not_forwarded():
     assert [tool["function"]["name"] for tool in sent_payloads[-1]["tools"]] == [
         "lookup"
     ]
+
+
+def test_chat_completions_fusion_selector_panel_json_returns_tool_call():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="force-selector",
+            fusion_aliases=["gpt2giga/fusion-force-selector"],
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = FusionGigachat(
+        panel_content=(
+            '{"name":"write_file","parameters":'
+            '{"file_path":"hello.py","content":"print(1)"}}'
+        ),
+        selector_payload={
+            "schema_version": "gpt2giga.fusion.selection.v1",
+            "selected_candidate_id": "panel_1",
+            "confidence": 1.0,
+            "reason_brief": "Use the write_file action.",
+        },
+    )
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-force-selector",
+            "messages": [{"role": "user", "content": "write hello.py"}],
+            "metadata": {
+                "gpt2giga_fusion": {
+                    "preset": "force-selector",
+                    "tools_mode": "schema_only",
+                }
+            },
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "write_file",
+                        "description": "Write a file",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["file_path", "content"],
+                        },
+                    },
+                }
+            ],
+        },
+    )
+
+    body = resp.json()
+    assert resp.status_code == 200
+    choice = body["choices"][0]
+    assert choice["finish_reason"] == "tool_calls"
+    assert choice["message"]["content"] is None
+    assert choice["message"]["tool_calls"][0]["function"]["name"] == "write_file"
+    assert json.loads(choice["message"]["tool_calls"][0]["function"]["arguments"]) == {
+        "file_path": "hello.py",
+        "content": "print(1)",
+    }
 
 
 def test_chat_completions_fusion_alias_is_legacy_model_when_disabled():

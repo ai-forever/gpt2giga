@@ -6,7 +6,9 @@ from gpt2giga.providers.fusion.tool_arbitration import (
     build_judge_tool_arbitration_prompt,
     build_panel_tool_reference,
     first_allowed_tool_call,
+    looks_like_tool_candidate_json,
     panel_tool_candidates,
+    panel_tool_candidates_by_result,
     resolve_tool_call_policy,
     tool_call_allowed,
     tool_choice_requires_tool,
@@ -276,6 +278,114 @@ def test_panel_tool_candidates_parse_actual_calls_and_json_candidate_text():
     assert all(
         candidate.raw_extensions["fusion_panel_model"] == "PanelA"
         for candidate in candidates
+    )
+
+
+def test_panel_tool_candidate_accepts_parameters_alias():
+    result = FusionPanelResult(
+        model="GigaChat-3-Ultra",
+        role="solver",
+        status="ok",
+        content=(
+            "```json\n"
+            '{"name":"write_file","parameters":'
+            '{"file_path":"hello.py","content":"print(1)"}}'
+            "\n```"
+        ),
+    )
+
+    calls = panel_tool_candidates([result])
+
+    assert len(calls) == 1
+    assert calls[0].name == "write_file"
+    assert calls[0].arguments == {
+        "file_path": "hello.py",
+        "content": "print(1)",
+    }
+
+
+def test_panel_tool_candidate_accepts_function_parameters_alias():
+    result = FusionPanelResult(
+        model="GigaChat-3-Ultra",
+        role="solver",
+        status="ok",
+        content=json.dumps(
+            {
+                "function": {
+                    "name": "write_file",
+                    "parameters": {
+                        "file_path": "hello.py",
+                        "content": "print(1)",
+                    },
+                }
+            }
+        ),
+    )
+
+    calls = panel_tool_candidates([result])
+
+    assert len(calls) == 1
+    assert calls[0].name == "write_file"
+    assert calls[0].arguments == {
+        "file_path": "hello.py",
+        "content": "print(1)",
+    }
+
+
+def test_panel_tool_candidate_accepts_canonical_advisory_shape():
+    result = FusionPanelResult(
+        model="GigaChat-3-Ultra",
+        role="solver",
+        status="ok",
+        content=json.dumps(
+            {
+                "tool_call_candidate": {
+                    "name": "write_file",
+                    "arguments": {
+                        "file_path": "hello.py",
+                        "content": "print(1)",
+                    },
+                }
+            }
+        ),
+    )
+
+    calls = panel_tool_candidates([result])
+
+    assert len(calls) == 1
+    assert calls[0].name == "write_file"
+    assert calls[0].arguments == {
+        "file_path": "hello.py",
+        "content": "print(1)",
+    }
+
+
+def test_panel_tool_candidates_by_result_preserves_panel_index_mapping():
+    first = FusionPanelResult(
+        model="PanelA",
+        role="solver",
+        status="ok",
+        content='{"name":"lookup","arguments":{"q":"first"}}',
+    )
+    failed = FusionPanelResult(model="PanelB", role="critic", status="error")
+    third = FusionPanelResult(
+        model="PanelC",
+        role="solver",
+        status="ok",
+        content='{"name":"lookup","arguments":{"q":"third"}}',
+    )
+
+    calls_by_result = panel_tool_candidates_by_result([first, failed, third])
+
+    assert sorted(calls_by_result) == [0, 2]
+    assert calls_by_result[0][0].arguments == {"q": "first"}
+    assert calls_by_result[2][0].arguments == {"q": "third"}
+    assert calls_by_result[2][0].raw_extensions["fusion_panel_model"] == "PanelC"
+
+
+def test_tool_candidate_json_detector_handles_invalid_candidate_shapes():
+    assert looks_like_tool_candidate_json(
+        '{"tool_call_candidate":{"name":"unknown","parameters":{"q":1}}}'
     )
 
 

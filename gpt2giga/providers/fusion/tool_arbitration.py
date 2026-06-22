@@ -44,9 +44,20 @@ def build_panel_tool_reference(
     if not tools or tools_mode == "off":
         return None
     return (
-        "Tool schemas are reference-only in the panel stage. Do not execute "
-        "tools or emit real tool calls. If a tool is necessary, propose one "
-        "tool_call_candidate JSON object for the judge/finalizer.\n"
+        "Tool schemas are reference-only in the panel stage.\n"
+        "Do not execute tools or emit real tool calls.\n"
+        "If a tool is necessary, return exactly one advisory JSON object:\n"
+        "{\n"
+        '  "tool_call_candidate": {\n'
+        '    "name": "<allowed tool name>",\n'
+        '    "arguments": {\n'
+        '      "...": "..."\n'
+        "    }\n"
+        "  }\n"
+        "}\n"
+        'Use "arguments", not "parameters".\n'
+        "Do not wrap this object in Markdown fences.\n"
+        "Do not include explanatory text before or after the JSON object.\n"
         f"{_json_dumps(_tool_schema_payload(tools))}"
     )
 
@@ -176,6 +187,31 @@ def panel_tool_candidates(
     return candidates
 
 
+def panel_tool_candidates_by_result(
+    panel_results: list[FusionPanelResult],
+) -> dict[int, list[NormalizedToolCall]]:
+    """Extract advisory tool candidates keyed by zero-based panel result index."""
+    output: dict[int, list[NormalizedToolCall]] = {}
+    for index, result in enumerate(panel_results):
+        if result.status != "ok":
+            continue
+        candidates = [
+            *(
+                _annotated_candidate(tool_call, panel=result)
+                for tool_call in result.tool_calls
+                if tool_call.name
+            ),
+            *(
+                _annotated_candidate(tool_call, panel=result)
+                for tool_call in _tool_candidates_from_text(result.content)
+                if tool_call.name
+            ),
+        ]
+        if candidates:
+            output[index] = candidates
+    return output
+
+
 def first_allowed_tool_call(
     tool_calls: list[NormalizedToolCall],
     *,
@@ -303,28 +339,27 @@ def _tool_candidates_from_text(content: str | None) -> list[NormalizedToolCall]:
     if payload is None:
         return []
 
-    raw_candidates: list[Any]
-    if isinstance(payload, Mapping):
-        if "tool_call_candidates" in payload:
-            value = payload["tool_call_candidates"]
-            raw_candidates = value if isinstance(value, list) else [value]
-        elif "tool_call_candidate" in payload:
-            raw_candidates = [payload["tool_call_candidate"]]
-        else:
-            raw_candidates = [payload]
-    elif isinstance(payload, list):
-        raw_candidates = payload
-    else:
-        return []
-
     candidates: list[NormalizedToolCall] = []
-    for item in raw_candidates:
+    for item in _raw_tool_candidate_items(payload):
         if not isinstance(item, Mapping):
             continue
         candidate = _tool_call_from_mapping(item)
         if candidate is not None:
             candidates.append(candidate)
     return candidates
+
+
+def looks_like_tool_candidate_json(content: str | None) -> bool:
+    """Return whether text appears to be advisory tool-call JSON."""
+    if not content:
+        return False
+    payload = _load_json_candidate_payload(content)
+    if payload is None:
+        return False
+    for item in _raw_tool_candidate_items(payload):
+        if isinstance(item, Mapping) and _mapping_has_tool_call_shape(item):
+            return True
+    return False
 
 
 def _load_json_candidate_payload(content: str) -> Any:
@@ -342,6 +377,30 @@ def _load_json_candidate_payload(content: str) -> Any:
             return None
 
 
+def _raw_tool_candidate_items(payload: Any) -> list[Any]:
+    if isinstance(payload, Mapping):
+        if "tool_call_candidates" in payload:
+            value = payload["tool_call_candidates"]
+            return value if isinstance(value, list) else [value]
+        if "tool_call_candidate" in payload:
+            return [payload["tool_call_candidate"]]
+        return [payload]
+    if isinstance(payload, list):
+        return payload
+    return []
+
+
+def _mapping_has_tool_call_shape(value: Mapping[str, Any]) -> bool:
+    if any(key in value for key in ("name", "arguments", "input", "parameters")):
+        return True
+    function = value.get("function")
+    if isinstance(function, Mapping):
+        return any(
+            key in function for key in ("name", "arguments", "input", "parameters")
+        )
+    return False
+
+
 def _tool_call_from_mapping(value: Mapping[str, Any]) -> NormalizedToolCall | None:
     function = value.get("function")
     function_data = function if isinstance(function, Mapping) else {}
@@ -352,7 +411,11 @@ def _tool_call_from_mapping(value: Mapping[str, Any]) -> NormalizedToolCall | No
     if arguments is None:
         arguments = value.get("input")
     if arguments is None:
+        arguments = value.get("parameters")
+    if arguments is None:
         arguments = function_data.get("arguments")
+    if arguments is None:
+        arguments = function_data.get("parameters")
     return NormalizedToolCall(
         id=_string_or_none(value.get("id") or value.get("call_id")),
         type=_string_or_none(value.get("type")) or "function",
