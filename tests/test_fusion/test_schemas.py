@@ -33,7 +33,40 @@ def test_fusion_analysis_accepts_final_tool_call():
 
     assert analysis.final_tool_call is not None
     assert analysis.final_tool_call.name == "apply_patch"
+    assert analysis.task_status == "needs_tool"
     assert analysis.blind_spots == []
+
+
+def test_fusion_analysis_normalizes_conflicting_final_actions():
+    analysis = FusionAnalysis(
+        final_answer="done",
+        final_tool_call=NormalizedToolCall(name="update_topic", arguments={}),
+    )
+
+    assert analysis.final_answer == "done"
+    assert analysis.final_tool_call is None
+
+
+def test_fusion_analysis_complete_status_drops_tool_call():
+    analysis = FusionAnalysis(
+        task_status="complete",
+        final_answer="done",
+        final_tool_call=NormalizedToolCall(name="lookup", arguments={}),
+    )
+
+    assert analysis.final_answer == "done"
+    assert analysis.final_tool_call is None
+
+
+def test_fusion_analysis_needs_tool_drops_client_visible_answer():
+    analysis = FusionAnalysis(
+        task_status="needs_tool",
+        final_answer="internal rationale",
+        final_tool_call=NormalizedToolCall(name="lookup", arguments={}),
+    )
+
+    assert analysis.final_answer is None
+    assert analysis.final_tool_call is not None
 
 
 def test_fusion_selection_requires_bounded_confidence():

@@ -49,6 +49,8 @@ DEFAULT_FUSION_ALIASES = [
     "GigaChat-Fusion-Code",
 ]
 
+DEFAULT_FUSION_META_TOOL_NAMES = ["update_topic", "update_plan", "todo_write"]
+
 
 def _parse_list_env(value: Any) -> Any:
     if value in (None, ""):
@@ -159,12 +161,15 @@ class FusionSettings(BaseModel):
     expose_panel_responses: bool = False
     debug_trace_enabled: bool = False
     fail_on_all_panels_failed: bool = True
+    meta_tool_names: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_FUSION_META_TOOL_NAMES)
+    )
 
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("aliases", mode="before")
+    @field_validator("aliases", "meta_tool_names", mode="before")
     @classmethod
-    def normalize_aliases(cls, value):
+    def normalize_string_lists(cls, value):
         return _parse_list_env(value)
 
     @field_validator("presets", mode="before")
@@ -359,6 +364,13 @@ class ProxySettings(BaseSettings):
     fusion_fail_on_all_panels_failed: bool = Field(
         default=True,
         description="Return an error when no Fusion analysis panel succeeds.",
+    )
+    fusion_meta_tool_names: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_FUSION_META_TOOL_NAMES),
+        description=(
+            "Tool names treated as Fusion meta/state tools and not as final "
+            "progress actions."
+        ),
     )
     structured_output_mode: Literal["function_call", "native"] = Field(
         default="function_call",
@@ -675,6 +687,11 @@ class ProxySettings(BaseSettings):
     def normalize_fusion_aliases(cls, value):
         return _parse_list_env(value)
 
+    @field_validator("fusion_meta_tool_names", mode="before")
+    @classmethod
+    def normalize_fusion_meta_tool_names(cls, value):
+        return _parse_list_env(value)
+
     @field_validator("fusion_presets", mode="before")
     @classmethod
     def normalize_fusion_presets(cls, value):
@@ -769,6 +786,7 @@ class ProxySettings(BaseSettings):
             expose_panel_responses=self.fusion_expose_panel_responses,
             debug_trace_enabled=self.fusion_debug_trace_enabled,
             fail_on_all_panels_failed=self.fusion_fail_on_all_panels_failed,
+            meta_tool_names=self.fusion_meta_tool_names,
         )
 
     @cached_property

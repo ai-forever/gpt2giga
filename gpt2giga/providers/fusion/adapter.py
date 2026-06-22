@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+import json
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Protocol
 
@@ -23,6 +23,7 @@ from gpt2giga.protocols.normalized import (
     NormalizedResponse,
     NormalizedResponseFormat,
     NormalizedTool,
+    NormalizedToolCall,
 )
 from gpt2giga.providers.fusion.detection import FusionRequestConfig
 from gpt2giga.providers.fusion.limiter import FusionRequestLimiter
@@ -119,6 +120,18 @@ class FusionProviderAdapter:
         started = time.perf_counter()
         requested_model = fusion_config.requested_model or request.model or "fusion"
 
+        post_tool_call = _latest_post_tool_call(request.messages)
+        if post_tool_call is not None:
+            return await self._chat_post_tool_finalizer(
+                request,
+                requested_model=requested_model,
+                post_tool_call=post_tool_call,
+                started=started,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+
         await _raise_if_disconnected(is_disconnected)
         direct_candidate, panel_results = await self._run_candidate_stages(
             request,
@@ -177,6 +190,99 @@ class FusionProviderAdapter:
             is_disconnected=is_disconnected,
         )
 
+    async def _chat_post_tool_finalizer(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        requested_model: str,
+        post_tool_call: NormalizedToolCall,
+        started: float,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        finalizer_started = time.perf_counter()
+        finalizer_response: NormalizedResponse | None = None
+        fallback_reason: str | None = None
+        try:
+            finalizer_response = await self._run_post_tool_finalizer(
+                request,
+                post_tool_call=post_tool_call,
+                context=context,
+                fusion_config=fusion_config,
+                is_disconnected=is_disconnected,
+            )
+            if finalizer_response.error is not None:
+                fallback_reason = (
+                    f"post_tool_finalizer_error:{finalizer_response.error.type}"
+                )
+        except asyncio.TimeoutError:
+            fallback_reason = "post_tool_finalizer_timeout"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            fallback_reason = f"post_tool_finalizer_failed:{type(exc).__name__}"
+        finalizer_latency_ms = _elapsed_ms(finalizer_started)
+
+        usage = aggregate_usage(
+            [finalizer_response.usage if finalizer_response is not None else None]
+        )
+        message, finish_reason = _message_from_response(
+            finalizer_response,
+            request_tools=[],
+            tools_mode="off",
+            tool_choice=None,
+            max_tool_calls=fusion_config.max_tool_calls,
+            request_messages=request.messages,
+            meta_tool_names=self.settings.meta_tool_names,
+        )
+        if fallback_reason is None and message is None:
+            fallback_reason = "post_tool_finalizer_empty_response"
+
+        run_result = self._build_run_result(
+            status="error" if fallback_reason else "ok",
+            requested_model=requested_model,
+            fusion_config=fusion_config,
+            panel_results=[],
+            failed_models=[],
+            usage=usage,
+            finalizer_usage=_response_usage(finalizer_response),
+            latency_ms=_elapsed_ms(started),
+            finalizer_latency_ms=finalizer_latency_ms,
+            fallback_reason=fallback_reason or "post_tool_finalizer",
+        )
+        await self._emit_telemetry(run_result, context, fusion_config)
+
+        if fallback_reason is not None or message is None:
+            return self._error_response(
+                requested_model=requested_model,
+                message="Fusion post-tool finalizer did not produce a final answer",
+                code="post_tool_finalizer_failed",
+                run_result=run_result,
+                usage=usage,
+            )
+
+        return NormalizedResponse(
+            id=context.request_id if context is not None else None,
+            model=requested_model,
+            provider=self.name,
+            choices=[
+                NormalizedChoice(
+                    index=0,
+                    message=message,
+                    finish_reason=finish_reason or "stop",
+                )
+            ],
+            usage=usage,
+            metadata=_public_metadata(run_result),
+            provider_metadata={
+                "fusion": _provider_metadata(
+                    run_result,
+                    settings=self.settings,
+                )
+            },
+        )
+
     async def _chat_synthesize(
         self,
         request: NormalizedChatRequest,
@@ -225,6 +331,8 @@ class FusionProviderAdapter:
             tools_mode=fusion_config.tools_mode,
             tool_choice=request.tool_choice,
             max_tool_calls=fusion_config.max_tool_calls,
+            request_messages=request.messages,
+            meta_tool_names=self.settings.meta_tool_names,
         )
         repair_response: NormalizedResponse | None = None
         if (
@@ -256,6 +364,8 @@ class FusionProviderAdapter:
                     tools_mode=fusion_config.tools_mode,
                     tool_choice=request.tool_choice,
                     max_tool_calls=fusion_config.max_tool_calls,
+                    request_messages=request.messages,
+                    meta_tool_names=self.settings.meta_tool_names,
                 )
                 if _analysis_has_final_output(repaired_analysis):
                     analysis = repaired_analysis
@@ -285,6 +395,8 @@ class FusionProviderAdapter:
             tools_mode=fusion_config.tools_mode,
             tool_choice=request.tool_choice,
             max_tool_calls=fusion_config.max_tool_calls,
+            request_messages=request.messages,
+            meta_tool_names=self.settings.meta_tool_names,
         )
         if _final_tool_call_is_required(
             message,
@@ -331,6 +443,8 @@ class FusionProviderAdapter:
                 tools_mode=fusion_config.tools_mode,
                 tool_choice=request.tool_choice,
                 max_tool_calls=fusion_config.max_tool_calls,
+                request_messages=request.messages,
+                meta_tool_names=self.settings.meta_tool_names,
             )
             if fallback is None:
                 run_result = self._build_run_result(
@@ -481,6 +595,8 @@ class FusionProviderAdapter:
                 tools_mode=fusion_config.tools_mode,
                 tool_choice=request.tool_choice,
                 max_tool_calls=fusion_config.max_tool_calls,
+                request_messages=request.messages,
+                meta_tool_names=self.settings.meta_tool_names,
             )
             finish_reason = selected_candidate.finish_reason or (
                 "tool_calls" if message is not None and message.tool_calls else "stop"
@@ -514,6 +630,8 @@ class FusionProviderAdapter:
                     tools_mode=fusion_config.tools_mode,
                     tool_choice=request.tool_choice,
                     max_tool_calls=fusion_config.max_tool_calls,
+                    request_messages=request.messages,
+                    meta_tool_names=self.settings.meta_tool_names,
                 )
             except asyncio.TimeoutError:
                 fallback_reason = fallback_reason or "finalizer_timeout"
@@ -673,6 +791,8 @@ class FusionProviderAdapter:
             tools_mode=fusion_config.tools_mode,
             tool_choice=request.tool_choice,
             max_tool_calls=fusion_config.max_tool_calls,
+            request_messages=request.messages,
+            meta_tool_names=self.settings.meta_tool_names,
         )
         usage = aggregate_usage(
             [
@@ -1080,6 +1200,26 @@ class FusionProviderAdapter:
             request,
             candidate=candidate,
             selection=selection,
+            fusion_config=fusion_config,
+        )
+        await _raise_if_disconnected(is_disconnected)
+        return await asyncio.wait_for(
+            self.upstream_provider.chat(finalizer_request, context=context),
+            timeout=fusion_config.timeout_seconds,
+        )
+
+    async def _run_post_tool_finalizer(
+        self,
+        request: NormalizedChatRequest,
+        *,
+        post_tool_call: NormalizedToolCall,
+        context: RequestContext | None,
+        fusion_config: FusionRequestConfig,
+        is_disconnected: DisconnectChecker | None,
+    ) -> NormalizedResponse:
+        finalizer_request = _build_post_tool_finalizer_request(
+            request,
+            post_tool_call=post_tool_call,
             fusion_config=fusion_config,
         )
         await _raise_if_disconnected(is_disconnected)
@@ -1520,6 +1660,47 @@ def _build_selector_finalizer_request(
     return finalizer_request
 
 
+def _build_post_tool_finalizer_request(
+    request: NormalizedChatRequest,
+    *,
+    post_tool_call: NormalizedToolCall,
+    fusion_config: FusionRequestConfig,
+) -> NormalizedChatRequest:
+    finalizer_request = request.model_copy(deep=True)
+    finalizer_request.model = fusion_config.final_model or fusion_config.judge_model
+    finalizer_request.stream = False
+    finalizer_request.response_format = None
+    _apply_generation_overrides(finalizer_request, fusion_config)
+
+    instruction_messages, conversation_messages = split_instruction_messages(
+        finalizer_request.messages
+    )
+    tool_policy = (
+        "Tools are disabled for this post-tool finalization step. "
+        "Use the latest tool result to answer the original user request. "
+        "Return final text only. Do not emit tool calls."
+    )
+    finalizer_request.messages = [
+        build_fusion_system_envelope(
+            stage="final",
+            client_instruction_messages=instruction_messages,
+            source_protocol=_source_protocol(finalizer_request),
+            tool_policy=tool_policy,
+            prompt_mode=fusion_config.prompt_mode,
+            decision_mode=fusion_config.decision_mode,
+        ),
+        *conversation_messages,
+    ]
+    finalizer_request.tools = []
+    finalizer_request.tool_choice = None
+    finalizer_request.metadata = {
+        **finalizer_request.metadata,
+        "gpt2giga_fusion_stage": "post_tool_finalizer",
+        "gpt2giga_fusion_tool_name": post_tool_call.name or "",
+    }
+    return finalizer_request
+
+
 def _build_judge_repair_request(
     request: NormalizedChatRequest,
     *,
@@ -1620,6 +1801,8 @@ def _analysis_from_judge_response(
     tools_mode: str,
     tool_choice: Any,
     max_tool_calls: int,
+    request_messages: list[NormalizedMessage],
+    meta_tool_names: list[str],
 ) -> tuple[FusionAnalysis | None, str | None]:
     if response is None:
         return None, "judge_failed"
@@ -1636,6 +1819,13 @@ def _analysis_from_judge_response(
         max_tool_calls=max_tool_calls,
     )
     if direct_tool_call is not None and not _content_to_text(message.content):
+        if _tool_call_repeated_without_new_user(request_messages, direct_tool_call):
+            return (
+                FusionAnalysis(task_status="needs_tool"),
+                "repeated_final_tool_call",
+            )
+        if _is_meta_tool_call(direct_tool_call, meta_tool_names):
+            return FusionAnalysis(task_status="needs_tool"), "meta_final_tool_call"
         return FusionAnalysis(final_tool_call=direct_tool_call), None
 
     content = _content_to_text(message.content)
@@ -1643,10 +1833,34 @@ def _analysis_from_judge_response(
         return None, "judge_empty_response"
     try:
         payload = _load_json_object(content)
+        payload, normalization_reason = _normalize_analysis_payload(
+            payload,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+            meta_tool_names=meta_tool_names,
+        )
         analysis = FusionAnalysis.model_validate(payload)
     except (json.JSONDecodeError, TypeError, ValueError, ValidationError):
         return None, "invalid_judge_json"
 
+    if analysis.final_tool_call is not None and _tool_call_repeated_without_new_user(
+        request_messages,
+        analysis.final_tool_call,
+    ):
+        analysis.final_tool_call = None
+        if not analysis.final_answer:
+            return analysis, "repeated_final_tool_call"
+        return analysis, "repeated_final_tool_call"
+    if analysis.final_tool_call is not None and _is_meta_tool_call(
+        analysis.final_tool_call,
+        meta_tool_names,
+    ):
+        analysis.final_tool_call = None
+        if not analysis.final_answer:
+            return analysis, "meta_final_tool_call"
+        return analysis, "meta_final_tool_call"
     if analysis.final_tool_call is not None and not tool_call_allowed(
         analysis.final_tool_call,
         request_tools=request_tools,
@@ -1675,7 +1889,7 @@ def _analysis_from_judge_response(
         )
         if validation.valid:
             analysis.final_tool_call = validation.tool_call
-    return analysis, None
+    return analysis, normalization_reason
 
 
 def _selection_from_judge_response(
@@ -1710,9 +1924,16 @@ def _final_message_from_analysis(
     tools_mode: str,
     tool_choice: Any,
     max_tool_calls: int,
+    request_messages: list[NormalizedMessage],
+    meta_tool_names: list[str],
 ) -> tuple[NormalizedMessage | None, str | None]:
     if analysis is None:
         return None, None
+    if analysis.final_answer:
+        return (
+            NormalizedMessage(role="assistant", content=analysis.final_answer),
+            "stop",
+        )
     if analysis.final_tool_call is not None and tool_call_allowed(
         analysis.final_tool_call,
         request_tools=request_tools,
@@ -1720,6 +1941,13 @@ def _final_message_from_analysis(
         tool_choice=tool_choice,
         max_tool_calls=max_tool_calls,
     ):
+        if _is_meta_tool_call(analysis.final_tool_call, meta_tool_names):
+            return None, None
+        if _tool_call_repeated_without_new_user(
+            request_messages,
+            analysis.final_tool_call,
+        ):
+            return None, None
         validation = validate_tool_call_arguments(
             analysis.final_tool_call,
             request_tools=request_tools,
@@ -1737,11 +1965,6 @@ def _final_message_from_analysis(
             ),
             "tool_calls",
         )
-    if analysis.final_answer:
-        return (
-            NormalizedMessage(role="assistant", content=analysis.final_answer),
-            "stop",
-        )
     return None, None
 
 
@@ -1752,6 +1975,8 @@ def _message_from_response(
     tools_mode: str,
     tool_choice: Any,
     max_tool_calls: int,
+    request_messages: list[NormalizedMessage],
+    meta_tool_names: list[str],
 ) -> tuple[NormalizedMessage | None, str | None]:
     if response is None or response.error is not None:
         return None, None
@@ -1764,6 +1989,8 @@ def _message_from_response(
         tools_mode=tools_mode,
         tool_choice=tool_choice,
         max_tool_calls=max_tool_calls,
+        request_messages=request_messages,
+        meta_tool_names=meta_tool_names,
         allow_tool_calls=True,
     )
     return message, choice.finish_reason
@@ -1776,6 +2003,8 @@ def _message_from_candidate(
     tools_mode: str,
     tool_choice: Any,
     max_tool_calls: int,
+    request_messages: list[NormalizedMessage],
+    meta_tool_names: list[str],
 ) -> NormalizedMessage | None:
     if candidate is None or candidate.status != "ok":
         return None
@@ -1789,6 +2018,8 @@ def _message_from_candidate(
         tools_mode=tools_mode,
         tool_choice=tool_choice,
         max_tool_calls=max_tool_calls,
+        request_messages=request_messages,
+        meta_tool_names=meta_tool_names,
         allow_tool_calls=candidate.source == "direct",
     )
 
@@ -1800,6 +2031,8 @@ def _normalize_final_message(
     tools_mode: str,
     tool_choice: Any,
     max_tool_calls: int,
+    request_messages: list[NormalizedMessage],
+    meta_tool_names: list[str],
     allow_tool_calls: bool,
 ) -> NormalizedMessage | None:
     content = _content_to_text(message.content)
@@ -1812,6 +2045,14 @@ def _normalize_final_message(
             max_tool_calls=max_tool_calls,
         )
         if direct_tool_call is not None:
+            if _is_meta_tool_call(direct_tool_call, meta_tool_names):
+                if content:
+                    return NormalizedMessage(role="assistant", content=content)
+                return None
+            if _tool_call_repeated_without_new_user(request_messages, direct_tool_call):
+                if content:
+                    return NormalizedMessage(role="assistant", content=content)
+                return None
             validation = validate_tool_call_arguments(
                 direct_tool_call,
                 request_tools=request_tools,
@@ -1879,6 +2120,159 @@ def _load_json_object(content: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("Fusion judge response must be a JSON object")
     return value
+
+
+def _normalize_analysis_payload(
+    payload: dict[str, Any],
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+    meta_tool_names: list[str],
+) -> tuple[dict[str, Any], str | None]:
+    normalized = dict(payload)
+    normalization_reason: str | None = None
+    final_answer = normalized.get("final_answer")
+    if isinstance(final_answer, str) and not final_answer.strip():
+        normalized["final_answer"] = None
+        final_answer = None
+
+    raw_final_tool_call = normalized.get("final_tool_call")
+    final_tool_call = _raw_tool_call_from_payload(raw_final_tool_call)
+    task_status = normalized.get("task_status")
+    if task_status not in {"needs_tool", "complete", "blocked", "answer_only"}:
+        if final_tool_call is not None and final_answer is None:
+            task_status = "needs_tool"
+        elif final_answer:
+            task_status = "answer_only"
+        else:
+            task_status = "answer_only"
+        normalized["task_status"] = task_status
+
+    if task_status in {"complete", "blocked"}:
+        normalized["final_tool_call"] = None
+        final_tool_call = None
+
+    if final_answer and final_tool_call is not None:
+        if task_status == "needs_tool" and _tool_call_is_real_progress_tool(
+            final_tool_call,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+            meta_tool_names=meta_tool_names,
+        ):
+            normalized["final_answer"] = None
+        elif _tool_choice_forces_real_progress_tool(
+            final_tool_call,
+            request_tools=request_tools,
+            tools_mode=tools_mode,
+            tool_choice=tool_choice,
+            max_tool_calls=max_tool_calls,
+            meta_tool_names=meta_tool_names,
+        ):
+            normalized["final_answer"] = None
+        else:
+            normalization_reason = _dropped_tool_call_reason(
+                raw_final_tool_call,
+                final_tool_call,
+                request_tools=request_tools,
+                tools_mode=tools_mode,
+                tool_choice=tool_choice,
+                max_tool_calls=max_tool_calls,
+                meta_tool_names=meta_tool_names,
+            )
+            normalized["final_tool_call"] = None
+    elif task_status == "needs_tool" and final_answer and final_tool_call is None:
+        normalized["final_answer"] = None
+
+    return normalized, normalization_reason
+
+
+def _raw_tool_call_from_payload(value: Any) -> NormalizedToolCall | None:
+    if isinstance(value, NormalizedToolCall):
+        return value
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        return NormalizedToolCall.model_validate(value)
+    except ValidationError:
+        return None
+
+
+def _dropped_tool_call_reason(
+    raw_tool_call: Any,
+    tool_call: NormalizedToolCall | None,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+    meta_tool_names: list[str],
+) -> str | None:
+    if raw_tool_call is None:
+        return None
+    if tool_call is None:
+        return "invalid_final_tool_call"
+    if _is_meta_tool_call(tool_call, meta_tool_names):
+        return "meta_final_tool_call"
+    validation = validate_tool_call_arguments(
+        tool_call,
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    )
+    if not validation.valid:
+        return "invalid_final_tool_call"
+    return None
+
+
+def _tool_choice_forces_real_progress_tool(
+    tool_call: NormalizedToolCall,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+    meta_tool_names: list[str],
+) -> bool:
+    if not tool_choice_requires_tool(
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    ):
+        return False
+    return _tool_call_is_real_progress_tool(
+        tool_call,
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+        meta_tool_names=meta_tool_names,
+    )
+
+
+def _tool_call_is_real_progress_tool(
+    tool_call: NormalizedToolCall,
+    *,
+    request_tools: list[NormalizedTool],
+    tools_mode: str,
+    tool_choice: Any,
+    max_tool_calls: int,
+    meta_tool_names: list[str],
+) -> bool:
+    if _is_meta_tool_call(tool_call, meta_tool_names):
+        return False
+    return tool_call_allowed(
+        tool_call,
+        request_tools=request_tools,
+        tools_mode=tools_mode,
+        tool_choice=tool_choice,
+        max_tool_calls=max_tool_calls,
+    )
 
 
 def _fusion_analysis_response_format() -> NormalizedResponseFormat:
@@ -1952,6 +2346,93 @@ def _strip_code_fence(content: str) -> str:
     if lines and lines[-1].strip() == "```":
         lines = lines[:-1]
     return "\n".join(lines).strip()
+
+
+def _latest_post_tool_call(
+    messages: list[NormalizedMessage],
+) -> NormalizedToolCall | None:
+    if not messages or messages[-1].role != "tool":
+        return None
+    last_user_index = _last_user_index(messages)
+    if len(messages) - 1 <= last_user_index:
+        return None
+    tool_result = messages[-1]
+    tool_call_id = tool_result.tool_call_id
+    for message in reversed(messages[last_user_index + 1 : -1]):
+        if message.role != "assistant" or not message.tool_calls:
+            continue
+        for tool_call in reversed(message.tool_calls):
+            if not tool_call_id:
+                return tool_call
+            if tool_call.id == tool_call_id or tool_call.name == tool_call_id:
+                return tool_call
+    return None
+
+
+def _tool_call_repeated_without_new_user(
+    messages: list[NormalizedMessage],
+    tool_call: NormalizedToolCall,
+) -> bool:
+    signature = _tool_call_signature(tool_call)
+    if signature is None:
+        return False
+    last_user_index = _last_user_index(messages)
+    for message in messages[last_user_index + 1 :]:
+        if message.role != "assistant":
+            continue
+        for existing_call in message.tool_calls:
+            if _tool_call_signature(existing_call) == signature:
+                return True
+    return False
+
+
+def _tool_call_signature(tool_call: NormalizedToolCall) -> tuple[str, str] | None:
+    name = (tool_call.name or "").strip()
+    if not name:
+        return None
+    return name, _canonical_tool_arguments(tool_call.arguments)
+
+
+def _canonical_tool_arguments(value: Any) -> str:
+    if value is None:
+        normalized: Any = {}
+    elif isinstance(value, str):
+        try:
+            normalized = json.loads(value)
+        except json.JSONDecodeError:
+            normalized = value
+    else:
+        normalized = value
+    return json.dumps(
+        normalized,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _is_meta_tool_call(
+    tool_call: NormalizedToolCall,
+    meta_tool_names: list[str],
+) -> bool:
+    name = (tool_call.name or "").strip().lower()
+    return bool(name and name in _normalized_meta_tool_names(meta_tool_names))
+
+
+def _normalized_meta_tool_names(meta_tool_names: list[str]) -> frozenset[str]:
+    return frozenset(
+        name.strip().lower()
+        for name in meta_tool_names
+        if isinstance(name, str) and name.strip()
+    )
+
+
+def _last_user_index(messages: list[NormalizedMessage]) -> int:
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].role == "user":
+            return index
+    return -1
 
 
 def _final_tool_call_is_required(

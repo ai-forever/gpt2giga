@@ -182,21 +182,24 @@ def _tool_response(
     )
 
 
-def _judge_json(final_answer="final answer", final_tool_call=None) -> str:
-    return json.dumps(
-        {
-            "schema_version": "gpt2giga.fusion.analysis.v1",
-            "consensus": ["Both panels agree."],
-            "contradictions": [],
-            "partial_coverage": [],
-            "unique_insights": [],
-            "blind_spots": [],
-            "risk_flags": [],
-            "selected_strategy": "Use the safer change.",
-            "final_answer": final_answer,
-            "final_tool_call": final_tool_call,
-        }
-    )
+def _judge_json(
+    final_answer="final answer", final_tool_call=None, task_status=None
+) -> str:
+    payload = {
+        "schema_version": "gpt2giga.fusion.analysis.v1",
+        "consensus": ["Both panels agree."],
+        "contradictions": [],
+        "partial_coverage": [],
+        "unique_insights": [],
+        "blind_spots": [],
+        "risk_flags": [],
+        "selected_strategy": "Use the safer change.",
+        "final_answer": final_answer,
+        "final_tool_call": final_tool_call,
+    }
+    if task_status is not None:
+        payload["task_status"] = task_status
+    return json.dumps(payload)
 
 
 def _selection_json(
@@ -813,6 +816,276 @@ async def test_fusion_adapter_strips_tools_from_panels_and_allows_final_tool_cal
         )
     ]
     assert response.choices[0].finish_reason == "tool_calls"
+
+
+async def test_fusion_adapter_final_answer_wins_over_meta_tool_call():
+    update_topic = NormalizedTool(
+        name="update_topic",
+        description="Update conversation topic",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [update_topic]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "panel answer"),
+            "PanelB": _text_response("PanelB", "panel answer"),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json(
+                    final_answer="hello.py is done",
+                    final_tool_call={
+                        "id": "call-1",
+                        "type": "function",
+                        "name": "update_topic",
+                        "arguments": {"topic": "done"},
+                    },
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    message = response.choices[0].message
+    assert message.content == "hello.py is done"
+    assert message.tool_calls == []
+    assert response.choices[0].finish_reason == "stop"
+
+
+async def test_fusion_adapter_repeated_meta_tool_call_returns_text_fallback():
+    update_topic = NormalizedTool(
+        name="update_topic",
+        description="Update conversation topic",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [update_topic]
+    request.messages = [
+        NormalizedMessage(role="user", content="Implement it"),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-previous",
+                    name="update_topic",
+                    arguments={"topic": "done"},
+                )
+            ],
+        ),
+    ]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "panel fallback answer"),
+            "PanelB": _text_response("PanelB", "panel fallback answer"),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json(
+                    final_answer=None,
+                    final_tool_call={
+                        "id": "call-next",
+                        "type": "function",
+                        "name": "update_topic",
+                        "arguments": {"topic": "done"},
+                    },
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    message = response.choices[0].message
+    assert message.content == "panel fallback answer"
+    assert message.tool_calls == []
+    assert response.choices[0].finish_reason == "stop"
+    assert (
+        response.metadata["gpt2giga_fusion_fallback_reason"]
+        == "repeated_final_tool_call"
+    )
+
+
+async def test_fusion_adapter_complete_task_status_drops_tool_call():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [tool]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "panel answer"),
+            "PanelB": _text_response("PanelB", "panel answer"),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json(
+                    final_answer="task complete",
+                    final_tool_call={
+                        "id": "call-1",
+                        "type": "function",
+                        "name": "lookup",
+                        "arguments": {"q": "ping"},
+                    },
+                    task_status="complete",
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    message = response.choices[0].message
+    assert message.content == "task complete"
+    assert message.tool_calls == []
+    assert response.choices[0].finish_reason == "stop"
+
+
+async def test_fusion_adapter_needs_tool_status_preserves_progress_tool_call():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [tool]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "Use lookup."),
+            "PanelB": _text_response("PanelB", "Use lookup."),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json(
+                    final_answer="internal rationale",
+                    final_tool_call={
+                        "id": "call-1",
+                        "type": "function",
+                        "name": "lookup",
+                        "arguments": {"q": "ping"},
+                    },
+                    task_status="needs_tool",
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    message = response.choices[0].message
+    assert message.content is None
+    assert message.tool_calls == [
+        NormalizedToolCall(
+            id="call-1",
+            type="function",
+            name="lookup",
+            arguments={"q": "ping"},
+        )
+    ]
+    assert response.choices[0].finish_reason == "tool_calls"
+
+
+async def test_fusion_adapter_required_meta_tool_only_returns_safe_error():
+    update_topic = NormalizedTool(
+        name="update_topic",
+        description="Update conversation topic",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [update_topic]
+    request.tool_choice = "required"
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response("PanelA", "A answer"),
+            "PanelB": _text_response("PanelB", "B answer"),
+            "Judge": _text_response(
+                "Judge",
+                _judge_json(
+                    final_answer=None,
+                    final_tool_call={
+                        "id": "call-1",
+                        "type": "function",
+                        "name": "update_topic",
+                        "arguments": {"topic": "done"},
+                    },
+                    task_status="needs_tool",
+                ),
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    assert response.error is not None
+    assert response.error.code == "fusion_tool_required"
+    assert response.choices == []
+    assert (
+        response.metadata["gpt2giga_fusion_fallback_reason"] == "meta_final_tool_call"
+    )
+
+
+async def test_fusion_adapter_post_tool_turn_runs_single_finalizer_with_tools_disabled():
+    tool = NormalizedTool(
+        name="lookup",
+        description="Lookup data",
+        parameters={"type": "object"},
+    )
+    request = _request()
+    request.tools = [tool]
+    request.messages = [
+        NormalizedMessage(role="user", content="Look this up"),
+        NormalizedMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                NormalizedToolCall(
+                    id="call-1",
+                    name="lookup",
+                    arguments={"q": "ping"},
+                )
+            ],
+        ),
+        NormalizedMessage(
+            role="tool",
+            content="lookup result",
+            tool_call_id="call-1",
+        ),
+    ]
+    provider = FakeProvider(
+        responses={
+            "Judge": _text_response("Judge", "final answer from tool result"),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(),
+    )
+
+    assert response.error is None
+    assert response.choices[0].message.content == "final answer from tool result"
+    assert response.choices[0].finish_reason == "stop"
+    assert [call.model for call in provider.calls] == ["Judge"]
+    assert provider.calls[0].tools == []
+    assert provider.calls[0].tool_choice is None
+    assert provider.calls[0].metadata["gpt2giga_fusion_stage"] == (
+        "post_tool_finalizer"
+    )
 
 
 async def test_fusion_adapter_invalid_final_tool_args_returns_text_when_available():

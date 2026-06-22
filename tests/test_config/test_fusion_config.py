@@ -2,6 +2,7 @@ import pytest
 
 from gpt2giga.models.config import (
     DEFAULT_FUSION_ALIASES,
+    DEFAULT_FUSION_META_TOOL_NAMES,
     FusionSettings,
     ProxySettings,
 )
@@ -24,6 +25,7 @@ _FUSION_ENV_KEYS = [
     "GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES",
     "GPT2GIGA_FUSION_DEBUG_TRACE_ENABLED",
     "GPT2GIGA_FUSION_FAIL_ON_ALL_PANELS_FAILED",
+    "GPT2GIGA_FUSION_META_TOOL_NAMES",
 ]
 
 
@@ -48,6 +50,7 @@ def test_fusion_settings_defaults_are_disabled(monkeypatch):
     assert settings.fusion.max_concurrent_requests == 4
     assert settings.fusion.max_total_upstream_calls_per_request == 5
     assert settings.fusion.max_tool_calls == 1
+    assert settings.fusion.meta_tool_names == DEFAULT_FUSION_META_TOOL_NAMES
 
 
 def test_fusion_settings_parse_json_env(monkeypatch):
@@ -87,6 +90,7 @@ def test_fusion_settings_parse_json_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS", "7")
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST", "6")
     monkeypatch.setenv("GPT2GIGA_FUSION_MAX_TOOL_CALLS", "1")
+    monkeypatch.setenv("GPT2GIGA_FUSION_META_TOOL_NAMES", "update_topic,done")
     monkeypatch.setenv("GPT2GIGA_FUSION_STREAMING_MODE", "BUFFERED")
     monkeypatch.setenv("GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS", "1.5")
 
@@ -102,6 +106,7 @@ def test_fusion_settings_parse_json_env(monkeypatch):
     assert settings.fusion.max_concurrent_requests == 7
     assert settings.fusion.max_total_upstream_calls_per_request == 6
     assert settings.fusion.max_tool_calls == 1
+    assert settings.fusion.meta_tool_names == ["update_topic", "done"]
     assert settings.fusion.stream_heartbeat_seconds == 1.5
     preset = settings.fusion.presets["code-high"]
     assert preset.analysis_models == ["GigaChat-3-Ultra", "GigaChat-2-Max"]

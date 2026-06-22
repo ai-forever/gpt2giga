@@ -97,6 +97,10 @@ def build_judge_tool_arbitration_prompt(
         "and satisfy tool_choice.\n"
         "- If no valid tool call is needed and require_tool_call=false, return "
         "final_tool_call=null and a text final_answer.\n"
+        "- Do not call tools to confirm completion, update topic, update plan, "
+        "record progress, or prepare follow-up.\n"
+        "- final_tool_call is only for actions required to make progress on the "
+        "original user request.\n"
         f"{_json_dumps(payload)}"
     )
 

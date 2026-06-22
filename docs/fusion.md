@@ -190,6 +190,7 @@ panel response.
 | `GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS` | `4` | Глобальный для процесса лимит одновременно выполняющихся Fusion-запросов. |
 | `GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST` | `5` | Максимум планируемых upstream calls на один Fusion-запрос: direct candidate, panel calls, judge call и обязательный selector finalizer. `0` отключает лимит. |
 | `GPT2GIGA_FUSION_MAX_TOOL_CALLS` | `1` | Зарезервировано под будущие parallel tool calls; текущий compact pipeline поддерживает ровно один final tool call. |
+| `GPT2GIGA_FUSION_META_TOOL_NAMES` | `update_topic,update_plan,todo_write` | Comma-separated или JSON list tool names, которые считаются meta/state tools и не используются как final progress actions. |
 | `GPT2GIGA_FUSION_STREAMING_MODE` | `buffered` | `buffered` отдает SSE после deliberation; `off` запрещает Fusion streaming requests. |
 | `GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS` | `0` | Если больше `0`, OpenAI Chat Completions stream отдает SSE comment heartbeat frames, пока buffered Fusion deliberation еще выполняется. |
 | `GPT2GIGA_FUSION_PIPELINE_MODE` | `compact` | Единственный поддержанный pipeline mode; decision behavior выбирается preset key `decision_mode`. |
@@ -251,6 +252,15 @@ Final tool-call arguments разбираются как JSON, ограничив
 невалиден, но есть text `final_answer`, клиент получает text answer без tool
 call. Если клиент требовал tool call через `tool_choice`, Fusion возвращает
 ошибку.
+
+Judge output has one final action: either `final_answer` or `final_tool_call`.
+If legacy judge JSON includes both, Fusion deterministically normalizes it.
+`final_answer` wins unless `task_status="needs_tool"` or `tool_choice` forces a
+valid non-meta progress tool. Meta/state tools from
+`GPT2GIGA_FUSION_META_TOOL_NAMES` are dropped as final actions. If the same tool
+name and canonical arguments already appeared in recent assistant tool calls
+after the latest user message, Fusion returns text fallback or a typed error
+instead of emitting the repeated call again.
 
 For tool-enabled agent presets prefer `return_selected_candidate=false`, so the
 selector decision still goes through finalizer/tool arbitration. Returning a

@@ -142,6 +142,10 @@ Fusion does not execute tools itself.
 Panel-stage tool candidates are advisory. Final calls are validated against
 allowed tool names, forced `tool_choice`, required tool calls,
 `GPT2GIGA_FUSION_MAX_TOOL_CALLS=1` and the original tool arguments JSON Schema.
+Judge final actions are normalized to one visible action: final text or one
+validated progress tool call. Meta/state tools from
+`GPT2GIGA_FUSION_META_TOOL_NAMES` are not final progress actions, and repeated
+assistant tool-call signatures after the latest user message are suppressed.
 If the client required a tool call and the judge does not produce a valid one,
 Fusion returns a typed normalized error instead of silently returning text.
 

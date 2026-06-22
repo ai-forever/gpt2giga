@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gpt2giga.protocols.normalized.models import NormalizedToolCall, NormalizedUsage
 
 FUSION_ANALYSIS_SCHEMA_VERSION = "gpt2giga.fusion.analysis.v1"
 FUSION_SELECTION_SCHEMA_VERSION = "gpt2giga.fusion.selection.v1"
+FusionTaskStatus = Literal["needs_tool", "complete", "blocked", "answer_only"]
 
 
 class FusionPanelResult(BaseModel):
@@ -89,10 +90,31 @@ class FusionAnalysis(BaseModel):
     blind_spots: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
     selected_strategy: Optional[str] = None
+    task_status: FusionTaskStatus = "answer_only"
     final_answer: Optional[str] = None
     final_tool_call: Optional[NormalizedToolCall] = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def normalize_final_action(self):
+        """Keep exactly one client-visible final action."""
+        if (
+            self.task_status == "answer_only"
+            and self.final_tool_call is not None
+            and not self.final_answer
+        ):
+            self.task_status = "needs_tool"
+
+        if self.task_status == "complete":
+            self.final_tool_call = None
+        elif self.task_status == "needs_tool":
+            self.final_answer = None
+        elif self.task_status == "blocked":
+            self.final_tool_call = None
+        elif self.final_answer and self.final_tool_call is not None:
+            self.final_tool_call = None
+        return self
 
 
 class FusionSelection(BaseModel):
