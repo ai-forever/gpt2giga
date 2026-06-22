@@ -152,6 +152,7 @@ venv.bak/
 /site
 docs-site/.docusaurus/
 docs-site/build/
+docs-site/node_modules/
 
 # mypy
 .mypy_cache/
