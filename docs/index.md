@@ -17,6 +17,8 @@ http://localhost:8090
 | Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
 | GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |
 | Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
+| GigaFusion behavior, presets and request examples | [GigaFusion](fusion.md) |
+| How to choose between benchmark Fusion and tool-agent Fusion | [GigaFusion guide](fusion-guide.md) |
 | Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |
 | Runtime logs, traffic logs, admin API, debug translate | [Operations](operations.md) |
 | Editor, agent, SDK, and reverse-proxy setup | [Integrations](integrations.md) |
@@ -51,4 +53,5 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
 
 - [Normalized messages](architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
 - [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
+- [Fusion provider architecture](architecture/fusion-provider.md) describes the internal Fusion orchestration boundary.
 - [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.

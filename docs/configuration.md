@@ -277,7 +277,8 @@ generation limits, `include_direct_candidate`, `return_selected_candidate`,
 предлагает следующий tool call или answer, verifier проверяет direct candidate,
 а judge возвращает structured action decision.
 
-Подробно: [GigaFusion](fusion.md).
+Подробно: [GigaFusion](fusion.md). Выбор режима для benchmark/tool-agent
+сценариев: [GigaFusion guide](fusion-guide.md).
 
 ## Normalized layer flags
 

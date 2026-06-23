@@ -6,7 +6,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Overview',
       collapsible: false,
-      items: ['index', 'quickstart', 'configuration'],
+      items: ['index', 'quickstart', 'configuration', 'fusion', 'fusion-guide'],
     },
     {
       type: 'category',
@@ -32,6 +32,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'architecture/normalized-messages',
         'architecture/logging-and-observability',
+        'architecture/fusion-provider',
         'architecture/how-to-add-provider',
       ],
     },

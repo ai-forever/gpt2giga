@@ -116,6 +116,7 @@ make docs-dev-ru
 | Совместимость SDK `extra_*` и параметров клиентов | [docs/client-parameter-compatibility.md](./docs/client-parameter-compatibility.md) |
 | Встроенные инструменты GigaChat и маппинг OpenAI/Anthropic/Gemini | [docs/builtin-tools.md](./docs/builtin-tools.md) |
 | Локальный multi-model deliberation через GigaFusion | [docs/fusion.md](./docs/fusion.md) |
+| Как выбрать benchmark Fusion или tool-agent Fusion | [docs/fusion-guide.md](./docs/fusion-guide.md) |
 | Переменные окружения, CLI flags, backend modes | [docs/configuration.md](./docs/configuration.md) |
 | Docker Compose, Traefik, Postgres, OpenSearch, Phoenix, production hardening | [docs/deployment.md](./docs/deployment.md) |
 | Logs, metrics, traffic logs, admin API, debug translation | [docs/operations.md](./docs/operations.md) |

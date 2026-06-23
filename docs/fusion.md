@@ -5,6 +5,11 @@ GigaFusion - локальный режим multi-model deliberation внутри
 прокси выполняет несколько внутренних GigaChat-вызовов, сравнивает ответы и
 возвращает один финальный ответ в исходном API-формате.
 
+Если нужно выбрать между benchmark-режимом, tool-agent режимом и обычным
+single-model path, начните с [GigaFusion guide](fusion-guide.md). Эта страница
+ниже остается reference-описанием API, aliases, presets, env variables и
+operational behavior.
+
 Это не прокси в OpenRouter Fusion и не точная копия OpenRouter behavior.
 Внешний OpenRouter не вызывается: все direct, panel, judge/selector и
 finalizer calls идут через настроенный GigaChat backend.
@@ -481,8 +486,7 @@ calls, fallback reasons and panel/candidate truncation counters. These are the
 primary signals for checking p95 latency, fallback rate, rewrite rate and
 selector distribution before using Fusion as a default coding-harness preset.
 
-More operational details: [Операции](operations.md#metrics) and
-[Phoenix / OpenTelemetry](operations.md#phoenix-opentelemetry).
+More operational details: [Operations](operations.md).
 
 Internal module boundaries and extension rules are described in
 [Fusion provider architecture](architecture/fusion-provider.md).
