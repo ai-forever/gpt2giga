@@ -231,6 +231,55 @@ Versioned prefixes are an explicit per-request override:
 - `/v1/chat/completions`, `/v1/responses`, `/v1/messages` use the GigaChat v1 contract;
 - `/v2/chat/completions`, `/v2/responses`, `/v2/messages` use the GigaChat v2 contract.
 
+## Fusion / multi-model deliberation
+
+GigaFusion - локальный режим, в котором один client request запускает direct
+candidate и/или несколько внутренних GigaChat panel calls, затем judge/selector
+и при необходимости finalizer call. Он выключен по
+умолчанию и не обращается к OpenRouter или другим внешним upstream.
+
+Минимальное включение:
+
+```dotenv
+GPT2GIGA_FUSION_ENABLED=True
+GPT2GIGA_FUSION_DEFAULT_PRESET=code-high
+```
+
+Частые overrides:
+
+```dotenv
+GPT2GIGA_FUSION_ALIASES='["gpt2giga/fusion","gpt2giga/fusion-code","gpt2giga/fusion-accuracy","gpt2giga/fusion-benchmark","gpt2giga/fusion-benchmark-text","gpt2giga/fusion-benchmark-tools","GigaChat-Fusion-Code"]'
+GPT2GIGA_FUSION_STREAMING_MODE=buffered
+GPT2GIGA_FUSION_MAX_PANEL_MODELS=4
+GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY=3
+GPT2GIGA_FUSION_MAX_CONCURRENT_REQUESTS=4
+GPT2GIGA_FUSION_MAX_TOTAL_UPSTREAM_CALLS_PER_REQUEST=5
+GPT2GIGA_FUSION_MAX_CLIENT_TOOL_ROUNDS=8
+GPT2GIGA_FUSION_POST_TOOL_MODE=direct_continuation
+GPT2GIGA_FUSION_DIRECT_TOOL_CALL_POLICY=return_immediately
+GPT2GIGA_FUSION_META_TOOL_NAMES=update_topic,update_plan,todo_write
+GPT2GIGA_FUSION_STREAM_HEARTBEAT_SECONDS=0
+GPT2GIGA_FUSION_EXPOSE_ANALYSIS_METADATA=False
+GPT2GIGA_FUSION_EXPOSE_PANEL_RESPONSES=False
+```
+
+Используйте `GPT2GIGA_FUSION_PRESETS` для JSON-карты custom presets с
+`analysis_models`, `judge_model`, `direct_model`, `final_model`, `panel_roles`,
+generation limits, `include_direct_candidate`, `return_selected_candidate`,
+`decision_mode`, `prompt_mode`, output budgets, `min_successful_panels`,
+`timeout_seconds`, `tools_mode`, `post_tool_mode`,
+`direct_tool_call_policy`, `candidate_stage_order`, `required_tool_policy` и
+`max_client_tool_rounds`.
+`decision_mode="selector"` выбирает лучший candidate и возвращает его без
+переписывания, если `needs_rewrite=false` и `return_selected_candidate=true`;
+`decision_mode="synthesize"` сохраняет старый compact `panel -> judge/finalizer`
+путь; `decision_mode="action"` включает verified tool loop, где direct model
+предлагает следующий tool call или answer, verifier проверяет direct candidate,
+а judge возвращает structured action decision.
+
+Подробно: [GigaFusion](fusion.md). Выбор режима для benchmark/tool-agent
+сценариев: [GigaFusion guide](fusion-guide.md).
+
 ## Normalized layer flags
 
 Experimental flags control the OpenAI Chat Completions normalized path and by

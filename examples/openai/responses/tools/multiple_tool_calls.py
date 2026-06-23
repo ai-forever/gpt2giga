@@ -3,11 +3,11 @@ from typing import Any
 
 from openai import OpenAI
 
-api_version = "v1"
+api_version = "v2"
 client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
-MODEL = "GigaChat-2-Max"
-
+MODEL = "gpt2giga/fusion-benchmark-tools"
+# MODEL = "GigaChat-2-Max"
 tools = [
     {
         "type": "function",
@@ -167,6 +167,7 @@ for _ in range(3):
         tools=tools,
         input=input_list,
     )
+    print(response.metadata)
     last_response = response
 
     input_list += response.output

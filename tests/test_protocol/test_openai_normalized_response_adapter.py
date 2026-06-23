@@ -64,8 +64,11 @@ def test_normalized_chat_response_to_openai_maps_tool_calls():
                     tool_calls=[
                         NormalizedToolCall(
                             id="state-1",
-                            name="lookup",
-                            arguments={"q": "ping"},
+                            name="write_file",
+                            arguments={
+                                "file_path": "hello.py",
+                                "content": "print(1)",
+                            },
                         )
                     ],
                 ),
@@ -81,12 +84,16 @@ def test_normalized_chat_response_to_openai_maps_tool_calls():
 
     choice = payload["choices"][0]
     assert choice["finish_reason"] == "tool_calls"
+    assert choice["message"]["content"] is None
     assert choice["message"]["tool_calls"] == [
         {
             "index": 0,
             "id": "state-1",
             "type": "function",
-            "function": {"name": "lookup", "arguments": '{"q": "ping"}'},
+            "function": {
+                "name": "write_file",
+                "arguments": '{"file_path": "hello.py", "content": "print(1)"}',
+            },
         }
     ]
 

@@ -9,6 +9,11 @@ from gpt2giga.common.gigachat_options import (
     gigachat_request_options,
 )
 from gpt2giga.openapi_tags import OPENAPI_TAG_LITELLM_MODEL_INFO
+from gpt2giga.providers.fusion.model_discovery import (
+    build_fusion_litellm_model_info,
+    find_fusion_litellm_model_info,
+    get_request_fusion_settings,
+)
 
 router = APIRouter(tags=[OPENAPI_TAG_LITELLM_MODEL_INFO])
 
@@ -37,6 +42,12 @@ def _model_info_entry(model_id: str) -> dict:
 @exceptions_handler
 async def get_model_info(request: Request, model: Optional[str] = None):
     """Return LiteLLM-style model info."""
+    fusion_settings = get_request_fusion_settings(request)
+    if model:
+        fusion_model_info = find_fusion_litellm_model_info(model, fusion_settings)
+        if fusion_model_info is not None:
+            return fusion_model_info
+
     giga_client = get_gigachat_client(request)
     request_options = extract_gigachat_request_options(
         request, exclude_query_params=("model",)
@@ -52,4 +63,5 @@ async def get_model_info(request: Request, model: Optional[str] = None):
             _model_info_entry(_extract_model_id(model_info))
             for model_info in response.data
         ]
+        + build_fusion_litellm_model_info(fusion_settings)
     }

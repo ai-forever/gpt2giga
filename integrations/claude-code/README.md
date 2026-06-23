@@ -155,6 +155,7 @@ Claude Code выбирает модель самостоятельно. `gpt2gig
 
 ## Полезные ссылки
 
+- [Claude Code + GigaFusion](fusion.md)
 - [Документация Claude Code](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview)
 - [Документация GigaChat API](https://developers.sber.ru/docs/ru/gigachat/overview)
 - [Примеры Anthropic API через gpt2giga](../../examples/anthropic/)

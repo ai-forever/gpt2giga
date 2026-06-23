@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -73,6 +74,64 @@ class FakeRequestTransformer:
         return {"model": data.get("model", "giga")}
 
 
+class FusionRequestTransformer(FakeRequestTransformer):
+    async def prepare_chat(self, data, giga_client=None):
+        self.chat_calls.append((data, giga_client))
+        return {
+            "model": data.get("model", "giga"),
+            "messages": data.get("messages", []),
+        }
+
+
+class FusionGigachat(FakeGigachat):
+    def __init__(self, *, panel_content=None, selector_payload=None):
+        self.chat_calls = []
+        self.panel_content = panel_content
+        self.selector_payload = selector_payload
+
+    async def achat(self, chat):
+        self.chat_calls.append(chat)
+        messages = chat.get("messages") or []
+        joined_content = "\n".join(
+            message.get("content", "")
+            for message in messages
+            if isinstance(message, dict)
+        )
+        if "<candidate_outputs" in joined_content and self.selector_payload:
+            content = json.dumps(self.selector_payload)
+        elif "judge/finalizer" in joined_content:
+            content = json.dumps(
+                {
+                    "consensus": ["Panels agree."],
+                    "contradictions": [],
+                    "partial_coverage": [],
+                    "unique_insights": [],
+                    "blind_spots": [],
+                    "risk_flags": [],
+                    "selected_strategy": "Use the merged answer.",
+                    "final_answer": "fused answer",
+                    "final_tool_call": None,
+                }
+            )
+        else:
+            content = self.panel_content or f"panel answer from {chat.get('model')}"
+        return MockResponse(
+            {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": content},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            }
+        )
+
+
 class RecordingObservabilitySink:
     def __init__(self):
         self.events = []
@@ -116,6 +175,316 @@ def test_chat_completions_non_stream_basic():
     assert resp.status_code == 200
     body = resp.json()
     assert body["object"] == "chat.completion"
+
+
+def test_chat_completions_fusion_model_alias_returns_non_stream_response():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="code-budget",
+            fusion_aliases=["gpt2giga/fusion-code-budget"],
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = FusionGigachat()
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-code-budget",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["model"] == "gpt2giga/fusion-code-budget"
+    assert body["choices"][0]["message"]["content"] == (
+        "panel answer from GigaChat-2-Max"
+    )
+    assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
+        "GigaChat-2-Max",
+    ]
+
+
+def test_chat_completions_fusion_model_alias_returns_buffered_stream():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="code-budget",
+            fusion_aliases=["gpt2giga/fusion-code-budget"],
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = FusionGigachat()
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-code-budget",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert '"object": "chat.completion.chunk"' in body
+    assert "panel answer from GigaChat-2-Max" in body
+    assert "data: [DONE]" in body
+    assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
+        "GigaChat-2-Max",
+    ]
+
+
+def test_chat_completions_fusion_stream_can_emit_heartbeat_comments():
+    class SlowFusionGigachat(FusionGigachat):
+        async def achat(self, chat):
+            await asyncio.sleep(0.01)
+            return await super().achat(chat)
+
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="code-budget",
+            fusion_aliases=["gpt2giga/fusion-code-budget"],
+            fusion_stream_heartbeat_seconds=0.001,
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = SlowFusionGigachat()
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    with client.stream(
+        "POST",
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-code-budget",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert ": gpt2giga-fusion heartbeat" in body
+    assert "panel answer from GigaChat-2-Max" in body
+    assert "data: [DONE]" in body
+
+
+def test_chat_completions_fusion_error_returns_http_502():
+    class FailingFusionGigachat:
+        def __init__(self):
+            self.chat_calls = []
+
+        async def achat(self, chat):
+            self.chat_calls.append(chat)
+            raise RuntimeError("upstream unavailable")
+
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="code-budget",
+            fusion_aliases=["gpt2giga/fusion-code-budget"],
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = FailingFusionGigachat()
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-code-budget",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    body = resp.json()
+    assert resp.status_code == 502
+    assert body["error"]["code"] == "outer_model_failed"
+    assert [call["model"] for call in app.state.gigachat_client.chat_calls] == [
+        "GigaChat-2-Max",
+    ]
+
+
+def test_chat_completions_fusion_openrouter_tool_artifacts_are_not_forwarded():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="code-budget",
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = FusionGigachat()
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "GigaChat",
+            "messages": [{"role": "user", "content": "hi"}],
+            "metadata": {
+                "tenant": "test",
+                "gpt2giga_fusion": {"preset": "general"},
+            },
+            "extra_body": {
+                "safe": "kept",
+                "gpt2giga_fusion": {"preset": "general"},
+            },
+            "plugins": [{"id": "fusion", "preset": "general"}],
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": "openrouter:fusion"},
+            },
+            "tools": [
+                {
+                    "type": "openrouter:fusion",
+                    "parameters": {
+                        "analysis_models": ["PanelA"],
+                        "model": "Judge",
+                    },
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "description": "Lookup data",
+                        "parameters": {"type": "object"},
+                    },
+                },
+            ],
+        },
+    )
+
+    assert resp.status_code == 200
+    sent_payloads = [call[0] for call in app.state.request_transformer.chat_calls]
+    assert [payload["model"] for payload in sent_payloads] == [
+        "GigaChat",
+        "PanelA",
+        "Judge",
+        "GigaChat",
+    ]
+    for payload in sent_payloads:
+        assert "plugins" not in payload
+        assert payload.get("metadata", {}).get("tenant") == "test"
+        assert "gpt2giga_fusion" not in payload.get("metadata", {})
+        assert payload.get("additional_fields") == {"safe": "kept"}
+    assert [tool["function"]["name"] for tool in sent_payloads[0]["tools"]] == [
+        "lookup",
+        "openrouter.fusion",
+    ]
+    assert "tools" not in sent_payloads[1]
+    assert "tools" not in sent_payloads[2]
+    assert [tool["function"]["name"] for tool in sent_payloads[-1]["tools"]] == [
+        "lookup"
+    ]
+
+
+def test_chat_completions_fusion_selector_panel_json_returns_tool_call():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=True,
+            fusion_default_preset="force-selector",
+            fusion_aliases=["gpt2giga/fusion-force-selector"],
+            gigachat_api_mode="v1",
+        )
+    )
+    app.state.gigachat_client = FusionGigachat(
+        panel_content=(
+            '{"name":"write_file","parameters":'
+            '{"file_path":"hello.py","content":"print(1)"}}'
+        ),
+        selector_payload={
+            "schema_version": "gpt2giga.fusion.selection.v1",
+            "selected_candidate_id": "panel_1",
+            "confidence": 1.0,
+            "reason_brief": "Use the write_file action.",
+        },
+    )
+    app.state.request_transformer = FusionRequestTransformer()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-force-selector",
+            "messages": [{"role": "user", "content": "write hello.py"}],
+            "metadata": {
+                "gpt2giga_fusion": {
+                    "preset": "force-selector",
+                    "tools_mode": "schema_only",
+                }
+            },
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "write_file",
+                        "description": "Write a file",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "file_path": {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["file_path", "content"],
+                        },
+                    },
+                }
+            ],
+        },
+    )
+
+    body = resp.json()
+    assert resp.status_code == 200
+    choice = body["choices"][0]
+    assert choice["finish_reason"] == "tool_calls"
+    assert choice["message"]["content"] is None
+    assert choice["message"]["tool_calls"][0]["function"]["name"] == "write_file"
+    assert json.loads(choice["message"]["tool_calls"][0]["function"]["arguments"]) == {
+        "file_path": "hello.py",
+        "content": "print(1)",
+    }
+
+
+def test_chat_completions_fusion_alias_is_legacy_model_when_disabled():
+    app = make_app()
+    app.state.config = ProxyConfig(
+        proxy=ProxySettings(
+            fusion_enabled=False,
+            fusion_aliases=["gpt2giga/fusion-code"],
+            gigachat_api_mode="v1",
+        )
+    )
+    client = TestClient(app)
+
+    resp = client.post(
+        "/chat/completions",
+        json={
+            "model": "gpt2giga/fusion-code",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert resp.status_code == 200
+    assert app.state.request_transformer.chat_calls[0][0]["model"] == (
+        "gpt2giga/fusion-code"
+    )
 
 
 def test_chat_completions_legacy_keeps_assistant_function_call_replay():

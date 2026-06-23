@@ -852,6 +852,51 @@ def test_gemini_response_adapter_maps_normalized_response():
     assert candidate["finishReason"] == "STOP"
 
 
+def test_gemini_response_adapter_maps_tool_call_without_text():
+    response = NormalizedResponse(
+        id="req-tool",
+        model="gemini-pro",
+        choices=[
+            NormalizedChoice(
+                index=0,
+                message=NormalizedMessage(
+                    role="assistant",
+                    content=None,
+                    tool_calls=[
+                        NormalizedToolCall(
+                            id="call_write",
+                            name="write_file",
+                            arguments={
+                                "file_path": "hello.py",
+                                "content": "print(1)",
+                            },
+                        )
+                    ],
+                ),
+                finish_reason="tool_calls",
+            )
+        ],
+    )
+
+    payload = normalized_chat_response_to_gemini(
+        response,
+        requested_model="gemini-pro",
+    )
+
+    assert payload["candidates"][0]["content"]["parts"] == [
+        {
+            "functionCall": {
+                "id": "call_write",
+                "name": "write_file",
+                "args": {
+                    "file_path": "hello.py",
+                    "content": "print(1)",
+                },
+            }
+        }
+    ]
+
+
 def test_gemini_stream_message_end_includes_usage_metadata():
     payload = normalized_stream_event_to_gemini_chunk(
         NormalizedStreamEvent(

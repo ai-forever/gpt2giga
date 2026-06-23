@@ -48,8 +48,14 @@ uv run python examples/openai/embeddings/basic.py
 # Responses API
 uv run python examples/openai/responses/basic/single_prompt.py
 
+# OpenAI Responses API через GigaFusion
+uv run python examples/openai/responses/fusion/fusion_response.py
+
 # Anthropic Messages API
 uv run python examples/anthropic/messages/basic/messages.py
+
+# Anthropic Messages API через GigaFusion
+uv run python examples/anthropic/messages/fusion/fusion_message.py
 
 # Anthropic stateful Messages API
 uv run python examples/anthropic/messages/basic/stateful.py
@@ -100,8 +106,16 @@ uv run python scripts/run_examples_smoke.py \
 ```
 
 По умолчанию пропускаются подготовленные, но пока не смонтированные Files/Batches
-examples и OpenAI Agents example с внешними HTTP API. Для принудительного запуска
-всего набора добавьте `--include-known-unsupported`.
+examples, OpenAI Agents example с внешними HTTP API и Fusion examples, которым
+нужен `GPT2GIGA_FUSION_ENABLED=True`. Для принудительного запуска всего набора
+добавьте `--include-known-unsupported`.
+
+Для отдельной проверки Fusion после запуска прокси с
+`GPT2GIGA_FUSION_ENABLED=True` используйте:
+
+```bash
+uv run python scripts/run_fusion_smoke.py --routes models,responses
+```
 
 Files API, OpenAI Batches API, Anthropic Message Batches API и Gemini Files/Batches API примеры уже подготовлены, но соответствующие router-модули временно не смонтированы в этом релизе.
 
@@ -111,6 +125,9 @@ Stateful Anthropic/Gemini examples require the proxy process to be started with
 ## Дополнительно
 
 - `examples/openai/embeddings/basic.py`: эмбеддинги (`/embeddings` или `/v1/embeddings`)
+- `examples/openai/chat_completions/fusion/fusion_chat_completion.py`: Chat Completions через локальный GigaFusion alias
+- `examples/openai/responses/fusion/fusion_response.py`: Responses API через локальный GigaFusion alias
+- `examples/anthropic/messages/fusion/fusion_message.py`: Anthropic Messages через локальный GigaFusion alias
 - `examples/openai/models/basic.py`: список моделей
 - `examples/openai/files/basic.py`: OpenAI Files API (router подготовлен, но временно не смонтирован)
 - `examples/openai/batches/basic.py`: OpenAI Batches API (router подготовлен, но временно не смонтирован)

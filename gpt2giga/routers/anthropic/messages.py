@@ -1,11 +1,16 @@
 """Anthropic message endpoints."""
 
+from collections.abc import Mapping
 from typing import Dict, List
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from gpt2giga.app_state import get_gigachat_client, get_model_concurrency_limiter
+from gpt2giga.app_state import (
+    get_fusion_request_limiter,
+    get_gigachat_client,
+    get_model_concurrency_limiter,
+)
 from gpt2giga.common.api_mode import resolve_gigachat_api_mode
 from gpt2giga.common.conversation import (
     commit_anthropic_response,
@@ -36,11 +41,22 @@ from gpt2giga.protocol.anthropic.request import (
     _is_anthropic_structured_output_request,
 )
 from gpt2giga.protocol.anthropic.response import _build_anthropic_response
+from gpt2giga.protocol.anthropic.response import _anthropic_http_exception
 from gpt2giga.protocol.anthropic.streaming import (
     _stream_anthropic_generator,
     _stream_anthropic_chat_completion_generator,
 )
 from gpt2giga.protocol.response import adapt_chat_completion_to_chat_shape
+from gpt2giga.protocols.anthropic import (
+    buffered_anthropic_sse_from_normalized_response,
+    normalized_response_to_anthropic_message,
+)
+from gpt2giga.protocols.normalized import NormalizedChatRequest
+from gpt2giga.protocols.openai import OpenAIProtocolAdapter
+from gpt2giga.providers.fusion.adapter import FusionProviderAdapter
+from gpt2giga.providers.fusion.detection import extract_fusion_request
+from gpt2giga.providers.fusion.errors import FusionConfigurationError
+from gpt2giga.providers.gigachat import GigaChatProviderAdapter
 from gpt2giga.sinks.observability.anthropic import (
     emit_anthropic_message_observability,
     observe_anthropic_message_stream,
@@ -107,6 +123,20 @@ async def messages(request: Request):
         _is_anthropic_structured_output_request(data)
         and state.config.proxy_settings.structured_output_mode == "function_call"
     )
+
+    fusion_response = await _try_fusion_anthropic_messages(
+        request,
+        data,
+        openai_data,
+        request_options,
+        giga_client,
+        model_limiter,
+        conversation_turn,
+        structured_output_fallback=structured_output_fallback,
+    )
+    if fusion_response is not None:
+        return fusion_response
+
     mode = resolve_gigachat_api_mode(request)
 
     if mode == "v2":
@@ -217,3 +247,139 @@ async def messages(request: Request):
         ),
         media_type="text/event-stream",
     )
+
+
+async def _try_fusion_anthropic_messages(
+    request: Request,
+    payload: dict,
+    openai_data: dict,
+    request_options,
+    giga_client,
+    model_limiter,
+    conversation_turn,
+    *,
+    structured_output_fallback: bool,
+) -> dict | JSONResponse | StreamingResponse | None:
+    state = request.app.state
+    settings = getattr(getattr(state, "config", None), "proxy_settings", None)
+    if settings is None:
+        return None
+
+    fusion_settings = settings.fusion
+    try:
+        fusion_config = extract_fusion_request(payload, fusion_settings)
+    except FusionConfigurationError as exc:
+        return _anthropic_http_exception(400, "invalid_request_error", str(exc))
+    if fusion_config is None:
+        return None
+
+    stream = bool(payload.get("stream", False))
+    if stream and fusion_settings.streaming_mode != "buffered":
+        return _anthropic_http_exception(
+            400,
+            "invalid_request_error",
+            "Fusion streaming is disabled.",
+        )
+
+    protocol_adapter = getattr(state, "openai_protocol_adapter", None)
+    if protocol_adapter is None:
+        protocol_adapter = OpenAIProtocolAdapter()
+    context = get_request_context()
+    normalized_request = await protocol_adapter.to_normalized(
+        openai_data,
+        context=context,
+    )
+    normalized_request.protocol = "anthropic"
+    normalized_request.operation = "messages"
+    _strip_fusion_request_artifacts(normalized_request)
+
+    upstream_provider = GigaChatProviderAdapter(
+        config=state.config,
+        request_transformer=state.request_transformer,
+        giga_client=giga_client,
+        model_limiter=model_limiter,
+        request_options=request_options,
+        response_processor=getattr(state, "response_processor", None),
+        api_mode=resolve_gigachat_api_mode(request),
+        provider_label="anthropic",
+        force_request_model=True,
+    )
+    fusion_adapter = FusionProviderAdapter(
+        settings=fusion_settings,
+        upstream_provider=upstream_provider,
+        metrics_sink=getattr(state, "metrics_sink", None),
+        observability_sink=getattr(state, "observability_sink", None),
+        logger=getattr(state, "logger", None),
+        request_limiter=get_fusion_request_limiter(request),
+    )
+    normalized_response = await fusion_adapter.chat(
+        normalized_request,
+        context=context,
+        fusion_config=fusion_config,
+        is_disconnected=request.is_disconnected,
+    )
+    requested_model = str(
+        payload.get("model") or normalized_response.model or "GigaChat"
+    )
+    response_id = normalized_response.id
+    if response_id is None:
+        response_id = context.request_id if context is not None else rquid_context.get()
+    response_id = response_id or "fusion"
+
+    if normalized_response.error is not None and not stream:
+        return _anthropic_http_exception(
+            502,
+            normalized_response.error.type,
+            normalized_response.error.message,
+        )
+
+    if not stream:
+        result = normalized_response_to_anthropic_message(
+            normalized_response,
+            requested_model=requested_model,
+            response_id=response_id,
+            is_structured_output=structured_output_fallback,
+        )
+        await commit_anthropic_response(request, conversation_turn, result)
+        await emit_anthropic_message_observability(
+            state,
+            openai_data,
+            result,
+            context=context,
+        )
+        return result
+
+    body_iterator = stitch_anthropic_stream(
+        request,
+        conversation_turn,
+        buffered_anthropic_sse_from_normalized_response(
+            normalized_response,
+            requested_model=requested_model,
+            response_id=response_id,
+            is_structured_output=structured_output_fallback,
+        ),
+    )
+    return StreamingResponse(
+        observe_anthropic_message_stream(
+            state,
+            body_iterator,
+            request_payload=openai_data,
+            context=context,
+        ),
+        media_type="text/event-stream",
+    )
+
+
+def _strip_fusion_request_artifacts(normalized_request: NormalizedChatRequest) -> None:
+    normalized_request.tools = [
+        tool for tool in normalized_request.tools if tool.type != "openrouter:fusion"
+    ]
+    normalized_request.metadata.pop("gpt2giga_fusion", None)
+    gigachat_metadata = normalized_request.provider_metadata.get("gigachat")
+    if isinstance(gigachat_metadata, Mapping):
+        additional_fields = gigachat_metadata.get("additional_fields")
+        if isinstance(additional_fields, dict):
+            for key in ("plugins", "gpt2giga_fusion"):
+                additional_fields.pop(key, None)
+    for key in ("plugins", "gpt2giga_fusion"):
+        normalized_request.raw_extensions.pop(key, None)

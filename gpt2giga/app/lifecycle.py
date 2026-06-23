@@ -9,6 +9,7 @@ from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
+from gpt2giga.providers.fusion.limiter import FusionRequestLimiter
 from gpt2giga.providers.gigachat.client import (
     close_gigachat_client,
     create_gigachat_client,
@@ -66,6 +67,9 @@ async def lifespan(app: FastAPI):
         limits=config.proxy_settings.model_max_connections,
         default_limit=config.proxy_settings.model_max_connections_default,
         acquire_timeout=config.proxy_settings.model_max_connections_acquire_timeout,
+    )
+    app.state.fusion_request_limiter = FusionRequestLimiter(
+        config.proxy_settings.fusion.max_concurrent_requests
     )
     app.state.gigachat_client = create_gigachat_client(config.gigachat_settings)
 
