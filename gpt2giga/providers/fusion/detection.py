@@ -206,7 +206,7 @@ def _build_request_config(
 ) -> FusionRequestConfig:
     preset_name = (
         _string_or_none(params.get("preset"))
-        or _preset_from_model_alias(requested_model)
+        or preset_from_model_alias(requested_model)
         or settings.default_preset
     )
     presets = get_fusion_presets(settings.presets)
@@ -530,7 +530,8 @@ def _optional_mode(value: Any, fallback: str) -> str:
     return text.lower() if text else fallback
 
 
-def _preset_from_model_alias(model: str | None) -> str | None:
+def preset_from_model_alias(model: str | None) -> str | None:
+    """Return the built-in Fusion preset implied by a virtual model alias."""
     if model is None:
         return None
     normalized = _normalize_model_id(model).lower()

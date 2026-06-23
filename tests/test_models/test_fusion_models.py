@@ -32,28 +32,28 @@ class FakeClient:
         return FakeModel(id=model, object="model")
 
 
-def _fusion_config() -> ProxyConfig:
+def _fusion_config(aliases: list[str] | None = None) -> ProxyConfig:
     return ProxyConfig(
         proxy=ProxySettings(
             fusion_enabled=True,
-            fusion_aliases=["gpt2giga/fusion-code", "GigaChat-Fusion-Code"],
+            fusion_aliases=aliases or ["gpt2giga/fusion-code", "GigaChat-Fusion-Code"],
         )
     )
 
 
-def _make_openai_app() -> FastAPI:
+def _make_openai_app(config: ProxyConfig | None = None) -> FastAPI:
     app = FastAPI()
     app.include_router(openai_router)
     app.include_router(litellm_models_router)
-    app.state.config = _fusion_config()
+    app.state.config = config or _fusion_config()
     app.state.gigachat_client = FakeClient()
     return app
 
 
-def _make_gemini_app() -> FastAPI:
+def _make_gemini_app(config: ProxyConfig | None = None) -> FastAPI:
     app = FastAPI()
     app.include_router(gemini_models_router)
-    app.state.config = _fusion_config()
+    app.state.config = config or _fusion_config()
     app.state.gigachat_client = FakeClient()
     return app
 
@@ -76,6 +76,47 @@ def test_openai_model_retrieve_returns_fusion_alias_without_upstream_call():
     assert response.status_code == 200
     assert response.json()["id"] == "gpt2giga/fusion-code"
     assert response.json()["created"] == FUSION_MODEL_CREATED
+    assert app.state.gigachat_client.model_calls == []
+
+
+def test_openai_model_retrieve_returns_fusion_preset_details():
+    app = _make_openai_app(_fusion_config(aliases=["gpt2giga/fusion-force-selector"]))
+    response = TestClient(app).get("/models/gpt2giga/fusion-force-selector")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == "gpt2giga/fusion-force-selector"
+    assert body["fusion"] == {
+        "preset": "force-selector",
+        "status": "configured",
+        "analysis_models": ["GigaChat-3-Ultra"],
+        "judge_model": "GigaChat-3-Ultra",
+        "final_model": None,
+        "effective_final_model": "GigaChat-3-Ultra",
+        "direct_model": None,
+        "effective_direct_model": "GigaChat-3-Ultra",
+        "panel_roles": ["solver"],
+        "temperature": 0.0,
+        "max_completion_tokens": None,
+        "reasoning": None,
+        "include_direct_candidate": True,
+        "return_selected_candidate": True,
+        "invocation_mode": "force",
+        "decision_mode": "selector",
+        "prompt_mode": "minimal",
+        "tools_mode": "off",
+        "candidate_stage_order": "parallel",
+        "required_tool_policy": "model_inferred",
+        "post_tool_mode": "direct_continuation",
+        "direct_tool_call_policy": "return_immediately",
+        "min_successful_panels": 1,
+        "timeout_seconds": 120.0,
+        "max_panel_output_chars": 6000,
+        "max_total_panel_output_chars": 12000,
+        "panel_output_truncation": "head_tail",
+        "max_client_tool_rounds": 8,
+        "pipeline_mode": "compact",
+    }
     assert app.state.gigachat_client.model_calls == []
 
 
@@ -112,6 +153,7 @@ def test_gemini_model_retrieve_returns_fusion_alias_without_upstream_call():
 
     assert response.status_code == 200
     assert response.json()["baseModelId"] == "gpt2giga/fusion-code"
+    assert response.json()["fusion"]["preset"] == "verified-tool-loop-ultra"
     assert app.state.gigachat_client.model_calls == []
 
 
@@ -122,6 +164,7 @@ def test_litellm_model_info_includes_fusion_aliases():
     entries = response.json()["data"]
     assert entries[1]["model_name"] == "gpt2giga/fusion-code"
     assert entries[1]["model_info"]["owned_by"] == "gpt2giga"
+    assert entries[1]["model_info"]["fusion"]["analysis_models"] == ["GigaChat-3-Ultra"]
 
 
 def test_litellm_model_query_returns_fusion_without_upstream_call():
