@@ -1046,6 +1046,7 @@ class FusionProviderAdapter:
             max_tool_calls=fusion_config.max_tool_calls,
             request_messages=request.messages,
             meta_tool_names=self.settings.meta_tool_names,
+            suppress_tool_candidate_json=True,
         )
         if fallback_reason is None and message is None:
             fallback_reason = "post_tool_finalizer_empty_response"
@@ -1469,6 +1470,7 @@ class FusionProviderAdapter:
                     max_tool_calls=fusion_config.max_tool_calls,
                     request_messages=request.messages,
                     meta_tool_names=self.settings.meta_tool_names,
+                    suppress_tool_candidate_json=True,
                 )
             except asyncio.TimeoutError:
                 fallback_reason = fallback_reason or "finalizer_timeout"
@@ -2360,8 +2362,12 @@ class FusionProviderAdapter:
             analysis_models=list(fusion_config.analysis_models),
             judge_model=fusion_config.judge_model,
             final_model=fusion_config.final_model,
+            invocation_mode=fusion_config.invocation_mode,
             decision_mode=fusion_config.decision_mode,
             prompt_mode=fusion_config.prompt_mode,
+            tools_mode=fusion_config.tools_mode,
+            direct_tool_call_policy=fusion_config.direct_tool_call_policy,
+            post_tool_mode=fusion_config.post_tool_mode,
             panel_results=panel_results,
             failed_models=failed_models,
             candidates=list(candidates or []),
@@ -3450,6 +3456,7 @@ def _message_from_response(
     max_tool_calls: int,
     request_messages: list[NormalizedMessage],
     meta_tool_names: list[str],
+    suppress_tool_candidate_json: bool = False,
 ) -> tuple[NormalizedMessage | None, str | None]:
     if response is None or response.error is not None:
         return None, None
@@ -3465,6 +3472,7 @@ def _message_from_response(
         request_messages=request_messages,
         meta_tool_names=meta_tool_names,
         allow_tool_calls=True,
+        suppress_tool_candidate_json=suppress_tool_candidate_json,
     )
     return message, choice.finish_reason
 
@@ -4504,8 +4512,12 @@ def _public_metadata(run_result: FusionRunResult) -> dict[str, str]:
         "gpt2giga_fusion_requested_model": run_result.requested_model,
         "gpt2giga_fusion_analysis_models": ",".join(run_result.analysis_models),
         "gpt2giga_fusion_judge_model": run_result.judge_model,
+        "gpt2giga_fusion_invocation_mode": run_result.invocation_mode,
         "gpt2giga_fusion_decision_mode": run_result.decision_mode,
         "gpt2giga_fusion_prompt_mode": run_result.prompt_mode,
+        "gpt2giga_fusion_tools_mode": run_result.tools_mode,
+        "gpt2giga_fusion_direct_tool_call_policy": (run_result.direct_tool_call_policy),
+        "gpt2giga_fusion_post_tool_mode": run_result.post_tool_mode,
         "gpt2giga_fusion_successful_panels": str(
             len(run_result.panel_results) - len(run_result.failed_models)
         ),
@@ -4561,8 +4573,12 @@ def _provider_metadata(
         "analysis_models": list(run_result.analysis_models),
         "judge_model": run_result.judge_model,
         "final_model": run_result.final_model,
+        "invocation_mode": run_result.invocation_mode,
         "decision_mode": run_result.decision_mode,
         "prompt_mode": run_result.prompt_mode,
+        "tools_mode": run_result.tools_mode,
+        "direct_tool_call_policy": run_result.direct_tool_call_policy,
+        "post_tool_mode": run_result.post_tool_mode,
         "selected_candidate_id": run_result.selected_candidate_id,
         "selected_candidate_source": run_result.selected_candidate_source,
         "needs_rewrite": run_result.needs_rewrite,

@@ -240,7 +240,8 @@ async def _try_fusion_chat_completion(
     except FusionConfigurationError as exc:
         return _openai_invalid_request_response(
             str(exc),
-            code="fusion_configuration_error",
+            code="invalid_fusion_configuration",
+            error_type="invalid_fusion_configuration",
         )
     if fusion_config is None:
         return None
@@ -563,13 +564,14 @@ def _openai_invalid_request_response(
     message: str,
     *,
     code: str,
+    error_type: str = "invalid_request_error",
 ) -> JSONResponse:
     return JSONResponse(
         status_code=400,
         content={
             "error": {
                 "message": message,
-                "type": "invalid_request_error",
+                "type": error_type,
                 "param": "model",
                 "code": code,
             }

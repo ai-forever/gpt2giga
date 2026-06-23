@@ -757,6 +757,11 @@ async def test_selector_prefers_valid_direct_native_tool_over_panel_advisory_too
     assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
         "direct_native_tool_call_preferred"
     )
+    assert response.metadata["gpt2giga_fusion_invocation_mode"] == "force"
+    assert response.metadata["gpt2giga_fusion_decision_mode"] == "selector"
+    assert response.metadata["gpt2giga_fusion_tools_mode"] == "schema_only"
+    assert response.metadata["gpt2giga_fusion_direct_tool_call_policy"] == "selector"
+    assert response.metadata["gpt2giga_fusion_post_tool_mode"] == "direct_continuation"
 
 
 async def test_selector_selected_panel_advisory_tool_returns_tool_call():
@@ -868,6 +873,42 @@ async def test_selector_invalid_advisory_tool_json_does_not_leak_as_text():
     assert response.choices[0].message.content == "safe fallback"
     assert response.choices[0].message.tool_calls == []
     assert response.choices[0].finish_reason == "stop"
+    assert [call.model for call in provider.calls] == ["PanelA", "Judge", "Final"]
+
+
+async def test_selector_finalizer_tool_json_does_not_leak_as_text():
+    request = _request()
+    request.tools = [_write_file_tool()]
+    provider = FakeProvider(
+        responses={
+            "PanelA": _text_response(
+                "PanelA",
+                '{"name":"write_file","arguments":{"file_path":"hello.py"}}',
+            ),
+            "Judge": _text_response("Judge", _selection_json("panel_1")),
+            "Final": _text_response(
+                "Final",
+                '```json\n{"name":"write_file","arguments":{"file_path":"hello.py"}}\n```',
+            ),
+        }
+    )
+
+    response = await _adapter(provider).chat(
+        request,
+        fusion_config=_fusion_config(
+            analysis_models=["PanelA"],
+            panel_roles=["implementer"],
+            decision_mode="selector",
+            final_model="Final",
+        ),
+    )
+
+    assert response.error is not None
+    assert response.error.code == "empty_fusion_result"
+    assert response.choices == []
+    assert response.metadata["gpt2giga_fusion_fallback_reason"] == (
+        "empty_fusion_result"
+    )
     assert [call.model for call in provider.calls] == ["PanelA", "Judge", "Final"]
 
 

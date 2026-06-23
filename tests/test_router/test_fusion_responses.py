@@ -181,6 +181,8 @@ def make_app(*, gigachat=None):
             fusion_aliases=[
                 "gpt2giga/fusion-code",
                 "gpt2giga/fusion-code-budget",
+                "gpt2giga/fusion-benchmark-text",
+                "gpt2giga/fusion-benchmark-tools",
                 "gpt2giga/fusion-force-synthesize",
                 "gpt2giga/fusion-force-selector",
             ],
@@ -456,6 +458,70 @@ def test_responses_fusion_selector_panel_json_returns_function_call():
         "file_path": "hello.py",
         "content": "print(1)",
     }
+
+
+def test_responses_fusion_benchmark_text_rejects_client_tools():
+    app = make_app()
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        json={
+            "model": "gpt2giga/fusion-benchmark-text",
+            "input": "Check weather.",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "parameters": {"type": "object"},
+                }
+            ],
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 400
+    assert body["error"]["type"] == "invalid_fusion_configuration"
+    assert body["error"]["code"] == "invalid_fusion_configuration"
+    assert "tools_mode=off" in body["error"]["message"]
+    assert app.state.gigachat_client.chat_calls == []
+
+
+def test_responses_fusion_benchmark_tools_exposes_resolved_metadata():
+    gigachat = FusionGigachat(
+        panel_content="Plain panel answer.",
+        selector_payload={
+            "schema_version": "gpt2giga.fusion.selection.v1",
+            "selected_candidate_id": "panel_1",
+            "confidence": 1.0,
+            "reason_brief": "Use panel.",
+        },
+    )
+    app = make_app(gigachat=gigachat)
+    client = TestClient(app)
+
+    response = client.post(
+        "/responses",
+        json={
+            "model": "gpt2giga/fusion-benchmark-tools",
+            "input": "Answer directly.",
+        },
+    )
+
+    body = response.json()
+    assert response.status_code == 200
+    assert body["metadata"]["gpt2giga_fusion_requested_model"] == (
+        "gpt2giga/fusion-benchmark-tools"
+    )
+    assert body["metadata"]["gpt2giga_fusion_preset"] == (
+        "force-benchmark-selector-tools"
+    )
+    assert body["metadata"]["gpt2giga_fusion_invocation_mode"] == "force"
+    assert body["metadata"]["gpt2giga_fusion_decision_mode"] == "selector"
+    assert body["metadata"]["gpt2giga_fusion_tools_mode"] == "schema_only"
+    assert body["metadata"]["gpt2giga_fusion_direct_tool_call_policy"] == "selector"
+    assert body["metadata"]["gpt2giga_fusion_post_tool_mode"] == ("fusion_continuation")
 
 
 def _last_sse_payload(body: str, event_type: str):

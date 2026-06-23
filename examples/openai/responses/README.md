@@ -33,7 +33,7 @@ GigaChat-specific built-in tools в `tools/gigachat_tools/` оставлены �
 ## Файлы
 
 - `basic/single_prompt.py`: минимальный пример
-- `fusion/fusion_response.py`: локальный GigaFusion alias `gpt2giga/fusion-code`
+- `fusion/fusion_response.py`: text-only benchmark alias `gpt2giga/fusion-benchmark-text`
 - `basic/stateful.py`: stateful Responses через `store` и `previous_response_id` (нужен Responses v2)
 - `basic/with_instructions.py`: instructions/system
 - `reasoning/reasoning.py`: reasoning в стиле Responses API

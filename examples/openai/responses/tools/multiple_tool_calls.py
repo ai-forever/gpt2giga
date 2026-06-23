@@ -6,7 +6,7 @@ from openai import OpenAI
 api_version = "v2"
 client = OpenAI(base_url=f"http://localhost:8090/{api_version}/", api_key="0")
 
-MODEL = "gpt2giga/fusion-code"
+MODEL = "gpt2giga/fusion-benchmark-tools"
 # MODEL = "GigaChat-2-Max"
 tools = [
     {
@@ -167,6 +167,7 @@ for _ in range(3):
         tools=tools,
         input=input_list,
     )
+    print(response.metadata)
     last_response = response
 
     input_list += response.output

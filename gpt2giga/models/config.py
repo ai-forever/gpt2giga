@@ -62,6 +62,8 @@ DEFAULT_FUSION_ALIASES = [
     "gpt2giga/fusion-code-high",
     "gpt2giga/fusion-accuracy",
     "gpt2giga/fusion-benchmark",
+    "gpt2giga/fusion-benchmark-text",
+    "gpt2giga/fusion-benchmark-tools",
     "gpt2giga/fusion-accuracy-verifier",
     "gpt2giga/fusion-code-agent-safe",
     "gpt2giga/fusion-force-selector",

@@ -248,7 +248,7 @@ GPT2GIGA_FUSION_DEFAULT_PRESET=code-high
 Частые overrides:
 
 ```dotenv
-GPT2GIGA_FUSION_ALIASES='["gpt2giga/fusion","gpt2giga/fusion-code","gpt2giga/fusion-accuracy","gpt2giga/fusion-benchmark","GigaChat-Fusion-Code"]'
+GPT2GIGA_FUSION_ALIASES='["gpt2giga/fusion","gpt2giga/fusion-code","gpt2giga/fusion-accuracy","gpt2giga/fusion-benchmark","gpt2giga/fusion-benchmark-text","gpt2giga/fusion-benchmark-tools","GigaChat-Fusion-Code"]'
 GPT2GIGA_FUSION_STREAMING_MODE=buffered
 GPT2GIGA_FUSION_MAX_PANEL_MODELS=4
 GPT2GIGA_FUSION_MAX_PANEL_CONCURRENCY=3

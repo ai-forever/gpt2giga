@@ -101,42 +101,50 @@ def extract_fusion_request(
     if tool_config is not None:
         if _is_explicitly_disabled(tool_config):
             return None
-        return _build_request_config(
+        config = _build_request_config(
             source="tool",
             params=_with_top_level_server_tool_params(tool_config, payload),
             requested_model=requested_model,
             settings=settings,
         )
+        _reject_tools_mode_off_with_client_tools(payload, config)
+        return config
 
     plugin_config = _extract_plugin_config(payload)
     if plugin_config is not None:
         if _is_explicitly_disabled(plugin_config):
             return None
-        return _build_request_config(
+        config = _build_request_config(
             source="plugin",
             params=_with_top_level_server_tool_params(plugin_config, payload),
             requested_model=requested_model,
             settings=settings,
         )
+        _reject_tools_mode_off_with_client_tools(payload, config)
+        return config
 
     metadata_config = _extract_metadata_config(payload)
     if metadata_config is not None:
         if _is_explicitly_disabled(metadata_config):
             return None
-        return _build_request_config(
+        config = _build_request_config(
             source="metadata",
             params=_with_top_level_server_tool_params(metadata_config, payload),
             requested_model=requested_model,
             settings=settings,
         )
+        _reject_tools_mode_off_with_client_tools(payload, config)
+        return config
 
     if is_fusion_model(requested_model, settings):
-        return _build_request_config(
+        config = _build_request_config(
             source="model",
             params=_with_top_level_server_tool_params({}, payload),
             requested_model=requested_model,
             settings=settings,
         )
+        _reject_tools_mode_off_with_client_tools(payload, config)
+        return config
 
     return None
 
@@ -195,6 +203,47 @@ def _with_top_level_server_tool_params(
         if key in payload and key not in merged:
             merged[key] = payload[key]
     return merged
+
+
+def _reject_tools_mode_off_with_client_tools(
+    payload: Mapping[str, Any],
+    config: FusionRequestConfig,
+) -> None:
+    if config.tools_mode != "off" or not _payload_has_client_tools(payload):
+        return
+    if config.source == "model":
+        requested = config.requested_model or "this Fusion alias"
+    else:
+        requested = "this Fusion request"
+    raise FusionConfigurationError(
+        f"Fusion preset {config.preset} has tools_mode=off but the request "
+        "includes client tools. Use gpt2giga/fusion-benchmark-tools or "
+        f"gpt2giga/fusion-code instead of {requested}."
+    )
+
+
+def _payload_has_client_tools(payload: Mapping[str, Any]) -> bool:
+    tools = payload.get("tools")
+    if not isinstance(tools, Sequence) or isinstance(tools, (str, bytes)):
+        return False
+    for tool in tools:
+        if not isinstance(tool, Mapping):
+            continue
+        tool_type = str(tool.get("type", "")).strip().lower()
+        tool_name = str(tool.get("name", "")).strip().lower()
+        function = tool.get("function")
+        function_name = (
+            str(function.get("name", "")).strip().lower()
+            if isinstance(function, Mapping)
+            else ""
+        )
+        if tool_type == "openrouter:fusion":
+            continue
+        if tool_type == "function" or tool_name or function_name:
+            return True
+        if tool_type and not tool_type.startswith("openrouter:"):
+            return True
+    return False
 
 
 def _build_request_config(
@@ -545,8 +594,12 @@ def preset_from_model_alias(model: str | None) -> str | None:
         return "code-high"
     if normalized.endswith("fusion-general"):
         return "general"
-    if normalized.endswith("fusion-benchmark"):
+    if normalized.endswith("fusion-benchmark-text"):
         return "force-benchmark-selector"
+    if normalized.endswith("fusion-benchmark-tools"):
+        return "force-benchmark-selector-tools"
+    if normalized.endswith("fusion-benchmark"):
+        return "force-benchmark-selector-tools"
     if normalized.endswith("fusion-code"):
         return "verified-tool-loop-ultra"
     if normalized.endswith("fusion-accuracy"):

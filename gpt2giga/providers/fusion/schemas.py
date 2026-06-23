@@ -216,10 +216,25 @@ class FusionRunResult(BaseModel):
     analysis_models: list[str] = Field(default_factory=list)
     judge_model: str
     final_model: Optional[str] = None
+    invocation_mode: Literal["outer_auto", "classifier_auto", "force", "off"] = (
+        "outer_auto"
+    )
     decision_mode: Literal["tool_result", "synthesize", "selector", "action"] = (
         "tool_result"
     )
     prompt_mode: Literal["full", "minimal"] = "full"
+    tools_mode: Literal["off", "schema_only", "final_arbitration"] = "schema_only"
+    direct_tool_call_policy: Literal[
+        "return_immediately",
+        "selector",
+        "verify_before_return",
+    ] = "return_immediately"
+    post_tool_mode: Literal[
+        "direct_continuation",
+        "fusion_continuation",
+        "verified_continuation",
+        "finalize",
+    ] = "direct_continuation"
     panel_results: list[FusionPanelResult] = Field(default_factory=list)
     failed_models: list[FusionPanelResult] = Field(default_factory=list)
     candidates: list[FusionCandidate] = Field(default_factory=list)

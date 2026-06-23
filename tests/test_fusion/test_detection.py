@@ -228,18 +228,75 @@ def test_extract_fusion_model_alias_can_select_accuracy_preset():
     assert config.prompt_mode == "minimal"
 
 
-def test_extract_fusion_benchmark_alias_uses_forced_selector_preset():
+def test_extract_fusion_benchmark_alias_uses_tool_aware_forced_selector_preset():
     config = extract_fusion_request(
         {"model": "gpt2giga/fusion-benchmark"},
         _settings(aliases=["gpt2giga/fusion-benchmark"]),
     )
 
     assert config is not None
-    assert config.preset == "force-benchmark-selector"
+    assert config.preset == "force-benchmark-selector-tools"
     assert config.include_direct_candidate is True
     assert config.return_selected_candidate is True
     assert config.invocation_mode == "force"
     assert config.decision_mode == "selector"
+    assert config.tools_mode == "schema_only"
+    assert config.direct_tool_call_policy == "selector"
+    assert config.post_tool_mode == "fusion_continuation"
+
+
+def test_extract_fusion_benchmark_text_alias_uses_text_only_preset():
+    config = extract_fusion_request(
+        {"model": "gpt2giga/fusion-benchmark-text"},
+        _settings(aliases=["gpt2giga/fusion-benchmark-text"]),
+    )
+
+    assert config is not None
+    assert config.preset == "force-benchmark-selector"
+    assert config.tools_mode == "off"
+
+
+def test_extract_fusion_benchmark_tools_alias_uses_tool_aware_preset():
+    config = extract_fusion_request(
+        {"model": "gpt2giga/fusion-benchmark-tools"},
+        _settings(aliases=["gpt2giga/fusion-benchmark-tools"]),
+    )
+
+    assert config is not None
+    assert config.preset == "force-benchmark-selector-tools"
+    assert config.tools_mode == "schema_only"
+
+
+def test_extract_fusion_text_only_preset_rejects_client_tools():
+    with pytest.raises(FusionConfigurationError, match="tools_mode=off"):
+        extract_fusion_request(
+            {
+                "model": "gpt2giga/fusion-benchmark-text",
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {"name": "get_weather"},
+                    }
+                ],
+            },
+            _settings(aliases=["gpt2giga/fusion-benchmark-text"]),
+        )
+
+
+def test_extract_fusion_openrouter_tool_config_is_not_client_tool():
+    config = extract_fusion_request(
+        {
+            "tools": [
+                {
+                    "type": "openrouter:fusion",
+                    "parameters": {"preset": "force-benchmark-selector"},
+                }
+            ],
+        },
+        _settings(),
+    )
+
+    assert config is not None
     assert config.tools_mode == "off"
 
 
