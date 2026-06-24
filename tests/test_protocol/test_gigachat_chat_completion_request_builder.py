@@ -280,6 +280,35 @@ async def test_prepare_chat_completion_maps_builtin_tools_in_v2_mode():
     assert request.tool_config.tool_name == "web_search"
 
 
+async def test_prepare_chat_completion_ignores_builtin_tools_when_mapping_disabled():
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            gigachat_api_mode="v2",
+            disable_builtin_tool_mapping=True,
+        )
+    )
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "search"}],
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                }
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    payload = request.model_dump(exclude_none=True)
+    assert "tools" not in payload
+    assert "tool_config" not in payload
+
+
 async def test_prepare_chat_completion_maps_anthropic_builtin_tool_types():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)
@@ -716,6 +745,42 @@ async def test_prepare_response_chat_completion_maps_responses_builtin_tools():
     assert spec.parameters["properties"]["value"]["type"] == "string"
     assert request.tool_config.mode == "tool"
     assert request.tool_config.tool_name == "web_search"
+
+
+async def test_prepare_response_chat_completion_ignores_builtin_tools_when_mapping_disabled():
+    cfg = ProxyConfig(proxy=ProxySettings(disable_builtin_tool_mapping=True))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "Find current sources and then calculate a summary.",
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "save_result",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"value": {"type": "string"}},
+                        },
+                    },
+                },
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert len(request.tools) == 1
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.name == "save_result"
+    assert spec.parameters["properties"]["value"]["type"] == "string"
+    assert request.tool_config is None
 
 
 async def test_prepare_response_chat_completion_flattens_namespace_tools():

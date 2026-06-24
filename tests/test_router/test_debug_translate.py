@@ -26,7 +26,12 @@ def _fixture(name: str) -> dict:
     return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
 
-def make_debug_app(*, admin_key: str | None = "secret", mode: str = "v1"):
+def make_debug_app(
+    *,
+    admin_key: str | None = "secret",
+    mode: str = "v1",
+    **settings,
+):
     app = FastAPI()
     app.include_router(debug_router)
     app.state.config = ProxyConfig(
@@ -34,6 +39,7 @@ def make_debug_app(*, admin_key: str | None = "secret", mode: str = "v1"):
             debug_translate_enabled=True,
             admin_api_key=admin_key,
             gigachat_api_mode=mode,
+            **settings,
         )
     )
     app.state.logger = logger
@@ -241,6 +247,36 @@ def test_debug_translate_normalized_to_gigachat():
     assert body["target"] == "gigachat"
     assert body["openai_payload"]["messages"][0]["content"] == "hello"
     assert body["gigachat_payload"]["prepared"] == "v1"
+
+
+def test_debug_translate_normalized_to_gigachat_ignores_builtin_when_mapping_disabled():
+    client = TestClient(make_debug_app(mode="v2", disable_builtin_tool_mapping=True))
+
+    response = client.post(
+        "/_debug/translate/normalized-to-gigachat",
+        json={
+            "model": "GigaChat",
+            "messages": [{"role": "user", "content": "search"}],
+            "tools": [
+                {
+                    "type": "web_search",
+                    "name": "web_search",
+                    "raw_extensions": {"web_search": {"indexes": ["web"]}},
+                },
+                {"type": "function", "name": "lookup", "parameters": {}},
+            ],
+            "tool_choice": {"type": "web_search"},
+        },
+        headers=_headers(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["openai_payload"]["tools"]) == 1
+    assert body["openai_payload"]["tools"][0]["type"] == "function"
+    assert body["openai_payload"]["tools"][0]["function"]["name"] == "lookup"
+    assert "tool_choice" not in body["openai_payload"]
+    assert body["gigachat_payload"]["prepared"] == "v2"
 
 
 def test_debug_translate_gigachat_to_openai():

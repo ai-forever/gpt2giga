@@ -169,7 +169,8 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
                 "description": (
                     "Anthropic tools (input_schema), plus compatible provider "
                     "tools in GigaChat v2 mode (`web_search*`, `web_fetch*`, "
-                    "`code_execution*`)."
+                    "`code_execution*`) unless "
+                    "GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=true."
                 ),
                 "items": {"type": "object", "additionalProperties": True},
             },
@@ -242,6 +243,8 @@ def anthropic_messages_openapi_extra() -> Dict[str, Any]:
         "unknown values are accepted but ignored.\n"
         "- Compatible Anthropic provider tools map to GigaChat v2 built-ins: "
         "`web_search*`, `web_fetch*`, and `code_execution*`.\n"
+        "- Set `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=true` to ignore provider "
+        "built-in tools while keeping local tools enabled.\n"
         "- Supported request content blocks are `text`, `image`, `tool_use`, "
         "and `tool_result`; document/file/container/search/thinking input blocks "
         "are accepted but ignored.\n"

@@ -42,6 +42,11 @@ different aliases, the first canonical field reaches the GigaChat payload.
 A forced `tool_choice` for supported built-in tools turns into a
 GigaChat `ChatToolConfig(mode="tool", tool_name="<canonical tool>")`.
 
+To temporarily disable this mapping without disabling user function tools, set
+`GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`. Known provider built-in tools are
+then accepted for compatibility but are not sent upstream as executable GigaChat
+tools; the matching `tool_choice` is ignored.
+
 ## OpenAI mapping
 
 OpenAI Chat Completions and Responses tools are normalized by `type`.

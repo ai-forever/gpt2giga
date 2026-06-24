@@ -101,6 +101,10 @@ is rejected, because the GigaChat upstream does not support a separate JSON mode
 With `GPT2GIGA_DISABLE_REASONING=True`, the proxy accepts `reasoning` and
 `reasoning_effort` but does not pass them to the upstream payload sent to GigaChat.
 
+With `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True`, the proxy accepts provider
+built-in tools for compatibility but does not map or send them to GigaChat as
+executable tools. User function tools continue to work.
+
 OpenAI metadata fields such as `user`, `metadata`, `service_tier`,
 `safety_identifier`, `seed`, `prompt_cache_key`, and `prompt_cache_retention` are
 accepted and ignored where they are classified.

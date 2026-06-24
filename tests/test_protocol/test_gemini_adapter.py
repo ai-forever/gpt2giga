@@ -547,6 +547,30 @@ def test_gemini_adapter_maps_supported_builtin_tools_to_gigachat_tools():
     ]
 
 
+def test_gemini_adapter_keeps_provider_tools_diagnostics_only_when_mapping_disabled():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "hello"}]}],
+            "tools": [
+                {"googleSearch": {"indexes": ["web"]}},
+                {"urlContext": {"max_uses": 2}, "codeExecution": {}},
+                {"googleMaps": {"api_key": "secret-gemini-key"}},
+            ],
+        },
+        model="gemini-pro",
+        builtin_tool_mapping_enabled=False,
+    )
+
+    assert normalized.tools == []
+    assert normalized.raw_extensions["unsupportedTools"] == [
+        {"googleSearch": {"indexes": ["web"]}},
+        {"urlContext": {"max_uses": 2}, "codeExecution": {}},
+        {"googleMaps": {"api_key": "secret-gemini-key"}},
+    ]
+
+
 def test_gemini_adapter_function_calling_config_filters_only_function_tools():
     adapter = GeminiProtocolAdapter()
 

@@ -10,6 +10,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("GPT2GIGA_DISABLE_REASONING", raising=False)
     monkeypatch.delenv("GPT2GIGA_STRUCTURED_OUTPUT_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_GIGACHAT_API_MODE", raising=False)
+    monkeypatch.delenv("GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING", raising=False)
     monkeypatch.delenv("GPT2GIGA_EXPERIMENTAL_NORMALIZED_LAYER", raising=False)
     monkeypatch.delenv("GPT2GIGA_NORMALIZATION_MODE", raising=False)
     monkeypatch.delenv("GPT2GIGA_LEGACY_CHAT_FALLBACK", raising=False)
@@ -61,6 +62,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.disable_reasoning is False
     assert s.structured_output_mode == "function_call"
     assert s.gigachat_api_mode == "v1"
+    assert s.disable_builtin_tool_mapping is False
     assert s.experimental_normalized_layer is False
     assert s.normalization_mode == "off"
     assert s.legacy_chat_fallback is True
@@ -222,6 +224,12 @@ def test_proxy_settings_gigachat_api_mode_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_GIGACHAT_API_MODE", "v2")
     s = ProxySettings()
     assert s.gigachat_api_mode == "v2"
+
+
+def test_proxy_settings_disable_builtin_tool_mapping_from_env(monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING", "true")
+    s = ProxySettings()
+    assert s.disable_builtin_tool_mapping is True
 
 
 def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):

@@ -231,6 +231,17 @@ Versioned prefixes are an explicit per-request override:
 - `/v1/chat/completions`, `/v1/responses`, `/v1/messages` use the GigaChat v1 contract;
 - `/v2/chat/completions`, `/v2/responses`, `/v2/messages` use the GigaChat v2 contract.
 
+Built-in tool mapping can be disabled separately:
+
+```dotenv
+GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=False
+```
+
+When set to `True`, OpenAI/Anthropic/Gemini provider built-in tools
+(`web_search*`, `code_execution*`, `urlContext`, and similar) are not mapped to
+GigaChat v2 built-in tools and are ignored. User function/local tools remain
+enabled.
+
 ## Normalized layer flags
 
 Experimental flags control the OpenAI Chat Completions normalized path and by

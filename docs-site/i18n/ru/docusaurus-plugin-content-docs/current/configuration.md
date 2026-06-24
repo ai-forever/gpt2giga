@@ -231,6 +231,17 @@ GPT2GIGA_GIGACHAT_API_MODE=v1
 - `/v1/chat/completions`, `/v1/responses`, `/v1/messages` используют контракт GigaChat v1;
 - `/v2/chat/completions`, `/v2/responses`, `/v2/messages` используют контракт GigaChat v2.
 
+Сопоставление built-in tools можно выключить отдельно:
+
+```dotenv
+GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=False
+```
+
+Когда значение `True`, OpenAI/Anthropic/Gemini provider built-in tools
+(`web_search*`, `code_execution*`, `urlContext` и похожие) не сопоставляются со
+встроенными инструментами GigaChat v2 и игнорируются. Пользовательские
+function/local tools остаются включены.
+
 ## Флаги нормализованного слоя
 
 Экспериментальные флаги управляют нормализованным путём OpenAI Chat Completions и по
