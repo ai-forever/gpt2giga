@@ -46,17 +46,18 @@ Client SDK
 | `models/security.py` | Security posture summary and request-size defaults |
 | `api/openai/` | Public OpenAI-compatible router aggregation |
 | `api/anthropic/` | Public Anthropic-compatible router aggregation |
+| `api/gemini/` | Public Gemini-compatible router aggregation and operation routes |
 | `api/admin/` | Opt-in admin traffic-log and debug translation endpoints |
 | `api/system/metrics.py` | Prometheus metrics endpoint mounting |
 | `common/` | Shared exception handling, client compatibility, request parsing, streaming, schema/tool utilities |
 | `core/` | Provider/sink interfaces, request context, redaction primitives |
 | `protocol/` | Legacy request, response, attachment, embedding, batch, and Anthropic translation logic |
-| `protocols/` | Experimental normalized protocol models/adapters/diagnostics |
+| `protocols/` | Normalized protocol models/adapters/diagnostics, including OpenAI and Gemini adapters |
 | `providers/gigachat/` | GigaChat SDK client creation, v1/v2 payload adapters, streaming, token handoff |
-| `routers/` | Concrete OpenAI, Anthropic, LiteLLM, system, and legacy log route handlers |
+| `routers/` | Concrete OpenAI, Anthropic, Gemini, LiteLLM, system, and legacy log route handlers |
 | `sinks/` | Traffic-log, metrics, and observability sink implementations |
 | `storage/` | Optional Postgres/OpenSearch storage helpers and migrations |
-| `openapi_specs/` | OpenAPI schema fragments for OpenAI and Anthropic endpoints |
+| `openapi_specs/` | OpenAPI schema fragments for OpenAI, Anthropic and Gemini endpoints |
 | `templates/log_viewer.html` | HTML log viewer for `/logs/html` |
 
 ## Router Layout
@@ -65,6 +66,7 @@ Client SDK
 |---|---|
 | `api/openai/routes.py` | Aggregates mounted OpenAI routes |
 | `api/anthropic/routes.py` | Aggregates mounted Anthropic routes |
+| `api/gemini/routes.py` | Aggregates mounted Gemini routes and operation routes |
 | `api/admin/routes.py` | `/_debug/translate*` when `debug_translate_enabled` is true |
 | `api/admin/logs.py` | `/_admin/logs*` when `admin_api_enabled` is true |
 | `api/system/metrics.py` | Metrics route when `metrics_enabled` is true |
@@ -76,6 +78,11 @@ Client SDK
 | `routers/openai/batches.py` | `/batches` code exists but is not mounted |
 | `routers/anthropic/messages.py` | `/messages` and `/messages/count_tokens` |
 | `routers/anthropic/batches.py` | `/messages/batches` code exists but is not mounted |
+| `routers/gemini/generate_content.py` | `/models/{model}:generateContent`, `:streamGenerateContent`, `:countTokens` |
+| `routers/gemini/embeddings.py` | `/models/{model}:embedContent`, `:batchEmbedContents` |
+| `routers/gemini/models.py` | `/v1beta/models` and Gemini-shaped model discovery |
+| `routers/gemini/files.py` | Gemini `/files` code exists but is not mounted |
+| `routers/gemini/batches.py` | Gemini `/batches` and `:batchGenerateContent` code exists but is not mounted |
 | `routers/litellm/models.py` | `/model/info` |
 | `routers/system_router.py` | `/health`, `/ping` |
 | `routers/logs_router.py` | `/logs/{last_n_lines}`, `/logs/stream`, `/logs/html` |
@@ -83,6 +90,8 @@ Client SDK
 - OpenAI and Anthropic routers are mounted at root, `/v1`, and `/v2`; root
   follows env API mode, while `/v1` and `/v2` force the matching GigaChat
   backend contract for that request.
+- Gemini operation routes are mounted at root, `/v1`, and `/v2`; Gemini-style
+  routes are mounted at `/v1beta`, `/v1/v1beta`, and `/v2/v1beta`.
 - LiteLLM model-info routes are mounted at root, `/v1`, and `/v2`.
 - System routes are root-only.
 - Log routes are disabled in `PROD`.
@@ -103,6 +112,7 @@ Client SDK
 | `protocol/anthropic/streaming.py` | Anthropic SSE/event translation |
 | `protocols/normalized/` | Normalized chat request/response models, diagnostics, and shadow execution |
 | `protocols/openai/` | OpenAI normalized adapter, response adapter, and streaming helpers |
+| `protocols/gemini/` | Gemini normalized adapter, response adapter, and streaming helpers |
 
 ## Common Utilities
 
@@ -131,7 +141,7 @@ Client SDK
 ## Patterns & Conventions
 
 - Keep reusable translation logic in `protocol/` or `common/`, not duplicated in routers.
-- Use `protocols/normalized/` only for the experimental normalized layer; preserve legacy paths unless the feature flag behavior is intentionally changed.
+- Use `protocols/normalized/` for the shared normalized contract; preserve legacy paths unless the feature flag behavior is intentionally changed. Gemini already uses its dedicated normalized adapter in the mounted execution path.
 - Keep upstream-provider code in `providers/gigachat/`; routers should not call raw SDK methods directly when a provider/helper exists.
 - Keep traffic-log, metrics, and observability writes behind sink interfaces; do not inline storage calls in routers.
 - Decorate router handlers with `@exceptions_handler`.
@@ -166,10 +176,13 @@ rg -n "class .*Middleware" gpt2giga/middlewares
 rg -n "def (prepare_|process_|transform_|_build_)" gpt2giga/protocol gpt2giga/protocols
 
 # Find disabled Files/Batches wiring
-rg -n "files_router|batches_router|messages/batches|/files|/batches" gpt2giga/api gpt2giga/routers gpt2giga/protocol
+rg -n "files_router|batches_router|messages/batches|batchGenerateContent|/files|/batches" gpt2giga/api gpt2giga/routers gpt2giga/protocol
 
 # Find OpenAPI schema helpers
 rg -n "openapi_extra|_openapi_extra" gpt2giga/openapi_specs gpt2giga/routers
+
+# Find Gemini protocol wiring
+rg -n "gemini|v1beta|generateContent" gpt2giga/app gpt2giga/api gpt2giga/routers gpt2giga/protocols tests
 
 # Find traffic logs, metrics, and observability wiring
 rg -n "traffic_log|metrics|observability|admin_api|debug_translate|replay" gpt2giga
@@ -177,9 +190,9 @@ rg -n "traffic_log|metrics|observability|admin_api|debug_translate|replay" gpt2g
 
 ## Common Gotchas
 
-- Files and batch metadata helpers still exist in `app_state.py`, but public Files/Batches routers are not mounted in the current API surface.
+- Files and batch metadata helpers still exist in `app_state.py`, but public OpenAI, Anthropic and Gemini Files/Batches routers are not mounted in the current API surface.
 - `MODE=PROD` implicitly requires an API key and disables docs/log routes.
-- `PathNormalizationMiddleware` supports root, `/v1`, and `/v2` style paths; endpoint changes should preserve that behavior unless intentionally breaking it.
+- `PathNormalizationMiddleware` supports root, `/v1`, `/v2`, and Gemini `/v1beta` style paths; endpoint changes should preserve that behavior unless intentionally breaking it.
 - `PassTokenMiddleware` only applies when `proxy.pass_token` is enabled.
 - `traffic_log_capture_content` and observability payload capture are opt-in and must remain redaction-aware.
 - Per-model concurrency limits are process-local; multi-worker deployments multiply effective capacity.
