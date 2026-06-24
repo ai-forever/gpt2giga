@@ -135,7 +135,8 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
                 "type": "array",
                 "description": (
                     "OpenAI tools format. Function tools are supported; GigaChat "
-                    "built-in tools are available only in GigaChat v2 chat mode. "
+                    "v2 built-in tools are mapped unless "
+                    "GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=true. "
                     "Unsupported tool entries are accepted but ignored."
                 ),
                 "items": {"type": "object", "additionalProperties": True},
@@ -263,7 +264,9 @@ def chat_completions_openapi_extra() -> Dict[str, Any]:
         "to GigaChat `additional_fields`.\n"
         "- Known unsupported optional parameters are accepted but ignored.\n"
         "- New tool/built-in-tool development targets GigaChat v2 chat mode; "
-        "v1 chat remains supported but is not being extended."
+        "v1 chat remains supported but is not being extended.\n"
+        "- Set `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=true` to ignore provider "
+        "built-in tools while keeping function tools enabled."
     )
     return _request_body_oneof(
         minimal_schema=minimal_schema,
@@ -425,7 +428,8 @@ def responses_openapi_extra() -> Dict[str, Any]:
                     "OpenAI function tools, plus GigaChat v2 built-in tools for "
                     "Responses (`web_search*`, `code_interpreter`, "
                     "`image_generation` / `image_generate`, "
-                    "`url_content_extraction`, `model_3d_generate`)."
+                    "`url_content_extraction`, `model_3d_generate`) unless "
+                    "GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=true."
                 ),
                 "items": {"type": "object", "additionalProperties": True},
             },

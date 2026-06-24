@@ -225,6 +225,39 @@ def test_transform_responses_parameters_accepts_builtin_tools_in_v2_mode():
     }
 
 
+def test_transform_responses_parameters_ignores_builtin_tools_when_mapping_disabled():
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            gigachat_api_mode="v2",
+            disable_builtin_tool_mapping=True,
+        )
+    )
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "search",
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                },
+                {
+                    "type": "image_generation",
+                    "size": "1024x1024",
+                },
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert "_gpt2giga_builtin_tools" not in out
+    assert "_gpt2giga_tool_config" not in out
+    assert "tools" not in out
+
+
 def test_transform_common_parameters_merges_extra_body_with_additional_fields():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)

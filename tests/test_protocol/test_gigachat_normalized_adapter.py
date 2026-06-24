@@ -172,6 +172,55 @@ def test_normalized_chat_to_openai_payload_preserves_builtin_tools():
     ]
 
 
+def test_normalized_chat_to_openai_payload_drops_builtin_tools_when_disabled():
+    request = NormalizedChatRequest(
+        protocol="gemini",
+        model="GigaChat",
+        messages=[NormalizedMessage(role="user", content="search")],
+        tools=[
+            NormalizedTool(
+                type="web_search",
+                name="web_search",
+                raw_extensions={"web_search": {"indexes": ["web"]}},
+            )
+        ],
+    )
+
+    payload = normalized_chat_to_openai_payload(
+        request,
+        include_builtin_tools=False,
+    )
+
+    assert "tools" not in payload
+
+
+def test_normalized_chat_to_openai_payload_drops_builtin_tool_choice_when_disabled():
+    request = NormalizedChatRequest(
+        protocol="gemini",
+        model="GigaChat",
+        messages=[NormalizedMessage(role="user", content="search")],
+        tools=[
+            NormalizedTool(
+                type="web_search",
+                name="web_search",
+                raw_extensions={"web_search": {"indexes": ["web"]}},
+            ),
+            NormalizedTool(name="lookup", parameters={}),
+        ],
+        tool_choice={"type": "web_search"},
+    )
+
+    payload = normalized_chat_to_openai_payload(
+        request,
+        include_builtin_tools=False,
+    )
+
+    assert len(payload["tools"]) == 1
+    assert payload["tools"][0]["type"] == "function"
+    assert payload["tools"][0]["function"]["name"] == "lookup"
+    assert "tool_choice" not in payload
+
+
 def test_normalized_chat_to_openai_payload_sanitizes_tool_parameters():
     request = NormalizedChatRequest(
         model="GigaChat",

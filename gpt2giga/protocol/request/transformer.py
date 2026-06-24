@@ -620,6 +620,12 @@ class RequestTransformer:
         )
 
     def _responses_chat_completion_tools_enabled_by_default(self) -> bool:
+        return (
+            getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
+            and self._builtin_tool_mapping_enabled()
+        )
+
+    def _responses_stateful_enabled_by_default(self) -> bool:
         return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
 
     @staticmethod
@@ -643,7 +649,17 @@ class RequestTransformer:
         return stripped
 
     def _chat_completion_tools_enabled_by_default(self) -> bool:
-        return getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
+        return (
+            getattr(self.config.proxy_settings, "gigachat_api_mode", "v1") == "v2"
+            and self._builtin_tool_mapping_enabled()
+        )
+
+    def _builtin_tool_mapping_enabled(self) -> bool:
+        return not getattr(
+            self.config.proxy_settings,
+            "disable_builtin_tool_mapping",
+            False,
+        )
 
     def transform_chat_parameters(
         self, data: Dict, *, allow_builtin_tools: Optional[bool] = None
@@ -652,7 +668,7 @@ class RequestTransformer:
         builtin_tools_enabled = (
             self._chat_completion_tools_enabled_by_default()
             if allow_builtin_tools is None
-            else allow_builtin_tools
+            else allow_builtin_tools and self._builtin_tool_mapping_enabled()
         )
         data = sanitize_openai_chat_parameters(
             data,
@@ -709,18 +725,30 @@ class RequestTransformer:
         return transformed
 
     def transform_responses_parameters(
-        self, data: Dict, *, allow_builtin_tools: Optional[bool] = None
+        self,
+        data: Dict,
+        *,
+        allow_builtin_tools: Optional[bool] = None,
+        allow_stateful: Optional[bool] = None,
     ) -> Dict:
         """Transforms responses parameters (Responses API)."""
         builtin_tools_enabled = (
             self._responses_chat_completion_tools_enabled_by_default()
             if allow_builtin_tools is None
-            else allow_builtin_tools
+            else allow_builtin_tools and self._builtin_tool_mapping_enabled()
         )
+        if allow_stateful is None:
+            stateful_enabled = (
+                allow_builtin_tools
+                if allow_builtin_tools is not None
+                else self._responses_stateful_enabled_by_default()
+            )
+        else:
+            stateful_enabled = allow_stateful
         data = sanitize_openai_responses_parameters(
             data,
             allow_builtin_tools=builtin_tools_enabled,
-            allow_stateful=builtin_tools_enabled,
+            allow_stateful=stateful_enabled,
         )
         transformed = self._transform_common_parameters(data)
         if builtin_tools_enabled:
@@ -1340,7 +1368,7 @@ class RequestTransformer:
     ) -> Dict[str, Any]:
         """Prepare a Responses API request for the legacy GigaChat chat path."""
         transformed_data = self.transform_responses_parameters(
-            data, allow_builtin_tools=False
+            data, allow_builtin_tools=False, allow_stateful=False
         )
         transformed_data["messages"] = self.transform_response_format(transformed_data)
         return await self._finalize_chat_transformation(transformed_data, giga_client)
@@ -1350,7 +1378,7 @@ class RequestTransformer:
     ) -> ChatCompletionRequest:
         """Prepare a Responses API request for the GigaChat chat completion path."""
         transformed_data = self.transform_responses_parameters(
-            data, allow_builtin_tools=True
+            data, allow_builtin_tools=True, allow_stateful=True
         )
         transformed_data["_gpt2giga_responses_api"] = True
         transformed_data["messages"] = self.transform_response_format(transformed_data)

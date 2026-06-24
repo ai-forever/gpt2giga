@@ -100,6 +100,10 @@ Structured output поддерживается через `json_schema`. Schema-
 При `GPT2GIGA_DISABLE_REASONING=True` прокси принимает `reasoning` и
 `reasoning_effort`, но не передает их в upstream payload к GigaChat.
 
+При `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING=True` прокси принимает provider
+built-in tools для совместимости, но не маппит и не отправляет их в GigaChat
+как executable tools. Пользовательские function tools продолжают работать.
+
 Поля метаданных OpenAI, такие как `user`, `metadata`, `service_tier`,
 `safety_identifier`, `seed`, `prompt_cache_key` и `prompt_cache_retention`,
 принимаются и игнорируются там, где они классифицированы.

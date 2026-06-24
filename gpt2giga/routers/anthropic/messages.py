@@ -93,7 +93,11 @@ async def messages(request: Request):
     model_limiter = get_model_concurrency_limiter(request)
 
     model = data.get("model", "unknown")
-    openai_data: Dict = _build_openai_data_from_anthropic_request(data, state.logger)
+    openai_data: Dict = _build_openai_data_from_anthropic_request(
+        data,
+        state.logger,
+        builtin_tool_mapping_enabled=not state.config.proxy_settings.disable_builtin_tool_mapping,
+    )
     if "conversation" in data:
         openai_data["conversation"] = data["conversation"]
     if "metadata" in data:
