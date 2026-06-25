@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from gpt2giga.app.settings import load_app_config, setup_app_logger
 from gpt2giga.common.model_concurrency import ModelConcurrencyLimiter
+from gpt2giga.models.lar1 import LAR1Settings
 from gpt2giga.protocol import AttachmentProcessor, RequestTransformer, ResponseProcessor
 from gpt2giga.protocols.gemini import GeminiProtocolAdapter
 from gpt2giga.protocols.openai import OpenAIProtocolAdapter
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
 
     app.state.config = config
     app.state.logger = logger
+    app.state.lar1_settings = LAR1Settings()
     if not hasattr(app.state, "openai_protocol_adapter"):
         app.state.openai_protocol_adapter = OpenAIProtocolAdapter()
     if not hasattr(app.state, "gemini_protocol_adapter"):

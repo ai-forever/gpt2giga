@@ -5,6 +5,14 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
+### Добавлено
+- **LAR-1 semantic routing**: опциональная семантическая маршрутизация для `POST /v1/chat/completions` по `metadata.lar1` (`confidence`, `evidence`, `time`, `act`, `mind`); прокси классифицирует запрос и подменяет `model` на выбранный GigaChat tier до upstream-вызова без дополнительных LLM-запросов на hot path.
+- **LAR-1 configuration**: добавлены env-переменные `LAR1_ENABLED`, `LAR1_THRESHOLD_LOW|MEDIUM|HIGH`, `LAR1_MODEL_GIGACHAT_PRO|GIGACHAT_FAST|LOCAL`; фича выключена по умолчанию (`LAR1_ENABLED=false`).
+- **LAR-1 classifier**: `UNVERIFIED` / low confidence → `gigachat-fast` (экономичная), `time=MEM` / mid confidence → `gigachat-pro` (продвинутая), high confidence → `local` (экономичная/быстрая); решение логируется как `[LAR-1] confidence=… → route (model=…)`.
+- **LAR-1 tests**: добавлены `tests/test_lar1_router.py` (10 unit-тестов классификатора) и integration-тесты хелпера `_apply_lar1_routing` в `tests/test_router/test_lar1_chat_integration.py`.
+
 ## [0.2.1a1] - 2026-06-17
 
 ### Добавлено
