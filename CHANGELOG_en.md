@@ -5,6 +5,14 @@ All notable changes to the gpt2giga project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **LAR-1 semantic routing**: optional routing for `POST /v1/chat/completions` based on `metadata.lar1` (`confidence`, `evidence`, `time`, `act`, `mind`); the proxy classifies the request and overrides `model` with the selected GigaChat tier before the upstream call, with no extra LLM calls on the hot path.
+- **LAR-1 configuration**: env vars `LAR1_ENABLED`, `LAR1_THRESHOLD_LOW|MEDIUM|HIGH`, `LAR1_MODEL_GIGACHAT_PRO|GIGACHAT_FAST|LOCAL`; disabled by default (`LAR1_ENABLED=false`).
+- **LAR-1 classifier**: `UNVERIFIED` / low confidence → `gigachat-fast` (economical), `time=MEM` / mid confidence → `gigachat-pro` (advanced), high confidence → `local` (economical/fast); decisions logged as `[LAR-1] confidence=… → route (model=…)`.
+- **LAR-1 tests**: `tests/test_lar1_router.py` (10 classifier unit tests) and `_apply_lar1_routing` integration tests.
+
 ## [0.2.2a1] - 2026-06-26
 
 ### Added
