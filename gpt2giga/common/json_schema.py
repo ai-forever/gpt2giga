@@ -62,6 +62,22 @@ def _ensure_concrete_property_schema(schema: dict) -> dict:
     return schema
 
 
+def _normalize_schema_enum(schema: dict) -> None:
+    enum = schema.get("enum")
+    if not isinstance(enum, list):
+        return
+
+    string_enum = []
+    for item in enum:
+        if isinstance(item, str) and item not in string_enum:
+            string_enum.append(item)
+
+    if string_enum:
+        schema["enum"] = string_enum
+    else:
+        schema.pop("enum", None)
+
+
 def _merge_schema_dict(target: dict, source: dict) -> dict:
     merged = dict(target)
     for key, value in source.items():
@@ -162,6 +178,9 @@ def normalize_json_schema(schema: dict) -> dict:
 
     result = dict(schema)
 
+    if "type" not in result and "enum" in result:
+        result["type"] = _infer_missing_type(result)
+
     if "type" in result:
         result["type"] = _normalize_schema_type(result["type"])
 
@@ -175,6 +194,8 @@ def normalize_json_schema(schema: dict) -> dict:
 
     if "format" in result and result["format"] not in _GIGACHAT_ALLOWED_SCHEMA_FORMATS:
         result.pop("format", None)
+
+    _normalize_schema_enum(result)
 
     # Обрабатываем anyOf, oneOf - GigaChat SDK не поддерживает эти конструкции
     for key in ("anyOf", "oneOf"):

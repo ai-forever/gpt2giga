@@ -176,6 +176,62 @@ def test_transform_responses_parameters_accepts_flat_forced_function_tool_choice
     assert out["function_call"] == {"name": "lookup"}
 
 
+def test_transform_responses_parameters_sanitizes_legacy_function_enums():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "render",
+            "functions": [
+                {
+                    "name": "render_artifact",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "manifest": {
+                                "type": "object",
+                                "properties": {
+                                    "surface": {
+                                        "type": "string",
+                                        "enum": ["dashboard", "report", None],
+                                    },
+                                    "version": {"type": "integer", "enum": [1]},
+                                },
+                            },
+                            "snapshot": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "ready",
+                                            "partial",
+                                            "blocked",
+                                            "fixture",
+                                            None,
+                                        ],
+                                    },
+                                    "version": {"type": "integer", "enum": [1]},
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    params = out["functions"][0]["parameters"]["properties"]
+    manifest = params["manifest"]["properties"]
+    snapshot = params["snapshot"]["properties"]
+    assert manifest["surface"]["enum"] == ["dashboard", "report"]
+    assert "enum" not in manifest["version"]
+    assert snapshot["status"]["enum"] == ["ready", "partial", "blocked", "fixture"]
+    assert "enum" not in snapshot["version"]
+
+
 def test_transform_responses_parameters_ignores_builtin_tools_in_v1_mode():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
