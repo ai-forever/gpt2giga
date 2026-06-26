@@ -176,6 +176,62 @@ def test_transform_responses_parameters_accepts_flat_forced_function_tool_choice
     assert out["function_call"] == {"name": "lookup"}
 
 
+def test_transform_responses_parameters_sanitizes_legacy_function_enums():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "render",
+            "functions": [
+                {
+                    "name": "render_artifact",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "manifest": {
+                                "type": "object",
+                                "properties": {
+                                    "surface": {
+                                        "type": "string",
+                                        "enum": ["dashboard", "report", None],
+                                    },
+                                    "version": {"type": "integer", "enum": [1]},
+                                },
+                            },
+                            "snapshot": {
+                                "type": "object",
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "ready",
+                                            "partial",
+                                            "blocked",
+                                            "fixture",
+                                            None,
+                                        ],
+                                    },
+                                    "version": {"type": "integer", "enum": [1]},
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    params = out["functions"][0]["parameters"]["properties"]
+    manifest = params["manifest"]["properties"]
+    snapshot = params["snapshot"]["properties"]
+    assert manifest["surface"]["enum"] == ["dashboard", "report"]
+    assert "enum" not in manifest["version"]
+    assert snapshot["status"]["enum"] == ["ready", "partial", "blocked", "fixture"]
+    assert "enum" not in snapshot["version"]
+
+
 def test_transform_responses_parameters_ignores_builtin_tools_in_v1_mode():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -223,6 +279,39 @@ def test_transform_responses_parameters_accepts_builtin_tools_in_v2_mode():
         "mode": "tool",
         "tool_name": "web_search",
     }
+
+
+def test_transform_responses_parameters_ignores_builtin_tools_when_mapping_disabled():
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            gigachat_api_mode="v2",
+            disable_builtin_tool_mapping=True,
+        )
+    )
+    rt = RequestTransformer(cfg, logger=logger)
+
+    out = rt.transform_responses_parameters(
+        {
+            "model": "gpt-x",
+            "input": "search",
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                },
+                {
+                    "type": "image_generation",
+                    "size": "1024x1024",
+                },
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert "_gpt2giga_builtin_tools" not in out
+    assert "_gpt2giga_tool_config" not in out
+    assert "tools" not in out
 
 
 def test_transform_common_parameters_merges_extra_body_with_additional_fields():

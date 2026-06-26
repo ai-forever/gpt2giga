@@ -547,6 +547,30 @@ def test_gemini_adapter_maps_supported_builtin_tools_to_gigachat_tools():
     ]
 
 
+def test_gemini_adapter_keeps_provider_tools_diagnostics_only_when_mapping_disabled():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [{"parts": [{"text": "hello"}]}],
+            "tools": [
+                {"googleSearch": {"indexes": ["web"]}},
+                {"urlContext": {"max_uses": 2}, "codeExecution": {}},
+                {"googleMaps": {"api_key": "secret-gemini-key"}},
+            ],
+        },
+        model="gemini-pro",
+        builtin_tool_mapping_enabled=False,
+    )
+
+    assert normalized.tools == []
+    assert normalized.raw_extensions["unsupportedTools"] == [
+        {"googleSearch": {"indexes": ["web"]}},
+        {"urlContext": {"max_uses": 2}, "codeExecution": {}},
+        {"googleMaps": {"api_key": "secret-gemini-key"}},
+    ]
+
+
 def test_gemini_adapter_function_calling_config_filters_only_function_tools():
     adapter = GeminiProtocolAdapter()
 
@@ -660,6 +684,82 @@ def test_gemini_adapter_preserves_one_function_response_and_followup():
     assert normalized.messages[1].tool_call_id == "state-1"
     assert json.loads(normalized.messages[1].content) == {"answer": "pong"}
     assert normalized.messages[2].content == "continue"
+
+
+def test_gemini_adapter_drops_unanswered_function_call_before_user_followup():
+    adapter = GeminiProtocolAdapter()
+
+    normalized = adapter.generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "id": "state-1",
+                                "name": "run_shell_command",
+                                "args": {"command": "pytest"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "id": "state-1",
+                                "name": "run_shell_command",
+                                "response": {"exit_code": 1},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "update_topic",
+                                "args": {
+                                    "strategic_intent": (
+                                        "Анализ и корректировка шестого конфликта"
+                                    )
+                                },
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": (
+                                "System: Potential loop detected. "
+                                "Please take a step back."
+                            )
+                        }
+                    ],
+                },
+            ]
+        },
+        model="gemini-pro",
+    )
+
+    assert [message.role for message in normalized.messages] == [
+        "assistant",
+        "tool",
+        "user",
+    ]
+    assert normalized.messages[0].tool_calls[0].name == "run_shell_command"
+    assert normalized.messages[1].name == "run_shell_command"
+    assert normalized.messages[2].content.startswith("System: Potential loop")
+    assert all(
+        tool_call.name != "update_topic"
+        for message in normalized.messages
+        for tool_call in message.tool_calls
+    )
 
 
 def test_gemini_adapter_preserves_multiple_function_response_parts():

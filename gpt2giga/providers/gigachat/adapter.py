@@ -82,7 +82,10 @@ class GigaChatProviderAdapter:
         context: RequestContext | None = None,
     ) -> NormalizedResponse:
         """Execute a non-streaming normalized chat request."""
-        payload = normalized_chat_to_openai_payload(request)
+        payload = normalized_chat_to_openai_payload(
+            request,
+            include_builtin_tools=self._builtin_tool_mapping_enabled(),
+        )
         mode = self._resolve_api_mode()
         if mode == "v2":
             return await self._chat_completion(payload, request, context=context)
@@ -100,7 +103,10 @@ class GigaChatProviderAdapter:
         if self.response_processor is None:
             raise RuntimeError("response_processor is required for streaming")
 
-        payload = normalized_chat_to_openai_payload(request)
+        payload = normalized_chat_to_openai_payload(
+            request,
+            include_builtin_tools=self._builtin_tool_mapping_enabled(),
+        )
         mode = self._resolve_api_mode()
         if mode == "v2":
             async for event in self._stream_chat_completion(
@@ -125,6 +131,13 @@ class GigaChatProviderAdapter:
     def _resolve_api_mode(self) -> Literal["v1", "v2"]:
         return self.api_mode or getattr(
             self.config.proxy_settings, "gigachat_api_mode", "v1"
+        )
+
+    def _builtin_tool_mapping_enabled(self) -> bool:
+        return not getattr(
+            self.config.proxy_settings,
+            "disable_builtin_tool_mapping",
+            False,
         )
 
     async def _chat(
@@ -318,12 +331,17 @@ class GigaChatProviderAdapter:
             response_processor=self.response_processor,
             requested_model=request.model or "unknown",
             response_id=context.request_id if context is not None else "stream",
-            request_data=normalized_chat_to_openai_payload(request),
+            request_data=normalized_chat_to_openai_payload(
+                request,
+                include_builtin_tools=self._builtin_tool_mapping_enabled(),
+            ),
         )
 
 
 def normalized_chat_to_openai_payload(
     request: NormalizedChatRequest,
+    *,
+    include_builtin_tools: bool = True,
 ) -> dict[str, Any]:
     """Reconstruct an OpenAI Chat payload from normalized chat fields."""
     payload: dict[str, Any] = {
@@ -336,9 +354,26 @@ def normalized_chat_to_openai_payload(
     if request.metadata:
         payload["metadata"] = dict(request.metadata)
     if request.tools:
-        payload["tools"] = [_tool_to_openai(tool) for tool in request.tools]
+        tools = [
+            tool_payload
+            for tool in request.tools
+            if (
+                tool_payload := _tool_to_openai(
+                    tool,
+                    include_builtin_tools=include_builtin_tools,
+                )
+            )
+            is not None
+        ]
+        if tools:
+            payload["tools"] = tools
     if request.tool_choice is not None:
-        payload["tool_choice"] = request.tool_choice
+        tool_choice = _tool_choice_to_openai(
+            request.tool_choice,
+            include_builtin_tools=include_builtin_tools,
+        )
+        if tool_choice is not None:
+            payload["tool_choice"] = tool_choice
     if request.response_format is not None:
         payload["response_format"] = request.response_format.to_json_dict()
 
@@ -436,10 +471,16 @@ def _content_part_to_openai(part: NormalizedContentPart) -> dict[str, Any]:
     return payload
 
 
-def _tool_to_openai(tool: NormalizedTool) -> dict[str, Any]:
+def _tool_to_openai(
+    tool: NormalizedTool,
+    *,
+    include_builtin_tools: bool = True,
+) -> dict[str, Any] | None:
     raw_extensions = dict(tool.raw_extensions)
     builtin_field_name = normalize_gigachat_builtin_tool_type(tool.type)
     if builtin_field_name is not None:
+        if not include_builtin_tools:
+            return None
         payload: dict[str, Any] = {"type": builtin_field_name}
         config = raw_extensions.pop(builtin_field_name, None)
         if isinstance(config, Mapping):
@@ -465,6 +506,30 @@ def _tool_to_openai(tool: NormalizedTool) -> dict[str, Any]:
         payload["function"].update(dict(function_extensions))
     payload.update(raw_extensions)
     return payload
+
+
+def _tool_choice_to_openai(
+    tool_choice: Any,
+    *,
+    include_builtin_tools: bool = True,
+) -> Any | None:
+    if include_builtin_tools:
+        return tool_choice
+    if isinstance(tool_choice, str):
+        if normalize_gigachat_builtin_tool_type(tool_choice) is not None:
+            return None
+        return tool_choice
+    if not isinstance(tool_choice, Mapping):
+        return tool_choice
+
+    choice_type = tool_choice.get("type")
+    if normalize_gigachat_builtin_tool_type(choice_type) is not None:
+        return None
+    if choice_type == "tool":
+        tool_name = tool_choice.get("name")
+        if normalize_gigachat_builtin_tool_type(tool_name) is not None:
+            return None
+    return tool_choice
 
 
 def _tool_call_to_openai(tool_call: NormalizedToolCall) -> dict[str, Any]:

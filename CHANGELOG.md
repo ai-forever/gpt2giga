@@ -5,6 +5,23 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.0.0/),
 и проект придерживается [Семантического версионирования](https://semver.org/lang/ru/).
 
+## [0.2.2a1] - 2026-06-26
+
+### Добавлено
+- **Docusaurus docs site**: добавлен `docs-site/` wrapper для GitHub Pages с TypeScript-конфигом, sidebar/theme настройками, npm lockfile, локалями `en`/`ru` и русскими переводами документации.
+- **Docs Makefile targets**: добавлены `make docs-install`, `make docs`, `make docs-preview`, `make docs-dev`, `make docs-dev-ru` и связанные команды для локального build/preview Docusaurus-документации.
+- **Built-in tool mapping toggle**: добавлен `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING`, который отключает маппинг provider built-in tools OpenAI/Anthropic/Gemini в GigaChat v2 built-ins, не отключая пользовательские function tools.
+
+### Изменено
+- **Docs publishing stack**: GitHub Pages workflow переведен с MkDocs/uv на Docusaurus/npm, `mkdocs.yml` удален, README и docs обновлены под новый локальный preview и опубликованный сайт.
+- **Gemini documentation alignment**: README, compatibility/configuration/deployment/operations/integrations docs и OpenAPI descriptions синхронизированы с Gemini-compatible API, текущими ограничениями Files/Batches и behavior built-in tools.
+- **Dependencies and CI**: версия проекта обновлена до `0.2.2a1`, lock-файлы обновлены, docs-site dependencies закреплены с security overrides, а GitHub Actions обновлены до актуальных major versions.
+
+### Исправлено
+- **Codex/MCP tool enum schemas**: JSON Schema normalizer теперь выводит только строковые `enum` значения для tool/function schemas и удаляет несовместимые literal-enum значения, чтобы GigaChat SDK не падал на Codex CLI/MCP схемах.
+- **Gemini abandoned function calls**: Gemini adapter отбрасывает unanswered model `functionCall`, если за ним пришел обычный user follow-up без matching `functionResponse`, предотвращая отправку некорректной истории upstream.
+- **Built-in tool mapping opt-out**: OpenAI Responses/Chat, Anthropic Messages, Gemini GenerateContent и debug translation теперь одинаково учитывают `GPT2GIGA_DISABLE_BUILTIN_TOOL_MAPPING`; Responses stateful-поля в v2 больше не зависят от включенного маппинга built-in tools.
+
 ## [0.2.1a1] - 2026-06-17
 
 ### Добавлено
@@ -445,6 +462,7 @@
 
 ---
 
+[0.2.2a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.1a1...v0.2.2a1
 [0.2.1a1]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a2...v0.2.1a1
 [0.2.0a2]: https://github.com/ai-forever/gpt2giga/compare/v0.2.0a1...v0.2.0a2
 [0.2.0a1]: https://github.com/ai-forever/gpt2giga/compare/v0.1.8a3...v0.2.0a1

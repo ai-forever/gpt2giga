@@ -1,45 +1,44 @@
-# Интеграции
+# Integrations
 
-`gpt2giga` рассчитан на клиентов, которые умеют указывать custom base URL для OpenAI-compatible, Anthropic-compatible или Gemini-compatible SDK и CLI.
+`gpt2giga` is designed for clients that can set a custom base URL for OpenAI-, Anthropic-, or Gemini-compatible SDKs and CLIs.
 
 ## Base URLs
 
-OpenAI-compatible clients обычно используют:
+OpenAI-compatible clients usually use:
 
 ```text
 http://localhost:8090/v1
 ```
 
-Для GigaChat v2 features можно явно указать:
+For GigaChat v2 features you can explicitly specify:
 
 ```text
 http://localhost:8090/v2
 ```
 
-Правило выбора backend одинаковое для всех совместимых клиентов: URL с `/v1`
-принудительно идёт в GigaChat v1 contract, URL с `/v2` — в GigaChat v2
-contract. Корневой URL без версии (`http://localhost:8090`) использует
-`GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
+The backend selection rule is the same for all compatible clients: a URL with
+`/v1` is forced into the GigaChat v1 contract, a URL with `/v2` into the
+GigaChat v2 contract. The root URL without a version (`http://localhost:8090`)
+uses `GPT2GIGA_GIGACHAT_API_MODE=v1|v2`.
 
-Anthropic-compatible clients обычно используют:
-
-```text
-http://localhost:8090
-```
-
-Gemini-compatible clients обычно используют корневой адрес:
+Anthropic-compatible clients usually use:
 
 ```text
 http://localhost:8090
 ```
 
-Официальные Gemini SDK/CLI при таком base URL сами добавляют Gemini-style path,
-например `/v1beta/models/{model}:generateContent`.
+Gemini-compatible clients usually use the root address:
 
-Если `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, используйте `GPT2GIGA_API_KEY` как client API key. Для Gemini clients поддерживается также заголовок
-`x-goog-api-key`.
+```text
+http://localhost:8090
+```
 
-## Запускаемые примеры
+With this base URL, the official Gemini SDKs/CLIs append a Gemini-style path
+themselves, for example `/v1beta/models/{model}:generateContent`.
+
+If `GPT2GIGA_ENABLE_API_KEY_AUTH=True`, use `GPT2GIGA_API_KEY` as the client API key. For Gemini clients, the `x-goog-api-key` header is also supported.
+
+## Runnable examples
 
 - OpenAI examples: [examples/openai/](https://github.com/ai-forever/gpt2giga/tree/main/examples/openai)
 - OpenAI Chat Completions: [examples/openai/chat_completions/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/chat_completions/README.md)
@@ -48,9 +47,9 @@ http://localhost:8090
 - Gemini examples: [examples/gemini/README.md](https://github.com/ai-forever/gpt2giga/blob/main/examples/gemini/README.md)
 - OpenAI Agents SDK: [examples/openai/agents/weather_handoff.py](https://github.com/ai-forever/gpt2giga/blob/main/examples/openai/agents/weather_handoff.py)
 
-## Гайды по интеграциям
+## Integration guides
 
-| Tool / client | Гайд |
+| Tool / client | Guide |
 |---|---|
 | OpenHands | [integrations/openhands/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/openhands/README.md) |
 | OpenAI Codex | [integrations/codex/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/codex/README.md) |
@@ -61,14 +60,14 @@ http://localhost:8090
 | Cursor | [integrations/cursor/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/cursor/README.md) |
 | Qwen Code | [integrations/qwen-code/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/qwen-code/README.md) |
 | Xcode | [integrations/xcode/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/xcode/README.md) |
-| nginx reverse proxy | [integrations/nginx/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/nginx/README.md) |
+| nginx (reverse proxy) | [integrations/nginx/README.md](https://github.com/ai-forever/gpt2giga/blob/main/integrations/nginx/README.md) |
 
-## Проверенные apps и frameworks
+## Verified apps and frameworks
 
-| Название | URL | Примечание |
+| Name | URL | Note |
 |---|---|---|
 | OpenCode | https://opencode.ai/ | Open-source coding agent. |
-| KiloCode | https://kilo.ai/ | Coding agent для JetBrains/VS Code. |
+| KiloCode | https://kilo.ai/ | Coding agent for JetBrains/VS Code. |
 | OpenHands | https://openhands.dev/ | Development agent. |
 | Zed | https://zed.dev/ | Editor AI assistant. |
 | Cline | https://cline.bot/ | Developer agent. |
@@ -76,7 +75,7 @@ http://localhost:8090
 | Gemini CLI | https://github.com/google-gemini/gemini-cli | Google CLI coding agent. |
 | Aider | https://aider.chat/ | App-building coding assistant. |
 | Langflow | https://github.com/langflow-ai/langflow | Low-code/no-code agent builder. |
-| DeepAgentsCLI | https://github.com/langchain-ai/deepagents | Agent platform на LangChain/LangGraph. |
+| DeepAgentsCLI | https://github.com/langchain-ai/deepagents | Agent platform on LangChain/LangGraph. |
 | CrewAI | https://github.com/crewAIInc/crewAI | Agent orchestration framework. |
 | Qwen Agent | https://github.com/QwenLM/Qwen-Agent | Agent framework. |
 | PydanticAI | https://github.com/pydantic/pydantic-ai | Pydantic-style GenAI agent framework. |
@@ -85,8 +84,8 @@ http://localhost:8090
 | Openclaw | https://openclaw.ai/ | Personal AI assistant. |
 | Claude Code | https://code.claude.com/docs/en/overview | Anthropic CLI coding agent. |
 | Claude Desktop App | https://claude.com/download | Desktop app for macOS and Windows. |
-| OpenAI Agents SDK | https://github.com/openai/openai-agents-python | Agent SDK с function calling и handoffs. |
-| Anthropic SDK | https://github.com/anthropics/anthropic-sdk-python | Официальный Anthropic Python SDK. |
+| OpenAI Agents SDK | https://github.com/openai/openai-agents-python | Agent SDK with function calling and handoffs. |
+| Anthropic SDK | https://github.com/anthropics/anthropic-sdk-python | Official Anthropic Python SDK. |
 | Cursor | https://cursor.com/ | AI editor. |
 | Qwen Code | https://github.com/QwenLM/qwen-code | CLI coding agent. |
-| Xcode | https://developer.apple.com/xcode/ | Apple Coding Intelligence и external agent tooling. |
+| Xcode | https://developer.apple.com/xcode/ | Apple Coding Intelligence and external agent tooling. |

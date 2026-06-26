@@ -1,24 +1,24 @@
-# Развертывание
+# Deployment
 
-Docker Compose manifests лежат в [deploy/](https://github.com/ai-forever/gpt2giga/tree/main/deploy). Они используют корневой `.env` и build context из корня репозитория.
+The Docker Compose manifests live in [deploy/](https://github.com/ai-forever/gpt2giga/tree/main/deploy). They use the root `.env` and the build context from the repository root.
 
-## Карта Compose-файлов
+## Compose file map
 
-| Файл | Назначение |
+| File | Purpose |
 |---|---|
-| [deploy/base.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/base.yaml) | Базовый gpt2giga service с профилями `DEV` и `PROD`. |
-| [deploy/traefik.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/traefik.yaml) | Traefik и несколько gpt2giga instances для примера model-based routing. |
-| [deploy/nginx.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/nginx.yaml) | Минимальный nginx reverse-proxy compose stack. |
-| [deploy/observability.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observability.yaml) | gpt2giga с mitmproxy для отладки traffic. |
-| [deploy/observe-multiple.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observe-multiple.yaml) | Несколько gpt2giga instances за mitmproxy. |
-| [deploy/mitmproxy.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/mitmproxy.yaml) | Optional mitmproxy overlay для `base.yaml`, Phoenix и других compose overlays. |
-| [deploy/postgres.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/postgres.yaml) | Optional Postgres durable traffic-log backend. |
+| [deploy/base.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/base.yaml) | Base gpt2giga service with the `DEV` and `PROD` profiles. |
+| [deploy/traefik.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/traefik.yaml) | Traefik and several gpt2giga instances as an example of model-based routing. |
+| [deploy/nginx.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/nginx.yaml) | Minimal Compose stack with nginx as a reverse proxy. |
+| [deploy/observability.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observability.yaml) | gpt2giga with mitmproxy for traffic debugging. |
+| [deploy/observe-multiple.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/observe-multiple.yaml) | Several gpt2giga instances behind mitmproxy. |
+| [deploy/mitmproxy.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/mitmproxy.yaml) | Optional mitmproxy overlay for `base.yaml`, Phoenix, and other Compose overlays. |
+| [deploy/postgres.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/postgres.yaml) | Optional durable Postgres traffic-log backend. |
 | [deploy/opensearch.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/opensearch.yaml) | Optional OpenSearch traffic-log mirror. |
 | [deploy/phoenix.yaml](https://github.com/ai-forever/gpt2giga/blob/main/deploy/phoenix.yaml) | Optional Phoenix/OpenTelemetry observability stack. |
 
-Команды для копирования есть в [deploy/README.md](https://github.com/ai-forever/gpt2giga/blob/main/deploy/README.md).
+Copyable commands are in [deploy/README.md](https://github.com/ai-forever/gpt2giga/blob/main/deploy/README.md).
 
-## Базовый service
+## Base service
 
 DEV:
 
@@ -32,11 +32,11 @@ PROD:
 docker compose --env-file .env -f deploy/base.yaml --profile PROD up -d
 ```
 
-`PROD` profile по умолчанию привязывает service к `127.0.0.1:${GPT2GIGA_PORT:-8090}`. Для внешнего traffic используйте reverse proxy или осознанно меняйте `ports:`.
+The `PROD` profile binds the service to `127.0.0.1:${GPT2GIGA_PORT:-8090}` by default. For external traffic, use a reverse proxy or deliberately change `ports:`.
 
-## Минимум для production
+## Production minimum
 
-Перед внешним доступом задайте:
+Before external access, set:
 
 ```dotenv
 GPT2GIGA_MODE=PROD
@@ -50,21 +50,21 @@ GIGACHAT_MODEL=GigaChat-2-Max
 GIGACHAT_VERIFY_SSL_CERTS=True
 ```
 
-`PROD` mode отключает `/docs`, `/redoc`, `/openapi.json`, `/logs`, `/logs/stream`, `/logs/html` и требует `GPT2GIGA_API_KEY`.
+`PROD` mode disables `/docs`, `/redoc`, `/openapi.json`, `/logs`, `/logs/stream`, `/logs/html` and requires `GPT2GIGA_API_KEY`.
 
-## Reverse proxy и TLS
+## Reverse proxy and TLS
 
-Используйте nginx, Caddy, Traefik или другой reverse proxy для TLS termination, rate limiting и perimeter controls.
+Use nginx, Caddy, Traefik, or another reverse proxy for TLS termination, rate limiting, and perimeter controls.
 
-Пример Traefik:
+Traefik example:
 
 ```sh
 docker compose --env-file .env -f deploy/traefik.yaml up -d
 ```
 
-Пример Traefik использует host-based routing из [traefik/rules.yml](https://github.com/ai-forever/gpt2giga/blob/main/traefik/rules.yml). Если обращаетесь по IP, задайте `HOST=127.0.0.1` или отправляйте ожидаемый `Host` header.
+The Traefik example uses host-based routing from [traefik/rules.yml](https://github.com/ai-forever/gpt2giga/blob/main/traefik/rules.yml). If you connect by IP, set `HOST=127.0.0.1` or send the expected `Host` header.
 
-Локальный self-signed HTTPS можно включить прямо в app:
+A local self-signed HTTPS can be enabled directly in the app:
 
 ```sh
 openssl req -x509 -nodes -days 365 \
@@ -81,11 +81,11 @@ GPT2GIGA_HTTPS_KEY_FILE=key.pem
 GPT2GIGA_HTTPS_CERT_FILE=cert.pem
 ```
 
-Для production лучше использовать reverse proxy или managed ingress с реальными сертификатами.
+For production, prefer a reverse proxy or managed ingress with real certificates.
 
 ## Optional traffic-log backends
 
-Durable storage в Postgres:
+Durable storage in Postgres:
 
 ```sh
 docker compose --env-file .env \
@@ -93,9 +93,9 @@ docker compose --env-file .env \
   --profile DEV --profile postgres up -d --build
 ```
 
-Postgres по умолчанию доступен на `127.0.0.1:${GPT2GIGA_POSTGRES_PORT:-5432}`. Перед shared use задайте сильный `GPT2GIGA_POSTGRES_PASSWORD`.
+Postgres is available at `127.0.0.1:${GPT2GIGA_POSTGRES_PORT:-5432}` by default. Before shared use, set a strong `GPT2GIGA_POSTGRES_PASSWORD`.
 
-OpenSearch mirror поверх Postgres:
+OpenSearch mirror on top of Postgres:
 
 ```sh
 docker compose --env-file .env \
@@ -103,7 +103,7 @@ docker compose --env-file .env \
   --profile DEV --profile postgres --profile opensearch up -d --build
 ```
 
-OpenSearch — optional search/index mirror. Durable source of truth остаётся Postgres.
+OpenSearch is an optional search/index mirror. The durable source of truth remains Postgres.
 
 ## Phoenix observability
 
@@ -113,13 +113,13 @@ docker compose --env-file .env \
   --profile DEV --profile phoenix up -d --build
 ```
 
-Phoenix UI доступен на `http://localhost:${PHOENIX_PORT:-6006}`. OTLP gRPC collector доступен на `127.0.0.1:${PHOENIX_GRPC_PORT:-4317}`.
+The Phoenix UI is available at `http://localhost:${PHOENIX_PORT:-6006}`. The OTLP gRPC collector is available at `127.0.0.1:${PHOENIX_GRPC_PORT:-4317}`.
 
-Payload capture остаётся выключенным, пока вы явно не включите соответствующие observability capture flags.
+Payload capture stays disabled until you explicitly enable the corresponding observability capture flags.
 
 ## Phoenix + mitmproxy
 
-Для одновременного Phoenix tracing и перехвата исходящего GigaChat traffic:
+For simultaneous Phoenix tracing and interception of outgoing GigaChat traffic:
 
 ```sh
 docker compose --env-file .env \
@@ -127,24 +127,24 @@ docker compose --env-file .env \
   --profile DEV --profile phoenix --profile mitmproxy up -d --build
 ```
 
-То же через Makefile:
+The same via Makefile:
 
 ```sh
 make phoenix-mitm-dev-d
 ```
 
-mitmproxy UI доступен на `http://localhost:${MITMPROXY_WEB_PORT:-8081}`. Proxy port по умолчанию привязан к `127.0.0.1:${MITMPROXY_PORT:-8080}`.
+The mitmproxy UI is available at `http://localhost:${MITMPROXY_WEB_PORT:-8081}`. The proxy port is bound to `127.0.0.1:${MITMPROXY_PORT:-8080}` by default.
 
-## Checklist для production hardening
+## Production hardening checklist
 
-- Установите `GPT2GIGA_MODE=PROD`.
-- Установите `GPT2GIGA_ENABLE_API_KEY_AUTH=True` и сильный `GPT2GIGA_API_KEY`.
-- Держите `GIGACHAT_VERIFY_SSL_CERTS=True`.
-- Завершайте TLS на reverse proxy или включайте app HTTPS с реальными сертификатами.
-- Ограничьте `GPT2GIGA_CORS_ALLOW_ORIGINS` известными доменами.
-- Храните секреты в environment variables, `.env` или secrets manager.
-- Не передавайте секреты через CLI flags.
-- Не используйте `GPT2GIGA_LOG_LEVEL=DEBUG` в production.
-- Держите content capture выключенным, пока не утверждены redaction, retention и access policies.
-- Используйте network isolation вокруг proxy и storage backends.
-- Мониторьте `/health`, `/ping` и optional `/metrics`.
+- Set `GPT2GIGA_MODE=PROD`.
+- Set `GPT2GIGA_ENABLE_API_KEY_AUTH=True` and a strong `GPT2GIGA_API_KEY`.
+- Keep `GIGACHAT_VERIFY_SSL_CERTS=True`.
+- Terminate TLS at a reverse proxy or enable app HTTPS with real certificates.
+- Restrict `GPT2GIGA_CORS_ALLOW_ORIGINS` to known domains.
+- Store secrets in environment variables, `.env`, or a secrets manager.
+- Do not pass secrets via CLI flags.
+- Do not use `GPT2GIGA_LOG_LEVEL=DEBUG` in production.
+- Keep content capture disabled until redaction, retention, and access policies are approved.
+- Use network isolation around the proxy and storage backends.
+- Monitor `/health`, `/ping`, and the optional `/metrics`.

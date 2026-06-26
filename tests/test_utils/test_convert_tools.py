@@ -122,6 +122,45 @@ def test_normalize_json_schema_removes_unsupported_format():
     assert result["properties"]["created"]["format"] == "date-time"
 
 
+def test_normalize_json_schema_removes_sdk_incompatible_enum_values():
+    schema = {
+        "type": "object",
+        "properties": {
+            "manifest": {
+                "type": "object",
+                "properties": {
+                    "surface": {
+                        "type": "string",
+                        "enum": ["dashboard", "report", None],
+                    },
+                    "version": {"type": "integer", "enum": [1]},
+                },
+            },
+            "snapshot": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["ready", "partial", "blocked", "fixture", None],
+                    },
+                    "version": {"enum": [1]},
+                },
+            },
+        },
+    }
+
+    result = normalize_tool_parameters_schema(schema)
+
+    manifest = result["properties"]["manifest"]["properties"]
+    snapshot = result["properties"]["snapshot"]["properties"]
+    assert manifest["surface"]["enum"] == ["dashboard", "report"]
+    assert "enum" not in manifest["version"]
+    assert manifest["version"]["type"] == "integer"
+    assert snapshot["status"]["enum"] == ["ready", "partial", "blocked", "fixture"]
+    assert "enum" not in snapshot["version"]
+    assert snapshot["version"]["type"] == "integer"
+
+
 def test_normalize_json_schema_removes_null_from_anyof():
     """Тест: удаляет type: null из anyOf и разворачивает единственный оставшийся тип"""
     schema = {
@@ -611,3 +650,56 @@ def test_convert_tool_with_ref_and_defs():
     assert "flight_number" in response_items["properties"]
     assert response_items["properties"]["flight_number"]["type"] == "string"
     assert response_items["properties"]["price"]["type"] == "integer"
+
+
+def test_convert_tool_with_mcp_literal_enums():
+    data = {
+        "tools": [
+            {
+                "type": "function",
+                "name": "render_artifact",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "manifest": {
+                            "type": "object",
+                            "properties": {
+                                "surface": {
+                                    "type": "string",
+                                    "enum": ["dashboard", "report", None],
+                                },
+                                "version": {"type": "integer", "enum": [1]},
+                            },
+                        },
+                        "snapshot": {
+                            "type": "object",
+                            "properties": {
+                                "status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "ready",
+                                        "partial",
+                                        "blocked",
+                                        "fixture",
+                                        None,
+                                    ],
+                                },
+                                "version": {"type": "integer", "enum": [1]},
+                            },
+                        },
+                    },
+                },
+            }
+        ]
+    }
+
+    out = convert_tool_to_giga_functions(data)
+    params = out[0].parameters.model_dump(by_alias=True, exclude_none=True)
+    manifest = params["properties"]["manifest"]["properties"]
+    snapshot = params["properties"]["snapshot"]["properties"]
+
+    assert out[0].name == "render_artifact"
+    assert manifest["surface"]["enum"] == ["dashboard", "report"]
+    assert "enum" not in manifest["version"]
+    assert snapshot["status"]["enum"] == ["ready", "partial", "blocked", "fixture"]
+    assert "enum" not in snapshot["version"]

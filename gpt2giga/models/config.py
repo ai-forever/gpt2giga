@@ -112,6 +112,13 @@ class ProxySettings(BaseSettings):
             "legacy chat methods, v2 uses chat completion resource methods"
         ),
     )
+    disable_builtin_tool_mapping: bool = Field(
+        default=False,
+        description=(
+            "Disable mapping provider built-in tools to GigaChat Chat Completions "
+            "v2 built-in tools; custom function tools remain enabled."
+        ),
+    )
     experimental_normalized_layer: bool = Field(
         default=False,
         description="Enable experimental normalized protocol layer wiring.",

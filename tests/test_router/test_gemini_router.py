@@ -662,6 +662,27 @@ def test_gemini_generate_content_passes_supported_builtin_tools_to_provider_payl
     }
 
 
+def test_gemini_generate_content_ignores_builtin_tools_when_mapping_disabled():
+    app = make_app(mode="v2", disable_builtin_tool_mapping=True)
+    client = TestClient(app)
+
+    response = client.post(
+        "/models/gemini-pro:generateContent",
+        json={
+            "contents": [{"parts": [{"text": "Hello"}]}],
+            "tools": [{"googleSearch": {}}],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = app.state.request_transformer.chat_completion_calls[0][0]
+    assert payload == {
+        "model": "gemini-pro",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "stream": False,
+    }
+
+
 def test_gemini_generate_content_stitches_by_metadata_conversation_id_v2():
     app = make_app(mode="v2", conversation_stitching_enabled=True)
     client = TestClient(app)

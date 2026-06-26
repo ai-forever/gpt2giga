@@ -92,6 +92,7 @@ class GeminiProtocolAdapter:
         model: str | None,
         context: RequestContext | None = None,
         stream: bool | None = None,
+        builtin_tool_mapping_enabled: bool = True,
     ) -> NormalizedChatRequest:
         """Convert a Gemini generateContent request body to normalized form."""
         _validate_generate_payload(payload)
@@ -100,10 +101,16 @@ class GeminiProtocolAdapter:
         )
         metadata, raw_extensions = _extensions(payload)
         raw_extensions.update(_gemini_protocol_extensions(payload))
-        unsupported_tools = _unsupported_gemini_tools(payload.get("tools"))
+        unsupported_tools = _unsupported_gemini_tools(
+            payload.get("tools"),
+            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
+        )
         if unsupported_tools:
             raw_extensions["unsupportedTools"] = unsupported_tools
-        tools = _normalize_tools(payload.get("tools"))
+        tools = _normalize_tools(
+            payload.get("tools"),
+            builtin_tool_mapping_enabled=builtin_tool_mapping_enabled,
+        )
         function_calling_config = _function_calling_config(
             _mapping_value(payload, "toolConfig", "tool_config")
         )
@@ -535,7 +542,7 @@ def _normalize_contents(value: Any) -> list[NormalizedMessage]:
         for item in value:
             if isinstance(item, Mapping) or isinstance(item, str):
                 messages.extend(_normalize_content(item))
-        return messages
+        return _drop_tool_calls_abandoned_by_followup(messages)
     return [NormalizedMessage(role="user", content=str(value))]
 
 
@@ -611,7 +618,11 @@ def _gemini_role_to_normalized(role: str) -> str:
     return normalized or "user"
 
 
-def _normalize_tools(value: Any) -> list[NormalizedTool]:
+def _normalize_tools(
+    value: Any,
+    *,
+    builtin_tool_mapping_enabled: bool = True,
+) -> list[NormalizedTool]:
     if not isinstance(value, list):
         return []
 
@@ -619,7 +630,8 @@ def _normalize_tools(value: Any) -> list[NormalizedTool]:
     for tool in value:
         if not isinstance(tool, Mapping):
             continue
-        tools.extend(_gemini_builtin_tools_to_normalized(tool))
+        if builtin_tool_mapping_enabled:
+            tools.extend(_gemini_builtin_tools_to_normalized(tool))
         declarations = _part_value(
             tool,
             "functionDeclarations",
@@ -659,7 +671,11 @@ def _gemini_builtin_tools_to_normalized(
     return normalized_tools
 
 
-def _unsupported_gemini_tools(value: Any) -> list[dict[str, Any]]:
+def _unsupported_gemini_tools(
+    value: Any,
+    *,
+    builtin_tool_mapping_enabled: bool = True,
+) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     unsupported_tools = []
@@ -670,7 +686,10 @@ def _unsupported_gemini_tools(value: Any) -> list[dict[str, Any]]:
             key: item
             for key, item in tool.items()
             if key not in _GEMINI_FUNCTION_DECLARATION_KEYS
-            and normalize_gigachat_builtin_tool_type(key) is None
+            and (
+                not builtin_tool_mapping_enabled
+                or normalize_gigachat_builtin_tool_type(key) is None
+            )
         }
         if tool_extensions:
             unsupported_tools.append(tool_extensions)
@@ -1000,6 +1019,94 @@ def _function_response_to_normalized(
             "functionResponse": function_response,
         },
     )
+
+
+def _drop_tool_calls_abandoned_by_followup(
+    messages: list[NormalizedMessage],
+) -> list[NormalizedMessage]:
+    """Drop Gemini function calls only after a later non-tool turn abandons them."""
+    pending: list[tuple[int, int, NormalizedToolCall]] = []
+
+    for message_index, message in enumerate(messages):
+        if message.role == "tool":
+            _resolve_pending_tool_response(message, pending)
+            continue
+
+        if pending:
+            _remove_pending_tool_calls(messages, pending)
+            pending.clear()
+
+        if message.role == "assistant" and message.tool_calls:
+            pending.extend(
+                (message_index, call_index, tool_call)
+                for call_index, tool_call in enumerate(message.tool_calls)
+            )
+
+    return [
+        message
+        for message in messages
+        if not (
+            message.role == "assistant"
+            and not message.tool_calls
+            and not _message_has_content(message)
+        )
+    ]
+
+
+def _resolve_pending_tool_response(
+    message: NormalizedMessage,
+    pending: list[tuple[int, int, NormalizedToolCall]],
+) -> None:
+    if not pending:
+        return
+    response_keys = _tool_response_keys(message)
+    for index, (_message_index, _call_index, tool_call) in enumerate(pending):
+        if response_keys and response_keys.isdisjoint(_tool_call_keys(tool_call)):
+            continue
+        pending.pop(index)
+        return
+
+
+def _remove_pending_tool_calls(
+    messages: list[NormalizedMessage],
+    pending: list[tuple[int, int, NormalizedToolCall]],
+) -> None:
+    pending_indexes_by_message: dict[int, set[int]] = {}
+    for message_index, call_index, _tool_call in pending:
+        pending_indexes_by_message.setdefault(message_index, set()).add(call_index)
+
+    for message_index, pending_indexes in pending_indexes_by_message.items():
+        message = messages[message_index]
+        message.tool_calls = [
+            tool_call
+            for call_index, tool_call in enumerate(message.tool_calls)
+            if call_index not in pending_indexes
+        ]
+
+
+def _tool_response_keys(message: NormalizedMessage) -> set[str]:
+    keys = set()
+    if message.tool_call_id:
+        keys.add(f"id:{message.tool_call_id}")
+    if message.name:
+        keys.add(f"name:{message.name}")
+    return keys
+
+
+def _tool_call_keys(tool_call: NormalizedToolCall) -> set[str]:
+    keys = set()
+    if tool_call.id:
+        keys.add(f"id:{tool_call.id}")
+    if tool_call.name:
+        keys.add(f"name:{tool_call.name}")
+    return keys
+
+
+def _message_has_content(message: NormalizedMessage) -> bool:
+    content = message.content
+    if isinstance(content, str):
+        return bool(content)
+    return content is not None
 
 
 def _collapse_text_parts(

@@ -1,0 +1,26 @@
+{
+  "title": {
+    "message": "gpt2giga",
+    "description": "The title in the navbar"
+  },
+  "item.label.Documentation": {
+    "message": "Документация",
+    "description": "Navbar item with label Documentation"
+  },
+  "item.label.Quickstart": {
+    "message": "Быстрый старт",
+    "description": "Navbar item with label Quickstart"
+  },
+  "item.label.Compatibility": {
+    "message": "Совместимость",
+    "description": "Navbar item with label Compatibility"
+  },
+  "item.label.Operations": {
+    "message": "Операции",
+    "description": "Navbar item with label Operations"
+  },
+  "item.label.GitHub": {
+    "message": "GitHub",
+    "description": "Navbar item with label GitHub"
+  }
+}

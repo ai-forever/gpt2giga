@@ -1,205 +1,235 @@
 # Normalized messages architecture
 
-Normalized слой - внутренний контракт между публичными API-форматами и
-upstream providers. Он не является новым публичным API. Клиенты продолжают
-посылать OpenAI Chat Completions, OpenAI Responses или Anthropic Messages, а
-gateway приводит совместимые части payload к каноническим моделям из
-`gpt2giga/protocols/normalized/`.
+The normalized layer is an internal contract between the public API formats and
+the upstream providers. It is not a new public API. Clients keep sending OpenAI
+Chat Completions, OpenAI Responses, Anthropic Messages, or Gemini GenerateContent,
+and the gateway brings the compatible parts of the payload to canonical models
+from `gpt2giga/protocols/normalized/`. Gemini GenerateContent already uses a
+dedicated Gemini-to-normalized adapter in the main execution path.
 
-## Текущий статус
+## Current status
 
-- `GPT2GIGA_NORMALIZATION_MODE=off`: все chat-like routes идут через legacy
+- `GPT2GIGA_NORMALIZATION_MODE=off`: OpenAI Chat Completions goes through legacy
   transforms.
-- `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat строит normalized request
-  рядом с legacy path и сохраняет safe diagnostic shape hash без prompt content.
-- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions исполняется через
-  normalized path и `GigaChatProviderAdapter`; до старта ответа доступен legacy
-  fallback через `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
-- OpenAI Responses и Anthropic Messages пока исполняются через legacy route
-  transforms, но observability и debug translation уже используют normalized
-  представление там, где это возможно.
-- Debug endpoints умеют переводить между `openai`, `anthropic`, `normalized` и
-  `gigachat` форматами для protected admin workflows.
+- `GPT2GIGA_NORMALIZATION_MODE=shadow`: OpenAI Chat builds a normalized request
+  alongside the legacy path and stores a safe diagnostic shape hash without prompt content.
+- `GPT2GIGA_NORMALIZATION_MODE=on`: OpenAI Chat Completions is executed through the
+  normalized path and `GigaChatProviderAdapter`; a legacy fallback is available
+  before the response starts via `GPT2GIGA_LEGACY_CHAT_FALLBACK=True`.
+- OpenAI Responses and Anthropic Messages are still executed through legacy route
+  transforms, but observability and debug translation already use a normalized
+  representation where possible.
+- Gemini GenerateContent and streamGenerateContent are executed through
+  `GeminiProtocolAdapter`, normalized models, and `GigaChatProviderAdapter`
+  independently of the OpenAI Chat normalization flags.
+- Debug endpoints can translate between the `openai`, `anthropic`, `normalized`, and
+  `gigachat` formats for protected admin workflows.
 
-## Основные модели
+## Core models
 
-Normalized request envelope:
+The normalized request envelope:
 
 - `NormalizedChatRequest`: `protocol`, `operation`, `model`, `stream`,
   `messages`, `tools`, `tool_choice`, `response_format`,
   `generation_config`, `user`, `metadata`.
 - `NormalizedMessage`: `role`, `content`, `name`, `tool_call_id`,
   `tool_calls`.
-- `NormalizedContentPart`: generic content part с `type`, `text`, `data`,
+- `NormalizedContentPart`: a generic content part with `type`, `text`, `data`,
   `mime_type`, `detail`.
-- `NormalizedTool`: flattened tool/function contract с `name`,
+- `NormalizedTool`: a flattened tool/function contract with `name`,
   `description`, `parameters`.
 - `NormalizedGenerationConfig`: common generation knobs:
   `temperature`, `top_p`, `max_tokens`, penalties, `stop`, `seed`.
 
 Normalized output:
 
-- `NormalizedResponse`: provider-independent non-streaming response:
+- `NormalizedResponse`: a provider-independent non-streaming response:
   `choices`, `usage`, `error`, `metadata`, `provider_metadata`.
-- `NormalizedChoice`: `message` или `delta`, `finish_reason`, `index`.
+- `NormalizedChoice`: `message` or `delta`, `finish_reason`, `index`.
 - `NormalizedUsage`: `input_tokens`, `output_tokens`, `total_tokens`.
 - `NormalizedStreamEvent`: canonical stream events:
   `message_start`, `content_delta`, `reasoning_delta`, `tool_call_start`,
   `tool_call_delta`, `usage`, `message_end`, `error`, `heartbeat`.
 
-Все normalized модели наследуют две extension buckets:
+All normalized models inherit two extension buckets:
 
-- `raw_extensions`: поля исходного public protocol, которые gateway должен
-  сохранить, но не поднимать в каноническую модель.
-- `provider_metadata`: provider-specific данные, например GigaChat
-  `additional_fields` или безопасная metadata из upstream response.
+- `raw_extensions`: fields of the original public protocol that the gateway must
+  keep but not promote into the canonical model.
+- `provider_metadata`: provider-specific data, for example GigaChat
+  `additional_fields` or safe metadata from the upstream response.
 
-## Поток OpenAI Chat
+## OpenAI Chat flow
 
-OpenAI Chat Completions в normalized mode проходит так:
+OpenAI Chat Completions in normalized mode goes like this:
 
-1. `gpt2giga/routers/openai/chat_completions.py` читает payload и request
+1. `gpt2giga/routers/openai/chat_completions.py` reads the payload and request
    context.
-2. `OpenAIProtocolAdapter` из `gpt2giga/protocols/openai/adapter.py` строит
-   `NormalizedChatRequest`.
-3. `GigaChatProviderAdapter` из `gpt2giga/providers/gigachat/adapter.py`
-   исполняет normalized request через текущий GigaChat SDK path.
-4. Provider adapter возвращает `NormalizedResponse` или
+2. `OpenAIProtocolAdapter` from `gpt2giga/protocols/openai/adapter.py` builds
+   a `NormalizedChatRequest`.
+3. `GigaChatProviderAdapter` from `gpt2giga/providers/gigachat/adapter.py`
+   executes the normalized request through the current GigaChat SDK path.
+4. The provider adapter returns a `NormalizedResponse` or a
    `NormalizedStreamEvent`.
-5. OpenAI response adapters маппят результат обратно в OpenAI Chat
-   Completions payload или SSE chunks.
-6. Observability получает normalized request/response и строит безопасные
+5. OpenAI response adapters map the result back into an OpenAI Chat
+   Completions payload or SSE chunks.
+6. Observability receives the normalized request/response and builds safe
    OpenInference-style span attributes.
 
-Внутри `GigaChatProviderAdapter` normalized request сейчас реконструируется в
-OpenAI-like payload, после чего используется существующий `RequestTransformer`
-для GigaChat v1/v2 SDK. Это переходный слой: normalized contract уже отделён от
-роутера, но часть GigaChat-specific подготовки ещё переиспользует legacy код.
+Inside `GigaChatProviderAdapter`, the normalized request is currently
+reconstructed into an OpenAI-like payload, after which the existing
+`RequestTransformer` for the GigaChat v1/v2 SDK is used. This is a transitional
+layer: the normalized contract is already separated from the router, but part of
+the GigaChat-specific preparation still reuses the legacy code.
 
-## Отличия от OpenAI Chat Completions
+## Differences from OpenAI Chat Completions
 
-OpenAI Chat Completions - публичный wire format. Normalized messages - внутренний
-gateway contract.
+OpenAI Chat Completions is the public wire format. Normalized messages are the
+internal gateway contract.
 
-Главные отличия:
+Main differences:
 
-- OpenAI хранит tool schemas как `{"type": "function", "function": {...}}`;
-  normalized хранит `NormalizedTool` с плоскими `name`, `description`,
+- OpenAI stores tool schemas as `{"type": "function", "function": {...}}`;
+  the normalized layer stores `NormalizedTool` with flat `name`, `description`,
   `parameters`.
-- OpenAI `tool_calls` содержит nested `function.arguments`; normalized хранит
-  `NormalizedToolCall.name` и `arguments` напрямую, а nested provider поля
-  остаются в `raw_extensions`.
-- OpenAI content parts используют конкретные поля вроде `text`, `image_url`,
-  `file`; normalized content part имеет generic `data` и optional metadata.
-- OpenAI top-level параметры смешаны в одном object; normalized группирует
-  generation knobs в `generation_config`, structured output в
-  `response_format`, а unknown/compatibility поля - в `raw_extensions`.
-- OpenAI usage называется `prompt_tokens` и `completion_tokens`; normalized
-  использует provider-neutral `input_tokens` и `output_tokens`.
-- OpenAI response id/object/created/system_fingerprint формируются только на
-  выходе из normalized response adapter.
+- OpenAI `tool_calls` contains nested `function.arguments`; the normalized layer stores
+  `NormalizedToolCall.name` and `arguments` directly, while the nested provider fields
+  remain in `raw_extensions`.
+- OpenAI content parts use concrete fields such as `text`, `image_url`,
+  `file`; the normalized content part has a generic `data` and optional metadata.
+- OpenAI top-level parameters are mixed in one object; the normalized layer groups
+  generation knobs in `generation_config`, structured output in
+  `response_format`, and unknown/compatibility fields in `raw_extensions`.
+- OpenAI usage is called `prompt_tokens` and `completion_tokens`; the normalized layer
+  uses provider-neutral `input_tokens` and `output_tokens`.
+- The OpenAI response `id`/`object`/`created`/`system_fingerprint` are formed only on
+  the way out of the normalized response adapter.
 
-## Отличия от OpenAI Responses
+## Differences from OpenAI Responses
 
-OpenAI Responses API имеет другой публичный contract: `input`, `instructions`,
+The OpenAI Responses API has a different public contract: `input`, `instructions`,
 `output` items, `previous_response_id`, stateful response ids, built-in tool
-progress events и `text.format`.
+progress events, and `text.format`.
 
-Normalized слой сейчас описывает Responses как chat-like exchange только для
+The normalized layer currently describes Responses as a chat-like exchange only for
 observability:
 
-- `responses_request_to_normalized()` строит `NormalizedChatRequest` с
+- `responses_request_to_normalized()` builds a `NormalizedChatRequest` with
   `operation="responses"`.
-- `input` и `instructions` превращаются в normalized messages.
-- `max_output_tokens` маппится в `generation_config.max_tokens`.
-- `text.format` маппится в `NormalizedResponseFormat`.
-- Responses output items сворачиваются в assistant message и tool calls для
+- `input` and `instructions` are turned into normalized messages.
+- `max_output_tokens` is mapped to `generation_config.max_tokens`.
+- `text.format` is mapped to `NormalizedResponseFormat`.
+- Responses output items are collapsed into an assistant message and tool calls for
   LLM spans.
 
-Исполнение `/responses` остаётся в legacy route path:
-`gpt2giga/routers/openai/responses.py` использует existing GigaChat v1/v2
-request transformers и response processor. Поэтому normalized Responses helper
-сейчас нужен для consistent observability, а не для основного execution path.
+Execution of `/responses` stays in the legacy route path:
+`gpt2giga/routers/openai/responses.py` uses the existing GigaChat v1/v2
+request transformers and response processor. So the normalized Responses helper
+is currently needed for consistent observability, not for the main execution path.
 
-## Отличия от GigaChat формата
+## Differences from Gemini GenerateContent
 
-GigaChat - upstream provider format, который gateway вызывает через SDK. Его
-v1/v2 contracts, SDK models, function-call state ids, attachments и
-`additional_fields` отличаются от публичных OpenAI/Anthropic shapes.
+Gemini GenerateContent is a separate public protocol with `contents`, `parts`,
+`systemInstruction`, `generationConfig`, `tools.functionDeclarations`,
+`toolConfig.functionCallingConfig`, candidates, and its own SSE response shape.
 
-Normalized слой отличается так:
+The normalized layer differs as follows:
 
-- не зависит от `gigachat.models.Messages` или v2 `ChatMessage`;
-- хранит provider-neutral roles/messages/tools/usage/errors;
-- не раскрывает GigaChat auth, SDK contextvars и transport details;
-- сохраняет GigaChat-specific passthrough в `provider_metadata["gigachat"]`;
-- фильтрует response headers перед переносом в metadata и не сохраняет
+- `contents[].parts` are turned into normalized messages/content parts.
+- `systemInstruction` becomes a normalized system message.
+- `generationConfig.temperature`, `topP`, `maxOutputTokens`, penalties, `seed`, and
+  `stopSequences` are mapped to `NormalizedGenerationConfig`.
+- `functionDeclarations` are turned into `NormalizedTool`; supported provider
+  tools are kept as GigaChat-compatible built-in tool metadata, while
+  unsupported tools remain in `raw_extensions` for diagnostics.
+- `toolConfig.functionCallingConfig` applies to function declarations and does not
+  force the built-in provider tools.
+- Gemini candidates, finish reasons, and usage metadata are formed on the way out of
+  the normalized response/stream adapters.
+
+The Gemini Files/Batches router modules are prepared but not mounted in the public
+API surface; they are not part of the current normalized execution path.
+
+## Differences from the GigaChat format
+
+GigaChat is the upstream provider format that the gateway calls through the SDK. Its
+v1/v2 contracts, SDK models, function-call state ids, attachments, and
+`additional_fields` differ from the public OpenAI/Anthropic shapes.
+
+The normalized layer differs as follows:
+
+- it does not depend on `gigachat.models.Messages` or the v2 `ChatMessage`;
+- it stores provider-neutral roles/messages/tools/usage/errors;
+- it does not expose GigaChat authorization, SDK contextvars, and transport details;
+- it keeps GigaChat-specific passthrough in `provider_metadata["gigachat"]`;
+- it filters response headers before moving them into metadata and does not store
   `authorization`, `x-api-key`, `cookie`;
-- нормализует GigaChat `function_call` в `NormalizedToolCall` и finish reason
-  `function_call` в `tool_calls`.
+- it normalizes the GigaChat `function_call` into `NormalizedToolCall` and the finish reason
+  `function_call` into `tool_calls`.
 
-Provider adapter отвечает за обратную сторону: он берёт normalized request,
-подготавливает GigaChat payload, вызывает upstream и возвращает normalized
+The provider adapter is responsible for the reverse side: it takes the normalized request,
+prepares the GigaChat payload, calls the upstream, and returns the normalized
 response/events.
 
-## Отличия от Anthropic Messages
+## Differences from Anthropic Messages
 
-Anthropic Messages - отдельный публичный protocol с `system` на top-level,
+Anthropic Messages is a separate public protocol with a top-level `system`,
 content blocks, `max_tokens`, `stop_sequences`, `tool_use`, `tool_result`,
-`thinking` и собственными streaming event names.
+`thinking`, and its own streaming event names.
 
-Normalized слой отличается так:
+The normalized layer differs as follows:
 
-- `system` становится обычным normalized `system` message.
-- Anthropic text/image blocks переводятся в normalized `content` string или
+- `system` becomes a regular normalized `system` message.
+- Anthropic text/image blocks are translated into a normalized `content` string or
   content parts.
-- `tool_use` становится assistant `tool_calls`.
-- `tool_result` становится normalized message с `role="tool"` и
+- `tool_use` becomes assistant `tool_calls`.
+- `tool_result` becomes a normalized message with `role="tool"` and
   `tool_call_id`.
-- `max_tokens` хранится в `generation_config.max_tokens`, а `stop_sequences` -
-  в `generation_config.stop`.
-- `thinking`/reasoning content не является отдельным canonical field и
-  сохраняется как controlled extension, например `reasoning_content`.
-- Anthropic `usage.input_tokens` и `usage.output_tokens` уже совпадают с
-  normalized naming, а `total_tokens` вычисляется при наличии обоих значений.
+- `max_tokens` is stored in `generation_config.max_tokens`, and `stop_sequences`
+  in `generation_config.stop`.
+- `thinking`/reasoning content is not a separate canonical field and
+  is kept as a controlled extension, for example `reasoning_content`.
+- Anthropic `usage.input_tokens` and `usage.output_tokens` already match the
+  normalized naming, and `total_tokens` is computed when both values are present.
 
-Сейчас Anthropic execution path остаётся legacy:
-Anthropic payload сначала приводится к OpenAI-like payload, затем используется
-общий GigaChat route transform. Debug translation и observability могут строить
-normalized representation поверх этого пути.
+Currently the Anthropic execution path stays legacy:
+the Anthropic payload is first brought to an OpenAI-like payload, then the
+common GigaChat route transform is used. Debug translation and observability can build
+a normalized representation on top of this path.
 
 ## Observability
 
-LLM observability намеренно строится поверх normalized shapes:
+LLM observability is intentionally built on top of normalized shapes:
 
-- Chat Completions spans получают request/response attributes из
-  `NormalizedChatRequest` и `NormalizedResponse`.
-- Responses и Anthropic helpers приводят свои public payloads к normalized
-  chat-like representation перед построением span attributes.
-- Streaming milestones строятся из `NormalizedStreamEvent`, когда route уже
-  использует normalized stream path.
-- Content capture остаётся выключенным по умолчанию; messages, tool args и
-  responses требуют отдельного opt-in и проходят redaction.
+- Chat Completions spans get request/response attributes from
+  `NormalizedChatRequest` and `NormalizedResponse`.
+- Responses and Anthropic helpers bring their public payloads to a normalized
+  chat-like representation before building span attributes.
+- The Gemini GenerateContent route already produces observability from the
+  normalized request/response and uses the root span `Gemini-Content`.
+- Streaming milestones are built from `NormalizedStreamEvent` when the route already
+  uses the normalized stream path.
+- Content capture stays disabled by default; messages, tool args, and
+  responses require a separate opt-in and go through redaction.
 
-Это позволяет добавлять новые protocols/providers без копирования всей логики
-OpenInference/Phoenix attributes для каждого wire format.
+This makes it possible to add new protocols/providers without copying all the
+OpenInference/Phoenix attribute logic for each wire format.
 
 ## Debugging
 
-Для локальной проверки включите protected debug translation:
+For a local check, enable protected debug translation:
 
 ```dotenv
 GPT2GIGA_DEBUG_TRANSLATE_ENABLED=True
 GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 ```
 
-Полезные endpoints:
+Useful endpoints:
 
 - `POST /_debug/translate/openai-to-normalized`
 - `POST /_debug/translate/anthropic-to-normalized`
 - `POST /_debug/translate/normalized-to-gigachat`
 - `POST /_debug/translate/gigachat-to-openai`
-- `POST /_debug/translate` для generic `from`/`to` envelope
+- `POST /_debug/translate` for a generic `from`/`to` envelope
 
-Shadow diagnostics не пишут prompt или response content. Они сохраняют route,
-status, warnings/errors и hash формы normalized payload.
+Shadow diagnostics do not write prompt or response content. They store the route,
+status, warnings/errors, and the shape hash of the normalized payload.

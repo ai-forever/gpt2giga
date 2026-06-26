@@ -280,6 +280,35 @@ async def test_prepare_chat_completion_maps_builtin_tools_in_v2_mode():
     assert request.tool_config.tool_name == "web_search"
 
 
+async def test_prepare_chat_completion_ignores_builtin_tools_when_mapping_disabled():
+    cfg = ProxyConfig(
+        proxy=ProxySettings(
+            gigachat_api_mode="v2",
+            disable_builtin_tool_mapping=True,
+        )
+    )
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "messages": [{"role": "user", "content": "search"}],
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                }
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    payload = request.model_dump(exclude_none=True)
+    assert "tools" not in payload
+    assert "tool_config" not in payload
+
+
 async def test_prepare_chat_completion_maps_anthropic_builtin_tool_types():
     cfg = ProxyConfig(proxy=ProxySettings(gigachat_api_mode="v2"))
     rt = RequestTransformer(cfg, logger=logger)
@@ -718,6 +747,42 @@ async def test_prepare_response_chat_completion_maps_responses_builtin_tools():
     assert request.tool_config.tool_name == "web_search"
 
 
+async def test_prepare_response_chat_completion_ignores_builtin_tools_when_mapping_disabled():
+    cfg = ProxyConfig(proxy=ProxySettings(disable_builtin_tool_mapping=True))
+    rt = RequestTransformer(cfg, logger=logger)
+
+    request = await rt.prepare_response_chat_completion(
+        {
+            "model": "GigaChat-2-Max",
+            "input": "Find current sources and then calculate a summary.",
+            "tools": [
+                {
+                    "type": "web_search_preview",
+                    "indexes": ["web"],
+                    "flags": ["trusted"],
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "save_result",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"value": {"type": "string"}},
+                        },
+                    },
+                },
+            ],
+            "tool_choice": {"type": "web_search_preview"},
+        }
+    )
+
+    assert len(request.tools) == 1
+    spec = request.tools[0].functions.specifications[0]
+    assert spec.name == "save_result"
+    assert spec.parameters["properties"]["value"]["type"] == "string"
+    assert request.tool_config is None
+
+
 async def test_prepare_response_chat_completion_flattens_namespace_tools():
     cfg = ProxyConfig()
     rt = RequestTransformer(cfg, logger=logger)
@@ -1060,3 +1125,83 @@ async def test_prepare_chat_completion_maps_gemini_function_calling_example_hist
     spec = request.tools[0].functions.specifications[0]
     assert spec.name == "get_weather"
     assert spec.parameters["properties"]["city"]["type"] == "string"
+
+
+async def test_prepare_chat_completion_ignores_gemini_orphaned_function_call():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "id": "state-1",
+                                "name": "run_shell_command",
+                                "args": {"command": "pytest"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "id": "state-1",
+                                "name": "run_shell_command",
+                                "response": {"exit_code": 1},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "update_topic",
+                                "args": {
+                                    "strategic_intent": (
+                                        "Анализ и корректировка шестого конфликта"
+                                    )
+                                },
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": (
+                                "System: Potential loop detected. "
+                                "Please take a step back."
+                            )
+                        }
+                    ],
+                },
+            ]
+        },
+        model="GigaChat-2-Max",
+    )
+
+    request = await rt.prepare_chat_completion(
+        normalized_chat_to_openai_payload(normalized)
+    )
+
+    assert [message.role for message in request.messages] == [
+        "assistant",
+        "tool",
+        "user",
+    ]
+    assert request.messages[0].content[0].function_call.name == "run_shell_command"
+    assert request.messages[1].content[0].function_result.name == "run_shell_command"
+    assert request.messages[2].content[0].text.startswith("System: Potential loop")
+    assert all(
+        part.function_call is None or part.function_call.name != "update_topic"
+        for message in request.messages
+        for part in message.content
+    )
