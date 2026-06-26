@@ -203,9 +203,13 @@ def test_admin_logs_list_filters_and_paginates():
             "to": "2026-06-08T00:00:00Z",
             "protocol": "openai",
             "route": "/v1/chat/completions",
+            "route_group": "chat",
+            "operation": "chat_completions",
             "model": "GigaChat",
             "status_code": "200",
+            "status_class": "2xx",
             "has_error": "false",
+            "stream": "false",
             "request_id": "req-1",
             "trace_id": "trace-1",
             "api_key_hash": "hash-1",
@@ -220,6 +224,10 @@ def test_admin_logs_list_filters_and_paginates():
     assert body["next_cursor"] == "6"
     assert body["data"][0]["id"] == EVENT_ID
     assert body["data"][0]["created_at"] == "2026-06-07T12:00:00+00:00"
+    assert body["data"][0]["operation"] == "chat_completions"
+    assert body["data"][0]["route_group"] == "chat"
+    assert body["data"][0]["stream"] is False
+    assert body["data"][0]["has_error"] is False
     assert body["data"][0]["has_request_body"] is True
     assert "request_body" not in body["data"][0]
     assert store.list_calls == [
@@ -231,9 +239,13 @@ def test_admin_logs_list_filters_and_paginates():
                 "to": "2026-06-08T00:00:00Z",
                 "protocol": "openai",
                 "route": "/v1/chat/completions",
+                "route_group": "chat",
+                "operation": "chat_completions",
                 "model": "GigaChat",
                 "status_code": 200,
+                "status_class": "2xx",
                 "has_error": False,
+                "stream": False,
                 "request_id": "req-1",
                 "trace_id": "trace-1",
                 "api_key_hash": "hash-1",
@@ -293,10 +305,24 @@ def test_admin_logs_csv_export_omits_payload_bodies():
     assert export.status_code == 200
     assert export.headers["content-type"].startswith("text/csv")
     assert "id,created_at,request_id" in export.text
+    assert "route_group,operation" in export.text
     assert EVENT_ID in export.text
     assert "authorization" not in export.text
     assert "messages" not in export.text
     assert "choices" not in export.text
+
+
+def test_admin_logs_rejects_invalid_status_class():
+    client = TestClient(make_logs_app(FakeTrafficLogQueryStore([_record()])))
+
+    response = client.get(
+        "/_admin/logs",
+        params={"status_class": "ok"},
+        headers=_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid status_class"
 
 
 def test_admin_logs_retention_purge_defaults_to_dry_run():

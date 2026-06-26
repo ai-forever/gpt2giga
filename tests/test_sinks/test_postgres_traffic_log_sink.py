@@ -173,6 +173,45 @@ async def test_postgres_query_store_lists_with_filters_and_decodes_json():
     )
 
 
+async def test_postgres_query_store_supports_logs_ui_filters():
+    pool = FakePool()
+
+    async def pool_factory(dsn):
+        return pool
+
+    store = PostgresTrafficLogQueryStore(
+        "postgresql://example",
+        pool_factory=pool_factory,
+    )
+
+    await store.list(
+        filters={
+            "operation": "chat_completions",
+            "route_group": "chat",
+            "status_class": "2xx",
+            "stream": True,
+        }
+    )
+
+    sql, args = pool.fetched[0]
+    assert "(status_code >= 200 AND status_code < 300)" in sql
+    assert "metadata->>'operation' = $1" in sql
+    assert "route LIKE $2" in sql
+    assert "metadata->>'route_group' = $3" in sql
+    assert "metadata @> $7::jsonb" in sql
+    assert args == (
+        "chat_completions",
+        "%/chat/completions",
+        "chat",
+        "%/chat/completions",
+        "%:generateContent",
+        "%:streamGenerateContent",
+        '{"stream": true}',
+        100,
+        0,
+    )
+
+
 async def test_postgres_query_store_gets_by_id():
     pool = FakePool()
 

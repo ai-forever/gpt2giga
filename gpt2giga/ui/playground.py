@@ -573,6 +573,10 @@ _PLAYGROUND_HTML = """<!doctype html>
           <span>Playground</span>
           <span class="badge ready">builder</span>
         </a>
+        <a class="nav-item" href="/ui/logs">
+          <span>Logs</span>
+          <span class="badge ready">list</span>
+        </a>
         <a class="nav-item" href="/_admin/compat/analyze">
           <span>Compatibility</span>
           <span class="badge">API</span>

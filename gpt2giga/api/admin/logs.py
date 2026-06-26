@@ -43,6 +43,8 @@ CSV_EXPORT_COLUMNS = [
     "span_id",
     "protocol",
     "route",
+    "route_group",
+    "operation",
     "method",
     "status_code",
     "model_requested",
@@ -54,7 +56,9 @@ CSV_EXPORT_COLUMNS = [
     "input_tokens",
     "output_tokens",
     "total_tokens",
+    "stream",
     "error_type",
+    "has_error",
     "api_key_hash",
     "has_request_body",
     "has_response_body",
@@ -75,9 +79,13 @@ async def list_logs(
     to: str | None = None,
     protocol: str | None = None,
     route: str | None = None,
+    route_group: str | None = None,
+    operation: str | None = None,
     model: str | None = None,
     status_code: int | None = None,
+    status_class: str | None = None,
     has_error: bool | None = None,
+    stream: bool | None = None,
     request_id: str | None = None,
     trace_id: str | None = None,
     api_key_hash: str | None = None,
@@ -91,9 +99,13 @@ async def list_logs(
         to=to,
         protocol=protocol,
         route=route,
+        route_group=route_group,
+        operation=operation,
         model=model,
         status_code=status_code,
+        status_class=status_class,
         has_error=has_error,
+        stream=stream,
         request_id=request_id,
         trace_id=trace_id,
         api_key_hash=api_key_hash,
@@ -137,9 +149,13 @@ async def export_logs_ndjson(
     to: str | None = None,
     protocol: str | None = None,
     route: str | None = None,
+    route_group: str | None = None,
+    operation: str | None = None,
     model: str | None = None,
     status_code: int | None = None,
+    status_class: str | None = None,
     has_error: bool | None = None,
+    stream: bool | None = None,
     request_id: str | None = None,
     trace_id: str | None = None,
     api_key_hash: str | None = None,
@@ -157,9 +173,13 @@ async def export_logs_ndjson(
             to=to,
             protocol=protocol,
             route=route,
+            route_group=route_group,
+            operation=operation,
             model=model,
             status_code=status_code,
+            status_class=status_class,
             has_error=has_error,
+            stream=stream,
             request_id=request_id,
             trace_id=trace_id,
             api_key_hash=api_key_hash,
@@ -180,9 +200,13 @@ async def export_logs_csv(
     to: str | None = None,
     protocol: str | None = None,
     route: str | None = None,
+    route_group: str | None = None,
+    operation: str | None = None,
     model: str | None = None,
     status_code: int | None = None,
+    status_class: str | None = None,
     has_error: bool | None = None,
+    stream: bool | None = None,
     request_id: str | None = None,
     trace_id: str | None = None,
     api_key_hash: str | None = None,
@@ -200,9 +224,13 @@ async def export_logs_csv(
             to=to,
             protocol=protocol,
             route=route,
+            route_group=route_group,
+            operation=operation,
             model=model,
             status_code=status_code,
+            status_class=status_class,
             has_error=has_error,
+            stream=stream,
             request_id=request_id,
             trace_id=trace_id,
             api_key_hash=api_key_hash,
@@ -411,9 +439,13 @@ def _build_filters(
     to: str | None,
     protocol: str | None,
     route: str | None,
+    route_group: str | None,
+    operation: str | None,
     model: str | None,
     status_code: int | None,
+    status_class: str | None,
     has_error: bool | None,
+    stream: bool | None,
     request_id: str | None,
     trace_id: str | None,
     api_key_hash: str | None,
@@ -425,9 +457,13 @@ def _build_filters(
             "to": to,
             "protocol": protocol,
             "route": route,
+            "route_group": route_group,
+            "operation": operation,
             "model": model,
             "status_code": status_code,
+            "status_class": _normalize_status_class(status_class),
             "has_error": has_error,
+            "stream": stream,
             "request_id": request_id,
             "trace_id": trace_id,
             "api_key_hash": api_key_hash,
@@ -452,6 +488,18 @@ def _parse_cursor(cursor: str | None) -> int:
             detail="Invalid cursor",
         )
     return offset
+
+
+def _normalize_status_class(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    normalized = value.strip().lower()
+    if normalized not in {"1xx", "2xx", "3xx", "4xx", "5xx", "unknown"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid status_class",
+        )
+    return normalized
 
 
 def _validate_event_id(event_id: str) -> None:
@@ -631,6 +679,25 @@ def _summary_record(record: Mapping[str, Any]) -> dict[str, Any]:
         for key, value in record.items()
         if key not in {"request_headers", "request_body", "response_body"}
     }
+    metadata = (
+        record.get("metadata") if isinstance(record.get("metadata"), Mapping) else {}
+    )
+    operation = _metadata_string(metadata, "operation") or _infer_operation(
+        protocol=str(record.get("protocol") or ""),
+        route=str(record.get("route") or ""),
+        method=str(record.get("method") or ""),
+    )
+    summary["operation"] = operation
+    summary["route_group"] = _metadata_string(
+        metadata, "route_group"
+    ) or _route_group_for_operation(operation)
+    summary["stream"] = _metadata_bool(metadata, "stream")
+    if summary["stream"] is None:
+        summary["stream"] = _stream_for_operation(operation)
+    status_code = record.get("status_code")
+    summary["has_error"] = bool(record.get("error_type")) or (
+        isinstance(status_code, int) and status_code >= 400
+    )
     summary["has_request_body"] = record.get("request_body") is not None
     summary["has_response_body"] = record.get("response_body") is not None
     return _json_ready(summary)
@@ -649,3 +716,74 @@ def _csv_ready(record: Mapping[str, Any]) -> dict[str, Any]:
         for key, value in record.items()
         if key in CSV_EXPORT_COLUMNS
     }
+
+
+def _metadata_string(metadata: Mapping[str, Any], key: str) -> str | None:
+    value = metadata.get(key)
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _metadata_bool(metadata: Mapping[str, Any], key: str) -> bool | None:
+    value = metadata.get(key)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+    return None
+
+
+def _infer_operation(*, protocol: str, route: str, method: str) -> str:
+    path = urlsplit(route).path.rstrip("/") or "/"
+    if path.endswith("/chat/completions"):
+        return "chat_completions"
+    if path.endswith("/responses"):
+        return "responses"
+    if path.endswith("/embeddings"):
+        return "embeddings"
+    if path.endswith("/model/info"):
+        return "model_info"
+    if path.endswith("/messages/count_tokens"):
+        return "count_tokens"
+    if path.endswith("/messages"):
+        return "messages"
+    if path.endswith(":streamGenerateContent"):
+        return "stream_generate_content"
+    if path.endswith(":generateContent"):
+        return "generate_content"
+    if path.endswith(":countTokens"):
+        return "count_tokens"
+    if path.endswith(":batchEmbedContents"):
+        return "batch_embed_contents"
+    if path.endswith(":embedContent"):
+        return "embed_content"
+    if path.endswith("/models") and method.upper() == "GET":
+        return "models"
+    if protocol == "system":
+        return "system"
+    return "unknown"
+
+
+def _route_group_for_operation(operation: str) -> str:
+    if operation in {"chat_completions", "generate_content", "stream_generate_content"}:
+        return "chat"
+    if operation == "responses":
+        return "responses"
+    if operation in {"embeddings", "embed_content", "batch_embed_contents"}:
+        return "embeddings"
+    if operation in {"messages", "count_tokens"}:
+        return "messages"
+    if operation in {"models", "model_info"}:
+        return "models"
+    if operation == "system":
+        return "system"
+    return "other"
+
+
+def _stream_for_operation(operation: str) -> bool:
+    return operation == "stream_generate_content"

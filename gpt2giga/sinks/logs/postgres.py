@@ -112,6 +112,30 @@ RETURNING
 
 PoolFactory = Callable[[str], Awaitable[Any]]
 
+_OPERATION_ROUTE_PATTERNS = {
+    "chat_completions": ("%/chat/completions",),
+    "responses": ("%/responses",),
+    "embeddings": ("%/embeddings",),
+    "model_info": ("%/model/info",),
+    "models": ("%/models", "%/v1beta/models"),
+    "messages": ("%/messages",),
+    "count_tokens": ("%/messages/count_tokens", "%:countTokens"),
+    "generate_content": ("%:generateContent",),
+    "stream_generate_content": ("%:streamGenerateContent",),
+    "embed_content": ("%:embedContent",),
+    "batch_embed_contents": ("%:batchEmbedContents",),
+}
+
+_ROUTE_GROUP_OPERATIONS = {
+    "chat": ("chat_completions", "generate_content", "stream_generate_content"),
+    "responses": ("responses",),
+    "embeddings": ("embeddings", "embed_content", "batch_embed_contents"),
+    "messages": ("messages", "count_tokens"),
+    "models": ("models", "model_info"),
+    "system": ("system",),
+    "other": ("unknown",),
+}
+
 
 class PostgresTrafficLogSink:
     """Write traffic log events to Postgres using asyncpg."""
@@ -421,12 +445,44 @@ def _build_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
     add("trace_id = ${arg}", filters.get("trace_id"))
     add("api_key_hash = ${arg}", filters.get("api_key_hash"))
 
+    status_class = filters.get("status_class")
+    if status_class == "unknown":
+        clauses.append("status_code IS NULL")
+    elif isinstance(status_class, str) and status_class.endswith("xx"):
+        lower = int(status_class[0]) * 100
+        clauses.append(f"(status_code >= {lower} AND status_code < {lower + 100})")
+
     model = filters.get("model")
     if model is not None:
         args.append(model)
         clauses.append(
             f"(model_requested = ${len(args)} OR model_effective = ${len(args)})"
         )
+
+    operation = filters.get("operation")
+    if operation is not None:
+        _add_metadata_or_route_filter(
+            clauses,
+            args,
+            metadata_key="operation",
+            value=operation,
+            route_patterns=_operation_route_patterns(str(operation)),
+        )
+
+    route_group = filters.get("route_group")
+    if route_group is not None:
+        _add_metadata_or_route_filter(
+            clauses,
+            args,
+            metadata_key="route_group",
+            value=route_group,
+            route_patterns=_route_group_patterns(str(route_group)),
+        )
+
+    stream = filters.get("stream")
+    if isinstance(stream, bool):
+        args.append(json.dumps({"stream": stream}))
+        clauses.append(f"metadata @> ${len(args)}::jsonb")
 
     has_error = filters.get("has_error")
     if has_error is True:
@@ -439,6 +495,37 @@ def _build_where_clause(filters: dict[str, Any]) -> tuple[str, list[Any]]:
     if not clauses:
         return "", args
     return "WHERE " + " AND ".join(clauses), args
+
+
+def _add_metadata_or_route_filter(
+    clauses: list[str],
+    args: list[Any],
+    *,
+    metadata_key: str,
+    value: str,
+    route_patterns: Sequence[str],
+) -> None:
+    args.append(value)
+    metadata_clause = f"metadata->>'{metadata_key}' = ${len(args)}"
+    route_clauses: list[str] = []
+    for pattern in route_patterns:
+        args.append(pattern)
+        route_clauses.append(f"route LIKE ${len(args)}")
+    if route_clauses:
+        clauses.append(f"({metadata_clause} OR {' OR '.join(route_clauses)})")
+    else:
+        clauses.append(metadata_clause)
+
+
+def _operation_route_patterns(operation: str) -> tuple[str, ...]:
+    return _OPERATION_ROUTE_PATTERNS.get(operation, ())
+
+
+def _route_group_patterns(route_group: str) -> tuple[str, ...]:
+    patterns: list[str] = []
+    for operation in _ROUTE_GROUP_OPERATIONS.get(route_group, ()):
+        patterns.extend(_operation_route_patterns(operation))
+    return tuple(dict.fromkeys(patterns))
 
 
 def _row_to_record(row: Any) -> dict[str, Any]:
