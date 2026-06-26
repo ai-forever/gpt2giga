@@ -15,6 +15,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'api-compatibility',
         'client-parameter-compatibility',
+        'diagnostics',
         'builtin-tools',
         'integrations',
       ],

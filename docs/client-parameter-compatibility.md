@@ -14,12 +14,18 @@ structure of the source code:
 
 Other client families are not covered by this compatibility check.
 
+To inspect how one concrete request will be classified without calling GigaChat,
+use [Compatibility Doctor](diagnostics.md). It returns the same public status
+language for fields, tools, backend mode, model selection, and redaction.
+
 ## Compatibility statuses
 
 | Status | Meaning |
 |---|---|
 | `supported` | The parameter affects the request or response and is covered by tests. |
 | `accepted_ignored` | The parameter is accepted for SDK compatibility but is not sent upstream. |
+| `accepted_diagnostic_only` | The parameter is retained only for diagnostics, observability summaries, or future UI explanation. |
+| `approximated` | The parameter or operation is implemented through a documented approximation rather than exact provider semantics. |
 | `rejected` | The request has an unexecutable shape, for example a missing required `input` or an `extra_body` that is not an object. Optional client feature flags do not use this status. |
 | `not_applicable` | The option relates to client-side transport configuration, not to a server-side request body parameter. |
 

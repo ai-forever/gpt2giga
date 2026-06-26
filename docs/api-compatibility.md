@@ -15,6 +15,7 @@ Below are the practical incompatibilities that the proxy covers.
 | SDK `extra_headers`, `extra_query`, `extra_body` | SDKs may send transport fields or optional model fields that GigaChat does not accept. | Filters dangerous headers, passes only allowed metadata, forwards GigaChat-specific `extra_body`, and ignores known unsupported optional fields. |
 | Streaming SSE | OpenAI, Anthropic, and Gemini SDKs expect their own event names and delta shapes. | Generates OpenAI-, Anthropic-, and Gemini-compatible SSE from GigaChat streaming responses. |
 | Tools and structured output | Function/tool schemas and JSON-schema controls differ between providers and backend modes. | Maps local tools/functions and provides a function-call fallback for structured output. |
+| Compatibility investigation | It is hard to tell whether a field is supported, ignored, diagnostic-only, approximated, or rejected before sending a real request. | Provides a protected no-upstream-call [Compatibility Doctor](diagnostics.md) endpoint that explains request interpretation and redaction decisions. |
 | Authorization | OpenAI/Anthropic clients work with API keys, while GigaChat requires a different credentials/scope mechanism. | Separates proxy API-key authentication from upstream GigaChat authorization and, if needed, supports per-request pass-through. |
 | Model discovery | GigaChat model responses do not match the OpenAI/Anthropic/Gemini/LiteLLM shape. | Repackages the model list and description for the target client. |
 | OpenAI/Anthropic/Gemini batch routes | The installed GigaChat SDK/backend has no full create/list/retrieve/cancel flow for batch APIs. | Keeps the Files/Batches routers disabled until they can work end-to-end. |
@@ -191,6 +192,11 @@ In observability, ignored request extensions are published in the redacted
 in `llm.invocation_parameters`.
 
 A reference for each parameter: [Client parameter compatibility](./client-parameter-compatibility.md).
+
+To inspect a concrete request envelope without calling GigaChat, use
+[Compatibility Doctor](./diagnostics.md). It reports supported, ignored,
+diagnostic-only, approximated, and rejected fields, plus tool-mapping and
+redaction decisions.
 
 The internal normalized layer that separates public protocol formats from
 provider execution is described in [Normalized messages architecture](./architecture/normalized-messages.md).

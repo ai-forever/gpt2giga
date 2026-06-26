@@ -527,5 +527,15 @@ GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
 These endpoints are intended for local debugging and protected admin workflows.
 Do not enable them publicly without reverse-proxy controls and a separate admin key.
 
+The Compatibility Doctor endpoint is also part of the Admin API:
+
+```http
+POST /_admin/compat/analyze
+```
+
+It analyzes an OpenAI-, Anthropic-, Gemini-, LiteLLM-, or system-shaped request
+envelope without calling GigaChat and returns only redacted diagnostics. See
+[Compatibility Doctor](./diagnostics.md).
+
 `GPT2GIGA_UI_ENABLED` is reserved for a future built-in UI. For now, do not
 use it as a security control.

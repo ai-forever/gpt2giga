@@ -15,6 +15,7 @@ http://localhost:8090
 | Quick start via Docker Compose or `uv` | [Quickstart](quickstart.md) |
 | Supported OpenAI, Anthropic, Gemini, and LiteLLM routes | [API compatibility](api-compatibility.md) |
 | Behavior of `extra_headers`, `extra_query`, `extra_body`, and optional fields | [Client parameters](client-parameter-compatibility.md) |
+| No-upstream-call request explanation and redaction audit | [Compatibility Doctor](diagnostics.md) |
 | GigaChat built-in tools and their mapping to OpenAI/Anthropic/Gemini | [Built-in tools](builtin-tools.md) |
 | Environment variables, authentication, limits, metrics, observability | [Configuration](configuration.md) |
 | Compose profiles, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Deployment](deployment.md) |
@@ -50,5 +51,6 @@ OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are pr
 ## For developers
 
 - [Normalized messages](architecture/normalized-messages.md) describes the experimental layer of protocol-independent models.
+- [Compatibility Doctor](diagnostics.md) explains how to inspect request interpretation without calling GigaChat.
 - [Logging and observability](architecture/logging-and-observability.md) sets the boundaries between runtime logs, traffic logs, metrics, and traces.
 - [Adding a provider or protocol](architecture/how-to-add-provider.md) gives a checklist for extending the public protocol surface and upstream providers.

@@ -15,6 +15,7 @@ http://localhost:8090
 | Быстрый запуск через Docker Compose или `uv` | [Быстрый старт](quickstart.md) |
 | Поддерживаемые маршруты OpenAI, Anthropic, Gemini и LiteLLM | [Совместимость API](api-compatibility.md) |
 | Поведение `extra_headers`, `extra_query`, `extra_body` и необязательных полей | [Параметры клиентов](client-parameter-compatibility.md) |
+| Объяснение запроса без upstream-вызова и аудит редактирования | [Compatibility Doctor](diagnostics.md) |
 | Встроенные инструменты GigaChat и их сопоставление с OpenAI/Anthropic/Gemini | [Встроенные инструменты](builtin-tools.md) |
 | Переменные окружения, аутентификация, лимиты, метрики, наблюдаемость | [Конфигурация](configuration.md) |
 | Профили Compose, Traefik, nginx, Postgres, OpenSearch, Phoenix | [Развёртывание](deployment.md) |
@@ -50,5 +51,6 @@ OpenAI Files/Batches, Anthropic Message Batches и Gemini Files/Batches подг
 ## Для разработчиков
 
 - [Нормализованные сообщения](architecture/normalized-messages.md) описывают экспериментальный слой моделей, не зависящих от протокола.
+- [Compatibility Doctor](diagnostics.md) объясняет, как проверить интерпретацию запроса без вызова GigaChat.
 - [Логирование и наблюдаемость](architecture/logging-and-observability.md) фиксирует границы между журналами выполнения, журналами трафика, метриками и трейсами.
 - [Добавление провайдера или протокола](architecture/how-to-add-provider.md) даёт чек-лист для расширения набора публичных протоколов и вышестоящих провайдеров.
