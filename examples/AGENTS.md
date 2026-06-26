@@ -2,7 +2,7 @@
 
 ## Package Identity
 
-- **What:** Runnable examples for using `gpt2giga` through OpenAI and Anthropic-compatible SDKs
+- **What:** Runnable examples for using `gpt2giga` through OpenAI-, Anthropic-, and Gemini-compatible SDKs
 - **Audience:** Users validating proxy behavior or copying starter integrations
 - **Default target:** `http://localhost:8090`
 
@@ -21,6 +21,7 @@
 | `examples/anthropic/messages/` | Anthropic Messages API examples grouped by capability |
 | `examples/anthropic/message_batches/` | Anthropic Message Batches examples; router code exists but is not mounted in this release |
 | `examples/anthropic/count_tokens/` | Anthropic Count Tokens examples |
+| `examples/gemini/` | Gemini-compatible GenerateContent, streaming, count tokens, embeddings and prepared Files/Batches examples |
 | `examples/README.md` | Example index |
 
 ### Notable Example Files
@@ -40,17 +41,21 @@
 - `anthropic/messages/basic/messages_stream.py`: streaming Messages API
 - `anthropic/count_tokens/basic.py`: token counting endpoint
 - `anthropic/messages/structured_outputs/structured_output_stream.py`: streaming structured output fallback
+- `gemini/content/generate_content.py`: Gemini-compatible GenerateContent
+- `gemini/content/stream_generate_content.py`: Gemini-compatible streaming
+- `gemini/count_tokens/count_tokens.py`: Gemini-compatible countTokens
+- `gemini/embeddings/embeddings.py`: Gemini-compatible embedContent and batch embeddings
 
 ## Patterns & Conventions
 
 - Keep examples self-contained and runnable with repo dependencies.
-- Use real SDK clients (`openai`, `anthropic`, `openai-agents`) rather than importing internal `gpt2giga` modules.
+- Use real SDK clients (`openai`, `anthropic`, `google-genai`, `openai-agents`) rather than importing internal `gpt2giga` modules.
 - Default to `api_key="0"` or another placeholder unless the example is specifically about proxy API-key auth.
 - Prefer `GigaChat-2-Max` in examples unless the example is about model selection.
 - Print or stream visible output so users can confirm behavior quickly.
 - Keep comments short and focused on what the example demonstrates.
 - Keep file/batch examples clearly marked as prepared but currently not runnable against the mounted public API.
-- Keep base URLs aligned with local defaults: OpenAI examples may use `http://localhost:8090`, `http://localhost:8090/v1`, or `http://localhost:8090/v2` depending on whether they need env-selected, explicit v1, or explicit v2 behavior; Anthropic examples can use `http://localhost:8090` unless they need an explicit backend contract.
+- Keep base URLs aligned with local defaults: OpenAI examples may use `http://localhost:8090`, `http://localhost:8090/v1`, or `http://localhost:8090/v2` depending on whether they need env-selected, explicit v1, or explicit v2 behavior; Anthropic examples can use `http://localhost:8090` unless they need an explicit backend contract; Gemini examples should use `google-genai` `HttpOptions` and the supported root, `/v1`, `/v2`, or `/v1beta` paths documented in `examples/gemini/README.md`.
 
 ## Setup & Run
 
@@ -68,6 +73,7 @@ uv run gpt2giga
 uv run python examples/openai/chat_completions/basic/chat_completion.py
 uv run python examples/openai/responses/basic/single_prompt.py
 uv run python examples/anthropic/messages/basic/messages.py
+uv run python examples/gemini/content/generate_content.py
 ```
 
 ## Quick Find Commands
@@ -94,6 +100,7 @@ rg -n "files|batches|message_batches" examples
 - `examples/openai/agents/weather_handoff.py` needs the `integrations` dependency group.
 - Anthropic examples use the `anthropic` SDK directly, not the OpenAI client.
 - OpenAI examples are grouped under `examples/openai/` by API and capability; keep README links and run commands aligned with that layout.
+- Gemini examples are grouped under `examples/gemini/` by capability; keep prepared Files/Batches examples marked as unmounted.
 - Examples are excluded from coverage and are not the canonical place to implement application logic.
 - Each API-style folder has its own `README.md`; update those alongside code examples when behavior changes.
-- OpenAI Files/Batches and Anthropic Message Batches examples document intended client usage, but the current API aggregators do not mount those routers.
+- OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches examples document intended client usage, but the current API aggregators do not mount those routers.

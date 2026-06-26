@@ -3,9 +3,9 @@
 ## Project Snapshot
 
 - **Repo type:** Single Python package with examples, docs, CI workflows, and deployment assets
-- **What:** FastAPI compatibility gateway that translates OpenAI and Anthropic-shaped requests into GigaChat calls
+- **What:** FastAPI compatibility gateway that translates OpenAI-, Anthropic-, and Gemini-shaped requests into GigaChat calls
 - **Stack:** Python 3.10-3.14, FastAPI/Starlette, GigaChat SDK, Pydantic Settings, SSE, Docker, optional Postgres/OpenSearch/Phoenix backends
-- **Tooling:** `uv`, Ruff, pytest, Docker, GitHub Actions
+- **Tooling:** `uv`, Ruff, pytest, Docusaurus/Node.js, Docker, GitHub Actions
 - **Hierarchy:** Subfolders with their own `AGENTS.md` override this file
 
 ## Setup Commands
@@ -55,8 +55,9 @@ uv run pre-commit install
 |---|---|---|
 | `gpt2giga/` | Main application package | App factory, API aggregation, routers, protocols, providers, sinks |
 | `tests/` | Test suite | Mirrors app, router, protocol, sink, and compatibility behavior |
-| `examples/` | Runnable SDK examples | OpenAI chat/responses/embeddings/models, Anthropic, agents; files/batches examples are prepared but not mounted |
-| `docs/` | User documentation | Compatibility, configuration, deployment, operations, integrations |
+| `examples/` | Runnable SDK examples | OpenAI chat/responses/embeddings/models, Anthropic, Gemini, agents; files/batches examples are prepared but not mounted |
+| `docs/` | User documentation content | Markdown guides and architecture notes rendered by Docusaurus |
+| `docs-site/` | Documentation site wrapper | Docusaurus config, sidebar/theme, npm lockfile, GitHub Pages artifact |
 | `integrations/` | Integration guides | Editor/agent/reverse-proxy setup docs |
 | `scripts/` | Small maintenance/debug scripts | Coverage badge + mitmproxy SSE helper |
 | `.github/` | Workflows and templates | CI, release, Docker publish, PR/issue templates |
@@ -69,7 +70,7 @@ uv run pre-commit install
 ## Current Architecture Notes
 
 - `gpt2giga/app/factory.py` is the FastAPI composition root: middleware, auth dependencies, metrics, public routers, and admin/debug routers are mounted there.
-- OpenAI and Anthropic public API aggregators live in `gpt2giga/api/openai/` and `gpt2giga/api/anthropic/`; concrete route handlers still live under `gpt2giga/routers/openai/` and `gpt2giga/routers/anthropic/`.
+- OpenAI, Anthropic, and Gemini public API aggregators live in `gpt2giga/api/openai/`, `gpt2giga/api/anthropic/`, and `gpt2giga/api/gemini/`; concrete route handlers live under the matching `gpt2giga/routers/*/` package.
 - LiteLLM-compatible model-info endpoints live in `gpt2giga/routers/litellm/`.
 - System health routes live in `gpt2giga/routers/system_router.py`; Prometheus metrics are mounted from `gpt2giga/api/system/metrics.py` when enabled.
 - Runtime `/logs*` routes live in `gpt2giga/routers/logs_router.py` and are disabled in `PROD`.
@@ -78,7 +79,7 @@ uv run pre-commit install
 - Shared HTTP, schema, streaming, auth, and utility helpers live in `gpt2giga/common/`.
 - GigaChat upstream integration lives in `gpt2giga/providers/gigachat/`.
 - Traffic logs, metrics, and observability sinks live in `gpt2giga/sinks/`; Postgres/OpenSearch storage helpers live in `gpt2giga/storage/`.
-- Files and batch router code exists, but OpenAI Files/Batches and Anthropic Message Batches are intentionally not mounted until the upstream SDK/backend can execute them end-to-end.
+- Files and batch router code exists, but OpenAI Files/Batches, Anthropic Message Batches, and Gemini Files/Batches are intentionally not mounted until the upstream SDK/backend can execute them end-to-end.
 - OpenAPI schema builders live in `gpt2giga/openapi_specs/`.
 
 ## Quick Find Commands
@@ -100,7 +101,7 @@ rg -n "class .*Middleware" gpt2giga/middlewares
 rg -n "admin|traffic_log|metrics|observability|debug_translate" gpt2giga docs .env.example
 
 # Find tests for a feature
-rg -n "batch|file|anthropic|responses|traffic|metrics|normalized" tests
+rg -n "batch|file|anthropic|gemini|responses|traffic|metrics|normalized" tests
 
 # Find workflow usage of scripts
 rg -n "scripts/" .github/workflows
@@ -117,6 +118,7 @@ uv run pytest tests/ --cov=. --cov-fail-under=80
 - Tests pass and coverage stays at or above `80%`
 - Ruff passes without warnings
 - Docs/config changes stay aligned with the real file layout
+- Docs-stack changes validate with `cd docs-site && npm run build`
 - `uv.lock` is updated if dependencies change
 
 ## Environment Notes

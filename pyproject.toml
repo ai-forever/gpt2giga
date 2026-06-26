@@ -1,7 +1,7 @@
 [project]
 name = "gpt2giga"
-version = "0.2.1a1"
-description = "Утилита для проксирования OpenAI и Anthropic запросов в GigaChat"
+version = "0.2.2a1"
+description = "Утилита для проксирования OpenAI, Anthropic и Gemini запросов в GigaChat"
 authors = [{ name = "Konstantin Krestnikov", email = "rai220@gmail.com" }]
 requires-python = ">=3.10,<4,<3.15"
 readme = "README.md"
@@ -80,9 +80,6 @@ dev = [
     "ruff (>=0.15,<1)",
     "pytest-cov (>=7.0.0,<8.0.0)",
     "pre-commit (>=4.3.0,<5.0.0)",
-]
-docs = [
-    "mkdocs-material>=9.6,<10",
 ]
 integrations = [
     "openai-agents (>=0.17,<1)",

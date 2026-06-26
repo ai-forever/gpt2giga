@@ -1,0 +1,26 @@
+{
+  "version.label": {
+    "message": "Текущая",
+    "description": "The label for version current"
+  },
+  "sidebar.docs.category.Overview": {
+    "message": "Обзор",
+    "description": "The label for category 'Overview' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Compatibility": {
+    "message": "Совместимость",
+    "description": "The label for category 'Compatibility' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Operations": {
+    "message": "Эксплуатация",
+    "description": "The label for category 'Operations' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Architecture": {
+    "message": "Архитектура",
+    "description": "The label for category 'Architecture' in sidebar 'docs'"
+  },
+  "sidebar.docs.category.Contributing": {
+    "message": "Участие",
+    "description": "The label for category 'Contributing' in sidebar 'docs'"
+  }
+}

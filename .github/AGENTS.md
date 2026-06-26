@@ -32,7 +32,7 @@ CI currently runs Ruff check and pytest coverage; the local Definition of Done i
 | `.github/workflows/pip-audit.yaml` | Audits installed Python dependencies for known vulnerabilities |
 | `.github/workflows/nightly-smoke.yaml` | Runs scheduled app-level smoke tests against the FastAPI app factory |
 | `.github/workflows/docker-smoke.yaml` | Builds the default Docker image and verifies `/health` comes up |
-| `.github/workflows/docs-pages.yaml` | Builds MkDocs documentation and deploys it to GitHub Pages |
+| `.github/workflows/docs-pages.yaml` | Builds Docusaurus documentation from `docs-site/` and deploys it to GitHub Pages |
 | `.github/workflows/pr-labeler.yaml` | Applies path-based labels to pull requests |
 | `.github/workflows/release-drafter.yaml` | Keeps the draft GitHub release notes up to date |
 | `.github/dependabot.yml` | Weekly Dependabot updates for GitHub Actions dependencies |
@@ -61,6 +61,9 @@ CI currently runs Ruff check and pytest coverage; the local Definition of Done i
 ```bash
 # Find uv-based workflow steps
 rg -n "uv sync|uv run|uv build|uv publish" .github/workflows
+
+# Find Docusaurus documentation workflow steps
+rg -n "npm ci|npm run build|docs-site" .github/workflows
 
 # Find Docker tag logic
 rg -n "tags:|IMAGE_NAME|VERSION" .github/workflows
