@@ -29,6 +29,8 @@ from gpt2giga.sinks.logs.noop import NoopTrafficLogSink
 from gpt2giga.sinks.metrics.noop import NoopMetricsSink
 from gpt2giga.sinks.observability.noop import NoopObservabilitySink
 
+LOG_DETAIL_EVENT_ID = "11111111-1111-4111-8111-111111111111"
+
 
 def test_legacy_create_app_facade_uses_modular_factory():
     assert create_app is create_modular_app
@@ -210,6 +212,7 @@ def test_ui_routes_are_unmounted_by_default():
     assert client.get("/ui").status_code == 404
     assert client.get("/ui/playground").status_code == 404
     assert client.get("/ui/logs").status_code == 404
+    assert client.get(f"/ui/logs/{LOG_DETAIL_EVENT_ID}").status_code == 404
 
 
 def test_ui_routes_require_admin_key_by_default():
@@ -220,9 +223,14 @@ def test_ui_routes_require_admin_key_by_default():
 
     assert client.get("/ui/playground").status_code == 403
     assert client.get("/ui/logs").status_code == 403
+    assert client.get(f"/ui/logs/{LOG_DETAIL_EVENT_ID}").status_code == 403
 
     response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
     logs_response = client.get("/ui/logs", headers={"x-admin-api-key": "admin"})
+    log_detail_response = client.get(
+        f"/ui/logs/{LOG_DETAIL_EVENT_ID}",
+        headers={"x-admin-api-key": "admin"},
+    )
 
     assert response.status_code == 200
     assert "gpt2giga playground" in response.text
@@ -263,6 +271,8 @@ def test_ui_routes_require_admin_key_by_default():
     assert "gpt2giga logs" in logs_response.text
     assert "Traffic logs" in logs_response.text
     assert "Log events" in logs_response.text
+    assert "Details" in logs_response.text
+    assert "/ui/logs/" in logs_response.text
     assert "Route group" in logs_response.text
     assert "Status class" in logs_response.text
     assert "API key hash" in logs_response.text
@@ -274,6 +284,22 @@ def test_ui_routes_require_admin_key_by_default():
     assert f'nonce="{logs_script_nonce.group(1)}"' in logs_response.text
     assert "connect-src 'self'" in logs_csp
     assert logs_response.headers["x-content-type-options"] == "nosniff"
+    assert log_detail_response.status_code == 200
+    assert "gpt2giga log detail" in log_detail_response.text
+    assert "Traffic log detail" in log_detail_response.text
+    assert LOG_DETAIL_EVENT_ID in log_detail_response.text
+    assert "Compatibility analysis" in log_detail_response.text
+    assert "Metrics context" in log_detail_response.text
+    assert "Redaction audit" in log_detail_response.text
+    assert "/_admin/logs/" in log_detail_response.text
+    assert "/_admin/compat/analyze" in log_detail_response.text
+    assert "fetch(" in log_detail_response.text
+    detail_csp = log_detail_response.headers["content-security-policy"]
+    detail_script_nonce = re.search(r"script-src 'nonce-([^']+)'", detail_csp)
+    assert detail_script_nonce is not None
+    assert f'nonce="{detail_script_nonce.group(1)}"' in log_detail_response.text
+    assert "connect-src 'self'" in detail_csp
+    assert log_detail_response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_ui_root_redirects_to_playground_when_enabled():
@@ -337,6 +363,35 @@ def test_ui_logs_csp_nonce_is_per_response():
     assert "__GPT2GIGA_LOGS_SCRIPT_NONCE__" not in second.text
 
 
+def test_ui_log_detail_csp_nonce_is_per_response():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    client = TestClient(app)
+
+    first = client.get(
+        f"/ui/logs/{LOG_DETAIL_EVENT_ID}",
+        headers={"x-admin-api-key": "admin"},
+    )
+    second = client.get(
+        f"/ui/logs/{LOG_DETAIL_EVENT_ID}",
+        headers={"x-admin-api-key": "admin"},
+    )
+
+    first_nonce = re.search(
+        r"script-src 'nonce-([^']+)'", first.headers["content-security-policy"]
+    )
+    second_nonce = re.search(
+        r"script-src 'nonce-([^']+)'", second.headers["content-security-policy"]
+    )
+
+    assert first_nonce is not None
+    assert second_nonce is not None
+    assert first_nonce.group(1) != second_nonce.group(1)
+    assert "__GPT2GIGA_LOG_DETAIL_SCRIPT_NONCE__" not in first.text
+    assert "__GPT2GIGA_LOG_DETAIL_SCRIPT_NONCE__" not in second.text
+
+
 def test_ui_routes_can_disable_auth_in_dev():
     app = create_app(
         config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, ui_require_auth=False))
@@ -345,11 +400,14 @@ def test_ui_routes_can_disable_auth_in_dev():
 
     response = client.get("/ui/playground")
     logs_response = client.get("/ui/logs")
+    log_detail_response = client.get(f"/ui/logs/{LOG_DETAIL_EVENT_ID}")
 
     assert response.status_code == 200
     assert logs_response.status_code == 200
+    assert log_detail_response.status_code == 200
     assert "Local admin UI" in response.text
     assert "Traffic logs" in logs_response.text
+    assert "Traffic log detail" in log_detail_response.text
 
 
 def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
@@ -368,14 +426,21 @@ def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
 
     assert client.get("/ui/playground").status_code == 403
     assert client.get("/ui/logs").status_code == 403
+    assert client.get(f"/ui/logs/{LOG_DETAIL_EVENT_ID}").status_code == 403
 
     response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
     logs_response = client.get("/ui/logs", headers={"x-admin-api-key": "admin"})
+    log_detail_response = client.get(
+        f"/ui/logs/{LOG_DETAIL_EVENT_ID}",
+        headers={"x-admin-api-key": "admin"},
+    )
 
     assert response.status_code == 200
     assert logs_response.status_code == 200
+    assert log_detail_response.status_code == 200
     assert "Playground" in response.text
     assert "Traffic logs" in logs_response.text
+    assert "Traffic log detail" in log_detail_response.text
 
 
 def test_ui_routes_are_excluded_from_openapi_schema():
@@ -387,6 +452,7 @@ def test_ui_routes_are_excluded_from_openapi_schema():
     assert "/ui" not in schema["paths"]
     assert "/ui/playground" not in schema["paths"]
     assert "/ui/logs" not in schema["paths"]
+    assert "/ui/logs/{event_id}" not in schema["paths"]
 
 
 def test_openapi_tags_group_routes_by_provider_and_endpoint_type():

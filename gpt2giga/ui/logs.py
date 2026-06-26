@@ -310,6 +310,18 @@ _LOGS_HTML = """<!doctype html>
       opacity: 0.55;
     }
 
+    .link {
+      color: var(--blue);
+      font-size: 12.5px;
+      font-weight: 780;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .link:hover {
+      text-decoration: underline;
+    }
+
     .table-wrap {
       overflow: auto;
       border: 1px solid var(--border);
@@ -368,37 +380,43 @@ _LOGS_HTML = """<!doctype html>
 
     th:nth-child(1),
     td:nth-child(1) {
-      min-width: 150px;
+      min-width: 82px;
       white-space: nowrap;
     }
 
     th:nth-child(2),
     td:nth-child(2) {
-      min-width: 72px;
+      min-width: 150px;
       white-space: nowrap;
     }
 
     th:nth-child(3),
     td:nth-child(3) {
-      min-width: 90px;
+      min-width: 72px;
+      white-space: nowrap;
     }
 
     th:nth-child(4),
     td:nth-child(4) {
-      min-width: 260px;
-      white-space: nowrap;
+      min-width: 90px;
     }
 
     th:nth-child(5),
     td:nth-child(5) {
+      min-width: 260px;
+      white-space: nowrap;
+    }
+
+    th:nth-child(6),
+    td:nth-child(6) {
       min-width: 170px;
       white-space: nowrap;
     }
 
-    th:nth-child(12),
     th:nth-child(13),
-    td:nth-child(12),
-    td:nth-child(13) {
+    th:nth-child(14),
+    td:nth-child(13),
+    td:nth-child(14) {
       min-width: 150px;
       white-space: nowrap;
     }
@@ -663,6 +681,7 @@ _LOGS_HTML = """<!doctype html>
             <table>
               <thead>
                 <tr>
+                  <th>Details</th>
                   <th>Time</th>
                   <th>Status</th>
                   <th>Protocol</th>
@@ -810,6 +829,7 @@ _LOGS_HTML = """<!doctype html>
         els.emptyState.hidden = rows.length !== 0;
         rows.forEach((record) => {
           const row = document.createElement("tr");
+          appendDetailCell(row, record.id);
           appendCell(row, formatDate(record.created_at), "mono");
           appendStatus(row, record.status_code, record.has_error);
           appendCell(row, record.protocol);
@@ -826,6 +846,20 @@ _LOGS_HTML = """<!doctype html>
           appendCell(row, record.error_type || record.error_message, "mono");
           els.logsBody.append(row);
         });
+      }
+
+      function appendDetailCell(row, id) {
+        const cell = document.createElement("td");
+        if (id) {
+          const link = document.createElement("a");
+          link.className = "link";
+          link.href = `/ui/logs/${encodeURIComponent(String(id))}`;
+          link.textContent = "Details";
+          cell.append(link);
+        } else {
+          cell.textContent = "-";
+        }
+        row.append(cell);
       }
 
       function appendCell(row, value, className) {

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
+from gpt2giga.ui.log_detail import render_log_detail_html
 from gpt2giga.ui.logs import render_logs_html
 from gpt2giga.ui.playground import (
     new_script_nonce,
@@ -54,5 +55,15 @@ async def logs() -> HTMLResponse:
     script_nonce = new_script_nonce()
     return _html_response(
         render_logs_html(script_nonce),
+        script_nonce=script_nonce,
+    )
+
+
+@router.get("/logs/{event_id}", response_class=HTMLResponse)
+async def log_detail(event_id: str) -> HTMLResponse:
+    """Serve the built-in traffic log detail page."""
+    script_nonce = new_script_nonce()
+    return _html_response(
+        render_log_detail_html(script_nonce, event_id),
         script_nonce=script_nonce,
     )
