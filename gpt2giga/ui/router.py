@@ -15,7 +15,10 @@ router = APIRouter(prefix="/ui", include_in_schema=False)
 
 
 def _html_response(content: str, *, script_nonce: str | None = None) -> HTMLResponse:
-    return HTMLResponse(content, headers=security_headers(script_nonce))
+    return HTMLResponse(
+        content,
+        headers=security_headers(script_nonce, allow_connect_self=True),
+    )
 
 
 def _redirect_response(url: str) -> RedirectResponse:

@@ -12,16 +12,21 @@ def new_script_nonce() -> str:
     return secrets.token_urlsafe(16)
 
 
-def security_headers(script_nonce: str | None = None) -> dict[str, str]:
+def security_headers(
+    script_nonce: str | None = None,
+    *,
+    allow_connect_self: bool = False,
+) -> dict[str, str]:
     """Build security headers for UI responses."""
     script_src = "'none'"
     if script_nonce is not None:
         script_src = f"'nonce-{script_nonce}'"
+    connect_src = "'self'" if allow_connect_self else "'none'"
     return {
         "Content-Security-Policy": (
             "default-src 'none'; "
             "base-uri 'none'; "
-            "connect-src 'none'; "
+            f"connect-src {connect_src}; "
             "form-action 'none'; "
             "frame-ancestors 'none'; "
             "img-src 'self' data:; "
@@ -579,7 +584,7 @@ _PLAYGROUND_HTML = """<!doctype html>
           <div class="section-head">
             <div>
               <h2>Request builder</h2>
-              <p id="builder-status" class="ok-text">No upstream calls</p>
+              <p id="builder-status" class="ok-text">Ready</p>
             </div>
           </div>
 
@@ -641,11 +646,17 @@ _PLAYGROUND_HTML = """<!doctype html>
               <label for="headers-json">headers JSON</label>
               <textarea id="headers-json" class="compact" spellcheck="false"></textarea>
             </div>
+            <div class="field full">
+              <label for="admin-key">Admin key</label>
+              <input id="admin-key" type="password" autocomplete="off" spellcheck="false">
+            </div>
           </form>
 
           <div class="actions" aria-label="Builder actions">
-            <button id="format-button" class="button primary" type="button">Format JSON</button>
-            <button id="reset-button" class="button ghost" type="button">Reset operation</button>
+            <button id="send-button" class="button primary" type="button">Send</button>
+            <button id="analyze-button" class="button ghost" type="button">Analyze</button>
+            <button id="format-button" class="button" type="button">Format JSON</button>
+            <button id="reset-button" class="button" type="button">Reset operation</button>
           </div>
         </section>
 
@@ -695,6 +706,8 @@ _PLAYGROUND_HTML = """<!doctype html>
       const jsonSpaces = 2;
       let currentProtocol = "openai";
       let currentPreview = "request";
+      let lastAnalyzeResult = null;
+      let lastSendResult = null;
 
       const operations = {
         openai: [
@@ -892,6 +905,7 @@ _PLAYGROUND_HTML = """<!doctype html>
         format: document.getElementById("format-json"),
         metadata: document.getElementById("metadata"),
         headers: document.getElementById("headers-json"),
+        adminKey: document.getElementById("admin-key"),
         messagesLabel: document.getElementById("messages-label"),
         formatLabel: document.getElementById("format-label"),
         methodPreview: document.getElementById("method-preview"),
@@ -909,6 +923,8 @@ _PLAYGROUND_HTML = """<!doctype html>
         builderStatus: document.getElementById("builder-status"),
         formatButton: document.getElementById("format-button"),
         resetButton: document.getElementById("reset-button"),
+        analyzeButton: document.getElementById("analyze-button"),
+        sendButton: document.getElementById("send-button"),
         previewTabs: Array.from(document.querySelectorAll("[data-preview]"))
       };
 
@@ -1161,12 +1177,28 @@ _PLAYGROUND_HTML = """<!doctype html>
 
       function buildAnalyzeEnvelope(request) {
         return {
+          method: request.method,
           protocol: request.protocol,
           route: request.route,
-          headers: redactObject(request.headers),
+          headers: request.headers,
           query: {},
           body: request.body || {}
         };
+      }
+
+      function buildSendEnvelope(request) {
+        return {
+          method: request.method,
+          protocol: request.protocol,
+          route: request.route,
+          headers: request.headers,
+          query: {},
+          body: request.body || {}
+        };
+      }
+
+      function requestKey(request) {
+        return JSON.stringify(buildSendEnvelope(request));
       }
 
       function buildResponsePlaceholder(request) {
@@ -1190,7 +1222,7 @@ _PLAYGROUND_HTML = """<!doctype html>
         }
         return [
           "event: pending",
-          "data: stream output will appear after /_admin/playground/send is added"
+          "data: stream output will appear after Send completes"
         ].join("\\n");
       }
 
@@ -1463,6 +1495,94 @@ _PLAYGROUND_HTML = """<!doctype html>
         els.redactionPreview.classList.toggle("hidden", nextPreview !== "redaction");
       }
 
+      function helperHeaders() {
+        const headers = { "content-type": "application/json" };
+        const adminKey = els.adminKey.value.trim();
+        if (adminKey) {
+          headers["x-admin-api-key"] = adminKey;
+        }
+        return headers;
+      }
+
+      async function postHelper(path, payload) {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: helperHeaders(),
+          body: JSON.stringify(payload)
+        });
+        const text = await response.text();
+        let body = text;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch (error) {
+          body = text;
+        }
+        if (!response.ok) {
+          throw new Error(JSON.stringify({
+            status_code: response.status,
+            body
+          }, null, jsonSpaces));
+        }
+        return body;
+      }
+
+      async function runAnalyze() {
+        const request = buildRequest();
+        if (!request.ok) {
+          render();
+          setPreviewTab("analyze");
+          return;
+        }
+        const key = requestKey(request);
+        els.builderStatus.textContent = "Analyzing";
+        els.builderStatus.className = "ok-text";
+        els.analyzeButton.disabled = true;
+        try {
+          const result = await postHelper("/_admin/playground/analyze", buildAnalyzeEnvelope(request));
+          lastAnalyzeResult = { key, result };
+          els.builderStatus.textContent = "Analysis ready";
+          els.builderStatus.className = "ok-text";
+          render();
+        } catch (error) {
+          lastAnalyzeResult = { key, result: { error: error.message } };
+          els.builderStatus.textContent = "Analyze failed";
+          els.builderStatus.className = "error-text";
+          render();
+        } finally {
+          els.analyzeButton.disabled = false;
+          setPreviewTab("analyze");
+        }
+      }
+
+      async function runSend() {
+        const request = buildRequest();
+        if (!request.ok) {
+          render();
+          setPreviewTab("response");
+          return;
+        }
+        const key = requestKey(request);
+        els.builderStatus.textContent = "Sending";
+        els.builderStatus.className = "ok-text";
+        els.sendButton.disabled = true;
+        try {
+          const result = await postHelper("/_admin/playground/send", buildSendEnvelope(request));
+          lastSendResult = { key, result };
+          lastAnalyzeResult = { key, result: result.analysis };
+          els.builderStatus.textContent = `Sent ${result.response?.status_code ?? ""}`.trim();
+          els.builderStatus.className = "ok-text";
+          render();
+        } catch (error) {
+          lastSendResult = { key, result: { error: error.message } };
+          els.builderStatus.textContent = "Send failed";
+          els.builderStatus.className = "error-text";
+          render();
+        } finally {
+          els.sendButton.disabled = false;
+          setPreviewTab(request.operation.stream ? "stream" : "response");
+        }
+      }
+
       function render() {
         updateLabels();
         const request = buildRequest();
@@ -1487,10 +1607,15 @@ _PLAYGROUND_HTML = """<!doctype html>
         }
         els.previewStatus.textContent = "Ready";
         els.previewStatus.className = "ok-text";
-        els.builderStatus.textContent = "No upstream calls";
-        els.builderStatus.className = "ok-text";
+        if (!els.sendButton.disabled && !els.analyzeButton.disabled) {
+          els.builderStatus.textContent = "Ready";
+          els.builderStatus.className = "ok-text";
+        }
         els.methodPreview.textContent = request.method;
         els.routePreview.textContent = request.route;
+        const key = requestKey(request);
+        const analyzeResult = lastAnalyzeResult?.key === key ? lastAnalyzeResult.result : null;
+        const sendResult = lastSendResult?.key === key ? lastSendResult.result : null;
         const requestPayload = {
           method: request.method,
           route: request.route,
@@ -1498,13 +1623,37 @@ _PLAYGROUND_HTML = """<!doctype html>
           body: request.body
         };
         els.requestPreview.textContent = jsonText(requestPayload);
-        els.streamPreview.textContent = buildStreamPlaceholder(request);
-        els.responsePreview.textContent = jsonText(buildResponsePlaceholder(request));
-        els.analyzePreview.textContent = jsonText(buildAnalyzeEnvelope(request));
+        els.streamPreview.textContent = sendResult?.response?.body && request.operation.stream
+          ? String(sendResult.response.body)
+          : buildStreamPlaceholder(request);
+        els.responsePreview.textContent = jsonText(sendResult?.response || buildResponsePlaceholder(request));
+        els.analyzePreview.textContent = jsonText(analyzeResult || {
+          endpoint: "/_admin/playground/analyze",
+          envelope: {
+            ...buildAnalyzeEnvelope(request),
+            headers: redactObject(request.headers)
+          }
+        });
         els.normalizedPreview.textContent = jsonText(buildNormalizedPreview(request));
-        els.providerPreview.textContent = jsonText(buildProviderPreview(request));
+        els.providerPreview.textContent = jsonText(sendResult?.response ? {
+          ...buildProviderPreview(request),
+          response_summary: {
+            status_code: sendResult.response.status_code,
+            request_id: sendResult.request_id || sendResult.response.request_id || null,
+            trace_id: sendResult.trace_id || sendResult.response.trace_id || null,
+            traffic_log_id: sendResult.traffic_log_id || null
+          }
+        } : buildProviderPreview(request));
         els.snippetsPreview.textContent = snippetsPreview(request);
-        els.idsPreview.textContent = jsonText(buildIdsPreview());
+        els.idsPreview.textContent = jsonText(sendResult ? {
+          request_id: sendResult.request_id || sendResult.response?.request_id || null,
+          trace_id: sendResult.trace_id || sendResult.response?.trace_id || null,
+          traffic_log_id: sendResult.traffic_log_id || null,
+          phoenix_trace_link: {
+            status: sendResult.trace_id ? "available_when_configured" : "pending_trace_id",
+            config: "GPT2GIGA_PHOENIX_BASE_URL"
+          }
+        } : buildIdsPreview());
         els.redactionPreview.textContent = jsonText(redactionRows(request.headers));
       }
 
@@ -1533,6 +1682,8 @@ _PLAYGROUND_HTML = """<!doctype html>
       els.previewTabs.forEach((tab) => {
         tab.addEventListener("click", () => setPreviewTab(tab.dataset.preview));
       });
+      els.analyzeButton.addEventListener("click", runAnalyze);
+      els.sendButton.addEventListener("click", runSend);
       els.formatButton.addEventListener("click", formatJsonTextareas);
       els.resetButton.addEventListener("click", applyOperationDefaults);
 

@@ -231,7 +231,7 @@ def test_ui_routes_require_admin_key_by_default():
     assert "tools / function declarations JSON" in response.text
     assert "response_format / generation_config JSON" in response.text
     assert "headers JSON" in response.text
-    assert "No upstream calls" in response.text
+    assert "Ready" in response.text
     assert "Raw request" in response.text
     assert "Stream" in response.text
     assert "Raw response" in response.text
@@ -246,12 +246,15 @@ def test_ui_routes_require_admin_key_by_default():
     assert "trace_id" in response.text
     assert "traffic_log_id" in response.text
     assert "GPT2GIGA_PHOENIX_BASE_URL" in response.text
-    assert "fetch(" not in response.text
+    assert "Admin key" in response.text
+    assert "/_admin/playground/analyze" in response.text
+    assert "/_admin/playground/send" in response.text
+    assert "fetch(" in response.text
     csp = response.headers["content-security-policy"]
     script_nonce = re.search(r"script-src 'nonce-([^']+)'", csp)
     assert script_nonce is not None
     assert f'nonce="{script_nonce.group(1)}"' in response.text
-    assert "connect-src 'none'" in csp
+    assert "connect-src 'self'" in csp
     assert response.headers["x-content-type-options"] == "nosniff"
 
 

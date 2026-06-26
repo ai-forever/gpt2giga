@@ -16,6 +16,7 @@ from gpt2giga.api.admin import (
     compat_router as admin_compat_router,
     debug_router,
     logs_router as admin_logs_router,
+    playground_router as admin_playground_router,
 )
 from gpt2giga.api.admin.access import verify_admin_key
 from gpt2giga.api.anthropic import router as anthropic_router
@@ -67,6 +68,10 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         openapi_tags=build_openapi_tags_metadata(
             include_logs=not prod_mode,
             include_admin_compat=config.proxy_settings.admin_api_enabled,
+            include_admin_playground=(
+                config.proxy_settings.admin_api_enabled
+                and config.proxy_settings.ui_enabled
+            ),
             include_admin_logs=config.proxy_settings.admin_api_enabled,
             include_debug_translation=config.proxy_settings.debug_translate_enabled,
         ),
@@ -207,6 +212,8 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         app.include_router(debug_router)
     if config.proxy_settings.admin_api_enabled:
         app.include_router(admin_compat_router)
+        if config.proxy_settings.ui_enabled:
+            app.include_router(admin_playground_router)
         app.include_router(admin_logs_router)
     if not prod_mode:
         app.include_router(logs_api_router, dependencies=api_dependencies)
