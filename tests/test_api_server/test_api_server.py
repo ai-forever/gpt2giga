@@ -1,3 +1,5 @@
+import re
+
 from fastapi.testclient import TestClient
 from starlette.middleware.cors import CORSMiddleware
 
@@ -221,8 +223,20 @@ def test_ui_routes_require_admin_key_by_default():
 
     assert response.status_code == 200
     assert "gpt2giga playground" in response.text
+    assert "Request builder" in response.text
+    assert 'data-protocol="openai"' in response.text
+    assert 'data-protocol="anthropic"' in response.text
+    assert 'data-protocol="gemini"' in response.text
+    assert "messages / contents JSON" in response.text
+    assert "tools / function declarations JSON" in response.text
+    assert "response_format / generation_config JSON" in response.text
+    assert "headers JSON" in response.text
     assert "No upstream calls" in response.text
-    assert response.headers["content-security-policy"].startswith("default-src 'none'")
+    csp = response.headers["content-security-policy"]
+    script_nonce = re.search(r"script-src 'nonce-([^']+)'", csp)
+    assert script_nonce is not None
+    assert f'nonce="{script_nonce.group(1)}"' in response.text
+    assert "connect-src 'none'" in csp
     assert response.headers["x-content-type-options"] == "nosniff"
 
 
@@ -238,6 +252,30 @@ def test_ui_root_redirects_to_playground_when_enabled():
 
     assert response.status_code == 307
     assert response.headers["location"] == "/ui/playground"
+    assert "script-src 'none'" in response.headers["content-security-policy"]
+
+
+def test_ui_playground_csp_nonce_is_per_response():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    client = TestClient(app)
+
+    first = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+    second = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+
+    first_nonce = re.search(
+        r"script-src 'nonce-([^']+)'", first.headers["content-security-policy"]
+    )
+    second_nonce = re.search(
+        r"script-src 'nonce-([^']+)'", second.headers["content-security-policy"]
+    )
+
+    assert first_nonce is not None
+    assert second_nonce is not None
+    assert first_nonce.group(1) != second_nonce.group(1)
+    assert "__GPT2GIGA_SCRIPT_NONCE__" not in first.text
+    assert "__GPT2GIGA_SCRIPT_NONCE__" not in second.text
 
 
 def test_ui_routes_can_disable_auth_in_dev():
