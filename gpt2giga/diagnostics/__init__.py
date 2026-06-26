@@ -1,6 +1,9 @@
 """Compatibility diagnostics contracts."""
 
-from gpt2giga.diagnostics.analyzer import build_empty_analysis
+from gpt2giga.diagnostics.analyzer import (
+    analyze_compatibility_request,
+    build_empty_analysis,
+)
 from gpt2giga.diagnostics.models import (
     BackendMode,
     BuiltinToolMappingDiagnostic,
@@ -25,5 +28,6 @@ __all__ = [
     "ProtocolDiagnosticWarning",
     "SecurityRedactionDiagnostic",
     "ToolCompatibility",
+    "analyze_compatibility_request",
     "build_empty_analysis",
 ]
