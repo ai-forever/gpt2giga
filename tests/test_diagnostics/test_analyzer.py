@@ -22,6 +22,10 @@ def _config(
     )
 
 
+def _tool_details(analysis):
+    return [detail.to_json_dict() for detail in analysis.tools.details]
+
+
 def test_analyze_openai_chat_reports_fields_tools_model_and_redaction():
     analysis = analyze_compatibility_request(
         protocol="openai",
@@ -68,6 +72,30 @@ def test_analyze_openai_chat_reports_fields_tools_model_and_redaction():
         }
     ]
     assert analysis.tools.unsupported_tools == ["file_search"]
+    assert {
+        "source": "openai.tools",
+        "category": "user_function",
+        "decision": "supported",
+        "name": "search_docs",
+        "reason": "custom_function",
+    } in _tool_details(analysis)
+    assert {
+        "source": "openai.tools",
+        "category": "provider_builtin",
+        "decision": "mapped",
+        "name": "web_search_preview",
+        "target": "web_search",
+        "reason": "provider_alias",
+        "field": "tools[1].type",
+    } in _tool_details(analysis)
+    assert {
+        "source": "openai.tools",
+        "category": "provider_builtin",
+        "decision": "unsupported",
+        "name": "file_search",
+        "reason": "unsupported_tool_type",
+        "field": "tools[2].type",
+    } in _tool_details(analysis)
     assert analysis.security.headers_redacted == ["authorization"]
     assert analysis.security.query_redacted == ["key"]
     assert {warning.code for warning in analysis.warnings} == {
@@ -125,6 +153,147 @@ def test_analyze_gemini_stream_generate_content_reports_tool_aliases():
     assert analysis.tools.unsupported_tools == ["fileSearch"]
     assert analysis.tools.forced_tool_choice_supported is True
     assert analysis.security.query_redacted == ["key"]
+
+
+def test_analyze_openai_reports_disabled_builtin_mapping_and_forced_choice():
+    analysis = analyze_compatibility_request(
+        protocol="openai",
+        route="/v2/chat/completions",
+        body={
+            "messages": [{"role": "user", "content": "hidden"}],
+            "tools": [{"type": "web_search_preview"}],
+            "tool_choice": {"type": "web_search_preview"},
+        },
+        config=_config(disable_builtin_tool_mapping=True),
+    )
+
+    assert analysis.tools.mapping_disabled is True
+    assert analysis.tools.mapped_builtin_tools == []
+    assert analysis.tools.unsupported_tools == ["web_search_preview"]
+    assert analysis.tools.forced_tool_choice_supported is False
+    assert {
+        "source": "openai.tools",
+        "category": "provider_builtin",
+        "decision": "unsupported",
+        "name": "web_search_preview",
+        "target": "web_search",
+        "reason": "builtin_tool_mapping_disabled",
+        "field": "tools[0].type",
+    } in _tool_details(analysis)
+    assert {
+        "source": "openai.tool_choice",
+        "category": "tool_choice",
+        "decision": "unsupported",
+        "name": "web_search_preview",
+        "target": "web_search",
+        "reason": "builtin_tool_mapping_disabled",
+        "field": "tool_choice.type",
+    } in _tool_details(analysis)
+    assert {warning.code for warning in analysis.warnings} == {
+        "unsupported_forced_tool_choice",
+        "unsupported_tool",
+    }
+
+
+def test_analyze_anthropic_reports_named_builtin_alias_and_disabled_choice():
+    analysis = analyze_compatibility_request(
+        protocol="anthropic",
+        route="/v2/messages",
+        body={
+            "messages": [{"role": "user", "content": "hidden"}],
+            "tools": [
+                {"type": "custom", "name": "lookup"},
+                {"type": "web_search_20250305", "name": "web_search"},
+                {"name": "WebFetch"},
+            ],
+            "tool_choice": {"type": "tool", "name": "web_search"},
+        },
+        config=_config(disable_builtin_tool_mapping=True),
+    )
+
+    assert analysis.tools.user_functions == ["lookup"]
+    assert analysis.tools.mapped_builtin_tools == []
+    assert analysis.tools.unsupported_tools == ["web_search_20250305", "WebFetch"]
+    assert analysis.tools.forced_tool_choice_supported is False
+    assert {
+        "source": "anthropic.tools",
+        "category": "provider_builtin",
+        "decision": "unsupported",
+        "name": "web_search_20250305",
+        "target": "web_search",
+        "reason": "builtin_tool_mapping_disabled",
+        "field": "tools[1].type",
+    } in _tool_details(analysis)
+    assert {
+        "source": "anthropic.tools",
+        "category": "provider_builtin",
+        "decision": "unsupported",
+        "name": "WebFetch",
+        "target": "url_content_extraction",
+        "reason": "builtin_tool_mapping_disabled",
+        "field": "tools[2].name",
+    } in _tool_details(analysis)
+    assert {
+        "source": "anthropic.tool_choice",
+        "category": "tool_choice",
+        "decision": "unsupported",
+        "name": "web_search",
+        "target": "web_search",
+        "reason": "builtin_tool_mapping_disabled",
+        "field": "tool_choice.name",
+    } in _tool_details(analysis)
+
+
+def test_analyze_gemini_reports_tool_key_and_forced_choice_limitations():
+    analysis = analyze_compatibility_request(
+        route="/v2/v1beta/models/gemini-pro:generateContent",
+        body={
+            "contents": [{"parts": [{"text": "hidden"}]}],
+            "toolConfig": {
+                "functionCallingConfig": {
+                    "mode": "ANY",
+                    "allowedFunctionNames": ["first", "second"],
+                }
+            },
+            "tools": [
+                {"googleSearch": {}},
+                {
+                    "functionDeclarations": [
+                        {"name": "first"},
+                        {"name": "second"},
+                    ]
+                },
+                {"fileSearch": {}},
+            ],
+        },
+        config=_config(gigachat_api_mode="v2"),
+    )
+
+    assert analysis.tools.user_functions == ["first", "second"]
+    assert [item.to_json_dict() for item in analysis.tools.mapped_builtin_tools] == [
+        {"from": "googleSearch", "to": "web_search", "reason": "provider_alias"}
+    ]
+    assert analysis.tools.unsupported_tools == ["fileSearch"]
+    assert analysis.tools.forced_tool_choice_supported is False
+    assert {
+        "source": "gemini.tools",
+        "category": "provider_builtin",
+        "decision": "unsupported",
+        "name": "fileSearch",
+        "reason": "unsupported_tool_key",
+        "field": "tools[2].fileSearch",
+    } in _tool_details(analysis)
+    assert {
+        "source": "gemini.toolConfig",
+        "category": "tool_choice",
+        "decision": "unsupported",
+        "reason": "backend_requires_single_forced_function",
+        "field": "toolConfig.functionCallingConfig.allowedFunctionNames",
+    } in _tool_details(analysis)
+    assert {warning.code for warning in analysis.warnings} == {
+        "unsupported_forced_tool_choice",
+        "unsupported_tool",
+    }
 
 
 def test_analyze_openai_responses_stateful_fields_depend_on_v2_backend():

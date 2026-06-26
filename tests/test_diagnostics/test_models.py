@@ -9,6 +9,7 @@ from gpt2giga.diagnostics import (
 )
 from gpt2giga.diagnostics.fields import build_field_compatibility
 from gpt2giga.diagnostics.tools import build_builtin_tool_mapping
+from gpt2giga.diagnostics.tools import build_tool_decision
 
 
 def test_build_empty_analysis_defaults_are_safe():
@@ -40,6 +41,7 @@ def test_build_empty_analysis_defaults_are_safe():
             "unsupported_tools": [],
             "accepted_ignored": [],
             "rejected": [],
+            "details": [],
         },
         "security": {
             "headers_redacted": [],
@@ -71,6 +73,17 @@ def test_compatibility_analysis_serializes_tool_aliases_and_warnings():
                 )
             ],
             "unsupported_tools": ["fileSearch"],
+            "details": [
+                build_tool_decision(
+                    source="gemini.tools",
+                    category="provider_builtin",
+                    decision="mapped",
+                    name="googleSearch",
+                    target="web_search",
+                    reason="provider_alias",
+                    field="tools[0].googleSearch",
+                )
+            ],
             "mapping_disabled": False,
         },
         security={
@@ -94,6 +107,17 @@ def test_compatibility_analysis_serializes_tool_aliases_and_warnings():
             "from": "googleSearch",
             "to": "web_search",
             "reason": "provider_alias",
+        }
+    ]
+    assert payload["tools"]["details"] == [
+        {
+            "source": "gemini.tools",
+            "category": "provider_builtin",
+            "decision": "mapped",
+            "name": "googleSearch",
+            "target": "web_search",
+            "reason": "provider_alias",
+            "field": "tools[0].googleSearch",
         }
     ]
     assert payload["warnings"] == [

@@ -14,6 +14,7 @@ from gpt2giga.diagnostics.models import (
     ProtocolDiagnosticWarning,
     SecurityRedactionDiagnostic,
     ToolCompatibility,
+    ToolDecisionDiagnostic,
 )
 from gpt2giga.diagnostics.routes import ADMIN_COMPAT_ANALYZE_ROUTE
 
@@ -28,6 +29,7 @@ __all__ = [
     "ProtocolDiagnosticWarning",
     "SecurityRedactionDiagnostic",
     "ToolCompatibility",
+    "ToolDecisionDiagnostic",
     "analyze_compatibility_request",
     "build_empty_analysis",
 ]

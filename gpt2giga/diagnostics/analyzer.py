@@ -23,9 +23,10 @@ from gpt2giga.diagnostics.models import (
     ModelResolutionDiagnostic,
     ProtocolDiagnosticWarning,
     SecurityRedactionDiagnostic,
+    ToolDecisionDiagnostic,
     ToolCompatibility,
 )
-from gpt2giga.diagnostics.tools import build_builtin_tool_mapping
+from gpt2giga.diagnostics.tools import build_builtin_tool_mapping, build_tool_decision
 from gpt2giga.protocol.anthropic.params import (
     ANTHROPIC_ACCEPTED_IGNORED_PARAMS,
     ANTHROPIC_MESSAGES_SUPPORTED_PARAMS,
@@ -433,33 +434,64 @@ def _tool_compatibility(
 
     mapping_enabled = _builtin_tool_mapping_enabled(config)
     builtin_mapping_available = backend_mode == "gigachat_v2" and mapping_enabled
+    mapping_unavailable_reason = _builtin_mapping_unavailable_reason(
+        backend_mode,
+        mapping_enabled,
+    )
     if protocol == "anthropic":
-        return _anthropic_tool_compatibility(body, builtin_mapping_available)
+        return _anthropic_tool_compatibility(
+            body,
+            builtin_mapping_available,
+            mapping_unavailable_reason=mapping_unavailable_reason,
+        )
     if protocol == "gemini":
-        return _gemini_tool_compatibility(body, builtin_mapping_available)
-    return _openai_tool_compatibility(body, builtin_mapping_available)
+        return _gemini_tool_compatibility(
+            body,
+            builtin_mapping_available,
+            mapping_unavailable_reason=mapping_unavailable_reason,
+        )
+    return _openai_tool_compatibility(
+        body,
+        builtin_mapping_available,
+        mapping_unavailable_reason=mapping_unavailable_reason,
+    )
 
 
 def _openai_tool_compatibility(
     body: Mapping[str, Any],
     builtin_mapping_available: bool,
+    *,
+    mapping_unavailable_reason: str | None,
 ) -> ToolCompatibility:
     user_functions = _openai_user_function_names(body)
-    mapped_builtin_tools, unsupported_tools = _openai_builtin_tools(
+    mapped_builtin_tools, unsupported_tools, builtin_details = _openai_builtin_tools(
         body.get("tools"),
+        mapping_available=builtin_mapping_available,
+        mapping_unavailable_reason=mapping_unavailable_reason,
+    )
+    forced_tool_choice_supported = _openai_forced_tool_choice_supported(
+        body,
+        mapped_builtin_tools=mapped_builtin_tools,
         mapping_available=builtin_mapping_available,
     )
     return ToolCompatibility(
         user_functions=user_functions,
         mapped_builtin_tools=mapped_builtin_tools,
         unsupported_tools=unsupported_tools,
+        details=[
+            *_user_function_details(
+                source=_openai_user_function_source(body),
+                names=user_functions,
+            ),
+            *builtin_details,
+            *_openai_tool_choice_details(
+                body,
+                supported=forced_tool_choice_supported,
+                mapping_unavailable_reason=mapping_unavailable_reason,
+            ),
+        ],
         mapping_disabled=not builtin_mapping_available,
-        forced_tool_choice_supported=_openai_forced_tool_choice_supported(
-            body,
-            mapped_builtin_tools=mapped_builtin_tools,
-            unsupported_tools=unsupported_tools,
-            mapping_available=builtin_mapping_available,
-        ),
+        forced_tool_choice_supported=forced_tool_choice_supported,
     )
 
 
@@ -472,17 +504,30 @@ def _openai_user_function_names(body: Mapping[str, Any]) -> list[str]:
     return names
 
 
+def _openai_user_function_source(body: Mapping[str, Any]) -> str:
+    tools = body.get("tools")
+    if isinstance(tools, list) and tools:
+        return "openai.tools"
+    return "openai.functions"
+
+
 def _openai_builtin_tools(
     tools: Any,
     *,
     mapping_available: bool,
-) -> tuple[list[BuiltinToolMappingDiagnostic], list[str]]:
+    mapping_unavailable_reason: str | None,
+) -> tuple[
+    list[BuiltinToolMappingDiagnostic],
+    list[str],
+    list[ToolDecisionDiagnostic],
+]:
     if not isinstance(tools, list):
-        return [], []
+        return [], [], []
 
     mapped = []
     unsupported = []
-    for tool in tools:
+    details = []
+    for index, tool in enumerate(tools):
         if not isinstance(tool, Mapping):
             continue
         tool_type = tool.get("type")
@@ -490,6 +535,16 @@ def _openai_builtin_tools(
         if target is None:
             if tool_type not in {None, "function", "namespace"}:
                 unsupported.append(str(tool_type))
+                details.append(
+                    build_tool_decision(
+                        source="openai.tools",
+                        category="provider_builtin",
+                        decision="unsupported",
+                        name=str(tool_type),
+                        reason="unsupported_tool_type",
+                        field=f"tools[{index}].type",
+                    )
+                )
             continue
         if mapping_available:
             mapped.append(
@@ -499,16 +554,37 @@ def _openai_builtin_tools(
                     reason="provider_alias",
                 )
             )
+            details.append(
+                build_tool_decision(
+                    source="openai.tools",
+                    category="provider_builtin",
+                    decision="mapped",
+                    name=str(tool_type),
+                    target=target,
+                    reason="provider_alias",
+                    field=f"tools[{index}].type",
+                )
+            )
         else:
             unsupported.append(str(tool_type))
-    return mapped, _dedupe(unsupported)
+            details.append(
+                build_tool_decision(
+                    source="openai.tools",
+                    category="provider_builtin",
+                    decision="unsupported",
+                    name=str(tool_type),
+                    target=target,
+                    reason=mapping_unavailable_reason,
+                    field=f"tools[{index}].type",
+                )
+            )
+    return mapped, _dedupe(unsupported), details
 
 
 def _openai_forced_tool_choice_supported(
     body: Mapping[str, Any],
     *,
     mapped_builtin_tools: list[BuiltinToolMappingDiagnostic],
-    unsupported_tools: list[str],
     mapping_available: bool,
 ) -> bool | None:
     tool_choice = body.get("tool_choice")
@@ -518,7 +594,7 @@ def _openai_forced_tool_choice_supported(
     if isinstance(function_call, Mapping) and function_call.get("name"):
         return True
     if isinstance(tool_choice, str):
-        return tool_choice in {"auto", "none", "required"}
+        return tool_choice in {"auto", "none"}
     if not isinstance(tool_choice, Mapping):
         return False
     choice_type = tool_choice.get("type")
@@ -526,22 +602,110 @@ def _openai_forced_tool_choice_supported(
         return True
     target = normalize_gigachat_builtin_tool_type(choice_type)
     if target is None:
-        return choice_type not in unsupported_tools
+        return False
     return mapping_available and any(
         item.to_name == target for item in mapped_builtin_tools
     )
 
 
+def _openai_tool_choice_details(
+    body: Mapping[str, Any],
+    *,
+    supported: bool | None,
+    mapping_unavailable_reason: str | None,
+) -> list[ToolDecisionDiagnostic]:
+    tool_choice = body.get("tool_choice")
+    function_call = body.get("function_call")
+    if tool_choice is None and function_call is None:
+        return []
+    if isinstance(function_call, Mapping) and function_call.get("name"):
+        return [
+            build_tool_decision(
+                source="openai.function_call",
+                category="tool_choice",
+                decision="supported",
+                name=str(function_call["name"]),
+                reason="forced_function_call",
+                field="function_call.name",
+            )
+        ]
+    if isinstance(tool_choice, str):
+        reason = {
+            "auto": "automatic_tool_choice",
+            "none": "tools_disabled_by_choice",
+            "required": "required_tool_choice_not_enforced",
+        }.get(tool_choice, "unsupported_tool_choice")
+        return [
+            build_tool_decision(
+                source="openai.tool_choice",
+                category="tool_choice",
+                decision="supported" if supported else "unsupported",
+                name=tool_choice,
+                reason=reason,
+                field="tool_choice",
+            )
+        ]
+    if not isinstance(tool_choice, Mapping):
+        return [
+            build_tool_decision(
+                source="openai.tool_choice",
+                category="tool_choice",
+                decision="unsupported",
+                reason="invalid_tool_choice_shape",
+                field="tool_choice",
+            )
+        ]
+    choice_type = tool_choice.get("type")
+    target = normalize_gigachat_builtin_tool_type(choice_type)
+    if choice_type in {"function", "namespace"}:
+        function = tool_choice.get("function")
+        name = function.get("name") if isinstance(function, Mapping) else None
+        if name is None:
+            name = tool_choice.get("name")
+        return [
+            build_tool_decision(
+                source="openai.tool_choice",
+                category="tool_choice",
+                decision="supported" if supported else "unsupported",
+                name=str(name) if name else None,
+                reason=(
+                    "forced_function_tool"
+                    if choice_type == "function"
+                    else "forced_namespace_tool"
+                ),
+                field="tool_choice",
+            )
+        ]
+    return [
+        build_tool_decision(
+            source="openai.tool_choice",
+            category="tool_choice",
+            decision="supported" if supported else "unsupported",
+            name=str(choice_type) if choice_type is not None else None,
+            target=target,
+            reason=(
+                "forced_builtin_tool"
+                if supported and target
+                else mapping_unavailable_reason or "unsupported_tool_choice"
+            ),
+            field="tool_choice.type",
+        )
+    ]
+
+
 def _anthropic_tool_compatibility(
     body: Mapping[str, Any],
     builtin_mapping_available: bool,
+    *,
+    mapping_unavailable_reason: str | None,
 ) -> ToolCompatibility:
     tools = body.get("tools")
     user_functions: list[str] = []
     mapped: list[BuiltinToolMappingDiagnostic] = []
     unsupported: list[str] = []
+    details: list[ToolDecisionDiagnostic] = []
     if isinstance(tools, list):
-        for tool in tools:
+        for index, tool in enumerate(tools):
             if not isinstance(tool, Mapping):
                 continue
             name = tool.get("name")
@@ -551,6 +715,7 @@ def _anthropic_tool_compatibility(
                 builtin_target = _ANTHROPIC_NAMED_BUILTIN_TOOLS.get(name)
             if builtin_target is not None:
                 source = str(tool_type or name)
+                field = f"tools[{index}].type" if tool_type else f"tools[{index}].name"
                 if builtin_mapping_available:
                     mapped.append(
                         build_builtin_tool_mapping(
@@ -559,32 +724,82 @@ def _anthropic_tool_compatibility(
                             reason="provider_alias",
                         )
                     )
+                    details.append(
+                        build_tool_decision(
+                            source="anthropic.tools",
+                            category="provider_builtin",
+                            decision="mapped",
+                            name=source,
+                            target=builtin_target,
+                            reason="provider_alias",
+                            field=field,
+                        )
+                    )
                 else:
                     unsupported.append(source)
+                    details.append(
+                        build_tool_decision(
+                            source="anthropic.tools",
+                            category="provider_builtin",
+                            decision="unsupported",
+                            name=source,
+                            target=builtin_target,
+                            reason=mapping_unavailable_reason,
+                            field=field,
+                        )
+                    )
                 continue
             if tool_type not in {None, "custom"}:
                 unsupported.append(str(tool_type))
+                details.append(
+                    build_tool_decision(
+                        source="anthropic.tools",
+                        category="provider_builtin",
+                        decision="unsupported",
+                        name=str(tool_type),
+                        reason="unsupported_tool_type",
+                        field=f"tools[{index}].type",
+                    )
+                )
                 continue
             if isinstance(name, str) and name and name not in user_functions:
                 user_functions.append(name)
+                details.append(
+                    build_tool_decision(
+                        source="anthropic.tools",
+                        category="user_function",
+                        decision="supported",
+                        name=name,
+                        reason="custom_function",
+                        field=f"tools[{index}].name",
+                    )
+                )
+    forced_tool_choice_supported = _anthropic_forced_tool_choice_supported(
+        body,
+        mapping_available=builtin_mapping_available,
+    )
     return ToolCompatibility(
         user_functions=user_functions,
         mapped_builtin_tools=mapped,
         unsupported_tools=_dedupe(unsupported),
+        details=[
+            *details,
+            *_anthropic_tool_choice_details(
+                body,
+                supported=forced_tool_choice_supported,
+                mapping_available=builtin_mapping_available,
+                mapping_unavailable_reason=mapping_unavailable_reason,
+            ),
+        ],
         mapping_disabled=not builtin_mapping_available,
-        forced_tool_choice_supported=_anthropic_forced_tool_choice_supported(
-            body,
-            mapped_builtin_tools=mapped,
-            unsupported_tools=unsupported,
-        ),
+        forced_tool_choice_supported=forced_tool_choice_supported,
     )
 
 
 def _anthropic_forced_tool_choice_supported(
     body: Mapping[str, Any],
     *,
-    mapped_builtin_tools: list[BuiltinToolMappingDiagnostic],
-    unsupported_tools: list[str],
+    mapping_available: bool,
 ) -> bool | None:
     tool_choice = body.get("tool_choice")
     if tool_choice is None:
@@ -599,21 +814,119 @@ def _anthropic_forced_tool_choice_supported(
     name = tool_choice.get("name")
     if not isinstance(name, str) or not name:
         return False
-    return name not in unsupported_tools or any(
-        item.from_name == name for item in mapped_builtin_tools
-    )
+    builtin_target = _anthropic_builtin_tool_choice_target(name, body.get("tools"))
+    if builtin_target is not None:
+        return mapping_available
+    return True
+
+
+def _anthropic_tool_choice_details(
+    body: Mapping[str, Any],
+    *,
+    supported: bool | None,
+    mapping_available: bool,
+    mapping_unavailable_reason: str | None,
+) -> list[ToolDecisionDiagnostic]:
+    tool_choice = body.get("tool_choice")
+    if tool_choice is None:
+        return []
+    if not isinstance(tool_choice, Mapping):
+        return [
+            build_tool_decision(
+                source="anthropic.tool_choice",
+                category="tool_choice",
+                decision="unsupported",
+                reason="invalid_tool_choice_shape",
+                field="tool_choice",
+            )
+        ]
+    choice_type = tool_choice.get("type")
+    if choice_type in {"auto", "none"}:
+        return [
+            build_tool_decision(
+                source="anthropic.tool_choice",
+                category="tool_choice",
+                decision="supported",
+                name=str(choice_type),
+                reason=(
+                    "automatic_tool_choice"
+                    if choice_type == "auto"
+                    else "tools_disabled_by_choice"
+                ),
+                field="tool_choice.type",
+            )
+        ]
+    name = tool_choice.get("name")
+    if choice_type != "tool" or not isinstance(name, str) or not name:
+        return [
+            build_tool_decision(
+                source="anthropic.tool_choice",
+                category="tool_choice",
+                decision="unsupported",
+                reason="unsupported_tool_choice",
+                field="tool_choice",
+            )
+        ]
+    builtin_target = _anthropic_builtin_tool_choice_target(name, body.get("tools"))
+    if builtin_target is not None:
+        return [
+            build_tool_decision(
+                source="anthropic.tool_choice",
+                category="tool_choice",
+                decision="supported"
+                if mapping_available and supported
+                else "unsupported",
+                name=name,
+                target=builtin_target,
+                reason=(
+                    "forced_builtin_tool"
+                    if mapping_available
+                    else mapping_unavailable_reason
+                ),
+                field="tool_choice.name",
+            )
+        ]
+    return [
+        build_tool_decision(
+            source="anthropic.tool_choice",
+            category="tool_choice",
+            decision="supported" if supported else "unsupported",
+            name=name,
+            reason="forced_function_tool",
+            field="tool_choice.name",
+        )
+    ]
+
+
+def _anthropic_builtin_tool_choice_target(
+    tool_name: str,
+    tools: Any,
+) -> str | None:
+    builtin_target = _ANTHROPIC_NAMED_BUILTIN_TOOLS.get(tool_name)
+    if builtin_target is not None:
+        return builtin_target
+    if not isinstance(tools, list):
+        return None
+    for tool in tools:
+        if not isinstance(tool, Mapping) or tool.get("name") != tool_name:
+            continue
+        return normalize_gigachat_builtin_tool_type(tool.get("type"))
+    return None
 
 
 def _gemini_tool_compatibility(
     body: Mapping[str, Any],
     builtin_mapping_available: bool,
+    *,
+    mapping_unavailable_reason: str | None,
 ) -> ToolCompatibility:
     tools = body.get("tools")
     user_functions: list[str] = []
     mapped: list[BuiltinToolMappingDiagnostic] = []
     unsupported: list[str] = []
+    details: list[ToolDecisionDiagnostic] = []
     if isinstance(tools, list):
-        for tool in tools:
+        for tool_index, tool in enumerate(tools):
             if not isinstance(tool, Mapping):
                 continue
             for key in tool:
@@ -622,6 +935,16 @@ def _gemini_tool_compatibility(
                 target = normalize_gigachat_builtin_tool_type(key)
                 if target is None:
                     unsupported.append(str(key))
+                    details.append(
+                        build_tool_decision(
+                            source="gemini.tools",
+                            category="provider_builtin",
+                            decision="unsupported",
+                            name=str(key),
+                            reason="unsupported_tool_key",
+                            field=f"tools[{tool_index}].{key}",
+                        )
+                    )
                 elif builtin_mapping_available:
                     mapped.append(
                         build_builtin_tool_mapping(
@@ -630,26 +953,70 @@ def _gemini_tool_compatibility(
                             reason="provider_alias",
                         )
                     )
+                    details.append(
+                        build_tool_decision(
+                            source="gemini.tools",
+                            category="provider_builtin",
+                            decision="mapped",
+                            name=str(key),
+                            target=target,
+                            reason="provider_alias",
+                            field=f"tools[{tool_index}].{key}",
+                        )
+                    )
                 else:
                     unsupported.append(str(key))
+                    details.append(
+                        build_tool_decision(
+                            source="gemini.tools",
+                            category="provider_builtin",
+                            decision="unsupported",
+                            name=str(key),
+                            target=target,
+                            reason=mapping_unavailable_reason,
+                            field=f"tools[{tool_index}].{key}",
+                        )
+                    )
             declarations = tool.get("functionDeclarations")
             if declarations is None:
                 declarations = tool.get("function_declarations")
-            for declaration in _as_list(declarations):
+            for declaration_index, declaration in enumerate(_as_list(declarations)):
                 if not isinstance(declaration, Mapping):
                     continue
                 name = declaration.get("name")
                 if isinstance(name, str) and name and name not in user_functions:
                     user_functions.append(name)
+                    details.append(
+                        build_tool_decision(
+                            source="gemini.tools",
+                            category="user_function",
+                            decision="supported",
+                            name=name,
+                            reason="function_declaration",
+                            field=(
+                                f"tools[{tool_index}]."
+                                f"functionDeclarations[{declaration_index}].name"
+                            ),
+                        )
+                    )
+    forced_tool_choice_supported = _gemini_forced_tool_choice_supported(
+        body,
+        user_functions=user_functions,
+    )
     return ToolCompatibility(
         user_functions=user_functions,
         mapped_builtin_tools=mapped,
         unsupported_tools=_dedupe(unsupported),
+        details=[
+            *details,
+            *_gemini_tool_choice_details(
+                body,
+                user_functions=user_functions,
+                supported=forced_tool_choice_supported,
+            ),
+        ],
         mapping_disabled=not builtin_mapping_available,
-        forced_tool_choice_supported=_gemini_forced_tool_choice_supported(
-            body,
-            user_functions=user_functions,
-        ),
+        forced_tool_choice_supported=forced_tool_choice_supported,
     )
 
 
@@ -681,7 +1048,125 @@ def _gemini_forced_tool_choice_supported(
         return len(user_functions) == 1
     if not isinstance(allowed, list):
         return False
-    return len([item for item in allowed if isinstance(item, str) and item]) == 1
+    allowed_names = [item for item in allowed if isinstance(item, str) and item]
+    return len(allowed_names) == 1 and all(
+        item in user_functions for item in allowed_names
+    )
+
+
+def _gemini_tool_choice_details(
+    body: Mapping[str, Any],
+    *,
+    user_functions: list[str],
+    supported: bool | None,
+) -> list[ToolDecisionDiagnostic]:
+    tool_config = _first_mapping(body, "toolConfig", "tool_config")
+    function_config = _first_mapping(
+        tool_config,
+        "functionCallingConfig",
+        "function_calling_config",
+    )
+    if not function_config:
+        return []
+    mode = function_config.get("mode")
+    allowed = function_config.get("allowedFunctionNames")
+    if allowed is None:
+        allowed = function_config.get("allowed_function_names")
+    if not isinstance(mode, str):
+        return [
+            build_tool_decision(
+                source="gemini.toolConfig",
+                category="tool_choice",
+                decision="unsupported",
+                reason="invalid_function_calling_mode",
+                field="toolConfig.functionCallingConfig.mode",
+            )
+        ]
+    normalized_mode = mode.strip().upper()
+    if normalized_mode in {"AUTO", "MODE_UNSPECIFIED", "NONE"}:
+        return [
+            build_tool_decision(
+                source="gemini.toolConfig",
+                category="tool_choice",
+                decision="supported",
+                name=normalized_mode,
+                reason=(
+                    "automatic_tool_choice"
+                    if normalized_mode != "NONE"
+                    else "tools_disabled_by_choice"
+                ),
+                field="toolConfig.functionCallingConfig.mode",
+            )
+        ]
+    if normalized_mode != "ANY":
+        return [
+            build_tool_decision(
+                source="gemini.toolConfig",
+                category="tool_choice",
+                decision="unsupported",
+                name=mode,
+                reason="unsupported_function_calling_mode",
+                field="toolConfig.functionCallingConfig.mode",
+            )
+        ]
+    if allowed is not None and not isinstance(allowed, list):
+        return [
+            build_tool_decision(
+                source="gemini.toolConfig",
+                category="tool_choice",
+                decision="unsupported",
+                reason="invalid_allowed_function_names",
+                field="toolConfig.functionCallingConfig.allowedFunctionNames",
+            )
+        ]
+    allowed_names = (
+        [item for item in allowed if isinstance(item, str) and item]
+        if isinstance(allowed, list)
+        else []
+    )
+    if isinstance(allowed, list) and len(allowed_names) != len(allowed):
+        return [
+            build_tool_decision(
+                source="gemini.toolConfig",
+                category="tool_choice",
+                decision="unsupported",
+                reason="invalid_allowed_function_names",
+                field="toolConfig.functionCallingConfig.allowedFunctionNames",
+            )
+        ]
+    candidate_names = allowed_names or user_functions
+    missing_names = [name for name in candidate_names if name not in user_functions]
+    if missing_names:
+        return [
+            build_tool_decision(
+                source="gemini.toolConfig",
+                category="tool_choice",
+                decision="unsupported",
+                name=",".join(missing_names),
+                reason="undeclared_allowed_function",
+                field="toolConfig.functionCallingConfig.allowedFunctionNames",
+            )
+        ]
+    if len(candidate_names) != 1:
+        return [
+            build_tool_decision(
+                source="gemini.toolConfig",
+                category="tool_choice",
+                decision="unsupported",
+                reason="backend_requires_single_forced_function",
+                field="toolConfig.functionCallingConfig.allowedFunctionNames",
+            )
+        ]
+    return [
+        build_tool_decision(
+            source="gemini.toolConfig",
+            category="tool_choice",
+            decision="supported" if supported else "unsupported",
+            name=candidate_names[0],
+            reason="single_forced_function",
+            field="toolConfig.functionCallingConfig.allowedFunctionNames",
+        )
+    ]
 
 
 def _model_resolution(
@@ -872,6 +1357,17 @@ def _warnings_for_analysis(
                 field="tools",
             )
         )
+    if tools.forced_tool_choice_supported is False:
+        warnings.append(
+            ProtocolDiagnosticWarning(
+                code="unsupported_forced_tool_choice",
+                message=(
+                    "The requested forced tool choice cannot be enforced by the "
+                    "current backend path."
+                ),
+                field="tool_choice",
+            )
+        )
     return warnings
 
 
@@ -899,6 +1395,23 @@ def _missing_required_fields(
     ]
 
 
+def _user_function_details(
+    *,
+    source: str,
+    names: Iterable[str],
+) -> list[ToolDecisionDiagnostic]:
+    return [
+        build_tool_decision(
+            source=source,
+            category="user_function",
+            decision="supported",
+            name=name,
+            reason="custom_function",
+        )
+        for name in names
+    ]
+
+
 def _proxy_settings(config: Any | None) -> Any | None:
     return getattr(config, "proxy_settings", config)
 
@@ -915,6 +1428,17 @@ def _pass_model(config: Any | None) -> bool:
 def _builtin_tool_mapping_enabled(config: Any | None) -> bool:
     value = getattr(_proxy_settings(config), "disable_builtin_tool_mapping", False)
     return not bool(value)
+
+
+def _builtin_mapping_unavailable_reason(
+    backend_mode: BackendMode,
+    mapping_enabled: bool,
+) -> str | None:
+    if not mapping_enabled:
+        return "builtin_tool_mapping_disabled"
+    if backend_mode != "gigachat_v2":
+        return "requires_gigachat_v2"
+    return None
 
 
 def _is_sensitive_name(name: str) -> bool:

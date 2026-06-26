@@ -16,6 +16,8 @@ CompatibilityProtocol = Literal[
 ]
 BackendMode = Literal["gigachat_v1", "gigachat_v2", "unknown"]
 WarningSeverity = Literal["info", "warning", "error"]
+ToolDecisionCategory = Literal["provider_builtin", "tool_choice", "user_function"]
+ToolDecision = Literal["ignored", "mapped", "rejected", "supported", "unsupported"]
 
 
 class DiagnosticBaseModel(BaseModel):
@@ -70,6 +72,18 @@ class BuiltinToolMappingDiagnostic(DiagnosticBaseModel):
     reason: str | None = None
 
 
+class ToolDecisionDiagnostic(DiagnosticBaseModel):
+    """Describe one safe per-tool compatibility decision."""
+
+    source: str
+    category: ToolDecisionCategory
+    decision: ToolDecision
+    name: str | None = None
+    target: str | None = None
+    reason: str | None = None
+    field: str | None = None
+
+
 class ToolCompatibility(DiagnosticBaseModel):
     """Summarize tool compatibility decisions."""
 
@@ -80,6 +94,7 @@ class ToolCompatibility(DiagnosticBaseModel):
     unsupported_tools: list[str] = Field(default_factory=list)
     accepted_ignored: list[str] = Field(default_factory=list)
     rejected: list[str] = Field(default_factory=list)
+    details: list[ToolDecisionDiagnostic] = Field(default_factory=list)
     mapping_disabled: bool | None = None
     forced_tool_choice_supported: bool | None = None
 
