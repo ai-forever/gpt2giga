@@ -201,6 +201,89 @@ def test_docs_disabled_in_prod_mode():
     assert client.get("/openapi.json").status_code == 404
 
 
+def test_ui_routes_are_unmounted_by_default():
+    app = create_app()
+    client = TestClient(app)
+
+    assert client.get("/ui").status_code == 404
+    assert client.get("/ui/playground").status_code == 404
+
+
+def test_ui_routes_require_admin_key_by_default():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    client = TestClient(app)
+
+    assert client.get("/ui/playground").status_code == 403
+
+    response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+
+    assert response.status_code == 200
+    assert "gpt2giga playground" in response.text
+    assert "No upstream calls" in response.text
+    assert response.headers["content-security-policy"].startswith("default-src 'none'")
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_ui_root_redirects_to_playground_when_enabled():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    client = TestClient(app)
+
+    response = client.get(
+        "/ui", headers={"x-admin-api-key": "admin"}, follow_redirects=False
+    )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ui/playground"
+
+
+def test_ui_routes_can_disable_auth_in_dev():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, ui_require_auth=False))
+    )
+    client = TestClient(app)
+
+    response = client.get("/ui/playground")
+
+    assert response.status_code == 200
+    assert "Local admin UI" in response.text
+
+
+def test_ui_routes_require_admin_key_in_prod_even_when_ui_auth_disabled():
+    app = create_app(
+        config=ProxyConfig(
+            proxy=ProxySettings(
+                mode="PROD",
+                api_key="proxy-key",
+                ui_enabled=True,
+                ui_require_auth=False,
+                admin_api_key="admin",
+            )
+        )
+    )
+    client = TestClient(app)
+
+    assert client.get("/ui/playground").status_code == 403
+
+    response = client.get("/ui/playground", headers={"x-admin-api-key": "admin"})
+
+    assert response.status_code == 200
+    assert "Playground" in response.text
+
+
+def test_ui_routes_are_excluded_from_openapi_schema():
+    app = create_app(
+        config=ProxyConfig(proxy=ProxySettings(ui_enabled=True, admin_api_key="admin"))
+    )
+    schema = app.openapi()
+
+    assert "/ui" not in schema["paths"]
+    assert "/ui/playground" not in schema["paths"]
+
+
 def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
     app = create_app(
         config=ProxyConfig(

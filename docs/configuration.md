@@ -537,5 +537,14 @@ It analyzes an OpenAI-, Anthropic-, Gemini-, LiteLLM-, or system-shaped request
 envelope without calling GigaChat and returns only redacted diagnostics. See
 [Compatibility Doctor](./diagnostics.md).
 
-`GPT2GIGA_UI_ENABLED` is reserved for a future built-in UI. For now, do not
-use it as a security control.
+The built-in UI is disabled by default:
+
+```dotenv
+GPT2GIGA_UI_ENABLED=False
+GPT2GIGA_UI_REQUIRE_AUTH=True
+GPT2GIGA_ADMIN_API_KEY="<strong-admin-secret>"
+```
+
+When enabled, `/ui` and `/ui/playground` are protected by
+`GPT2GIGA_ADMIN_API_KEY` by default. In `MODE=PROD`, UI routes always require
+the admin key even if `GPT2GIGA_UI_REQUIRE_AUTH=False`.

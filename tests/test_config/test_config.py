@@ -44,6 +44,7 @@ def test_proxy_settings_defaults(monkeypatch):
     monkeypatch.delenv("PHOENIX_PROJECT_NAME", raising=False)
     monkeypatch.delenv("PHOENIX_API_KEY", raising=False)
     monkeypatch.delenv("GPT2GIGA_UI_ENABLED", raising=False)
+    monkeypatch.delenv("GPT2GIGA_UI_REQUIRE_AUTH", raising=False)
     monkeypatch.delenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_ADMIN_API_ENABLED", raising=False)
     monkeypatch.delenv("GPT2GIGA_ADMIN_API_KEY", raising=False)
@@ -98,6 +99,7 @@ def test_proxy_settings_defaults(monkeypatch):
     assert s.metrics_enabled is False
     assert s.metrics_path == "/metrics"
     assert s.ui_enabled is False
+    assert s.ui_require_auth is True
     assert s.debug_translate_enabled is False
     assert s.admin_api_enabled is False
     assert s.admin_api_key is None
@@ -280,6 +282,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     monkeypatch.setenv("GPT2GIGA_METRICS_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_METRICS_PATH", "internal/metrics/")
     monkeypatch.setenv("GPT2GIGA_UI_ENABLED", "true")
+    monkeypatch.setenv("GPT2GIGA_UI_REQUIRE_AUTH", "false")
     monkeypatch.setenv("GPT2GIGA_DEBUG_TRANSLATE_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_ADMIN_API_ENABLED", "true")
     monkeypatch.setenv("GPT2GIGA_ADMIN_API_KEY", "admin-secret")
@@ -333,6 +336,7 @@ def test_proxy_settings_modular_feature_flags_from_env(monkeypatch):
     assert s.metrics_enabled is True
     assert s.metrics_path == "/internal/metrics"
     assert s.ui_enabled is True
+    assert s.ui_require_auth is False
     assert s.debug_translate_enabled is True
     assert s.admin_api_enabled is True
     assert s.admin_api_key == "admin-secret"

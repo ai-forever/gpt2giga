@@ -17,6 +17,7 @@ from gpt2giga.api.admin import (
     debug_router,
     logs_router as admin_logs_router,
 )
+from gpt2giga.api.admin.access import verify_admin_key
 from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.gemini import (
     operations_router as gemini_operations_router,
@@ -43,6 +44,7 @@ from gpt2giga.sinks.logs.factory import create_traffic_log_sink
 from gpt2giga.sinks.logs.query import create_traffic_log_query_store
 from gpt2giga.sinks.metrics.factory import create_metrics_sink
 from gpt2giga.sinks.observability.factory import create_observability_sink
+from gpt2giga.ui import router as ui_router
 
 
 def create_app(config: ProxyConfig | None = None) -> FastAPI:
@@ -103,6 +105,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
             "model",
             "files",
             "batches",
+            "ui",
         ],
     )
     app.add_middleware(
@@ -195,6 +198,11 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     )
     app.include_router(litellm_router, dependencies=api_dependencies)
     app.include_router(system_router)
+    if config.proxy_settings.ui_enabled:
+        ui_dependencies = []
+        if prod_mode or config.proxy_settings.ui_require_auth:
+            ui_dependencies.append(Depends(verify_admin_key))
+        app.include_router(ui_router, dependencies=ui_dependencies)
     if config.proxy_settings.debug_translate_enabled:
         app.include_router(debug_router)
     if config.proxy_settings.admin_api_enabled:

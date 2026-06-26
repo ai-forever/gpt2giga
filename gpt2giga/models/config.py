@@ -320,7 +320,11 @@ class ProxySettings(BaseSettings):
     )
     ui_enabled: bool = Field(
         default=False,
-        description="Enable future built-in debugging and playground UI.",
+        description="Enable the built-in local/admin debugging and playground UI.",
+    )
+    ui_require_auth: bool = Field(
+        default=True,
+        description="Require the admin API key for built-in UI pages.",
     )
     debug_translate_enabled: bool = Field(
         default=False,
