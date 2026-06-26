@@ -12,7 +12,11 @@ from gpt2giga.app.settings import (
     load_app_config,
     validate_app_config,
 )
-from gpt2giga.api.admin import debug_router, logs_router as admin_logs_router
+from gpt2giga.api.admin import (
+    compat_router as admin_compat_router,
+    debug_router,
+    logs_router as admin_logs_router,
+)
 from gpt2giga.api.anthropic import router as anthropic_router
 from gpt2giga.api.gemini import (
     operations_router as gemini_operations_router,
@@ -60,6 +64,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
         openapi_url=None if prod_mode else "/openapi.json",
         openapi_tags=build_openapi_tags_metadata(
             include_logs=not prod_mode,
+            include_admin_compat=config.proxy_settings.admin_api_enabled,
             include_admin_logs=config.proxy_settings.admin_api_enabled,
             include_debug_translation=config.proxy_settings.debug_translate_enabled,
         ),
@@ -193,6 +198,7 @@ def create_app(config: ProxyConfig | None = None) -> FastAPI:
     if config.proxy_settings.debug_translate_enabled:
         app.include_router(debug_router)
     if config.proxy_settings.admin_api_enabled:
+        app.include_router(admin_compat_router)
         app.include_router(admin_logs_router)
     if not prod_mode:
         app.include_router(logs_api_router, dependencies=api_dependencies)

@@ -16,6 +16,7 @@ OPENAPI_TAG_ANTHROPIC_MESSAGE_BATCHES = "Anthropic / Message Batches"
 OPENAPI_TAG_LITELLM_MODEL_INFO = "LiteLLM / Model Info"
 OPENAPI_TAG_SYSTEM_HEALTH = "System / Health"
 OPENAPI_TAG_SYSTEM_LOGS = "System / Logs"
+OPENAPI_TAG_ADMIN_COMPATIBILITY = "Admin / Compatibility"
 OPENAPI_TAG_ADMIN_TRAFFIC_LOGS = "Admin / Traffic Logs"
 OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION = "Admin / Debug Translation"
 
@@ -84,6 +85,10 @@ _OPENAPI_TAGS_METADATA_BY_NAME = {
         "name": OPENAPI_TAG_SYSTEM_LOGS,
         "description": "Local development log inspection routes.",
     },
+    OPENAPI_TAG_ADMIN_COMPATIBILITY: {
+        "name": OPENAPI_TAG_ADMIN_COMPATIBILITY,
+        "description": "Protected compatibility diagnostics routes.",
+    },
     OPENAPI_TAG_ADMIN_TRAFFIC_LOGS: {
         "name": OPENAPI_TAG_ADMIN_TRAFFIC_LOGS,
         "description": "Protected traffic log query and replay routes.",
@@ -111,6 +116,7 @@ _DEFAULT_OPENAPI_TAGS = [
 def build_openapi_tags_metadata(
     *,
     include_logs: bool,
+    include_admin_compat: bool,
     include_admin_logs: bool,
     include_debug_translation: bool,
 ) -> list[dict[str, str]]:
@@ -118,6 +124,8 @@ def build_openapi_tags_metadata(
     tag_names = [*_DEFAULT_OPENAPI_TAGS]
     if include_logs:
         tag_names.append(OPENAPI_TAG_SYSTEM_LOGS)
+    if include_admin_compat:
+        tag_names.append(OPENAPI_TAG_ADMIN_COMPATIBILITY)
     if include_admin_logs:
         tag_names.append(OPENAPI_TAG_ADMIN_TRAFFIC_LOGS)
     if include_debug_translation:
@@ -127,6 +135,7 @@ def build_openapi_tags_metadata(
 
 OPENAPI_TAGS_METADATA = build_openapi_tags_metadata(
     include_logs=True,
+    include_admin_compat=True,
     include_admin_logs=True,
     include_debug_translation=True,
 )

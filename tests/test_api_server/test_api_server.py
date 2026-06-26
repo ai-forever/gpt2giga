@@ -6,6 +6,7 @@ from gpt2giga.app.factory import create_app as create_modular_app
 from gpt2giga.common.app_meta import check_port_available
 from gpt2giga.models.config import ProxyConfig, ProxySettings
 from gpt2giga.openapi_tags import (
+    OPENAPI_TAG_ADMIN_COMPATIBILITY,
     OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION,
     OPENAPI_TAG_ADMIN_TRAFFIC_LOGS,
     OPENAPI_TAG_ANTHROPIC_MESSAGES,
@@ -257,6 +258,7 @@ def test_openapi_tags_group_routes_by_provider_and_endpoint_type():
         ("get", "/health"): [OPENAPI_TAG_SYSTEM_HEALTH],
         ("get", "/logs"): [OPENAPI_TAG_SYSTEM_LOGS],
         ("get", "/logs/html"): [OPENAPI_TAG_SYSTEM_LOGS],
+        ("post", "/_admin/compat/analyze"): [OPENAPI_TAG_ADMIN_COMPATIBILITY],
         ("get", "/_admin/logs"): [OPENAPI_TAG_ADMIN_TRAFFIC_LOGS],
         ("post", "/_debug/translate"): [OPENAPI_TAG_ADMIN_DEBUG_TRANSLATION],
     }
