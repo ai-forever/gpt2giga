@@ -485,6 +485,10 @@ _PLAYGROUND_HTML = """<!doctype html>
       word-break: break-word;
     }
 
+    .terminal.snippets {
+      min-height: 430px;
+    }
+
     .terminal.small {
       min-height: 118px;
       background: #172033;
@@ -654,8 +658,14 @@ _PLAYGROUND_HTML = """<!doctype html>
           </div>
 
           <div class="preview-tabs" role="tablist" aria-label="Preview tabs">
-            <button id="tab-request" class="tab" type="button" role="tab" aria-selected="true" data-preview="request">Request</button>
-            <button id="tab-analyze" class="tab" type="button" role="tab" aria-selected="false" data-preview="analyze">Analyze</button>
+            <button id="tab-request" class="tab" type="button" role="tab" aria-selected="true" data-preview="request">Raw request</button>
+            <button id="tab-stream" class="tab" type="button" role="tab" aria-selected="false" data-preview="stream">Stream</button>
+            <button id="tab-response" class="tab" type="button" role="tab" aria-selected="false" data-preview="response">Raw response</button>
+            <button id="tab-analyze" class="tab" type="button" role="tab" aria-selected="false" data-preview="analyze">Compatibility</button>
+            <button id="tab-normalized" class="tab" type="button" role="tab" aria-selected="false" data-preview="normalized">Normalized</button>
+            <button id="tab-provider" class="tab" type="button" role="tab" aria-selected="false" data-preview="provider">Provider</button>
+            <button id="tab-snippets" class="tab" type="button" role="tab" aria-selected="false" data-preview="snippets">Snippets</button>
+            <button id="tab-ids" class="tab" type="button" role="tab" aria-selected="false" data-preview="ids">IDs</button>
             <button id="tab-redaction" class="tab" type="button" role="tab" aria-selected="false" data-preview="redaction">Redaction</button>
           </div>
 
@@ -665,7 +675,13 @@ _PLAYGROUND_HTML = """<!doctype html>
               <span id="route-preview" class="route">/v2/chat/completions</span>
             </div>
             <pre id="request-preview" class="terminal" aria-labelledby="tab-request"></pre>
+            <pre id="stream-preview" class="terminal hidden" aria-labelledby="tab-stream"></pre>
+            <pre id="response-preview" class="terminal hidden" aria-labelledby="tab-response"></pre>
             <pre id="analyze-preview" class="terminal hidden" aria-labelledby="tab-analyze"></pre>
+            <pre id="normalized-preview" class="terminal hidden" aria-labelledby="tab-normalized"></pre>
+            <pre id="provider-preview" class="terminal hidden" aria-labelledby="tab-provider"></pre>
+            <pre id="snippets-preview" class="terminal snippets hidden" aria-labelledby="tab-snippets"></pre>
+            <pre id="ids-preview" class="terminal small hidden" aria-labelledby="tab-ids"></pre>
             <pre id="redaction-preview" class="terminal small hidden" aria-labelledby="tab-redaction"></pre>
           </div>
         </section>
@@ -881,7 +897,13 @@ _PLAYGROUND_HTML = """<!doctype html>
         methodPreview: document.getElementById("method-preview"),
         routePreview: document.getElementById("route-preview"),
         requestPreview: document.getElementById("request-preview"),
+        streamPreview: document.getElementById("stream-preview"),
+        responsePreview: document.getElementById("response-preview"),
         analyzePreview: document.getElementById("analyze-preview"),
+        normalizedPreview: document.getElementById("normalized-preview"),
+        providerPreview: document.getElementById("provider-preview"),
+        snippetsPreview: document.getElementById("snippets-preview"),
+        idsPreview: document.getElementById("ids-preview"),
         redactionPreview: document.getElementById("redaction-preview"),
         previewStatus: document.getElementById("preview-status"),
         builderStatus: document.getElementById("builder-status"),
@@ -1147,6 +1169,89 @@ _PLAYGROUND_HTML = """<!doctype html>
         };
       }
 
+      function buildResponsePlaceholder(request) {
+        return {
+          status: "not_sent",
+          request_id: null,
+          trace_id: null,
+          traffic_log_id: null,
+          headers: {},
+          body: null,
+          source: "v0.2.4-004 helper endpoints"
+        };
+      }
+
+      function buildStreamPlaceholder(request) {
+        if (!request.operation.stream) {
+          return "event: unavailable\\ndata: selected operation does not support streaming";
+        }
+        if (!request.body?.stream && request.protocol !== "gemini") {
+          return "event: disabled\\ndata: enable the Stream toggle to preview streamed output";
+        }
+        return [
+          "event: pending",
+          "data: stream output will appear after /_admin/playground/send is added"
+        ].join("\\n");
+      }
+
+      function buildNormalizedPreview(request) {
+        return {
+          request: {
+            status: "pending_helper_endpoint",
+            protocol: request.protocol,
+            operation: request.operation.id,
+            route: request.route,
+            source: "adapter conversion is not executed by this static preview"
+          },
+          response: {
+            status: "not_sent",
+            source: "response normalization requires a helper response payload"
+          }
+        };
+      }
+
+      function backendPrefix() {
+        return els.prefix.value || "root";
+      }
+
+      function modelValue() {
+        return els.model.value.trim() || defaultModel;
+      }
+
+      function buildProviderPreview(request) {
+        const body = request.body || {};
+        return {
+          request_summary: {
+            protocol: request.protocol,
+            operation: request.operation.id,
+            backend_prefix: backendPrefix(),
+            model: request.protocol === "gemini" ? modelValue() : body.model,
+            stream: Boolean(body.stream || request.operation.id === "stream_generate_content"),
+            body_fields: Object.keys(body),
+            redacted_headers: redactObject(request.headers)
+          },
+          response_summary: {
+            status: "not_sent",
+            request_id: null,
+            trace_id: null,
+            traffic_log_id: null,
+            source: "v0.2.4-004 helper endpoints"
+          }
+        };
+      }
+
+      function buildIdsPreview() {
+        return {
+          request_id: "available_after_send",
+          trace_id: "available_after_send",
+          traffic_log_id: "available_after_send",
+          phoenix_trace_link: {
+            status: "pending_trace_id",
+            config: "GPT2GIGA_PHOENIX_BASE_URL"
+          }
+        };
+      }
+
       function redactObject(value) {
         if (!value || typeof value !== "object" || Array.isArray(value)) {
           return {};
@@ -1157,6 +1262,159 @@ _PLAYGROUND_HTML = """<!doctype html>
             shouldRedactKey(key) ? "<redacted>" : item
           ])
         );
+      }
+
+      function headerValueForSnippet(key, value) {
+        if (shouldRedactKey(key)) {
+          return "${GPT2GIGA_API_KEY}";
+        }
+        return String(value);
+      }
+
+      function baseUrlForSnippet() {
+        const prefix = els.prefix.value;
+        return prefix ? `http://localhost:8090${prefix}` : "http://localhost:8090";
+      }
+
+      function routeUrlForSnippet(request) {
+        return `http://localhost:8090${request.route}`;
+      }
+
+      function curlSnippet(request) {
+        const lines = ["curl -sS"];
+        if (request.method !== "GET") {
+          lines.push("  -X POST");
+        }
+        Object.entries(request.headers || {}).forEach(([key, value]) => {
+          lines.push(`  -H "${key}: ${headerValueForSnippet(key, value)}"`);
+        });
+        if (request.method !== "GET") {
+          lines.push('  -H "content-type: application/json"');
+          lines.push(`  -d '${JSON.stringify(request.body || {})}'`);
+        }
+        lines.push(`  "${routeUrlForSnippet(request)}"`);
+        return lines.join(" \\\\\\n");
+      }
+
+      function openAiSdkSnippet(request) {
+        const payload = jsonText(request.body || {});
+        const operationCalls = {
+          chat_completions: "client.chat.completions.create(**payload)",
+          responses: "client.responses.create(**payload)",
+          embeddings: "client.embeddings.create(**payload)",
+          models: "client.models.list()"
+        };
+        const call = operationCalls[request.operation.id] || "client.chat.completions.create(**payload)";
+        const payloadBlock = request.operation.id === "models" ? "" : `payload = ${payload}\\n`;
+        return [
+          "import os",
+          "from openai import OpenAI",
+          "",
+          "client = OpenAI(",
+          `    base_url="${baseUrlForSnippet()}",`,
+          '    api_key=os.environ["GPT2GIGA_API_KEY"],',
+          ")",
+          `${payloadBlock}result = ${call}`
+        ].join("\\n");
+      }
+
+      function anthropicSdkSnippet(request) {
+        const payload = jsonText(request.body || {});
+        const call = request.operation.id === "models"
+          ? "client.models.list()"
+          : request.operation.id === "count_tokens"
+            ? "client.messages.count_tokens(**payload)"
+            : "client.messages.create(**payload)";
+        const payloadBlock = request.operation.id === "models" ? "" : `payload = ${payload}\\n`;
+        return [
+          "import os",
+          "from anthropic import Anthropic",
+          "",
+          "client = Anthropic(",
+          `    base_url="${baseUrlForSnippet()}",`,
+          '    api_key=os.environ["GPT2GIGA_API_KEY"],',
+          ")",
+          `${payloadBlock}result = ${call}`
+        ].join("\\n");
+      }
+
+      function googleGenAiSnippet(request) {
+        const body = request.body || {};
+        const model = modelValue();
+        const contents = jsonText(body.contents ?? body.content ?? body.requests ?? {});
+        const config = jsonText(body.generationConfig ?? {});
+        const calls = {
+          generate_content: "client.models.generate_content",
+          stream_generate_content: "client.models.generate_content_stream",
+          count_tokens: "client.models.count_tokens",
+          embed_content: "client.models.embed_content",
+          batch_embed_contents: "client.models.embed_content",
+          models: "client.models.list"
+        };
+        const call = calls[request.operation.id] || "client.models.generate_content";
+        if (request.operation.id === "models") {
+          return [
+            "import os",
+            "from google import genai",
+            "",
+            "client = genai.Client(",
+            '    api_key=os.environ["GPT2GIGA_API_KEY"],',
+            `    http_options={"base_url": "${baseUrlForSnippet()}/v1beta"},`,
+            ")",
+            "result = client.models.list()"
+          ].join("\\n");
+        }
+        return [
+          "import os",
+          "from google import genai",
+          "",
+          "client = genai.Client(",
+          '    api_key=os.environ["GPT2GIGA_API_KEY"],',
+          `    http_options={"base_url": "${baseUrlForSnippet()}/v1beta"},`,
+          ")",
+          `contents = ${contents}`,
+          `config = ${config}`,
+          `result = ${call}(model="${model}", contents=contents, config=config)`
+        ].join("\\n");
+      }
+
+      function pythonSnippet(request) {
+        if (request.protocol === "anthropic") {
+          return anthropicSdkSnippet(request);
+        }
+        if (request.protocol === "gemini") {
+          return googleGenAiSnippet(request);
+        }
+        return openAiSdkSnippet(request);
+      }
+
+      function snippetsPreview(request) {
+        const sections = [
+          ["curl snippet", curlSnippet(request)],
+          ["Python SDK snippet", pythonSnippet(request)]
+        ];
+        if (request.protocol === "gemini") {
+          sections.push(["Google GenAI snippet", googleGenAiSnippet(request)]);
+        } else {
+          const geminiOperation = operations.gemini[0];
+          const geminiRequest = {
+            protocol: "gemini",
+            operation: geminiOperation,
+            route: geminiRoute(geminiOperation),
+            method: "POST",
+            body: buildGeminiBody(geminiOperation, {
+              messages: defaults.gemini.generate_content.messages,
+              tools: [],
+              format: {},
+              metadata: {}
+            }),
+            headers: { "x-goog-api-key": "${GPT2GIGA_API_KEY}" }
+          };
+          sections.push(["Google GenAI snippet", googleGenAiSnippet(geminiRequest)]);
+        }
+        return sections
+          .map(([title, body]) => `# ${title}\\n${body}`)
+          .join("\\n\\n");
       }
 
       function redactionRows(headers) {
@@ -1195,7 +1453,13 @@ _PLAYGROUND_HTML = """<!doctype html>
           tab.setAttribute("aria-selected", String(selected));
         });
         els.requestPreview.classList.toggle("hidden", nextPreview !== "request");
+        els.streamPreview.classList.toggle("hidden", nextPreview !== "stream");
+        els.responsePreview.classList.toggle("hidden", nextPreview !== "response");
         els.analyzePreview.classList.toggle("hidden", nextPreview !== "analyze");
+        els.normalizedPreview.classList.toggle("hidden", nextPreview !== "normalized");
+        els.providerPreview.classList.toggle("hidden", nextPreview !== "provider");
+        els.snippetsPreview.classList.toggle("hidden", nextPreview !== "snippets");
+        els.idsPreview.classList.toggle("hidden", nextPreview !== "ids");
         els.redactionPreview.classList.toggle("hidden", nextPreview !== "redaction");
       }
 
@@ -1211,7 +1475,13 @@ _PLAYGROUND_HTML = """<!doctype html>
           els.routePreview.textContent = request.route || "/";
           const errorPayload = { errors: request.errors };
           els.requestPreview.textContent = jsonText(errorPayload);
+          els.streamPreview.textContent = jsonText(errorPayload);
+          els.responsePreview.textContent = jsonText(errorPayload);
           els.analyzePreview.textContent = jsonText(errorPayload);
+          els.normalizedPreview.textContent = jsonText(errorPayload);
+          els.providerPreview.textContent = jsonText(errorPayload);
+          els.snippetsPreview.textContent = jsonText(errorPayload);
+          els.idsPreview.textContent = jsonText(errorPayload);
           els.redactionPreview.textContent = jsonText(errorPayload);
           return;
         }
@@ -1228,7 +1498,13 @@ _PLAYGROUND_HTML = """<!doctype html>
           body: request.body
         };
         els.requestPreview.textContent = jsonText(requestPayload);
+        els.streamPreview.textContent = buildStreamPlaceholder(request);
+        els.responsePreview.textContent = jsonText(buildResponsePlaceholder(request));
         els.analyzePreview.textContent = jsonText(buildAnalyzeEnvelope(request));
+        els.normalizedPreview.textContent = jsonText(buildNormalizedPreview(request));
+        els.providerPreview.textContent = jsonText(buildProviderPreview(request));
+        els.snippetsPreview.textContent = snippetsPreview(request);
+        els.idsPreview.textContent = jsonText(buildIdsPreview());
         els.redactionPreview.textContent = jsonText(redactionRows(request.headers));
       }
 

@@ -232,6 +232,21 @@ def test_ui_routes_require_admin_key_by_default():
     assert "response_format / generation_config JSON" in response.text
     assert "headers JSON" in response.text
     assert "No upstream calls" in response.text
+    assert "Raw request" in response.text
+    assert "Stream" in response.text
+    assert "Raw response" in response.text
+    assert "Compatibility" in response.text
+    assert "Normalized" in response.text
+    assert "Provider" in response.text
+    assert "Snippets" in response.text
+    assert "curl snippet" in response.text
+    assert "Python SDK snippet" in response.text
+    assert "Google GenAI snippet" in response.text
+    assert "request_id" in response.text
+    assert "trace_id" in response.text
+    assert "traffic_log_id" in response.text
+    assert "GPT2GIGA_PHOENIX_BASE_URL" in response.text
+    assert "fetch(" not in response.text
     csp = response.headers["content-security-policy"]
     script_nonce = re.search(r"script-src 'nonce-([^']+)'", csp)
     assert script_nonce is not None
