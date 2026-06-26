@@ -542,7 +542,7 @@ def _normalize_contents(value: Any) -> list[NormalizedMessage]:
         for item in value:
             if isinstance(item, Mapping) or isinstance(item, str):
                 messages.extend(_normalize_content(item))
-        return messages
+        return _drop_tool_calls_abandoned_by_followup(messages)
     return [NormalizedMessage(role="user", content=str(value))]
 
 
@@ -1019,6 +1019,94 @@ def _function_response_to_normalized(
             "functionResponse": function_response,
         },
     )
+
+
+def _drop_tool_calls_abandoned_by_followup(
+    messages: list[NormalizedMessage],
+) -> list[NormalizedMessage]:
+    """Drop Gemini function calls only after a later non-tool turn abandons them."""
+    pending: list[tuple[int, int, NormalizedToolCall]] = []
+
+    for message_index, message in enumerate(messages):
+        if message.role == "tool":
+            _resolve_pending_tool_response(message, pending)
+            continue
+
+        if pending:
+            _remove_pending_tool_calls(messages, pending)
+            pending.clear()
+
+        if message.role == "assistant" and message.tool_calls:
+            pending.extend(
+                (message_index, call_index, tool_call)
+                for call_index, tool_call in enumerate(message.tool_calls)
+            )
+
+    return [
+        message
+        for message in messages
+        if not (
+            message.role == "assistant"
+            and not message.tool_calls
+            and not _message_has_content(message)
+        )
+    ]
+
+
+def _resolve_pending_tool_response(
+    message: NormalizedMessage,
+    pending: list[tuple[int, int, NormalizedToolCall]],
+) -> None:
+    if not pending:
+        return
+    response_keys = _tool_response_keys(message)
+    for index, (_message_index, _call_index, tool_call) in enumerate(pending):
+        if response_keys and response_keys.isdisjoint(_tool_call_keys(tool_call)):
+            continue
+        pending.pop(index)
+        return
+
+
+def _remove_pending_tool_calls(
+    messages: list[NormalizedMessage],
+    pending: list[tuple[int, int, NormalizedToolCall]],
+) -> None:
+    pending_indexes_by_message: dict[int, set[int]] = {}
+    for message_index, call_index, _tool_call in pending:
+        pending_indexes_by_message.setdefault(message_index, set()).add(call_index)
+
+    for message_index, pending_indexes in pending_indexes_by_message.items():
+        message = messages[message_index]
+        message.tool_calls = [
+            tool_call
+            for call_index, tool_call in enumerate(message.tool_calls)
+            if call_index not in pending_indexes
+        ]
+
+
+def _tool_response_keys(message: NormalizedMessage) -> set[str]:
+    keys = set()
+    if message.tool_call_id:
+        keys.add(f"id:{message.tool_call_id}")
+    if message.name:
+        keys.add(f"name:{message.name}")
+    return keys
+
+
+def _tool_call_keys(tool_call: NormalizedToolCall) -> set[str]:
+    keys = set()
+    if tool_call.id:
+        keys.add(f"id:{tool_call.id}")
+    if tool_call.name:
+        keys.add(f"name:{tool_call.name}")
+    return keys
+
+
+def _message_has_content(message: NormalizedMessage) -> bool:
+    content = message.content
+    if isinstance(content, str):
+        return bool(content)
+    return content is not None
 
 
 def _collapse_text_parts(

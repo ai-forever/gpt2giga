@@ -1125,3 +1125,83 @@ async def test_prepare_chat_completion_maps_gemini_function_calling_example_hist
     spec = request.tools[0].functions.specifications[0]
     assert spec.name == "get_weather"
     assert spec.parameters["properties"]["city"]["type"] == "string"
+
+
+async def test_prepare_chat_completion_ignores_gemini_orphaned_function_call():
+    cfg = ProxyConfig()
+    rt = RequestTransformer(cfg, logger=logger)
+    normalized = GeminiProtocolAdapter().generate_content_to_normalized(
+        {
+            "contents": [
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "id": "state-1",
+                                "name": "run_shell_command",
+                                "args": {"command": "pytest"},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "id": "state-1",
+                                "name": "run_shell_command",
+                                "response": {"exit_code": 1},
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "update_topic",
+                                "args": {
+                                    "strategic_intent": (
+                                        "Анализ и корректировка шестого конфликта"
+                                    )
+                                },
+                            }
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "text": (
+                                "System: Potential loop detected. "
+                                "Please take a step back."
+                            )
+                        }
+                    ],
+                },
+            ]
+        },
+        model="GigaChat-2-Max",
+    )
+
+    request = await rt.prepare_chat_completion(
+        normalized_chat_to_openai_payload(normalized)
+    )
+
+    assert [message.role for message in request.messages] == [
+        "assistant",
+        "tool",
+        "user",
+    ]
+    assert request.messages[0].content[0].function_call.name == "run_shell_command"
+    assert request.messages[1].content[0].function_result.name == "run_shell_command"
+    assert request.messages[2].content[0].text.startswith("System: Potential loop")
+    assert all(
+        part.function_call is None or part.function_call.name != "update_topic"
+        for message in request.messages
+        for part in message.content
+    )
