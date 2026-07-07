@@ -26,6 +26,15 @@ dependencies = [
 
 [project.scripts]
 gpt2giga = "gpt2giga:run"
+gpt2giga-harness = "gpt2giga.harness.cli:main"
+giga = "gpt2giga.harness.cli:main"
+
+[project.entry-points."gpt2giga.harnesses"]
+direct-chat = "gpt2giga.harness.harnesses.direct_chat:DirectChatHarness"
+codex-cli = "gpt2giga.harness.harnesses.codex_cli:CodexCliHarness"
+claude-code = "gpt2giga.harness.harnesses.claude_code:ClaudeCodeHarness"
+gemini-cli = "gpt2giga.harness.harnesses.gemini_cli:GeminiCliHarness"
+echo = "gpt2giga.harness.harnesses.echo:EchoHarness"
 
 [project.optional-dependencies]
 postgres = [

@@ -1,0 +1,209 @@
+# Unified Harness
+
+Unified Harness is a local control surface on top of `gpt2giga`. It lets you
+choose a harness, choose a GigaChat model, choose the explicit GigaChat Chat
+Completions backend mode (`/v1` or `/v2`), and run quick smoke tests from either
+the CLI or a small browser UI.
+
+It does not replace the existing `gpt2giga` proxy entry point. Start the proxy as
+before, then use `giga` or `gpt2giga-harness` as the local harness client.
+
+## Quickstart
+
+Start the proxy:
+
+```bash
+uv run gpt2giga
+```
+
+In another terminal, inspect the harness environment:
+
+```bash
+giga doctor
+giga harness list
+```
+
+Run direct Chat Completions smoke tests through explicit backend routes:
+
+```bash
+giga chat --api-mode v2 --model GigaChat-2-Max "Привет"
+giga chat --api-mode v1 --model GigaChat-2-Max "Привет"
+```
+
+The same flow through the generic harness command:
+
+```bash
+giga harness run direct-chat \
+  --api-mode v2 \
+  --model GigaChat-2-Max \
+  --prompt "Hello from the harness"
+```
+
+Open the local UI:
+
+```bash
+giga ui
+```
+
+By default the UI binds to `127.0.0.1:8091`. To bind remotely you must opt in:
+
+```bash
+giga ui --host 0.0.0.0 --allow-remote
+```
+
+Remote binding can expose local harness execution. Use it only behind a trusted
+network boundary.
+
+## Configuration
+
+CLI flags override environment variables. Useful variables:
+
+```bash
+GPT2GIGA_HARNESS_PROXY_URL=http://127.0.0.1:8090
+GPT2GIGA_HARNESS_API_KEY=<local-proxy-api-key>
+GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
+GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
+GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
+GPT2GIGA_HARNESS_UI_PORT=8091
+```
+
+If `GPT2GIGA_HARNESS_API_KEY` is not set, the harness falls back to
+`GPT2GIGA_API_KEY` for calls to the local proxy. It never passes
+`GIGACHAT_CREDENTIALS`, OAuth tokens, certificates, or `.env` contents to
+external agent CLIs.
+
+## Built-in Harnesses
+
+| Harness | Status | Purpose |
+|---|---|---|
+| `direct-chat` | MVP | Sends OpenAI-style Chat Completions to `/v1/chat/completions` or `/v2/chat/completions`. |
+| `echo` | MVP | Local no-network smoke harness for tests and UI checks. |
+| `codex-cli` | MVP | Builds and runs a sanitized `codex exec` command against the local proxy. |
+| `claude-code` | scaffold | Detects the `claude` executable and reports a clear not-implemented result if run. |
+| `gemini-cli` | scaffold | Detects the `gemini` executable and reports a clear not-implemented result if run. |
+
+Inspect one harness:
+
+```bash
+giga harness inspect direct-chat
+```
+
+Automation-friendly JSON output is available on commands that return structured
+results:
+
+```bash
+giga harness list --json
+giga harness run echo --prompt "hello" --json
+```
+
+## Codex CLI Harness
+
+The Codex harness is intentionally conservative. `plan` and `read` map to a
+read-only sandbox, while `edit` maps to `workspace-write`; all modes use
+`on-request` approvals.
+
+```bash
+giga harness run codex-cli \
+  --mode plan \
+  --model GigaChat-2-Max \
+  --api-mode v2 \
+  --prompt "Inspect this repo and propose the smallest implementation plan"
+```
+
+Backward-friendly alias:
+
+```bash
+giga run --agent codex --mode plan "Inspect this repo"
+```
+
+Use `--dry-run --json` to inspect the sanitized command and environment without
+launching Codex:
+
+```bash
+giga harness run codex-cli --prompt "Inspect" --dry-run --json
+```
+
+## Browser UI
+
+`giga ui` serves one no-build HTML page with:
+
+- harness selection;
+- model input with proxy-backed model suggestions when available;
+- API mode selection: `v1` or `v2`;
+- capability and mode selection;
+- prompt input;
+- output and raw JSON panels;
+- copy buttons for the equivalent CLI command and direct-chat curl command.
+
+The UI stores no API keys in local storage and receives only redacted command
+metadata from the backend.
+
+## Model Selection Notes
+
+The direct harness always sends the requested `model` field to the proxy. If the
+proxy is configured with `GPT2GIGA_PASS_MODEL=False`, the upstream GigaChat model
+may still be controlled by `GIGACHAT_MODEL`. `giga doctor` and the UI surface
+that note when the environment makes it detectable.
+
+Model discovery tries these endpoints in the selected mode first:
+
+```text
+GET /v2/models
+GET /v1/models
+GET /models
+```
+
+If discovery fails, the UI still accepts manual model input.
+
+## Add a New Harness
+
+1. Create `gpt2giga/harness/harnesses/my_harness.py`.
+2. Subclass `BaseHarness`.
+3. Implement `spec()`, `availability()`, and `run()`.
+4. Register the class in `BUILTIN_HARNESSES` or expose a package entry point:
+
+   ```toml
+   [project.entry-points."gpt2giga.harnesses"]
+   my-harness = "my_package.my_harness:MyHarness"
+   ```
+
+5. Add tests that do not require live GigaChat credentials.
+6. Run:
+
+   ```bash
+   giga harness list
+   giga ui
+   ```
+
+For a starting template:
+
+```bash
+giga harness scaffold my-harness
+```
+
+## Troubleshooting
+
+Start with:
+
+```bash
+giga doctor
+```
+
+Common checks:
+
+- proxy is reachable at `GPT2GIGA_HARNESS_PROXY_URL` or
+  `http://127.0.0.1:8090`;
+- `GPT2GIGA_API_KEY` or `GPT2GIGA_HARNESS_API_KEY` matches the proxy when API-key
+  auth is enabled;
+- `GIGACHAT_CREDENTIALS` is present for real upstream calls;
+- the selected mode uses the intended explicit route: `/v1/chat/completions` or
+  `/v2/chat/completions`;
+- external CLI harnesses report `missing` until the matching executable is on
+  `PATH`.
+
+## Current Limitations
+
+The first MVP runs direct Chat Completions and Codex CLI. Claude Code and Gemini
+CLI are registered as safe scaffolds with availability detection so they appear
+in the registry and UI, but command execution is intentionally left as follow-up
+work.

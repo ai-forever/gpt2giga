@@ -1,0 +1,48 @@
+import pytest
+from fastapi.testclient import TestClient
+
+from gpt2giga.harness.config import HarnessConfig
+from gpt2giga.harness.registry import create_default_registry
+from gpt2giga.harness.ui.app import create_app, validate_ui_bind
+
+
+def test_ui_harnesses_endpoint_returns_specs():
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/harnesses")
+
+    assert response.status_code == 200
+    ids = {item["spec"]["id"] for item in response.json()["harnesses"]}
+    assert "direct-chat" in ids
+    assert "echo" in ids
+
+
+def test_ui_can_run_echo_harness():
+    app = create_app(
+        HarnessConfig(),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/run",
+        json={"harness_id": "echo", "prompt": "hello", "api_mode": "v2"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["text"] == "hello"
+
+
+def test_ui_rejects_remote_bind_without_allow_remote():
+    with pytest.raises(ValueError):
+        validate_ui_bind("0.0.0.0", allow_remote=False)
+
+
+def test_ui_allows_remote_bind_with_explicit_flag():
+    validate_ui_bind("0.0.0.0", allow_remote=True)
