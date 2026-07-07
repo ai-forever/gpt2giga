@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser."""
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--proxy-url", default=None, help="Local gpt2giga proxy URL")
+    common.add_argument(
+        "--start-proxy",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Start a local gpt2giga sidecar if the proxy is down",
+    )
 
     parser = argparse.ArgumentParser(prog="giga")
     subparsers = parser.add_subparsers(dest="command")
@@ -281,7 +287,10 @@ def _run_harness(
 
 def _config_from_args(args: argparse.Namespace) -> HarnessConfig:
     config = HarnessConfig.from_env()
-    return config.with_overrides(proxy_url=getattr(args, "proxy_url", None))
+    return config.with_overrides(
+        proxy_url=getattr(args, "proxy_url", None),
+        auto_start_proxy=getattr(args, "start_proxy", None),
+    )
 
 
 def _print_result(result, *, as_json: bool) -> None:

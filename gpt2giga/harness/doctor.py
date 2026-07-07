@@ -21,6 +21,7 @@ def run_doctor(
     """Build a human-readable diagnostic report without printing secrets."""
     registry = registry or create_default_registry()
     health = proxy.health_check(config)
+    sidecar = proxy.sidecar_preflight(config.to_context())
     models = proxy.discover_models(config, config.default_api_mode)
     route_probes = (
         _chat_route_probes(config, _route_probe_model(config, models))
@@ -38,6 +39,7 @@ def run_doctor(
         f"  URL: {config.proxy_url}",
         f"  Health: {_health_text(health)}",
         f"  API key: {'configured (redacted)' if config.api_key else 'not configured'}",
+        f"  Auto-start: {_sidecar_text(sidecar)}",
         "",
         "GigaChat:",
         f"  Credentials: {_credentials_text()}",
@@ -75,6 +77,12 @@ def _health_text(health: proxy.ProxyHealth) -> str:
     if health.ok:
         return f"OK via {health.path} ({health.status_code})"
     return f"unreachable ({health.error})"
+
+
+def _sidecar_text(sidecar: proxy.SidecarPreflight) -> str:
+    if sidecar.ok:
+        return "ready"
+    return sidecar.reason
 
 
 def _chat_route_probes(

@@ -41,6 +41,23 @@ def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
     assert captured["request"].prompt == "hello"
 
 
+def test_cli_no_start_proxy_override(monkeypatch, capsys):
+    captured = {}
+
+    def fake_run(self, request, context):
+        captured["context"] = context
+        return HarnessResult(ok=True, text="ok")
+
+    monkeypatch.setattr(DirectChatHarness, "run", fake_run)
+
+    exit_code = cli.main(["chat", "--no-start-proxy", "hello"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert output.strip() == "ok"
+    assert captured["context"].auto_start_proxy is False
+
+
 def test_cli_agent_alias_passes_workspace(monkeypatch, capsys, tmp_path):
     captured = {}
 

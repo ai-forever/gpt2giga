@@ -5,8 +5,11 @@ choose a harness, choose a GigaChat model, choose the explicit GigaChat Chat
 Completions backend mode (`/v1` or `/v2`), and run quick smoke tests from either
 the CLI or a small browser UI.
 
-It does not replace the existing `gpt2giga` proxy entry point. Start the proxy as
-before, then use `giga` or `gpt2giga-harness` as the local harness client.
+It does not replace the existing `gpt2giga` proxy entry point. You can still
+start the proxy yourself as before, then use `giga` or `gpt2giga-harness` as the
+local harness client. For local `127.0.0.1` proxy URLs, the direct-chat harness
+can also start a temporary `gpt2giga` sidecar when the proxy is down and real
+GigaChat credentials are already present in the environment.
 
 ## Quickstart
 
@@ -21,6 +24,13 @@ In another terminal, inspect the harness environment:
 ```bash
 giga doctor
 giga harness list
+```
+
+If the proxy is not running, `giga chat` and `giga harness run direct-chat` try
+to start a local sidecar by default. Disable that for a single command with:
+
+```bash
+giga chat --no-start-proxy --api-mode v2 --model GigaChat-2-Max "Привет"
 ```
 
 Run direct Chat Completions smoke tests through explicit backend routes:
@@ -65,12 +75,19 @@ GPT2GIGA_HARNESS_DEFAULT_MODEL=GigaChat-2-Max
 GPT2GIGA_HARNESS_DEFAULT_API_MODE=v2
 GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
 GPT2GIGA_HARNESS_UI_PORT=8091
+GPT2GIGA_HARNESS_AUTO_START_PROXY=True
+GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
 ```
 
 If `GPT2GIGA_HARNESS_API_KEY` is not set, the harness falls back to
 `GPT2GIGA_API_KEY` for calls to the local proxy. It never passes
 `GIGACHAT_CREDENTIALS`, OAuth tokens, certificates, or `.env` contents to
 external agent CLIs.
+
+Auto-start is local-only. It supports `http://127.0.0.1:<port>`,
+`http://localhost:<port>`, and `http://[::1]:<port>`. It refuses remote hosts,
+does not create fake upstream credentials, and starts the child proxy with a
+generated local `GPT2GIGA_API_KEY` if one is not already configured.
 
 ## Built-in Harnesses
 
@@ -195,6 +212,7 @@ Common checks:
 
 - proxy is reachable at `GPT2GIGA_HARNESS_PROXY_URL` or
   `http://127.0.0.1:8090`;
+- if relying on auto-start, `giga doctor` reports `Proxy / Auto-start: ready`;
 - `GPT2GIGA_API_KEY` or `GPT2GIGA_HARNESS_API_KEY` matches the proxy when API-key
   auth is enabled;
 - `GIGACHAT_CREDENTIALS` is present for real upstream calls;

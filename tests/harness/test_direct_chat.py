@@ -63,6 +63,44 @@ def test_direct_chat_parses_choices_message_content(monkeypatch):
     assert result.text == "answer"
 
 
+def test_direct_chat_autostart_uses_generated_sidecar_api_key(monkeypatch):
+    captured = {}
+
+    def fake_ensure_proxy_available(context, api_mode):
+        captured["startup_context"] = context
+        captured["startup_api_mode"] = api_mode
+        return proxy.ProxyStartup(
+            ok=True,
+            started=True,
+            api_key="generated-proxy-key",
+            pid=123,
+            detail="started",
+        )
+
+    def fake_request_json(method, url, *, payload, api_key, timeout):
+        captured["api_key"] = api_key
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(proxy, "ensure_proxy_available", fake_ensure_proxy_available)
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    result = DirectChatHarness().run(
+        HarnessRequest(prompt="hello", api_mode=GigaChatApiMode.V2),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            auto_start_proxy=True,
+        ),
+    )
+
+    assert result.ok is True
+    assert captured["api_key"] == "generated-proxy-key"
+    assert captured["startup_api_mode"] == GigaChatApiMode.V2
+    assert result.events[0].type == "proxy_sidecar"
+    assert result.events[0].payload["pid"] == 123
+    assert "Authorization: Bearer <redacted>" in result.raw["curl_command"]
+    assert "generated-proxy-key" not in str(result.raw)
+
+
 def test_model_listing_falls_back_when_proxy_unavailable(monkeypatch):
     def fail_request(*args, **kwargs):
         raise proxy.ProxyRequestError("down")

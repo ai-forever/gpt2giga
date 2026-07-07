@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
+import secrets
+import subprocess
+import sys
+import time
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from gpt2giga.harness.config import DEFAULT_MODEL_HINTS, HarnessConfig
-from gpt2giga.harness.types import GigaChatApiMode, redact_secrets
+from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, redact_secrets
 
 
 class ProxyRequestError(RuntimeError):
@@ -51,6 +57,29 @@ class RouteProbe:
     status_code: int | None = None
     detail: str | None = None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class SidecarPreflight:
+    """Explain whether the local proxy sidecar can be started."""
+
+    ok: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class ProxyStartup:
+    """Result of preparing a local proxy for a harness request."""
+
+    ok: bool
+    started: bool = False
+    api_key: str | None = None
+    pid: int | None = None
+    detail: str | None = None
+    error: str | None = None
+
+
+_SIDECAR_API_KEYS: dict[str, str] = {}
 
 
 def build_chat_completions_url(
@@ -103,15 +132,79 @@ def request_json(
 
 def health_check(config: HarnessConfig) -> ProxyHealth:
     """Check common local proxy health paths without requiring credentials."""
+    return _health_check_url(config.proxy_url)
+
+
+def sidecar_preflight(context: HarnessContext) -> SidecarPreflight:
+    """Validate whether this process can start a local gpt2giga sidecar."""
+    if not context.auto_start_proxy:
+        return SidecarPreflight(ok=False, reason="auto-start disabled")
+    parsed = urlparse(context.proxy_url)
+    if parsed.scheme != "http":
+        return SidecarPreflight(
+            ok=False,
+            reason="auto-start supports only http:// local proxy URLs",
+        )
+    host = parsed.hostname or ""
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        return SidecarPreflight(
+            ok=False,
+            reason="auto-start is limited to 127.0.0.1, localhost, or ::1",
+        )
+    path = parsed.path.rstrip("/")
+    if path:
+        return SidecarPreflight(
+            ok=False,
+            reason="auto-start requires a proxy URL without a path component",
+        )
+    if not _has_upstream_credentials(os.environ):
+        return SidecarPreflight(
+            ok=False,
+            reason=(
+                "missing GigaChat credentials; set GIGACHAT_CREDENTIALS or "
+                "GIGACHAT_ACCESS_TOKEN"
+            ),
+        )
+    return SidecarPreflight(ok=True, reason="ready")
+
+
+def cached_sidecar_api_key(proxy_url: str) -> str | None:
+    """Return the generated sidecar API key for this process, if any."""
+    return _SIDECAR_API_KEYS.get(proxy_url)
+
+
+def ensure_proxy_available(
+    context: HarnessContext,
+    api_mode: GigaChatApiMode,
+) -> ProxyStartup:
+    """Return a reachable proxy or start a local sidecar when allowed."""
+    cached_api_key = context.api_key or cached_sidecar_api_key(context.proxy_url)
+    health = _health_check_url(context.proxy_url)
+    if health.ok:
+        return ProxyStartup(
+            ok=True,
+            api_key=cached_api_key,
+            detail=f"proxy already reachable via {health.path}",
+        )
+
+    preflight = sidecar_preflight(context)
+    if not preflight.ok:
+        return ProxyStartup(ok=False, api_key=cached_api_key, error=preflight.reason)
+
+    return _start_local_sidecar(context, api_mode, cached_api_key)
+
+
+def _health_check_url(proxy_url: str) -> ProxyHealth:
+    """Check common local proxy health paths without requiring credentials."""
     last_error = "proxy did not respond"
     for path in ("/health", "/ping", "/"):
-        url = f"{config.proxy_url}{path}"
+        url = f"{proxy_url}{path}"
         try:
             request = Request(url, method="GET")
             with urlopen(request, timeout=5) as response:
                 return ProxyHealth(
                     ok=200 <= response.status < 500,
-                    url=config.proxy_url,
+                    url=proxy_url,
                     path=path,
                     status_code=response.status,
                 )
@@ -119,13 +212,13 @@ def health_check(config: HarnessConfig) -> ProxyHealth:
             if exc.code < 500:
                 return ProxyHealth(
                     ok=True,
-                    url=config.proxy_url,
+                    url=proxy_url,
                     path=path,
                     status_code=exc.code,
                 )
         except URLError as exc:
             last_error = str(exc.reason)
-    return ProxyHealth(ok=False, url=config.proxy_url, error=last_error)
+    return ProxyHealth(ok=False, url=proxy_url, error=last_error)
 
 
 def probe_json_route(
@@ -145,7 +238,7 @@ def probe_json_route(
             payload=payload
             if payload is not None
             else _default_route_probe_payload(config, model=model),
-            api_key=config.api_key,
+            api_key=config.api_key or cached_sidecar_api_key(config.proxy_url),
             timeout=5,
         )
     except ProxyRequestError as exc:
@@ -179,7 +272,7 @@ def discover_models(
             data = request_json(
                 "GET",
                 f"{config.proxy_url}{path}",
-                api_key=config.api_key,
+                api_key=config.api_key or cached_sidecar_api_key(config.proxy_url),
                 timeout=10,
             )
         except ProxyRequestError as exc:
@@ -229,6 +322,97 @@ def extract_text(data: dict[str, Any]) -> str:
 def safe_raw(data: dict[str, Any]) -> dict[str, Any]:
     """Return a redacted shallow JSON object for results."""
     return redact_secrets(data)
+
+
+def _start_local_sidecar(
+    context: HarnessContext,
+    api_mode: GigaChatApiMode,
+    api_key: str | None,
+) -> ProxyStartup:
+    parsed = urlparse(context.proxy_url)
+    port = parsed.port or 80
+    bind_host = "::1" if parsed.hostname == "::1" else "127.0.0.1"
+    api_key = api_key or secrets.token_urlsafe(32)
+    env = _sidecar_env(
+        context,
+        api_mode,
+        host=bind_host,
+        port=port,
+        api_key=api_key,
+    )
+    process = subprocess.Popen(
+        [sys.executable, "-c", "from gpt2giga import run; run()"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + context.proxy_start_timeout_seconds
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return ProxyStartup(
+                ok=False,
+                api_key=api_key,
+                error=f"proxy sidecar exited early with code {process.returncode}",
+            )
+        health = _health_check_url(context.proxy_url)
+        if health.ok:
+            _SIDECAR_API_KEYS[context.proxy_url] = api_key
+            return ProxyStartup(
+                ok=True,
+                started=True,
+                api_key=api_key,
+                pid=process.pid,
+                detail=f"started local proxy sidecar on port {port}",
+            )
+        time.sleep(0.2)
+
+    process.terminate()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+    return ProxyStartup(
+        ok=False,
+        api_key=api_key,
+        error=(
+            f"timed out waiting for local proxy sidecar to start at {context.proxy_url}"
+        ),
+    )
+
+
+def _sidecar_env(
+    context: HarnessContext,
+    api_mode: GigaChatApiMode,
+    *,
+    host: str,
+    port: int,
+    api_key: str,
+) -> dict[str, str]:
+    env = dict(os.environ)
+    env.update(
+        {
+            "GPT2GIGA_MODE": "DEV",
+            "GPT2GIGA_HOST": host,
+            "GPT2GIGA_PORT": str(port),
+            "GPT2GIGA_ENABLE_API_KEY_AUTH": "True",
+            "GPT2GIGA_API_KEY": api_key,
+            "GPT2GIGA_GIGACHAT_API_MODE": api_mode.value,
+            "GPT2GIGA_PASS_MODEL": "False",
+            "GPT2GIGA_DISABLE_REASONING": "True",
+        }
+    )
+    if context.default_model and not env.get("GIGACHAT_MODEL"):
+        env["GIGACHAT_MODEL"] = context.default_model
+    return env
+
+
+def _has_upstream_credentials(env: dict[str, str]) -> bool:
+    for name in ("GIGACHAT_CREDENTIALS", "GIGACHAT_ACCESS_TOKEN", "GIGACHAT_USER"):
+        value = env.get(name)
+        if value and value.strip():
+            return True
+    return False
 
 
 def _model_paths(api_mode: GigaChatApiMode) -> tuple[str, ...]:

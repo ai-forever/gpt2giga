@@ -10,6 +10,7 @@ from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, parse_api_mo
 DEFAULT_PROXY_URL = "http://127.0.0.1:8090"
 DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8091
+DEFAULT_PROXY_START_TIMEOUT_SECONDS = 15.0
 DEFAULT_MODEL_HINTS = (
     "GigaChat-2-Max",
     "GigaChat-3-Ultra",
@@ -29,6 +30,8 @@ class HarnessConfig:
     ui_host: str = DEFAULT_UI_HOST
     ui_port: int = DEFAULT_UI_PORT
     timeout_seconds: float = 60.0
+    auto_start_proxy: bool = True
+    proxy_start_timeout_seconds: float = DEFAULT_PROXY_START_TIMEOUT_SECONDS
 
     @classmethod
     def from_env(cls) -> "HarnessConfig":
@@ -51,6 +54,14 @@ class HarnessConfig:
             _env_first("GPT2GIGA_HARNESS_TIMEOUT_SECONDS"),
             60.0,
         )
+        auto_start_proxy = _parse_bool(
+            _env_first("GPT2GIGA_HARNESS_AUTO_START_PROXY"),
+            True,
+        )
+        proxy_start_timeout = _parse_float(
+            _env_first("GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS"),
+            DEFAULT_PROXY_START_TIMEOUT_SECONDS,
+        )
         return cls(
             proxy_url=_normalize_proxy_url(proxy_url),
             api_key=api_key,
@@ -59,6 +70,8 @@ class HarnessConfig:
             ui_host=ui_host,
             ui_port=ui_port,
             timeout_seconds=timeout,
+            auto_start_proxy=auto_start_proxy,
+            proxy_start_timeout_seconds=proxy_start_timeout,
         )
 
     def with_overrides(
@@ -67,6 +80,7 @@ class HarnessConfig:
         proxy_url: str | None = None,
         ui_host: str | None = None,
         ui_port: int | None = None,
+        auto_start_proxy: bool | None = None,
     ) -> "HarnessConfig":
         """Return a copy with CLI-provided overrides."""
         return HarnessConfig(
@@ -77,6 +91,12 @@ class HarnessConfig:
             ui_host=ui_host or self.ui_host,
             ui_port=ui_port if ui_port is not None else self.ui_port,
             timeout_seconds=self.timeout_seconds,
+            auto_start_proxy=(
+                auto_start_proxy
+                if auto_start_proxy is not None
+                else self.auto_start_proxy
+            ),
+            proxy_start_timeout_seconds=self.proxy_start_timeout_seconds,
         )
 
     def to_context(self) -> HarnessContext:
@@ -86,6 +106,8 @@ class HarnessConfig:
             api_key=self.api_key,
             default_model=self.default_model,
             timeout_seconds=self.timeout_seconds,
+            auto_start_proxy=self.auto_start_proxy,
+            proxy_start_timeout_seconds=self.proxy_start_timeout_seconds,
         )
 
 
@@ -131,3 +153,14 @@ def _parse_float(value: str | None, default: float) -> float:
         return float(value)
     except ValueError:
         return default
+
+
+def _parse_bool(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default

@@ -10,6 +10,7 @@ from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,
+    HarnessEvent,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -50,6 +51,7 @@ class DirectChatHarness(BaseHarness):
             "messages": [{"role": "user", "content": request.prompt}],
             "stream": bool(request.stream),
         }
+        api_key = context.api_key or proxy.cached_sidecar_api_key(context.proxy_url)
         cli_command = (
             "giga",
             "chat",
@@ -59,7 +61,7 @@ class DirectChatHarness(BaseHarness):
             model,
             request.prompt,
         )
-        curl_command = _curl_command(url, payload, bool(context.api_key))
+        curl_command = _curl_command(url, payload, bool(api_key))
         if request.extra.get("dry_run"):
             return HarnessResult(
                 ok=True,
@@ -67,12 +69,45 @@ class DirectChatHarness(BaseHarness):
                 raw={"url": url, "payload": payload, "curl_command": curl_command},
                 command=cli_command,
             )
+        events: tuple[HarnessEvent, ...] = ()
+        if context.auto_start_proxy:
+            startup = proxy.ensure_proxy_available(context, request.api_mode)
+            api_key = startup.api_key or api_key
+            curl_command = _curl_command(url, payload, bool(api_key))
+            if not startup.ok:
+                return HarnessResult(
+                    ok=False,
+                    text="",
+                    raw={
+                        "url": url,
+                        "payload": payload,
+                        "curl_command": curl_command,
+                        "proxy_start": {
+                            "started": startup.started,
+                            "detail": startup.detail,
+                            "error": startup.error,
+                        },
+                    },
+                    command=cli_command,
+                    error=startup.error or "proxy is not reachable",
+                )
+            if startup.started:
+                events = (
+                    HarnessEvent(
+                        type="proxy_sidecar",
+                        message="Started local gpt2giga proxy sidecar.",
+                        payload={
+                            "proxy_url": context.proxy_url,
+                            "pid": startup.pid,
+                        },
+                    ),
+                )
         try:
             data = proxy.request_json(
                 "POST",
                 url,
                 payload=payload,
-                api_key=context.api_key,
+                api_key=api_key,
                 timeout=context.timeout_seconds,
             )
         except proxy.ProxyRequestError as exc:
@@ -81,6 +116,7 @@ class DirectChatHarness(BaseHarness):
                 text="",
                 raw={"url": url, "payload": payload, "curl_command": curl_command},
                 command=cli_command,
+                events=events,
                 error=str(exc),
             )
         return HarnessResult(
@@ -91,6 +127,7 @@ class DirectChatHarness(BaseHarness):
                 "url": url,
                 "curl_command": curl_command,
             },
+            events=events,
             command=cli_command,
         )
 

@@ -119,6 +119,8 @@ class HarnessContext:
     api_key: str | None = None
     default_model: str | None = None
     timeout_seconds: float = 60.0
+    auto_start_proxy: bool = False
+    proxy_start_timeout_seconds: float = 15.0
     extra_env: Mapping[str, str] = field(default_factory=dict)
 
     def api_base_url(self, api_mode: GigaChatApiMode) -> str:
