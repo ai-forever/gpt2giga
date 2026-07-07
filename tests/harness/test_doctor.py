@@ -29,6 +29,36 @@ def test_probe_json_route_treats_not_found_as_unreachable(monkeypatch):
     assert result.detail == "route not found"
 
 
+def test_probe_json_route_sends_ping_message(monkeypatch):
+    captured = {}
+
+    def fake_request_json(method, url, *, payload, api_key, timeout):
+        captured["method"] = method
+        captured["url"] = url
+        captured["payload"] = payload
+        captured["api_key"] = api_key
+        captured["timeout"] = timeout
+        return {}
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    result = proxy.probe_json_route(
+        HarnessConfig(default_model="GigaChat-2-Max", api_key="proxy-key"),
+        "/v2/chat/completions",
+    )
+
+    assert result.ok is True
+    assert captured["method"] == "POST"
+    assert captured["url"].endswith("/v2/chat/completions")
+    assert captured["payload"] == {
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": False,
+        "model": "GigaChat-2-Max",
+    }
+    assert captured["api_key"] == "proxy-key"
+    assert captured["timeout"] == 5
+
+
 def test_doctor_reports_live_route_probes(monkeypatch):
     monkeypatch.setattr(
         proxy,

@@ -141,7 +141,9 @@ def probe_json_route(
         request_json(
             method,
             f"{config.proxy_url}{normalized_path}",
-            payload=payload or {},
+            payload=payload
+            if payload is not None
+            else _default_route_probe_payload(config),
             api_key=config.api_key,
             timeout=5,
         )
@@ -256,6 +258,16 @@ def _read_error_body(exc: HTTPError) -> str:
     except OSError:
         return ""
     return body[:500]
+
+
+def _default_route_probe_payload(config: HarnessConfig) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "messages": [{"role": "user", "content": "ping"}],
+        "stream": False,
+    }
+    if config.default_model:
+        payload["model"] = config.default_model
+    return payload
 
 
 def _status_indicates_mounted_route(status_code: int | None) -> bool:
