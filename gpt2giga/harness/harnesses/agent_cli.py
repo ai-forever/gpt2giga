@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 from gpt2giga.harness import proxy
 from gpt2giga.harness.types import (
@@ -155,7 +156,7 @@ def run_command(
 
     stdout = _redact_known_secret_values(completed.stdout, env)
     stderr = _redact_known_secret_values(completed.stderr, env)
-    text = stdout.strip() or stderr.strip()
+    text = _extract_machine_readable_text(stdout) or stdout.strip() or stderr.strip()
     return HarnessResult(
         ok=completed.returncode == 0,
         text=text,
@@ -219,3 +220,27 @@ def _redact_known_secret_values(text: str, env: Mapping[str, str]) -> str:
         if value and value != "0":
             redacted = redacted.replace(value, REDACTED)
     return redacted
+
+
+def _extract_machine_readable_text(stdout: str) -> str:
+    payload = _load_json_object(stdout)
+    if payload is None:
+        return ""
+    for key in ("result", "response", "output_text", "text"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _load_json_object(stdout: str) -> dict[str, Any] | None:
+    text = stdout.strip()
+    if not text:
+        return None
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(decoded, dict):
+        return decoded
+    return None

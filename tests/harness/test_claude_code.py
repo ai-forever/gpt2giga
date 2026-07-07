@@ -1,4 +1,5 @@
 from gpt2giga.harness import proxy
+from gpt2giga.harness.harnesses.agent_cli import run_command
 from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga.harness.types import (
     Availability,
@@ -95,3 +96,27 @@ def test_claude_code_proxy_preflight_failure_prevents_cli_run(monkeypatch):
 
     assert result.ok is False
     assert result.error == "missing GigaChat credentials"
+
+
+def test_claude_code_json_output_uses_result_as_text(monkeypatch):
+    class Completed:
+        returncode = 0
+        stdout = '{"type":"result","result":"Привет! Все хорошо.","usage":{"x":1}}'
+        stderr = ""
+
+    monkeypatch.setattr(
+        "gpt2giga.harness.harnesses.agent_cli.subprocess.run",
+        lambda *args, **kwargs: Completed(),
+    )
+
+    result = run_command(
+        label="Claude Code",
+        command=("claude",),
+        env={},
+        cwd=None,
+        timeout_seconds=1,
+    )
+
+    assert result.ok is True
+    assert result.text == "Привет! Все хорошо."
+    assert result.raw["stdout"].startswith('{"type":"result"')

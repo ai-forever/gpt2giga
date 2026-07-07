@@ -162,3 +162,30 @@ def test_gemini_cli_autostart_uses_generated_proxy_key(monkeypatch):
     assert captured["env"]["GEMINI_API_KEY"] == "generated-proxy-key"
     assert captured["env"]["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v1"
     assert result.events[0].payload["pid"] == 456
+
+
+def test_gemini_cli_json_output_uses_response_as_text(monkeypatch):
+    class Completed:
+        returncode = 0
+        stdout = (
+            '{"session_id":"abc","response":"Привет! Готов к работе.",'
+            '"stats":{"tokens":{"total":12}}}'
+        )
+        stderr = ""
+
+    monkeypatch.setattr(
+        "gpt2giga.harness.harnesses.agent_cli.subprocess.run",
+        lambda *args, **kwargs: Completed(),
+    )
+
+    result = run_command(
+        label="Gemini CLI",
+        command=("gemini",),
+        env={},
+        cwd=None,
+        timeout_seconds=1,
+    )
+
+    assert result.ok is True
+    assert result.text == "Привет! Готов к работе."
+    assert '"stats"' in result.raw["stdout"]
