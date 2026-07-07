@@ -64,11 +64,11 @@ class CodexCliHarness(BaseHarness):
         model = request.model or context.default_model or "GigaChat"
         return (
             executable,
+            "--ask-for-approval",
+            "on-request",
             "exec",
             "--sandbox",
             sandbox,
-            "--approval-policy",
-            "on-request",
             "--ephemeral",
             "-m",
             model,

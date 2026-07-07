@@ -44,3 +44,13 @@ def test_codex_cli_mode_mapping_plan_read_edit():
     for mode, sandbox in expected.items():
         command = harness.build_command(HarnessRequest(prompt="x", mode=mode), context)
         assert command[command.index("--sandbox") + 1] == sandbox
+
+
+def test_codex_cli_uses_top_level_approval_flag():
+    command = CodexCliHarness().build_command(
+        HarnessRequest(prompt="x"),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert "--approval-policy" not in command
+    assert command[1:4] == ("--ask-for-approval", "on-request", "exec")
