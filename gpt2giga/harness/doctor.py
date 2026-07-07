@@ -17,6 +17,7 @@ def run_doctor(
     """Build a human-readable diagnostic report without printing secrets."""
     registry = registry or create_default_registry()
     health = proxy.health_check(config)
+    route_probes = _chat_route_probes(config) if health.ok else {}
     models = proxy.discover_models(config, config.default_api_mode)
     lines = [
         "gpt2giga Unified Harness doctor",
@@ -37,8 +38,8 @@ def run_doctor(
         f"  PASS_MODEL: {pass_model_env_note() or 'not set'}",
         "",
         "Routes:",
-        "  /v1/chat/completions: mounted by proxy; live POST not attempted",
-        "  /v2/chat/completions: mounted by proxy; live POST not attempted",
+        f"  /v1/chat/completions: {_route_probe_text(route_probes.get('/v1/chat/completions'))}",
+        f"  /v2/chat/completions: {_route_probe_text(route_probes.get('/v2/chat/completions'))}",
         (f"  model discovery: {len(models.models)} candidate(s) from {models.source}"),
         "",
         "Harnesses:",
@@ -66,6 +67,25 @@ def _health_text(health: proxy.ProxyHealth) -> str:
     if health.ok:
         return f"OK via {health.path} ({health.status_code})"
     return f"unreachable ({health.error})"
+
+
+def _chat_route_probes(config: HarnessConfig) -> dict[str, proxy.RouteProbe]:
+    return {
+        path: proxy.probe_json_route(config, path)
+        for path in ("/v1/chat/completions", "/v2/chat/completions")
+    }
+
+
+def _route_probe_text(route: proxy.RouteProbe | None) -> str:
+    if route is None:
+        return "not checked; proxy unreachable"
+    status = (
+        f"HTTP {route.status_code}" if route.status_code is not None else "no status"
+    )
+    detail = f"; {route.detail}" if route.detail else ""
+    if route.ok:
+        return f"reachable ({status}{detail})"
+    return f"unreachable ({status}{detail})"
 
 
 def _credentials_text() -> str:

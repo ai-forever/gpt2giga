@@ -41,6 +41,18 @@ class ModelDiscovery:
     error: str | None = None
 
 
+@dataclass(frozen=True)
+class RouteProbe:
+    """Route-level diagnostic result for doctor output."""
+
+    ok: bool
+    path: str
+    method: str
+    status_code: int | None = None
+    detail: str | None = None
+    error: str | None = None
+
+
 def build_chat_completions_url(
     proxy_url: str,
     api_mode: GigaChatApiMode,
@@ -114,6 +126,42 @@ def health_check(config: HarnessConfig) -> ProxyHealth:
         except URLError as exc:
             last_error = str(exc.reason)
     return ProxyHealth(ok=False, url=config.proxy_url, error=last_error)
+
+
+def probe_json_route(
+    config: HarnessConfig,
+    path: str,
+    *,
+    method: str = "POST",
+    payload: dict[str, Any] | None = None,
+) -> RouteProbe:
+    """Probe whether a JSON route is mounted without requiring upstream success."""
+    normalized_path = path if path.startswith("/") else f"/{path}"
+    try:
+        request_json(
+            method,
+            f"{config.proxy_url}{normalized_path}",
+            payload=payload or {},
+            api_key=config.api_key,
+            timeout=5,
+        )
+    except ProxyRequestError as exc:
+        status_code = exc.status_code
+        return RouteProbe(
+            ok=_status_indicates_mounted_route(status_code),
+            path=normalized_path,
+            method=method.upper(),
+            status_code=status_code,
+            detail=_route_probe_detail(status_code),
+            error=str(exc),
+        )
+    return RouteProbe(
+        ok=True,
+        path=normalized_path,
+        method=method.upper(),
+        status_code=200,
+        detail="accepted probe request",
+    )
 
 
 def discover_models(
@@ -208,3 +256,21 @@ def _read_error_body(exc: HTTPError) -> str:
     except OSError:
         return ""
     return body[:500]
+
+
+def _status_indicates_mounted_route(status_code: int | None) -> bool:
+    return status_code in {400, 401, 403, 405, 422}
+
+
+def _route_probe_detail(status_code: int | None) -> str:
+    if status_code in {400, 422}:
+        return "route rejected the intentionally minimal JSON probe"
+    if status_code in {401, 403}:
+        return "route is protected by proxy auth"
+    if status_code == 405:
+        return "path exists but rejected the probe method"
+    if status_code == 404:
+        return "route not found"
+    if status_code is None:
+        return "proxy did not respond"
+    return "unexpected route probe response"
