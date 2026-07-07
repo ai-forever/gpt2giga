@@ -59,7 +59,24 @@ def test_probe_json_route_sends_ping_message(monkeypatch):
     assert captured["timeout"] == 5
 
 
+def test_probe_json_route_uses_model_fallback(monkeypatch):
+    captured = {}
+
+    def fake_request_json(method, url, *, payload, api_key, timeout):
+        captured["payload"] = payload
+        return {}
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    result = proxy.probe_json_route(HarnessConfig(), "/v2/chat/completions")
+
+    assert result.ok is True
+    assert captured["payload"]["model"] == "GigaChat-2-Max"
+    assert captured["payload"]["messages"] == [{"role": "user", "content": "ping"}]
+
+
 def test_doctor_reports_live_route_probes(monkeypatch):
+    captured_models = []
     monkeypatch.setattr(
         proxy,
         "health_check",
@@ -75,23 +92,25 @@ def test_doctor_reports_live_route_probes(monkeypatch):
         "discover_models",
         lambda config, api_mode: proxy.ModelDiscovery(
             ok=True,
-            models=("GigaChat-2-Max",),
+            models=("DiscoveredModel",),
             source="/v2/models",
         ),
     )
-    monkeypatch.setattr(
-        proxy,
-        "probe_json_route",
-        lambda config, path: proxy.RouteProbe(
+
+    def fake_probe_json_route(config, path, *, model=None, **kwargs):
+        captured_models.append(model)
+        return proxy.RouteProbe(
             ok=True,
             path=path,
             method="POST",
             status_code=422,
             detail="route rejected the intentionally minimal JSON probe",
-        ),
-    )
+        )
+
+    monkeypatch.setattr(proxy, "probe_json_route", fake_probe_json_route)
 
     output = run_doctor(HarnessConfig())
 
     assert "/v1/chat/completions: reachable (HTTP 422" in output
     assert "/v2/chat/completions: reachable (HTTP 422" in output
+    assert captured_models == ["DiscoveredModel", "DiscoveredModel"]

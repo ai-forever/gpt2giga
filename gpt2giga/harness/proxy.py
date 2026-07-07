@@ -134,6 +134,7 @@ def probe_json_route(
     *,
     method: str = "POST",
     payload: dict[str, Any] | None = None,
+    model: str | None = None,
 ) -> RouteProbe:
     """Probe whether a JSON route is mounted without requiring upstream success."""
     normalized_path = path if path.startswith("/") else f"/{path}"
@@ -143,7 +144,7 @@ def probe_json_route(
             f"{config.proxy_url}{normalized_path}",
             payload=payload
             if payload is not None
-            else _default_route_probe_payload(config),
+            else _default_route_probe_payload(config, model=model),
             api_key=config.api_key,
             timeout=5,
         )
@@ -260,13 +261,16 @@ def _read_error_body(exc: HTTPError) -> str:
     return body[:500]
 
 
-def _default_route_probe_payload(config: HarnessConfig) -> dict[str, Any]:
+def _default_route_probe_payload(
+    config: HarnessConfig,
+    *,
+    model: str | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
+        "model": model or config.default_model or DEFAULT_MODEL_HINTS[0],
         "messages": [{"role": "user", "content": "ping"}],
         "stream": False,
     }
-    if config.default_model:
-        payload["model"] = config.default_model
     return payload
 
 

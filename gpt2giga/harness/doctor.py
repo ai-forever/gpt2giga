@@ -6,7 +6,11 @@ import os
 import platform
 
 from gpt2giga.harness import proxy
-from gpt2giga.harness.config import HarnessConfig, pass_model_env_note
+from gpt2giga.harness.config import (
+    DEFAULT_MODEL_HINTS,
+    HarnessConfig,
+    pass_model_env_note,
+)
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 
 
@@ -17,8 +21,12 @@ def run_doctor(
     """Build a human-readable diagnostic report without printing secrets."""
     registry = registry or create_default_registry()
     health = proxy.health_check(config)
-    route_probes = _chat_route_probes(config) if health.ok else {}
     models = proxy.discover_models(config, config.default_api_mode)
+    route_probes = (
+        _chat_route_probes(config, _route_probe_model(config, models))
+        if health.ok
+        else {}
+    )
     lines = [
         "gpt2giga Unified Harness doctor",
         "",
@@ -69,11 +77,25 @@ def _health_text(health: proxy.ProxyHealth) -> str:
     return f"unreachable ({health.error})"
 
 
-def _chat_route_probes(config: HarnessConfig) -> dict[str, proxy.RouteProbe]:
+def _chat_route_probes(
+    config: HarnessConfig,
+    model: str,
+) -> dict[str, proxy.RouteProbe]:
     return {
-        path: proxy.probe_json_route(config, path)
+        path: proxy.probe_json_route(config, path, model=model)
         for path in ("/v1/chat/completions", "/v2/chat/completions")
     }
+
+
+def _route_probe_model(
+    config: HarnessConfig,
+    models: proxy.ModelDiscovery,
+) -> str:
+    if config.default_model:
+        return config.default_model
+    if models.models:
+        return models.models[0]
+    return DEFAULT_MODEL_HINTS[0]
 
 
 def _route_probe_text(route: proxy.RouteProbe | None) -> str:
