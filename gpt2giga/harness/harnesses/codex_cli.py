@@ -109,9 +109,19 @@ class CodexCliHarness(BaseHarness):
                 raw={
                     "env": redact_secrets(
                         self.build_env(request, context, codex_home="<temp>")
-                    )
+                    ),
+                    "workspace": request.workspace,
                 },
                 command=command,
+            )
+        workspace_error = _workspace_error(request.workspace)
+        if workspace_error is not None:
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw={},
+                command=command,
+                error=workspace_error,
             )
         availability = self.availability()
         if availability.status.value != "available":
@@ -184,3 +194,14 @@ def _write_codex_config(
 
 def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _workspace_error(value: str | None) -> str | None:
+    if value is None:
+        return None
+    path = Path(value)
+    if not path.exists():
+        return f"Workspace does not exist: {value}"
+    if not path.is_dir():
+        return f"Workspace is not a directory: {value}"
+    return None

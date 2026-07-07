@@ -107,13 +107,14 @@ giga harness run codex-cli \
   --mode plan \
   --model GigaChat-2-Max \
   --api-mode v2 \
+  --workspace . \
   --prompt "Inspect this repo and propose the smallest implementation plan"
 ```
 
 Backward-friendly alias:
 
 ```bash
-giga run --agent codex --mode plan "Inspect this repo"
+giga run --agent codex --mode plan --workspace . "Inspect this repo"
 ```
 
 Use `--dry-run --json` to inspect the sanitized command and environment without
@@ -131,6 +132,7 @@ giga harness run codex-cli --prompt "Inspect" --dry-run --json
 - model input with proxy-backed model suggestions when available;
 - API mode selection: `v1` or `v2`;
 - capability and mode selection;
+- optional workspace path for agent harnesses;
 - prompt input;
 - output and raw JSON panels;
 - copy buttons for the equivalent CLI command and direct-chat curl command.

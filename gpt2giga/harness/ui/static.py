@@ -107,6 +107,9 @@ INDEX_HTML = """<!doctype html>
       color: #92400e;
       font-size: 13px;
     }
+    .optional {
+      display: none;
+    }
     @media (max-width: 800px) {
       .layout {
         grid-template-columns: 1fr;
@@ -148,6 +151,9 @@ INDEX_HTML = """<!doctype html>
             <option value="read">read</option>
             <option value="edit">edit</option>
           </select>
+        </label>
+        <label id="workspace-row" class="optional">Workspace
+          <input id="workspace" placeholder="/path/to/repo">
         </label>
         <label>Prompt
           <textarea id="prompt" spellcheck="true"></textarea>
@@ -214,6 +220,8 @@ INDEX_HTML = """<!doctype html>
       const item = state.harnesses.find((entry) => entry.spec.id === harnessId);
       const caps = item ? item.spec.capabilities : [];
       byId("warning").style.display = caps.includes("agent_cli") ? "block" : "none";
+      byId("workspace-row").style.display =
+        item && item.spec.supports_workspace ? "block" : "none";
       if (caps.includes("agent_cli")) {
         byId("capability").value = "agent_cli";
       } else {
@@ -229,7 +237,8 @@ INDEX_HTML = """<!doctype html>
         model: byId("model").value,
         api_mode: byId("api-mode").value,
         capability: byId("capability").value,
-        mode: byId("mode").value
+        mode: byId("mode").value,
+        workspace: byId("workspace").value
       };
       const response = await fetch("/api/run", {
         method: "POST",

@@ -20,6 +20,7 @@ from gpt2giga.harness.types import (
     spec_to_dict,
 )
 from gpt2giga.harness.ui.static import INDEX_HTML
+from gpt2giga.harness.workspace import resolve_workspace
 
 
 def create_app(
@@ -87,7 +88,7 @@ def create_app(
                 payload.get("capability") or HarnessCapability.CHAT_COMPLETIONS.value
             ),
             mode=str(payload.get("mode") or "plan"),
-            workspace=_optional_text(payload.get("workspace")),
+            workspace=resolve_workspace(_optional_text(payload.get("workspace"))),
         )
         result = harness.run(request, config.to_context())
         return result_to_dict(result)

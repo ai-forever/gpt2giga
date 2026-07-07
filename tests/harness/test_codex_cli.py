@@ -32,6 +32,22 @@ def test_codex_cli_does_not_include_gigachat_credentials(monkeypatch):
     assert "secret" not in str(result.raw)
 
 
+def test_codex_cli_dry_run_reports_workspace_without_validating(tmp_path):
+    missing_workspace = tmp_path / "missing"
+
+    result = CodexCliHarness().run(
+        HarnessRequest(
+            prompt="inspect",
+            workspace=str(missing_workspace),
+            extra={"dry_run": True},
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key"),
+    )
+
+    assert result.ok is True
+    assert result.raw["workspace"] == str(missing_workspace)
+
+
 def test_codex_cli_mode_mapping_plan_read_edit():
     harness = CodexCliHarness()
     context = HarnessContext(proxy_url="http://127.0.0.1:8090")
@@ -54,3 +70,15 @@ def test_codex_cli_uses_top_level_approval_flag():
 
     assert "--approval-policy" not in command
     assert command[1:4] == ("--ask-for-approval", "on-request", "exec")
+
+
+def test_codex_cli_reports_missing_workspace(tmp_path):
+    missing_workspace = tmp_path / "missing"
+
+    result = CodexCliHarness().run(
+        HarnessRequest(prompt="x", workspace=str(missing_workspace)),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is False
+    assert result.error == f"Workspace does not exist: {missing_workspace}"

@@ -22,6 +22,7 @@ from gpt2giga.harness.types import (
     spec_to_dict,
 )
 from gpt2giga.harness.ui.app import create_app, validate_ui_bind
+from gpt2giga.harness.workspace import resolve_workspace
 
 AGENT_ALIASES = {
     "codex": "codex-cli",
@@ -78,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--mode", choices=("plan", "read", "edit"), default="plan")
     run.add_argument("--model", default=None)
     run.add_argument("--api-mode", choices=("v1", "v2"), default=None)
+    run.add_argument("--workspace", default=None)
     run.add_argument("--json", action="store_true")
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("prompt", nargs="+")
@@ -199,7 +201,7 @@ def _handle_agent_alias(args: argparse.Namespace, config: HarnessConfig) -> int:
         api_mode=args.api_mode,
         capability=HarnessCapability.AGENT_CLI.value,
         mode=args.mode,
-        workspace=None,
+        workspace=args.workspace,
         dry_run=args.dry_run,
         config=config,
     )
@@ -271,7 +273,7 @@ def _run_harness(
         api_mode=parse_api_mode(api_mode or config.default_api_mode),
         capability=parse_capability(capability),
         mode=mode,
-        workspace=workspace,
+        workspace=resolve_workspace(workspace),
         extra={"dry_run": dry_run},
     )
     return harness.run(request, config.to_context())
