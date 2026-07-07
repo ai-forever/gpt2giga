@@ -1,9 +1,18 @@
-"""Gemini CLI harness scaffold."""
+"""Gemini CLI harness for running Gemini through local gpt2giga."""
 
 from __future__ import annotations
 
+import json
 import shutil
+import tempfile
+from pathlib import Path
 
+from gpt2giga.harness.harnesses.agent_cli import (
+    build_safe_env,
+    executable_availability,
+    run_command,
+    workspace_error,
+)
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.types import (
     Availability,
@@ -12,11 +21,17 @@ from gpt2giga.harness.types import (
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
+    redact_secrets,
 )
+
+MODE_TO_APPROVAL = {
+    "plan": "--approval-mode=plan",
+    "read": "--approval-mode=plan",
+}
 
 
 class GeminiCliHarness(BaseHarness):
-    """Detect Gemini CLI and expose a safe scaffold."""
+    """Run Gemini CLI in headless mode against gpt2giga."""
 
     @classmethod
     def spec(cls) -> HarnessSpec:
@@ -24,34 +39,123 @@ class GeminiCliHarness(BaseHarness):
             id="gemini-cli",
             title="Gemini CLI",
             kind="agent-cli",
-            description="Gemini CLI adapter scaffold; executable detection only",
+            description="Run Gemini CLI against local gpt2giga proxy",
             capabilities=(HarnessCapability.AGENT_CLI,),
             supports_model_selection=True,
             supports_api_mode_selection=True,
             supports_workspace=True,
-            tags=("gemini", "agent", "scaffold"),
+            tags=("gemini", "agent"),
         )
 
     def availability(self) -> Availability:
         executable = shutil.which("gemini")
-        if executable is None:
-            return Availability.missing(
-                "gemini executable not found",
-                "Install Gemini CLI and ensure it is on PATH.",
-            )
-        return Availability.available(f"gemini executable found: {executable}")
+        return executable_availability(
+            executable=executable,
+            executable_name="gemini",
+            install_hint="Install Gemini CLI and ensure it is on PATH.",
+            version_args=None,
+        )
+
+    def build_command(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> tuple[str, ...]:
+        """Build the Gemini CLI command without executing it."""
+        executable = shutil.which("gemini") or "gemini"
+        model = request.model or context.default_model or "GigaChat"
+        command = [
+            executable,
+            "-m",
+            model,
+            "-p",
+            request.prompt,
+            "--output-format",
+            "json",
+            "--skip-trust",
+        ]
+        approval = MODE_TO_APPROVAL.get(request.mode)
+        if approval is not None:
+            command.append(approval)
+        return tuple(command)
+
+    def build_env(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+        *,
+        home: str | None = None,
+    ) -> dict[str, str]:
+        """Build a sanitized environment for Gemini CLI."""
+        model = request.model or context.default_model or "GigaChat"
+        return build_safe_env(
+            context,
+            home=home,
+            extra={
+                "GOOGLE_GEMINI_BASE_URL": context.api_base_url(request.api_mode),
+                "GEMINI_API_KEY": context.api_key or "0",
+                "GEMINI_MODEL": model,
+                "GEMINI_CLI_TRUST_WORKSPACE": "true",
+                "GPT2GIGA_HARNESS_PROXY_URL": context.proxy_url,
+                "GPT2GIGA_HARNESS_API_MODE": request.api_mode.value,
+            },
+        )
 
     def run(
         self,
         request: HarnessRequest,
         context: HarnessContext,
     ) -> HarnessResult:
-        return HarnessResult(
-            ok=False,
-            text="",
-            raw={"api_mode": request.api_mode.value, "proxy_url": context.proxy_url},
-            error=(
-                "Gemini CLI command execution is not implemented in this MVP. "
-                "The harness is registered for availability and UI scaffolding."
-            ),
-        )
+        command = self.build_command(request, context)
+        if request.extra.get("dry_run"):
+            return HarnessResult(
+                ok=True,
+                text="dry run",
+                raw={
+                    "env": redact_secrets(
+                        self.build_env(request, context, home="<temp>")
+                    ),
+                    "workspace": request.workspace,
+                },
+                command=command,
+            )
+        workspace_validation_error = workspace_error(request.workspace)
+        if workspace_validation_error is not None:
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw={},
+                command=command,
+                error=workspace_validation_error,
+            )
+        availability = self.availability()
+        if availability.status.value != "available":
+            return HarnessResult(
+                ok=False,
+                text="",
+                raw={},
+                command=command,
+                error=availability.reason,
+            )
+        with tempfile.TemporaryDirectory(prefix="gpt2giga-gemini-") as temp_dir:
+            _write_gemini_settings(Path(temp_dir))
+            env = self.build_env(request, context, home=temp_dir)
+            return run_command(
+                label="Gemini CLI",
+                command=command,
+                env=env,
+                cwd=request.workspace,
+                timeout_seconds=context.timeout_seconds,
+            )
+
+
+def _write_gemini_settings(home: Path) -> None:
+    settings_path = home / ".gemini" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps(
+            {"security": {"auth": {"selectedType": "gemini-api-key"}}},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 
+from gpt2giga.harness.harnesses.agent_cli import run_command, workspace_error
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.types import (
     Availability,
@@ -114,14 +114,14 @@ class CodexCliHarness(BaseHarness):
                 },
                 command=command,
             )
-        workspace_error = _workspace_error(request.workspace)
-        if workspace_error is not None:
+        workspace_validation_error = workspace_error(request.workspace)
+        if workspace_validation_error is not None:
             return HarnessResult(
                 ok=False,
                 text="",
                 raw={},
                 command=command,
-                error=workspace_error,
+                error=workspace_validation_error,
             )
         availability = self.availability()
         if availability.status.value != "available":
@@ -137,38 +137,13 @@ class CodexCliHarness(BaseHarness):
             Path(codex_home).mkdir(parents=True, exist_ok=True)
             _write_codex_config(Path(codex_home), request, context)
             env = self.build_env(request, context, codex_home=codex_home)
-            try:
-                completed = subprocess.run(
-                    command,
-                    cwd=request.workspace or None,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=context.timeout_seconds,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                return HarnessResult(
-                    ok=False,
-                    text="",
-                    raw={"timeout_seconds": context.timeout_seconds},
-                    command=command,
-                    error=f"Codex CLI timed out after {exc.timeout} seconds",
-                )
-        text = completed.stdout.strip() or completed.stderr.strip()
-        return HarnessResult(
-            ok=completed.returncode == 0,
-            text=text,
-            raw=redact_secrets(
-                {
-                    "exit_code": completed.returncode,
-                    "stdout": completed.stdout[-4000:],
-                    "stderr": completed.stderr[-4000:],
-                }
-            ),
-            command=command,
-            error=None if completed.returncode == 0 else text,
-        )
+            return run_command(
+                label="Codex CLI",
+                command=command,
+                env=env,
+                cwd=request.workspace or None,
+                timeout_seconds=context.timeout_seconds,
+            )
 
 
 def _write_codex_config(
@@ -194,14 +169,3 @@ def _write_codex_config(
 
 def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _workspace_error(value: str | None) -> str | None:
-    if value is None:
-        return None
-    path = Path(value)
-    if not path.exists():
-        return f"Workspace does not exist: {value}"
-    if not path.is_dir():
-        return f"Workspace is not a directory: {value}"
-    return None

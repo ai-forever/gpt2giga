@@ -96,8 +96,8 @@ generated local `GPT2GIGA_API_KEY` if one is not already configured.
 | `direct-chat` | MVP | Sends OpenAI-style Chat Completions to `/v1/chat/completions` or `/v2/chat/completions`. |
 | `echo` | MVP | Local no-network smoke harness for tests and UI checks. |
 | `codex-cli` | MVP | Builds and runs a sanitized `codex exec` command against the local proxy. |
-| `claude-code` | scaffold | Detects the `claude` executable and reports a clear not-implemented result if run. |
-| `gemini-cli` | scaffold | Detects the `gemini` executable and reports a clear not-implemented result if run. |
+| `claude-code` | MVP | Builds and runs sanitized Claude Code print-mode commands against the local proxy. |
+| `gemini-cli` | MVP | Builds and runs sanitized Gemini CLI headless commands against the local proxy. |
 
 Inspect one harness:
 
@@ -139,6 +139,56 @@ launching Codex:
 
 ```bash
 giga harness run codex-cli --prompt "Inspect" --dry-run --json
+```
+
+## Claude Code Harness
+
+The Claude Code harness uses print mode and points Claude at the selected
+explicit `gpt2giga` API mode through `ANTHROPIC_BASE_URL`:
+
+```bash
+giga harness run claude-code \
+  --mode plan \
+  --model GigaChat-2-Max \
+  --api-mode v2 \
+  --workspace . \
+  --prompt "Inspect this repo"
+```
+
+`plan` and `read` use `--permission-mode plan`; `edit` uses Claude Code's
+default permission mode instead of bypassing prompts. The harness also uses
+`--bare`, `--safe-mode`, `--no-session-persistence`, and a sanitized environment
+that only includes the local proxy API key as `ANTHROPIC_API_KEY`.
+
+Backward-friendly alias:
+
+```bash
+giga run --agent claude --mode plan --workspace . "Inspect this repo"
+```
+
+## Gemini CLI Harness
+
+The Gemini CLI harness uses headless prompt mode and points Gemini at the
+selected explicit `gpt2giga` API mode through `GOOGLE_GEMINI_BASE_URL`:
+
+```bash
+giga harness run gemini-cli \
+  --mode plan \
+  --model GigaChat-2-Max \
+  --api-mode v2 \
+  --workspace . \
+  --prompt "Inspect this repo"
+```
+
+`plan` and `read` add `--approval-mode=plan`; `edit` does not switch to
+`--approval-mode=yolo`. Real runs use a temporary `HOME` with
+`.gemini/settings.json` pinned to `gemini-api-key` auth, avoiding cached Google
+auth when the local proxy API key should be used.
+
+Backward-friendly alias:
+
+```bash
+giga run --agent gemini --mode plan --workspace . "Inspect this repo"
 ```
 
 ## Browser UI
@@ -219,11 +269,12 @@ Common checks:
 - the selected mode uses the intended explicit route: `/v1/chat/completions` or
   `/v2/chat/completions`;
 - external CLI harnesses report `missing` until the matching executable is on
-  `PATH`.
+  `PATH`; startup errors from broken CLI installations are reported by the run
+  result.
 
 ## Current Limitations
 
-The first MVP runs direct Chat Completions and Codex CLI. Claude Code and Gemini
-CLI are registered as safe scaffolds with availability detection so they appear
-in the registry and UI, but command execution is intentionally left as follow-up
-work.
+The first MVP runs direct Chat Completions plus Codex, Claude Code, and Gemini
+CLI command paths. External agent behavior still depends on each installed CLI's
+current support for custom local API endpoints and non-interactive modes; use
+`--dry-run --json` first when validating a new workstation.

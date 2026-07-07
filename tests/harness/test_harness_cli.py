@@ -1,6 +1,8 @@
 from gpt2giga.harness import cli
+from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
 from gpt2giga.harness.harnesses.direct_chat import DirectChatHarness
+from gpt2giga.harness.harnesses.gemini_cli import GeminiCliHarness
 from gpt2giga.harness.types import HarnessResult
 
 
@@ -86,3 +88,24 @@ def test_cli_agent_alias_passes_workspace(monkeypatch, capsys, tmp_path):
     assert output.strip() == "ok"
     assert captured["request"].workspace == str(tmp_path.resolve())
     assert captured["request"].capability.value == "agent_cli"
+
+
+def test_cli_agent_aliases_include_claude_and_gemini(monkeypatch, capsys):
+    captured = []
+
+    def fake_run(self, request, context):
+        captured.append((type(self).__name__, request.prompt))
+        return HarnessResult(ok=True, text="ok")
+
+    monkeypatch.setattr(ClaudeCodeHarness, "run", fake_run)
+    monkeypatch.setattr(GeminiCliHarness, "run", fake_run)
+
+    assert cli.main(["run", "--agent", "claude", "inspect"]) == 0
+    assert cli.main(["run", "--agent", "gemini", "inspect"]) == 0
+
+    output = capsys.readouterr().out
+    assert output.strip().splitlines() == ["ok", "ok"]
+    assert captured == [
+        ("ClaudeCodeHarness", "inspect"),
+        ("GeminiCliHarness", "inspect"),
+    ]
