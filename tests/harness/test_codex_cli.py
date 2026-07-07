@@ -1,5 +1,12 @@
+from gpt2giga.harness import proxy
 from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
-from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, HarnessRequest
+from gpt2giga.harness.types import (
+    Availability,
+    GigaChatApiMode,
+    HarnessContext,
+    HarnessRequest,
+    HarnessResult,
+)
 
 
 def test_codex_cli_sanitizes_env(monkeypatch):
@@ -82,3 +89,50 @@ def test_codex_cli_reports_missing_workspace(tmp_path):
 
     assert result.ok is False
     assert result.error == f"Workspace does not exist: {missing_workspace}"
+
+
+def test_codex_cli_autostart_uses_generated_proxy_key(monkeypatch):
+    captured = {}
+
+    def fake_ensure_proxy_available(context, api_mode):
+        captured["api_mode"] = api_mode
+        return proxy.ProxyStartup(
+            ok=True,
+            started=True,
+            api_key="generated-proxy-key",
+            pid=123,
+            detail="started",
+        )
+
+    def fake_run_command(*, label, command, env, cwd, timeout_seconds):
+        captured["env"] = env
+        return HarnessResult(ok=True, text="ok", command=command)
+
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_available",
+        fake_ensure_proxy_available,
+    )
+    monkeypatch.setattr(
+        CodexCliHarness,
+        "availability",
+        lambda self: Availability.available("codex available"),
+    )
+    monkeypatch.setattr(
+        "gpt2giga.harness.harnesses.codex_cli.run_command",
+        fake_run_command,
+    )
+
+    result = CodexCliHarness().run(
+        HarnessRequest(prompt="inspect", api_mode=GigaChatApiMode.V2),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            auto_start_proxy=True,
+        ),
+    )
+
+    assert result.ok is True
+    assert captured["api_mode"] == GigaChatApiMode.V2
+    assert captured["env"]["GPT2GIGA_API_KEY"] == "generated-proxy-key"
+    assert result.events[0].type == "proxy_sidecar"
+    assert result.events[0].payload["pid"] == 123

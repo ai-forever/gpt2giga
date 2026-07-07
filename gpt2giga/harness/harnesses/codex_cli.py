@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 from pathlib import Path
 
-from gpt2giga.harness.harnesses.agent_cli import run_command, workspace_error
+from gpt2giga.harness.harnesses.agent_cli import (
+    build_safe_env,
+    prepare_proxy_for_agent,
+    run_command,
+    with_events,
+    workspace_error,
+)
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.types import (
     Availability,
@@ -24,7 +29,6 @@ MODE_TO_SANDBOX = {
     "read": "read-only",
     "edit": "workspace-write",
 }
-SAFE_ENV_KEYS = ("PATH", "HOME", "TMPDIR", "TEMP", "TMP", "SHELL", "LANG", "LC_ALL")
 
 
 class CodexCliHarness(BaseHarness):
@@ -83,18 +87,17 @@ class CodexCliHarness(BaseHarness):
         codex_home: str | None = None,
     ) -> dict[str, str]:
         """Build a sanitized environment for the external CLI."""
-        env: dict[str, str] = {
-            key: value
-            for key in SAFE_ENV_KEYS
-            if (value := os.environ.get(key)) is not None
+        extra = {
+            "GPT2GIGA_API_KEY": context.api_key or "0",
+            "GPT2GIGA_HARNESS_PROXY_URL": context.proxy_url,
+            "GPT2GIGA_HARNESS_API_MODE": request.api_mode.value,
         }
-        env.update(context.extra_env)
-        env["GPT2GIGA_API_KEY"] = context.api_key or "0"
-        env["GPT2GIGA_HARNESS_PROXY_URL"] = context.proxy_url
-        env["GPT2GIGA_HARNESS_API_MODE"] = request.api_mode.value
         if codex_home is not None:
-            env["CODEX_HOME"] = codex_home
-        return env
+            extra["CODEX_HOME"] = codex_home
+        return build_safe_env(
+            context,
+            extra=extra,
+        )
 
     def run(
         self,
@@ -132,18 +135,26 @@ class CodexCliHarness(BaseHarness):
                 command=command,
                 error=availability.reason,
             )
+        prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
+            request,
+            context,
+            command=command,
+        )
+        if proxy_error is not None:
+            return proxy_error
         with tempfile.TemporaryDirectory(prefix="gpt2giga-codex-") as temp_dir:
             codex_home = str(Path(temp_dir) / ".codex")
             Path(codex_home).mkdir(parents=True, exist_ok=True)
-            _write_codex_config(Path(codex_home), request, context)
-            env = self.build_env(request, context, codex_home=codex_home)
-            return run_command(
+            _write_codex_config(Path(codex_home), request, prepared_context)
+            env = self.build_env(request, prepared_context, codex_home=codex_home)
+            result = run_command(
                 label="Codex CLI",
                 command=command,
                 env=env,
                 cwd=request.workspace or None,
                 timeout_seconds=context.timeout_seconds,
             )
+            return with_events(result, proxy_events)
 
 
 def _write_codex_config(

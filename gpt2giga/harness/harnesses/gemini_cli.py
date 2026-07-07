@@ -10,7 +10,9 @@ from pathlib import Path
 from gpt2giga.harness.harnesses.agent_cli import (
     build_safe_env,
     executable_availability,
+    prepare_proxy_for_agent,
     run_command,
+    with_events,
     workspace_error,
 )
 from gpt2giga.harness.harnesses.base import BaseHarness
@@ -137,16 +139,24 @@ class GeminiCliHarness(BaseHarness):
                 command=command,
                 error=availability.reason,
             )
+        prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
+            request,
+            context,
+            command=command,
+        )
+        if proxy_error is not None:
+            return proxy_error
         with tempfile.TemporaryDirectory(prefix="gpt2giga-gemini-") as temp_dir:
             _write_gemini_settings(Path(temp_dir))
-            env = self.build_env(request, context, home=temp_dir)
-            return run_command(
+            env = self.build_env(request, prepared_context, home=temp_dir)
+            result = run_command(
                 label="Gemini CLI",
                 command=command,
                 env=env,
                 cwd=request.workspace,
                 timeout_seconds=context.timeout_seconds,
             )
+            return with_events(result, proxy_events)
 
 
 def _write_gemini_settings(home: Path) -> None:

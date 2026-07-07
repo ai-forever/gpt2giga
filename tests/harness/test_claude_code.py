@@ -1,5 +1,11 @@
+from gpt2giga.harness import proxy
 from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
-from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, HarnessRequest
+from gpt2giga.harness.types import (
+    Availability,
+    GigaChatApiMode,
+    HarnessContext,
+    HarnessRequest,
+)
 
 
 def test_claude_code_sanitizes_env(monkeypatch):
@@ -58,3 +64,34 @@ def test_claude_code_reports_missing_workspace(tmp_path):
 
     assert result.ok is False
     assert result.error == f"Workspace does not exist: {missing_workspace}"
+
+
+def test_claude_code_proxy_preflight_failure_prevents_cli_run(monkeypatch):
+    def fail_run_command(*args, **kwargs):
+        raise AssertionError("Claude Code should not run when proxy preflight fails")
+
+    monkeypatch.setattr(
+        ClaudeCodeHarness,
+        "availability",
+        lambda self: Availability.available("claude available"),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_available",
+        lambda context, api_mode: proxy.ProxyStartup(
+            ok=False,
+            error="missing GigaChat credentials",
+        ),
+    )
+    monkeypatch.setattr(
+        "gpt2giga.harness.harnesses.claude_code.run_command",
+        fail_run_command,
+    )
+
+    result = ClaudeCodeHarness().run(
+        HarnessRequest(prompt="inspect"),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert result.ok is False
+    assert result.error == "missing GigaChat credentials"

@@ -1,10 +1,13 @@
+from gpt2giga.harness import proxy
 from gpt2giga.harness.harnesses.agent_cli import executable_availability, run_command
 from gpt2giga.harness.harnesses.gemini_cli import GeminiCliHarness
 from gpt2giga.harness.types import (
+    Availability,
     AvailabilityStatus,
     GigaChatApiMode,
     HarnessContext,
     HarnessRequest,
+    HarnessResult,
 )
 
 
@@ -116,3 +119,46 @@ def test_agent_cli_run_command_redacts_known_proxy_keys(monkeypatch):
     assert "proxy-key" not in result.text
     assert "proxy-key" not in result.raw["stdout"]
     assert "proxy-key" not in result.raw["stderr"]
+
+
+def test_gemini_cli_autostart_uses_generated_proxy_key(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        GeminiCliHarness,
+        "availability",
+        lambda self: Availability.available("gemini available"),
+    )
+    monkeypatch.setattr(
+        proxy,
+        "ensure_proxy_available",
+        lambda context, api_mode: proxy.ProxyStartup(
+            ok=True,
+            started=True,
+            api_key="generated-proxy-key",
+            pid=456,
+            detail="started",
+        ),
+    )
+
+    def fake_run_command(*, label, command, env, cwd, timeout_seconds):
+        captured["env"] = env
+        return HarnessResult(ok=True, text="ok", command=command)
+
+    monkeypatch.setattr(
+        "gpt2giga.harness.harnesses.gemini_cli.run_command",
+        fake_run_command,
+    )
+
+    result = GeminiCliHarness().run(
+        HarnessRequest(prompt="inspect", api_mode=GigaChatApiMode.V1),
+        HarnessContext(
+            proxy_url="http://127.0.0.1:8090",
+            auto_start_proxy=True,
+        ),
+    )
+
+    assert result.ok is True
+    assert captured["env"]["GEMINI_API_KEY"] == "generated-proxy-key"
+    assert captured["env"]["GOOGLE_GEMINI_BASE_URL"] == "http://127.0.0.1:8090/v1"
+    assert result.events[0].payload["pid"] == 456

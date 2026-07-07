@@ -26,8 +26,9 @@ giga doctor
 giga harness list
 ```
 
-If the proxy is not running, `giga chat` and `giga harness run direct-chat` try
-to start a local sidecar by default. Disable that for a single command with:
+If the proxy is not running, `giga chat`, `giga harness run direct-chat`, and
+real external agent CLI runs try to start a local sidecar by default. Disable
+that for a single command with:
 
 ```bash
 giga chat --no-start-proxy --api-mode v2 --model GigaChat-2-Max "Привет"
@@ -88,6 +89,11 @@ Auto-start is local-only. It supports `http://127.0.0.1:<port>`,
 `http://localhost:<port>`, and `http://[::1]:<port>`. It refuses remote hosts,
 does not create fake upstream credentials, and starts the child proxy with a
 generated local `GPT2GIGA_API_KEY` if one is not already configured.
+
+External agent harnesses run the same proxy preflight before launching Codex,
+Claude Code, or Gemini CLI. If a sidecar is started, the generated local proxy
+key is passed only through the agent-specific local API-key environment variable
+and remains redacted from JSON/UI results.
 
 ## Built-in Harnesses
 
@@ -270,7 +276,10 @@ Common checks:
   `/v2/chat/completions`;
 - external CLI harnesses report `missing` until the matching executable is on
   `PATH`; startup errors from broken CLI installations are reported by the run
-  result.
+  result;
+- real external CLI harness runs perform proxy preflight before launching the
+  CLI, so proxy auto-start errors are reported directly instead of being buried
+  in agent stdout/stderr.
 
 ## Current Limitations
 

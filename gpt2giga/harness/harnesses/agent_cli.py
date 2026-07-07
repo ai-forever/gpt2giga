@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import os
 import subprocess
 from pathlib import Path
 from typing import Mapping
 
+from gpt2giga.harness import proxy
 from gpt2giga.harness.types import (
     REDACTED,
     Availability,
     HarnessContext,
+    HarnessEvent,
+    HarnessRequest,
     HarnessResult,
 )
 
@@ -53,6 +57,64 @@ def workspace_error(value: str | None) -> str | None:
     if not path.is_dir():
         return f"Workspace is not a directory: {value}"
     return None
+
+
+def prepare_proxy_for_agent(
+    request: HarnessRequest,
+    context: HarnessContext,
+    *,
+    command: tuple[str, ...],
+) -> tuple[HarnessContext, tuple[HarnessEvent, ...], HarnessResult | None]:
+    """Ensure the local proxy is ready before launching an external agent CLI."""
+    startup = proxy.ensure_proxy_available(context, request.api_mode)
+    if not startup.ok:
+        return (
+            context,
+            (),
+            HarnessResult(
+                ok=False,
+                text="",
+                raw={
+                    "proxy_url": context.proxy_url,
+                    "auto_start_proxy": context.auto_start_proxy,
+                },
+                command=command,
+                error=startup.error or "proxy is not reachable",
+            ),
+        )
+
+    prepared_context = replace(context, api_key=startup.api_key or context.api_key)
+    events: tuple[HarnessEvent, ...] = ()
+    if startup.started:
+        events = (
+            HarnessEvent(
+                type="proxy_sidecar",
+                message="Started local gpt2giga proxy sidecar.",
+                payload={
+                    "proxy_url": context.proxy_url,
+                    "pid": startup.pid,
+                    "detail": startup.detail,
+                },
+            ),
+        )
+    return prepared_context, events, None
+
+
+def with_events(
+    result: HarnessResult,
+    events: tuple[HarnessEvent, ...],
+) -> HarnessResult:
+    """Return a result with prepended events."""
+    if not events:
+        return result
+    return HarnessResult(
+        ok=result.ok,
+        text=result.text,
+        raw=result.raw,
+        events=(*events, *result.events),
+        command=result.command,
+        error=result.error,
+    )
 
 
 def run_command(

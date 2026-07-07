@@ -7,7 +7,9 @@ import shutil
 from gpt2giga.harness.harnesses.agent_cli import (
     build_safe_env,
     executable_availability,
+    prepare_proxy_for_agent,
     run_command,
+    with_events,
     workspace_error,
 )
 from gpt2giga.harness.harnesses.base import BaseHarness
@@ -131,10 +133,18 @@ class ClaudeCodeHarness(BaseHarness):
                 command=command,
                 error=availability.reason,
             )
-        return run_command(
+        prepared_context, proxy_events, proxy_error = prepare_proxy_for_agent(
+            request,
+            context,
+            command=command,
+        )
+        if proxy_error is not None:
+            return proxy_error
+        result = run_command(
             label="Claude Code",
             command=command,
-            env=env,
+            env=self.build_env(request, prepared_context),
             cwd=request.workspace,
             timeout_seconds=context.timeout_seconds,
         )
+        return with_events(result, proxy_events)
