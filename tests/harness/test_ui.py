@@ -349,6 +349,7 @@ def test_ui_index_contains_control_panel_elements():
         "raw-response-panel",
         "command-panel",
         "diff-panel",
+        "attachments-panel",
         "storage-panel",
     ):
         assert element_id in html
@@ -357,6 +358,7 @@ def test_ui_index_contains_control_panel_elements():
         "/api/project",
         "project_id",
         "Project Cockpit",
+        "Attachments",
         "Storage",
         "Attach",
         "attachment_ids",

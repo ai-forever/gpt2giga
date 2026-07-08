@@ -743,6 +743,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="raw-response">Raw response</button>
               <button class="tab" type="button" data-tab="command">Command</button>
               <button class="tab" type="button" data-tab="diff">Diff</button>
+              <button class="tab" type="button" data-tab="attachments">Attachments</button>
               <button class="tab" type="button" data-tab="storage">Storage</button>
             </div>
             <pre id="run-panel" class="mono-panel tab-panel active">No run selected.</pre>
@@ -751,6 +752,7 @@ INDEX_HTML = """<!doctype html>
             <pre id="raw-response-panel" class="mono-panel tab-panel">{}</pre>
             <pre id="command-panel" class="mono-panel tab-panel">No command yet.</pre>
             <pre id="diff-panel" class="mono-panel tab-panel">No diff captured.</pre>
+            <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
             <pre id="storage-panel" class="mono-panel tab-panel">No storage selected.</pre>
           </div>
         </div>
@@ -1493,6 +1495,7 @@ INDEX_HTML = """<!doctype html>
       setText("command-panel", run && run.command && run.command.length ? run.command.join(" ") : commandPreview(state.lastPayload));
       const diff = run && run.metadata ? run.metadata.diff : "";
       setText("diff-panel", diff || "No diff captured.");
+      setText("attachments-panel", run ? attachmentInspectorText(run, rawRequests[rawRequests.length - 1]) : "No attachments selected.");
       setText("storage-panel", pretty(bundle.storage || {}));
       byId("pin-session-button").textContent = session && session.pinned ? "Unpin" : "Pin";
       byId("archive-session-button").textContent = session && session.archived ? "Unarchive" : "Archive";
@@ -1518,6 +1521,44 @@ INDEX_HTML = """<!doctype html>
         `;
         panel.appendChild(row);
       }
+    }
+
+    function attachmentInspectorText(run, rawRequest) {
+      const metadata = run && run.metadata ? run.metadata : {};
+      const requestPayload = rawRequest && rawRequest.payload ? rawRequest.payload : {};
+      const attachments = Array.isArray(metadata.attachments) ? metadata.attachments : Array.isArray(requestPayload.attachments) ? requestPayload.attachments : [];
+      const renderPlan = metadata.attachment_render_plan || requestPayload.attachment_render_plan || null;
+      if (!attachments.length && !renderPlan) return "No attachments selected.";
+      const lines = [];
+      if (attachments.length) {
+        lines.push("Attachments");
+        for (const attachment of attachments) {
+          lines.push(`- ${attachment.filename || attachment.id} [${attachment.kind || "attachment"}] ${attachment.mime_type || ""} ${formatBytes(attachment.size_bytes || 0)}`);
+          if (attachment.workspace_path) lines.push(`  workspace: @${attachment.workspace_path}`);
+          if (attachment.source) lines.push(`  source: ${attachment.source}`);
+        }
+      }
+      if (renderPlan) {
+        lines.push("");
+        lines.push("Render plan");
+        const metadata = renderPlan.metadata || {};
+        if (metadata.transport) lines.push(`transport: ${metadata.transport}`);
+        if (Array.isArray(renderPlan.warnings) && renderPlan.warnings.length) {
+          lines.push("warnings:");
+          for (const warning of renderPlan.warnings) lines.push(`- ${warning}`);
+        }
+        if (renderPlan.prompt_prefix) lines.push(`prompt_prefix:\\n${renderPlan.prompt_prefix}`);
+        if (Array.isArray(renderPlan.cli_args) && renderPlan.cli_args.length) {
+          lines.push(`cli_args: ${renderPlan.cli_args.join(" ")}`);
+        }
+        if (Array.isArray(renderPlan.content_parts) && renderPlan.content_parts.length) {
+          lines.push(`content_parts: ${renderPlan.content_parts.length}`);
+        }
+        lines.push("");
+        lines.push("render_plan_json:");
+        lines.push(pretty(renderPlan));
+      }
+      return lines.join("\\n");
     }
 
     async function patchCurrentSession(patch) {
