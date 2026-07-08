@@ -315,7 +315,8 @@ INDEX_HTML = """<!doctype html>
       gap: 8px;
     }
     .session-list,
-    #harness-list {
+    #harness-list,
+    #native-session-list {
       display: grid;
       gap: 6px;
       padding: 10px;
@@ -327,7 +328,11 @@ INDEX_HTML = """<!doctype html>
       font-weight: 800;
       text-transform: uppercase;
     }
+    .sidebar-heading {
+      padding: 0 10px;
+    }
     .session-row,
+    .native-session-row,
     .harness-card {
       border: 1px solid transparent;
       border-radius: 6px;
@@ -337,12 +342,15 @@ INDEX_HTML = """<!doctype html>
       cursor: pointer;
     }
     .session-row:hover,
+    .native-session-row:hover,
     .harness-card:hover,
-    .session-row.active {
+    .session-row.active,
+    .native-session-row.active {
       border-color: var(--border);
       background: var(--panel-soft);
     }
-    .session-row.active {
+    .session-row.active,
+    .native-session-row.active {
       border-color: var(--accent);
     }
     .session-title {
@@ -636,7 +644,17 @@ INDEX_HTML = """<!doctype html>
           </label>
         </div>
         <div class="sidebar-scroll">
+          <div class="group-title sidebar-heading">GPT2Giga chats</div>
           <div id="session-list" class="session-list"></div>
+          <div class="section">
+            <div class="inline-actions">
+              <h2>Native sessions</h2>
+              <span id="native-count" class="badge info">0</span>
+              <button id="sync-native-button" class="secondary" type="button">Sync native history</button>
+            </div>
+            <div id="native-status" class="status-line">Native history not synced</div>
+          </div>
+          <div id="native-session-list"></div>
           <div class="section">
             <div class="inline-actions">
               <h2>Harnesses</h2>
@@ -652,6 +670,12 @@ INDEX_HTML = """<!doctype html>
           <div class="config-grid">
             <label>Harness
               <select id="harness-select"></select>
+            </label>
+            <label>Invocation
+              <select id="invocation-select">
+                <option value="headless">Headless</option>
+                <option value="native">Native</option>
+              </select>
             </label>
             <label>Model
               <div id="model-picker" class="model-picker">
@@ -744,6 +768,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="command">Command</button>
               <button class="tab" type="button" data-tab="diff">Diff</button>
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
+              <button class="tab" type="button" data-tab="native">Native</button>
               <button class="tab" type="button" data-tab="storage">Storage</button>
             </div>
             <pre id="run-panel" class="mono-panel tab-panel active">No run selected.</pre>
@@ -753,6 +778,7 @@ INDEX_HTML = """<!doctype html>
             <pre id="command-panel" class="mono-panel tab-panel">No command yet.</pre>
             <pre id="diff-panel" class="mono-panel tab-panel">No diff captured.</pre>
             <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
+            <pre id="native-panel" class="mono-panel tab-panel">No native session selected.</pre>
             <pre id="storage-panel" class="mono-panel tab-panel">No storage selected.</pre>
           </div>
         </div>
@@ -770,6 +796,10 @@ INDEX_HTML = """<!doctype html>
       project: null,
       projectConfig: null,
       selectedHarness: null,
+      nativeSessions: [],
+      selectedNativeRefId: null,
+      nativePreview: null,
+      activeNativeProcess: null,
       attachments: [],
       fileMentionQuery: null,
       currentSessionId: null,
@@ -1017,6 +1047,7 @@ INDEX_HTML = """<!doctype html>
       renderAttachments();
       const capabilities = Array.isArray(item.spec.capabilities) ? item.spec.capabilities.join(", ") : "";
       setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}${capabilities ? " Capabilities: " + capabilities : ""}`);
+      loadNativeSessions(false);
     }
 
     function renderCapabilityOptions(spec) {
@@ -1033,17 +1064,26 @@ INDEX_HTML = """<!doctype html>
 
     function updateHarnessDrivenControls() {
       const spec = state.selectedHarness && state.selectedHarness.spec ? state.selectedHarness.spec : {};
+      const invocation = byId("invocation-select");
+      const supportsNative = spec.supports_native_sessions === true;
+      invocation.disabled = !supportsNative;
+      if (!supportsNative) {
+        invocation.value = "headless";
+      } else if (!invocation.value || invocation.value === "headless") {
+        invocation.value = spec.default_invocation_mode || "native";
+      }
       byId("model-input").disabled = spec.supports_model_selection === false;
       byId("model-menu-button").disabled = spec.supports_model_selection === false;
       if (spec.supports_model_selection === false) closeModelList();
       byId("api-mode-v1").disabled = spec.supports_api_mode_selection === false;
       byId("api-mode-v2").disabled = spec.supports_api_mode_selection === false;
       byId("workspace-input").disabled = spec.supports_workspace === false;
-      byId("stream-checkbox").disabled = spec.supports_streaming !== true;
+      byId("stream-checkbox").disabled = spec.supports_streaming !== true || currentInvocationMode() === "native";
       byId("copy-curl-button").disabled = spec.id !== "direct-chat";
       const availability = state.selectedHarness && state.selectedHarness.availability ? state.selectedHarness.availability : {};
       const warning = availability.status === "missing" || availability.status === "error" ? availability.reason || availability.status : "";
       setText("harness-warning", warning);
+      byId("run-button").textContent = currentInvocationMode() === "native" && supportsNative ? "Start native" : "Run";
     }
 
     async function loadSessions() {
@@ -1059,6 +1099,42 @@ INDEX_HTML = """<!doctype html>
       const result = await getJson(`/api/sessions?${params.toString()}`);
       state.sessions = result.ok ? result.data.sessions || [] : [];
       renderSessions();
+    }
+
+    async function loadNativeSessions(sync) {
+      const workspace = byId("session-workspace-filter").value.trim() || byId("workspace-input").value.trim();
+      const includeExternal = true;
+      if (sync) {
+        const payload = {
+          workspace: workspace || null,
+          include_external: includeExternal
+        };
+        const synced = await getJson("/api/native/sessions/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!synced.ok) {
+          state.nativeSessions = [];
+          renderNativeSessions(synced.data.detail || "Native history sync failed.");
+          return;
+        }
+        const errors = Array.isArray(synced.data.errors) ? synced.data.errors : [];
+        if (errors.length) {
+          setText("native-status", `Native sync completed with ${errors.length} warning${errors.length === 1 ? "" : "s"}.`);
+        }
+      }
+      const params = new URLSearchParams({ include_external: "true" });
+      if (workspace) params.set("workspace", workspace);
+      if (!workspace && state.project && state.project.id) params.set("project_id", state.project.id);
+      const result = await getJson(`/api/native/sessions?${params.toString()}`);
+      if (!result.ok) {
+        state.nativeSessions = [];
+        renderNativeSessions(result.data.detail || "Native history unavailable.");
+        return;
+      }
+      state.nativeSessions = result.data.sessions || [];
+      renderNativeSessions();
     }
 
     function renderSessions() {
@@ -1096,6 +1172,75 @@ INDEX_HTML = """<!doctype html>
       }
     }
 
+    function renderNativeSessions(error) {
+      const list = byId("native-session-list");
+      list.textContent = "";
+      byId("native-count").textContent = String(state.nativeSessions.length);
+      if (error) {
+        setText("native-status", error);
+      } else {
+        setText("native-status", state.nativeSessions.length ? "Native history loaded" : "No native sessions cached");
+      }
+      if (!state.nativeSessions.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = error || "No native sessions";
+        list.appendChild(empty);
+        return;
+      }
+      const groups = groupByHarness(state.nativeSessions);
+      for (const [harnessId, sessions] of groups) {
+        const title = document.createElement("div");
+        title.className = "group-title sidebar-heading";
+        title.textContent = harnessTitle(harnessId);
+        list.appendChild(title);
+        for (const ref of sessions) {
+          list.appendChild(nativeSessionRow(ref));
+        }
+      }
+    }
+
+    function nativeSessionRow(ref) {
+      const row = document.createElement("div");
+      row.className = `native-session-row${ref.id === state.selectedNativeRefId ? " active" : ""}`;
+      const status = nativeStatusLabel(ref.status);
+      row.innerHTML = `
+        <div class="session-title">${escapeHtml(ref.title || "Untitled native session")}</div>
+        <div class="session-meta">
+          <span>${escapeHtml(ref.harness_id || "")}</span>
+          <span>${escapeHtml(status)}</span>
+          <span>${escapeHtml(ref.can_resume ? "resumable" : ref.can_import ? "importable" : "readonly")}</span>
+        </div>
+        <div class="badge-row">
+          ${nativeBadge(ref.status)}
+          ${ref.can_resume ? '<span class="badge ok">resumable</span>' : ''}
+          ${ref.can_import ? '<span class="badge info">importable</span>' : ''}
+        </div>
+      `;
+      row.addEventListener("click", () => selectNativeSession(ref.id));
+      const actions = document.createElement("div");
+      actions.className = "inline-actions";
+      actions.appendChild(nativeActionButton("Preview", () => previewNativeSession(ref.id), !ref.can_preview));
+      actions.appendChild(nativeActionButton("Import", () => importNativeSession(ref.id), !ref.can_import));
+      actions.appendChild(nativeActionButton("Link to current chat", () => linkNativeSession(ref.id), !state.currentSessionId));
+      actions.appendChild(nativeActionButton("Resume native", () => resumeNativeSession(ref.id), !ref.can_resume));
+      row.appendChild(actions);
+      return row;
+    }
+
+    function nativeActionButton(label, handler, disabled) {
+      const button = document.createElement("button");
+      button.className = "secondary";
+      button.type = "button";
+      button.textContent = label;
+      button.disabled = Boolean(disabled);
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        handler();
+      });
+      return button;
+    }
+
     function groupSessions(sessions) {
       const today = new Date();
       const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
@@ -1117,6 +1262,127 @@ INDEX_HTML = """<!doctype html>
         buckets.get(label).push(session);
       }
       return [...buckets.entries()];
+    }
+
+    function groupByHarness(refs) {
+      const buckets = new Map();
+      for (const ref of refs) {
+        const harnessId = ref.harness_id || "unknown";
+        if (!buckets.has(harnessId)) buckets.set(harnessId, []);
+        buckets.get(harnessId).push(ref);
+      }
+      return [...buckets.entries()];
+    }
+
+    function harnessTitle(harnessId) {
+      const item = state.harnesses.find((entry) => entry.spec && entry.spec.id === harnessId);
+      return item && item.spec && item.spec.title ? item.spec.title : harnessId;
+    }
+
+    function nativeStatusLabel(status) {
+      const value = String(status || "readonly");
+      if (value === "managed_native") return "managed";
+      if (value === "external_native") return "external";
+      return value;
+    }
+
+    function nativeBadge(status) {
+      const label = nativeStatusLabel(status);
+      const className = label === "managed" || label === "linked" || label === "imported" ? "ok" : label === "external" ? "warn" : "info";
+      return `<span class="badge ${className}">${escapeHtml(label)}</span>`;
+    }
+
+    function selectNativeSession(refId) {
+      state.selectedNativeRefId = refId;
+      const ref = state.nativeSessions.find((item) => item.id === refId);
+      setText("native-panel", ref ? pretty(ref) : "No native session selected.");
+      renderNativeSessions();
+      showTab("native");
+    }
+
+    async function previewNativeSession(refId) {
+      state.selectedNativeRefId = refId;
+      const result = await getJson(`/api/native/sessions/${encodeURIComponent(refId)}/preview`);
+      if (!result.ok) {
+        setText("native-panel", result.data.detail || "Native preview failed.");
+        showTab("native");
+        return;
+      }
+      state.nativePreview = result.data;
+      setText("native-panel", pretty(result.data));
+      renderNativeSessions();
+      showTab("native");
+    }
+
+    async function importNativeSession(refId) {
+      state.selectedNativeRefId = refId;
+      const result = await getJson(`/api/native/sessions/${encodeURIComponent(refId)}/import`, { method: "POST" });
+      if (!result.ok) {
+        setText("native-panel", result.data.detail || "Native import failed.");
+        showTab("native");
+        return;
+      }
+      setText("native-panel", pretty(result.data));
+      if (result.data.session && result.data.session.id) {
+        await loadSession(result.data.session.id);
+      }
+      await loadNativeSessions(false);
+      showTab("native");
+    }
+
+    async function linkNativeSession(refId) {
+      state.selectedNativeRefId = refId;
+      if (!state.currentSessionId) {
+        setText("native-panel", "Select a GPT2Giga chat before linking a native session.");
+        showTab("native");
+        return;
+      }
+      const result = await getJson(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/native/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ native_ref_id: refId })
+      });
+      if (!result.ok) {
+        setText("native-panel", result.data.detail || "Native link failed.");
+        showTab("native");
+        return;
+      }
+      setText("native-panel", pretty(result.data));
+      await loadSession(state.currentSessionId);
+      showTab("native");
+    }
+
+    async function resumeNativeSession(refId) {
+      state.selectedNativeRefId = refId;
+      const ref = state.nativeSessions.find((item) => item.id === refId);
+      if (!ref) return;
+      if (!(await ensureSessionForNative({
+        harness_id: ref.harness_id,
+        model: byId("model-input").value.trim() || null,
+        api_mode: currentApiMode(),
+        mode: byId("mode-select").value,
+        workspace: ref.workspace || byId("workspace-input").value.trim() || null
+      }))) return;
+      setText("native-panel", "Resuming native session...");
+      showTab("native");
+      const result = await getJson("/api/native/processes/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: state.currentSessionId,
+          action: "resume",
+          native_ref_id: refId,
+          workspace: ref.workspace || byId("workspace-input").value.trim() || null
+        })
+      });
+      if (!result.ok) {
+        setText("native-panel", result.data.detail || "Native resume failed.");
+        return;
+      }
+      state.activeNativeProcess = result.data.process || null;
+      setText("native-panel", pretty(result.data));
+      await loadSession(state.currentSessionId);
+      showTab("native");
     }
 
     async function loadSession(sessionId) {
@@ -1393,6 +1659,7 @@ INDEX_HTML = """<!doctype html>
         ...buildSessionDefaults(),
         prompt: byId("prompt-input").value,
         capability: byId("capability-select").value || "chat_completions",
+        invocation_mode: currentInvocationMode(),
         stream: byId("stream-checkbox").checked,
         dry_run: byId("dry-run-checkbox").checked
       };
@@ -1404,6 +1671,10 @@ INDEX_HTML = """<!doctype html>
     async function runHarness() {
       const payload = buildPayload();
       if (!payload.prompt.trim()) return;
+      if (payload.invocation_mode === "native" && currentHarnessSupportsNative()) {
+        await startNativeProcess(payload);
+        return;
+      }
       state.lastPayload = payload;
       setText("raw-request-panel", pretty(payload));
       setText("raw-response-panel", "{}");
@@ -1435,6 +1706,60 @@ INDEX_HTML = """<!doctype html>
         byId("run-button").disabled = false;
         byId("run-button").textContent = "Run";
       }
+    }
+
+    async function startNativeProcess(payload) {
+      if (!(await ensureSessionForNative(payload))) return;
+      state.lastPayload = payload;
+      setText("raw-request-panel", pretty(payload));
+      setText("raw-response-panel", "{}");
+      setText("command-panel", commandPreview(payload));
+      setText("native-panel", "Starting native process...");
+      showTab("native");
+      byId("run-button").disabled = true;
+      byId("run-button").textContent = "Starting...";
+      try {
+        const result = await getJson("/api/native/processes/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: state.currentSessionId,
+            action: "start",
+            harness_id: payload.harness_id,
+            prompt: payload.prompt,
+            model: payload.model,
+            api_mode: payload.api_mode,
+            mode: payload.mode,
+            workspace: payload.workspace
+          })
+        });
+        if (!result.ok) {
+          setText("native-panel", result.data.detail || `Native start failed with HTTP ${result.status}`);
+          return;
+        }
+        state.activeNativeProcess = result.data.process || null;
+        setText("native-panel", pretty(result.data));
+        if (state.currentSessionId) await loadSession(state.currentSessionId);
+      } finally {
+        byId("run-button").disabled = false;
+        updateHarnessDrivenControls();
+      }
+    }
+
+    async function ensureSessionForNative(payload) {
+      if (state.currentSessionId) return true;
+      const result = await getJson("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!result.ok || !result.data.session) {
+        setText("native-panel", result.data.detail || "Native session creation failed.");
+        return false;
+      }
+      state.currentSessionId = result.data.session.id;
+      await loadSession(state.currentSessionId);
+      return true;
     }
 
     function renderAll() {
@@ -1496,9 +1821,18 @@ INDEX_HTML = """<!doctype html>
       const diff = run && run.metadata ? run.metadata.diff : "";
       setText("diff-panel", diff || "No diff captured.");
       setText("attachments-panel", run ? attachmentInspectorText(run, rawRequests[rawRequests.length - 1]) : "No attachments selected.");
+      setText("native-panel", nativeInspectorText(bundle));
       setText("storage-panel", pretty(bundle.storage || {}));
       byId("pin-session-button").textContent = session && session.pinned ? "Unpin" : "Pin";
       byId("archive-session-button").textContent = session && session.archived ? "Unarchive" : "Archive";
+    }
+
+    function nativeInspectorText(bundle) {
+      if (state.nativePreview) return pretty(state.nativePreview);
+      if (state.activeNativeProcess) return pretty(state.activeNativeProcess);
+      const links = bundle && Array.isArray(bundle.native_links) ? bundle.native_links : [];
+      if (!links.length) return "No native session selected.";
+      return pretty({ native_links: links });
     }
 
     function renderEvents(events) {
@@ -1595,6 +1929,15 @@ INDEX_HTML = """<!doctype html>
       return byId("harness-select").value || "echo";
     }
 
+    function currentHarnessSupportsNative() {
+      const spec = state.selectedHarness && state.selectedHarness.spec ? state.selectedHarness.spec : {};
+      return spec.supports_native_sessions === true;
+    }
+
+    function currentInvocationMode() {
+      return byId("invocation-select").value || "headless";
+    }
+
     function currentApiMode() {
       return byId("api-mode-v1").checked ? "v1" : "v2";
     }
@@ -1613,6 +1956,7 @@ INDEX_HTML = """<!doctype html>
     function commandPreview(payload) {
       if (!payload) return "No command yet.";
       const args = ["giga", "harness", "run", payload.harness_id || "echo", "--api-mode", payload.api_mode || "v2"];
+      if (payload.invocation_mode === "native") args.push("--native");
       if (payload.model) args.push("--model", payload.model);
       args.push("--prompt", payload.prompt || "");
       return args.map(shellQuote).join(" ");
@@ -1689,6 +2033,8 @@ INDEX_HTML = """<!doctype html>
       byId("init-project-button").addEventListener("click", initProject);
       byId("new-chat-button").addEventListener("click", newChat);
       byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
+      byId("invocation-select").addEventListener("change", updateHarnessDrivenControls);
+      byId("sync-native-button").addEventListener("click", () => loadNativeSessions(true));
       byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); });
       byId("api-mode-v2").addEventListener("change", () => { updateRouteNote(); loadModels(); });
       byId("model-menu-button").addEventListener("click", toggleModelList);
@@ -1783,6 +2129,7 @@ INDEX_HTML = """<!doctype html>
       await loadProject();
       await Promise.all([loadHarnesses(), refreshHealth(), loadModels()]);
       await loadSessions();
+      await loadNativeSessions(false);
       renderAll();
     }
 

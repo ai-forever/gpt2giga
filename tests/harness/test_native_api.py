@@ -164,6 +164,33 @@ def test_native_session_import_creates_normalized_session_and_link(tmp_path):
     assert bundle["native_links"][0]["status"] == "imported"
 
 
+def test_native_session_link_adds_link_to_existing_session(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    ref = _ref(workspace=str(workspace), status=NativeSessionStatus.MANAGED_NATIVE)
+    connector = FakeConnector("codex-cli", refs=(ref,))
+    registry = NativeHistoryConnectorRegistry()
+    registry.register(connector)
+    store = InMemoryHarnessSessionStore()
+    session = store.create_session(title="Existing chat", default_harness_id="echo")
+    client = _client(tmp_path, registry, store=store)
+    client.post(
+        "/api/native/sessions/sync",
+        json={"harness_id": "codex-cli", "workspace": str(workspace)},
+    )
+
+    linked = client.post(
+        f"/api/sessions/{session.id}/native/link",
+        json={"native_ref_id": ref.id},
+    )
+
+    assert linked.status_code == 200
+    assert linked.json()["native_link"]["status"] == "linked"
+    assert linked.json()["native_link"]["native_ref_id"] == ref.id
+    bundle = client.get(f"/api/sessions/{session.id}").json()
+    assert bundle["native_links"][0]["status"] == "linked"
+
+
 class FakeConnector:
     def __init__(
         self,

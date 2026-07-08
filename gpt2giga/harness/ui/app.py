@@ -435,6 +435,45 @@ def create_app(
             "native_link": native_link_to_dict(link),
         }
 
+    @app.post("/api/sessions/{session_id}/native/link")
+    async def native_session_link(
+        session_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            session = store.get_session(session_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        ref = _native_ref_or_404(
+            native_index_store,
+            _required_text(payload.get("native_ref_id"), "native_ref_id is required"),
+        )
+        link = store.append_native_link(
+            session.id,
+            HarnessNativeLink(
+                id=new_id("nlink"),
+                session_id=session.id,
+                harness_id=ref.harness_id,
+                status=NativeSessionStatus.LINKED,
+                created_at=utc_now(),
+                updated_at=utc_now(),
+                native_session_id=ref.native_session_id,
+                native_ref_id=ref.id,
+                source=ref.source,
+                workspace=ref.workspace,
+                metadata={
+                    "source_status": ref.status.value,
+                    "project_id": ref.metadata.get("project_id"),
+                    "can_resume": ref.can_resume,
+                    "resume_reason": ref.resume_reason,
+                },
+            ),
+        )
+        return {
+            "session": _session_summary(store, session.id),
+            "native_link": native_link_to_dict(link),
+        }
+
     @app.post("/api/native/processes/start")
     async def native_process_start(
         payload: dict[str, Any] = Body(default_factory=dict),
