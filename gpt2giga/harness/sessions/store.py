@@ -47,6 +47,7 @@ class HarnessSessionStore(Protocol):
     def list_sessions(
         self,
         *,
+        project_id: str | None = None,
         workspace: str | None = None,
         harness_id: str | None = None,
         q: str | None = None,
@@ -183,6 +184,7 @@ class InMemoryHarnessSessionStore:
     def list_sessions(
         self,
         *,
+        project_id: str | None = None,
         workspace: str | None = None,
         harness_id: str | None = None,
         q: str | None = None,
@@ -194,6 +196,7 @@ class InMemoryHarnessSessionStore:
             for session in self._sessions.values()
             if _matches_session(
                 session,
+                project_id=project_id,
                 workspace=workspace,
                 harness_id=harness_id,
                 q=q,
@@ -404,12 +407,15 @@ def _title_or_default(title: str | None) -> str:
 def _matches_session(
     session: HarnessSession,
     *,
+    project_id: str | None,
     workspace: str | None,
     harness_id: str | None,
     q: str | None,
     include_archived: bool,
 ) -> bool:
     if session.archived and not include_archived:
+        return False
+    if project_id and session.metadata.get("project_id") != project_id:
         return False
     if workspace and session.workspace != workspace:
         return False

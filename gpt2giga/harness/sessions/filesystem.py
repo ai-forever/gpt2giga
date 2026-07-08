@@ -95,6 +95,7 @@ class FilesystemHarnessSessionStore:
     def list_sessions(
         self,
         *,
+        project_id: str | None = None,
         workspace: str | None = None,
         harness_id: str | None = None,
         q: str | None = None,
@@ -109,6 +110,7 @@ class FilesystemHarnessSessionStore:
                 continue
             if _matches_session(
                 session,
+                project_id=project_id,
                 workspace=workspace,
                 harness_id=harness_id,
                 q=q,

@@ -1,5 +1,6 @@
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.base import BaseHarness
+from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.registry import HarnessRegistry
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
@@ -70,13 +71,49 @@ def test_session_runner_passes_previous_messages_to_chat_harness():
     ]
 
 
-def _runner(harness: BaseHarness) -> HarnessSessionRunner:
+def test_session_runner_create_session_records_project_metadata(tmp_path):
+    runner = _runner(_CaptureHarness(), data_dir=tmp_path / "data")
+
+    session = runner.create_session(workspace=str(tmp_path))
+
+    assert session.workspace == str(tmp_path)
+    assert session.metadata["project_id"] == project_id_for_root(tmp_path)
+    assert session.metadata["project_root"] == str(tmp_path)
+    assert session.metadata["project_name"] == tmp_path.name
+
+
+def test_session_runner_updates_legacy_session_project_metadata(tmp_path):
+    store = InMemoryHarnessSessionStore()
+    legacy = store.create_session(title="legacy", default_harness_id="capture")
+    runner = _runner(_CaptureHarness(), store=store, data_dir=tmp_path / "data")
+
+    result = runner.run_in_session(
+        legacy.id,
+        {
+            "prompt": "hello",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert result.session.metadata["project_id"] == project_id_for_root(tmp_path)
+    assert result.session.metadata["project_root"] == str(tmp_path)
+
+
+def _runner(
+    harness: BaseHarness,
+    *,
+    store: InMemoryHarnessSessionStore | None = None,
+    data_dir=None,
+) -> HarnessSessionRunner:
     registry = HarnessRegistry()
     registry.register(harness)
     return HarnessSessionRunner(
         registry=registry,
-        config=HarnessConfig(default_model="ConfiguredModel"),
-        store=InMemoryHarnessSessionStore(),
+        config=HarnessConfig(
+            default_model="ConfiguredModel",
+            data_dir=str(data_dir) if data_dir is not None else "~/.gpt2giga/harness",
+        ),
+        store=store or InMemoryHarnessSessionStore(),
     )
 
 

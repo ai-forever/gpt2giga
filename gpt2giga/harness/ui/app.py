@@ -179,6 +179,7 @@ def create_app(
 
     @app.get("/api/sessions")
     async def sessions(
+        project_id: str | None = Query(default=None),
         workspace: str | None = Query(default=None),
         harness_id: str | None = Query(default=None),
         q: str | None = Query(default=None),
@@ -187,6 +188,7 @@ def create_app(
     ) -> dict[str, Any]:
         resolved_workspace = resolve_workspace(_optional_text(workspace))
         items = store.list_sessions(
+            project_id=_optional_text(project_id),
             workspace=resolved_workspace,
             harness_id=_optional_text(harness_id),
             q=_optional_text(q),
@@ -368,10 +370,21 @@ def _session_summary(
         preview = " ".join(messages[-1].content.split())[:120]
     last_status = runs[-1].status if runs else None
     payload = session_to_dict(session)
+    project_id = _optional_text(session.metadata.get("project_id"))
     payload.update(
         {
             "last_message_preview": preview,
             "last_run_status": last_status,
+            "project_id": project_id,
+            "project": (
+                {
+                    "id": project_id,
+                    "root": session.metadata.get("project_root"),
+                    "name": session.metadata.get("project_name"),
+                }
+                if project_id
+                else None
+            ),
         }
     )
     return payload

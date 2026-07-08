@@ -7,6 +7,7 @@ import subprocess
 from typing import Any, Mapping
 
 from gpt2giga.harness.config import HarnessConfig
+from gpt2giga.harness.project import resolve_project
 from gpt2giga.harness.registry import HarnessRegistry
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
@@ -85,13 +86,18 @@ class HarnessSessionRunner:
         default_mode: str = "plan",
     ) -> HarnessSession:
         """Create a new empty session."""
+        resolved_workspace = resolve_workspace(workspace)
         return self.store.create_session(
             title=title,
-            workspace=resolve_workspace(workspace),
+            workspace=resolved_workspace,
             default_harness_id=default_harness_id,
             default_model=default_model,
             default_api_mode=parse_api_mode(default_api_mode),
             default_mode=default_mode,
+            metadata=_project_metadata(
+                resolved_workspace,
+                data_dir=self.config.data_dir,
+            ),
         )
 
     def create_and_run(
@@ -294,6 +300,12 @@ class HarnessSessionRunner:
             "default_mode": options["mode"],
             "workspace": options["workspace"],
         }
+        project_metadata = _project_metadata(
+            options["workspace"],
+            data_dir=self.config.data_dir,
+        )
+        if project_metadata:
+            session_patch["metadata"] = {**session.metadata, **project_metadata}
         if session.title == "Untitled session":
             session_patch["title"] = title_from_prompt(options["prompt"])
         updated_session = self.store.update_session(session.id, **session_patch)
@@ -398,6 +410,17 @@ def _native_resume_metadata(harness_id: str) -> dict[str, Any]:
     return {
         "supported": False,
         "reason": "native sessions do not apply to this harness",
+    }
+
+
+def _project_metadata(workspace: str | None, *, data_dir: str) -> dict[str, str]:
+    if workspace is None:
+        return {}
+    project = resolve_project(workspace, data_dir=data_dir)
+    return {
+        "project_id": project.id,
+        "project_root": project.root,
+        "project_name": project.name,
     }
 
 

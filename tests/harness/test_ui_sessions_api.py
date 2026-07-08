@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from gpt2giga.harness.config import HarnessConfig
+from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.registry import create_default_registry
 from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
 from gpt2giga.harness.ui.app import create_app
@@ -35,6 +36,42 @@ def test_sessions_api_create_list_get_update_delete():
     deleted = client.delete(f"/api/sessions/{session_id}")
     assert deleted.status_code == 200
     assert deleted.json() == {"deleted": True}
+
+
+def test_sessions_api_filters_by_project_id(tmp_path):
+    client = _client()
+    first_workspace = tmp_path / "first"
+    second_workspace = tmp_path / "second"
+    first_workspace.mkdir()
+    second_workspace.mkdir()
+    first = client.post(
+        "/api/sessions",
+        json={
+            "title": "First project",
+            "harness_id": "echo",
+            "workspace": str(first_workspace),
+        },
+    )
+    second = client.post(
+        "/api/sessions",
+        json={
+            "title": "Second project",
+            "harness_id": "echo",
+            "workspace": str(second_workspace),
+        },
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    response = client.get(
+        "/api/sessions",
+        params={"project_id": project_id_for_root(first_workspace)},
+    )
+
+    assert response.status_code == 200
+    sessions = response.json()["sessions"]
+    assert [session["id"] for session in sessions] == [first.json()["session"]["id"]]
+    assert sessions[0]["project"]["id"] == project_id_for_root(first_workspace)
 
 
 def test_sessions_api_create_and_run_echo_then_continue():

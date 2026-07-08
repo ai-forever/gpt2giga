@@ -72,6 +72,25 @@ def test_filesystem_store_lists_newest_first_and_archive_filter(tmp_path):
     ]
 
 
+def test_filesystem_store_filters_by_project_id_without_hiding_legacy(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+    first = store.create_session(
+        title="first",
+        metadata={"project_id": "proj_first"},
+    )
+    second = store.create_session(
+        title="second",
+        metadata={"project_id": "proj_second"},
+    )
+    legacy = store.create_session(title="legacy")
+
+    filtered = store.list_sessions(project_id="proj_first", include_archived=True)
+    unfiltered = store.list_sessions(include_archived=True)
+
+    assert [session.id for session in filtered] == [first.id]
+    assert {session.id for session in unfiltered} == {first.id, second.id, legacy.id}
+
+
 def test_filesystem_store_rebuilds_missing_index(tmp_path):
     store = FilesystemHarnessSessionStore(tmp_path)
     session = store.create_session(title="recover me")
