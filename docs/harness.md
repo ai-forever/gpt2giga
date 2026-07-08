@@ -488,6 +488,27 @@ Use this when validating the project cockpit manually:
 - [ ] No secret-looking values appear in UI raw JSON.
 - [ ] Old sessions still load.
 - [ ] Archived and pinned sessions still work.
+- [ ] Native sessions are separate from normalized GPT2Giga chats.
+- [ ] `Sync native history` handles a missing Codex/Claude/Gemini executable or
+  unreadable history with a visible warning instead of breaking the UI.
+- [ ] Native history is scoped to the current project/workspace by default.
+- [ ] `Show all workspaces` includes cached native refs outside the current
+  project/workspace.
+- [ ] A native transcript can be previewed without exposing secret-looking
+  values.
+- [ ] Importing a native session creates a normalized GPT2Giga chat and an
+  imported native link.
+- [ ] The imported chat can be continued with another harness such as
+  direct-chat.
+- [ ] Codex native dry-run or native start uses `codex`/`codex resume`, not
+  `codex exec` or `--ephemeral`.
+- [ ] A native process streams terminal output into the Native panel.
+- [ ] Stopping a native process updates process status and run status.
+- [ ] Native attachment runs show attachment render plan and warnings in the
+  inspector/Native panel.
+- [ ] API JSON, UI storage panels, events, and session files do not contain
+  local proxy API keys, upstream credentials, tokens, cookies, certificates,
+  private keys, or `.env` values.
 
 ## Native Session Mode
 
@@ -533,6 +554,8 @@ The intended native workflow is:
 5. Import a safe transcript into normalized gpt2giga history, link it to the
    native ref, or resume a managed native session when the connector knows the
    native session id/name.
+6. Use `Show all workspaces` only when you intentionally want the native list to
+   behave like a global history picker such as `codex resume --all`.
 
 The sidebar should keep these sources distinct. GPT2Giga chats are controlled
 by the normalized store. Native sessions are grouped by harness and marked as
@@ -566,6 +589,12 @@ Claude Code native mode should use interactive `claude` or
 automation. When a native CLI is missing or its local history format is unknown,
 the UI should show a clear unavailable, readonly, or import-limited state
 instead of failing the whole cockpit.
+
+Managed native resume is best-effort. Claude Code uses a deterministic managed
+session name, while Codex and Gemini resume support depends on discovering a
+real native session id/name after the CLI has written its history. Until that id
+is known, the normalized session stores a managed native link with
+`can_resume=false` and an explicit reason.
 
 ## Model Selection Notes
 
@@ -634,6 +663,11 @@ Common checks:
 - real external CLI harness runs perform proxy preflight before launching the
   CLI, so proxy auto-start errors are reported directly instead of being buried
   in agent stdout/stderr.
+- native history sync and import commands share the browser UI's native index;
+  use `giga native sync --include-external --json` when debugging why a native
+  ref is not visible in the UI.
+- if a managed native session cannot be resumed, inspect the session bundle's
+  `native_links` metadata for `resume_reason`.
 
 ## Current Limitations
 
