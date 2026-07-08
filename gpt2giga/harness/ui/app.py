@@ -54,7 +54,11 @@ from gpt2giga.harness.types import (
     spec_to_dict,
 )
 from gpt2giga.harness.ui.static import INDEX_HTML
-from gpt2giga.harness.workspace import resolve_workspace
+from gpt2giga.harness.workspace import (
+    resolve_workspace,
+    workspace_file_metadata,
+    workspace_tree,
+)
 
 
 def create_app(
@@ -358,6 +362,47 @@ def create_app(
             raise HTTPException(status_code=404, detail="Attachment not found") from exc
         return {"deleted": True}
 
+    @app.get("/api/workspace/tree")
+    async def workspace_tree_endpoint(
+        workspace: str | None = Query(default=None),
+        q: str | None = Query(default=None),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> dict[str, Any]:
+        try:
+            workspace_root = _workspace_api_root(workspace, config.data_dir)
+            files = workspace_tree(
+                workspace_root,
+                query=q,
+                limits=_workspace_limits(workspace_root),
+                result_limit=limit,
+            )
+        except (AttachmentValidationError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "workspace": workspace_root,
+            "q": _optional_text(q) or "",
+            "files": files,
+        }
+
+    @app.get("/api/workspace/file/metadata")
+    async def workspace_file_metadata_endpoint(
+        workspace: str | None = Query(default=None),
+        path: str = Query(...),
+    ) -> dict[str, Any]:
+        try:
+            workspace_root = _workspace_api_root(workspace, config.data_dir)
+            metadata = workspace_file_metadata(
+                workspace_root,
+                path,
+                limits=_workspace_limits(workspace_root),
+            )
+        except (AttachmentValidationError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "workspace": workspace_root,
+            "file": metadata,
+        }
+
     @app.post("/api/sessions/run")
     async def create_session_and_run(
         payload: dict[str, Any] = Body(...),
@@ -530,6 +575,17 @@ def _attachment_workspace(
     if workspace is None:
         raise ValueError("workspace is required")
     return resolve_workspace(workspace)
+
+
+def _workspace_api_root(workspace: str | None, data_dir: str) -> str:
+    resolved = resolve_workspace(_optional_text(workspace))
+    if resolved is not None:
+        return resolved
+    return resolve_project(None, data_dir=data_dir).root
+
+
+def _workspace_limits(workspace_root: str) -> AttachmentLimits:
+    return limits_from_project_settings(load_project_config(workspace_root).attachments)
 
 
 def _attachment_response(

@@ -483,6 +483,32 @@ INDEX_HTML = """<!doctype html>
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .workspace-file-menu {
+      display: grid;
+      max-height: 180px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #111418;
+      padding: 4px;
+    }
+    .workspace-file-menu[hidden] {
+      display: none;
+    }
+    .workspace-file-option {
+      width: 100%;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text);
+      padding: 7px 8px;
+      text-align: left;
+      font-weight: 700;
+    }
+    .workspace-file-option:hover:not(:disabled) {
+      background: var(--panel-strong);
+      color: var(--accent-strong);
+    }
     .details,
     .warning {
       min-height: 20px;
@@ -681,6 +707,7 @@ INDEX_HTML = """<!doctype html>
           <label>Prompt
             <textarea id="prompt-input" spellcheck="true"></textarea>
           </label>
+          <div id="workspace-file-menu" class="workspace-file-menu" hidden></div>
           <div class="attachment-toolbar">
             <input id="attachment-file-input" type="file" multiple hidden>
             <button id="attach-file-button" class="secondary" type="button">Attach</button>
@@ -742,6 +769,7 @@ INDEX_HTML = """<!doctype html>
       projectConfig: null,
       selectedHarness: null,
       attachments: [],
+      fileMentionQuery: null,
       currentSessionId: null,
       currentBundle: null,
       lastPayload: null
@@ -1179,6 +1207,100 @@ INDEX_HTML = """<!doctype html>
       renderAttachments();
     }
 
+    async function searchWorkspaceFiles() {
+      const query = currentFileMentionQuery();
+      state.fileMentionQuery = query;
+      if (query == null) {
+        hideWorkspaceFileMenu();
+        return;
+      }
+      const workspace = byId("workspace-input").value.trim() || ".";
+      const params = new URLSearchParams({ workspace, q: query, limit: "20" });
+      const result = await getJson(`/api/workspace/tree?${params.toString()}`);
+      if (state.fileMentionQuery !== query) return;
+      if (!result.ok) {
+        renderWorkspaceFileMenu([], result.data.detail || "Workspace search failed.");
+        return;
+      }
+      renderWorkspaceFileMenu(result.data.files || [], "");
+    }
+
+    function currentFileMentionQuery() {
+      const input = byId("prompt-input");
+      const beforeCursor = input.value.slice(0, input.selectionStart || 0);
+      const match = beforeCursor.match(/(?:^|\\s)@([^\\s@]*)$/);
+      return match ? match[1] : null;
+    }
+
+    function renderWorkspaceFileMenu(files, error) {
+      const menu = byId("workspace-file-menu");
+      menu.textContent = "";
+      if (error) {
+        const item = document.createElement("button");
+        item.className = "workspace-file-option";
+        item.type = "button";
+        item.disabled = true;
+        item.textContent = error;
+        menu.appendChild(item);
+        menu.hidden = false;
+        return;
+      }
+      if (!files.length) {
+        hideWorkspaceFileMenu();
+        return;
+      }
+      for (const file of files) {
+        const item = document.createElement("button");
+        item.className = "workspace-file-option";
+        item.type = "button";
+        item.textContent = `${file.path} (${formatBytes(file.size_bytes || 0)})`;
+        item.addEventListener("click", () => attachWorkspaceFile(file.path));
+        menu.appendChild(item);
+      }
+      menu.hidden = false;
+    }
+
+    function hideWorkspaceFileMenu() {
+      const menu = byId("workspace-file-menu");
+      if (menu) {
+        menu.textContent = "";
+        menu.hidden = true;
+      }
+    }
+
+    async function attachWorkspaceFile(path) {
+      if (!(await ensureSessionForAttachments())) return;
+      const workspace = byId("workspace-input").value.trim() || ".";
+      const result = await getJson(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/attachments/workspace`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace, path })
+      });
+      if (!result.ok || !result.data.attachment) {
+        setText("attachment-status", result.data.detail || "Workspace attachment failed.");
+        return;
+      }
+      state.attachments.push(result.data.attachment);
+      replaceCurrentFileMention(path);
+      hideWorkspaceFileMenu();
+      renderAttachments();
+      await loadSessions();
+    }
+
+    function replaceCurrentFileMention(path) {
+      const input = byId("prompt-input");
+      const start = input.selectionStart || 0;
+      const beforeCursor = input.value.slice(0, start);
+      const afterCursor = input.value.slice(input.selectionEnd || start);
+      const replaced = beforeCursor.replace(/(?:^|\\s)@([^\\s@]*)$/, (match) => {
+        const prefix = match.startsWith("@") ? "" : match.slice(0, 1);
+        return `${prefix}@${path} `;
+      });
+      input.value = replaced + afterCursor;
+      input.focus();
+      input.selectionStart = input.selectionEnd = replaced.length;
+    }
+
     function renderAttachments() {
       const list = byId("attachment-list");
       if (!list) return;
@@ -1596,6 +1718,10 @@ INDEX_HTML = """<!doctype html>
           event.preventDefault();
           runHarness();
         }
+        if (event.key === "Escape") hideWorkspaceFileMenu();
+      });
+      byId("prompt-input").addEventListener("input", () => {
+        searchWorkspaceFiles();
       });
       byId("prompt-input").addEventListener("paste", (event) => {
         const items = event.clipboardData && event.clipboardData.items ? Array.from(event.clipboardData.items) : [];
