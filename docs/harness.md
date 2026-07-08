@@ -454,18 +454,83 @@ Use this when validating the project cockpit manually:
 - [ ] Old sessions still load.
 - [ ] Archived and pinned sessions still work.
 
-## Native CLI Sessions
+## Native Session Mode
 
 The persistent UI history is always the gpt2giga normalized session store.
-Codex, Claude Code, and Gemini CLI native transcript files are not parsed as the
-canonical UI database.
+Codex, Claude Code, Gemini CLI, direct-chat, echo, imported transcripts, raw
+requests, raw responses, attachment render plans, and run events all flow
+through that stable JSON/JSONL history. Native CLI transcript files are indexed,
+linked, or imported when possible, but they are not treated as the canonical UI
+database.
 
-This version keeps native resume disabled for external CLI harnesses and records
-that limitation in run metadata. One-shot CLI behavior remains conservative:
-Codex uses an isolated temporary `CODEX_HOME` and `--ephemeral`; Claude Code
-uses `--no-session-persistence`; Gemini CLI uses an isolated temporary `HOME`.
-Managed per-session native homes can be added later under
-`GPT2GIGA_HARNESS_DATA_DIR/native/` without changing the UI history contract.
+Harnesses can support two invocation modes:
+
+| Invocation | Behavior |
+|---|---|
+| `headless` | Runs the current one-shot automation path. This is best for CLI smoke tests, dry-runs, CI, and scripted checks. |
+| `native` | Starts or resumes the external CLI's standard interactive/sessionful mode. This is best for project work from `giga ui`. |
+
+Existing CLI commands keep the conservative `headless` behavior unless native
+mode is explicitly selected. Browser UI workflows can prefer `native` for
+external CLI harnesses once the selected harness advertises native support.
+Direct-chat and echo remain normalized gpt2giga sessions because they do not own
+separate native CLI history.
+
+Native sessions sit beside normalized sessions:
+
+- normalized gpt2giga sessions are the stable project cockpit history;
+- managed native sessions are created by gpt2giga in managed homes under
+  `GPT2GIGA_HARNESS_DATA_DIR/native/`;
+- external native sessions are discovered from existing Codex, Claude Code, or
+  Gemini CLI history only when the user asks to sync or include that history;
+- imported native transcripts are copied into normalized sessions after
+  redaction;
+- linked sessions record which normalized gpt2giga session corresponds to which
+  native CLI session id, name, tag, home, or source.
+
+The intended native workflow is:
+
+1. Open the project cockpit with `giga ui`.
+2. Pick a harness such as Codex CLI, Claude Code, or Gemini CLI.
+3. Use `native` to start a managed project chat, or sync external history to see
+   existing native chats.
+4. Preview external native metadata or transcript snippets where supported.
+5. Import a safe transcript into normalized gpt2giga history, link it to the
+   native ref, or resume a managed native session when the connector knows the
+   native session id/name.
+
+The sidebar should keep these sources distinct. GPT2Giga chats are controlled
+by the normalized store. Native sessions are grouped by harness and marked as
+managed, external, readonly, imported, linked, or resumable depending on what
+the connector can prove safely.
+
+Security posture:
+
+- metadata-only external indexing is the default for user-owned CLI homes;
+- external transcript content is not stored in normalized history unless the
+  user imports it;
+- imported content passes through the same redaction path as other harness
+  session data;
+- gpt2giga must not rewrite `~/.codex/config.toml`,
+  `~/.claude/settings.json`, or `~/.gemini/settings.json`;
+- managed native homes live under `GPT2GIGA_HARNESS_DATA_DIR/native/`;
+- upstream GigaChat credentials, OAuth tokens, cookies, certificates, private
+  keys, and `.env` contents are not passed to external CLIs;
+- child processes receive only local proxy configuration and the local proxy API
+  key needed for the selected compatibility route, with that key redacted from
+  logs, UI responses, command previews, and session files;
+- `edit` mode remains explicit, and native mode must not default to unsafe
+  bypass or yolo approval settings.
+
+Connector behavior is intentionally defensive. Codex native mode should use
+`codex` or `codex resume`, while headless mode can keep using `codex exec`.
+Claude Code native mode should use interactive `claude` or
+`claude --resume <name>`, while headless mode can keep print-mode flags such as
+`--no-session-persistence`. Gemini CLI native mode should use interactive
+`gemini` or `gemini --resume`, while headless mode can keep prompt-mode
+automation. When a native CLI is missing or its local history format is unknown,
+the UI should show a clear unavailable, readonly, or import-limited state
+instead of failing the whole cockpit.
 
 ## Model Selection Notes
 
@@ -539,10 +604,12 @@ Common checks:
 
 The first MVP runs direct Chat Completions plus Codex, Claude Code, and Gemini
 CLI command paths. External agent behavior still depends on each installed CLI's
-current support for custom local API endpoints and non-interactive modes; use
-`--dry-run --json` first when validating a new workstation.
+current support for custom local API endpoints, non-interactive modes, native
+resume, and local history formats. Use `--dry-run --json` first when validating
+a new workstation, and treat external native history as metadata-only until
+preview or import support for that connector is confirmed.
 
 Attachment support is intentionally conservative. Document and binary transport
 through external CLIs is path/reference based unless local CLI behavior has been
 verified. SSE/WebSocket streaming for live attachment run events remains future
-work.
+work; native terminal transport will be local-only when enabled.
