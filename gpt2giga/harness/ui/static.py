@@ -540,6 +540,19 @@ INDEX_HTML = """<!doctype html>
       padding: 10px;
       font-size: 12px;
     }
+    #native-terminal-output {
+      min-height: 180px;
+      margin: 10px 0;
+      border: 1px solid #232830;
+      border-radius: 6px;
+      background: #07090b;
+      padding: 8px;
+    }
+    #native-terminal-input {
+      min-height: 70px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+        "Liberation Mono", monospace;
+    }
     .tab-panel {
       display: none;
     }
@@ -778,7 +791,22 @@ INDEX_HTML = """<!doctype html>
             <pre id="command-panel" class="mono-panel tab-panel">No command yet.</pre>
             <pre id="diff-panel" class="mono-panel tab-panel">No diff captured.</pre>
             <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
-            <pre id="native-panel" class="mono-panel tab-panel">No native session selected.</pre>
+            <div id="native-panel" class="mono-panel tab-panel">
+              <div class="badge-row">
+                <span id="native-terminal-status" class="badge info">Native: idle</span>
+                <button id="poll-native-output-button" class="secondary" type="button">Poll output</button>
+                <button id="stop-native-process-button" class="danger" type="button">Stop process</button>
+                <button id="clear-native-terminal-button" class="secondary" type="button">Clear terminal</button>
+              </div>
+              <pre id="native-process-summary">No native session selected.</pre>
+              <pre id="native-terminal-output">Terminal output will appear here.</pre>
+              <label>Native stdin
+                <textarea id="native-terminal-input" spellcheck="false"></textarea>
+              </label>
+              <div class="inline-actions">
+                <button id="send-native-input-button" type="button">Send input</button>
+              </div>
+            </div>
             <pre id="storage-panel" class="mono-panel tab-panel">No storage selected.</pre>
           </div>
         </div>
@@ -800,6 +828,9 @@ INDEX_HTML = """<!doctype html>
       selectedNativeRefId: null,
       nativePreview: null,
       activeNativeProcess: null,
+      nativeOutputCursor: 0,
+      nativeTerminalText: "",
+      nativePollTimer: null,
       attachments: [],
       fileMentionQuery: null,
       currentSessionId: null,
@@ -1295,7 +1326,7 @@ INDEX_HTML = """<!doctype html>
     function selectNativeSession(refId) {
       state.selectedNativeRefId = refId;
       const ref = state.nativeSessions.find((item) => item.id === refId);
-      setText("native-panel", ref ? pretty(ref) : "No native session selected.");
+      setNativeSummary(ref ? pretty(ref) : "No native session selected.");
       renderNativeSessions();
       showTab("native");
     }
@@ -1304,12 +1335,12 @@ INDEX_HTML = """<!doctype html>
       state.selectedNativeRefId = refId;
       const result = await getJson(`/api/native/sessions/${encodeURIComponent(refId)}/preview`);
       if (!result.ok) {
-        setText("native-panel", result.data.detail || "Native preview failed.");
+        setNativeSummary(result.data.detail || "Native preview failed.");
         showTab("native");
         return;
       }
       state.nativePreview = result.data;
-      setText("native-panel", pretty(result.data));
+      setNativeSummary(pretty(result.data));
       renderNativeSessions();
       showTab("native");
     }
@@ -1318,11 +1349,11 @@ INDEX_HTML = """<!doctype html>
       state.selectedNativeRefId = refId;
       const result = await getJson(`/api/native/sessions/${encodeURIComponent(refId)}/import`, { method: "POST" });
       if (!result.ok) {
-        setText("native-panel", result.data.detail || "Native import failed.");
+        setNativeSummary(result.data.detail || "Native import failed.");
         showTab("native");
         return;
       }
-      setText("native-panel", pretty(result.data));
+      setNativeSummary(pretty(result.data));
       if (result.data.session && result.data.session.id) {
         await loadSession(result.data.session.id);
       }
@@ -1333,7 +1364,7 @@ INDEX_HTML = """<!doctype html>
     async function linkNativeSession(refId) {
       state.selectedNativeRefId = refId;
       if (!state.currentSessionId) {
-        setText("native-panel", "Select a GPT2Giga chat before linking a native session.");
+        setNativeSummary("Select a GPT2Giga chat before linking a native session.");
         showTab("native");
         return;
       }
@@ -1343,11 +1374,11 @@ INDEX_HTML = """<!doctype html>
         body: JSON.stringify({ native_ref_id: refId })
       });
       if (!result.ok) {
-        setText("native-panel", result.data.detail || "Native link failed.");
+        setNativeSummary(result.data.detail || "Native link failed.");
         showTab("native");
         return;
       }
-      setText("native-panel", pretty(result.data));
+      setNativeSummary(pretty(result.data));
       await loadSession(state.currentSessionId);
       showTab("native");
     }
@@ -1363,7 +1394,7 @@ INDEX_HTML = """<!doctype html>
         mode: byId("mode-select").value,
         workspace: ref.workspace || byId("workspace-input").value.trim() || null
       }))) return;
-      setText("native-panel", "Resuming native session...");
+      setNativeSummary("Resuming native session...");
       showTab("native");
       const result = await getJson("/api/native/processes/start", {
         method: "POST",
@@ -1376,11 +1407,10 @@ INDEX_HTML = """<!doctype html>
         })
       });
       if (!result.ok) {
-        setText("native-panel", result.data.detail || "Native resume failed.");
+        setNativeSummary(result.data.detail || "Native resume failed.");
         return;
       }
-      state.activeNativeProcess = result.data.process || null;
-      setText("native-panel", pretty(result.data));
+      setActiveNativeProcess(result.data.process || null, result.data);
       await loadSession(state.currentSessionId);
       showTab("native");
     }
@@ -1714,7 +1744,7 @@ INDEX_HTML = """<!doctype html>
       setText("raw-request-panel", pretty(payload));
       setText("raw-response-panel", "{}");
       setText("command-panel", commandPreview(payload));
-      setText("native-panel", "Starting native process...");
+      setNativeSummary("Starting native process...");
       showTab("native");
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Starting...";
@@ -1734,11 +1764,10 @@ INDEX_HTML = """<!doctype html>
           })
         });
         if (!result.ok) {
-          setText("native-panel", result.data.detail || `Native start failed with HTTP ${result.status}`);
+          setNativeSummary(result.data.detail || `Native start failed with HTTP ${result.status}`);
           return;
         }
-        state.activeNativeProcess = result.data.process || null;
-        setText("native-panel", pretty(result.data));
+        setActiveNativeProcess(result.data.process || null, result.data);
         if (state.currentSessionId) await loadSession(state.currentSessionId);
       } finally {
         byId("run-button").disabled = false;
@@ -1754,7 +1783,7 @@ INDEX_HTML = """<!doctype html>
         body: JSON.stringify(payload)
       });
       if (!result.ok || !result.data.session) {
-        setText("native-panel", result.data.detail || "Native session creation failed.");
+        setNativeSummary(result.data.detail || "Native session creation failed.");
         return false;
       }
       state.currentSessionId = result.data.session.id;
@@ -1821,7 +1850,7 @@ INDEX_HTML = """<!doctype html>
       const diff = run && run.metadata ? run.metadata.diff : "";
       setText("diff-panel", diff || "No diff captured.");
       setText("attachments-panel", run ? attachmentInspectorText(run, rawRequests[rawRequests.length - 1]) : "No attachments selected.");
-      setText("native-panel", nativeInspectorText(bundle));
+      setNativeSummary(nativeInspectorText(bundle));
       setText("storage-panel", pretty(bundle.storage || {}));
       byId("pin-session-button").textContent = session && session.pinned ? "Unpin" : "Pin";
       byId("archive-session-button").textContent = session && session.archived ? "Unarchive" : "Archive";
@@ -1833,6 +1862,121 @@ INDEX_HTML = """<!doctype html>
       const links = bundle && Array.isArray(bundle.native_links) ? bundle.native_links : [];
       if (!links.length) return "No native session selected.";
       return pretty({ native_links: links });
+    }
+
+    function setNativeSummary(value) {
+      setText("native-process-summary", value);
+    }
+
+    function setActiveNativeProcess(process, payload) {
+      stopNativePolling();
+      state.activeNativeProcess = process;
+      state.nativeOutputCursor = 0;
+      state.nativeTerminalText = "";
+      setNativeSummary(pretty(payload || process || {}));
+      setText("native-terminal-output", "Terminal output will appear here.");
+      renderNativeTerminalStatus();
+      if (process && process.id) {
+        pollNativeOutput();
+        state.nativePollTimer = window.setInterval(pollNativeOutput, 1000);
+      }
+    }
+
+    function renderNativeTerminalStatus(status) {
+      const process = state.activeNativeProcess || {};
+      const effectiveStatus = status || process.status || "idle";
+      const badge = byId("native-terminal-status");
+      badge.className = effectiveStatus === "running" ? "badge ok" : effectiveStatus === "idle" ? "badge info" : "badge warn";
+      badge.textContent = `Native: ${effectiveStatus}`;
+      const running = effectiveStatus === "running";
+      byId("send-native-input-button").disabled = !running;
+      byId("stop-native-process-button").disabled = !process.id || !running;
+      byId("poll-native-output-button").disabled = !process.id;
+    }
+
+    async function pollNativeOutput() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id) {
+        renderNativeTerminalStatus("idle");
+        return;
+      }
+      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/output?cursor=${state.nativeOutputCursor}`);
+      if (!result.ok) {
+        appendNativeTerminalLine(result.data.detail || "Native output polling failed.");
+        stopNativePolling();
+        renderNativeTerminalStatus("error");
+        return;
+      }
+      const body = result.data || {};
+      state.nativeOutputCursor = body.cursor || state.nativeOutputCursor;
+      const outputs = Array.isArray(body.outputs) ? body.outputs : [];
+      for (const output of outputs) {
+        appendNativeTerminal(output.text || "");
+      }
+      const status = body.status || (body.run && body.run.status) || "running";
+      state.activeNativeProcess = { ...process, status, exit_code: body.exit_code };
+      renderNativeTerminalStatus(status);
+      if (status !== "running") stopNativePolling();
+      if (body.run) setNativeSummary(pretty({ process: state.activeNativeProcess, run: body.run }));
+    }
+
+    async function sendNativeInput() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id) return;
+      const input = byId("native-terminal-input");
+      const data = input.value;
+      if (!data) return;
+      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}/input`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data })
+      });
+      if (!result.ok) {
+        appendNativeTerminalLine(result.data.detail || "Native input failed.");
+        return;
+      }
+      input.value = "";
+      if (result.data.process) state.activeNativeProcess = result.data.process;
+      await pollNativeOutput();
+    }
+
+    async function stopNativeProcess() {
+      const process = state.activeNativeProcess || {};
+      if (!process.id) return;
+      const result = await getJson(`/api/native/processes/${encodeURIComponent(process.id)}`, { method: "DELETE" });
+      if (!result.ok) {
+        appendNativeTerminalLine(result.data.detail || "Native stop failed.");
+        return;
+      }
+      if (result.data.process) state.activeNativeProcess = result.data.process;
+      setNativeSummary(pretty(result.data));
+      await pollNativeOutput();
+    }
+
+    function stopNativePolling() {
+      if (state.nativePollTimer) {
+        window.clearInterval(state.nativePollTimer);
+        state.nativePollTimer = null;
+      }
+    }
+
+    function clearNativeTerminal() {
+      state.nativeTerminalText = "";
+      setText("native-terminal-output", "Terminal output will appear here.");
+    }
+
+    function appendNativeTerminal(text) {
+      const clean = stripAnsi(text);
+      state.nativeTerminalText += clean;
+      setText("native-terminal-output", state.nativeTerminalText || "Terminal output will appear here.");
+    }
+
+    function appendNativeTerminalLine(text) {
+      appendNativeTerminal(`${text}\\n`);
+    }
+
+    function stripAnsi(text) {
+      return String(text || "").replace(/\\x1B\\[[0-?]*[ -/]*[@-~]/g, "");
     }
 
     function renderEvents(events) {
@@ -2035,6 +2179,10 @@ INDEX_HTML = """<!doctype html>
       byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
       byId("invocation-select").addEventListener("change", updateHarnessDrivenControls);
       byId("sync-native-button").addEventListener("click", () => loadNativeSessions(true));
+      byId("poll-native-output-button").addEventListener("click", pollNativeOutput);
+      byId("send-native-input-button").addEventListener("click", sendNativeInput);
+      byId("stop-native-process-button").addEventListener("click", stopNativeProcess);
+      byId("clear-native-terminal-button").addEventListener("click", clearNativeTerminal);
       byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); });
       byId("api-mode-v2").addEventListener("change", () => { updateRouteNote(); loadModels(); });
       byId("model-menu-button").addEventListener("click", toggleModelList);
@@ -2125,6 +2273,7 @@ INDEX_HTML = """<!doctype html>
 
     async function boot() {
       bindEvents();
+      renderNativeTerminalStatus("idle");
       await loadDefaults();
       await loadProject();
       await Promise.all([loadHarnesses(), refreshHealth(), loadModels()]);
