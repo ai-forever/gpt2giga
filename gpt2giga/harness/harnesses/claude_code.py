@@ -19,6 +19,7 @@ from gpt2giga.harness.harnesses.attachment_plan import (
     prompt_with_attachments,
 )
 from gpt2giga.harness.harnesses.base import BaseHarness
+from gpt2giga.harness.native import HarnessInvocationMode
 from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
@@ -58,6 +59,9 @@ class ClaudeCodeHarness(BaseHarness):
                 "document",
             ),
             attachment_transport=("prompt_path_reference", "at_file_reference"),
+            supports_native_sessions=True,
+            supports_external_history=True,
+            default_invocation_mode=HarnessInvocationMode.NATIVE,
             tags=("claude", "agent"),
         )
 

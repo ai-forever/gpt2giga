@@ -11,6 +11,12 @@ import uvicorn
 
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.doctor import run_doctor
+from gpt2giga.harness.native import HarnessInvocationMode
+from gpt2giga.harness.native.base import native_command_plan_to_dict
+from gpt2giga.harness.native.registry import (
+    UnknownNativeHistoryConnectorError,
+    create_default_native_registry,
+)
 from gpt2giga.harness.project import (
     init_project_config,
     load_project_config,
@@ -28,6 +34,7 @@ from gpt2giga.harness.sessions.models import bundle_to_dict, session_to_dict
 from gpt2giga.harness.types import (
     HarnessCapability,
     HarnessRequest,
+    HarnessResult,
     availability_to_dict,
     parse_api_mode,
     parse_capability,
@@ -109,6 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--model", default=None)
     run.add_argument("--api-mode", choices=("v1", "v2"), default=None)
     run.add_argument("--workspace", default=None)
+    run.add_argument("--native", action="store_true")
     run.add_argument("--json", action="store_true")
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("prompt", nargs="+")
@@ -168,6 +176,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     harness_run.add_argument("--mode", choices=("plan", "read", "edit"), default="plan")
     harness_run.add_argument("--workspace", default=None)
+    harness_run.add_argument("--native", action="store_true")
     harness_run.add_argument("--json", action="store_true")
     harness_run.add_argument("--dry-run", action="store_true")
     harness_run.set_defaults(handler=_handle_harness_run)
@@ -248,6 +257,8 @@ def _handle_harness_list(args: argparse.Namespace, config: HarnessConfig) -> int
                 "id": spec.id,
                 "kind": spec.kind,
                 "status": availability.status.value,
+                "native": spec.supports_native_sessions,
+                "default_invocation_mode": spec.default_invocation_mode.value,
                 "description": spec.description,
             }
         )
@@ -282,6 +293,7 @@ def _handle_harness_run(args: argparse.Namespace, config: HarnessConfig) -> int:
         mode=args.mode,
         workspace=args.workspace,
         dry_run=args.dry_run,
+        native=args.native,
         config=config,
     )
     _print_result(result, as_json=args.json)
@@ -298,6 +310,7 @@ def _handle_chat(args: argparse.Namespace, config: HarnessConfig) -> int:
         mode="plan",
         workspace=None,
         dry_run=args.dry_run,
+        native=False,
         config=config,
     )
     _print_result(result, as_json=args.json)
@@ -315,6 +328,7 @@ def _handle_agent_alias(args: argparse.Namespace, config: HarnessConfig) -> int:
         mode=args.mode,
         workspace=args.workspace,
         dry_run=args.dry_run,
+        native=args.native,
         config=config,
     )
     _print_result(result, as_json=args.json)
@@ -406,19 +420,55 @@ def _run_harness(
     mode: str,
     workspace: str | None,
     dry_run: bool,
+    native: bool,
     config: HarnessConfig,
 ):
     registry = create_default_registry()
     harness = registry.get(harness_id)
+    spec = harness.spec()
+    invocation_mode = (
+        HarnessInvocationMode.NATIVE if native else HarnessInvocationMode.HEADLESS
+    )
     request = HarnessRequest(
         prompt=prompt,
         model=model,
         api_mode=parse_api_mode(api_mode or config.default_api_mode),
         capability=parse_capability(capability),
         mode=mode,
+        invocation_mode=invocation_mode,
         workspace=resolve_workspace(workspace),
         extra={"dry_run": dry_run},
     )
+    if native:
+        if not spec.supports_native_sessions:
+            return HarnessResult(
+                ok=False,
+                text="",
+                error=f"Harness does not support native sessions: {harness_id}",
+            )
+        if not dry_run:
+            return HarnessResult(
+                ok=False,
+                text="",
+                error="Native CLI runs currently require --dry-run",
+            )
+        try:
+            connector = create_default_native_registry(data_dir=config.data_dir).get(
+                harness_id
+            )
+        except UnknownNativeHistoryConnectorError:
+            return HarnessResult(
+                ok=False,
+                text="",
+                error=f"Native connector is not registered: {harness_id}",
+            )
+        plan = connector.build_start_command(request, config.to_context())
+        return HarnessResult(
+            ok=True,
+            text="native dry run",
+            raw={"native_command_plan": native_command_plan_to_dict(plan)},
+            command=plan.command,
+        )
     return harness.run(request, config.to_context())
 
 
@@ -445,11 +495,13 @@ def _print_json(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2))
 
 
-def _print_table(rows: list[dict[str, str]]) -> None:
-    print(f"{'ID':<16}{'Kind':<14}{'Status':<12}Description")
+def _print_table(rows: list[dict[str, Any]]) -> None:
+    print(f"{'ID':<16}{'Kind':<14}{'Status':<12}{'Native':<8}Description")
     for row in rows:
+        native = row.get("default_invocation_mode") if row.get("native") else "-"
         print(
-            f"{row['id']:<16}{row['kind']:<14}{row['status']:<12}{row['description']}"
+            f"{row['id']:<16}{row['kind']:<14}{row['status']:<12}"
+            f"{native:<8}{row['description']}"
         )
 
 

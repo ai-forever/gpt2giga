@@ -28,9 +28,6 @@ from gpt2giga.harness.config import (
 from gpt2giga.harness.native.base import (
     discovery_error_to_dict,
 )
-from gpt2giga.harness.native.claude import ClaudeNativeHistoryConnector
-from gpt2giga.harness.native.codex import CodexNativeHistoryConnector
-from gpt2giga.harness.native.gemini import GeminiNativeHistoryConnector
 from gpt2giga.harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
@@ -39,6 +36,7 @@ from gpt2giga.harness.native.models import (
 from gpt2giga.harness.native.registry import (
     NativeHistoryConnectorRegistry,
     UnknownNativeHistoryConnectorError,
+    create_default_native_registry,
 )
 from gpt2giga.harness.native.store import (
     FilesystemNativeSessionIndexStore,
@@ -98,7 +96,9 @@ def create_app(
     config = config or HarnessConfig.from_env()
     registry = registry or create_default_registry()
     store = store or FilesystemHarnessSessionStore(config.data_dir)
-    native_registry = native_registry or _create_default_native_registry(config)
+    native_registry = native_registry or create_default_native_registry(
+        data_dir=config.data_dir
+    )
     native_index_store = native_index_store or FilesystemNativeSessionIndexStore(
         config.data_dir
     )
@@ -683,20 +683,6 @@ def validate_ui_bind(host: str, *, allow_remote: bool) -> None:
             "Refusing to bind UI to 0.0.0.0 without --allow-remote. "
             "The UI may expose local harness execution."
         )
-
-
-def _create_default_native_registry(
-    config: HarnessConfig,
-) -> NativeHistoryConnectorRegistry:
-    registry = NativeHistoryConnectorRegistry()
-    registry.register_many(
-        (
-            CodexNativeHistoryConnector(data_dir=config.data_dir),
-            ClaudeNativeHistoryConnector(data_dir=config.data_dir),
-            GeminiNativeHistoryConnector(data_dir=config.data_dir),
-        )
-    )
-    return registry
 
 
 def _native_project_id(

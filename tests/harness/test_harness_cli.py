@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from gpt2giga.harness import cli
 from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
@@ -15,6 +17,29 @@ def test_cli_harness_list_outputs_direct_chat(capsys):
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "direct-chat" in output
+
+
+def test_cli_harness_list_json_shows_native_metadata(capsys):
+    exit_code = cli.main(["harness", "list", "--json"])
+
+    rows = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["codex-cli"]["native"] is True
+    assert by_id["codex-cli"]["default_invocation_mode"] == "native"
+    assert by_id["direct-chat"]["native"] is False
+
+
+def test_cli_harness_inspect_json_shows_native_support(capsys):
+    exit_code = cli.main(["harness", "inspect", "claude-code", "--json"])
+
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["spec"]["supports_native_sessions"] is True
+    assert payload["spec"]["supports_external_history"] is True
+    assert payload["spec"]["default_invocation_mode"] == "native"
 
 
 def test_cli_project_info_json_reports_workspace(capsys, tmp_path):
@@ -168,3 +193,60 @@ def test_cli_session_show_json(monkeypatch, capsys, tmp_path):
     output = json.loads(capsys.readouterr().out)
     assert output["session"]["id"] == session.id
     assert output["messages"] == []
+
+
+@pytest.mark.parametrize(
+    ("harness_id", "forbidden"),
+    (
+        ("codex-cli", ("exec", "--ephemeral")),
+        ("claude-code", ("-p", "--no-session-persistence")),
+        ("gemini-cli", ("-p", "--skip-trust")),
+    ),
+)
+def test_cli_native_dry_run_prints_command_plan_without_headless_run(
+    harness_id,
+    forbidden,
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    secret = "sk-native-cli-key-123"
+
+    def fail_run(self, request, context):
+        raise AssertionError("headless run should not be called for native dry-run")
+
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("GPT2GIGA_HARNESS_API_KEY", secret)
+    monkeypatch.setattr(CodexCliHarness, "run", fail_run)
+    monkeypatch.setattr(ClaudeCodeHarness, "run", fail_run)
+    monkeypatch.setattr(GeminiCliHarness, "run", fail_run)
+
+    exit_code = cli.main(
+        [
+            "harness",
+            "run",
+            harness_id,
+            "--native",
+            "--dry-run",
+            "--prompt",
+            "Inspect",
+            "--model",
+            "GigaChat-2-Max",
+            "--api-mode",
+            "v2",
+            "--json",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    command = payload["raw"]["native_command_plan"]["command"]
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["text"] == "native dry run"
+    assert payload["raw"]["native_command_plan"]["metadata"]["managed"] is True
+    for item in forbidden:
+        assert item not in command
+    assert secret not in output
+    assert payload["raw"]["native_command_plan"]["env"] != {}

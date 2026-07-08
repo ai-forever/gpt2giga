@@ -20,6 +20,7 @@ from gpt2giga.harness.harnesses.attachment_plan import (
     prompt_with_attachments,
 )
 from gpt2giga.harness.harnesses.base import BaseHarness
+from gpt2giga.harness.native import HarnessInvocationMode
 from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
@@ -54,6 +55,9 @@ class CodexCliHarness(BaseHarness):
             supports_attachments=True,
             accepted_attachment_kinds=("image", "text", "workspace_file"),
             attachment_transport=("cli_image_flag", "prompt_path_reference"),
+            supports_native_sessions=True,
+            supports_external_history=True,
+            default_invocation_mode=HarnessInvocationMode.NATIVE,
             tags=("codex", "agent"),
         )
 

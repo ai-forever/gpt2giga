@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable
 
+from gpt2giga.harness.config import DEFAULT_HARNESS_DATA_DIR
 from gpt2giga.harness.native.base import (
     NativeDiscoveryError,
     NativeDiscoveryResult,
@@ -97,3 +99,23 @@ def _connector_error(
         message=str(redact_secrets(str(exc))),
         detail=type(exc).__name__,
     )
+
+
+def create_default_native_registry(
+    *,
+    data_dir: str | Path = DEFAULT_HARNESS_DATA_DIR,
+) -> NativeHistoryConnectorRegistry:
+    """Create a registry with built-in native history connectors."""
+    from gpt2giga.harness.native.claude import ClaudeNativeHistoryConnector
+    from gpt2giga.harness.native.codex import CodexNativeHistoryConnector
+    from gpt2giga.harness.native.gemini import GeminiNativeHistoryConnector
+
+    registry = NativeHistoryConnectorRegistry()
+    registry.register_many(
+        (
+            CodexNativeHistoryConnector(data_dir=data_dir),
+            ClaudeNativeHistoryConnector(data_dir=data_dir),
+            GeminiNativeHistoryConnector(data_dir=data_dir),
+        )
+    )
+    return registry
