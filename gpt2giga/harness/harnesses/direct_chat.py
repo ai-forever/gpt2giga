@@ -8,6 +8,7 @@ from gpt2giga.harness import proxy
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.types import (
     Availability,
+    HarnessChatMessage,
     HarnessCapability,
     HarnessContext,
     HarnessEvent,
@@ -47,9 +48,13 @@ class DirectChatHarness(BaseHarness):
     ) -> HarnessResult:
         model = request.model or context.default_model or DEFAULT_MODEL
         url = proxy.build_chat_completions_url(context.proxy_url, request.api_mode)
+        messages = _request_messages(request)
         payload = {
             "model": model,
-            "messages": [{"role": "user", "content": request.prompt}],
+            "messages": [
+                {"role": message.role, "content": message.content}
+                for message in messages
+            ],
             "stream": bool(request.stream),
         }
         api_key = context.api_key or proxy.cached_sidecar_api_key(context.proxy_url)
@@ -143,3 +148,9 @@ def _curl_command(
         command.extend(["-H", "Authorization: Bearer <redacted>"])
     command.extend(["-d", json.dumps(payload, ensure_ascii=False)])
     return tuple(command)
+
+
+def _request_messages(request: HarnessRequest) -> tuple[HarnessChatMessage, ...]:
+    if request.messages:
+        return request.messages
+    return (HarnessChatMessage(role="user", content=request.prompt),)

@@ -12,6 +12,11 @@ import uvicorn
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.doctor import run_doctor
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
+from gpt2giga.harness.sessions import (
+    FilesystemHarnessSessionStore,
+    SessionNotFoundError,
+)
+from gpt2giga.harness.sessions.models import bundle_to_dict, session_to_dict
 from gpt2giga.harness.types import (
     HarnessCapability,
     HarnessRequest,
@@ -43,6 +48,9 @@ def main(argv: list[str] | None = None) -> int:
         return args.handler(args, config)
     except UnknownHarnessError as exc:
         print(f"Unknown harness: {exc.args[0]}", file=sys.stderr)
+        return 2
+    except SessionNotFoundError as exc:
+        print(f"Unknown session: {exc.args[0]}", file=sys.stderr)
         return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
@@ -90,6 +98,21 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true")
     run.add_argument("prompt", nargs="+")
     run.set_defaults(handler=_handle_agent_alias)
+
+    session = subparsers.add_parser("session")
+    session_subparsers = session.add_subparsers(dest="session_command")
+
+    session_list = session_subparsers.add_parser("list", parents=[common])
+    session_list.add_argument("--json", action="store_true")
+    session_list.add_argument("--workspace", default=None)
+    session_list.add_argument("--harness", dest="harness_id", default=None)
+    session_list.add_argument("--include-archived", action="store_true")
+    session_list.set_defaults(handler=_handle_session_list)
+
+    session_show = session_subparsers.add_parser("show", parents=[common])
+    session_show.add_argument("session_id")
+    session_show.add_argument("--json", action="store_true")
+    session_show.set_defaults(handler=_handle_session_show)
 
     harness = subparsers.add_parser("harness")
     harness_subparsers = harness.add_subparsers(dest="harness_command")
@@ -215,6 +238,37 @@ def _handle_agent_alias(args: argparse.Namespace, config: HarnessConfig) -> int:
     return 0 if result.ok else 1
 
 
+def _handle_session_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    workspace = resolve_workspace(args.workspace) if args.workspace else None
+    sessions = store.list_sessions(
+        workspace=workspace,
+        harness_id=args.harness_id,
+        include_archived=args.include_archived,
+    )
+    rows = [_session_row(store, session.id) for session in sessions]
+    if args.json:
+        _print_json(rows)
+    else:
+        _print_session_table(rows)
+    return 0
+
+
+def _handle_session_show(args: argparse.Namespace, config: HarnessConfig) -> int:
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    bundle = bundle_to_dict(store.get_session_bundle(args.session_id))
+    if args.json:
+        _print_json(bundle)
+    else:
+        session = bundle["session"]
+        print(f"{session['title']} ({session['id']})")
+        print(f"Harness: {session['default_harness_id']}")
+        print(f"Updated: {session['updated_at']}")
+        print(f"Messages: {len(bundle['messages'])}")
+        print(f"Runs: {len(bundle['runs'])}")
+    return 0
+
+
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
     validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
@@ -313,6 +367,34 @@ def _print_table(rows: list[dict[str, str]]) -> None:
     for row in rows:
         print(
             f"{row['id']:<16}{row['kind']:<14}{row['status']:<12}{row['description']}"
+        )
+
+
+def _session_row(
+    store: FilesystemHarnessSessionStore,
+    session_id: str,
+) -> dict[str, Any]:
+    session = store.get_session(session_id)
+    messages = store.list_messages(session_id)
+    runs = store.list_runs(session_id)
+    row = session_to_dict(session)
+    row.update(
+        {
+            "last_message_preview": (
+                " ".join(messages[-1].content.split())[:120] if messages else ""
+            ),
+            "last_run_status": runs[-1].status if runs else None,
+        }
+    )
+    return row
+
+
+def _print_session_table(rows: list[dict[str, Any]]) -> None:
+    print(f"{'ID':<38}{'Updated':<22}{'Harness':<16}Title")
+    for row in rows:
+        print(
+            f"{row['id']:<38}{row['updated_at']:<22}"
+            f"{row['default_harness_id']:<16}{row['title']}"
         )
 
 

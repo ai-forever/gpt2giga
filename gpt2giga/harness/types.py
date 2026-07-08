@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import os
+import re
 from typing import Any, Mapping
 
 
@@ -77,6 +79,14 @@ class HarnessSpec:
 
 
 @dataclass(frozen=True)
+class HarnessChatMessage:
+    """Chat message passed to chat-capable harnesses."""
+
+    role: str
+    content: str
+
+
+@dataclass(frozen=True)
 class HarnessRequest:
     """Normalized user request passed to any harness."""
 
@@ -87,6 +97,10 @@ class HarnessRequest:
     mode: str = "plan"
     stream: bool = False
     workspace: str | None = None
+    messages: tuple[HarnessChatMessage, ...] = ()
+    session_id: str | None = None
+    run_id: str | None = None
+    native_session_id: str | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -132,12 +146,32 @@ SECRET_KEY_PARTS = (
     "api_key",
     "apikey",
     "authorization",
+    "cookie",
     "credentials",
     "password",
+    "private_key",
     "secret",
     "token",
 )
 REDACTED = "<redacted>"
+SECRET_ENV_NAMES = (
+    "GIGACHAT_CREDENTIALS",
+    "GIGACHAT_ACCESS_TOKEN",
+    "GPT2GIGA_API_KEY",
+    "GPT2GIGA_HARNESS_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "OPENAI_API_KEY",
+)
+SECRET_VALUE_PATTERNS = (
+    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+    re.compile(r"sk-[A-Za-z0-9][A-Za-z0-9_-]{8,}"),
+    re.compile(
+        r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
+        re.DOTALL,
+    ),
+)
 
 
 def parse_api_mode(value: str | GigaChatApiMode | None) -> GigaChatApiMode:
@@ -175,6 +209,8 @@ def redact_secrets(value: Any) -> Any:
         return tuple(redact_secrets(item) for item in value)
     if isinstance(value, list):
         return [redact_secrets(item) for item in value]
+    if isinstance(value, str):
+        return _redact_secret_text(value)
     return value
 
 
@@ -217,9 +253,20 @@ def result_to_dict(result: HarnessResult) -> dict[str, Any]:
     """Serialize a harness result without exposing secrets."""
     return {
         "ok": result.ok,
-        "text": result.text,
+        "text": redact_secrets(result.text),
         "raw": redact_secrets(dict(result.raw)),
         "events": [event_to_dict(event) for event in result.events],
-        "command": list(result.command),
-        "error": result.error,
+        "command": redact_secrets(list(result.command)),
+        "error": redact_secrets(result.error),
     }
+
+
+def _redact_secret_text(text: str) -> str:
+    redacted = text
+    for name in SECRET_ENV_NAMES:
+        value = os.getenv(name)
+        if value and value != "0":
+            redacted = redacted.replace(value, REDACTED)
+    for pattern in SECRET_VALUE_PATTERNS:
+        redacted = pattern.sub(REDACTED, redacted)
+    return redacted

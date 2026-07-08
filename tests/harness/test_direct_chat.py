@@ -3,7 +3,12 @@ import pytest
 from gpt2giga.harness import proxy
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.direct_chat import DirectChatHarness
-from gpt2giga.harness.types import GigaChatApiMode, HarnessContext, HarnessRequest
+from gpt2giga.harness.types import (
+    GigaChatApiMode,
+    HarnessChatMessage,
+    HarnessContext,
+    HarnessRequest,
+)
 
 
 @pytest.mark.parametrize(
@@ -63,6 +68,34 @@ def test_direct_chat_parses_choices_message_content(monkeypatch):
     assert result.text == "answer"
 
 
+def test_direct_chat_sends_provided_history(monkeypatch):
+    captured = {}
+
+    def fake_request_json(method, url, *, payload, api_key, timeout):
+        captured["payload"] = payload
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+
+    DirectChatHarness().run(
+        HarnessRequest(
+            prompt="second",
+            messages=(
+                HarnessChatMessage(role="user", content="first"),
+                HarnessChatMessage(role="assistant", content="answer"),
+                HarnessChatMessage(role="user", content="second"),
+            ),
+        ),
+        HarnessContext(proxy_url="http://127.0.0.1:8090"),
+    )
+
+    assert captured["payload"]["messages"] == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "answer"},
+        {"role": "user", "content": "second"},
+    ]
+
+
 def test_direct_chat_autostart_uses_generated_sidecar_api_key(monkeypatch):
     captured = {}
 
@@ -113,3 +146,26 @@ def test_model_listing_falls_back_when_proxy_unavailable(monkeypatch):
     assert discovery.ok is False
     assert discovery.source == "fallback"
     assert discovery.models[0] == "ConfiguredModel"
+
+
+def test_model_listing_can_be_strict_to_selected_api_mode(monkeypatch):
+    called_urls = []
+
+    def fake_request_json(method, url, *, payload=None, api_key=None, timeout=60.0):
+        called_urls.append(url)
+        raise proxy.ProxyRequestError("down")
+
+    monkeypatch.setattr(proxy, "request_json", fake_request_json)
+    config = HarnessConfig(default_model="ConfiguredModel")
+
+    discovery = proxy.discover_models(
+        config,
+        GigaChatApiMode.V2,
+        include_compat_paths=False,
+        include_fallback=False,
+    )
+
+    assert discovery.ok is False
+    assert discovery.models == ()
+    assert discovery.source == "/v2/models"
+    assert called_urls == ["http://127.0.0.1:8090/v2/models"]

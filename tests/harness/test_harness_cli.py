@@ -1,8 +1,11 @@
+import json
+
 from gpt2giga.harness import cli
 from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
 from gpt2giga.harness.harnesses.direct_chat import DirectChatHarness
 from gpt2giga.harness.harnesses.gemini_cli import GeminiCliHarness
+from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga.harness.types import HarnessResult
 
 
@@ -109,3 +112,29 @@ def test_cli_agent_aliases_include_claude_and_gemini(monkeypatch, capsys):
         ("ClaudeCodeHarness", "inspect"),
         ("GeminiCliHarness", "inspect"),
     ]
+
+
+def test_cli_session_list_json_uses_configured_data_dir(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="CLI session", default_harness_id="echo")
+
+    exit_code = cli.main(["session", "list", "--json"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output[0]["id"] == session.id
+    assert output[0]["title"] == "CLI session"
+
+
+def test_cli_session_show_json(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path))
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="CLI session", default_harness_id="echo")
+
+    exit_code = cli.main(["session", "show", session.id, "--json"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["session"]["id"] == session.id
+    assert output["messages"] == []

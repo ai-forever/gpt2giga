@@ -11,6 +11,7 @@ DEFAULT_PROXY_URL = "http://127.0.0.1:8090"
 DEFAULT_UI_HOST = "127.0.0.1"
 DEFAULT_UI_PORT = 8091
 DEFAULT_PROXY_START_TIMEOUT_SECONDS = 15.0
+DEFAULT_HARNESS_DATA_DIR = "~/.gpt2giga/harness"
 DEFAULT_MODEL_HINTS = (
     "GigaChat-2-Max",
     "GigaChat-3-Ultra",
@@ -32,6 +33,7 @@ class HarnessConfig:
     timeout_seconds: float = 60.0
     auto_start_proxy: bool = True
     proxy_start_timeout_seconds: float = DEFAULT_PROXY_START_TIMEOUT_SECONDS
+    data_dir: str = DEFAULT_HARNESS_DATA_DIR
 
     @classmethod
     def from_env(cls) -> "HarnessConfig":
@@ -62,6 +64,7 @@ class HarnessConfig:
             _env_first("GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS"),
             DEFAULT_PROXY_START_TIMEOUT_SECONDS,
         )
+        data_dir = _env_first("GPT2GIGA_HARNESS_DATA_DIR") or DEFAULT_HARNESS_DATA_DIR
         return cls(
             proxy_url=_normalize_proxy_url(proxy_url),
             api_key=api_key,
@@ -72,6 +75,7 @@ class HarnessConfig:
             timeout_seconds=timeout,
             auto_start_proxy=auto_start_proxy,
             proxy_start_timeout_seconds=proxy_start_timeout,
+            data_dir=data_dir,
         )
 
     def with_overrides(
@@ -97,6 +101,7 @@ class HarnessConfig:
                 else self.auto_start_proxy
             ),
             proxy_start_timeout_seconds=self.proxy_start_timeout_seconds,
+            data_dir=self.data_dir,
         )
 
     def to_context(self) -> HarnessContext:

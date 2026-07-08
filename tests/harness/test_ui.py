@@ -79,7 +79,7 @@ def test_ui_models_rejects_invalid_api_mode_non_fatally():
 
 
 def test_ui_models_handles_discovery_exception_safely(monkeypatch):
-    def fail_discovery(config, mode):
+    def fail_discovery(config, mode, **kwargs):
         raise RuntimeError("super-secret discovery failure")
 
     monkeypatch.setattr(proxy, "discover_models", fail_discovery)
@@ -94,10 +94,42 @@ def test_ui_models_handles_discovery_exception_safely(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is False
-    assert body["source"] == "fallback"
-    assert body["models"][0] == "ConfiguredModel"
+    assert body["source"] == "/v2/models"
+    assert body["models"] == []
     assert body["error"] == "model discovery failed"
     assert "super-secret" not in str(body)
+
+
+def test_ui_models_uses_selected_versioned_endpoint_only(monkeypatch):
+    captured = {}
+
+    def fake_discovery(config, mode, **kwargs):
+        captured["mode"] = mode
+        captured["kwargs"] = kwargs
+        return proxy.ModelDiscovery(
+            ok=True,
+            models=("v1-only-model",),
+            source=f"/{mode.value}/models",
+        )
+
+    monkeypatch.setattr(proxy, "discover_models", fake_discovery)
+    app = create_app(
+        HarnessConfig(default_model="ConfiguredModel"),
+        registry=create_default_registry(include_entry_points=False),
+    )
+    client = TestClient(app)
+
+    response = client.get("/api/models?api_mode=v1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["models"] == ["v1-only-model"]
+    assert body["source"] == "/v1/models"
+    assert captured["mode"].value == "v1"
+    assert captured["kwargs"] == {
+        "include_compat_paths": False,
+        "include_fallback": False,
+    }
 
 
 def test_ui_can_run_echo_harness():
@@ -272,9 +304,16 @@ def test_ui_index_contains_control_panel_elements():
     assert response.status_code == 200
     html = response.text
     for element_id in (
+        "new-chat-button",
+        "session-list",
+        "session-search",
+        "session-workspace-filter",
+        "session-harness-filter",
+        "include-archived-checkbox",
         "harness-list",
         "harness-select",
         "model-input",
+        "model-menu-button",
         "model-list",
         "api-mode-v2",
         "api-mode-v1",
@@ -292,13 +331,17 @@ def test_ui_index_contains_control_panel_elements():
         "model-status",
         "harness-details",
         "output-panel",
+        "run-panel",
         "events-panel",
         "raw-request-panel",
         "raw-response-panel",
         "command-panel",
         "diff-panel",
+        "storage-panel",
     ):
         assert element_id in html
+    for text in ("+ New chat", "/api/sessions", "Storage"):
+        assert text in html
 
 
 def test_ui_rejects_remote_bind_without_allow_remote():

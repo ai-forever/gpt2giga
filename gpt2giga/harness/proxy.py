@@ -263,9 +263,16 @@ def probe_json_route(
 def discover_models(
     config: HarnessConfig,
     api_mode: GigaChatApiMode,
+    *,
+    include_compat_paths: bool = True,
+    include_fallback: bool = True,
 ) -> ModelDiscovery:
     """Try proxy model endpoints and fall back to local hints."""
-    paths = _model_paths(api_mode)
+    paths = (
+        _model_paths(api_mode)
+        if include_compat_paths
+        else (f"/{api_mode.value}/models",)
+    )
     errors: list[str] = []
     for path in paths:
         try:
@@ -281,6 +288,14 @@ def discover_models(
         models = _extract_model_ids(data)
         if models:
             return ModelDiscovery(ok=True, models=tuple(models), source=path)
+
+    if not include_fallback:
+        return ModelDiscovery(
+            ok=False,
+            models=(),
+            source=paths[0],
+            error="; ".join(errors) or f"{paths[0]} returned no models",
+        )
 
     fallback = tuple(
         model for model in (config.default_model, *DEFAULT_MODEL_HINTS) if model

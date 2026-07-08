@@ -1,0 +1,132 @@
+import json
+
+from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
+from gpt2giga.harness.sessions.models import HarnessMessage, HarnessStoredEvent
+from gpt2giga.harness.sessions.store import new_id, utc_now
+from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability, REDACTED
+
+
+def test_filesystem_store_persists_session_messages_runs_and_events(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+
+    session = store.create_session(
+        title="Fix tests",
+        workspace="/repo",
+        default_harness_id="echo",
+        default_model="GigaChat-2-Max",
+        default_api_mode=GigaChatApiMode.V2,
+    )
+    message = store.append_message(
+        HarnessMessage(
+            id=new_id("msg"),
+            session_id=session.id,
+            run_id=None,
+            role="user",
+            content="hello",
+            created_at=utc_now(),
+        )
+    )
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        status="running",
+        prompt="hello",
+        model="GigaChat-2-Max",
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace="/repo",
+    )
+    event = store.append_event(
+        HarnessStoredEvent(
+            id=new_id("evt"),
+            session_id=session.id,
+            run_id=run.id,
+            type="run_started",
+            message="started",
+            payload={"ok": True},
+            created_at=utc_now(),
+        )
+    )
+
+    reopened = FilesystemHarnessSessionStore(tmp_path)
+    bundle = reopened.get_session_bundle(session.id)
+
+    assert bundle.session.title == "Fix tests"
+    assert bundle.messages == (message,)
+    assert bundle.runs[0].id == run.id
+    assert bundle.events == (event,)
+
+
+def test_filesystem_store_lists_newest_first_and_archive_filter(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+
+    older = store.create_session(title="older")
+    newer = store.create_session(title="newer")
+    store.archive_session(newer.id)
+
+    assert [session.id for session in store.list_sessions()] == [older.id]
+    assert [session.id for session in store.list_sessions(include_archived=True)] == [
+        newer.id,
+        older.id,
+    ]
+
+
+def test_filesystem_store_rebuilds_missing_index(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="recover me")
+    (tmp_path / "sessions" / "index.json").unlink()
+
+    reopened = FilesystemHarnessSessionStore(tmp_path)
+
+    assert reopened.get_session(session.id).title == "recover me"
+
+
+def test_filesystem_store_ignores_corrupted_manifest_in_list(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+    good = store.create_session(title="good")
+    bad_dir = tmp_path / "sessions" / "2026" / "07" / "bad"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / "manifest.json").write_text("{bad json", encoding="utf-8")
+    (tmp_path / "sessions" / "index.json").unlink()
+
+    assert [session.id for session in store.list_sessions()] == [good.id]
+
+
+def test_filesystem_store_redacts_secrets_on_disk(tmp_path, monkeypatch):
+    secret = "sk-test-super-secret-123"
+    monkeypatch.setenv("GPT2GIGA_API_KEY", secret)
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title=f"secret {secret}")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt=f"prompt {secret}",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+    )
+    store.append_raw_request(
+        session_id=session.id,
+        run_id=run.id,
+        payload={"headers": {"Authorization": f"Bearer {secret}"}},
+    )
+    store.append_raw_response(
+        session_id=session.id,
+        run_id=run.id,
+        payload={"access_token": secret, "text": f"value {secret}"},
+    )
+
+    disk_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    )
+
+    assert secret not in disk_text
+    assert REDACTED in disk_text
+    assert json.loads(
+        next(tmp_path.rglob("raw_responses.jsonl")).read_text(encoding="utf-8")
+    )

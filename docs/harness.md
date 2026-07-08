@@ -78,6 +78,7 @@ GPT2GIGA_HARNESS_UI_HOST=127.0.0.1
 GPT2GIGA_HARNESS_UI_PORT=8091
 GPT2GIGA_HARNESS_AUTO_START_PROXY=True
 GPT2GIGA_HARNESS_PROXY_START_TIMEOUT_SECONDS=15
+GPT2GIGA_HARNESS_DATA_DIR=~/.gpt2giga/harness
 ```
 
 If `GPT2GIGA_HARNESS_API_KEY` is not set, the harness falls back to
@@ -197,6 +198,30 @@ Backward-friendly alias:
 giga run --agent gemini --mode plan --workspace . "Inspect this repo"
 ```
 
+## Session History CLI
+
+Harness sessions are stored as gpt2giga-owned normalized history, not by parsing
+Codex, Claude Code, or Gemini CLI transcript directories.
+
+List local sessions:
+
+```bash
+giga session list
+giga session list --json
+giga session list --workspace . --harness echo
+```
+
+Show a session bundle:
+
+```bash
+giga session show <session_id>
+giga session show <session_id> --json
+```
+
+The minimal CLI intentionally shares the same filesystem store as `giga ui`.
+Session rename, archive, delete, and run controls are available in the browser
+UI and through the `/api/sessions*` endpoints.
+
 ## Browser UI
 
 `giga ui` serves the local Harness Control Panel as one no-build HTML page. It
@@ -208,8 +233,10 @@ harnesses appear in the browser without frontend code changes. It shows each
 harness' availability status, kind, capabilities, tags, and missing/error
 details when discovery fails.
 
-The run configuration panel includes:
+The UI is a chat-like harness cockpit with:
 
+- persistent session sidebar with search, workspace and harness filters, pin,
+  archive, and delete controls;
 - harness selection;
 - model input with proxy-backed model suggestions when available;
 - explicit API mode selection: `v1` maps to `/v1/chat/completions`, and `v2`
@@ -218,7 +245,9 @@ The run configuration panel includes:
 - optional workspace path for harnesses that declare workspace support;
 - dry-run and stream toggles where the selected harness supports them;
 - prompt input;
-- output, events, raw request, raw response, command, and passive diff panels;
+- user, assistant, and error messages in the selected session;
+- run, events, raw request, raw response, command, diff, and storage inspector
+  panels;
 - copy buttons for the equivalent CLI command and direct-chat curl command.
 
 Echo runs entirely locally and does not require credentials. Direct-chat sends
@@ -227,16 +256,73 @@ therefore needs real GigaChat credentials for live upstream responses. External
 agent CLI harnesses such as Codex, Claude Code, and Gemini can be previewed with
 dry-run even when their executable is missing.
 
-The UI stores only non-secret preferences such as selected harness, API mode,
-mode, and model name. It does not store prompt text, workspace paths, API keys,
-or GigaChat credentials. Curl previews always use
-`Authorization: Bearer <GPT2GIGA_API_KEY>` as a placeholder and never expose the
-real local proxy key.
+Session history survives browser refreshes and UI restarts. New runs are stored
+in the selected session, and `direct-chat` receives previous user and assistant
+messages from that session as multi-turn context.
 
 The stream checkbox passes `stream=true` to the harness request when the harness
 declares streaming support. The browser page still renders the final result
 after the backend call completes; it does not implement SSE or WebSocket event
 streaming yet.
+
+## Session Storage
+
+By default session data is stored under:
+
+```text
+~/.gpt2giga/harness
+```
+
+Override it with:
+
+```bash
+export GPT2GIGA_HARNESS_DATA_DIR=/path/to/harness-data
+```
+
+The store uses transparent JSON and JSONL files:
+
+```text
+sessions/index.json
+sessions/<year>/<month>/<session_id>/manifest.json
+sessions/<year>/<month>/<session_id>/messages.jsonl
+sessions/<year>/<month>/<session_id>/runs.jsonl
+sessions/<year>/<month>/<session_id>/events.jsonl
+sessions/<year>/<month>/<session_id>/raw_requests.jsonl
+sessions/<year>/<month>/<session_id>/raw_responses.jsonl
+```
+
+Stored fields include session title, workspace path, selected harness, model,
+API mode, mode, prompts, assistant/error outputs, events, raw request/response
+metadata, command arrays, status, timestamps, and storage metadata.
+
+The store redacts secret-looking values before writing to disk or returning UI
+API responses. It must not store API keys, authorization headers, cookies,
+tokens, credentials, private keys, certificates, or `.env` contents. Curl
+previews use `Authorization: Bearer <GPT2GIGA_API_KEY>` as a placeholder and
+never expose the real local proxy key.
+
+Delete history from the UI with the session delete button, or remove the data
+directory manually when the UI is stopped:
+
+```bash
+rm -rf ~/.gpt2giga/harness
+```
+
+Do not set `GPT2GIGA_HARNESS_DATA_DIR` to the repository working tree unless you
+intentionally want local audit files there.
+
+## Native CLI Sessions
+
+The persistent UI history is always the gpt2giga normalized session store.
+Codex, Claude Code, and Gemini CLI native transcript files are not parsed as the
+canonical UI database.
+
+This version keeps native resume disabled for external CLI harnesses and records
+that limitation in run metadata. One-shot CLI behavior remains conservative:
+Codex uses an isolated temporary `CODEX_HOME` and `--ephemeral`; Claude Code
+uses `--no-session-persistence`; Gemini CLI uses an isolated temporary `HOME`.
+Managed per-session native homes can be added later under
+`GPT2GIGA_HARNESS_DATA_DIR/native/` without changing the UI history contract.
 
 ## Model Selection Notes
 

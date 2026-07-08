@@ -14,6 +14,13 @@ from gpt2giga.harness.config import (
     pass_model_env_note,
 )
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
+from gpt2giga.harness.session_runner import HarnessSessionRunner
+from gpt2giga.harness.sessions import (
+    FilesystemHarnessSessionStore,
+    HarnessSessionStore,
+    SessionNotFoundError,
+)
+from gpt2giga.harness.sessions.models import bundle_to_dict, session_to_dict
 from gpt2giga.harness.types import (
     HarnessCapability,
     HarnessRequest,
@@ -30,13 +37,18 @@ from gpt2giga.harness.workspace import resolve_workspace
 def create_app(
     config: HarnessConfig | None = None,
     registry: HarnessRegistry | None = None,
+    store: HarnessSessionStore | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
     registry = registry or create_default_registry()
+    store = store or FilesystemHarnessSessionStore(config.data_dir)
+    runner = HarnessSessionRunner(registry=registry, config=config, store=store)
     app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
     app.state.harness_config = config
     app.state.harness_registry = registry
+    app.state.harness_session_store = store
+    app.state.harness_session_runner = runner
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -79,12 +91,17 @@ def create_app(
                 "note": pass_model_env_note(),
             }
         try:
-            discovery = proxy.discover_models(config, mode)
+            discovery = proxy.discover_models(
+                config,
+                mode,
+                include_compat_paths=False,
+                include_fallback=False,
+            )
         except Exception:
             return {
                 "ok": False,
-                "models": _fallback_models(config),
-                "source": "fallback",
+                "models": [],
+                "source": f"/{mode.value}/models",
                 "error": "model discovery failed",
                 "note": pass_model_env_note(),
             }
@@ -105,6 +122,120 @@ def create_app(
             "path": status.path,
             "status_code": status.status_code,
             "error": status.error,
+        }
+
+    @app.get("/api/sessions")
+    async def sessions(
+        workspace: str | None = Query(default=None),
+        harness_id: str | None = Query(default=None),
+        q: str | None = Query(default=None),
+        include_archived: bool = Query(default=False),
+        limit: int = Query(default=50, ge=1, le=200),
+    ) -> dict[str, Any]:
+        resolved_workspace = resolve_workspace(_optional_text(workspace))
+        items = store.list_sessions(
+            workspace=resolved_workspace,
+            harness_id=_optional_text(harness_id),
+            q=_optional_text(q),
+            include_archived=include_archived,
+            limit=limit,
+        )
+        return {"sessions": [_session_summary(store, session.id) for session in items]}
+
+    @app.post("/api/sessions")
+    async def create_session(payload: dict[str, Any] = Body(default_factory=dict)):
+        try:
+            session = runner.create_session(
+                title=_optional_text(payload.get("title")),
+                workspace=_optional_text(payload.get("workspace")),
+                default_harness_id=str(payload.get("harness_id") or "echo"),
+                default_model=_optional_text(payload.get("model")),
+                default_api_mode=payload.get("api_mode") or config.default_api_mode,
+                default_mode=str(payload.get("mode") or "plan"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session": _session_summary(store, session.id)}
+
+    @app.get("/api/sessions/{session_id}")
+    async def get_session(session_id: str) -> dict[str, Any]:
+        try:
+            return bundle_to_dict(store.get_session_bundle(session_id))
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.patch("/api/sessions/{session_id}")
+    async def update_session(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            patch = _session_patch(payload)
+            session = store.update_session(session_id, **patch)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"session": _session_summary(store, session.id)}
+
+    @app.delete("/api/sessions/{session_id}")
+    async def delete_session(session_id: str) -> dict[str, Any]:
+        try:
+            store.delete_session(session_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        return {"deleted": True}
+
+    @app.post("/api/sessions/run")
+    async def create_session_and_run(
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            result = runner.create_and_run(payload)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return result.to_dict()
+
+    @app.post("/api/sessions/{session_id}/run")
+    async def run_in_session(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            result = runner.run_in_session(session_id, payload)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return result.to_dict()
+
+    @app.get("/api/sessions/{session_id}/events")
+    async def session_events(
+        session_id: str,
+        run_id: str | None = Query(default=None),
+        after_id: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        try:
+            events = store.list_events(session_id, run_id=run_id, after_id=after_id)
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        return {
+            "events": [
+                {
+                    "id": event.id,
+                    "session_id": event.session_id,
+                    "run_id": event.run_id,
+                    "type": event.type,
+                    "message": event.message,
+                    "payload": dict(event.payload),
+                    "created_at": event.created_at,
+                }
+                for event in events
+            ]
         }
 
     @app.post("/api/run")
@@ -170,6 +301,48 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _session_summary(
+    store: HarnessSessionStore,
+    session_id: str,
+) -> dict[str, Any]:
+    session = store.get_session(session_id)
+    messages = store.list_messages(session_id)
+    runs = store.list_runs(session_id)
+    preview = ""
+    if messages:
+        preview = " ".join(messages[-1].content.split())[:120]
+    last_status = runs[-1].status if runs else None
+    payload = session_to_dict(session)
+    payload.update(
+        {
+            "last_message_preview": preview,
+            "last_run_status": last_status,
+        }
+    )
+    return payload
+
+
+def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "title",
+        "workspace",
+        "default_harness_id",
+        "default_model",
+        "default_api_mode",
+        "default_mode",
+        "pinned",
+        "archived",
+        "tags",
+        "metadata",
+    }
+    patch = {key: payload[key] for key in allowed if key in payload}
+    if "workspace" in patch:
+        patch["workspace"] = resolve_workspace(_optional_text(patch["workspace"]))
+    if "default_api_mode" in patch:
+        patch["default_api_mode"] = parse_api_mode(patch["default_api_mode"])
+    return patch
 
 
 def _fallback_models(config: HarnessConfig) -> list[str]:

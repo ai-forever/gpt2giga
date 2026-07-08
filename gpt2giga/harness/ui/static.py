@@ -5,33 +5,35 @@ INDEX_HTML = """<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>gpt2giga Unified Harness</title>
+  <title>gpt2giga Harness Chat Cockpit</title>
   <style>
     :root {
-      color-scheme: light dark;
+      color-scheme: dark;
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
         "Segoe UI", sans-serif;
       line-height: 1.4;
-      --bg: #f5f6f8;
-      --panel: #ffffff;
-      --panel-soft: #f9fafb;
-      --border: #d7dce5;
-      --text: #172033;
-      --muted: #657085;
-      --accent: #0f766e;
-      --accent-strong: #0b5f59;
-      --blue: #1d4ed8;
-      --yellow: #a16207;
-      --red: #b42318;
-      --green: #067647;
-      --mono: #101828;
-      --mono-text: #f8fafc;
+      --bg: #111315;
+      --panel: #181b20;
+      --panel-soft: #20242b;
+      --panel-strong: #252a32;
+      --border: #343b46;
+      --text: #f2f4f7;
+      --muted: #98a2b3;
+      --accent: #14b8a6;
+      --accent-strong: #2dd4bf;
+      --blue: #60a5fa;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --green: #34d399;
+      --violet: #a78bfa;
+      --mono-bg: #0b0d10;
     }
     * {
       box-sizing: border-box;
     }
     body {
       margin: 0;
+      min-height: 100vh;
       background: var(--bg);
       color: var(--text);
     }
@@ -42,13 +44,13 @@ INDEX_HTML = """<!doctype html>
       font: inherit;
     }
     button {
-      min-height: 34px;
+      min-height: 32px;
       border: 1px solid var(--accent);
       border-radius: 6px;
       background: var(--accent);
-      color: #ffffff;
-      padding: 7px 12px;
-      font-weight: 650;
+      color: #06201d;
+      padding: 6px 10px;
+      font-weight: 700;
       cursor: pointer;
     }
     button:hover:not(:disabled) {
@@ -56,50 +58,49 @@ INDEX_HTML = """<!doctype html>
     }
     button:disabled {
       cursor: not-allowed;
-      opacity: 0.52;
+      opacity: 0.55;
     }
-    button.secondary {
-      background: #ffffff;
-      color: var(--accent);
-    }
-    button.secondary:hover:not(:disabled),
-    button.tab.active {
-      background: #ecfdf3;
-      color: var(--accent-strong);
-    }
+    button.secondary,
     button.tab {
       border-color: var(--border);
-      background: #ffffff;
+      background: var(--panel-soft);
       color: var(--text);
-      font-weight: 600;
     }
-    label {
-      display: grid;
-      gap: 5px;
-      margin: 0;
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 650;
+    button.danger {
+      border-color: #7f1d1d;
+      background: #451a1a;
+      color: #fecaca;
+    }
+    button.tab.active {
+      border-color: var(--accent);
+      color: var(--accent-strong);
     }
     input,
     select,
     textarea {
       width: 100%;
-      border: 1px solid #c8cfdb;
+      border: 1px solid var(--border);
       border-radius: 6px;
-      background: #ffffff;
-      color: #111827;
-      padding: 8px 10px;
+      background: #111418;
+      color: var(--text);
+      padding: 7px 9px;
     }
     input:disabled,
     select:disabled,
     textarea:disabled {
-      background: #eef1f5;
-      color: #687386;
+      color: #6b7280;
+      background: #191d23;
     }
     textarea {
-      min-height: 154px;
+      min-height: 104px;
       resize: vertical;
+    }
+    label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
     }
     pre,
     code {
@@ -112,320 +113,391 @@ INDEX_HTML = """<!doctype html>
       white-space: pre-wrap;
       word-break: break-word;
     }
-    .page {
+    .app {
       min-height: 100vh;
       display: grid;
-      grid-template-rows: auto 1fr auto;
+      grid-template-rows: auto 1fr;
     }
     .topbar {
       display: flex;
-      flex-wrap: wrap;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding: 16px 22px 12px;
+      gap: 14px;
+      padding: 12px 16px;
       border-bottom: 1px solid var(--border);
-      background: var(--panel);
+      background: #15181d;
     }
-    .title-block {
-      display: grid;
-      gap: 4px;
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      letter-spacing: 0;
     }
     h1 {
-      margin: 0;
-      font-size: 22px;
-      line-height: 1.15;
-      letter-spacing: 0;
+      font-size: 18px;
     }
-    .subtitle,
-    .hint,
-    .status-line {
-      color: var(--muted);
+    h2 {
       font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
     }
-    .status-strip {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 8px;
-      max-width: 720px;
+    h3 {
+      font-size: 14px;
     }
-    .shell {
-      display: grid;
-      grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
-      gap: 14px;
-      width: min(1480px, 100%);
-      margin: 0 auto;
-      padding: 14px 18px;
-    }
-    .panel {
-      min-width: 0;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel);
-    }
-    .sidebar {
-      display: grid;
-      grid-template-rows: auto 1fr;
-      min-height: 580px;
-    }
-    .panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 13px 14px;
-      border-bottom: 1px solid var(--border);
-    }
-    .panel-header h2 {
-      margin: 0;
-      font-size: 15px;
-      letter-spacing: 0;
-    }
-    .harness-list {
-      display: grid;
-      align-content: start;
-      gap: 9px;
-      padding: 12px;
-      overflow: auto;
-    }
-    .harness-card {
-      width: 100%;
-      display: grid;
-      gap: 6px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel-soft);
-      color: var(--text);
-      padding: 10px;
-      text-align: left;
-    }
-    .harness-card.selected {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 2px rgba(15, 118, 110, 0.14);
-    }
-    .harness-title-row,
-    .row {
+    .top-actions,
+    .inline-actions,
+    .badge-row,
+    .check-row,
+    .tabs {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 8px;
     }
-    .harness-title {
-      font-weight: 750;
-    }
-    .harness-desc {
+    .status-line,
+    .hint {
       color: var(--muted);
       font-size: 12px;
+    }
+    .model-picker {
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 34px;
+    }
+    .model-picker input {
+      min-width: 0;
+      border-radius: 6px 0 0 6px;
+    }
+    .model-picker:focus-within input,
+    .model-picker:focus-within .model-menu-button {
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 1px #93c5fd;
+    }
+    .model-menu-button {
+      min-height: 0;
+      border-color: var(--border);
+      border-left: 0;
+      border-radius: 0 6px 6px 0;
+      background: #111418;
+      color: var(--muted);
+      padding: 0;
+    }
+    .model-menu-button:hover:not(:disabled) {
+      background: var(--panel-soft);
+      color: var(--text);
+    }
+    .model-menu-button:disabled {
+      border-left: 0;
+    }
+    .model-list {
+      position: absolute;
+      z-index: 40;
+      top: calc(100% + 6px);
+      right: 0;
+      left: 0;
+      max-height: 220px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #111418;
+      box-shadow: 0 16px 40px rgb(0 0 0 / 0.38);
+      padding: 4px;
+    }
+    .model-list[hidden] {
+      display: none;
+    }
+    .model-option {
+      display: block;
+      width: 100%;
+      min-height: 32px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text);
+      padding: 6px 8px;
+      text-align: left;
+      font-weight: 700;
+    }
+    .model-option:hover,
+    .model-option.active {
+      background: var(--panel-strong);
+      color: var(--accent-strong);
+    }
+    .model-option.empty {
+      color: var(--muted);
+      cursor: default;
     }
     .badge {
       display: inline-flex;
       align-items: center;
-      min-height: 20px;
-      border: 1px solid #cdd5df;
+      gap: 4px;
+      min-height: 24px;
+      border: 1px solid var(--border);
       border-radius: 999px;
-      background: #ffffff;
-      color: #344054;
+      background: var(--panel-soft);
+      color: var(--muted);
       padding: 2px 8px;
       font-size: 12px;
-      font-weight: 650;
+      font-weight: 700;
+      white-space: nowrap;
     }
     .badge.ok {
-      border-color: #abefc6;
-      background: #ecfdf3;
       color: var(--green);
+      border-color: #166534;
     }
     .badge.warn {
-      border-color: #fedf89;
-      background: #fffaeb;
-      color: var(--yellow);
+      color: var(--amber);
+      border-color: #92400e;
     }
     .badge.error {
-      border-color: #fecdca;
-      background: #fef3f2;
       color: var(--red);
+      border-color: #7f1d1d;
     }
     .badge.info {
-      border-color: #bfdbfe;
-      background: #eff6ff;
       color: var(--blue);
+      border-color: #1d4ed8;
     }
-    .main {
+    .shell {
       display: grid;
-      grid-template-rows: auto minmax(320px, 1fr);
-      gap: 14px;
+      grid-template-columns: 280px minmax(0, 1fr) 360px;
+      min-height: 0;
+    }
+    .sidebar,
+    .inspector {
       min-width: 0;
+      border-right: 1px solid var(--border);
+      background: var(--panel);
     }
-    .config-panel {
-      padding: 14px;
+    .inspector {
+      border-right: 0;
+      border-left: 1px solid var(--border);
     }
-    .form-grid {
+    .sidebar-scroll,
+    .chat-scroll,
+    .inspector-scroll {
+      overflow: auto;
+      min-height: 0;
+    }
+    .sidebar,
+    .center,
+    .inspector {
       display: grid;
-      grid-template-columns: repeat(2, minmax(220px, 1fr));
-      gap: 12px;
+      grid-template-rows: auto 1fr;
+      min-height: calc(100vh - 57px);
+    }
+    .section {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sidebar-controls {
+      display: grid;
+      gap: 8px;
+    }
+    .session-list,
+    #harness-list {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+    }
+    .group-title {
+      margin: 12px 0 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .session-row,
+    .harness-card {
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      padding: 8px;
+      cursor: pointer;
+    }
+    .session-row:hover,
+    .harness-card:hover,
+    .session-row.active {
+      border-color: var(--border);
+      background: var(--panel-soft);
+    }
+    .session-row.active {
+      border-color: var(--accent);
+    }
+    .session-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 750;
+    }
+    .session-meta,
+    .message-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .center {
+      min-width: 0;
+      background: #13161a;
+    }
+    .config-grid {
+      display: grid;
+      grid-template-columns: minmax(150px, 1.1fr) minmax(160px, 1.2fr) 130px 120px;
+      gap: 10px;
       align-items: end;
     }
     .span-2 {
+      grid-column: span 2;
+    }
+    .span-4 {
       grid-column: 1 / -1;
     }
-    .radio-row,
-    .check-row,
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px;
+    fieldset {
+      margin: 0;
+      border: 0;
+      padding: 0;
     }
     .choice {
       display: inline-flex;
+      width: auto;
+      grid-template-columns: auto;
       align-items: center;
       gap: 6px;
-      min-height: 34px;
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      background: var(--panel-soft);
-      padding: 6px 10px;
       color: var(--text);
       font-size: 13px;
-      font-weight: 650;
     }
     .choice input {
       width: auto;
-      margin: 0;
     }
-    .warning {
-      display: none;
-      border: 1px solid #fedf89;
-      border-radius: 8px;
-      background: #fffaeb;
-      color: #7a4b00;
-      padding: 9px 10px;
-      font-size: 13px;
-    }
-    .warning.visible {
-      display: block;
-    }
-    .details {
+    .message-list {
       display: grid;
-      gap: 7px;
-      min-height: 76px;
+      gap: 10px;
+      padding: 16px;
+    }
+    .message {
+      max-width: min(860px, 92%);
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: var(--panel-soft);
-      padding: 10px;
-      color: var(--muted);
-      font-size: 13px;
+      background: var(--panel);
+      padding: 10px 12px;
     }
-    .tabs-panel {
-      min-width: 0;
-      overflow: hidden;
+    .message.user {
+      justify-self: end;
+      background: #14312d;
+      border-color: #115e59;
     }
-    .tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding: 10px;
-      border-bottom: 1px solid var(--border);
-      background: var(--panel-soft);
+    .message.assistant {
+      justify-self: start;
     }
-    .tab-body {
-      min-height: 330px;
+    .message.error {
+      justify-self: start;
+      border-color: #7f1d1d;
+      background: #2b1717;
+    }
+    .message-content {
+      margin-top: 6px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 14px;
+    }
+    .composer {
+      display: grid;
+      gap: 10px;
       padding: 12px;
+      border-top: 1px solid var(--border);
       background: var(--panel);
     }
-    .tab-panel {
-      min-height: 306px;
-      border-radius: 8px;
-      background: var(--mono);
-      color: var(--mono-text);
-      padding: 13px;
-      font-size: 13px;
+    .details,
+    .warning {
+      min-height: 20px;
+      color: var(--muted);
+      font-size: 12px;
     }
-    .tab-panel[hidden] {
+    .warning {
+      color: var(--amber);
+    }
+    .inspector-body {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+    .mono-panel {
+      min-height: 160px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--mono-bg);
+      color: #d1d5db;
+      padding: 10px;
+      font-size: 12px;
+    }
+    .tab-panel {
       display: none;
     }
-    .event-list {
-      display: grid;
-      align-content: start;
-      gap: 9px;
-      overflow: auto;
+    .tab-panel.active {
+      display: block;
     }
     .event-row {
-      display: grid;
-      gap: 5px;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-      padding-bottom: 9px;
+      border-bottom: 1px solid #232830;
+      padding: 8px 0;
     }
     .event-row:last-child {
       border-bottom: 0;
     }
-    .event-message {
-      color: #e5e7eb;
-    }
-    .event-payload {
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.08);
-      color: #d1d5db;
-      padding: 8px;
-      font-size: 12px;
-    }
-    .footer {
-      padding: 0 22px 14px;
+    .empty {
       color: var(--muted);
-      font-size: 12px;
+      padding: 18px;
+      text-align: center;
     }
-    @media (max-width: 880px) {
+    @media (max-width: 1100px) {
       .shell {
-        grid-template-columns: 1fr;
-        padding: 12px;
+        grid-template-columns: 240px minmax(0, 1fr);
       }
-      .form-grid {
+      .inspector {
+        grid-column: 1 / -1;
+        min-height: auto;
+        border-left: 0;
+        border-top: 1px solid var(--border);
+      }
+      .config-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+    @media (max-width: 760px) {
+      .topbar,
+      .shell {
+        display: block;
+      }
+      .sidebar,
+      .center,
+      .inspector {
+        min-height: auto;
+        border-left: 0;
+        border-right: 0;
+      }
+      .config-grid {
         grid-template-columns: 1fr;
       }
-      .span-2 {
+      .span-2,
+      .span-4 {
         grid-column: auto;
       }
-      .status-strip {
-        justify-content: flex-start;
-      }
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #111827;
-        --panel: #172033;
-        --panel-soft: #1f2937;
-        --border: #344054;
-        --text: #f8fafc;
-        --muted: #c5cedb;
-      }
-      button.secondary,
-      button.tab,
-      input,
-      select,
-      textarea,
-      .badge {
-        background: #111827;
-        color: var(--text);
-      }
-      input:disabled,
-      select:disabled,
-      textarea:disabled {
-        background: #202b3d;
+      .message {
+        max-width: 100%;
       }
     }
   </style>
 </head>
 <body>
-  <div class="page">
+  <div class="app">
     <header class="topbar">
-      <div class="title-block">
-        <h1>gpt2giga Unified Harness</h1>
-        <div class="subtitle">
-          127.0.0.1 local control panel · v1 -&gt; /v1/chat/completions · v2 -&gt; /v2/chat/completions
-        </div>
+      <div>
+        <h1>gpt2giga Harness Chat Cockpit</h1>
         <div id="model-status" class="status-line">Loading model suggestions...</div>
       </div>
-      <div class="status-strip">
+      <div class="top-actions">
         <span id="proxy-status" class="badge warn">Proxy: checking</span>
         <button id="refresh-health-button" class="secondary" type="button">Refresh proxy</button>
         <button id="refresh-models-button" class="secondary" type="button">Refresh models</button>
@@ -433,42 +505,64 @@ INDEX_HTML = """<!doctype html>
     </header>
 
     <main class="shell">
-      <aside class="panel sidebar" aria-label="Harnesses">
-        <div class="panel-header">
-          <h2>Harnesses</h2>
-          <span id="harness-count" class="badge info">0</span>
+      <aside class="sidebar" aria-label="Session history">
+        <div class="section sidebar-controls">
+          <div class="inline-actions">
+            <button id="new-chat-button" type="button">+ New chat</button>
+            <span id="session-count" class="badge info">0</span>
+          </div>
+          <input id="session-search" placeholder="Search" autocomplete="off">
+          <label>Workspace
+            <input id="session-workspace-filter" placeholder="All workspaces" autocomplete="off">
+          </label>
+          <label>Harness
+            <select id="session-harness-filter">
+              <option value="">All harnesses</option>
+            </select>
+          </label>
+          <label class="choice" for="include-archived-checkbox">
+            <input id="include-archived-checkbox" type="checkbox">
+            Include archived
+          </label>
         </div>
-        <div id="harness-list" class="harness-list"></div>
+        <div class="sidebar-scroll">
+          <div id="session-list" class="session-list"></div>
+          <div class="section">
+            <div class="inline-actions">
+              <h2>Harnesses</h2>
+              <span id="harness-count" class="badge info">0</span>
+            </div>
+            <div id="harness-list"></div>
+          </div>
+        </div>
       </aside>
 
-      <section class="main" aria-label="Run configuration and output">
-        <div class="panel config-panel">
-          <div class="form-grid">
+      <section class="center" aria-label="Chat and run surface">
+        <div class="section">
+          <div class="config-grid">
             <label>Harness
               <select id="harness-select"></select>
             </label>
             <label>Model
-              <input id="model-input" list="model-list" placeholder="GigaChat-2-Max" autocomplete="off">
-              <datalist id="model-list"></datalist>
+              <div id="model-picker" class="model-picker">
+                <input id="model-input" placeholder="GigaChat-2-Max" autocomplete="off" aria-controls="model-list">
+                <button id="model-menu-button" class="model-menu-button" type="button" aria-label="Show model suggestions">v</button>
+                <div id="model-list" class="model-list" role="listbox" hidden></div>
+              </div>
             </label>
-
-            <fieldset class="radio-row" aria-label="API mode">
-              <legend class="hint">API mode</legend>
-              <label class="choice" for="api-mode-v2">
-                <input id="api-mode-v2" name="api-mode" type="radio" value="v2" checked>
-                v2
-              </label>
-              <label class="choice" for="api-mode-v1">
-                <input id="api-mode-v1" name="api-mode" type="radio" value="v1">
-                v1
-              </label>
-              <span id="route-note" class="hint">Current route: /v2/chat/completions</span>
+            <fieldset aria-label="API mode">
+              <div class="badge-row">
+                <label class="choice" for="api-mode-v2">
+                  <input id="api-mode-v2" name="api-mode" type="radio" value="v2" checked>
+                  v2
+                </label>
+                <label class="choice" for="api-mode-v1">
+                  <input id="api-mode-v1" name="api-mode" type="radio" value="v1">
+                  v1
+                </label>
+              </div>
+              <div id="route-note" class="hint">Current route: /v2/chat/completions</div>
             </fieldset>
-
-            <label>Capability
-              <select id="capability-select"></select>
-            </label>
-
             <label>Mode
               <select id="mode-select">
                 <option value="plan">plan</option>
@@ -476,12 +570,13 @@ INDEX_HTML = """<!doctype html>
                 <option value="edit">edit</option>
               </select>
             </label>
-
-            <label>Workspace
+            <label>Capability
+              <select id="capability-select"></select>
+            </label>
+            <label class="span-2">Workspace
               <input id="workspace-input" placeholder="." autocomplete="off">
             </label>
-
-            <div class="check-row span-2">
+            <div class="check-row">
               <label class="choice" for="dry-run-checkbox">
                 <input id="dry-run-checkbox" type="checkbox">
                 dry run
@@ -490,290 +585,236 @@ INDEX_HTML = """<!doctype html>
                 <input id="stream-checkbox" type="checkbox">
                 stream
               </label>
-              <span class="hint">Run mode defaults to plan. Edit mode must be selected explicitly.</span>
             </div>
-
-            <label class="span-2">Prompt
-              <textarea id="prompt-input" spellcheck="true" placeholder="Type a smoke prompt or agent task"></textarea>
-            </label>
-
-            <div id="harness-warning" class="warning span-2"></div>
-            <div id="harness-details" class="details span-2"></div>
-
-            <div class="actions span-2">
-              <button id="run-button" type="button">Run</button>
-              <button id="copy-cli-button" class="secondary" type="button">Copy CLI</button>
-              <button id="copy-curl-button" class="secondary" type="button">Copy curl</button>
-              <button id="reset-button" class="secondary" type="button">Reset</button>
-            </div>
+            <div id="harness-warning" class="warning span-4"></div>
+            <div id="harness-details" class="details span-4"></div>
           </div>
         </div>
-
-        <div class="panel tabs-panel">
-          <div class="tabs" role="tablist">
-            <button class="tab active" type="button" data-tab="output">Output</button>
-            <button class="tab" type="button" data-tab="events">Events</button>
-            <button class="tab" type="button" data-tab="raw-request">Raw request</button>
-            <button class="tab" type="button" data-tab="raw-response">Raw response</button>
-            <button class="tab" type="button" data-tab="command">Command</button>
-            <button class="tab" type="button" data-tab="diff">Diff</button>
-          </div>
-          <div class="tab-body">
-            <pre id="output-panel" class="tab-panel">Ready.</pre>
-            <div id="events-panel" class="tab-panel event-list" hidden></div>
-            <pre id="raw-request-panel" class="tab-panel" hidden>{}</pre>
-            <pre id="raw-response-panel" class="tab-panel" hidden>{}</pre>
-            <pre id="command-panel" class="tab-panel" hidden>No command has been generated yet.</pre>
-            <pre id="diff-panel" class="tab-panel" hidden>No diff or file-change data was returned by this harness run.</pre>
+        <div id="output-panel" class="chat-scroll">
+          <div id="message-list" class="message-list"></div>
+        </div>
+        <div class="composer">
+          <label>Prompt
+            <textarea id="prompt-input" spellcheck="true"></textarea>
+          </label>
+          <div class="inline-actions">
+            <button id="run-button" type="button">Run</button>
+            <button id="copy-cli-button" class="secondary" type="button">Copy CLI</button>
+            <button id="copy-curl-button" class="secondary" type="button">Copy curl</button>
+            <button id="reset-button" class="secondary" type="button">Reset</button>
           </div>
         </div>
       </section>
-    </main>
 
-    <footer class="footer">
-      The browser UI does not store or display API keys. Curl previews use placeholder auth only.
-    </footer>
+      <aside class="inspector" aria-label="Inspector">
+        <div class="section">
+          <div class="inline-actions">
+            <h2>Inspector</h2>
+            <button id="rename-session-button" class="secondary" type="button">Rename</button>
+            <button id="pin-session-button" class="secondary" type="button">Pin</button>
+            <button id="archive-session-button" class="secondary" type="button">Archive</button>
+            <button id="delete-session-button" class="danger" type="button">Delete</button>
+          </div>
+          <div id="selected-session-line" class="status-line">No session selected</div>
+        </div>
+        <div class="inspector-scroll">
+          <div class="inspector-body">
+            <div class="tabs" role="tablist">
+              <button class="tab active" type="button" data-tab="run">Run</button>
+              <button class="tab" type="button" data-tab="events">Events</button>
+              <button class="tab" type="button" data-tab="raw-request">Raw request</button>
+              <button class="tab" type="button" data-tab="raw-response">Raw response</button>
+              <button class="tab" type="button" data-tab="command">Command</button>
+              <button class="tab" type="button" data-tab="diff">Diff</button>
+              <button class="tab" type="button" data-tab="storage">Storage</button>
+            </div>
+            <pre id="run-panel" class="mono-panel tab-panel active">No run selected.</pre>
+            <div id="events-panel" class="mono-panel tab-panel">No events yet.</div>
+            <pre id="raw-request-panel" class="mono-panel tab-panel">{}</pre>
+            <pre id="raw-response-panel" class="mono-panel tab-panel">{}</pre>
+            <pre id="command-panel" class="mono-panel tab-panel">No command yet.</pre>
+            <pre id="diff-panel" class="mono-panel tab-panel">No diff captured.</pre>
+            <pre id="storage-panel" class="mono-panel tab-panel">No storage selected.</pre>
+          </div>
+        </div>
+      </aside>
+    </main>
   </div>
 
   <script>
     const state = {
-      defaults: {
-        proxy_url: "http://127.0.0.1:8090",
-        default_model: "GigaChat-2-Max",
-        default_api_mode: "v2"
-      },
+      defaults: {},
       harnesses: [],
+      sessions: [],
+      models: [],
+      modelSource: "",
       selectedHarness: null,
-      lastPayload: null,
-      lastResponse: null,
-      events: []
+      currentSessionId: null,
+      currentBundle: null,
+      lastPayload: null
     };
 
-    const knownEvents = new Set([
-      "run_started",
-      "proxy_sidecar",
-      "message_delta",
-      "tool_call_started",
-      "tool_call_finished",
-      "file_changed",
-      "approval_requested",
-      "raw_request",
-      "raw_response",
-      "run_finished",
-      "error"
-    ]);
-
     const byId = (id) => document.getElementById(id);
-
-    function setText(id, text) {
-      byId(id).textContent = String(text ?? "");
-    }
-
-    function pretty(value) {
-      return JSON.stringify(value ?? {}, null, 2);
-    }
-
-    function selectedApiMode() {
-      return byId("api-mode-v1").checked ? "v1" : "v2";
-    }
-
-    function setApiMode(value) {
-      const mode = value === "v1" ? "v1" : "v2";
-      byId("api-mode-v1").checked = mode === "v1";
-      byId("api-mode-v2").checked = mode === "v2";
-      updateRouteNote();
-    }
-
-    function updateRouteNote() {
-      setText("route-note", `Current route: /${selectedApiMode()}/chat/completions`);
-    }
-
-    function statusClass(status) {
-      if (status === "available" || status === true) return "badge ok";
-      if (status === "missing") return "badge warn";
-      if (status === "error" || status === false) return "badge error";
-      return "badge info";
-    }
-
-    function readPrefs() {
-      try {
-        return JSON.parse(localStorage.getItem("gpt2giga.harness.ui") || "{}");
-      } catch {
-        return {};
-      }
-    }
-
-    function writePrefs() {
-      const prefs = {
-        harness_id: byId("harness-select").value,
-        api_mode: selectedApiMode(),
-        mode: byId("mode-select").value,
-        model: byId("model-input").value
-      };
-      localStorage.setItem("gpt2giga.harness.ui", JSON.stringify(prefs));
-    }
+    const pretty = (value) => JSON.stringify(value || {}, null, 2);
+    const setText = (id, value) => {
+      const node = byId(id);
+      if (node) node.textContent = value == null ? "" : String(value);
+    };
 
     async function getJson(url, options) {
+      const response = await fetch(url, options);
+      let data = {};
       try {
-        const response = await fetch(url, options);
-        const text = await response.text();
-        let data = {};
-        if (text) {
-          try {
-            data = JSON.parse(text);
-          } catch {
-            data = { detail: text };
-          }
-        }
-        return { ok: response.ok, status: response.status, data };
+        data = await response.json();
       } catch (error) {
-        return { ok: false, status: 0, data: { detail: String(error) } };
+        data = { detail: "non-JSON response" };
       }
+      return { ok: response.ok, status: response.status, data };
     }
 
     async function loadDefaults() {
       const result = await getJson("/api/defaults");
-      if (!result.ok) {
-        setText("model-status", "Defaults unavailable; using local fallback values.");
-        return;
-      }
-      state.defaults = { ...state.defaults, ...result.data };
-      const prefs = readPrefs();
-      setApiMode(prefs.api_mode || state.defaults.default_api_mode || "v2");
-      byId("mode-select").value = prefs.mode || "plan";
-      byId("model-input").value = prefs.model || state.defaults.default_model || "";
-      if (result.data.note) {
-        setText("model-status", result.data.note);
+      if (!result.ok) return;
+      state.defaults = result.data;
+      byId("model-input").value = result.data.default_model || "GigaChat-2-Max";
+      const mode = result.data.default_api_mode || "v2";
+      byId(`api-mode-${mode}`).checked = true;
+      updateRouteNote();
+      if (result.data.note) setText("model-status", result.data.note);
+    }
+
+    async function refreshHealth() {
+      const result = await getJson("/api/health");
+      const badge = byId("proxy-status");
+      if (result.ok && result.data.ok) {
+        badge.className = "badge ok";
+        badge.textContent = `Proxy: ${result.data.path || "ok"}`;
+      } else {
+        badge.className = "badge warn";
+        badge.textContent = "Proxy: unavailable";
       }
     }
 
-    async function loadHealth() {
-      const result = await getJson("/api/health");
-      const node = byId("proxy-status");
-      node.className = statusClass(result.ok && result.data.ok);
-      if (result.ok && result.data.ok) {
-        node.textContent = `Proxy: OK ${result.data.path || ""}`.trim();
-      } else {
-        const error = result.data.error || result.data.detail || "unreachable";
-        node.textContent = `Proxy: Error (${error})`;
+    async function loadModels() {
+      const mode = currentApiMode();
+      const result = await getJson(`/api/models?api_mode=${encodeURIComponent(mode)}`);
+      const data = result.data || {};
+      state.models = Array.isArray(data.models) ? data.models : [];
+      state.modelSource = data.source || `/${mode}/models`;
+      renderModelList();
+      if (!byId("model-input").value && state.models[0]) byId("model-input").value = state.models[0];
+      const status = data.ok ? `Models: ${data.source}` : `Models: ${state.modelSource} unavailable${data.error ? " - " + data.error : ""}`;
+      setText("model-status", data.note ? `${status}. ${data.note}` : status);
+    }
+
+    function renderModelList() {
+      const list = byId("model-list");
+      const query = byId("model-input").value.trim().toLowerCase();
+      const models = state.models.filter((model) => String(model).toLowerCase().includes(query));
+      list.textContent = "";
+      if (!models.length) {
+        const empty = document.createElement("button");
+        empty.className = "model-option empty";
+        empty.type = "button";
+        empty.disabled = true;
+        empty.textContent = state.models.length ? "No matching models" : `No models from ${state.modelSource || "selected route"}`;
+        list.appendChild(empty);
+        return;
       }
+      for (const model of models) {
+        const option = document.createElement("button");
+        option.className = `model-option${model === byId("model-input").value ? " active" : ""}`;
+        option.type = "button";
+        option.setAttribute("role", "option");
+        option.setAttribute("aria-selected", model === byId("model-input").value ? "true" : "false");
+        option.textContent = model;
+        option.addEventListener("click", () => selectModel(model));
+        list.appendChild(option);
+      }
+    }
+
+    function openModelList() {
+      if (byId("model-input").disabled) return;
+      renderModelList();
+      byId("model-list").hidden = false;
+    }
+
+    function closeModelList() {
+      byId("model-list").hidden = true;
+    }
+
+    function toggleModelList() {
+      if (byId("model-list").hidden) {
+        openModelList();
+      } else {
+        closeModelList();
+      }
+    }
+
+    function selectModel(model) {
+      byId("model-input").value = model;
+      renderModelList();
+      closeModelList();
+      byId("model-input").focus();
     }
 
     async function loadHarnesses() {
       const result = await getJson("/api/harnesses");
       if (!result.ok) {
-        setText("harness-list", "Failed to load harness registry.");
         setText("harness-details", result.data.detail || "Harness registry failed.");
         return;
       }
-      state.harnesses = Array.isArray(result.data.harnesses) ? result.data.harnesses : [];
+      state.harnesses = result.data.harnesses || [];
       renderHarnessSelect();
       renderHarnessCards();
-      const errors = Array.isArray(result.data.discovery_errors)
-        ? result.data.discovery_errors
-        : [];
-      if (errors.length) {
-        setWarning(`Harness discovery warnings: ${errors.join("; ")}`);
-      }
       chooseInitialHarness();
-    }
-
-    async function loadModels() {
-      const mode = selectedApiMode();
-      updateRouteNote();
-      const result = await getJson(`/api/models?api_mode=${encodeURIComponent(mode)}`);
-      const list = byId("model-list");
-      list.textContent = "";
-      const models = Array.isArray(result.data.models) ? result.data.models : [];
-      for (const model of models) {
-        const option = document.createElement("option");
-        option.value = model;
-        list.appendChild(option);
-      }
-      if (!byId("model-input").value && models.length) {
-        byId("model-input").value = models[0];
-      }
-      const note = result.data.note ? ` ${result.data.note}` : "";
-      if (result.ok && result.data.ok) {
-        setText("model-status", `Models loaded from ${result.data.source}.${note}`);
-      } else {
-        const error = result.data.error || result.data.detail || "model discovery failed";
-        setText("model-status", `Model discovery fallback: ${error}.${note}`);
-      }
-      writePrefs();
     }
 
     function renderHarnessSelect() {
       const select = byId("harness-select");
+      const filter = byId("session-harness-filter");
       select.textContent = "";
+      filter.textContent = "";
+      const all = document.createElement("option");
+      all.value = "";
+      all.textContent = "All harnesses";
+      filter.appendChild(all);
       for (const item of state.harnesses) {
         const spec = item.spec || {};
-        const availability = item.availability || {};
         const option = document.createElement("option");
-        option.value = spec.id || "";
-        option.textContent = `${spec.id || "unknown"} (${availability.status || "unknown"})`;
+        option.value = spec.id;
+        option.textContent = spec.title || spec.id;
         select.appendChild(option);
+        const filterOption = option.cloneNode(true);
+        filter.appendChild(filterOption);
       }
-      setText("harness-count", String(state.harnesses.length));
+      byId("harness-count").textContent = String(state.harnesses.length);
     }
 
     function renderHarnessCards() {
       const list = byId("harness-list");
       list.textContent = "";
-      if (!state.harnesses.length) {
-        list.textContent = "No harnesses registered.";
-        return;
-      }
       for (const item of state.harnesses) {
         const spec = item.spec || {};
         const availability = item.availability || {};
-        const card = document.createElement("button");
-        card.type = "button";
+        const card = document.createElement("div");
         card.className = "harness-card";
-        card.dataset.harnessId = spec.id || "";
-
-        const titleRow = document.createElement("div");
-        titleRow.className = "harness-title-row";
-        const title = document.createElement("span");
-        title.className = "harness-title";
-        title.textContent = spec.id || "unknown";
-        const status = document.createElement("span");
-        status.className = statusClass(availability.status);
-        status.textContent = availability.status || "unknown";
-        titleRow.append(title, status);
-
-        const desc = document.createElement("div");
-        desc.className = "harness-desc";
-        desc.textContent = spec.description || "";
-
-        const tags = document.createElement("div");
-        tags.className = "row";
-        const kind = document.createElement("span");
-        kind.className = "badge info";
-        kind.textContent = spec.kind || "unknown";
-        tags.appendChild(kind);
-        for (const capability of spec.capabilities || []) {
-          const cap = document.createElement("span");
-          cap.className = "badge";
-          cap.textContent = capability;
-          tags.appendChild(cap);
-        }
-
-        card.append(titleRow, desc, tags);
+        card.innerHTML = `
+          <div class="session-title">${escapeHtml(spec.title || spec.id)}</div>
+          <div class="session-meta">
+            <span>${escapeHtml(spec.id || "")}</span>
+            <span>${escapeHtml(availability.status || "unknown")}</span>
+          </div>
+        `;
         card.addEventListener("click", () => selectHarness(spec.id));
         list.appendChild(card);
       }
     }
 
     function chooseInitialHarness() {
-      const prefs = readPrefs();
-      const ids = state.harnesses.map((item) => item.spec && item.spec.id).filter(Boolean);
-      const preferred = [prefs.harness_id, "echo", "direct-chat", ids[0]].find(
-        (id) => id && ids.includes(id)
-      );
-      if (preferred) {
-        selectHarness(preferred);
-      }
+      const preferred = byId("harness-select").value || "echo";
+      const first = state.harnesses.find((item) => item.spec && item.spec.id === preferred) || state.harnesses[0];
+      if (first && first.spec) selectHarness(first.spec.id);
     }
 
     function selectHarness(harnessId) {
@@ -781,419 +822,450 @@ INDEX_HTML = """<!doctype html>
       if (!item) return;
       state.selectedHarness = item;
       byId("harness-select").value = harnessId;
-      for (const card of document.querySelectorAll(".harness-card")) {
-        card.classList.toggle("selected", card.dataset.harnessId === harnessId);
-      }
+      renderCapabilityOptions(item.spec);
       updateHarnessDrivenControls();
-      writePrefs();
+      setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}`);
     }
 
-    function updateHarnessDrivenControls() {
-      const item = state.selectedHarness;
-      if (!item) return;
-      const spec = item.spec || {};
-      const availability = item.availability || {};
-      const capabilities = Array.isArray(spec.capabilities) ? spec.capabilities : [];
-
-      const capabilitySelect = byId("capability-select");
-      capabilitySelect.textContent = "";
-      for (const capability of capabilities.length ? capabilities : ["chat_completions"]) {
+    function renderCapabilityOptions(spec) {
+      const select = byId("capability-select");
+      select.textContent = "";
+      const capabilities = spec.capabilities && spec.capabilities.length ? spec.capabilities : ["chat_completions"];
+      for (const capability of capabilities) {
         const option = document.createElement("option");
         option.value = capability;
         option.textContent = capability;
-        capabilitySelect.appendChild(option);
+        select.appendChild(option);
       }
+    }
 
+    function updateHarnessDrivenControls() {
+      const spec = state.selectedHarness && state.selectedHarness.spec ? state.selectedHarness.spec : {};
       byId("model-input").disabled = spec.supports_model_selection === false;
-      const apiModeDisabled = spec.supports_api_mode_selection === false;
-      byId("api-mode-v1").disabled = apiModeDisabled;
-      byId("api-mode-v2").disabled = apiModeDisabled;
-      byId("workspace-input").disabled = spec.supports_workspace !== true;
+      byId("model-menu-button").disabled = spec.supports_model_selection === false;
+      if (spec.supports_model_selection === false) closeModelList();
+      byId("api-mode-v1").disabled = spec.supports_api_mode_selection === false;
+      byId("api-mode-v2").disabled = spec.supports_api_mode_selection === false;
+      byId("workspace-input").disabled = spec.supports_workspace === false;
       byId("stream-checkbox").disabled = spec.supports_streaming !== true;
       byId("copy-curl-button").disabled = spec.id !== "direct-chat";
+      const availability = state.selectedHarness && state.selectedHarness.availability ? state.selectedHarness.availability : {};
+      const warning = availability.status === "missing" || availability.status === "error" ? availability.reason || availability.status : "";
+      setText("harness-warning", warning);
+    }
 
-      const detailLines = [
-        `${spec.title || spec.id || "Harness"} - ${spec.description || ""}`,
-        `kind: ${spec.kind || "unknown"}`,
-        `availability: ${availability.status || "unknown"} - ${availability.reason || ""}`,
-        `capabilities: ${capabilities.join(", ") || "none"}`
-      ];
-      if (availability.detail) detailLines.push(`detail: ${availability.detail}`);
-      setText("harness-details", detailLines.join("\\n"));
+    async function loadSessions() {
+      const params = new URLSearchParams();
+      const q = byId("session-search").value.trim();
+      const workspace = byId("session-workspace-filter").value.trim();
+      const harness = byId("session-harness-filter").value;
+      if (q) params.set("q", q);
+      if (workspace) params.set("workspace", workspace);
+      if (harness) params.set("harness_id", harness);
+      if (byId("include-archived-checkbox").checked) params.set("include_archived", "true");
+      const result = await getJson(`/api/sessions?${params.toString()}`);
+      state.sessions = result.ok ? result.data.sessions || [] : [];
+      renderSessions();
+    }
 
-      if (availability.status === "missing" || availability.status === "error") {
-        setWarning(
-          `${spec.id} is ${availability.status}. Real runs are blocked; dry run can still preview commands.`
-        );
-      } else if (spec.kind === "agent-cli") {
-        setWarning("External agent harness. Use plan/read by default; edit must be explicit.");
-      } else {
-        setWarning("");
+    function renderSessions() {
+      const list = byId("session-list");
+      list.textContent = "";
+      byId("session-count").textContent = String(state.sessions.length);
+      if (!state.sessions.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No sessions";
+        list.appendChild(empty);
+        return;
+      }
+      const groups = groupSessions(state.sessions);
+      for (const [label, sessions] of groups) {
+        if (!sessions.length) continue;
+        const title = document.createElement("div");
+        title.className = "group-title";
+        title.textContent = label;
+        list.appendChild(title);
+        for (const session of sessions) {
+          const row = document.createElement("div");
+          row.className = `session-row${session.id === state.currentSessionId ? " active" : ""}`;
+          row.innerHTML = `
+            <div class="session-title">${escapeHtml(session.title || "Untitled session")}</div>
+            <div class="session-meta">
+              <span>${escapeHtml(session.default_harness_id || "")}</span>
+              <span>${escapeHtml(session.default_api_mode || "")}</span>
+              <span>${escapeHtml(session.last_run_status || "new")}</span>
+            </div>
+          `;
+          row.addEventListener("click", () => loadSession(session.id));
+          list.appendChild(row);
+        }
       }
     }
 
-    function setWarning(message) {
-      const warning = byId("harness-warning");
-      warning.textContent = message;
-      warning.classList.toggle("visible", Boolean(message));
+    function groupSessions(sessions) {
+      const today = new Date();
+      const startToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const buckets = new Map([
+        ["Pinned", []],
+        ["Today", []],
+        ["Yesterday", []],
+        ["Previous 7 days", []],
+        ["Older", []]
+      ]);
+      for (const session of sessions) {
+        if (session.pinned) {
+          buckets.get("Pinned").push(session);
+          continue;
+        }
+        const updated = new Date(session.updated_at);
+        const days = Math.floor((startToday - new Date(updated.getFullYear(), updated.getMonth(), updated.getDate())) / 86400000);
+        const label = days <= 0 ? "Today" : days === 1 ? "Yesterday" : days <= 7 ? "Previous 7 days" : "Older";
+        buckets.get(label).push(session);
+      }
+      return [...buckets.entries()];
     }
 
-    function buildPayload() {
-      const item = state.selectedHarness || {};
-      const spec = item.spec || {};
+    async function loadSession(sessionId) {
+      const result = await getJson(`/api/sessions/${encodeURIComponent(sessionId)}`);
+      if (!result.ok) return;
+      state.currentSessionId = sessionId;
+      state.currentBundle = result.data;
+      applySessionDefaults(result.data.session || {});
+      renderAll();
+      await loadSessions();
+    }
+
+    function applySessionDefaults(session) {
+      if (session.default_harness_id) selectHarness(session.default_harness_id);
+      byId("model-input").value = session.default_model || state.defaults.default_model || "";
+      renderModelList();
+      const mode = session.default_api_mode || state.defaults.default_api_mode || "v2";
+      byId(`api-mode-${mode}`).checked = true;
+      byId("mode-select").value = session.default_mode || "plan";
+      byId("workspace-input").value = session.workspace || "";
+      updateRouteNote();
+    }
+
+    async function newChat() {
+      const payload = buildSessionDefaults();
+      const result = await getJson("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (result.ok) {
+        byId("prompt-input").value = "";
+        await loadSession(result.data.session.id);
+      }
+    }
+
+    function buildSessionDefaults() {
       return {
-        harness_id: byId("harness-select").value || "echo",
-        prompt: byId("prompt-input").value,
-        model: byId("model-input").disabled ? "" : byId("model-input").value,
-        api_mode: selectedApiMode(),
-        capability: byId("capability-select").value || "chat_completions",
-        mode: byId("mode-select").value || "plan",
-        workspace: spec.supports_workspace ? byId("workspace-input").value : "",
-        stream: byId("stream-checkbox").checked && !byId("stream-checkbox").disabled,
-        dry_run: byId("dry-run-checkbox").checked,
-        extra: {}
+        harness_id: currentHarnessId(),
+        model: byId("model-input").value.trim() || null,
+        api_mode: currentApiMode(),
+        mode: byId("mode-select").value,
+        workspace: byId("workspace-input").value.trim() || null
       };
     }
 
-    function canRunPayload(payload) {
-      const item = state.selectedHarness;
-      if (!item) {
-        return { ok: false, message: "No harness is selected." };
-      }
-      const status = item.availability && item.availability.status;
-      if ((status === "missing" || status === "error") && !payload.dry_run) {
-        return {
-          ok: false,
-          message: "This harness is not available. Enable dry run to preview it safely."
-        };
-      }
-      return { ok: true, message: "" };
+    function buildPayload() {
+      return {
+        ...buildSessionDefaults(),
+        prompt: byId("prompt-input").value,
+        capability: byId("capability-select").value || "chat_completions",
+        stream: byId("stream-checkbox").checked,
+        dry_run: byId("dry-run-checkbox").checked
+      };
     }
 
     async function runHarness() {
       const payload = buildPayload();
+      if (!payload.prompt.trim()) return;
       state.lastPayload = payload;
-      state.lastResponse = null;
-      state.events = [
-        {
-          type: "run_started",
-          message: `Run started for ${payload.harness_id}`,
-          payload: {
-            harness_id: payload.harness_id,
-            api_mode: payload.api_mode,
-            mode: payload.mode,
-            dry_run: payload.dry_run
-          }
-        },
-        { type: "raw_request", message: "Normalized UI request", payload }
-      ];
-      renderEvents();
       setText("raw-request-panel", pretty(payload));
       setText("raw-response-panel", "{}");
       setText("command-panel", commandPreview(payload));
-      setText("diff-panel", "No diff or file-change data was returned by this harness run.");
-      showTab("events");
-      writePrefs();
-
-      const allowed = canRunPayload(payload);
-      if (!allowed.ok) {
-        const body = { ok: false, detail: allowed.message };
-        state.lastResponse = body;
-        state.events.push({ type: "error", message: allowed.message, payload: {} });
-        renderEvents();
-        setText("output-panel", allowed.message);
-        setText("raw-response-panel", pretty(body));
-        showTab("output");
-        return;
-      }
-
+      setText("diff-panel", "No diff captured.");
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Running...";
-      setText("output-panel", "Running...");
       try {
-        const result = await getJson("/api/run", {
+        const url = state.currentSessionId ? `/api/sessions/${encodeURIComponent(state.currentSessionId)}/run` : "/api/sessions/run";
+        const result = await getJson(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
         const body = result.data || {};
-        state.lastResponse = body;
-        setText("raw-response-panel", pretty(body));
-        if (result.ok && body.ok) {
-          setText("output-panel", body.text || "");
-          state.events.push(...normalizeEvents(body.events));
-          state.events.push({ type: "run_finished", message: "Run finished.", payload: {} });
+        if (result.ok) {
+          state.currentSessionId = body.session.id;
+          state.currentBundle = body;
+          byId("prompt-input").value = "";
+          renderAll();
+          await loadSessions();
         } else {
-          const message = body.error || body.detail || `Request failed with HTTP ${result.status}`;
-          setText("output-panel", message);
-          state.events.push(...normalizeEvents(body.events));
-          state.events.push({ type: "error", message, payload: body });
+          setText("raw-response-panel", pretty(body));
+          setText("run-panel", body.detail || `Request failed with HTTP ${result.status}`);
         }
-        renderEvents();
-        setText("command-panel", commandPreview(payload, body));
-        renderDiff(body);
-        showTab("output");
       } finally {
         byId("run-button").disabled = false;
         byId("run-button").textContent = "Run";
       }
     }
 
-    function normalizeEvents(events) {
-      if (!Array.isArray(events)) return [];
-      return events.map((event) => ({
-        type: String(event.type || "event"),
-        message: String(event.message || ""),
-        payload: event.payload && typeof event.payload === "object" ? event.payload : {}
-      }));
+    function renderAll() {
+      renderMessages();
+      renderInspector();
+      renderSessions();
     }
 
-    function renderEvents() {
+    function renderMessages() {
+      const list = byId("message-list");
+      list.textContent = "";
+      const messages = state.currentBundle && Array.isArray(state.currentBundle.messages) ? state.currentBundle.messages : [];
+      if (!messages.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "New session";
+        list.appendChild(empty);
+        return;
+      }
+      for (const message of messages) {
+        const item = document.createElement("article");
+        item.className = `message ${message.role || "assistant"}`;
+        item.innerHTML = `
+          <div class="message-meta">
+            <span>${escapeHtml(message.role || "")}</span>
+            <span>${escapeHtml(message.harness_id || "")}</span>
+            <span>${escapeHtml(message.api_mode || "")}</span>
+          </div>
+          <div class="message-content">${escapeHtml(message.content || "")}</div>
+        `;
+        list.appendChild(item);
+      }
+      byId("output-panel").scrollTop = byId("output-panel").scrollHeight;
+    }
+
+    function renderInspector() {
+      const bundle = state.currentBundle || {};
+      const session = bundle.session || null;
+      const runs = Array.isArray(bundle.runs) ? bundle.runs : [];
+      const events = Array.isArray(bundle.events) ? bundle.events : [];
+      const rawRequests = Array.isArray(bundle.raw_requests) ? bundle.raw_requests : [];
+      const rawResponses = Array.isArray(bundle.raw_responses) ? bundle.raw_responses : [];
+      const run = runs[runs.length - 1] || null;
+      setText("selected-session-line", session ? `${session.title} - ${session.id}` : "No session selected");
+      setText("run-panel", run ? pretty(run) : "No run selected.");
+      renderEvents(events);
+      setText("raw-request-panel", rawRequests.length ? pretty(rawRequests[rawRequests.length - 1].payload) : "{}");
+      setText("raw-response-panel", rawResponses.length ? pretty(rawResponses[rawResponses.length - 1].payload) : "{}");
+      setText("command-panel", run && run.command && run.command.length ? run.command.join(" ") : commandPreview(state.lastPayload));
+      const diff = run && run.metadata ? run.metadata.diff : "";
+      setText("diff-panel", diff || "No diff captured.");
+      setText("storage-panel", pretty(bundle.storage || {}));
+      byId("pin-session-button").textContent = session && session.pinned ? "Unpin" : "Pin";
+      byId("archive-session-button").textContent = session && session.archived ? "Unarchive" : "Archive";
+    }
+
+    function renderEvents(events) {
       const panel = byId("events-panel");
       panel.textContent = "";
-      if (!state.events.length) {
+      if (!events || !events.length) {
         panel.textContent = "No events yet.";
         return;
       }
-      for (const event of state.events) {
+      for (const event of events) {
         const row = document.createElement("div");
         row.className = "event-row";
-        const header = document.createElement("div");
-        header.className = "row";
-        const badge = document.createElement("span");
-        badge.className = knownEvents.has(event.type) ? "badge info" : "badge";
-        badge.textContent = event.type;
-        const message = document.createElement("span");
-        message.className = "event-message";
-        message.textContent = event.message || "";
-        header.append(badge, message);
-        row.appendChild(header);
-        if (event.payload && Object.keys(event.payload).length) {
-          const payload = document.createElement("pre");
-          payload.className = "event-payload";
-          payload.textContent = pretty(event.payload);
-          row.appendChild(payload);
-        }
+        row.innerHTML = `
+          <div class="badge-row">
+            <span class="badge info">${escapeHtml(event.type || "event")}</span>
+            <span class="hint">${escapeHtml(event.created_at || "")}</span>
+          </div>
+          <div>${escapeHtml(event.message || "")}</div>
+          <pre>${escapeHtml(pretty(event.payload || {}))}</pre>
+        `;
         panel.appendChild(row);
       }
     }
 
-    function renderDiff(body) {
-      const chunks = [];
-      const raw = body && body.raw && typeof body.raw === "object" ? body.raw : {};
-      if (typeof raw.diff === "string" && raw.diff) chunks.push(raw.diff);
-      if (typeof raw.git_diff === "string" && raw.git_diff) chunks.push(raw.git_diff);
-      if (Array.isArray(raw.changed_files) && raw.changed_files.length) {
-        chunks.push(`changed_files:\\n${pretty(raw.changed_files)}`);
-      }
-      const fileEvents = state.events.filter((event) => {
-        if (event.type === "file_changed") return true;
-        return event.payload && typeof event.payload.path === "string";
+    async function patchCurrentSession(patch) {
+      if (!state.currentSessionId) return;
+      const result = await getJson(`/api/sessions/${encodeURIComponent(state.currentSessionId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
       });
-      if (fileEvents.length) {
-        chunks.push(`file events:\\n${pretty(fileEvents)}`);
-      }
-      setText(
-        "diff-panel",
-        chunks.length
-          ? chunks.join("\\n\\n")
-          : "No diff or file-change data was returned by this harness run."
-      );
+      if (result.ok) await loadSession(state.currentSessionId);
     }
 
-    function commandPreview(payload, responseBody) {
-      const sections = [];
-      if (
-        payloadMatchesLastRun(payload) &&
-        responseBody &&
-        Array.isArray(responseBody.command) &&
-        responseBody.command.length
-      ) {
-        sections.push(`Backend command array:\\n${pretty(responseBody.command)}`);
-        sections.push(`Backend shell command:\\n${responseBody.command.map(shellQuote).join(" ")}`);
+    async function deleteCurrentSession() {
+      if (!state.currentSessionId) return;
+      const sessionId = state.currentSessionId;
+      const result = await getJson(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+      if (result.ok) {
+        state.currentSessionId = null;
+        state.currentBundle = null;
+        renderAll();
+        await loadSessions();
       }
-      sections.push(`Equivalent CLI:\\n${buildCliCommand(payload).map(shellQuote).join(" ")}`);
-      const curl = buildCurlCommand(payload);
-      if (curl) {
-        sections.push(`Direct-chat curl:\\n${curl.map(shellQuote).join(" ")}`);
-      } else {
-        sections.push("Direct-chat curl:\\ncurl is only available for direct-chat.");
-      }
-      return sections.join("\\n\\n");
     }
 
-    function payloadMatchesLastRun(payload) {
-      if (!state.lastPayload) return false;
-      return JSON.stringify(state.lastPayload) === JSON.stringify(payload);
+    function renameCurrentSession() {
+      if (!state.currentBundle || !state.currentBundle.session) return;
+      const title = window.prompt("Rename session", state.currentBundle.session.title || "");
+      if (title != null) patchCurrentSession({ title });
     }
 
-    function buildCliCommand(payload) {
-      const model = payload.model || state.defaults.default_model || "GigaChat-2-Max";
-      if (payload.harness_id === "direct-chat") {
-        const command = ["giga", "chat", "--api-mode", payload.api_mode, "--model", model];
-        if (payload.dry_run) command.push("--dry-run");
-        command.push(payload.prompt || "");
-        return command;
-      }
-      const command = [
-        "giga",
-        "harness",
-        "run",
-        payload.harness_id,
-        "--api-mode",
-        payload.api_mode,
-        "--model",
-        model,
-        "--capability",
-        payload.capability,
-        "--mode",
-        payload.mode
-      ];
-      if (payload.workspace) command.push("--workspace", payload.workspace);
-      if (payload.dry_run) command.push("--dry-run");
-      command.push("--prompt", payload.prompt || "");
-      return command;
+    function currentHarnessId() {
+      return byId("harness-select").value || "echo";
     }
 
-    function buildCurlCommand(payload) {
-      if (payload.harness_id !== "direct-chat") return null;
-      const proxyUrl = (state.defaults.proxy_url || "http://127.0.0.1:8090").replace(/\\/$/, "");
-      const model = payload.model || state.defaults.default_model || "GigaChat-2-Max";
+    function currentApiMode() {
+      return byId("api-mode-v1").checked ? "v1" : "v2";
+    }
+
+    function updateRouteNote() {
+      setText("route-note", `Current route: /${currentApiMode()}/chat/completions`);
+    }
+
+    function commandPreview(payload) {
+      if (!payload) return "No command yet.";
+      const args = ["giga", "harness", "run", payload.harness_id || "echo", "--api-mode", payload.api_mode || "v2"];
+      if (payload.model) args.push("--model", payload.model);
+      args.push("--prompt", payload.prompt || "");
+      return args.map(shellQuote).join(" ");
+    }
+
+    function curlPreview() {
+      const payload = state.lastPayload || buildPayload();
+      if (payload.harness_id !== "direct-chat") return "curl is only available for direct-chat.";
       const body = {
-        model,
+        model: payload.model || state.defaults.default_model || "GigaChat",
         messages: [{ role: "user", content: payload.prompt || "" }],
         stream: Boolean(payload.stream)
       };
+      const url = `${state.defaults.proxy_url || "http://127.0.0.1:8090"}/${payload.api_mode || "v2"}/chat/completions`;
       return [
-        "curl",
-        "-sS",
-        `${proxyUrl}/${payload.api_mode}/chat/completions`,
+        "curl -sS",
+        shellQuote(url),
         "-H",
-        "Content-Type: application/json",
+        shellQuote("Content-Type: application/json"),
         "-H",
-        "Authorization: Bearer <GPT2GIGA_API_KEY>",
+        shellQuote("Authorization: Bearer <GPT2GIGA_API_KEY>"),
         "-d",
-        JSON.stringify(body)
-      ];
+        shellQuote(JSON.stringify(body))
+      ].join(" ");
     }
 
-    function shellQuote(value) {
-      const text = String(value ?? "");
-      if (/^[A-Za-z0-9_./:=@+-]+$/.test(text)) return text;
-      return "'" + text.replaceAll("'", "'\\''") + "'";
-    }
-
-    async function copyText(text) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+    async function copyText(text, status) {
+      try {
         await navigator.clipboard.writeText(text);
-        return;
+        setText("model-status", status);
+      } catch (error) {
+        setText("model-status", "Clipboard unavailable.");
       }
-      const node = document.createElement("textarea");
-      node.value = text;
-      node.setAttribute("readonly", "readonly");
-      node.style.position = "fixed";
-      node.style.left = "-9999px";
-      document.body.appendChild(node);
-      node.select();
-      document.execCommand("copy");
-      node.remove();
-    }
-
-    async function copyCli() {
-      const payload = buildPayload();
-      await copyText(buildCliCommand(payload).map(shellQuote).join(" "));
-      setText("model-status", "Copied CLI command.");
-      setText("command-panel", commandPreview(payload, state.lastResponse));
-      showTab("command");
-    }
-
-    async function copyCurl() {
-      const payload = buildPayload();
-      const command = buildCurlCommand(payload);
-      if (!command) {
-        setText("model-status", "curl is only available for direct-chat.");
-        return;
-      }
-      await copyText(command.map(shellQuote).join(" "));
-      setText("model-status", "Copied direct-chat curl command.");
-      setText("command-panel", commandPreview(payload, state.lastResponse));
-      showTab("command");
-    }
-
-    function resetUi() {
-      const prefs = readPrefs();
-      byId("prompt-input").value = "";
-      byId("workspace-input").value = "";
-      byId("dry-run-checkbox").checked = false;
-      byId("stream-checkbox").checked = false;
-      byId("mode-select").value = prefs.mode || "plan";
-      setApiMode(prefs.api_mode || state.defaults.default_api_mode || "v2");
-      byId("model-input").value = prefs.model || state.defaults.default_model || "";
-      chooseInitialHarness();
-      state.lastPayload = null;
-      state.lastResponse = null;
-      state.events = [];
-      setText("output-panel", "Ready.");
-      setText("raw-request-panel", "{}");
-      setText("raw-response-panel", "{}");
-      setText("command-panel", "No command has been generated yet.");
-      setText("diff-panel", "No diff or file-change data was returned by this harness run.");
-      renderEvents();
-      showTab("output");
     }
 
     function showTab(name) {
-      const map = {
-        output: "output-panel",
-        events: "events-panel",
-        "raw-request": "raw-request-panel",
-        "raw-response": "raw-response-panel",
-        command: "command-panel",
-        diff: "diff-panel"
-      };
-      for (const [tab, panelId] of Object.entries(map)) {
-        byId(panelId).hidden = tab !== name;
+      for (const tab of document.querySelectorAll(".tab")) {
+        tab.classList.toggle("active", tab.dataset.tab === name);
       }
-      for (const button of document.querySelectorAll("[data-tab]")) {
-        button.classList.toggle("active", button.dataset.tab === name);
+      for (const panel of document.querySelectorAll(".tab-panel")) {
+        panel.classList.remove("active");
       }
+      const panelId = name === "run" ? "run-panel" : `${name}-panel`;
+      const panel = byId(panelId);
+      if (panel) panel.classList.add("active");
     }
 
-    function wireEvents() {
-      byId("harness-select").addEventListener("change", (event) => {
-        selectHarness(event.target.value);
-      });
-      byId("api-mode-v1").addEventListener("change", loadModels);
-      byId("api-mode-v2").addEventListener("change", loadModels);
-      byId("mode-select").addEventListener("change", writePrefs);
-      byId("model-input").addEventListener("change", writePrefs);
-      byId("dry-run-checkbox").addEventListener("change", updateHarnessDrivenControls);
-      byId("run-button").addEventListener("click", runHarness);
-      byId("copy-cli-button").addEventListener("click", copyCli);
-      byId("copy-curl-button").addEventListener("click", copyCurl);
-      byId("reset-button").addEventListener("click", resetUi);
-      byId("refresh-health-button").addEventListener("click", loadHealth);
+    function resetComposer() {
+      byId("prompt-input").value = "";
+      byId("dry-run-checkbox").checked = false;
+      byId("stream-checkbox").checked = false;
+    }
+
+    function shellQuote(value) {
+      const text = String(value == null ? "" : value);
+      if (/^[A-Za-z0-9_./:=@-]+$/.test(text)) return text;
+      return `'${text.replace(/'/g, "'\\\\''")}'`;
+    }
+
+    function escapeHtml(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function bindEvents() {
+      byId("refresh-health-button").addEventListener("click", refreshHealth);
       byId("refresh-models-button").addEventListener("click", loadModels);
-      for (const button of document.querySelectorAll("[data-tab]")) {
-        button.addEventListener("click", () => showTab(button.dataset.tab));
+      byId("new-chat-button").addEventListener("click", newChat);
+      byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
+      byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); });
+      byId("api-mode-v2").addEventListener("change", () => { updateRouteNote(); loadModels(); });
+      byId("model-menu-button").addEventListener("click", toggleModelList);
+      byId("model-input").addEventListener("focus", openModelList);
+      byId("model-input").addEventListener("input", openModelList);
+      byId("model-input").addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeModelList();
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          openModelList();
+          const first = byId("model-list").querySelector(".model-option:not(.empty)");
+          if (first) first.focus();
+        }
+      });
+      byId("model-list").addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeModelList();
+          byId("model-input").focus();
+        }
+      });
+      document.addEventListener("click", (event) => {
+        if (!byId("model-picker").contains(event.target)) closeModelList();
+      });
+      byId("run-button").addEventListener("click", runHarness);
+      byId("reset-button").addEventListener("click", resetComposer);
+      byId("copy-cli-button").addEventListener("click", () => copyText(commandPreview(state.lastPayload || buildPayload()), "Copied CLI command."));
+      byId("copy-curl-button").addEventListener("click", () => copyText(curlPreview(), "Copied curl command."));
+      byId("session-search").addEventListener("input", loadSessions);
+      byId("session-workspace-filter").addEventListener("change", loadSessions);
+      byId("session-harness-filter").addEventListener("change", loadSessions);
+      byId("include-archived-checkbox").addEventListener("change", loadSessions);
+      byId("rename-session-button").addEventListener("click", renameCurrentSession);
+      byId("pin-session-button").addEventListener("click", () => {
+        const pinned = !(state.currentBundle && state.currentBundle.session && state.currentBundle.session.pinned);
+        patchCurrentSession({ pinned });
+      });
+      byId("archive-session-button").addEventListener("click", () => {
+        const archived = !(state.currentBundle && state.currentBundle.session && state.currentBundle.session.archived);
+        patchCurrentSession({ archived });
+      });
+      byId("delete-session-button").addEventListener("click", deleteCurrentSession);
+      byId("prompt-input").addEventListener("keydown", (event) => {
+        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+          event.preventDefault();
+          runHarness();
+        }
+      });
+      for (const tab of document.querySelectorAll(".tab")) {
+        tab.addEventListener("click", () => showTab(tab.dataset.tab));
       }
     }
 
-    async function init() {
-      wireEvents();
-      renderEvents();
+    async function boot() {
+      bindEvents();
       await loadDefaults();
-      await loadHealth();
-      await loadHarnesses();
-      await loadModels();
-      updateRouteNote();
+      await Promise.all([loadHarnesses(), refreshHealth(), loadModels()]);
+      await loadSessions();
+      renderAll();
     }
 
-    init().catch((error) => {
-      setText("output-panel", String(error));
-      state.events.push({ type: "error", message: String(error), payload: {} });
-      renderEvents();
-    });
+    boot();
   </script>
 </body>
 </html>
