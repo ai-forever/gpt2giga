@@ -61,12 +61,24 @@ def test_session_runner_persists_uploaded_image_attachment_with_echo(tmp_path):
     assert run_attachment["kind"] == "image"
     assert run_attachment["source"] == "paste"
     assert "storage_path" not in run_attachment
+    assert result.run.metadata["attachment_render_plan"]["metadata"]["transport"] == (
+        "metadata_only"
+    )
     assert result.bundle.raw_requests[-1].payload["attachment_ids"] == [attachment.id]
+    assert (
+        result.bundle.raw_requests[-1].payload["attachment_render_plan"]["metadata"][
+            "transport"
+        ]
+        == "metadata_only"
+    )
     assert result.bundle.raw_requests[-1].payload["attachments"][0]["id"] == (
         attachment.id
     )
     assert result.bundle.messages[0].metadata["attachment_ids"] == [attachment.id]
     assert result.to_dict()["attachments"][0]["id"] == attachment.id
+    assert result.to_dict()["attachment_render_plan"]["metadata"]["transport"] == (
+        "metadata_only"
+    )
 
 
 def test_session_runner_persists_workspace_attachment_with_echo(tmp_path):

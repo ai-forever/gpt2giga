@@ -11,6 +11,8 @@ from gpt2giga.harness.attachments import (
     FilesystemAttachmentStore,
     HarnessAttachment,
     attachment_to_dict,
+    render_attachments_for_harness,
+    render_plan_to_dict,
 )
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.project import resolve_project
@@ -67,6 +69,9 @@ class HarnessSessionRunResult:
         attachments = self.run.metadata.get("attachments")
         if attachments:
             payload["attachments"] = attachments
+        attachment_render_plan = self.run.metadata.get("attachment_render_plan")
+        if attachment_render_plan:
+            payload["attachment_render_plan"] = attachment_render_plan
         return payload
 
 
@@ -149,12 +154,29 @@ class HarnessSessionRunner:
         attachment_payloads = tuple(
             _run_attachment_metadata(attachment) for attachment in attachments
         )
+        attachment_render_plan = (
+            render_attachments_for_harness(
+                options["harness_id"],
+                attachments,
+                self.attachment_store,
+                prompt=options["prompt"],
+            )
+            if attachment_payloads
+            else None
+        )
+        attachment_render_plan_payload = (
+            render_plan_to_dict(attachment_render_plan)
+            if attachment_render_plan is not None
+            else None
+        )
         run_metadata: dict[str, Any] = {
             "native_resume": _native_resume_metadata(options["harness_id"])
         }
         if attachment_payloads:
             run_metadata["attachment_ids"] = list(options["attachment_ids"])
             run_metadata["attachments"] = list(attachment_payloads)
+        if attachment_render_plan_payload:
+            run_metadata["attachment_render_plan"] = attachment_render_plan_payload
         run = self.store.create_run(
             session_id=session.id,
             harness_id=options["harness_id"],
@@ -212,7 +234,11 @@ class HarnessSessionRunner:
             session_id=session.id,
             run_id=run.id,
             native_session_id=options["native_session_id"],
-            extra=_request_extra(options["extra"], attachment_payloads),
+            extra=_request_extra(
+                options["extra"],
+                attachment_payloads,
+                attachment_render_plan_payload,
+            ),
         )
         raw_request = {
             "harness_id": options["harness_id"],
@@ -232,6 +258,8 @@ class HarnessSessionRunner:
         if attachment_payloads:
             raw_request["attachment_ids"] = list(options["attachment_ids"])
             raw_request["attachments"] = list(attachment_payloads)
+        if attachment_render_plan_payload:
+            raw_request["attachment_render_plan"] = attachment_render_plan_payload
         self.store.append_raw_request(
             session_id=session.id,
             run_id=run.id,
@@ -523,6 +551,7 @@ def _message_attachment_metadata(
 def _request_extra(
     extra: Mapping[str, Any],
     attachments: tuple[Mapping[str, Any], ...],
+    attachment_render_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = dict(extra)
     if attachments:
@@ -530,6 +559,8 @@ def _request_extra(
             str(attachment["id"]) for attachment in attachments
         ]
         payload["attachments"] = [dict(attachment) for attachment in attachments]
+    if attachment_render_plan:
+        payload["attachment_render_plan"] = dict(attachment_render_plan)
     return payload
 
 
