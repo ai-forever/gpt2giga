@@ -173,6 +173,7 @@ launching Codex:
 
 ```bash
 giga harness run codex-cli --prompt "Inspect" --dry-run --json
+giga harness run codex-cli --native --dry-run --prompt "Inspect" --json
 ```
 
 ## Claude Code Harness
@@ -248,6 +249,40 @@ giga session show <session_id> --json
 The minimal CLI intentionally shares the same filesystem store as `giga ui`.
 Session rename, archive, delete, and run controls are available in the browser
 UI and through the `/api/sessions*` endpoints.
+
+## Native Session CLI
+
+Native session commands share the same discovery index and normalized session
+store as the browser UI. They do not execute Codex, Claude Code, or Gemini CLI;
+they discover metadata, list cached refs, and import transcripts into
+gpt2giga-owned session history.
+
+Sync native refs for one harness:
+
+```bash
+giga native sync --harness codex-cli --workspace .
+giga native sync --harness codex-cli --workspace . --include-external --json
+```
+
+List cached native refs:
+
+```bash
+giga native list --harness codex-cli
+giga native list --harness codex-cli --include-external --json
+```
+
+Import a native transcript into normalized gpt2giga history:
+
+```bash
+giga native import <native_ref_id>
+giga native import <native_ref_id> --json
+```
+
+Imported sessions can be opened from `giga ui` or inspected with:
+
+```bash
+giga session show <session_id> --json
+```
 
 ## Browser UI
 

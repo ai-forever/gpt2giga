@@ -7,6 +7,12 @@ from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
 from gpt2giga.harness.harnesses.direct_chat import DirectChatHarness
 from gpt2giga.harness.harnesses.gemini_cli import GeminiCliHarness
+from gpt2giga.harness.native.models import (
+    NativeSessionRef,
+    NativeSessionStatus,
+    NativeTranscriptMessage,
+)
+from gpt2giga.harness.native.registry import NativeHistoryConnectorRegistry
 from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga.harness.types import HarnessResult
 
@@ -195,6 +201,95 @@ def test_cli_session_show_json(monkeypatch, capsys, tmp_path):
     assert output["messages"] == []
 
 
+def test_cli_native_sync_list_and_import_json(monkeypatch, capsys, tmp_path):
+    data_dir = tmp_path / "data"
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    ref = NativeSessionRef(
+        id="native_fake_1",
+        harness_id="fake-cli",
+        native_session_id="native-session-1",
+        title="Fake native session",
+        workspace=str(workspace),
+        source="external",
+        status=NativeSessionStatus.EXTERNAL_NATIVE,
+        created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:01:00Z",
+        message_count=3,
+        can_preview=True,
+        can_import=True,
+        can_resume=False,
+        metadata={"model": "GigaChat-2-Max", "api_mode": "v2"},
+    )
+    registry = NativeHistoryConnectorRegistry()
+    registry.register(
+        FakeNativeConnector(
+            ref,
+            import_messages=(
+                NativeTranscriptMessage(role="user", content="native user"),
+                NativeTranscriptMessage(role="model", content="native answer"),
+                NativeTranscriptMessage(role="mystery", content="skip me"),
+            ),
+        )
+    )
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(
+        cli,
+        "create_default_native_registry",
+        lambda *, data_dir: registry,
+    )
+
+    sync_code = cli.main(
+        [
+            "native",
+            "sync",
+            "--harness",
+            "fake-cli",
+            "--workspace",
+            str(workspace),
+            "--include-external",
+            "--json",
+        ]
+    )
+    sync_payload = json.loads(capsys.readouterr().out)
+
+    assert sync_code == 0
+    assert sync_payload["sessions"][0]["id"] == ref.id
+
+    list_code = cli.main(
+        [
+            "native",
+            "list",
+            "--harness",
+            "fake-cli",
+            "--workspace",
+            str(workspace),
+            "--include-external",
+            "--json",
+        ]
+    )
+    list_payload = json.loads(capsys.readouterr().out)
+
+    assert list_code == 0
+    assert [item["id"] for item in list_payload] == [ref.id]
+
+    import_code = cli.main(["native", "import", ref.id, "--json"])
+    import_payload = json.loads(capsys.readouterr().out)
+
+    assert import_code == 0
+    assert import_payload["session"]["default_harness_id"] == "fake-cli"
+    assert import_payload["imported_message_count"] == 2
+    assert import_payload["skipped_item_count"] == 1
+    assert [message["role"] for message in import_payload["messages"]] == [
+        "user",
+        "assistant",
+    ]
+    store = FilesystemHarnessSessionStore(data_dir)
+    bundle = store.get_session_bundle(import_payload["session"]["id"])
+    assert bundle.native_links[0].native_ref_id == ref.id
+    assert bundle.events[0].type == "native_import_warning"
+
+
 @pytest.mark.parametrize(
     ("harness_id", "forbidden"),
     (
@@ -250,3 +345,27 @@ def test_cli_native_dry_run_prints_command_plan_without_headless_run(
         assert item not in command
     assert secret not in output
     assert payload["raw"]["native_command_plan"]["env"] != {}
+
+
+class FakeNativeConnector:
+    harness_id = "fake-cli"
+
+    def __init__(
+        self,
+        ref: NativeSessionRef,
+        *,
+        import_messages: tuple[NativeTranscriptMessage, ...],
+    ) -> None:
+        self.ref = ref
+        self.import_messages = import_messages
+
+    def discover(self, *, workspace, include_external):
+        assert include_external is True
+        return (self.ref,)
+
+    def preview(self, ref, *, max_messages=20):
+        return self.import_messages[:max_messages]
+
+    def import_ref(self, ref):
+        assert ref.id == self.ref.id
+        return self.import_messages
