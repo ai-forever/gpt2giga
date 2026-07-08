@@ -159,6 +159,27 @@ INDEX_HTML = """<!doctype html>
       color: var(--muted);
       font-size: 12px;
     }
+    .top-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .project-panel {
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-soft);
+    }
+    .project-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+      font-weight: 800;
+    }
     .model-picker {
       position: relative;
       display: grid;
@@ -494,11 +515,17 @@ INDEX_HTML = """<!doctype html>
   <div class="app">
     <header class="topbar">
       <div>
-        <h1>gpt2giga Harness Chat Cockpit</h1>
-        <div id="model-status" class="status-line">Loading model suggestions...</div>
+        <h1>gpt2giga Project Cockpit</h1>
+        <div id="project-status" class="status-line">Loading project...</div>
+        <div class="top-summary">
+          <span id="current-model-badge" class="badge info">Model: loading</span>
+          <span id="current-route-badge" class="badge info">Route: /v2/chat/completions</span>
+          <span id="model-status" class="badge">Models: loading</span>
+        </div>
       </div>
       <div class="top-actions">
         <span id="proxy-status" class="badge warn">Proxy: checking</span>
+        <button id="init-project-button" class="secondary" type="button" hidden>Init project</button>
         <button id="refresh-health-button" class="secondary" type="button">Refresh proxy</button>
         <button id="refresh-models-button" class="secondary" type="button">Refresh models</button>
       </div>
@@ -507,6 +534,11 @@ INDEX_HTML = """<!doctype html>
     <main class="shell">
       <aside class="sidebar" aria-label="Session history">
         <div class="section sidebar-controls">
+          <div class="project-panel">
+            <h2>Project</h2>
+            <div id="project-name" class="project-title">Loading...</div>
+            <div id="project-meta" class="session-meta"></div>
+          </div>
           <div class="inline-actions">
             <button id="new-chat-button" type="button">+ New chat</button>
             <span id="session-count" class="badge info">0</span>
@@ -648,6 +680,8 @@ INDEX_HTML = """<!doctype html>
       sessions: [],
       models: [],
       modelSource: "",
+      project: null,
+      projectConfig: null,
       selectedHarness: null,
       currentSessionId: null,
       currentBundle: null,
@@ -680,7 +714,61 @@ INDEX_HTML = """<!doctype html>
       const mode = result.data.default_api_mode || "v2";
       byId(`api-mode-${mode}`).checked = true;
       updateRouteNote();
+      updateHeaderBadges();
       if (result.data.note) setText("model-status", result.data.note);
+    }
+
+    async function loadProject() {
+      const result = await getJson("/api/project");
+      if (!result.ok) {
+        setText("project-status", result.data.detail || "Project unavailable.");
+        setText("project-name", "Project unavailable");
+        byId("init-project-button").hidden = true;
+        return;
+      }
+      state.project = result.data.project || null;
+      state.projectConfig = result.data.config || null;
+      applyProject();
+    }
+
+    function applyProject() {
+      const project = state.project || {};
+      const config = state.projectConfig || {};
+      setText("project-name", project.name || "Unassigned");
+      const branch = project.git_branch ? `branch ${project.git_branch}` : "no git branch";
+      const dirty = project.dirty_summary || {};
+      const dirtyText = project.is_git_repo ? `dirty +${dirty.added || 0} -${dirty.deleted || 0} ~${dirty.changed || 0}` : "not a git repo";
+      setText("project-meta", `${branch} | ${dirtyText}`);
+      setText("project-status", `${project.name || "Project"} / ${project.root || ""}`);
+      byId("init-project-button").hidden = Boolean(config.exists);
+      if (project.root && !byId("workspace-input").value) {
+        byId("workspace-input").value = project.root;
+      }
+      if (config.exists && config.defaults) {
+        byId("model-input").value = config.defaults.model || byId("model-input").value;
+        byId("mode-select").value = config.defaults.mode || "plan";
+        const mode = config.defaults.api_mode || "v2";
+        const apiMode = byId(`api-mode-${mode}`);
+        if (apiMode) apiMode.checked = true;
+        updateRouteNote();
+      }
+    }
+
+    async function initProject() {
+      const workspace = state.project && state.project.root ? state.project.root : null;
+      const result = await getJson("/api/project/init", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace })
+      });
+      if (!result.ok) {
+        setText("project-status", result.data.detail || "Project init failed.");
+        return;
+      }
+      state.project = result.data.project || null;
+      state.projectConfig = result.data.config || null;
+      applyProject();
+      await loadSessions();
     }
 
     async function refreshHealth() {
@@ -705,6 +793,7 @@ INDEX_HTML = """<!doctype html>
       if (!byId("model-input").value && state.models[0]) byId("model-input").value = state.models[0];
       const status = data.ok ? `Models: ${data.source}` : `Models: ${state.modelSource} unavailable${data.error ? " - " + data.error : ""}`;
       setText("model-status", data.note ? `${status}. ${data.note}` : status);
+      updateHeaderBadges();
     }
 
     function renderModelList() {
@@ -755,6 +844,7 @@ INDEX_HTML = """<!doctype html>
       byId("model-input").value = model;
       renderModelList();
       closeModelList();
+      updateHeaderBadges();
       byId("model-input").focus();
     }
 
@@ -797,6 +887,10 @@ INDEX_HTML = """<!doctype html>
       for (const item of state.harnesses) {
         const spec = item.spec || {};
         const availability = item.availability || {};
+        const capabilities = Array.isArray(spec.capabilities) ? spec.capabilities.slice(0, 3) : [];
+        const extras = [];
+        if (spec.supports_workspace) extras.push("workspace");
+        if (spec.supports_streaming) extras.push("stream");
         const card = document.createElement("div");
         card.className = "harness-card";
         card.innerHTML = `
@@ -805,6 +899,12 @@ INDEX_HTML = """<!doctype html>
             <span>${escapeHtml(spec.id || "")}</span>
             <span>${escapeHtml(availability.status || "unknown")}</span>
           </div>
+          <div class="session-meta">
+            <span>${escapeHtml(capabilities.join(", ") || "no capabilities")}</span>
+          </div>
+          <div class="session-meta">
+            <span>${escapeHtml(extras.join(", ") || "prompt only")}</span>
+          </div>
         `;
         card.addEventListener("click", () => selectHarness(spec.id));
         list.appendChild(card);
@@ -812,7 +912,8 @@ INDEX_HTML = """<!doctype html>
     }
 
     function chooseInitialHarness() {
-      const preferred = byId("harness-select").value || "echo";
+      const configDefaults = state.projectConfig && state.projectConfig.exists ? state.projectConfig.defaults || {} : {};
+      const preferred = configDefaults.harness || byId("harness-select").value || "echo";
       const first = state.harnesses.find((item) => item.spec && item.spec.id === preferred) || state.harnesses[0];
       if (first && first.spec) selectHarness(first.spec.id);
     }
@@ -824,7 +925,8 @@ INDEX_HTML = """<!doctype html>
       byId("harness-select").value = harnessId;
       renderCapabilityOptions(item.spec);
       updateHarnessDrivenControls();
-      setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}`);
+      const capabilities = Array.isArray(item.spec.capabilities) ? item.spec.capabilities.join(", ") : "";
+      setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}${capabilities ? " Capabilities: " + capabilities : ""}`);
     }
 
     function renderCapabilityOptions(spec) {
@@ -861,6 +963,7 @@ INDEX_HTML = """<!doctype html>
       const harness = byId("session-harness-filter").value;
       if (q) params.set("q", q);
       if (workspace) params.set("workspace", workspace);
+      if (!workspace && state.project && state.project.id) params.set("project_id", state.project.id);
       if (harness) params.set("harness_id", harness);
       if (byId("include-archived-checkbox").checked) params.set("include_archived", "true");
       const result = await getJson(`/api/sessions?${params.toString()}`);
@@ -1128,6 +1231,13 @@ INDEX_HTML = """<!doctype html>
 
     function updateRouteNote() {
       setText("route-note", `Current route: /${currentApiMode()}/chat/completions`);
+      updateHeaderBadges();
+    }
+
+    function updateHeaderBadges() {
+      const model = byId("model-input").value.trim() || "unset";
+      setText("current-model-badge", `Model: ${model}`);
+      setText("current-route-badge", `Route: /${currentApiMode()}/chat/completions`);
     }
 
     function commandPreview(payload) {
@@ -1203,13 +1313,17 @@ INDEX_HTML = """<!doctype html>
     function bindEvents() {
       byId("refresh-health-button").addEventListener("click", refreshHealth);
       byId("refresh-models-button").addEventListener("click", loadModels);
+      byId("init-project-button").addEventListener("click", initProject);
       byId("new-chat-button").addEventListener("click", newChat);
       byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
       byId("api-mode-v1").addEventListener("change", () => { updateRouteNote(); loadModels(); });
       byId("api-mode-v2").addEventListener("change", () => { updateRouteNote(); loadModels(); });
       byId("model-menu-button").addEventListener("click", toggleModelList);
       byId("model-input").addEventListener("focus", openModelList);
-      byId("model-input").addEventListener("input", openModelList);
+      byId("model-input").addEventListener("input", () => {
+        updateHeaderBadges();
+        openModelList();
+      });
       byId("model-input").addEventListener("keydown", (event) => {
         if (event.key === "Escape") closeModelList();
         if (event.key === "ArrowDown") {
@@ -1260,6 +1374,7 @@ INDEX_HTML = """<!doctype html>
     async function boot() {
       bindEvents();
       await loadDefaults();
+      await loadProject();
       await Promise.all([loadHarnesses(), refreshHealth(), loadModels()]);
       await loadSessions();
       renderAll();

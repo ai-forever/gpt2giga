@@ -310,6 +310,12 @@ def test_ui_index_contains_control_panel_elements():
         "session-workspace-filter",
         "session-harness-filter",
         "include-archived-checkbox",
+        "project-status",
+        "project-name",
+        "project-meta",
+        "init-project-button",
+        "current-model-badge",
+        "current-route-badge",
         "harness-list",
         "harness-select",
         "model-input",
@@ -340,7 +346,13 @@ def test_ui_index_contains_control_panel_elements():
         "storage-panel",
     ):
         assert element_id in html
-    for text in ("+ New chat", "/api/sessions", "Storage"):
+    for text in (
+        "+ New chat",
+        "/api/project",
+        "project_id",
+        "Project Cockpit",
+        "Storage",
+    ):
         assert text in html
 
 
