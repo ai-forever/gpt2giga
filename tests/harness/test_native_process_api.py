@@ -68,6 +68,42 @@ def test_native_process_api_start_poll_input_and_stop(tmp_path):
     }
 
 
+def test_native_process_api_start_creates_managed_native_link(tmp_path):
+    script = _write_once_cli(tmp_path)
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(
+            start_script=script,
+            native_session_id="managed-native-1",
+        ),
+    )
+    session = store.create_session(
+        title="Native API",
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "start",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert started.status_code == 200, started.text
+    assert started.json()["run"]["native_session_id"] == "managed-native-1"
+    link = started.json()["native_link"]
+    assert link["status"] == "managed_native"
+    assert link["native_session_id"] == "managed-native-1"
+    assert link["metadata"]["can_resume"] is True
+    assert link["metadata"]["native_process_id"] == started.json()["process"]["id"]
+    bundle = store.get_session_bundle(session.id)
+    assert bundle.native_links[-1].native_session_id == "managed-native-1"
+
+
 def test_native_process_api_resume_uses_cached_native_ref(tmp_path):
     resume_script = tmp_path / "resume_cli.py"
     resume_script.write_text(
@@ -103,6 +139,86 @@ def test_native_process_api_resume_uses_cached_native_ref(tmp_path):
     _wait_for_output(client, process_id, 0, "resumed:native-session-1")
     completed = _wait_for_process_status(client, process_id, {"completed", "failed"})
     assert completed["run"]["status"] == "completed"
+
+
+def test_native_process_api_resume_uses_stored_managed_link(tmp_path):
+    start_script = _write_once_cli(tmp_path)
+    resume_script = tmp_path / "resume_cli.py"
+    resume_script.write_text(
+        "import sys\nprint('resumed-link:' + sys.argv[1], flush=True)\n",
+        encoding="utf-8",
+    )
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(
+            start_script=start_script,
+            resume_script=resume_script,
+            native_session_id="managed-native-2",
+        ),
+    )
+    session = store.create_session(
+        title="Native API",
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "start",
+            "workspace": str(tmp_path),
+        },
+    )
+    assert started.status_code == 200, started.text
+
+    resumed = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "resume",
+        },
+    )
+
+    assert resumed.status_code == 200, resumed.text
+    process_id = resumed.json()["process"]["id"]
+    assert resumed.json()["run"]["native_session_id"] == "managed-native-2"
+    assert resumed.json()["native_link"]["native_session_id"] == "managed-native-2"
+    _wait_for_output(client, process_id, 0, "resumed-link:managed-native-2")
+
+
+def test_native_process_api_resume_reports_missing_native_id_from_link(tmp_path):
+    script = _write_once_cli(tmp_path)
+    client, store = _client(tmp_path, FakeProcessConnector(start_script=script))
+    session = store.create_session(
+        title="Native API",
+        workspace=str(tmp_path),
+        default_harness_id="fake-cli",
+    )
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "start",
+            "workspace": str(tmp_path),
+        },
+    )
+    assert started.status_code == 200, started.text
+    assert started.json()["native_link"]["metadata"]["can_resume"] is False
+
+    resumed = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "fake-cli",
+            "action": "resume",
+        },
+    )
+
+    assert resumed.status_code == 400
+    assert "Native session id was not detected" in resumed.json()["detail"]
 
 
 def test_native_process_api_redacts_start_output_and_events(tmp_path):
@@ -158,10 +274,12 @@ class FakeProcessConnector:
         start_script,
         resume_script=None,
         pass_context_api_key: bool = False,
+        native_session_id: str | None = None,
     ) -> None:
         self.start_script = start_script
         self.resume_script = resume_script or start_script
         self.pass_context_api_key = pass_context_api_key
+        self.native_session_id = native_session_id
 
     def discover(self, *, workspace, include_external):
         return ()
@@ -180,11 +298,15 @@ class FakeProcessConnector:
         env = _python_env()
         if self.pass_context_api_key and context.api_key:
             env["GPT2GIGA_API_KEY"] = context.api_key
+        metadata = {"harness_id": self.harness_id}
+        if self.native_session_id is not None:
+            metadata["native_session_id"] = self.native_session_id
         return NativeCommandPlan(
             command=(sys.executable, str(self.start_script)),
             env=env,
             cwd=request.workspace,
-            metadata={"harness_id": self.harness_id},
+            native_home=str(request.workspace) if request.workspace else None,
+            metadata=metadata,
         )
 
     def build_resume_command(
@@ -241,6 +363,15 @@ def _write_echo_cli(tmp_path):
         "for line in sys.stdin:\n"
         "    text = line.strip()\n"
         "    print(f'echo:{text}', flush=True)\n",
+        encoding="utf-8",
+    )
+    return script
+
+
+def _write_once_cli(tmp_path):
+    script = tmp_path / "once_cli.py"
+    script.write_text(
+        "print('started', flush=True)\n",
         encoding="utf-8",
     )
     return script

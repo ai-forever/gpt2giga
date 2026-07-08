@@ -26,6 +26,7 @@ from gpt2giga.harness.config import (
     pass_model_env_note,
 )
 from gpt2giga.harness.native.base import (
+    NativeCommandPlan,
     discovery_error_to_dict,
 )
 from gpt2giga.harness.native.models import (
@@ -513,6 +514,7 @@ def create_app(
                 config=config,
                 native_registry=native_registry,
                 native_index_store=native_index_store,
+                store=store,
             )
             run = store.create_run(
                 session_id=session.id,
@@ -540,6 +542,12 @@ def create_app(
                 native_session_id=options["native_session_id"],
                 metadata=_native_process_run_metadata(options, process_ref),
             )
+            native_link = _append_native_process_link(
+                store=store,
+                session=session,
+                options=options,
+                process_ref=process_ref,
+            )
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
         except HTTPException:
@@ -556,6 +564,7 @@ def create_app(
         return {
             "process": native_process_ref_to_dict(process_ref),
             "run": run_to_dict(run),
+            "native_link": native_link_to_dict(native_link),
         }
 
     @app.post("/api/native/processes/{process_id}/input")
@@ -948,6 +957,7 @@ def _native_process_start_options(
     config: HarnessConfig,
     native_registry: NativeHistoryConnectorRegistry,
     native_index_store: NativeSessionIndexStore,
+    store: HarnessSessionStore,
 ) -> dict[str, Any]:
     action = str(payload.get("action") or "start").strip().lower()
     if action not in {"start", "resume"}:
@@ -959,6 +969,7 @@ def _native_process_start_options(
             config=config,
             native_registry=native_registry,
             native_index_store=native_index_store,
+            store=store,
         )
     return _native_process_new_options(
         payload=payload,
@@ -1002,6 +1013,7 @@ def _native_process_new_options(
         extra=_metadata_mapping(payload.get("extra")),
     )
     plan = connector.build_start_command(request, config.to_context())
+    native_session_id = _native_session_id_from_plan(plan)
     return {
         "action": "start",
         "plan": plan,
@@ -1013,7 +1025,7 @@ def _native_process_new_options(
         "mode": mode,
         "workspace": workspace,
         "native_ref": None,
-        "native_session_id": None,
+        "native_session_id": native_session_id,
     }
 
 
@@ -1024,12 +1036,17 @@ def _native_process_resume_options(
     config: HarnessConfig,
     native_registry: NativeHistoryConnectorRegistry,
     native_index_store: NativeSessionIndexStore,
+    store: HarnessSessionStore,
 ) -> dict[str, Any]:
-    native_ref_id = _required_text(
-        payload.get("native_ref_id"),
-        "native_ref_id is required",
-    )
-    ref = _native_ref_or_404(native_index_store, native_ref_id)
+    native_ref_id = _optional_text(payload.get("native_ref_id"))
+    if native_ref_id is not None:
+        ref = _native_ref_or_404(native_index_store, native_ref_id)
+    else:
+        harness_id = _required_text(
+            payload.get("harness_id") or session.default_harness_id,
+            "harness_id is required",
+        )
+        ref = _native_ref_from_session_link(store, session, harness_id)
     if not ref.can_resume:
         raise HTTPException(
             status_code=400,
@@ -1069,10 +1086,14 @@ def _native_process_run_metadata(
     process_ref: NativeProcessRef | None = None,
 ) -> dict[str, Any]:
     ref = options.get("native_ref")
+    plan = options.get("plan")
+    native_session_id = _optional_text(options.get("native_session_id"))
     metadata = {
         "invocation_mode": HarnessInvocationMode.NATIVE.value,
         "native_action": options["action"],
     }
+    if native_session_id is not None:
+        metadata["native_session_id"] = native_session_id
     if isinstance(ref, NativeSessionRef):
         metadata.update(
             {
@@ -1081,6 +1102,8 @@ def _native_process_run_metadata(
                 "native_status": ref.status.value,
             }
         )
+    elif isinstance(plan, NativeCommandPlan) and plan.native_home is not None:
+        metadata["native_home"] = plan.native_home
     if process_ref is not None:
         metadata["native_process"] = {
             "id": process_ref.id,
@@ -1089,6 +1112,120 @@ def _native_process_run_metadata(
             "status": process_ref.status.value,
         }
     return metadata
+
+
+def _append_native_process_link(
+    *,
+    store: HarnessSessionStore,
+    session: HarnessSession,
+    options: Mapping[str, Any],
+    process_ref: NativeProcessRef,
+) -> HarnessNativeLink:
+    ref = options.get("native_ref")
+    native_session_id = _optional_text(options.get("native_session_id"))
+    can_resume = native_session_id is not None
+    resume_reason = None if can_resume else _native_missing_session_id_reason()
+    status = (
+        ref.status
+        if isinstance(ref, NativeSessionRef)
+        else NativeSessionStatus.MANAGED_NATIVE
+    )
+    now = utc_now()
+    metadata: dict[str, Any] = {
+        "native_action": options["action"],
+        "native_process_id": process_ref.id,
+        "run_id": process_ref.run_id,
+        "can_resume": can_resume,
+        "resume_reason": resume_reason,
+        "command": list(process_ref.display_command),
+        "process_status": process_ref.status.value,
+    }
+    if process_ref.native_home is not None:
+        metadata["native_home"] = process_ref.native_home
+    if isinstance(ref, NativeSessionRef):
+        metadata.update(
+            {
+                "source_ref_status": ref.status.value,
+                "source_ref_can_resume": ref.can_resume,
+                "source_ref_resume_reason": ref.resume_reason,
+            }
+        )
+    if isinstance(options.get("plan"), NativeCommandPlan):
+        metadata["plan_metadata"] = dict(options["plan"].metadata)
+    return store.append_native_link(
+        session.id,
+        HarnessNativeLink(
+            id=new_id("nlink"),
+            session_id=session.id,
+            harness_id=str(options["harness_id"]),
+            status=status,
+            created_at=now,
+            updated_at=now,
+            native_session_id=native_session_id,
+            native_ref_id=ref.id if isinstance(ref, NativeSessionRef) else None,
+            source=f"native_process_{options['action']}",
+            workspace=_optional_text(options.get("workspace")) or session.workspace,
+            metadata=metadata,
+        ),
+    )
+
+
+def _native_ref_from_session_link(
+    store: HarnessSessionStore,
+    session: HarnessSession,
+    harness_id: str,
+) -> NativeSessionRef:
+    link = store.get_native_link(session.id, harness_id)
+    if link is None:
+        raise HTTPException(
+            status_code=400,
+            detail="native_ref_id is required or session native link is unavailable",
+        )
+    can_resume = bool(link.metadata.get("can_resume")) and bool(link.native_session_id)
+    resume_reason = _optional_text(link.metadata.get("resume_reason"))
+    if not can_resume and resume_reason is None:
+        resume_reason = _native_missing_session_id_reason()
+    return NativeSessionRef(
+        id=link.native_ref_id or link.id,
+        harness_id=link.harness_id,
+        native_session_id=link.native_session_id,
+        title=str(link.metadata.get("title") or "Managed native session"),
+        workspace=link.workspace or session.workspace,
+        source=link.source or "native_process",
+        status=link.status,
+        created_at=link.created_at,
+        updated_at=link.updated_at,
+        message_count=None,
+        can_preview=False,
+        can_import=False,
+        can_resume=can_resume,
+        resume_reason=resume_reason,
+        metadata=link.metadata,
+    )
+
+
+def _native_session_id_from_plan(plan: NativeCommandPlan) -> str | None:
+    metadata = dict(plan.metadata)
+    for key in (
+        "native_session_id",
+        "managed_session_id",
+        "session_name",
+        "session_id",
+        "codex_session_id",
+        "claude_session_id",
+        "gemini_session_id",
+    ):
+        value = _optional_text(metadata.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _native_missing_session_id_reason() -> str:
+    return (
+        "Native session id was not detected yet; sync native sessions after the "
+        "CLI writes history."
+    )
 
 
 def _sync_native_process_run(
