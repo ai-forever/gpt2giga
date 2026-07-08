@@ -1,8 +1,10 @@
 from dataclasses import replace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gpt2giga.harness.config import HarnessConfig
+from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.native.base import NativeCommandPlan
 from gpt2giga.harness.native.models import (
     NativeSessionRef,
@@ -10,11 +12,15 @@ from gpt2giga.harness.native.models import (
     NativeTranscriptMessage,
 )
 from gpt2giga.harness.native.registry import NativeHistoryConnectorRegistry
-from gpt2giga.harness.registry import create_default_registry
+from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
 from gpt2giga.harness.types import (
+    Availability,
+    HarnessCapability,
     HarnessContext,
     HarnessRequest,
+    HarnessResult,
+    HarnessSpec,
     REDACTED,
 )
 from gpt2giga.harness.ui.app import create_app
@@ -164,6 +170,118 @@ def test_native_session_import_creates_normalized_session_and_link(tmp_path):
     assert bundle["native_links"][0]["status"] == "imported"
 
 
+@pytest.mark.parametrize("harness_id", ("codex-cli", "claude-code", "gemini-cli"))
+def test_native_session_import_supports_external_harness_ids(tmp_path, harness_id):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    ref = _ref(
+        workspace=str(workspace),
+        harness_id=harness_id,
+        status=NativeSessionStatus.MANAGED_NATIVE,
+    )
+    connector = FakeConnector(
+        harness_id,
+        refs=(ref,),
+        import_messages=(
+            NativeTranscriptMessage(role="user", content="native user"),
+            NativeTranscriptMessage(role="assistant", content="native assistant"),
+        ),
+    )
+    registry = NativeHistoryConnectorRegistry()
+    registry.register(connector)
+    client = _client(tmp_path, registry)
+    client.post(
+        "/api/native/sessions/sync",
+        json={"harness_id": harness_id, "workspace": str(workspace)},
+    )
+
+    imported = client.post(f"/api/native/sessions/{ref.id}/import")
+
+    assert imported.status_code == 200
+    assert imported.json()["session"]["default_harness_id"] == harness_id
+    assert [message["role"] for message in imported.json()["messages"]] == [
+        "user",
+        "assistant",
+    ]
+
+
+def test_native_session_import_skips_unknown_roles_with_warning(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    ref = _ref(workspace=str(workspace), status=NativeSessionStatus.MANAGED_NATIVE)
+    connector = FakeConnector(
+        "codex-cli",
+        refs=(ref,),
+        import_messages=(
+            NativeTranscriptMessage(role="user", content="known"),
+            NativeTranscriptMessage(role="mystery", content="tool internals"),
+            NativeTranscriptMessage(role="model", content="model answer"),
+        ),
+    )
+    registry = NativeHistoryConnectorRegistry()
+    registry.register(connector)
+    client = _client(tmp_path, registry)
+    client.post(
+        "/api/native/sessions/sync",
+        json={"harness_id": "codex-cli", "workspace": str(workspace)},
+    )
+
+    imported = client.post(f"/api/native/sessions/{ref.id}/import")
+    session_id = imported.json()["session"]["id"]
+    bundle = client.get(f"/api/sessions/{session_id}").json()
+
+    assert imported.status_code == 200
+    assert [message["role"] for message in imported.json()["messages"]] == [
+        "user",
+        "assistant",
+    ]
+    assert "tool internals" not in str(imported.json()["messages"])
+    assert bundle["events"][0]["type"] == "native_import_warning"
+    assert bundle["events"][0]["payload"]["role"] == "mystery"
+    assert bundle["native_links"][0]["metadata"]["skipped_item_count"] == 1
+
+
+def test_imported_native_session_can_continue_with_another_harness(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    ref = _ref(workspace=str(workspace), status=NativeSessionStatus.MANAGED_NATIVE)
+    connector = FakeConnector(
+        "codex-cli",
+        refs=(ref,),
+        import_messages=(
+            NativeTranscriptMessage(role="user", content="native question"),
+            NativeTranscriptMessage(role="assistant", content="native answer"),
+        ),
+    )
+    native_registry = NativeHistoryConnectorRegistry()
+    native_registry.register(connector)
+    capture = CaptureHarness()
+    harness_registry = HarnessRegistry()
+    harness_registry.register(capture)
+    client = _client(tmp_path, native_registry, registry=harness_registry)
+    client.post(
+        "/api/native/sessions/sync",
+        json={"harness_id": "codex-cli", "workspace": str(workspace)},
+    )
+    imported = client.post(f"/api/native/sessions/{ref.id}/import")
+    session_id = imported.json()["session"]["id"]
+
+    continued = client.post(
+        f"/api/sessions/{session_id}/run",
+        json={"harness_id": "capture", "prompt": "continue here"},
+    )
+
+    assert continued.status_code == 200
+    assert capture.last_request is not None
+    assert [
+        (message.role, message.content) for message in capture.last_request.messages
+    ] == [
+        ("user", "native question"),
+        ("assistant", "native answer"),
+        ("user", "continue here"),
+    ]
+
+
 def test_native_session_link_adds_link_to_existing_session(tmp_path):
     workspace = tmp_path / "repo"
     workspace.mkdir()
@@ -259,13 +377,14 @@ def _client(
     native_registry: NativeHistoryConnectorRegistry,
     *,
     store=None,
+    registry=None,
 ) -> TestClient:
     app = create_app(
         HarnessConfig(
             default_model="ConfiguredModel",
             data_dir=str(tmp_path / "data"),
         ),
-        registry=create_default_registry(include_entry_points=False),
+        registry=registry or create_default_registry(include_entry_points=False),
         store=store or InMemoryHarnessSessionStore(),
         native_registry=native_registry,
     )
@@ -275,11 +394,12 @@ def _client(
 def _ref(
     *,
     workspace: str,
+    harness_id: str = "codex-cli",
     status: NativeSessionStatus = NativeSessionStatus.EXTERNAL_NATIVE,
 ) -> NativeSessionRef:
     return NativeSessionRef(
-        id="native_codex_fake_1",
-        harness_id="codex-cli",
+        id=f"native_{harness_id.replace('-', '_')}_fake_1",
+        harness_id=harness_id,
         native_session_id="codex-session-1",
         title="Fake native session",
         workspace=workspace,
@@ -296,3 +416,29 @@ def _ref(
             "model": "GigaChat-2-Max",
         },
     )
+
+
+class CaptureHarness(BaseHarness):
+    def __init__(self) -> None:
+        self.last_request: HarnessRequest | None = None
+
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="capture",
+            title="Capture",
+            kind="test",
+            description="Capture request",
+            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("test")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
+        self.last_request = request
+        return HarnessResult(ok=True, text="continued")

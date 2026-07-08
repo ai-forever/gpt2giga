@@ -73,6 +73,7 @@ from gpt2giga.harness.sessions.models import (
     HarnessMessage,
     HarnessNativeLink,
     HarnessSession,
+    HarnessStoredEvent,
     bundle_to_dict,
     message_to_dict,
     native_link_to_dict,
@@ -389,26 +390,48 @@ def create_app(
             },
             metadata=_native_import_session_metadata(ref),
         )
-        messages = [
-            store.append_message(
-                HarnessMessage(
-                    id=new_id("msg"),
-                    session_id=session.id,
-                    run_id=None,
-                    role=_native_message_role(message.role),
-                    content=str(redact_for_storage(message.content)),
-                    created_at=message.created_at or utc_now(),
-                    harness_id=ref.harness_id,
-                    metadata={
-                        "source": "native_import",
-                        "native_ref_id": ref.id,
-                        "native_session_id": ref.native_session_id,
-                        **dict(redact_for_storage(dict(message.metadata))),
-                    },
+        messages = []
+        skipped_count = 0
+        for message in imported:
+            role = _native_import_message_role(message.role)
+            if role is None:
+                skipped_count += 1
+                store.append_event(
+                    HarnessStoredEvent(
+                        id=new_id("evt"),
+                        session_id=session.id,
+                        run_id="native_import",
+                        type="native_import_warning",
+                        message="Skipped native transcript item with unknown role.",
+                        payload={
+                            "native_ref_id": ref.id,
+                            "native_session_id": ref.native_session_id,
+                            "role": message.role,
+                            "metadata": _redacted_mapping(message.metadata),
+                        },
+                        created_at=message.created_at or utc_now(),
+                    )
+                )
+                continue
+            messages.append(
+                store.append_message(
+                    HarnessMessage(
+                        id=new_id("msg"),
+                        session_id=session.id,
+                        run_id=None,
+                        role=role,
+                        content=str(redact_for_storage(message.content)),
+                        created_at=message.created_at or utc_now(),
+                        harness_id=ref.harness_id,
+                        metadata={
+                            "source": "native_import",
+                            "native_ref_id": ref.id,
+                            "native_session_id": ref.native_session_id,
+                            **dict(redact_for_storage(dict(message.metadata))),
+                        },
+                    )
                 )
             )
-            for message in imported
-        ]
         link = store.append_native_link(
             session.id,
             HarnessNativeLink(
@@ -425,6 +448,7 @@ def create_app(
                 metadata={
                     "source_status": ref.status.value,
                     "imported_message_count": len(messages),
+                    "skipped_item_count": skipped_count,
                     "project_id": ref.metadata.get("project_id"),
                 },
             ),
@@ -1142,6 +1166,15 @@ def _native_message_role(role: str) -> str:
     if normalized == "model":
         return "assistant"
     return "assistant"
+
+
+def _native_import_message_role(role: str) -> str | None:
+    normalized = str(role).strip().lower()
+    if normalized in {"user", "assistant", "system", "tool"}:
+        return normalized
+    if normalized == "model":
+        return "assistant"
+    return None
 
 
 def _redacted_mapping(value: Any) -> dict[str, Any]:
