@@ -8,7 +8,11 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from gpt2giga.harness import proxy
-from gpt2giga.harness.config import HarnessConfig, pass_model_env_note
+from gpt2giga.harness.config import (
+    DEFAULT_MODEL_HINTS,
+    HarnessConfig,
+    pass_model_env_note,
+)
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga.harness.types import (
     HarnessCapability,
@@ -47,13 +51,43 @@ def create_app(
                     "availability": availability_to_dict(harness.availability()),
                 }
                 for harness in registry.list()
-            ]
+            ],
+            "discovery_errors": list(registry.discovery_errors),
+        }
+
+    @app.get("/api/defaults")
+    async def defaults() -> dict[str, Any]:
+        return {
+            "proxy_url": config.proxy_url,
+            "default_model": config.default_model or DEFAULT_MODEL_HINTS[0],
+            "default_api_mode": config.default_api_mode.value,
+            "auto_start_proxy": config.auto_start_proxy,
+            "proxy_start_timeout_seconds": config.proxy_start_timeout_seconds,
+            "note": pass_model_env_note(),
         }
 
     @app.get("/api/models")
     async def models(api_mode: str = Query(default="v2")) -> dict[str, Any]:
-        mode = parse_api_mode(api_mode)
-        discovery = proxy.discover_models(config, mode)
+        try:
+            mode = parse_api_mode(api_mode)
+        except ValueError:
+            return {
+                "ok": False,
+                "models": _fallback_models(config),
+                "source": "fallback",
+                "error": "invalid api_mode; expected v1 or v2",
+                "note": pass_model_env_note(),
+            }
+        try:
+            discovery = proxy.discover_models(config, mode)
+        except Exception:
+            return {
+                "ok": False,
+                "models": _fallback_models(config),
+                "source": "fallback",
+                "error": "model discovery failed",
+                "note": pass_model_env_note(),
+            }
         return {
             "ok": discovery.ok,
             "models": list(discovery.models),
@@ -80,17 +114,43 @@ def create_app(
             harness = registry.get(harness_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown harness") from exc
+        extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
+        extra = dict(extra)
+        if bool(payload.get("dry_run")):
+            extra["dry_run"] = True
+        try:
+            api_mode = parse_api_mode(payload.get("api_mode"))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid api_mode; expected v1 or v2",
+            ) from exc
+        try:
+            capability = parse_capability(
+                payload.get("capability") or HarnessCapability.CHAT_COMPLETIONS.value
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid capability",
+            ) from exc
         request = HarnessRequest(
             prompt=str(payload.get("prompt") or ""),
             model=_optional_text(payload.get("model")),
-            api_mode=parse_api_mode(payload.get("api_mode")),
-            capability=parse_capability(
-                payload.get("capability") or HarnessCapability.CHAT_COMPLETIONS.value
-            ),
+            api_mode=api_mode,
+            capability=capability,
             mode=str(payload.get("mode") or "plan"),
+            stream=bool(payload.get("stream")),
             workspace=resolve_workspace(_optional_text(payload.get("workspace"))),
+            extra=extra,
         )
-        result = harness.run(request, config.to_context())
+        try:
+            result = harness.run(request, config.to_context())
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail="Harness run failed",
+            ) from exc
         return result_to_dict(result)
 
     return app
@@ -110,3 +170,11 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _fallback_models(config: HarnessConfig) -> list[str]:
+    return list(
+        dict.fromkeys(
+            model for model in (config.default_model, *DEFAULT_MODEL_HINTS) if model
+        )
+    )

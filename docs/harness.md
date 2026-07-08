@@ -199,19 +199,44 @@ giga run --agent gemini --mode plan --workspace . "Inspect this repo"
 
 ## Browser UI
 
-`giga ui` serves one no-build HTML page with:
+`giga ui` serves the local Harness Control Panel as one no-build HTML page. It
+binds to `127.0.0.1:8091` by default. Remote binding is rejected unless you pass
+`--allow-remote`.
+
+The UI is populated from `HarnessRegistry`, so built-in and entry-point
+harnesses appear in the browser without frontend code changes. It shows each
+harness' availability status, kind, capabilities, tags, and missing/error
+details when discovery fails.
+
+The run configuration panel includes:
 
 - harness selection;
 - model input with proxy-backed model suggestions when available;
-- API mode selection: `v1` or `v2`;
+- explicit API mode selection: `v1` maps to `/v1/chat/completions`, and `v2`
+  maps to `/v2/chat/completions`;
 - capability and mode selection;
-- optional workspace path for agent harnesses;
+- optional workspace path for harnesses that declare workspace support;
+- dry-run and stream toggles where the selected harness supports them;
 - prompt input;
-- output and raw JSON panels;
+- output, events, raw request, raw response, command, and passive diff panels;
 - copy buttons for the equivalent CLI command and direct-chat curl command.
 
-The UI stores no API keys in local storage and receives only redacted command
-metadata from the backend.
+Echo runs entirely locally and does not require credentials. Direct-chat sends
+requests through the configured local proxy or auto-started local sidecar and
+therefore needs real GigaChat credentials for live upstream responses. External
+agent CLI harnesses such as Codex, Claude Code, and Gemini can be previewed with
+dry-run even when their executable is missing.
+
+The UI stores only non-secret preferences such as selected harness, API mode,
+mode, and model name. It does not store prompt text, workspace paths, API keys,
+or GigaChat credentials. Curl previews always use
+`Authorization: Bearer <GPT2GIGA_API_KEY>` as a placeholder and never expose the
+real local proxy key.
+
+The stream checkbox passes `stream=true` to the harness request when the harness
+declares streaming support. The browser page still renders the final result
+after the backend call completes; it does not implement SSE or WebSocket event
+streaming yet.
 
 ## Model Selection Notes
 
