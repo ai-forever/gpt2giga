@@ -665,6 +665,10 @@ INDEX_HTML = """<!doctype html>
               <span id="native-count" class="badge info">0</span>
               <button id="sync-native-button" class="secondary" type="button">Sync native history</button>
             </div>
+            <label class="choice" for="native-all-workspaces-checkbox">
+              <input id="native-all-workspaces-checkbox" type="checkbox">
+              Show all workspaces
+            </label>
             <div id="native-status" class="status-line">Native history not synced</div>
           </div>
           <div id="native-session-list"></div>
@@ -1133,11 +1137,12 @@ INDEX_HTML = """<!doctype html>
     }
 
     async function loadNativeSessions(sync) {
-      const workspace = byId("session-workspace-filter").value.trim() || byId("workspace-input").value.trim();
+      const showAllWorkspaces = byId("native-all-workspaces-checkbox").checked;
+      const workspace = showAllWorkspaces ? "" : byId("session-workspace-filter").value.trim() || byId("workspace-input").value.trim();
       const includeExternal = true;
       if (sync) {
         const payload = {
-          workspace: workspace || null,
+          workspace: showAllWorkspaces ? null : workspace || null,
           include_external: includeExternal
         };
         const synced = await getJson("/api/native/sessions/sync", {
@@ -1156,8 +1161,8 @@ INDEX_HTML = """<!doctype html>
         }
       }
       const params = new URLSearchParams({ include_external: "true" });
-      if (workspace) params.set("workspace", workspace);
-      if (!workspace && state.project && state.project.id) params.set("project_id", state.project.id);
+      if (!showAllWorkspaces && workspace) params.set("workspace", workspace);
+      if (!showAllWorkspaces && !workspace && state.project && state.project.id) params.set("project_id", state.project.id);
       const result = await getJson(`/api/native/sessions?${params.toString()}`);
       if (!result.ok) {
         state.nativeSessions = [];
@@ -2182,6 +2187,7 @@ INDEX_HTML = """<!doctype html>
       byId("harness-select").addEventListener("change", (event) => selectHarness(event.target.value));
       byId("invocation-select").addEventListener("change", updateHarnessDrivenControls);
       byId("sync-native-button").addEventListener("click", () => loadNativeSessions(true));
+      byId("native-all-workspaces-checkbox").addEventListener("change", () => loadNativeSessions(false));
       byId("poll-native-output-button").addEventListener("click", pollNativeOutput);
       byId("send-native-input-button").addEventListener("click", sendNativeInput);
       byId("stop-native-process-button").addEventListener("click", stopNativeProcess);

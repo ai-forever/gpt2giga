@@ -12,6 +12,8 @@ from gpt2giga.harness.native.models import (
     NativeTranscriptMessage,
 )
 from gpt2giga.harness.native.registry import NativeHistoryConnectorRegistry
+from gpt2giga.harness.native.store import FilesystemNativeSessionIndexStore
+from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
 from gpt2giga.harness.types import (
@@ -82,6 +84,44 @@ def test_native_sessions_sync_populates_cached_index(tmp_path):
     assert connector.discovery_calls == (
         {"workspace": str(workspace), "include_external": True},
     )
+
+
+def test_native_sessions_api_filters_by_project_and_can_show_all(tmp_path):
+    workspace_a = tmp_path / "repo-a"
+    workspace_b = tmp_path / "repo-b"
+    workspace_a.mkdir()
+    workspace_b.mkdir()
+    index_store = FilesystemNativeSessionIndexStore(tmp_path / "data")
+    ref_a = _ref(
+        workspace=str(workspace_a),
+        status=NativeSessionStatus.MANAGED_NATIVE,
+    )
+    ref_b = replace(
+        _ref(
+            workspace=str(workspace_b),
+            status=NativeSessionStatus.MANAGED_NATIVE,
+        ),
+        id="native_codex_fake_2",
+        native_session_id="codex-session-2",
+    )
+    project_a = project_id_for_root(workspace_a)
+    project_b = project_id_for_root(workspace_b)
+    index_store.upsert_ref(ref_a, project_id=project_a)
+    index_store.upsert_ref(ref_b, project_id=project_b)
+    client = _client(
+        tmp_path,
+        NativeHistoryConnectorRegistry(),
+        native_index_store=index_store,
+    )
+
+    scoped = client.get("/api/native/sessions", params={"project_id": project_a})
+    all_workspaces = client.get("/api/native/sessions")
+
+    assert [item["id"] for item in scoped.json()["sessions"]] == [ref_a.id]
+    assert {item["id"] for item in all_workspaces.json()["sessions"]} == {
+        ref_a.id,
+        ref_b.id,
+    }
 
 
 def test_native_session_preview_redacts_messages(tmp_path):
@@ -378,6 +418,7 @@ def _client(
     *,
     store=None,
     registry=None,
+    native_index_store=None,
 ) -> TestClient:
     app = create_app(
         HarnessConfig(
@@ -387,6 +428,7 @@ def _client(
         registry=registry or create_default_registry(include_entry_points=False),
         store=store or InMemoryHarnessSessionStore(),
         native_registry=native_registry,
+        native_index_store=native_index_store,
     )
     return TestClient(app)
 
