@@ -272,9 +272,11 @@ The UI is a chat-like harness cockpit with:
 - optional workspace path for harnesses that declare workspace support;
 - dry-run and stream toggles where the selected harness supports them;
 - prompt input;
+- file and image attachments in the composer;
+- `@file` workspace references from the current project;
 - user, assistant, and error messages in the selected session;
-- run, events, raw request, raw response, command, diff, and storage inspector
-  panels;
+- run, events, raw request, raw response, command, diff, attachments, and storage
+  inspector panels;
 - copy buttons for the equivalent CLI command and direct-chat curl command.
 
 Echo runs entirely locally and does not require credentials. Direct-chat sends
@@ -291,6 +293,94 @@ The stream checkbox passes `stream=true` to the harness request when the harness
 declares streaming support. The browser page still renders the final result
 after the backend call completes; it does not implement SSE or WebSocket event
 streaming yet.
+
+## Project Cockpit Attachments
+
+Attachments are a harness/session feature. They do not use the proxy Files or
+Batches APIs, and they do not try to emulate full OpenAI, Anthropic, or Gemini
+Files parity.
+
+From a project directory:
+
+```bash
+cd my-project
+giga ui
+```
+
+The cockpit resolves the project root, shows project-scoped sessions first, and
+stores non-secret project defaults in `.giga/harness.toml` when initialized with
+`giga init` or the UI `Init project` button.
+
+The composer supports:
+
+- `Attach` for browser file selection;
+- drag and drop over the composer;
+- pasted images from the clipboard;
+- `@path` search for safe files under the current workspace.
+
+Uploaded and pasted files are copied into `GPT2GIGA_HARNESS_DATA_DIR`.
+Workspace files are stored as path references by default; the harness receives a
+rendered reference such as `@gpt2giga/harness/workspace.py`, not a copied
+repository file.
+
+The selected harness determines the render plan:
+
+| Harness | Attachment behavior |
+|---|---|
+| `echo` | Reports attachment metadata and events without credentials. |
+| `direct-chat` | Uses OpenAI-style image content parts for stored images and inlines small text files with truncation warnings. Workspace files are referenced by path. |
+| `codex-cli` | Adds safe path or `@file` references to the prompt. Image CLI flags are not enabled unless support is verified. |
+| `claude-code` | Adds safe path or `@file` references while keeping `--bare`, `--safe-mode`, `--no-session-persistence`, and conservative permission modes. |
+| `gemini-cli` | Adds `@file` or path references and warns when images are path-only. |
+
+Use dry-run to inspect what would be sent without launching an external CLI or
+calling the upstream proxy:
+
+```bash
+giga harness run codex-cli \
+  --workspace . \
+  --mode plan \
+  --api-mode v2 \
+  --model GigaChat-2-Max \
+  --prompt "Inspect @gpt2giga/harness/workspace.py" \
+  --dry-run \
+  --json
+```
+
+The UI Raw request and Attachments inspector panels show the selected
+`attachment_ids`, normalized attachment metadata, render transport, warnings,
+content-part count, CLI args, prompt prefix, and render-plan JSON. Curl previews
+use placeholder authorization only.
+
+Safety defaults:
+
+- deny `.env`, `.env.*`, `.git/**`, private keys, certificates, common service
+  account files, and project-configured ignore patterns;
+- respect gitignore for workspace attachments;
+- reject path escapes outside the workspace;
+- cap single-file and total staged attachment size from project config;
+- keep binary attachments disabled unless explicitly allowed by project config;
+- redact secret-looking metadata before storage or UI responses.
+
+Examples:
+
+```text
+Direct-chat screenshot:
+  paste a screenshot, keep harness direct-chat, enable dry run, inspect Raw request
+  for image_url content parts.
+
+Codex dry-run with image:
+  paste or attach an image, switch to codex-cli, enable dry run, inspect Command
+  and Attachments for path-reference behavior.
+
+Claude Code with workspace file:
+  type @src/foo.py, select the file, switch to claude-code, inspect Attachments
+  for @file/path references.
+
+Gemini CLI with @file:
+  type @src/foo.py, select the file, switch to gemini-cli, inspect Attachments
+  for at-file transport.
+```
 
 ## Session Storage
 
@@ -316,11 +406,15 @@ sessions/<year>/<month>/<session_id>/runs.jsonl
 sessions/<year>/<month>/<session_id>/events.jsonl
 sessions/<year>/<month>/<session_id>/raw_requests.jsonl
 sessions/<year>/<month>/<session_id>/raw_responses.jsonl
+sessions/<year>/<month>/<session_id>/attachments.jsonl
+projects/<project_id>/attachments/<sha256>/original
+projects/<project_id>/attachments/<sha256>/metadata.json
 ```
 
 Stored fields include session title, workspace path, selected harness, model,
 API mode, mode, prompts, assistant/error outputs, events, raw request/response
-metadata, command arrays, status, timestamps, and storage metadata.
+metadata, command arrays, attachment metadata, render plans, status, timestamps,
+and storage metadata.
 
 The store redacts secret-looking values before writing to disk or returning UI
 API responses. It must not store API keys, authorization headers, cookies,
@@ -337,6 +431,28 @@ rm -rf ~/.gpt2giga/harness
 
 Do not set `GPT2GIGA_HARNESS_DATA_DIR` to the repository working tree unless you
 intentionally want local audit files there.
+
+## Manual QA Checklist
+
+Use this when validating the project cockpit manually:
+
+- [ ] `giga ui` opens on `127.0.0.1` by default.
+- [ ] Header shows the current project name and git branch.
+- [ ] `Init project` creates `.giga/harness.toml`.
+- [ ] New chat defaults come from project config.
+- [ ] Switching harness updates capabilities and attachment warnings.
+- [ ] Pasting a screenshot creates an image attachment card.
+- [ ] Drag/drop file creates an attachment card.
+- [ ] Typing `@src/foo.py` and selecting a result creates a workspace attachment.
+- [ ] Echo run shows attachment summary without credentials.
+- [ ] Direct-chat dry-run shows inline image/text behavior in Raw request.
+- [ ] Codex dry-run shows safe command/path behavior.
+- [ ] Claude dry-run shows path or at-file behavior.
+- [ ] Gemini dry-run shows path or at-file behavior.
+- [ ] Attachments inspector shows transport, warnings, and render-plan JSON.
+- [ ] No secret-looking values appear in UI raw JSON.
+- [ ] Old sessions still load.
+- [ ] Archived and pinned sessions still work.
 
 ## Native CLI Sessions
 
@@ -425,3 +541,8 @@ The first MVP runs direct Chat Completions plus Codex, Claude Code, and Gemini
 CLI command paths. External agent behavior still depends on each installed CLI's
 current support for custom local API endpoints and non-interactive modes; use
 `--dry-run --json` first when validating a new workstation.
+
+Attachment support is intentionally conservative. Document and binary transport
+through external CLIs is path/reference based unless local CLI behavior has been
+verified. SSE/WebSocket streaming for live attachment run events remains future
+work.
