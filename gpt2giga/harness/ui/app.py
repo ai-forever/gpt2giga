@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Any
+from typing import Any, Mapping
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
@@ -25,6 +25,26 @@ from gpt2giga.harness.config import (
     HarnessConfig,
     pass_model_env_note,
 )
+from gpt2giga.harness.native.base import (
+    discovery_error_to_dict,
+)
+from gpt2giga.harness.native.claude import ClaudeNativeHistoryConnector
+from gpt2giga.harness.native.codex import CodexNativeHistoryConnector
+from gpt2giga.harness.native.gemini import GeminiNativeHistoryConnector
+from gpt2giga.harness.native.models import (
+    NativeSessionRef,
+    NativeSessionStatus,
+    NativeTranscriptMessage,
+)
+from gpt2giga.harness.native.registry import (
+    NativeHistoryConnectorRegistry,
+    UnknownNativeHistoryConnectorError,
+)
+from gpt2giga.harness.native.store import (
+    FilesystemNativeSessionIndexStore,
+    NativeSessionIndexStore,
+    native_session_ref_to_dict,
+)
 from gpt2giga.harness.project import (
     init_project_config,
     load_project_config,
@@ -39,11 +59,17 @@ from gpt2giga.harness.sessions import (
     HarnessSessionStore,
     SessionNotFoundError,
 )
+from gpt2giga.harness.sessions.redaction import redact_for_storage
 from gpt2giga.harness.sessions.models import (
+    HarnessMessage,
+    HarnessNativeLink,
     HarnessSession,
     bundle_to_dict,
+    message_to_dict,
+    native_link_to_dict,
     session_to_dict,
 )
+from gpt2giga.harness.sessions.store import new_id, utc_now
 from gpt2giga.harness.types import (
     HarnessCapability,
     HarnessRequest,
@@ -65,11 +91,17 @@ def create_app(
     config: HarnessConfig | None = None,
     registry: HarnessRegistry | None = None,
     store: HarnessSessionStore | None = None,
+    native_registry: NativeHistoryConnectorRegistry | None = None,
+    native_index_store: NativeSessionIndexStore | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
     registry = registry or create_default_registry()
     store = store or FilesystemHarnessSessionStore(config.data_dir)
+    native_registry = native_registry or _create_default_native_registry(config)
+    native_index_store = native_index_store or FilesystemNativeSessionIndexStore(
+        config.data_dir
+    )
     attachment_store = FilesystemAttachmentStore(config.data_dir)
     runner = HarnessSessionRunner(
         registry=registry,
@@ -83,6 +115,8 @@ def create_app(
     app.state.harness_session_store = store
     app.state.harness_session_runner = runner
     app.state.harness_attachment_store = attachment_store
+    app.state.harness_native_registry = native_registry
+    app.state.harness_native_index_store = native_index_store
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -245,6 +279,144 @@ def create_app(
             return bundle_to_dict(store.get_session_bundle(session_id))
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="Session not found") from exc
+
+    @app.get("/api/native/sessions")
+    async def native_sessions(
+        harness_id: str | None = Query(default=None),
+        workspace: str | None = Query(default=None),
+        project_id: str | None = Query(default=None),
+        include_external: bool = Query(default=False),
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        resolved_workspace = resolve_workspace(_optional_text(workspace))
+        resolved_project_id = _native_project_id(
+            project_id=_optional_text(project_id),
+            workspace=resolved_workspace,
+            data_dir=config.data_dir,
+        )
+        refs = native_index_store.list_refs(
+            harness_id=_optional_text(harness_id),
+            workspace=resolved_workspace,
+            project_id=resolved_project_id,
+            limit=limit,
+        )
+        refs = _filter_external_native_refs(refs, include_external=include_external)
+        return {"sessions": [native_session_ref_to_dict(ref) for ref in refs]}
+
+    @app.post("/api/native/sessions/sync")
+    async def native_sessions_sync(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        resolved_workspace = resolve_workspace(_optional_text(payload.get("workspace")))
+        resolved_project_id = _native_project_id(
+            project_id=_optional_text(payload.get("project_id")),
+            workspace=resolved_workspace,
+            data_dir=config.data_dir,
+        )
+        result = native_registry.discover(
+            harness_id=_optional_text(payload.get("harness_id")),
+            workspace=resolved_workspace,
+            include_external=bool(payload.get("include_external")),
+        )
+        stored = [
+            native_index_store.upsert_ref(ref, project_id=resolved_project_id)
+            for ref in result.sessions
+        ]
+        return {
+            "sessions": [native_session_ref_to_dict(ref) for ref in stored],
+            "errors": [discovery_error_to_dict(error) for error in result.errors],
+        }
+
+    @app.get("/api/native/sessions/{native_ref_id}/preview")
+    async def native_session_preview(
+        native_ref_id: str,
+        max_messages: int = Query(default=20, ge=1, le=100),
+    ) -> dict[str, Any]:
+        ref = _native_ref_or_404(native_index_store, native_ref_id)
+        connector = _native_connector_or_404(native_registry, ref.harness_id)
+        messages = connector.preview(ref, max_messages=max_messages)
+        return {
+            "ref": native_session_ref_to_dict(ref),
+            "messages": [
+                _native_transcript_message_to_dict(message) for message in messages
+            ],
+        }
+
+    @app.post("/api/native/sessions/{native_ref_id}/import")
+    async def native_session_import(native_ref_id: str) -> dict[str, Any]:
+        ref = _native_ref_or_404(native_index_store, native_ref_id)
+        if not ref.can_import:
+            raise HTTPException(
+                status_code=400,
+                detail="Native session cannot be imported",
+            )
+        connector = _native_connector_or_404(native_registry, ref.harness_id)
+        imported = connector.import_ref(ref)
+        if not imported:
+            raise HTTPException(
+                status_code=400,
+                detail="Native session has no importable messages",
+            )
+        session = store.create_session(
+            title=str(redact_for_storage(ref.title)),
+            workspace=ref.workspace,
+            default_harness_id=ref.harness_id,
+            default_model=_optional_text(ref.metadata.get("model")),
+            default_api_mode=config.default_api_mode,
+            default_mode="plan",
+            native={
+                "source": "native_import",
+                "native_ref_id": ref.id,
+                "native_session_id": ref.native_session_id,
+                "status": ref.status.value,
+            },
+            metadata=_native_import_session_metadata(ref),
+        )
+        messages = [
+            store.append_message(
+                HarnessMessage(
+                    id=new_id("msg"),
+                    session_id=session.id,
+                    run_id=None,
+                    role=_native_message_role(message.role),
+                    content=str(redact_for_storage(message.content)),
+                    created_at=message.created_at or utc_now(),
+                    harness_id=ref.harness_id,
+                    metadata={
+                        "source": "native_import",
+                        "native_ref_id": ref.id,
+                        "native_session_id": ref.native_session_id,
+                        **dict(redact_for_storage(dict(message.metadata))),
+                    },
+                )
+            )
+            for message in imported
+        ]
+        link = store.append_native_link(
+            session.id,
+            HarnessNativeLink(
+                id=new_id("nlink"),
+                session_id=session.id,
+                harness_id=ref.harness_id,
+                status=NativeSessionStatus.IMPORTED,
+                created_at=utc_now(),
+                updated_at=utc_now(),
+                native_session_id=ref.native_session_id,
+                native_ref_id=ref.id,
+                source=ref.source,
+                workspace=ref.workspace,
+                metadata={
+                    "source_status": ref.status.value,
+                    "imported_message_count": len(messages),
+                    "project_id": ref.metadata.get("project_id"),
+                },
+            ),
+        )
+        return {
+            "session": _session_summary(store, session.id),
+            "messages": [message_to_dict(message) for message in messages],
+            "native_link": native_link_to_dict(link),
+        }
 
     @app.patch("/api/sessions/{session_id}")
     async def update_session(
@@ -511,6 +683,113 @@ def validate_ui_bind(host: str, *, allow_remote: bool) -> None:
             "Refusing to bind UI to 0.0.0.0 without --allow-remote. "
             "The UI may expose local harness execution."
         )
+
+
+def _create_default_native_registry(
+    config: HarnessConfig,
+) -> NativeHistoryConnectorRegistry:
+    registry = NativeHistoryConnectorRegistry()
+    registry.register_many(
+        (
+            CodexNativeHistoryConnector(data_dir=config.data_dir),
+            ClaudeNativeHistoryConnector(data_dir=config.data_dir),
+            GeminiNativeHistoryConnector(data_dir=config.data_dir),
+        )
+    )
+    return registry
+
+
+def _native_project_id(
+    *,
+    project_id: str | None,
+    workspace: str | None,
+    data_dir: str,
+) -> str | None:
+    if project_id is not None:
+        return project_id
+    if workspace is None:
+        return None
+    return resolve_project(workspace, data_dir=data_dir).id
+
+
+def _filter_external_native_refs(
+    refs: tuple[NativeSessionRef, ...],
+    *,
+    include_external: bool,
+) -> tuple[NativeSessionRef, ...]:
+    if include_external:
+        return refs
+    external_statuses = {
+        NativeSessionStatus.EXTERNAL_NATIVE,
+        NativeSessionStatus.READONLY,
+    }
+    return tuple(ref for ref in refs if ref.status not in external_statuses)
+
+
+def _native_ref_or_404(
+    native_index_store: NativeSessionIndexStore,
+    native_ref_id: str,
+) -> NativeSessionRef:
+    ref = native_index_store.get_ref(native_ref_id)
+    if ref is None:
+        raise HTTPException(status_code=404, detail="Native session not found")
+    return ref
+
+
+def _native_connector_or_404(
+    native_registry: NativeHistoryConnectorRegistry,
+    harness_id: str,
+):
+    try:
+        return native_registry.get(harness_id)
+    except UnknownNativeHistoryConnectorError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Native connector not found",
+        ) from exc
+
+
+def _native_transcript_message_to_dict(
+    message: NativeTranscriptMessage,
+) -> dict[str, Any]:
+    return {
+        "role": _native_message_role(message.role),
+        "content": str(redact_for_storage(message.content)),
+        "created_at": message.created_at,
+        "metadata": _redacted_mapping(message.metadata),
+    }
+
+
+def _native_import_session_metadata(ref: NativeSessionRef) -> dict[str, Any]:
+    project_id = _optional_text(ref.metadata.get("project_id"))
+    metadata: dict[str, Any] = {
+        "source": "native_import",
+        "source_harness_id": ref.harness_id,
+        "native_ref_id": ref.id,
+        "native_session_id": ref.native_session_id,
+        "native_status": ref.status.value,
+    }
+    if project_id is not None:
+        metadata["project_id"] = project_id
+    if ref.workspace is not None:
+        metadata["project_root"] = ref.workspace
+    return metadata
+
+
+def _native_message_role(role: str) -> str:
+    normalized = str(role).strip().lower()
+    if normalized in {"user", "assistant", "system", "tool"}:
+        return normalized
+    if normalized == "model":
+        return "assistant"
+    return "assistant"
+
+
+def _redacted_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        value = dict(value) if isinstance(value, Mapping) else {}
+    redacted = redact_for_storage(value)
+    return dict(redacted) if isinstance(redacted, Mapping) else {}
 
 
 def _optional_text(value: Any) -> str | None:
