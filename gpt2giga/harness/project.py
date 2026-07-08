@@ -107,6 +107,7 @@ def resolve_project(
     workspace: str | Path | None = None,
     *,
     data_dir: str | Path = DEFAULT_HARNESS_DATA_DIR,
+    load_config_name: bool = True,
 ) -> HarnessProject:
     """Resolve workspace identity, preferring the enclosing git root."""
     workspace_path = _resolve_workspace_path(workspace)
@@ -114,7 +115,11 @@ def resolve_project(
     root_path = git_root_path or workspace_path
     project_id = project_id_for_root(root_path)
     config_path = project_config_path(root_path)
-    project_config = load_project_config(root_path) if config_path.exists() else None
+    project_config = (
+        load_project_config(root_path)
+        if load_config_name and config_path.exists()
+        else None
+    )
     project_name = (
         project_config.project_name
         if project_config and project_config.project_name
@@ -180,13 +185,14 @@ def init_project_config(
     overwrite: bool = False,
 ) -> HarnessProjectConfig:
     """Create a default non-secret project config if it is missing."""
+    root = Path(project_root).expanduser().resolve()
+    if not root.exists() or not root.is_dir():
+        raise ValueError(f"Project root does not exist: {root}")
     path = project_config_path(project_root)
     if path.exists() and not overwrite:
         return load_project_config(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    name = (
-        _optional_text(project_name) or Path(project_root).expanduser().resolve().name
-    )
+    name = _optional_text(project_name) or root.name
     path.write_text(default_project_config_text(name), encoding="utf-8")
     return load_project_config(project_root)
 

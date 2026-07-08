@@ -17,6 +17,36 @@ def test_cli_harness_list_outputs_direct_chat(capsys):
     assert "direct-chat" in output
 
 
+def test_cli_project_info_json_reports_workspace(capsys, tmp_path):
+    exit_code = cli.main(["project", "info", "--workspace", str(tmp_path), "--json"])
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["project"]["root"] == str(tmp_path)
+    assert output["project"]["name"] == tmp_path.name
+    assert output["config"]["exists"] is False
+    assert output["defaults"]["harness"] == "codex-cli"
+
+
+def test_cli_init_alias_writes_project_config(capsys, tmp_path):
+    exit_code = cli.main(
+        [
+            "init",
+            "--workspace",
+            str(tmp_path),
+            "--name",
+            "cli-demo",
+            "--json",
+        ]
+    )
+
+    assert exit_code == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["project"]["name"] == "cli-demo"
+    assert output["config"]["exists"] is True
+    assert (tmp_path / ".giga" / "harness.toml").exists()
+
+
 def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
     captured = {}
 

@@ -56,6 +56,15 @@ Open the local UI:
 giga ui
 ```
 
+From a project directory, inspect or initialize the project cockpit config:
+
+```bash
+giga project info
+giga project init
+# Short alias:
+giga init
+```
+
 By default the UI binds to `127.0.0.1:8091`. To bind remotely you must opt in:
 
 ```bash
@@ -95,6 +104,24 @@ External agent harnesses run the same proxy preflight before launching Codex,
 Claude Code, or Gemini CLI. If a sidecar is started, the generated local proxy
 key is passed only through the agent-specific local API-key environment variable
 and remains redacted from JSON/UI results.
+
+### Project Config
+
+`giga project init` creates a non-secret `.giga/harness.toml` in the current
+project root. If the command runs inside a git repository, the git top-level
+directory is used as the project root; otherwise the current directory is used.
+
+The config stores project defaults such as harness, model, explicit `v1`/`v2`
+API mode, mode, enabled harnesses, presets, and future attachment safety
+defaults. It must not contain API keys, tokens, cookies, credentials, private
+keys, certificates, or `.env` contents.
+
+Use JSON output when wiring tools or checking what `giga ui` will use:
+
+```bash
+giga project info --json
+giga project init --name my-project --json
+```
 
 ## Built-in Harnesses
 

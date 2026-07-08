@@ -11,6 +11,14 @@ import uvicorn
 
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.doctor import run_doctor
+from gpt2giga.harness.project import (
+    init_project_config,
+    load_project_config,
+    project_config_path,
+    project_config_to_dict,
+    project_to_dict,
+    resolve_project,
+)
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
@@ -74,6 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
     doctor = subparsers.add_parser("doctor", parents=[common])
     doctor.set_defaults(handler=_handle_doctor)
 
+    init = subparsers.add_parser("init")
+    init.add_argument("--workspace", default=None)
+    init.add_argument("--name", default=None)
+    init.add_argument("--overwrite", action="store_true")
+    init.add_argument("--json", action="store_true")
+    init.set_defaults(handler=_handle_project_init)
+
     chat = subparsers.add_parser("chat", parents=[common])
     chat.add_argument("--model", default=None)
     chat.add_argument("--api-mode", choices=("v1", "v2"), default=None)
@@ -114,6 +129,21 @@ def build_parser() -> argparse.ArgumentParser:
     session_show.add_argument("--json", action="store_true")
     session_show.set_defaults(handler=_handle_session_show)
 
+    project = subparsers.add_parser("project")
+    project_subparsers = project.add_subparsers(dest="project_command")
+
+    project_info = project_subparsers.add_parser("info")
+    project_info.add_argument("--workspace", default=None)
+    project_info.add_argument("--json", action="store_true")
+    project_info.set_defaults(handler=_handle_project_info)
+
+    project_init = project_subparsers.add_parser("init")
+    project_init.add_argument("--workspace", default=None)
+    project_init.add_argument("--name", default=None)
+    project_init.add_argument("--overwrite", action="store_true")
+    project_init.add_argument("--json", action="store_true")
+    project_init.set_defaults(handler=_handle_project_init)
+
     harness = subparsers.add_parser("harness")
     harness_subparsers = harness.add_subparsers(dest="harness_command")
 
@@ -151,6 +181,59 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _handle_doctor(args: argparse.Namespace, config: HarnessConfig) -> int:
     print(run_doctor(config))
+    return 0
+
+
+def _handle_project_info(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = _project_payload(
+        workspace=args.workspace,
+        config=config,
+        load_config_name=True,
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        project = payload["project"]
+        defaults = payload["defaults"]
+        print(f"Project: {project['name']} ({project['id']})")
+        print(f"Root: {project['root']}")
+        if project["git_branch"]:
+            print(f"Branch: {project['git_branch']}")
+        print(f"Config: {payload['config']['path']}")
+        print(f"Config exists: {payload['config']['exists']}")
+        print(
+            "Defaults: "
+            f"{defaults['harness']} / {defaults['model']} / "
+            f"{defaults['api_mode']} / {defaults['mode']}"
+        )
+    return 0
+
+
+def _handle_project_init(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(
+        args.workspace,
+        data_dir=config.data_dir,
+        load_config_name=False,
+    )
+    existed = project_config_path(project.root).exists()
+    loaded = init_project_config(
+        project.root,
+        project_name=args.name,
+        overwrite=args.overwrite,
+    )
+    payload = _project_payload(
+        workspace=project.root,
+        config=config,
+        load_config_name=True,
+    )
+    if args.json:
+        _print_json(payload)
+    else:
+        action = "Updated" if existed and args.overwrite else "Using existing"
+        if not existed:
+            action = "Initialized"
+        print(f"{action} project config: {loaded.path}")
+        print(f"Project: {payload['project']['name']} ({payload['project']['id']})")
     return 0
 
 
@@ -396,6 +479,27 @@ def _print_session_table(rows: list[dict[str, Any]]) -> None:
             f"{row['id']:<38}{row['updated_at']:<22}"
             f"{row['default_harness_id']:<16}{row['title']}"
         )
+
+
+def _project_payload(
+    *,
+    workspace: str | None,
+    config: HarnessConfig,
+    load_config_name: bool,
+) -> dict[str, Any]:
+    project = resolve_project(
+        workspace,
+        data_dir=config.data_dir,
+        load_config_name=load_config_name,
+    )
+    loaded = load_project_config(project.root)
+    config_payload = project_config_to_dict(loaded)
+    return {
+        "project": project_to_dict(project),
+        "config": config_payload,
+        "defaults": config_payload["defaults"],
+        "presets": list(config_payload["presets"].values()),
+    }
 
 
 if __name__ == "__main__":

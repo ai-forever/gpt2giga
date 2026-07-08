@@ -13,6 +13,13 @@ from gpt2giga.harness.config import (
     HarnessConfig,
     pass_model_env_note,
 )
+from gpt2giga.harness.project import (
+    init_project_config,
+    load_project_config,
+    project_config_to_dict,
+    project_to_dict,
+    resolve_project,
+)
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
@@ -77,6 +84,52 @@ def create_app(
             "proxy_start_timeout_seconds": config.proxy_start_timeout_seconds,
             "note": pass_model_env_note(),
         }
+
+    @app.get("/api/project")
+    async def project(workspace: str | None = Query(default=None)) -> dict[str, Any]:
+        try:
+            return _project_response(
+                workspace=_optional_text(workspace),
+                data_dir=config.data_dir,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/project/config")
+    async def project_config(
+        workspace: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(workspace),
+                data_dir=config.data_dir,
+            )
+            loaded = load_project_config(project_context.root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"config": project_config_to_dict(loaded)}
+
+    @app.post("/api/project/init")
+    async def project_init(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+                load_config_name=False,
+            )
+            init_project_config(
+                project_context.root,
+                project_name=_optional_text(payload.get("name")),
+                overwrite=bool(payload.get("overwrite")),
+            )
+            return _project_response(
+                workspace=project_context.root,
+                data_dir=config.data_dir,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/models")
     async def models(api_mode: str = Query(default="v2")) -> dict[str, Any]:
@@ -343,6 +396,18 @@ def _session_patch(payload: dict[str, Any]) -> dict[str, Any]:
     if "default_api_mode" in patch:
         patch["default_api_mode"] = parse_api_mode(patch["default_api_mode"])
     return patch
+
+
+def _project_response(workspace: str | None, data_dir: str) -> dict[str, Any]:
+    project_context = resolve_project(workspace, data_dir=data_dir)
+    loaded = load_project_config(project_context.root)
+    config_payload = project_config_to_dict(loaded)
+    return {
+        "project": project_to_dict(project_context),
+        "config": config_payload,
+        "defaults": config_payload["defaults"],
+        "presets": list(config_payload["presets"].values()),
+    }
 
 
 def _fallback_models(config: HarnessConfig) -> list[str]:
