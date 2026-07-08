@@ -15,6 +15,7 @@ from gpt2giga.harness.attachments import (
     render_plan_to_dict,
 )
 from gpt2giga.harness.config import HarnessConfig
+from gpt2giga.harness.native.models import parse_invocation_mode
 from gpt2giga.harness.project import resolve_project
 from gpt2giga.harness.registry import HarnessRegistry
 from gpt2giga.harness.sessions.models import (
@@ -170,7 +171,8 @@ class HarnessSessionRunner:
             else None
         )
         run_metadata: dict[str, Any] = {
-            "native_resume": _native_resume_metadata(options["harness_id"])
+            "invocation_mode": options["invocation_mode"].value,
+            "native_resume": _native_resume_metadata(options["harness_id"]),
         }
         if attachment_payloads:
             run_metadata["attachment_ids"] = list(options["attachment_ids"])
@@ -187,6 +189,7 @@ class HarnessSessionRunner:
             capability=options["capability"],
             mode=options["mode"],
             workspace=options["workspace"],
+            invocation_mode=options["invocation_mode"],
             started_at=utc_now(),
             metadata=run_metadata,
         )
@@ -214,6 +217,7 @@ class HarnessSessionRunner:
                 "model": options["model"],
                 "api_mode": options["api_mode"].value,
                 "mode": options["mode"],
+                "invocation_mode": options["invocation_mode"].value,
                 "attachment_count": len(attachment_payloads),
             },
         )
@@ -227,6 +231,7 @@ class HarnessSessionRunner:
             api_mode=options["api_mode"],
             capability=options["capability"],
             mode=options["mode"],
+            invocation_mode=options["invocation_mode"],
             stream=options["stream"],
             workspace=options["workspace"],
             messages=request_messages,
@@ -248,6 +253,7 @@ class HarnessSessionRunner:
             "api_mode": options["api_mode"].value,
             "capability": options["capability"].value,
             "mode": options["mode"],
+            "invocation_mode": options["invocation_mode"].value,
             "stream": options["stream"],
             "workspace": options["workspace"],
             "messages": [
@@ -408,6 +414,7 @@ class HarnessSessionRunner:
             or (spec.capabilities[0].value if spec.capabilities else None)
         )
         mode = str(payload.get("mode") or (session.default_mode if session else "plan"))
+        invocation_mode = parse_invocation_mode(payload.get("invocation_mode"))
         workspace = _optional_text(payload.get("workspace"))
         if workspace is None and session is not None:
             workspace = session.workspace
@@ -426,6 +433,7 @@ class HarnessSessionRunner:
             "api_mode": api_mode,
             "capability": capability,
             "mode": mode,
+            "invocation_mode": invocation_mode,
             "workspace": workspace,
             "stream": bool(payload.get("stream")),
             "extra": extra,

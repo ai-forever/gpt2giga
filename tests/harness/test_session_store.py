@@ -1,7 +1,13 @@
 import json
 
 from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.sessions.models import HarnessMessage, HarnessStoredEvent
+from gpt2giga.harness.native import HarnessInvocationMode, NativeSessionStatus
+from gpt2giga.harness.sessions.models import (
+    HarnessMessage,
+    HarnessNativeLink,
+    HarnessStoredEvent,
+    bundle_to_dict,
+)
 from gpt2giga.harness.sessions.store import new_id, utc_now
 from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability, REDACTED
 
@@ -56,6 +62,80 @@ def test_filesystem_store_persists_session_messages_runs_and_events(tmp_path):
     assert bundle.messages == (message,)
     assert bundle.runs[0].id == run.id
     assert bundle.events == (event,)
+    assert bundle.native_links == ()
+
+
+def test_filesystem_store_persists_invocation_mode_on_runs(tmp_path):
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="native")
+
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="codex-cli",
+        prompt="inspect",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.AGENT_CLI,
+        mode="plan",
+        invocation_mode="native",
+        workspace="/repo",
+    )
+    default_run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="hello",
+        model=None,
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="plan",
+        workspace=None,
+    )
+
+    reopened = FilesystemHarnessSessionStore(tmp_path)
+    runs = reopened.list_runs(session.id)
+
+    assert run.invocation_mode is HarnessInvocationMode.NATIVE
+    assert default_run.invocation_mode is HarnessInvocationMode.HEADLESS
+    assert runs[0].invocation_mode is HarnessInvocationMode.NATIVE
+    assert runs[1].invocation_mode is HarnessInvocationMode.HEADLESS
+    assert (
+        bundle_to_dict(reopened.get_session_bundle(session.id))["runs"][0][
+            "invocation_mode"
+        ]
+        == "native"
+    )
+
+
+def test_filesystem_store_persists_native_links_in_bundle(tmp_path, monkeypatch):
+    secret = "sk-native-secret-123"
+    monkeypatch.setenv("GPT2GIGA_API_KEY", secret)
+    store = FilesystemHarnessSessionStore(tmp_path)
+    session = store.create_session(title="linked")
+    link = HarnessNativeLink(
+        id=new_id("nlink"),
+        session_id="wrong-session",
+        harness_id="codex-cli",
+        status=NativeSessionStatus.LINKED,
+        created_at=utc_now(),
+        updated_at=utc_now(),
+        native_session_id=f"codex-{secret}",
+        native_ref_id="native_codex_1",
+        source=f"/tmp/{secret}/sessions",
+        workspace="/repo",
+        metadata={"api_key": secret, "safe": "ok"},
+    )
+
+    stored = store.append_native_link(session.id, link)
+    reopened = FilesystemHarnessSessionStore(tmp_path)
+    bundle = reopened.get_session_bundle(session.id)
+
+    assert stored.session_id == session.id
+    assert secret not in str(bundle_to_dict(bundle))
+    assert bundle.native_links == (stored,)
+    assert reopened.list_native_links(session.id) == (stored,)
+    assert reopened.get_native_link(session.id, "codex-cli") == stored
+    assert bundle_to_dict(bundle)["native_links"][0]["status"] == "linked"
+    assert (next(tmp_path.rglob("native_links.jsonl"))).is_file()
 
 
 def test_filesystem_store_lists_newest_first_and_archive_filter(tmp_path):

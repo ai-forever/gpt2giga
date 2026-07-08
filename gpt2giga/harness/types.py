@@ -103,6 +103,7 @@ class HarnessRequest:
     api_mode: GigaChatApiMode = GigaChatApiMode.V2
     capability: HarnessCapability = HarnessCapability.CHAT_COMPLETIONS
     mode: str = "plan"
+    invocation_mode: HarnessInvocationMode = HarnessInvocationMode.HEADLESS
     stream: bool = False
     workspace: str | None = None
     messages: tuple[HarnessChatMessage, ...] = ()

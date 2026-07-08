@@ -1,5 +1,6 @@
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.harnesses.base import BaseHarness
+from gpt2giga.harness.native import HarnessInvocationMode
 from gpt2giga.harness.project import project_id_for_root
 from gpt2giga.harness.registry import HarnessRegistry
 from gpt2giga.harness.session_runner import HarnessSessionRunner
@@ -97,6 +98,26 @@ def test_session_runner_updates_legacy_session_project_metadata(tmp_path):
 
     assert result.session.metadata["project_id"] == project_id_for_root(tmp_path)
     assert result.session.metadata["project_root"] == str(tmp_path)
+
+
+def test_session_runner_persists_invocation_mode_metadata():
+    harness = _CaptureHarness()
+    runner = _runner(harness)
+
+    result = runner.create_and_run(
+        {
+            "harness_id": "capture",
+            "prompt": "hello",
+            "invocation_mode": "native",
+        }
+    )
+
+    assert harness.last_request is not None
+    assert harness.last_request.invocation_mode is HarnessInvocationMode.NATIVE
+    assert result.run.invocation_mode is HarnessInvocationMode.NATIVE
+    assert result.run.metadata["invocation_mode"] == "native"
+    assert result.bundle.runs[0].invocation_mode is HarnessInvocationMode.NATIVE
+    assert result.bundle.raw_requests[0].payload["invocation_mode"] == "native"
 
 
 def _runner(

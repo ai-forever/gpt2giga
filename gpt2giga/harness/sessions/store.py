@@ -7,13 +7,17 @@ from datetime import datetime, timezone
 from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
+from gpt2giga.harness.native.models import parse_invocation_mode
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
+    HarnessNativeLink,
     HarnessRawRecord,
     HarnessRun,
     HarnessSession,
     HarnessSessionBundle,
     HarnessStoredEvent,
+    native_link_from_dict,
+    native_link_to_dict,
 )
 from gpt2giga.harness.sessions.redaction import redact_for_storage
 from gpt2giga.harness.types import GigaChatApiMode, HarnessCapability
@@ -89,6 +93,7 @@ class HarnessSessionStore(Protocol):
         capability: HarnessCapability,
         mode: str,
         workspace: str | None,
+        invocation_mode: Any = None,
         status: str = "queued",
         started_at: str | None = None,
         metadata: Mapping[str, Any] | None = None,
@@ -137,6 +142,23 @@ class HarnessSessionStore(Protocol):
     def list_raw_responses(self, session_id: str) -> tuple[HarnessRawRecord, ...]:
         """List raw response records for one session."""
 
+    def append_native_link(
+        self,
+        session_id: str,
+        link: HarnessNativeLink,
+    ) -> HarnessNativeLink:
+        """Append one native session link."""
+
+    def list_native_links(self, session_id: str) -> tuple[HarnessNativeLink, ...]:
+        """List native links for one session."""
+
+    def get_native_link(
+        self,
+        session_id: str,
+        harness_id: str,
+    ) -> HarnessNativeLink | None:
+        """Return the latest native link for a harness in one session."""
+
     def get_session_bundle(self, session_id: str) -> HarnessSessionBundle:
         """Return a complete session bundle."""
 
@@ -151,6 +173,7 @@ class InMemoryHarnessSessionStore:
         self._events: dict[str, list[HarnessStoredEvent]] = {}
         self._raw_requests: dict[str, list[HarnessRawRecord]] = {}
         self._raw_responses: dict[str, list[HarnessRawRecord]] = {}
+        self._native_links: dict[str, list[HarnessNativeLink]] = {}
 
     def create_session(
         self,
@@ -228,6 +251,7 @@ class InMemoryHarnessSessionStore:
         self._events.pop(session_id, None)
         self._raw_requests.pop(session_id, None)
         self._raw_responses.pop(session_id, None)
+        self._native_links.pop(session_id, None)
 
     def archive_session(
         self,
@@ -261,6 +285,7 @@ class InMemoryHarnessSessionStore:
         capability: HarnessCapability,
         mode: str,
         workspace: str | None,
+        invocation_mode: Any = None,
         status: str = "queued",
         started_at: str | None = None,
         metadata: Mapping[str, Any] | None = None,
@@ -278,6 +303,7 @@ class InMemoryHarnessSessionStore:
             capability=capability,
             mode=mode,
             workspace=workspace,
+            invocation_mode=parse_invocation_mode(invocation_mode),
             created_at=now,
             updated_at=now,
             started_at=started_at,
@@ -343,6 +369,32 @@ class InMemoryHarnessSessionStore:
         self.get_session(session_id)
         return tuple(self._raw_responses.get(session_id, ()))
 
+    def append_native_link(
+        self,
+        session_id: str,
+        link: HarnessNativeLink,
+    ) -> HarnessNativeLink:
+        self.get_session(session_id)
+        stored = _redacted_native_link(replace(link, session_id=session_id))
+        self._native_links.setdefault(session_id, []).append(stored)
+        return stored
+
+    def list_native_links(self, session_id: str) -> tuple[HarnessNativeLink, ...]:
+        self.get_session(session_id)
+        return tuple(self._native_links.get(session_id, ()))
+
+    def get_native_link(
+        self,
+        session_id: str,
+        harness_id: str,
+    ) -> HarnessNativeLink | None:
+        links = [
+            link
+            for link in self.list_native_links(session_id)
+            if link.harness_id == harness_id
+        ]
+        return links[-1] if links else None
+
     def get_session_bundle(self, session_id: str) -> HarnessSessionBundle:
         return HarnessSessionBundle(
             session=self.get_session(session_id),
@@ -351,6 +403,7 @@ class InMemoryHarnessSessionStore:
             events=self.list_events(session_id),
             raw_requests=self.list_raw_requests(session_id),
             raw_responses=self.list_raw_responses(session_id),
+            native_links=self.list_native_links(session_id),
             storage={"type": "memory"},
         )
 
@@ -509,3 +562,10 @@ def _redacted_mapping(value: Mapping[str, Any] | None) -> Mapping[str, Any]:
     if isinstance(redacted, Mapping):
         return dict(redacted)
     return {}
+
+
+def _redacted_native_link(link: HarnessNativeLink) -> HarnessNativeLink:
+    redacted = redact_for_storage(native_link_to_dict(link))
+    if isinstance(redacted, Mapping):
+        return native_link_from_dict(redacted)
+    return link

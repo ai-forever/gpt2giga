@@ -14,6 +14,17 @@ class HarnessInvocationMode(str, Enum):
     NATIVE = "native"
 
 
+def parse_invocation_mode(
+    value: str | HarnessInvocationMode | None,
+) -> HarnessInvocationMode:
+    """Parse a CLI/UI invocation mode value."""
+    if isinstance(value, HarnessInvocationMode):
+        return value
+    if value is None or not str(value).strip():
+        return HarnessInvocationMode.HEADLESS
+    return HarnessInvocationMode(str(value).strip().lower())
+
+
 class NativeSessionStatus(str, Enum):
     """Describe how a native session relates to gpt2giga history."""
 

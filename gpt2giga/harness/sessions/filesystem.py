@@ -9,8 +9,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from gpt2giga.harness.native.models import parse_invocation_mode
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
+    HarnessNativeLink,
     HarnessRawRecord,
     HarnessRun,
     HarnessSession,
@@ -21,6 +23,8 @@ from gpt2giga.harness.sessions.models import (
     event_to_dict,
     message_from_dict,
     message_to_dict,
+    native_link_from_dict,
+    native_link_to_dict,
     raw_record_from_dict,
     raw_record_to_dict,
     run_from_dict,
@@ -50,6 +54,7 @@ RUNS_FILE = "runs.jsonl"
 EVENTS_FILE = "events.jsonl"
 RAW_REQUESTS_FILE = "raw_requests.jsonl"
 RAW_RESPONSES_FILE = "raw_responses.jsonl"
+NATIVE_LINKS_FILE = "native_links.jsonl"
 
 
 class FilesystemHarnessSessionStore:
@@ -187,6 +192,7 @@ class FilesystemHarnessSessionStore:
         capability: HarnessCapability,
         mode: str,
         workspace: str | None,
+        invocation_mode: Any = None,
         status: str = "queued",
         started_at: str | None = None,
         metadata: Mapping[str, Any] | None = None,
@@ -204,6 +210,7 @@ class FilesystemHarnessSessionStore:
             capability=capability,
             mode=mode,
             workspace=workspace,
+            invocation_mode=parse_invocation_mode(invocation_mode),
             created_at=now,
             updated_at=now,
             started_at=started_at,
@@ -296,6 +303,40 @@ class FilesystemHarnessSessionStore:
             )
         )
 
+    def append_native_link(
+        self,
+        session_id: str,
+        link: HarnessNativeLink,
+    ) -> HarnessNativeLink:
+        self.get_session(session_id)
+        stored = _redacted_native_link(replace(link, session_id=session_id))
+        self._append_jsonl(
+            self._session_dir(session_id) / NATIVE_LINKS_FILE,
+            native_link_to_dict(stored),
+        )
+        return stored
+
+    def list_native_links(self, session_id: str) -> tuple[HarnessNativeLink, ...]:
+        self.get_session(session_id)
+        return tuple(
+            _read_jsonl(
+                self._session_dir(session_id) / NATIVE_LINKS_FILE,
+                native_link_from_dict,
+            )
+        )
+
+    def get_native_link(
+        self,
+        session_id: str,
+        harness_id: str,
+    ) -> HarnessNativeLink | None:
+        links = [
+            link
+            for link in self.list_native_links(session_id)
+            if link.harness_id == harness_id
+        ]
+        return links[-1] if links else None
+
     def get_session_bundle(self, session_id: str) -> HarnessSessionBundle:
         session_dir = self._session_dir(session_id)
         return HarnessSessionBundle(
@@ -305,6 +346,7 @@ class FilesystemHarnessSessionStore:
             events=self.list_events(session_id),
             raw_requests=self.list_raw_requests(session_id),
             raw_responses=self.list_raw_responses(session_id),
+            native_links=self.list_native_links(session_id),
             storage={
                 "type": "filesystem",
                 "data_dir": str(self.data_dir),
@@ -480,3 +522,10 @@ def _append_jsonl(path: Path, payload: Any) -> None:
         handle.write("\n")
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def _redacted_native_link(link: HarnessNativeLink) -> HarnessNativeLink:
+    redacted = redact_for_storage(native_link_to_dict(link))
+    if isinstance(redacted, Mapping):
+        return native_link_from_dict(redacted)
+    return link

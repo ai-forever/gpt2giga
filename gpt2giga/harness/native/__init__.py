@@ -5,6 +5,7 @@ from gpt2giga.harness.native.models import (
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+    parse_invocation_mode,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "NativeSessionRef",
     "NativeSessionStatus",
     "NativeTranscriptMessage",
+    "parse_invocation_mode",
 ]

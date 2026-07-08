@@ -3,6 +3,7 @@
 from gpt2giga.harness.sessions.filesystem import FilesystemHarnessSessionStore
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
+    HarnessNativeLink,
     HarnessRawRecord,
     HarnessRun,
     HarnessSession,
@@ -19,6 +20,7 @@ from gpt2giga.harness.sessions.store import (
 __all__ = [
     "FilesystemHarnessSessionStore",
     "HarnessMessage",
+    "HarnessNativeLink",
     "HarnessRawRecord",
     "HarnessRun",
     "HarnessSession",
