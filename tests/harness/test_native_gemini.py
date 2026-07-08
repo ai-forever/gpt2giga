@@ -204,6 +204,51 @@ def test_gemini_native_start_command_uses_managed_home_and_redacts_key(
     assert REDACTED in str(payload)
 
 
+def test_gemini_native_start_command_records_attachment_prompt(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    workspace.mkdir()
+    connector = GeminiNativeHistoryConnector(data_dir=data_dir, executable="gemini")
+    request = HarnessRequest(
+        prompt="Inspect this project",
+        model="GigaChat-2-Max",
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.AGENT_CLI,
+        mode="plan",
+        workspace=str(workspace),
+        attachments=(
+            {
+                "id": "att_log",
+                "filename": "debug.log",
+                "kind": "workspace_file",
+                "mime_type": "text/plain",
+                "size_bytes": 64,
+            },
+        ),
+        attachment_render_plan={
+            "prompt_prefix": "Attachments:\n- @logs/debug.log",
+            "warnings": [
+                "Gemini CLI will receive this image as a path reference only."
+            ],
+            "metadata": {"transport": "at_file_reference"},
+        },
+    )
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+
+    plan = connector.build_start_command(request, context)
+
+    assert "-p" not in plan.command
+    assert plan.metadata["initial_prompt"] == (
+        "Attachments:\n- @logs/debug.log\n\nInspect this project"
+    )
+    assert plan.metadata["attachment_render_plan"]["metadata"]["transport"] == (
+        "at_file_reference"
+    )
+    assert plan.metadata["attachment_warnings"] == [
+        "Gemini CLI will receive this image as a path reference only."
+    ]
+
+
 def test_gemini_native_resume_command_requires_managed_ref(tmp_path):
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"

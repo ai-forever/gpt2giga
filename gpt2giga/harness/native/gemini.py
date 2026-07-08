@@ -13,6 +13,10 @@ from typing import Any, Callable, Iterable, Mapping
 
 from gpt2giga.harness.config import DEFAULT_HARNESS_DATA_DIR
 from gpt2giga.harness.harnesses.agent_cli import build_safe_env
+from gpt2giga.harness.harnesses.attachment_plan import (
+    attachment_raw_metadata,
+    prompt_with_attachments,
+)
 from gpt2giga.harness.native.base import NativeCommandPlan, NativeHistoryConnector
 from gpt2giga.harness.native.models import (
     NativeSessionRef,
@@ -123,6 +127,18 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
         command = [self._executable()]
         if model:
             command.extend(["-m", model])
+        prompt = prompt_with_attachments(request).strip()
+        metadata: dict[str, Any] = {
+            "harness_id": self.harness_id,
+            "project_id": project_id,
+            "api_mode": request.api_mode.value,
+            "managed": True,
+            "initial_prompt_present": bool(prompt),
+            "chat_commands": ("/chat save <tag>", "/chat resume <tag>"),
+            **attachment_raw_metadata(request),
+        }
+        if prompt:
+            metadata["initial_prompt"] = prompt
         env = _gemini_env(
             context,
             api_mode=request.api_mode,
@@ -134,14 +150,7 @@ class GeminiNativeHistoryConnector(NativeHistoryConnector):
             env=env,
             cwd=request.workspace,
             native_home=str(native_home),
-            metadata={
-                "harness_id": self.harness_id,
-                "project_id": project_id,
-                "api_mode": request.api_mode.value,
-                "managed": True,
-                "initial_prompt_present": bool(request.prompt.strip()),
-                "chat_commands": ("/chat save <tag>", "/chat resume <tag>"),
-            },
+            metadata=metadata,
         )
 
     def build_resume_command(

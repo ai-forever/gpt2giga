@@ -184,6 +184,46 @@ def test_codex_native_start_command_uses_managed_home_and_redacts_key(
     assert REDACTED in str(payload)
 
 
+def test_codex_native_start_command_applies_attachment_plan(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    workspace.mkdir()
+    connector = CodexNativeHistoryConnector(data_dir=data_dir, executable="codex")
+    request = HarnessRequest(
+        prompt="Inspect this project",
+        model="GigaChat-2-Max",
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.AGENT_CLI,
+        mode="plan",
+        workspace=str(workspace),
+        attachments=(
+            {
+                "id": "att_file",
+                "filename": "app.py",
+                "kind": "workspace_file",
+                "mime_type": "text/x-python",
+                "size_bytes": 42,
+            },
+        ),
+        attachment_render_plan={
+            "prompt_prefix": "Attachments:\n- @src/app.py",
+            "warnings": ["image attachments use path references only."],
+            "metadata": {"transport": "prompt_path_reference"},
+        },
+    )
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+
+    plan = connector.build_start_command(request, context)
+
+    assert plan.command[-1] == "Attachments:\n- @src/app.py\n\nInspect this project"
+    assert plan.metadata["attachment_render_plan"]["metadata"]["transport"] == (
+        "prompt_path_reference"
+    )
+    assert plan.metadata["attachment_warnings"] == [
+        "image attachments use path references only."
+    ]
+
+
 def test_codex_native_resume_command_requires_managed_ref(tmp_path):
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"

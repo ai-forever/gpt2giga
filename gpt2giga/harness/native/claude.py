@@ -12,6 +12,11 @@ from typing import Any, Iterable, Mapping
 
 from gpt2giga.harness.config import DEFAULT_HARNESS_DATA_DIR
 from gpt2giga.harness.harnesses.agent_cli import build_safe_env
+from gpt2giga.harness.harnesses.attachment_plan import (
+    attachment_raw_metadata,
+    cli_args_from_attachments,
+    prompt_with_attachments,
+)
 from gpt2giga.harness.native.base import NativeCommandPlan, NativeHistoryConnector
 from gpt2giga.harness.native.models import (
     NativeSessionRef,
@@ -109,7 +114,8 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
         model = request.model or context.default_model
         if model:
             command.extend(["--model", model])
-        prompt = request.prompt.strip()
+        command.extend(cli_args_from_attachments(request))
+        prompt = prompt_with_attachments(request).strip()
         if prompt:
             command.append(prompt)
         env = _claude_env(context, api_mode=request.api_mode, native_home=native_home)
@@ -124,6 +130,7 @@ class ClaudeNativeHistoryConnector(NativeHistoryConnector):
                 "api_mode": request.api_mode.value,
                 "managed": True,
                 "session_name": session_name,
+                **attachment_raw_metadata(request),
             },
         )
 

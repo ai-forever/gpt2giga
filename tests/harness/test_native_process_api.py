@@ -14,7 +14,10 @@ from gpt2giga.harness.native.process import NativeProcessManager
 from gpt2giga.harness.native.registry import NativeHistoryConnectorRegistry
 from gpt2giga.harness.native.store import FilesystemNativeSessionIndexStore
 from gpt2giga.harness.registry import create_default_registry
-from gpt2giga.harness.sessions import InMemoryHarnessSessionStore
+from gpt2giga.harness.sessions import (
+    FilesystemHarnessSessionStore,
+    InMemoryHarnessSessionStore,
+)
 from gpt2giga.harness.types import HarnessContext, HarnessRequest, REDACTED
 from gpt2giga.harness.ui.app import create_app
 
@@ -102,6 +105,63 @@ def test_native_process_api_start_creates_managed_native_link(tmp_path):
     assert link["metadata"]["native_process_id"] == started.json()["process"]["id"]
     bundle = store.get_session_bundle(session.id)
     assert bundle.native_links[-1].native_session_id == "managed-native-1"
+
+
+def test_native_process_api_start_preserves_attachment_render_plan(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    source = workspace / "src" / "app.py"
+    source.parent.mkdir()
+    source.write_text("print('hello')\n", encoding="utf-8")
+    script = _write_once_cli(tmp_path)
+    data_dir = tmp_path / "data"
+    session_store = FilesystemHarnessSessionStore(data_dir)
+    client, store = _client(
+        tmp_path,
+        FakeProcessConnector(
+            start_script=script,
+            harness_id="codex-cli",
+            native_session_id="managed-native-attachments",
+        ),
+        config=HarnessConfig(
+            default_model="ConfiguredModel",
+            data_dir=str(data_dir),
+        ),
+        store=session_store,
+    )
+    session = store.create_session(
+        title="Native API",
+        workspace=str(workspace),
+        default_harness_id="codex-cli",
+    )
+    attachment = client.post(
+        f"/api/sessions/{session.id}/attachments/workspace",
+        json={"path": "src/app.py", "workspace": str(workspace)},
+    ).json()["attachment"]
+
+    started = client.post(
+        "/api/native/processes/start",
+        json={
+            "session_id": session.id,
+            "harness_id": "codex-cli",
+            "action": "start",
+            "prompt": "Inspect",
+            "workspace": str(workspace),
+            "attachment_ids": [attachment["id"]],
+        },
+    )
+
+    assert started.status_code == 200, started.text
+    process_id = started.json()["process"]["id"]
+    metadata = started.json()["run"]["metadata"]
+    assert metadata["attachment_ids"] == [attachment["id"]]
+    assert metadata["attachments"][0]["workspace_path"] == "src/app.py"
+    assert "@src/app.py" in metadata["attachment_render_plan"]["prompt_prefix"]
+    output = client.get(f"/api/native/processes/{process_id}/output").json()
+    assert (
+        output["run"]["metadata"]["attachment_render_plan"]["prompt_prefix"]
+        == metadata["attachment_render_plan"]["prompt_prefix"]
+    )
 
 
 def test_native_process_api_resume_uses_cached_native_ref(tmp_path):
@@ -275,7 +335,9 @@ class FakeProcessConnector:
         resume_script=None,
         pass_context_api_key: bool = False,
         native_session_id: str | None = None,
+        harness_id: str = "fake-cli",
     ) -> None:
+        self.harness_id = harness_id
         self.start_script = start_script
         self.resume_script = resume_script or start_script
         self.pass_context_api_key = pass_context_api_key
@@ -335,8 +397,9 @@ def _client(
     *,
     config: HarnessConfig | None = None,
     native_index_store=None,
-) -> tuple[TestClient, InMemoryHarnessSessionStore]:
-    store = InMemoryHarnessSessionStore()
+    store=None,
+):
+    store = store or InMemoryHarnessSessionStore()
     native_registry = NativeHistoryConnectorRegistry()
     native_registry.register(connector)
     manager = NativeProcessManager(session_store=store, use_pty=False)

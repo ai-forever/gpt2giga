@@ -1760,7 +1760,8 @@ INDEX_HTML = """<!doctype html>
             model: payload.model,
             api_mode: payload.api_mode,
             mode: payload.mode,
-            workspace: payload.workspace
+            workspace: payload.workspace,
+            attachment_ids: payload.attachment_ids || []
           })
         });
         if (!result.ok) {
@@ -1768,6 +1769,8 @@ INDEX_HTML = """<!doctype html>
           return;
         }
         setActiveNativeProcess(result.data.process || null, result.data);
+        state.attachments = [];
+        renderAttachments();
         if (state.currentSessionId) await loadSession(state.currentSessionId);
       } finally {
         byId("run-button").disabled = false;

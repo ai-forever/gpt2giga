@@ -178,6 +178,49 @@ def test_claude_native_start_command_uses_managed_home_and_redacts_key(
     assert REDACTED in str(payload)
 
 
+def test_claude_native_start_command_applies_attachment_plan(tmp_path):
+    workspace = tmp_path / "repo"
+    data_dir = tmp_path / "data"
+    workspace.mkdir()
+    connector = ClaudeNativeHistoryConnector(data_dir=data_dir, executable="claude")
+    request = HarnessRequest(
+        prompt="Inspect this project",
+        model="GigaChat-2-Max",
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.AGENT_CLI,
+        mode="plan",
+        workspace=str(workspace),
+        session_id="sess_native_attach",
+        attachments=(
+            {
+                "id": "att_doc",
+                "filename": "notes.md",
+                "kind": "workspace_file",
+                "mime_type": "text/markdown",
+                "size_bytes": 24,
+            },
+        ),
+        attachment_render_plan={
+            "prompt_prefix": "Attachments:\n- @docs/notes.md",
+            "warnings": [
+                "Claude Code will receive this attachment as a path reference."
+            ],
+            "metadata": {"transport": "at_file_reference"},
+        },
+    )
+    context = HarnessContext(proxy_url="http://127.0.0.1:8090", api_key="proxy-key")
+
+    plan = connector.build_start_command(request, context)
+
+    assert plan.command[-1] == "Attachments:\n- @docs/notes.md\n\nInspect this project"
+    assert plan.metadata["attachment_render_plan"]["metadata"]["transport"] == (
+        "at_file_reference"
+    )
+    assert plan.metadata["attachment_warnings"] == [
+        "Claude Code will receive this attachment as a path reference."
+    ]
+
+
 def test_claude_native_resume_command_requires_managed_ref(tmp_path):
     workspace = tmp_path / "repo"
     data_dir = tmp_path / "data"

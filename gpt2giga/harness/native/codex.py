@@ -11,6 +11,11 @@ from typing import Any, Iterable, Mapping
 
 from gpt2giga.harness.config import DEFAULT_HARNESS_DATA_DIR
 from gpt2giga.harness.harnesses.agent_cli import build_safe_env
+from gpt2giga.harness.harnesses.attachment_plan import (
+    attachment_raw_metadata,
+    cli_args_from_attachments,
+    prompt_with_attachments,
+)
 from gpt2giga.harness.native.base import NativeCommandPlan, NativeHistoryConnector
 from gpt2giga.harness.native.models import (
     NativeSessionRef,
@@ -115,7 +120,8 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
         if model:
             command.extend(["-m", model])
         command.extend(["--sandbox", sandbox])
-        prompt = request.prompt.strip()
+        command.extend(cli_args_from_attachments(request))
+        prompt = prompt_with_attachments(request).strip()
         if prompt:
             command.append(prompt)
         env = _codex_env(
@@ -133,6 +139,7 @@ class CodexNativeHistoryConnector(NativeHistoryConnector):
                 "project_id": project_id,
                 "api_mode": request.api_mode.value,
                 "managed": True,
+                **attachment_raw_metadata(request),
             },
         )
 

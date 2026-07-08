@@ -19,6 +19,8 @@ from gpt2giga.harness.attachments import (
     HarnessAttachment,
     attachment_to_dict,
     limits_from_project_settings,
+    render_attachments_for_harness,
+    render_plan_to_dict,
 )
 from gpt2giga.harness.config import (
     DEFAULT_MODEL_HINTS,
@@ -515,6 +517,7 @@ def create_app(
                 native_registry=native_registry,
                 native_index_store=native_index_store,
                 store=store,
+                attachment_store=attachment_store,
             )
             run = store.create_run(
                 session_id=session.id,
@@ -958,6 +961,7 @@ def _native_process_start_options(
     native_registry: NativeHistoryConnectorRegistry,
     native_index_store: NativeSessionIndexStore,
     store: HarnessSessionStore,
+    attachment_store: FilesystemAttachmentStore,
 ) -> dict[str, Any]:
     action = str(payload.get("action") or "start").strip().lower()
     if action not in {"start", "resume"}:
@@ -976,6 +980,7 @@ def _native_process_start_options(
         session=session,
         config=config,
         native_registry=native_registry,
+        attachment_store=attachment_store,
     )
 
 
@@ -985,6 +990,7 @@ def _native_process_new_options(
     session: HarnessSession,
     config: HarnessConfig,
     native_registry: NativeHistoryConnectorRegistry,
+    attachment_store: FilesystemAttachmentStore,
 ) -> dict[str, Any]:
     harness_id = _required_text(
         payload.get("harness_id") or session.default_harness_id,
@@ -1001,6 +1007,35 @@ def _native_process_new_options(
     prompt = str(payload.get("prompt") or "")
     model = _optional_text(payload.get("model")) or session.default_model
     mode = str(payload.get("mode") or session.default_mode)
+    attachment_ids = _attachment_ids(payload.get("attachment_ids"))
+    attachments = _load_native_attachments(
+        attachment_store,
+        session.id,
+        attachment_ids,
+    )
+    attachment_payloads = tuple(
+        _native_attachment_metadata(attachment) for attachment in attachments
+    )
+    attachment_render_plan = (
+        render_attachments_for_harness(
+            harness_id,
+            attachments,
+            attachment_store,
+            prompt=prompt,
+        )
+        if attachments
+        else None
+    )
+    attachment_render_plan_payload = (
+        render_plan_to_dict(attachment_render_plan)
+        if attachment_render_plan is not None
+        else None
+    )
+    extra = _native_request_extra(
+        _metadata_mapping(payload.get("extra")),
+        attachment_payloads,
+        attachment_render_plan_payload,
+    )
     request = HarnessRequest(
         prompt=prompt,
         model=model,
@@ -1010,7 +1045,9 @@ def _native_process_new_options(
         invocation_mode=HarnessInvocationMode.NATIVE,
         workspace=workspace,
         session_id=session.id,
-        extra=_metadata_mapping(payload.get("extra")),
+        attachments=attachment_payloads,
+        attachment_render_plan=attachment_render_plan_payload,
+        extra=extra,
     )
     plan = connector.build_start_command(request, config.to_context())
     native_session_id = _native_session_id_from_plan(plan)
@@ -1026,6 +1063,9 @@ def _native_process_new_options(
         "workspace": workspace,
         "native_ref": None,
         "native_session_id": native_session_id,
+        "attachment_ids": attachment_ids,
+        "attachments": attachment_payloads,
+        "attachment_render_plan": attachment_render_plan_payload,
     }
 
 
@@ -1078,6 +1118,9 @@ def _native_process_resume_options(
         "workspace": workspace,
         "native_ref": ref,
         "native_session_id": ref.native_session_id,
+        "attachment_ids": (),
+        "attachments": (),
+        "attachment_render_plan": None,
     }
 
 
@@ -1111,6 +1154,13 @@ def _native_process_run_metadata(
             "transport": process_ref.transport,
             "status": process_ref.status.value,
         }
+    attachments = options.get("attachments")
+    if isinstance(attachments, tuple | list) and attachments:
+        metadata["attachment_ids"] = list(options.get("attachment_ids") or ())
+        metadata["attachments"] = [dict(attachment) for attachment in attachments]
+    attachment_render_plan = options.get("attachment_render_plan")
+    if isinstance(attachment_render_plan, Mapping):
+        metadata["attachment_render_plan"] = dict(attachment_render_plan)
     return metadata
 
 
@@ -1228,15 +1278,69 @@ def _native_missing_session_id_reason() -> str:
     )
 
 
+def _attachment_ids(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("attachment_ids must be a list")
+    ids: list[str] = []
+    for item in value:
+        attachment_id = _optional_text(item)
+        if attachment_id is None:
+            raise ValueError("attachment_ids must contain non-empty strings")
+        ids.append(attachment_id)
+    return tuple(ids)
+
+
+def _load_native_attachments(
+    attachment_store: FilesystemAttachmentStore,
+    session_id: str,
+    attachment_ids: tuple[str, ...],
+) -> tuple[HarnessAttachment, ...]:
+    attachments: list[HarnessAttachment] = []
+    for attachment_id in attachment_ids:
+        try:
+            attachment = attachment_store.get_attachment(attachment_id)
+        except AttachmentNotFoundError as exc:
+            raise ValueError(f"Unknown attachment id: {attachment_id}") from exc
+        if attachment.session_id != session_id:
+            raise ValueError(f"Attachment does not belong to session: {attachment_id}")
+        attachments.append(attachment)
+    return tuple(attachments)
+
+
+def _native_attachment_metadata(
+    attachment: HarnessAttachment,
+) -> dict[str, Any]:
+    payload = attachment_to_dict(attachment)
+    payload.pop("storage_path", None)
+    return payload
+
+
+def _native_request_extra(
+    extra: Mapping[str, Any],
+    attachments: tuple[Mapping[str, Any], ...],
+    attachment_render_plan: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(extra)
+    if attachments:
+        payload["attachment_ids"] = [
+            str(attachment["id"]) for attachment in attachments
+        ]
+        payload["attachments"] = [dict(attachment) for attachment in attachments]
+    if attachment_render_plan:
+        payload["attachment_render_plan"] = dict(attachment_render_plan)
+    return payload
+
+
 def _sync_native_process_run(
     store: HarnessSessionStore,
     process_ref: NativeProcessRef,
 ):
     status = _run_status_from_process(process_ref)
-    patch: dict[str, Any] = {
-        "status": status,
-        "command": process_ref.display_command,
-        "metadata": {
+    metadata = _existing_run_metadata(store, process_ref)
+    metadata.update(
+        {
             "invocation_mode": HarnessInvocationMode.NATIVE.value,
             "native_process": {
                 "id": process_ref.id,
@@ -1245,7 +1349,12 @@ def _sync_native_process_run(
                 "status": process_ref.status.value,
                 "exit_code": process_ref.exit_code,
             },
-        },
+        }
+    )
+    patch: dict[str, Any] = {
+        "status": status,
+        "command": process_ref.display_command,
+        "metadata": metadata,
     }
     if process_ref.status is not NativeProcessStatus.RUNNING:
         patch["finished_at"] = process_ref.updated_at
@@ -1255,6 +1364,19 @@ def _sync_native_process_run(
         return store.update_run(process_ref.run_id, **patch)
     except RunNotFoundError:
         return None
+
+
+def _existing_run_metadata(
+    store: HarnessSessionStore,
+    process_ref: NativeProcessRef,
+) -> dict[str, Any]:
+    try:
+        for run in store.list_runs(process_ref.session_id):
+            if run.id == process_ref.run_id:
+                return dict(run.metadata)
+    except SessionNotFoundError:
+        return {}
+    return {}
 
 
 def _run_status_from_process(process_ref: NativeProcessRef) -> str:
