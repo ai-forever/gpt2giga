@@ -44,6 +44,14 @@ class ClaudeCodeHarness(BaseHarness):
             supports_model_selection=True,
             supports_api_mode_selection=True,
             supports_workspace=True,
+            supports_attachments=True,
+            accepted_attachment_kinds=(
+                "image",
+                "text",
+                "workspace_file",
+                "document",
+            ),
+            attachment_transport=("prompt_path_reference", "at_file_reference"),
             tags=("claude", "agent"),
         )
 

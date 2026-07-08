@@ -74,6 +74,9 @@ class HarnessSpec:
     supports_api_mode_selection: bool = True
     supports_streaming: bool = False
     supports_workspace: bool = False
+    supports_attachments: bool = False
+    accepted_attachment_kinds: tuple[str, ...] = field(default_factory=tuple)
+    attachment_transport: tuple[str, ...] = field(default_factory=tuple)
     default_api_mode: GigaChatApiMode = GigaChatApiMode.V2
     tags: tuple[str, ...] = field(default_factory=tuple)
 
@@ -235,6 +238,9 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         "supports_api_mode_selection": spec.supports_api_mode_selection,
         "supports_streaming": spec.supports_streaming,
         "supports_workspace": spec.supports_workspace,
+        "supports_attachments": spec.supports_attachments,
+        "accepted_attachment_kinds": list(spec.accepted_attachment_kinds),
+        "attachment_transport": list(spec.attachment_transport),
         "default_api_mode": spec.default_api_mode.value,
         "tags": list(spec.tags),
     }

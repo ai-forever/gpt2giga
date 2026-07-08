@@ -24,6 +24,15 @@ class EchoHarness(BaseHarness):
             kind="test",
             description="Local echo harness for tests and UI smoke checks",
             capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+            supports_attachments=True,
+            accepted_attachment_kinds=(
+                "image",
+                "text",
+                "document",
+                "binary",
+                "workspace_file",
+            ),
+            attachment_transport=("metadata_only",),
             tags=("local", "test"),
         )
 

@@ -35,6 +35,9 @@ class DirectChatHarness(BaseHarness):
             supports_model_selection=True,
             supports_api_mode_selection=True,
             supports_streaming=True,
+            supports_attachments=True,
+            accepted_attachment_kinds=("image", "text", "workspace_file"),
+            attachment_transport=("openai_content_parts", "inline_text"),
             tags=("chat", "proxy"),
         )
 

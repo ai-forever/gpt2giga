@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Any
 
 from fastapi import Body, FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 from gpt2giga.harness import proxy
+from gpt2giga.harness.attachments import (
+    AttachmentLimits,
+    AttachmentNotFoundError,
+    AttachmentSessionNotFoundError,
+    AttachmentValidationError,
+    FilesystemAttachmentStore,
+    HarnessAttachment,
+    attachment_to_dict,
+    limits_from_project_settings,
+)
 from gpt2giga.harness.config import (
     DEFAULT_MODEL_HINTS,
     HarnessConfig,
@@ -27,7 +39,11 @@ from gpt2giga.harness.sessions import (
     HarnessSessionStore,
     SessionNotFoundError,
 )
-from gpt2giga.harness.sessions.models import bundle_to_dict, session_to_dict
+from gpt2giga.harness.sessions.models import (
+    HarnessSession,
+    bundle_to_dict,
+    session_to_dict,
+)
 from gpt2giga.harness.types import (
     HarnessCapability,
     HarnessRequest,
@@ -51,11 +67,13 @@ def create_app(
     registry = registry or create_default_registry()
     store = store or FilesystemHarnessSessionStore(config.data_dir)
     runner = HarnessSessionRunner(registry=registry, config=config, store=store)
+    attachment_store = FilesystemAttachmentStore(config.data_dir)
     app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
     app.state.harness_config = config
     app.state.harness_registry = registry
     app.state.harness_session_store = store
     app.state.harness_session_runner = runner
+    app.state.harness_attachment_store = attachment_store
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -241,6 +259,100 @@ def create_app(
             raise HTTPException(status_code=404, detail="Session not found") from exc
         return {"deleted": True}
 
+    @app.post("/api/sessions/{session_id}/attachments")
+    async def create_attachment(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            session = store.get_session(session_id)
+            attachment = attachment_store.create_upload(
+                session_id=session.id,
+                project_id=_session_project_id(session),
+                filename=str(payload.get("filename") or ""),
+                data=_decode_attachment_payload(payload.get("data_base64")),
+                mime_type=_optional_text(payload.get("mime_type")),
+                source=_optional_text(payload.get("source")) or "upload",
+                metadata=_metadata_mapping(payload.get("metadata")),
+                limits=_attachment_limits(session),
+            )
+        except (SessionNotFoundError, AttachmentSessionNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except (AttachmentValidationError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"attachment": _attachment_response(registry, attachment)}
+
+    @app.post("/api/sessions/{session_id}/attachments/workspace")
+    async def create_workspace_attachment(
+        session_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        try:
+            session = store.get_session(session_id)
+            workspace_root = _attachment_workspace(session, payload)
+            attachment = attachment_store.create_workspace_reference(
+                session_id=session.id,
+                project_id=_session_project_id(session)
+                or resolve_project(workspace_root, data_dir=config.data_dir).id,
+                workspace_root=workspace_root,
+                path=_required_text(payload.get("path"), "path is required"),
+                mime_type=_optional_text(payload.get("mime_type")),
+                metadata=_metadata_mapping(payload.get("metadata")),
+                limits=_attachment_limits(session, workspace_root=workspace_root),
+            )
+        except (SessionNotFoundError, AttachmentSessionNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except (AttachmentValidationError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"attachment": _attachment_response(registry, attachment)}
+
+    @app.get("/api/sessions/{session_id}/attachments")
+    async def session_attachments(session_id: str) -> dict[str, Any]:
+        try:
+            store.get_session(session_id)
+            attachments = attachment_store.list_session_attachments(session_id)
+        except (SessionNotFoundError, AttachmentSessionNotFoundError) as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        return {
+            "attachments": [
+                _attachment_response(registry, attachment) for attachment in attachments
+            ]
+        }
+
+    @app.get("/api/attachments/{attachment_id}/metadata")
+    async def attachment_metadata(attachment_id: str) -> dict[str, Any]:
+        try:
+            attachment = attachment_store.get_attachment(attachment_id)
+        except AttachmentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Attachment not found") from exc
+        return {"attachment": _attachment_response(registry, attachment)}
+
+    @app.get("/api/attachments/{attachment_id}")
+    async def attachment_blob(attachment_id: str) -> Response:
+        try:
+            attachment = attachment_store.get_attachment(attachment_id)
+            data = attachment_store.read_blob(attachment_id)
+        except AttachmentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Attachment not found") from exc
+        except AttachmentValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(
+            content=data,
+            media_type=attachment.mime_type,
+            headers={
+                "Content-Disposition": _content_disposition(attachment.filename),
+                "X-GPT2GIGA-Attachment-Id": attachment.id,
+            },
+        )
+
+    @app.delete("/api/attachments/{attachment_id}")
+    async def delete_attachment(attachment_id: str) -> dict[str, Any]:
+        try:
+            attachment_store.delete_attachment(attachment_id)
+        except AttachmentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Attachment not found") from exc
+        return {"deleted": True}
+
     @app.post("/api/sessions/run")
     async def create_session_and_run(
         payload: dict[str, Any] = Body(...),
@@ -356,6 +468,112 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _required_text(value: Any, message: str) -> str:
+    text = _optional_text(value)
+    if text is None:
+        raise ValueError(message)
+    return text
+
+
+def _decode_attachment_payload(value: Any) -> bytes:
+    text = _required_text(value, "data_base64 is required")
+    if text.startswith("data:") and "," in text:
+        text = text.split(",", 1)[1]
+    try:
+        return base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("data_base64 is invalid") from exc
+
+
+def _metadata_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
+def _session_project_id(session: HarnessSession) -> str | None:
+    return _optional_text(session.metadata.get("project_id"))
+
+
+def _session_project_root(session: HarnessSession) -> str | None:
+    return _optional_text(session.metadata.get("project_root")) or _optional_text(
+        session.workspace
+    )
+
+
+def _attachment_limits(
+    session: HarnessSession,
+    *,
+    workspace_root: str | None = None,
+) -> AttachmentLimits:
+    project_root = workspace_root or _session_project_root(session)
+    if project_root is None:
+        return AttachmentLimits()
+    loaded = load_project_config(project_root)
+    return limits_from_project_settings(loaded.attachments)
+
+
+def _attachment_workspace(
+    session: HarnessSession,
+    payload: dict[str, Any],
+) -> str:
+    workspace = _optional_text(payload.get("workspace")) or _session_project_root(
+        session
+    )
+    if workspace is None:
+        raise ValueError("workspace is required")
+    return resolve_workspace(workspace)
+
+
+def _attachment_response(
+    registry: HarnessRegistry,
+    attachment: HarnessAttachment,
+) -> dict[str, Any]:
+    payload = attachment_to_dict(attachment)
+    payload.pop("storage_path", None)
+    payload["url"] = f"/api/attachments/{attachment.id}"
+    payload["supported_by"] = _attachment_supported_by(registry, attachment)
+    payload["warnings"] = _attachment_warnings(registry, attachment)
+    return payload
+
+
+def _attachment_supported_by(
+    registry: HarnessRegistry,
+    attachment: HarnessAttachment,
+) -> dict[str, bool]:
+    support: dict[str, bool] = {}
+    for harness in registry.list():
+        spec = harness.spec()
+        support[spec.id] = bool(
+            spec.supports_attachments
+            and attachment.kind in spec.accepted_attachment_kinds
+        )
+    return support
+
+
+def _attachment_warnings(
+    registry: HarnessRegistry,
+    attachment: HarnessAttachment,
+) -> list[str]:
+    warnings: list[str] = []
+    for harness in registry.list():
+        spec = harness.spec()
+        if not spec.supports_attachments:
+            warnings.append(f"{spec.id} does not support attachments.")
+        elif attachment.kind not in spec.accepted_attachment_kinds:
+            warnings.append(f"{spec.id} does not accept {attachment.kind} attachments.")
+    return warnings
+
+
+def _content_disposition(filename: str) -> str:
+    safe = "".join(
+        char for char in filename if char.isalnum() or char in {" ", ".", "_", "-"}
+    ).strip()
+    if not safe:
+        safe = "attachment"
+    return f'inline; filename="{safe}"'
 
 
 def _session_summary(

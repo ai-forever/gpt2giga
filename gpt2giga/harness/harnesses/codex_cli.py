@@ -45,6 +45,9 @@ class CodexCliHarness(BaseHarness):
             supports_model_selection=True,
             supports_api_mode_selection=True,
             supports_workspace=True,
+            supports_attachments=True,
+            accepted_attachment_kinds=("image", "text", "workspace_file"),
+            attachment_transport=("cli_image_flag", "prompt_path_reference"),
             tags=("codex", "agent"),
         )
 
