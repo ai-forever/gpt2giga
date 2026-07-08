@@ -431,6 +431,58 @@ INDEX_HTML = """<!doctype html>
       border-top: 1px solid var(--border);
       background: var(--panel);
     }
+    .composer.drag-over {
+      outline: 2px solid var(--accent);
+      outline-offset: -6px;
+      background: #17211f;
+    }
+    .attachment-toolbar,
+    .attachment-list,
+    .attachment-card,
+    .attachment-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .attachment-list {
+      align-items: stretch;
+    }
+    .attachment-card {
+      max-width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--panel-soft);
+      padding: 7px 8px;
+    }
+    .attachment-name {
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 750;
+    }
+    .attachment-remove {
+      min-height: 24px;
+      border-color: var(--border);
+      background: transparent;
+      color: var(--muted);
+      padding: 0 7px;
+    }
+    .attachment-remove:hover:not(:disabled) {
+      border-color: var(--red);
+      background: #2b1717;
+      color: #fecaca;
+    }
+    .attachment-chip-row {
+      margin-top: 8px;
+    }
+    .attachment-chip {
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .details,
     .warning {
       min-height: 20px;
@@ -625,10 +677,16 @@ INDEX_HTML = """<!doctype html>
         <div id="output-panel" class="chat-scroll">
           <div id="message-list" class="message-list"></div>
         </div>
-        <div class="composer">
+        <div id="composer" class="composer">
           <label>Prompt
             <textarea id="prompt-input" spellcheck="true"></textarea>
           </label>
+          <div class="attachment-toolbar">
+            <input id="attachment-file-input" type="file" multiple hidden>
+            <button id="attach-file-button" class="secondary" type="button">Attach</button>
+            <span id="attachment-status" class="status-line">No attachments</span>
+          </div>
+          <div id="attachment-list" class="attachment-list" aria-live="polite"></div>
           <div class="inline-actions">
             <button id="run-button" type="button">Run</button>
             <button id="copy-cli-button" class="secondary" type="button">Copy CLI</button>
@@ -683,6 +741,7 @@ INDEX_HTML = """<!doctype html>
       project: null,
       projectConfig: null,
       selectedHarness: null,
+      attachments: [],
       currentSessionId: null,
       currentBundle: null,
       lastPayload: null
@@ -925,6 +984,7 @@ INDEX_HTML = """<!doctype html>
       byId("harness-select").value = harnessId;
       renderCapabilityOptions(item.spec);
       updateHarnessDrivenControls();
+      renderAttachments();
       const capabilities = Array.isArray(item.spec.capabilities) ? item.spec.capabilities.join(", ") : "";
       setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}${capabilities ? " Capabilities: " + capabilities : ""}`);
     }
@@ -1034,9 +1094,138 @@ INDEX_HTML = """<!doctype html>
       if (!result.ok) return;
       state.currentSessionId = sessionId;
       state.currentBundle = result.data;
+      await loadAttachments(sessionId);
       applySessionDefaults(result.data.session || {});
       renderAll();
       await loadSessions();
+    }
+
+    async function loadAttachments(sessionId) {
+      if (!sessionId) {
+        state.attachments = [];
+        renderAttachments();
+        return;
+      }
+      const result = await getJson(`/api/sessions/${encodeURIComponent(sessionId)}/attachments`);
+      state.attachments = result.ok && Array.isArray(result.data.attachments) ? result.data.attachments : [];
+      renderAttachments();
+    }
+
+    async function ensureSessionForAttachments() {
+      if (state.currentSessionId) return true;
+      const result = await getJson("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildSessionDefaults())
+      });
+      if (!result.ok || !result.data.session) {
+        setText("attachment-status", result.data.detail || "Attachment session failed.");
+        return false;
+      }
+      await loadSession(result.data.session.id);
+      return true;
+    }
+
+    async function attachFiles(files, source) {
+      const fileList = Array.from(files || []).filter(Boolean);
+      if (!fileList.length) return;
+      if (!(await ensureSessionForAttachments())) return;
+      setText("attachment-status", `Uploading ${fileList.length}...`);
+      for (const file of fileList) {
+        try {
+          const dataBase64 = await readFileAsBase64(file);
+          const result = await getJson(`/api/sessions/${encodeURIComponent(state.currentSessionId)}/attachments`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              filename: file.name || "clipboard-image.png",
+              mime_type: file.type || null,
+              data_base64: dataBase64,
+              source
+            })
+          });
+          if (result.ok && result.data.attachment) {
+            state.attachments.push(result.data.attachment);
+          } else {
+            setText("attachment-status", result.data.detail || "Attachment upload failed.");
+          }
+        } catch (error) {
+          setText("attachment-status", "Attachment upload failed.");
+        }
+      }
+      renderAttachments();
+      await loadSessions();
+    }
+
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const value = String(reader.result || "");
+          resolve(value.includes(",") ? value.split(",", 2)[1] : value);
+        };
+        reader.onerror = () => reject(reader.error || new Error("file read failed"));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function removeAttachment(attachmentId) {
+      const result = await getJson(`/api/attachments/${encodeURIComponent(attachmentId)}`, { method: "DELETE" });
+      if (!result.ok) {
+        setText("attachment-status", result.data.detail || "Attachment delete failed.");
+        return;
+      }
+      state.attachments = state.attachments.filter((attachment) => attachment.id !== attachmentId);
+      renderAttachments();
+    }
+
+    function renderAttachments() {
+      const list = byId("attachment-list");
+      if (!list) return;
+      list.textContent = "";
+      if (!state.attachments.length) {
+        setText("attachment-status", "No attachments");
+        return;
+      }
+      setText("attachment-status", `${state.attachments.length} attachment${state.attachments.length === 1 ? "" : "s"}`);
+      for (const attachment of state.attachments) {
+        const card = document.createElement("div");
+        card.className = "attachment-card";
+        const warning = attachmentWarning(attachment);
+        card.innerHTML = `
+          <span class="attachment-name">${escapeHtml(attachment.filename || attachment.id)}</span>
+          <span class="badge info">${escapeHtml(attachment.kind || "attachment")}</span>
+          <span class="status-line">${escapeHtml(attachment.mime_type || "")} ${escapeHtml(formatBytes(attachment.size_bytes || 0))}</span>
+          ${warning ? `<span class="badge warn">${escapeHtml(warning)}</span>` : ""}
+        `;
+        const remove = document.createElement("button");
+        remove.className = "attachment-remove";
+        remove.type = "button";
+        remove.textContent = "x";
+        remove.addEventListener("click", () => removeAttachment(attachment.id));
+        card.appendChild(remove);
+        list.appendChild(card);
+      }
+    }
+
+    function attachmentWarning(attachment) {
+      const harnessId = currentHarnessId();
+      const supported = attachment.supported_by || {};
+      if (Object.prototype.hasOwnProperty.call(supported, harnessId) && !supported[harnessId]) {
+        const warning = (attachment.warnings || []).find((item) => String(item).startsWith(`${harnessId} `));
+        return warning || `${harnessId} does not accept this attachment`;
+      }
+      if (attachment.kind === "image" && harnessId === "gemini-cli") {
+        return "path reference only";
+      }
+      return "";
+    }
+
+    function formatBytes(value) {
+      const bytes = Number(value) || 0;
+      if (bytes < 1024) return `${bytes} B`;
+      if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+      return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     }
 
     function applySessionDefaults(session) {
@@ -1059,6 +1248,8 @@ INDEX_HTML = """<!doctype html>
       });
       if (result.ok) {
         byId("prompt-input").value = "";
+        state.attachments = [];
+        renderAttachments();
         await loadSession(result.data.session.id);
       }
     }
@@ -1074,13 +1265,16 @@ INDEX_HTML = """<!doctype html>
     }
 
     function buildPayload() {
-      return {
+      const payload = {
         ...buildSessionDefaults(),
         prompt: byId("prompt-input").value,
         capability: byId("capability-select").value || "chat_completions",
         stream: byId("stream-checkbox").checked,
         dry_run: byId("dry-run-checkbox").checked
       };
+      const attachmentIds = state.attachments.map((attachment) => attachment.id).filter(Boolean);
+      if (attachmentIds.length) payload.attachment_ids = attachmentIds;
+      return payload;
     }
 
     async function runHarness() {
@@ -1105,6 +1299,8 @@ INDEX_HTML = """<!doctype html>
           state.currentSessionId = body.session.id;
           state.currentBundle = body;
           byId("prompt-input").value = "";
+          state.attachments = [];
+          renderAttachments();
           renderAll();
           await loadSessions();
         } else {
@@ -1137,6 +1333,14 @@ INDEX_HTML = """<!doctype html>
       for (const message of messages) {
         const item = document.createElement("article");
         item.className = `message ${message.role || "assistant"}`;
+        const attachments = message.metadata && Array.isArray(message.metadata.attachments) ? message.metadata.attachments : [];
+        const attachmentChips = attachments.length ? `
+          <div class="attachment-chip-row">
+            ${attachments.map((attachment) => `
+              <span class="badge attachment-chip">${escapeHtml(attachment.filename || attachment.id || "attachment")}</span>
+            `).join("")}
+          </div>
+        ` : "";
         item.innerHTML = `
           <div class="message-meta">
             <span>${escapeHtml(message.role || "")}</span>
@@ -1144,6 +1348,7 @@ INDEX_HTML = """<!doctype html>
             <span>${escapeHtml(message.api_mode || "")}</span>
           </div>
           <div class="message-content">${escapeHtml(message.content || "")}</div>
+          ${attachmentChips}
         `;
         list.appendChild(item);
       }
@@ -1210,6 +1415,8 @@ INDEX_HTML = """<!doctype html>
       if (result.ok) {
         state.currentSessionId = null;
         state.currentBundle = null;
+        state.attachments = [];
+        renderAttachments();
         renderAll();
         await loadSessions();
       }
@@ -1294,6 +1501,8 @@ INDEX_HTML = """<!doctype html>
       byId("prompt-input").value = "";
       byId("dry-run-checkbox").checked = false;
       byId("stream-checkbox").checked = false;
+      state.attachments = [];
+      renderAttachments();
     }
 
     function shellQuote(value) {
@@ -1311,6 +1520,7 @@ INDEX_HTML = """<!doctype html>
     }
 
     function bindEvents() {
+      const composer = byId("composer");
       byId("refresh-health-button").addEventListener("click", refreshHealth);
       byId("refresh-models-button").addEventListener("click", loadModels);
       byId("init-project-button").addEventListener("click", initProject);
@@ -1344,6 +1554,27 @@ INDEX_HTML = """<!doctype html>
       });
       byId("run-button").addEventListener("click", runHarness);
       byId("reset-button").addEventListener("click", resetComposer);
+      byId("attach-file-button").addEventListener("click", () => byId("attachment-file-input").click());
+      byId("attachment-file-input").addEventListener("change", (event) => {
+        attachFiles(event.target.files, "upload");
+        event.target.value = "";
+      });
+      composer.addEventListener("dragenter", (event) => {
+        event.preventDefault();
+        composer.classList.add("drag-over");
+      });
+      composer.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        composer.classList.add("drag-over");
+      });
+      composer.addEventListener("dragleave", (event) => {
+        if (!composer.contains(event.relatedTarget)) composer.classList.remove("drag-over");
+      });
+      composer.addEventListener("drop", (event) => {
+        event.preventDefault();
+        composer.classList.remove("drag-over");
+        attachFiles(event.dataTransfer.files, "upload");
+      });
       byId("copy-cli-button").addEventListener("click", () => copyText(commandPreview(state.lastPayload || buildPayload()), "Copied CLI command."));
       byId("copy-curl-button").addEventListener("click", () => copyText(curlPreview(), "Copied curl command."));
       byId("session-search").addEventListener("input", loadSessions);
@@ -1365,6 +1596,14 @@ INDEX_HTML = """<!doctype html>
           event.preventDefault();
           runHarness();
         }
+      });
+      byId("prompt-input").addEventListener("paste", (event) => {
+        const items = event.clipboardData && event.clipboardData.items ? Array.from(event.clipboardData.items) : [];
+        const files = items
+          .filter((item) => item.kind === "file")
+          .map((item) => item.getAsFile())
+          .filter((file) => file && String(file.type || "").startsWith("image/"));
+        if (files.length) attachFiles(files, "paste");
       });
       for (const tab of document.querySelectorAll(".tab")) {
         tab.addEventListener("click", () => showTab(tab.dataset.tab));

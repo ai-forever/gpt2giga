@@ -328,7 +328,12 @@ def test_ui_index_contains_control_panel_elements():
         "workspace-input",
         "dry-run-checkbox",
         "stream-checkbox",
+        "composer",
         "prompt-input",
+        "attachment-file-input",
+        "attach-file-button",
+        "attachment-status",
+        "attachment-list",
         "run-button",
         "copy-cli-button",
         "copy-curl-button",
@@ -352,6 +357,12 @@ def test_ui_index_contains_control_panel_elements():
         "project_id",
         "Project Cockpit",
         "Storage",
+        "Attach",
+        "attachment_ids",
+        "data_base64",
+        "/attachments",
+        "dragover",
+        "clipboardData",
     ):
         assert text in html
 
