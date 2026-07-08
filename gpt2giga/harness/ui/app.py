@@ -29,9 +29,19 @@ from gpt2giga.harness.native.base import (
     discovery_error_to_dict,
 )
 from gpt2giga.harness.native.models import (
+    HarnessInvocationMode,
     NativeSessionRef,
     NativeSessionStatus,
     NativeTranscriptMessage,
+)
+from gpt2giga.harness.native.process import (
+    NativeProcessManager,
+    NativeProcessNotFoundError,
+    NativeProcessRef,
+    NativeProcessStartError,
+    NativeProcessStatus,
+    native_output_chunk_to_dict,
+    native_process_ref_to_dict,
 )
 from gpt2giga.harness.native.registry import (
     NativeHistoryConnectorRegistry,
@@ -55,6 +65,7 @@ from gpt2giga.harness.session_runner import HarnessSessionRunner
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
     HarnessSessionStore,
+    RunNotFoundError,
     SessionNotFoundError,
 )
 from gpt2giga.harness.sessions.redaction import redact_for_storage
@@ -65,6 +76,7 @@ from gpt2giga.harness.sessions.models import (
     bundle_to_dict,
     message_to_dict,
     native_link_to_dict,
+    run_to_dict,
     session_to_dict,
 )
 from gpt2giga.harness.sessions.store import new_id, utc_now
@@ -91,6 +103,7 @@ def create_app(
     store: HarnessSessionStore | None = None,
     native_registry: NativeHistoryConnectorRegistry | None = None,
     native_index_store: NativeSessionIndexStore | None = None,
+    native_process_manager: NativeProcessManager | None = None,
 ) -> FastAPI:
     """Create the Unified Harness UI app."""
     config = config or HarnessConfig.from_env()
@@ -101,6 +114,9 @@ def create_app(
     )
     native_index_store = native_index_store or FilesystemNativeSessionIndexStore(
         config.data_dir
+    )
+    native_process_manager = native_process_manager or NativeProcessManager(
+        session_store=store
     )
     attachment_store = FilesystemAttachmentStore(config.data_dir)
     runner = HarnessSessionRunner(
@@ -117,6 +133,7 @@ def create_app(
     app.state.harness_attachment_store = attachment_store
     app.state.harness_native_registry = native_registry
     app.state.harness_native_index_store = native_index_store
+    app.state.harness_native_process_manager = native_process_manager
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -416,6 +433,132 @@ def create_app(
             "session": _session_summary(store, session.id),
             "messages": [message_to_dict(message) for message in messages],
             "native_link": native_link_to_dict(link),
+        }
+
+    @app.post("/api/native/processes/start")
+    async def native_process_start(
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        run = None
+        try:
+            session = store.get_session(
+                _required_text(payload.get("session_id"), "session_id is required")
+            )
+            options = _native_process_start_options(
+                payload=payload,
+                session=session,
+                config=config,
+                native_registry=native_registry,
+                native_index_store=native_index_store,
+            )
+            run = store.create_run(
+                session_id=session.id,
+                harness_id=options["harness_id"],
+                status="running",
+                prompt=options["prompt"],
+                model=options["model"],
+                api_mode=options["api_mode"],
+                capability=options["capability"],
+                mode=options["mode"],
+                workspace=options["workspace"],
+                invocation_mode=HarnessInvocationMode.NATIVE,
+                started_at=utc_now(),
+                metadata=_native_process_run_metadata(options),
+            )
+            process_ref = native_process_manager.start(
+                options["plan"],
+                session_id=session.id,
+                workspace=options["workspace"],
+                run_id=run.id,
+            )
+            run = store.update_run(
+                run.id,
+                command=process_ref.display_command,
+                native_session_id=options["native_session_id"],
+                metadata=_native_process_run_metadata(options, process_ref),
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Session not found") from exc
+        except HTTPException:
+            raise
+        except (NativeProcessStartError, ValueError) as exc:
+            if run is not None:
+                store.update_run(
+                    run.id,
+                    status="failed",
+                    error=str(exc),
+                    finished_at=utc_now(),
+                )
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "process": native_process_ref_to_dict(process_ref),
+            "run": run_to_dict(run),
+        }
+
+    @app.post("/api/native/processes/{process_id}/input")
+    async def native_process_input(
+        process_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            data = payload.get("data", payload.get("text", ""))
+            process_ref = native_process_manager.write(process_id, str(data))
+            run = _sync_native_process_run(store, process_ref)
+        except NativeProcessNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Native process not found"
+            ) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "process": native_process_ref_to_dict(process_ref),
+            "run": run_to_dict(run) if run is not None else None,
+        }
+
+    @app.get("/api/native/processes/{process_id}/output")
+    async def native_process_output(
+        process_id: str,
+        cursor: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
+        try:
+            chunk = native_process_manager.read_since(process_id, cursor)
+            process_ref = native_process_manager.status(process_id)
+            run = _sync_native_process_run(store, process_ref)
+        except NativeProcessNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Native process not found"
+            ) from exc
+        payload = native_output_chunk_to_dict(chunk)
+        payload["run"] = run_to_dict(run) if run is not None else None
+        return payload
+
+    @app.get("/api/native/processes/{process_id}")
+    async def native_process_status(process_id: str) -> dict[str, Any]:
+        try:
+            process_ref = native_process_manager.status(process_id)
+            run = _sync_native_process_run(store, process_ref)
+        except NativeProcessNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Native process not found"
+            ) from exc
+        return {
+            "process": native_process_ref_to_dict(process_ref),
+            "run": run_to_dict(run) if run is not None else None,
+        }
+
+    @app.delete("/api/native/processes/{process_id}")
+    async def native_process_stop(process_id: str) -> dict[str, Any]:
+        try:
+            process_ref = native_process_manager.stop(process_id)
+            run = _sync_native_process_run(store, process_ref)
+        except NativeProcessNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Native process not found"
+            ) from exc
+        return {
+            "stopped": True,
+            "process": native_process_ref_to_dict(process_ref),
+            "run": run_to_dict(run) if run is not None else None,
         }
 
     @app.patch("/api/sessions/{session_id}")
@@ -733,6 +876,197 @@ def _native_connector_or_404(
             status_code=404,
             detail="Native connector not found",
         ) from exc
+
+
+def _native_process_start_options(
+    *,
+    payload: Mapping[str, Any],
+    session: HarnessSession,
+    config: HarnessConfig,
+    native_registry: NativeHistoryConnectorRegistry,
+    native_index_store: NativeSessionIndexStore,
+) -> dict[str, Any]:
+    action = str(payload.get("action") or "start").strip().lower()
+    if action not in {"start", "resume"}:
+        raise ValueError("action must be start or resume")
+    if action == "resume":
+        return _native_process_resume_options(
+            payload=payload,
+            session=session,
+            config=config,
+            native_registry=native_registry,
+            native_index_store=native_index_store,
+        )
+    return _native_process_new_options(
+        payload=payload,
+        session=session,
+        config=config,
+        native_registry=native_registry,
+    )
+
+
+def _native_process_new_options(
+    *,
+    payload: Mapping[str, Any],
+    session: HarnessSession,
+    config: HarnessConfig,
+    native_registry: NativeHistoryConnectorRegistry,
+) -> dict[str, Any]:
+    harness_id = _required_text(
+        payload.get("harness_id") or session.default_harness_id,
+        "harness_id is required",
+    )
+    connector = _native_connector_or_404(native_registry, harness_id)
+    api_mode = parse_api_mode(payload.get("api_mode") or session.default_api_mode)
+    capability = parse_capability(
+        payload.get("capability") or HarnessCapability.AGENT_CLI.value
+    )
+    workspace = resolve_workspace(
+        _optional_text(payload.get("workspace")) or session.workspace
+    )
+    prompt = str(payload.get("prompt") or "")
+    model = _optional_text(payload.get("model")) or session.default_model
+    mode = str(payload.get("mode") or session.default_mode)
+    request = HarnessRequest(
+        prompt=prompt,
+        model=model,
+        api_mode=api_mode,
+        capability=capability,
+        mode=mode,
+        invocation_mode=HarnessInvocationMode.NATIVE,
+        workspace=workspace,
+        session_id=session.id,
+        extra=_metadata_mapping(payload.get("extra")),
+    )
+    plan = connector.build_start_command(request, config.to_context())
+    return {
+        "action": "start",
+        "plan": plan,
+        "harness_id": harness_id,
+        "prompt": prompt,
+        "model": model,
+        "api_mode": api_mode,
+        "capability": capability,
+        "mode": mode,
+        "workspace": workspace,
+        "native_ref": None,
+        "native_session_id": None,
+    }
+
+
+def _native_process_resume_options(
+    *,
+    payload: Mapping[str, Any],
+    session: HarnessSession,
+    config: HarnessConfig,
+    native_registry: NativeHistoryConnectorRegistry,
+    native_index_store: NativeSessionIndexStore,
+) -> dict[str, Any]:
+    native_ref_id = _required_text(
+        payload.get("native_ref_id"),
+        "native_ref_id is required",
+    )
+    ref = _native_ref_or_404(native_index_store, native_ref_id)
+    if not ref.can_resume:
+        raise HTTPException(
+            status_code=400,
+            detail=ref.resume_reason or "Native session cannot be resumed",
+        )
+    connector = _native_connector_or_404(native_registry, ref.harness_id)
+    plan = connector.build_resume_command(ref, config.to_context())
+    api_mode = parse_api_mode(payload.get("api_mode") or session.default_api_mode)
+    capability = parse_capability(
+        payload.get("capability") or HarnessCapability.AGENT_CLI.value
+    )
+    workspace = resolve_workspace(
+        _optional_text(payload.get("workspace")) or ref.workspace or session.workspace
+    )
+    prompt = (
+        _optional_text(payload.get("prompt")) or f"Resume native session: {ref.title}"
+    )
+    return {
+        "action": "resume",
+        "plan": plan,
+        "harness_id": ref.harness_id,
+        "prompt": prompt,
+        "model": _optional_text(payload.get("model"))
+        or _optional_text(ref.metadata.get("model"))
+        or session.default_model,
+        "api_mode": api_mode,
+        "capability": capability,
+        "mode": str(payload.get("mode") or session.default_mode),
+        "workspace": workspace,
+        "native_ref": ref,
+        "native_session_id": ref.native_session_id,
+    }
+
+
+def _native_process_run_metadata(
+    options: Mapping[str, Any],
+    process_ref: NativeProcessRef | None = None,
+) -> dict[str, Any]:
+    ref = options.get("native_ref")
+    metadata = {
+        "invocation_mode": HarnessInvocationMode.NATIVE.value,
+        "native_action": options["action"],
+    }
+    if isinstance(ref, NativeSessionRef):
+        metadata.update(
+            {
+                "native_ref_id": ref.id,
+                "native_session_id": ref.native_session_id,
+                "native_status": ref.status.value,
+            }
+        )
+    if process_ref is not None:
+        metadata["native_process"] = {
+            "id": process_ref.id,
+            "pid": process_ref.pid,
+            "transport": process_ref.transport,
+            "status": process_ref.status.value,
+        }
+    return metadata
+
+
+def _sync_native_process_run(
+    store: HarnessSessionStore,
+    process_ref: NativeProcessRef,
+):
+    status = _run_status_from_process(process_ref)
+    patch: dict[str, Any] = {
+        "status": status,
+        "command": process_ref.display_command,
+        "metadata": {
+            "invocation_mode": HarnessInvocationMode.NATIVE.value,
+            "native_process": {
+                "id": process_ref.id,
+                "pid": process_ref.pid,
+                "transport": process_ref.transport,
+                "status": process_ref.status.value,
+                "exit_code": process_ref.exit_code,
+            },
+        },
+    }
+    if process_ref.status is not NativeProcessStatus.RUNNING:
+        patch["finished_at"] = process_ref.updated_at
+    if process_ref.status is NativeProcessStatus.EXITED and process_ref.exit_code:
+        patch["error"] = f"Native process exited with code {process_ref.exit_code}"
+    try:
+        return store.update_run(process_ref.run_id, **patch)
+    except RunNotFoundError:
+        return None
+
+
+def _run_status_from_process(process_ref: NativeProcessRef) -> str:
+    if process_ref.status is NativeProcessStatus.RUNNING:
+        return "running"
+    if process_ref.status is NativeProcessStatus.STOPPED:
+        return "stopped"
+    if process_ref.status is NativeProcessStatus.FAILED:
+        return "failed"
+    if process_ref.exit_code == 0:
+        return "completed"
+    return "failed"
 
 
 def _native_transcript_message_to_dict(
