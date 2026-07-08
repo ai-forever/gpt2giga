@@ -66,8 +66,13 @@ def create_app(
     config = config or HarnessConfig.from_env()
     registry = registry or create_default_registry()
     store = store or FilesystemHarnessSessionStore(config.data_dir)
-    runner = HarnessSessionRunner(registry=registry, config=config, store=store)
     attachment_store = FilesystemAttachmentStore(config.data_dir)
+    runner = HarnessSessionRunner(
+        registry=registry,
+        config=config,
+        store=store,
+        attachment_store=attachment_store,
+    )
     app = FastAPI(title="gpt2giga Unified Harness", docs_url=None, redoc_url=None)
     app.state.harness_config = config
     app.state.harness_registry = registry

@@ -6,6 +6,12 @@ from dataclasses import dataclass
 import subprocess
 from typing import Any, Mapping
 
+from gpt2giga.harness.attachments import (
+    AttachmentNotFoundError,
+    FilesystemAttachmentStore,
+    HarnessAttachment,
+    attachment_to_dict,
+)
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.project import resolve_project
 from gpt2giga.harness.registry import HarnessRegistry
@@ -58,6 +64,9 @@ class HarnessSessionRunResult:
                 "result": result_to_dict(self.result),
             }
         )
+        attachments = self.run.metadata.get("attachments")
+        if attachments:
+            payload["attachments"] = attachments
         return payload
 
 
@@ -70,10 +79,14 @@ class HarnessSessionRunner:
         registry: HarnessRegistry,
         config: HarnessConfig,
         store: HarnessSessionStore,
+        attachment_store: FilesystemAttachmentStore | None = None,
     ) -> None:
         self.registry = registry
         self.config = config
         self.store = store
+        self.attachment_store = attachment_store or FilesystemAttachmentStore(
+            config.data_dir
+        )
 
     def create_session(
         self,
@@ -129,6 +142,19 @@ class HarnessSessionRunner:
         options = self._run_options(payload, session=session)
         harness = self.registry.get(options["harness_id"])
         previous_messages = self.store.list_messages(session.id)
+        attachments = self._load_attachments(
+            session.id,
+            options["attachment_ids"],
+        )
+        attachment_payloads = tuple(
+            _run_attachment_metadata(attachment) for attachment in attachments
+        )
+        run_metadata: dict[str, Any] = {
+            "native_resume": _native_resume_metadata(options["harness_id"])
+        }
+        if attachment_payloads:
+            run_metadata["attachment_ids"] = list(options["attachment_ids"])
+            run_metadata["attachments"] = list(attachment_payloads)
         run = self.store.create_run(
             session_id=session.id,
             harness_id=options["harness_id"],
@@ -140,7 +166,7 @@ class HarnessSessionRunner:
             mode=options["mode"],
             workspace=options["workspace"],
             started_at=utc_now(),
-            metadata={"native_resume": _native_resume_metadata(options["harness_id"])},
+            metadata=run_metadata,
         )
         self.store.append_message(
             HarnessMessage(
@@ -153,6 +179,7 @@ class HarnessSessionRunner:
                 harness_id=options["harness_id"],
                 model=options["model"],
                 api_mode=options["api_mode"],
+                metadata=_message_attachment_metadata(attachment_payloads),
             )
         )
         self._append_event(
@@ -165,6 +192,7 @@ class HarnessSessionRunner:
                 "model": options["model"],
                 "api_mode": options["api_mode"].value,
                 "mode": options["mode"],
+                "attachment_count": len(attachment_payloads),
             },
         )
         request_messages = self._build_request_messages(
@@ -180,36 +208,44 @@ class HarnessSessionRunner:
             stream=options["stream"],
             workspace=options["workspace"],
             messages=request_messages,
+            attachments=attachment_payloads,
             session_id=session.id,
             run_id=run.id,
             native_session_id=options["native_session_id"],
-            extra=options["extra"],
+            extra=_request_extra(options["extra"], attachment_payloads),
         )
+        raw_request = {
+            "harness_id": options["harness_id"],
+            "prompt": options["prompt"],
+            "model": options["model"],
+            "api_mode": options["api_mode"].value,
+            "capability": options["capability"].value,
+            "mode": options["mode"],
+            "stream": options["stream"],
+            "workspace": options["workspace"],
+            "messages": [
+                {"role": message.role, "content": message.content}
+                for message in request_messages
+            ],
+            "extra": options["extra"],
+        }
+        if attachment_payloads:
+            raw_request["attachment_ids"] = list(options["attachment_ids"])
+            raw_request["attachments"] = list(attachment_payloads)
         self.store.append_raw_request(
             session_id=session.id,
             run_id=run.id,
-            payload={
-                "harness_id": options["harness_id"],
-                "prompt": options["prompt"],
-                "model": options["model"],
-                "api_mode": options["api_mode"].value,
-                "capability": options["capability"].value,
-                "mode": options["mode"],
-                "stream": options["stream"],
-                "workspace": options["workspace"],
-                "messages": [
-                    {"role": message.role, "content": message.content}
-                    for message in request_messages
-                ],
-                "extra": options["extra"],
-            },
+            payload=raw_request,
         )
         self._append_event(
             session.id,
             run.id,
             "raw_request",
             "Stored redacted harness request.",
-            {"message_count": len(request_messages)},
+            {
+                "message_count": len(request_messages),
+                "attachment_count": len(attachment_payloads),
+            },
         )
         try:
             result = harness.run(request, self.config.to_context())
@@ -271,7 +307,7 @@ class HarnessSessionRunner:
             event_message,
             {"role": role},
         )
-        metadata = {"native_resume": _native_resume_metadata(options["harness_id"])}
+        metadata = dict(run_metadata)
         diff = _capture_git_diff(
             options["workspace"], enabled=options["mode"] == "edit"
         )
@@ -353,6 +389,7 @@ class HarnessSessionRunner:
             extra["dry_run"] = True
         if "continue_native" in payload:
             extra["continue_native"] = bool(payload.get("continue_native"))
+        attachment_ids = _attachment_ids(payload.get("attachment_ids"))
         return {
             "prompt": prompt,
             "harness_id": harness_id,
@@ -364,6 +401,7 @@ class HarnessSessionRunner:
             "stream": bool(payload.get("stream")),
             "extra": extra,
             "native_session_id": _optional_text(payload.get("native_session_id")),
+            "attachment_ids": attachment_ids,
         }
 
     def _build_request_messages(
@@ -379,6 +417,24 @@ class HarnessSessionRunner:
         ]
         history.append(HarnessChatMessage(role="user", content=prompt))
         return tuple(history[-MAX_HISTORY_MESSAGES:])
+
+    def _load_attachments(
+        self,
+        session_id: str,
+        attachment_ids: tuple[str, ...],
+    ) -> tuple[HarnessAttachment, ...]:
+        attachments: list[HarnessAttachment] = []
+        for attachment_id in attachment_ids:
+            try:
+                attachment = self.attachment_store.get_attachment(attachment_id)
+            except AttachmentNotFoundError as exc:
+                raise ValueError(f"Unknown attachment id: {attachment_id}") from exc
+            if attachment.session_id != session_id:
+                raise ValueError(
+                    f"Attachment does not belong to session: {attachment_id}"
+                )
+            attachments.append(attachment)
+        return tuple(attachments)
 
     def _append_event(
         self,
@@ -429,6 +485,52 @@ def _optional_text(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _attachment_ids(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValueError("attachment_ids must be a list")
+    ids: list[str] = []
+    for item in value:
+        attachment_id = _optional_text(item)
+        if attachment_id is None:
+            raise ValueError("attachment_ids must contain non-empty strings")
+        ids.append(attachment_id)
+    return tuple(ids)
+
+
+def _run_attachment_metadata(
+    attachment: HarnessAttachment,
+) -> dict[str, Any]:
+    payload = attachment_to_dict(attachment)
+    payload.pop("storage_path", None)
+    return payload
+
+
+def _message_attachment_metadata(
+    attachments: tuple[Mapping[str, Any], ...],
+) -> dict[str, Any]:
+    if not attachments:
+        return {}
+    return {
+        "attachment_ids": [str(attachment["id"]) for attachment in attachments],
+        "attachments": [dict(attachment) for attachment in attachments],
+    }
+
+
+def _request_extra(
+    extra: Mapping[str, Any],
+    attachments: tuple[Mapping[str, Any], ...],
+) -> dict[str, Any]:
+    payload = dict(extra)
+    if attachments:
+        payload["attachment_ids"] = [
+            str(attachment["id"]) for attachment in attachments
+        ]
+        payload["attachments"] = [dict(attachment) for attachment in attachments]
+    return payload
 
 
 def _capture_git_diff(workspace: str | None, *, enabled: bool) -> str | None:

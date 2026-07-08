@@ -101,6 +101,7 @@ class HarnessRequest:
     stream: bool = False
     workspace: str | None = None
     messages: tuple[HarnessChatMessage, ...] = ()
+    attachments: tuple[Mapping[str, Any], ...] = ()
     session_id: str | None = None
     run_id: str | None = None
     native_session_id: str | None = None
