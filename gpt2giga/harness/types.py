@@ -8,6 +8,8 @@ import os
 import re
 from typing import Any, Mapping
 
+from gpt2giga.harness.native.models import HarnessInvocationMode
+
 
 class HarnessCapability(str, Enum):
     """Describe a capability a harness can execute."""
@@ -77,6 +79,9 @@ class HarnessSpec:
     supports_attachments: bool = False
     accepted_attachment_kinds: tuple[str, ...] = field(default_factory=tuple)
     attachment_transport: tuple[str, ...] = field(default_factory=tuple)
+    supports_native_sessions: bool = False
+    supports_external_history: bool = False
+    default_invocation_mode: HarnessInvocationMode = HarnessInvocationMode.HEADLESS
     default_api_mode: GigaChatApiMode = GigaChatApiMode.V2
     tags: tuple[str, ...] = field(default_factory=tuple)
 
@@ -243,6 +248,9 @@ def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
         "supports_attachments": spec.supports_attachments,
         "accepted_attachment_kinds": list(spec.accepted_attachment_kinds),
         "attachment_transport": list(spec.attachment_transport),
+        "supports_native_sessions": spec.supports_native_sessions,
+        "supports_external_history": spec.supports_external_history,
+        "default_invocation_mode": spec.default_invocation_mode.value,
         "default_api_mode": spec.default_api_mode.value,
         "tags": list(spec.tags),
     }
