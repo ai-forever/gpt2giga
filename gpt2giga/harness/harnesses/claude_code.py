@@ -12,6 +12,12 @@ from gpt2giga.harness.harnesses.agent_cli import (
     with_events,
     workspace_error,
 )
+from gpt2giga.harness.harnesses.attachment_plan import (
+    attachment_raw_metadata,
+    attachment_warning_events,
+    cli_args_from_attachments,
+    prompt_with_attachments,
+)
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.types import (
     Availability,
@@ -75,6 +81,7 @@ class ClaudeCodeHarness(BaseHarness):
         permission_mode = MODE_TO_PERMISSION.get(
             request.mode, MODE_TO_PERMISSION["plan"]
         )
+        prompt = prompt_with_attachments(request)
         return (
             executable,
             "--bare",
@@ -87,7 +94,8 @@ class ClaudeCodeHarness(BaseHarness):
             "--no-session-persistence",
             "--permission-mode",
             permission_mode,
-            request.prompt,
+            *cli_args_from_attachments(request),
+            prompt,
         )
 
     def build_env(
@@ -120,7 +128,9 @@ class ClaudeCodeHarness(BaseHarness):
                 raw={
                     "env": redact_secrets(env),
                     "workspace": request.workspace,
+                    **attachment_raw_metadata(request),
                 },
+                events=attachment_warning_events(request),
                 command=command,
             )
         workspace_validation_error = workspace_error(request.workspace)
@@ -155,4 +165,4 @@ class ClaudeCodeHarness(BaseHarness):
             cwd=request.workspace,
             timeout_seconds=context.timeout_seconds,
         )
-        return with_events(result, proxy_events)
+        return with_events(result, (*attachment_warning_events(request), *proxy_events))

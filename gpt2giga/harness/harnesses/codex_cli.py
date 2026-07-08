@@ -13,6 +13,12 @@ from gpt2giga.harness.harnesses.agent_cli import (
     with_events,
     workspace_error,
 )
+from gpt2giga.harness.harnesses.attachment_plan import (
+    attachment_raw_metadata,
+    attachment_warning_events,
+    cli_args_from_attachments,
+    prompt_with_attachments,
+)
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.types import (
     Availability,
@@ -69,6 +75,7 @@ class CodexCliHarness(BaseHarness):
         executable = shutil.which("codex") or "codex"
         sandbox = MODE_TO_SANDBOX.get(request.mode, MODE_TO_SANDBOX["plan"])
         model = request.model or context.default_model or "GigaChat"
+        prompt = prompt_with_attachments(request)
         return (
             executable,
             "--ask-for-approval",
@@ -79,7 +86,8 @@ class CodexCliHarness(BaseHarness):
             "--ephemeral",
             "-m",
             model,
-            request.prompt,
+            *cli_args_from_attachments(request),
+            prompt,
         )
 
     def build_env(
@@ -117,7 +125,9 @@ class CodexCliHarness(BaseHarness):
                         self.build_env(request, context, codex_home="<temp>")
                     ),
                     "workspace": request.workspace,
+                    **attachment_raw_metadata(request),
                 },
+                events=attachment_warning_events(request),
                 command=command,
             )
         workspace_validation_error = workspace_error(request.workspace)
@@ -157,7 +167,10 @@ class CodexCliHarness(BaseHarness):
                 cwd=request.workspace or None,
                 timeout_seconds=context.timeout_seconds,
             )
-            return with_events(result, proxy_events)
+            return with_events(
+                result,
+                (*attachment_warning_events(request), *proxy_events),
+            )
 
 
 def _write_codex_config(

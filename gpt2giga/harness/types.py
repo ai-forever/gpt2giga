@@ -102,6 +102,7 @@ class HarnessRequest:
     workspace: str | None = None
     messages: tuple[HarnessChatMessage, ...] = ()
     attachments: tuple[Mapping[str, Any], ...] = ()
+    attachment_render_plan: Mapping[str, Any] | None = None
     session_id: str | None = None
     run_id: str | None = None
     native_session_id: str | None = None

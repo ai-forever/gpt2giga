@@ -15,6 +15,12 @@ from gpt2giga.harness.harnesses.agent_cli import (
     with_events,
     workspace_error,
 )
+from gpt2giga.harness.harnesses.attachment_plan import (
+    attachment_raw_metadata,
+    attachment_warning_events,
+    cli_args_from_attachments,
+    prompt_with_attachments,
+)
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.types import (
     Availability,
@@ -69,12 +75,14 @@ class GeminiCliHarness(BaseHarness):
         """Build the Gemini CLI command without executing it."""
         executable = shutil.which("gemini") or "gemini"
         model = request.model or context.default_model or "GigaChat"
+        prompt = prompt_with_attachments(request)
         command = [
             executable,
             "-m",
             model,
+            *cli_args_from_attachments(request),
             "-p",
-            request.prompt,
+            prompt,
             "--output-format",
             "json",
             "--skip-trust",
@@ -121,7 +129,9 @@ class GeminiCliHarness(BaseHarness):
                         self.build_env(request, context, home="<temp>")
                     ),
                     "workspace": request.workspace,
+                    **attachment_raw_metadata(request),
                 },
+                events=attachment_warning_events(request),
                 command=command,
             )
         workspace_validation_error = workspace_error(request.workspace)
@@ -159,7 +169,10 @@ class GeminiCliHarness(BaseHarness):
                 cwd=request.workspace,
                 timeout_seconds=context.timeout_seconds,
             )
-            return with_events(result, proxy_events)
+            return with_events(
+                result,
+                (*attachment_warning_events(request), *proxy_events),
+            )
 
 
 def _write_gemini_settings(home: Path) -> None:

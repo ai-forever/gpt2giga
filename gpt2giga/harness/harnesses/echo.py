@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from gpt2giga.harness.harnesses.attachment_plan import (
+    attachment_raw_metadata,
+    attachment_warning_events,
+)
 from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.types import (
     Availability,
     HarnessCapability,
     HarnessContext,
+    HarnessEvent,
     HarnessRequest,
     HarnessResult,
     HarnessSpec,
@@ -45,15 +50,24 @@ class EchoHarness(BaseHarness):
         context: HarnessContext,
     ) -> HarnessResult:
         model = request.model or context.default_model
+        attachment_summary = _attachment_summary(request)
+        text = request.prompt
+        if attachment_summary:
+            text = f"{request.prompt}\n\nAttachments:\n{attachment_summary}"
         return HarnessResult(
             ok=True,
-            text=request.prompt,
+            text=text,
             raw={
                 "model": model,
                 "api_mode": request.api_mode.value,
                 "capability": request.capability.value,
                 "mode": request.mode,
+                **attachment_raw_metadata(request),
             },
+            events=(
+                *attachment_warning_events(request),
+                *_attachment_events(request),
+            ),
             command=(
                 "giga",
                 "harness",
@@ -65,3 +79,33 @@ class EchoHarness(BaseHarness):
                 request.prompt,
             ),
         )
+
+
+def _attachment_summary(request: HarnessRequest) -> str:
+    lines: list[str] = []
+    for attachment in request.attachments:
+        filename = str(attachment.get("filename") or attachment.get("id") or "")
+        kind = str(attachment.get("kind") or "attachment")
+        mime_type = str(attachment.get("mime_type") or "application/octet-stream")
+        size_bytes = int(attachment.get("size_bytes") or 0)
+        if filename:
+            lines.append(f"- {filename} ({kind}, {mime_type}, {size_bytes} bytes)")
+    return "\n".join(lines)
+
+
+def _attachment_events(request: HarnessRequest) -> tuple[HarnessEvent, ...]:
+    return tuple(
+        HarnessEvent(
+            type="attachment",
+            message=(
+                "Echo received attachment "
+                f"{attachment.get('filename') or attachment.get('id')}."
+            ),
+            payload={
+                "id": attachment.get("id"),
+                "kind": attachment.get("kind"),
+                "filename": attachment.get("filename"),
+            },
+        )
+        for attachment in request.attachments
+    )

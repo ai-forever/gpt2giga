@@ -231,6 +231,7 @@ class HarnessSessionRunner:
             workspace=options["workspace"],
             messages=request_messages,
             attachments=attachment_payloads,
+            attachment_render_plan=attachment_render_plan_payload,
             session_id=session.id,
             run_id=run.id,
             native_session_id=options["native_session_id"],
