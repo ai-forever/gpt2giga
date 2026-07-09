@@ -110,6 +110,10 @@ from gpt2giga.harness.pr_artifacts import (
     create_pr_branch,
     pr_artifact_to_dict,
 )
+from gpt2giga.harness.plugins import (
+    harness_validation_report_to_dict,
+    validate_harness_spec,
+)
 from gpt2giga.harness.provenance import (
     build_replay_request,
     build_run_provenance,
@@ -230,14 +234,21 @@ def create_app(
 
     @app.get("/api/harnesses")
     async def harnesses() -> dict[str, Any]:
-        return {
-            "harnesses": [
+        harness_items = []
+        for harness in registry.list():
+            spec = harness.spec()
+            validation = registry.validation_report(spec.id) or validate_harness_spec(
+                spec
+            )
+            harness_items.append(
                 {
-                    "spec": spec_to_dict(harness.spec()),
+                    "spec": spec_to_dict(spec),
                     "availability": availability_to_dict(harness.availability()),
+                    "validation": harness_validation_report_to_dict(validation),
                 }
-                for harness in registry.list()
-            ],
+            )
+        return {
+            "harnesses": harness_items,
             "discovery_errors": list(registry.discovery_errors),
         }
 

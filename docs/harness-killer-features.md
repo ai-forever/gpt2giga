@@ -228,7 +228,7 @@ this status to choose the next vertical slice.
 | Slice 16: provenance and replay | Implemented as an MVP: completed session-backed runs store `run.metadata.provenance` with project/git, harness, request, redacted command/env, raw-record, event, attachment, and replay metadata; `/api/runs/{run_id}/provenance`, `/api/runs/{run_id}/replay`, and `/api/runs/{run_id}/fork` expose inspection and local replay/fork workflows; `giga run provenance|replay RUN_ID` exposes the same from the CLI; the UI has a Provenance inspector tab. Richer time-travel replay, benchmark integration, and native terminal replay remain future work. |
 | Slice 17: secrets firewall and context budget inspector | Implemented as an MVP: `/api/preflight/run` scans prompt/history/memory/attachments, hard-blocks private keys and credential-looking content before run persistence or harness invocation, records warning-level reports in `run.metadata.preflight`, and surfaces context budget details plus attachment exclude/path-only remediation in the browser UI. |
 | Slice 18: local evals/benchmarks | Implemented as an MVP: project eval specs are loaded from `.giga/evals/*.yaml`, `giga init` creates a safe smoke spec, `giga eval list|run` and `/api/evals*` expose local runs, deterministic checks produce redacted scorecards under `projects/PROJECT_ID/eval-runs/`, and the UI has an Evals inspector tab. Parallel/long-running benchmark orchestration and richer metrics remain future work. |
-| Slice 19: plugin/marketplace-ready harness format | Partially implemented through entry point loading and scaffold output. Metadata schema, validation, and UI config forms remain open. |
+| Slice 19: plugin/marketplace-ready harness format | Implemented as an MVP: entry-point harnesses are loaded into the registry, `HarnessSpec` exposes marketplace-friendly icon/config-schema/metadata fields, `giga harness scaffold|inspect|validate` cover plugin authoring and validation, unknown capability fields are ignored safely in API/UI serialization, and the browser renders simple config schema fields from plugin metadata. Runtime plugin config persistence and a full marketplace installer remain future work. |
 | Slice 20: editor bridge | Open. |
 
 ## Target Data Boundaries
@@ -266,10 +266,10 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 19 for a
-plugin/marketplace-ready harness format: harden entry-point harness metadata,
-add validation/inspection commands, and make plugin capability metadata visible
-without editing the core registry or no-build UI for every new harness.
+The highest-value next implementation slice is Slice 20 for an editor bridge:
+add safe editor command builders, dry-run/open endpoints, and UI/CLI actions for
+opening a workspace, changed file, diff, terminal, or deep link from a session
+or run.
 
 Slice 03 can still be enriched later with richer per-harness stdout/message
 delta emission, Slice 10 can grow parallel execution and arena cancellation,
@@ -279,7 +279,8 @@ later add real opt-in tool config writes after an explicit safety review, Slice
 Slice 15 can later add automatic memory suggestions after an explicit approval
 flow. Slice 17 can later add deeper language-aware detectors and per-harness
 budget limits. Slice 18 can later add parallel benchmark execution, richer
-aggregate metrics, and trend comparisons across saved scorecards.
+aggregate metrics, and trend comparisons across saved scorecards. Slice 19 can
+later add persisted per-plugin config values and an install/update workflow.
 
 ## Safety Rules
 

@@ -13,6 +13,7 @@ from gpt2giga.harness.types import (
     HarnessSpec,
 )
 from gpt2giga.harness.ui.app import create_app, validate_ui_bind
+from gpt2giga.harness.ui.static import INDEX_HTML
 
 
 def test_ui_defaults_endpoint_does_not_expose_secrets(monkeypatch):
@@ -59,6 +60,32 @@ def test_ui_harnesses_endpoint_includes_discovery_errors():
 
     assert response.status_code == 200
     assert response.json()["discovery_errors"] == ["broken-plugin: import failed"]
+
+
+def test_ui_harnesses_endpoint_includes_plugin_metadata():
+    registry = HarnessRegistry()
+    registry.register(_SchemaPluginHarness())
+    app = create_app(HarnessConfig(), registry=registry)
+    client = TestClient(app)
+
+    response = client.get("/api/harnesses")
+
+    assert response.status_code == 200
+    item = response.json()["harnesses"][0]
+    assert item["spec"]["id"] == "schema-plugin"
+    assert item["spec"]["plugin_metadata"]["icon"] == "plug"
+    assert (
+        item["spec"]["plugin_metadata"]["config_schema"]["properties"]["endpoint"][
+            "type"
+        ]
+        == "string"
+    )
+    assert item["validation"]["ok"] is True
+
+
+def test_ui_static_includes_plugin_config_schema_renderer():
+    assert "function simpleConfigFields" in INDEX_HTML
+    assert "harness-config-" in INDEX_HTML
 
 
 def test_ui_models_rejects_invalid_api_mode_non_fatally():
@@ -641,6 +668,39 @@ class _CaptureRequestHarness(BaseHarness):
     ) -> HarnessResult:
         self.last_request = request
         return HarnessResult(ok=True, text="ok")
+
+
+class _SchemaPluginHarness(BaseHarness):
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="schema-plugin",
+            title="Schema Plugin",
+            kind="custom",
+            description="Schema-backed plugin harness",
+            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+            icon="plug",
+            config_schema={
+                "type": "object",
+                "properties": {
+                    "endpoint": {
+                        "type": "string",
+                        "title": "Endpoint",
+                    }
+                },
+            },
+            metadata={"package": "schema-plugin"},
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("schema plugin")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context,
+    ) -> HarnessResult:
+        return HarnessResult(ok=True, text=request.prompt)
 
 
 class _ExplodingHarness(BaseHarness):

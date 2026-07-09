@@ -376,6 +376,7 @@ Inspect one harness:
 
 ```bash
 giga harness inspect direct-chat
+giga harness validate direct-chat
 ```
 
 Automation-friendly JSON output is available on commands that return structured
@@ -383,8 +384,23 @@ results:
 
 ```bash
 giga harness list --json
+giga harness inspect direct-chat --json
+giga harness validate direct-chat --json
 giga harness run echo --prompt "hello" --json
 ```
+
+`HarnessSpec` is the marketplace-facing metadata contract. In addition to id,
+title, kind, description, tags, capabilities, attachment support, and native
+support, third-party harnesses can expose:
+
+- `icon`: a short icon token shown in the UI;
+- `config_schema`: a JSON-schema-like object schema for simple plugin settings;
+- `metadata`: safe package/version/homepage metadata.
+
+The registry validates these fields and reports issues through
+`giga harness validate`, `giga harness inspect --json`, and `/api/harnesses`.
+Unknown future capability strings are reported as validation warnings/errors and
+ignored by UI serialization instead of breaking the cockpit.
 
 ## Codex CLI Harness
 
@@ -984,6 +1000,7 @@ If discovery fails, the UI still accepts manual model input.
 
    ```bash
    giga harness list
+   giga harness validate my-harness
    giga ui
    ```
 

@@ -1416,17 +1416,24 @@ INDEX_HTML = """<!doctype html>
       for (const item of state.harnesses) {
         const spec = item.spec || {};
         const availability = item.availability || {};
+        const validation = item.validation || {};
+        const plugin = spec.plugin_metadata || {};
         const capabilities = Array.isArray(spec.capabilities) ? spec.capabilities.slice(0, 3) : [];
+        const configFields = simpleConfigFields(plugin.config_schema || spec.config_schema || {});
         const extras = [];
         if (spec.supports_workspace) extras.push("workspace");
         if (spec.supports_streaming) extras.push("stream");
+        if (configFields.length) extras.push(`config: ${configFields.length}`);
+        if (validation.ok === false) extras.push("validate");
         const recommended = state.routeRecommendation && state.routeRecommendation.harness_id === spec.id;
+        const icon = plugin.icon || spec.icon || "";
         const card = document.createElement("div");
         card.className = "harness-card";
         card.innerHTML = `
-          <div class="session-title">${escapeHtml(spec.title || spec.id)}</div>
+          <div class="session-title">${icon ? `<span>${escapeHtml(icon)}</span> ` : ""}${escapeHtml(spec.title || spec.id)}</div>
           <div class="session-meta">
             <span>${escapeHtml(spec.id || "")}</span>
+            <span>${escapeHtml(spec.kind || "")}</span>
             <span>${escapeHtml(availability.status || "unknown")}</span>
             ${recommended ? '<span class="badge ok">Recommended</span>' : ''}
           </div>
@@ -1462,11 +1469,76 @@ INDEX_HTML = """<!doctype html>
       renderCapabilityOptions(item.spec);
       updateHarnessDrivenControls();
       renderAttachments();
-      const capabilities = Array.isArray(item.spec.capabilities) ? item.spec.capabilities.join(", ") : "";
-      setText("harness-details", `${item.spec.title || harnessId} - ${item.spec.description || ""}${capabilities ? " Capabilities: " + capabilities : ""}`);
+      renderHarnessDetails(item);
       renderRouteRecommendation(state.routeRecommendation);
       loadNativeSessions(false);
       persistProjectState();
+    }
+
+    function renderHarnessDetails(item) {
+      const spec = item.spec || {};
+      const plugin = spec.plugin_metadata || {};
+      const validation = item.validation || {};
+      const details = byId("harness-details");
+      details.textContent = "";
+      const capabilities = Array.isArray(spec.capabilities) ? spec.capabilities.join(", ") : "";
+      const summary = document.createElement("div");
+      summary.textContent = `${spec.title || spec.id} - ${spec.description || ""}${capabilities ? " Capabilities: " + capabilities : ""}`;
+      details.appendChild(summary);
+      const fields = simpleConfigFields(plugin.config_schema || spec.config_schema || {});
+      if (fields.length) {
+        const form = document.createElement("div");
+        form.className = "config-grid";
+        for (const field of fields) {
+          const label = document.createElement("label");
+          label.textContent = field.title || field.name;
+          const input = document.createElement(field.type === "array" ? "textarea" : "input");
+          input.name = `harness-config-${field.name}`;
+          input.disabled = true;
+          input.placeholder = field.description || "";
+          if (field.type === "boolean") input.type = "checkbox";
+          else if (field.type === "integer" || field.type === "number") input.type = "number";
+          else input.type = "text";
+          if (field.default !== undefined && field.type !== "boolean") input.value = String(field.default);
+          if (field.default !== undefined && field.type === "boolean") input.checked = Boolean(field.default);
+          label.appendChild(input);
+          form.appendChild(label);
+        }
+        details.appendChild(form);
+      }
+      if (validation.ok === false && Array.isArray(validation.issues)) {
+        const warnings = validation.issues
+          .filter((issue) => issue.level === "error" || issue.level === "warning")
+          .slice(0, 3)
+          .map((issue) => issue.field ? `${issue.field}: ${issue.message}` : issue.message);
+        if (warnings.length) {
+          const warning = document.createElement("div");
+          warning.className = "warning";
+          warning.textContent = warnings.join(" ");
+          details.appendChild(warning);
+        }
+      }
+    }
+
+    function simpleConfigFields(schema) {
+      if (!schema || typeof schema !== "object") return [];
+      const properties = schema.properties && typeof schema.properties === "object" ? schema.properties : {};
+      const required = Array.isArray(schema.required) ? new Set(schema.required) : new Set();
+      const fields = [];
+      for (const [name, value] of Object.entries(properties)) {
+        if (!value || typeof value !== "object") continue;
+        const type = value.type || "string";
+        if (!["string", "integer", "number", "boolean", "array"].includes(type)) continue;
+        fields.push({
+          name,
+          type,
+          title: value.title || name,
+          description: value.description || "",
+          default: value.default,
+          required: required.has(name)
+        });
+      }
+      return fields.slice(0, 12);
     }
 
     function ensureArenaSelection(harnessId) {

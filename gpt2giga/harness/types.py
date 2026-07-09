@@ -92,6 +92,7 @@ class HarnessSpec:
     kind: str
     description: str
     capabilities: tuple[HarnessCapability, ...]
+    icon: str | None = None
     supports_model_selection: bool = True
     supports_api_mode_selection: bool = True
     supports_streaming: bool = False
@@ -104,6 +105,8 @@ class HarnessSpec:
     default_invocation_mode: HarnessInvocationMode = HarnessInvocationMode.HEADLESS
     default_api_mode: GigaChatApiMode = GigaChatApiMode.V2
     tags: tuple[str, ...] = field(default_factory=tuple)
+    config_schema: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -257,25 +260,124 @@ def availability_to_dict(availability: Availability) -> dict[str, Any]:
 
 def spec_to_dict(spec: HarnessSpec) -> dict[str, Any]:
     """Serialize a harness spec for JSON output."""
+    capabilities = list(spec_capability_values(spec))
+    config_schema = _safe_mapping(getattr(spec, "config_schema", {}))
+    metadata = _safe_mapping(getattr(spec, "metadata", {}))
+    accepted_attachment_kinds = _string_values(
+        getattr(spec, "accepted_attachment_kinds", ())
+    )
+    attachment_transport = _string_values(getattr(spec, "attachment_transport", ()))
+    default_invocation_mode = _enum_text(
+        getattr(spec, "default_invocation_mode", None),
+        HarnessInvocationMode.HEADLESS.value,
+    )
+    default_api_mode = _enum_text(
+        getattr(spec, "default_api_mode", None),
+        GigaChatApiMode.V2.value,
+    )
+    tags = _string_values(getattr(spec, "tags", ()))
     return {
-        "id": spec.id,
-        "title": spec.title,
-        "kind": spec.kind,
-        "description": spec.description,
-        "capabilities": [capability.value for capability in spec.capabilities],
+        "id": _optional_text(spec.id) or "",
+        "title": _optional_text(spec.title) or "",
+        "kind": _optional_text(spec.kind) or "",
+        "description": _optional_text(spec.description) or "",
+        "icon": _optional_text(getattr(spec, "icon", None)),
+        "capabilities": capabilities,
         "supports_model_selection": spec.supports_model_selection,
         "supports_api_mode_selection": spec.supports_api_mode_selection,
         "supports_streaming": spec.supports_streaming,
         "supports_workspace": spec.supports_workspace,
         "supports_attachments": spec.supports_attachments,
-        "accepted_attachment_kinds": list(spec.accepted_attachment_kinds),
-        "attachment_transport": list(spec.attachment_transport),
+        "accepted_attachment_kinds": accepted_attachment_kinds,
+        "attachment_transport": attachment_transport,
         "supports_native_sessions": spec.supports_native_sessions,
         "supports_external_history": spec.supports_external_history,
-        "default_invocation_mode": spec.default_invocation_mode.value,
-        "default_api_mode": spec.default_api_mode.value,
-        "tags": list(spec.tags),
+        "default_invocation_mode": default_invocation_mode,
+        "default_api_mode": default_api_mode,
+        "tags": tags,
+        "config_schema": config_schema,
+        "metadata": metadata,
+        "plugin_metadata": {
+            "display_name": _optional_text(spec.title) or "",
+            "description": _optional_text(spec.description) or "",
+            "icon": _optional_text(getattr(spec, "icon", None)),
+            "kind": _optional_text(spec.kind) or "",
+            "capabilities": capabilities,
+            "supports": {
+                "model_selection": spec.supports_model_selection,
+                "api_mode_selection": spec.supports_api_mode_selection,
+                "streaming": spec.supports_streaming,
+                "workspace": spec.supports_workspace,
+                "attachments": spec.supports_attachments,
+                "native_sessions": spec.supports_native_sessions,
+                "external_history": spec.supports_external_history,
+                "headless": True,
+                "native": spec.supports_native_sessions,
+            },
+            "attachments": {
+                "supported": spec.supports_attachments,
+                "accepted_kinds": accepted_attachment_kinds,
+                "transport": attachment_transport,
+            },
+            "config_schema": config_schema,
+            "metadata": metadata,
+        },
     }
+
+
+def spec_capability_values(spec: HarnessSpec) -> tuple[str, ...]:
+    """Return known capability values from a spec, ignoring unknown plugin fields."""
+    values: list[str] = []
+    for capability in getattr(spec, "capabilities", ()):
+        value = _capability_value(capability)
+        if value is not None and value not in values:
+            values.append(value)
+    return tuple(values)
+
+
+def _capability_value(value: Any) -> str | None:
+    if isinstance(value, HarnessCapability):
+        return value.value
+    if isinstance(value, str):
+        try:
+            return HarnessCapability(value).value
+        except ValueError:
+            return None
+    return None
+
+
+def _safe_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return dict(redact_secrets(dict(value)))
+
+
+def _string_values(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    try:
+        return [str(item) for item in value]
+    except TypeError:
+        return [str(value)]
+
+
+def _enum_text(value: Any, default: str) -> str:
+    enum_value = getattr(value, "value", None)
+    if isinstance(enum_value, str):
+        return enum_value
+    if isinstance(value, str) and value:
+        return value
+    return default
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 def event_to_dict(event: HarnessEvent) -> dict[str, Any]:

@@ -13,6 +13,7 @@ from gpt2giga.harness.harnesses import (
     GeminiCliHarness,
 )
 from gpt2giga.harness.harnesses.base import BaseHarness
+from gpt2giga.harness.plugins import HarnessValidationReport, validate_harness_spec
 
 ENTRY_POINT_GROUP = "gpt2giga.harnesses"
 BUILTIN_HARNESSES = (
@@ -33,12 +34,17 @@ class HarnessRegistry:
 
     def __init__(self) -> None:
         self._harnesses: dict[str, BaseHarness] = {}
+        self.validation_reports: dict[str, HarnessValidationReport] = {}
         self.discovery_errors: list[str] = []
 
     def register(self, harness: BaseHarness) -> None:
         """Register one harness instance."""
         spec = harness.spec()
-        self._harnesses[spec.id] = harness
+        report = validate_harness_spec(spec)
+        if not report.harness_id:
+            raise ValueError("Harness id is required.")
+        self._harnesses[report.harness_id] = harness
+        self.validation_reports[report.harness_id] = report
 
     def get(self, harness_id: str) -> BaseHarness:
         """Return a registered harness by id."""
@@ -54,6 +60,10 @@ class HarnessRegistry:
     def ids(self) -> tuple[str, ...]:
         """Return registered harness ids."""
         return tuple(sorted(self._harnesses))
+
+    def validation_report(self, harness_id: str) -> HarnessValidationReport | None:
+        """Return the last validation report for a registered harness."""
+        return self.validation_reports.get(harness_id)
 
     @classmethod
     def with_builtins(cls) -> "HarnessRegistry":
@@ -76,8 +86,7 @@ class HarnessRegistry:
             return
         for entry_point in selected:
             try:
-                harness_class = entry_point.load()
-                harness = harness_class()
+                harness = _load_entry_point_harness(entry_point.load())
                 self.register(harness)
             except Exception as exc:  # pragma: no cover - plugin failure path
                 self.discovery_errors.append(f"{entry_point.name}: {exc}")
@@ -96,3 +105,17 @@ def _select_entry_points():
     if hasattr(all_entry_points, "select"):
         return all_entry_points.select(group=ENTRY_POINT_GROUP)
     return all_entry_points.get(ENTRY_POINT_GROUP, ())
+
+
+def _load_entry_point_harness(loaded):
+    if isinstance(loaded, BaseHarness):
+        return loaded
+    if isinstance(loaded, type):
+        harness = loaded()
+    elif callable(loaded):
+        harness = loaded()
+    else:
+        raise TypeError("entry point must expose a BaseHarness class or factory")
+    if not isinstance(harness, BaseHarness):
+        raise TypeError("entry point did not create a BaseHarness instance")
+    return harness

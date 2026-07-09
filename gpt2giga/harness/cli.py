@@ -59,6 +59,10 @@ from gpt2giga.harness.preflight import (
     preflight_report_to_dict,
 )
 from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
+from gpt2giga.harness.plugins import (
+    harness_validation_report_to_dict,
+    validate_harness_spec,
+)
 from gpt2giga.harness.provenance import (
     build_replay_request,
     build_run_provenance,
@@ -93,6 +97,7 @@ from gpt2giga.harness.types import (
     parse_api_mode,
     parse_capability,
     result_to_dict,
+    spec_capability_values,
     spec_to_dict,
 )
 from gpt2giga.harness.ui.app import create_app, validate_ui_bind
@@ -346,6 +351,11 @@ def build_parser() -> argparse.ArgumentParser:
     harness_inspect.add_argument("--json", action="store_true")
     harness_inspect.set_defaults(handler=_handle_harness_inspect)
 
+    harness_validate = harness_subparsers.add_parser("validate")
+    harness_validate.add_argument("harness_id")
+    harness_validate.add_argument("--json", action="store_true")
+    harness_validate.set_defaults(handler=_handle_harness_validate)
+
     harness_run = harness_subparsers.add_parser("run", parents=[common])
     harness_run.add_argument("harness_id")
     harness_run.add_argument("--prompt", required=True)
@@ -433,15 +443,19 @@ def _handle_harness_list(args: argparse.Namespace, config: HarnessConfig) -> int
     rows = []
     for harness in registry.list():
         spec = harness.spec()
+        spec_payload = spec_to_dict(spec)
         availability = harness.availability()
+        validation = registry.validation_report(spec.id) or validate_harness_spec(spec)
         rows.append(
             {
-                "id": spec.id,
-                "kind": spec.kind,
+                "id": spec_payload["id"],
+                "kind": spec_payload["kind"],
                 "status": availability.status.value,
-                "native": spec.supports_native_sessions,
-                "default_invocation_mode": spec.default_invocation_mode.value,
-                "description": spec.description,
+                "native": spec_payload["supports_native_sessions"],
+                "default_invocation_mode": spec_payload["default_invocation_mode"],
+                "description": spec_payload["description"],
+                "plugin_metadata": spec_payload["plugin_metadata"],
+                "validation": harness_validation_report_to_dict(validation),
             }
         )
     if args.json:
@@ -454,15 +468,40 @@ def _handle_harness_list(args: argparse.Namespace, config: HarnessConfig) -> int
 def _handle_harness_inspect(args: argparse.Namespace, config: HarnessConfig) -> int:
     registry = create_default_registry()
     harness = registry.get(args.harness_id)
+    spec = harness.spec()
+    validation = registry.validation_report(args.harness_id) or validate_harness_spec(
+        spec
+    )
     payload = {
-        "spec": spec_to_dict(harness.spec()),
+        "spec": spec_to_dict(spec),
         "availability": availability_to_dict(harness.availability()),
+        "validation": harness_validation_report_to_dict(validation),
     }
     if args.json:
         _print_json(payload)
     else:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
+
+
+def _handle_harness_validate(args: argparse.Namespace, config: HarnessConfig) -> int:
+    registry = create_default_registry()
+    harness = registry.get(args.harness_id)
+    spec = harness.spec()
+    report = registry.validation_report(args.harness_id) or validate_harness_spec(spec)
+    payload = {
+        "spec": spec_to_dict(spec),
+        "validation": harness_validation_report_to_dict(report),
+    }
+    if args.json:
+        _print_json(payload)
+    else:
+        status = "ok" if report.ok else "failed"
+        print(f"Harness validation {status}: {args.harness_id}")
+        for issue in report.issues:
+            field = f" {issue.field}:" if issue.field else ""
+            print(f"- {issue.level}{field} {issue.message}")
+    return 0 if report.ok else 1
 
 
 def _handle_harness_run(args: argparse.Namespace, config: HarnessConfig) -> int:
@@ -1012,8 +1051,15 @@ def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
 def _handle_harness_scaffold(args: argparse.Namespace, config: HarnessConfig) -> int:
     class_name = "".join(part.title() for part in args.harness_id.split("-"))
     print(
-        f"""from gpt2giga.harness.harnesses.base import BaseHarness
-from gpt2giga.harness.types import Availability, HarnessRequest, HarnessResult, HarnessSpec
+        f'''from gpt2giga.harness.harnesses.base import BaseHarness
+from gpt2giga.harness.types import (
+    Availability,
+    HarnessCapability,
+    HarnessContext,
+    HarnessRequest,
+    HarnessResult,
+    HarnessSpec,
+)
 
 
 class {class_name}Harness(BaseHarness):
@@ -1024,15 +1070,43 @@ class {class_name}Harness(BaseHarness):
             title="{class_name}",
             kind="custom",
             description="Describe this harness",
-            capabilities=(),
+            capabilities=(HarnessCapability.CHAT_COMPLETIONS,),
+            icon="plug",
+            supports_workspace=True,
+            supports_attachments=False,
+            tags=("plugin",),
+            config_schema={{
+                "type": "object",
+                "properties": {{
+                    "endpoint": {{
+                        "type": "string",
+                        "title": "Endpoint",
+                        "description": "Optional local service URL.",
+                    }},
+                    "dry_run": {{
+                        "type": "boolean",
+                        "title": "Dry run",
+                        "default": True,
+                    }},
+                }},
+                "additionalProperties": False,
+            }},
+            metadata={{
+                "package": "my-package",
+                "version": "0.1.0",
+            }},
         )
 
     def availability(self) -> Availability:
         return Availability.available("custom harness")
 
-    def run(self, request: HarnessRequest, context) -> HarnessResult:
+    def run(
+        self,
+        request: HarnessRequest,
+        context: HarnessContext,
+    ) -> HarnessResult:
         return HarnessResult(ok=False, text="", error="not implemented")
-"""
+'''
     )
     return 0
 
@@ -1054,6 +1128,7 @@ def _run_harness(
     registry = create_default_registry()
     harness = registry.get(harness_id)
     spec = harness.spec()
+    known_capabilities = spec_capability_values(spec)
     invocation_mode = (
         HarnessInvocationMode.NATIVE if native else HarnessInvocationMode.HEADLESS
     )
@@ -1062,7 +1137,7 @@ def _run_harness(
         model=model,
         api_mode=parse_api_mode(api_mode or config.default_api_mode),
         capability=parse_capability(
-            capability or (spec.capabilities[0].value if spec.capabilities else None)
+            capability or (known_capabilities[0] if known_capabilities else None)
         ),
         mode=mode,
         invocation_mode=invocation_mode,

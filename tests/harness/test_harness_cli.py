@@ -3,6 +3,7 @@ import json
 import pytest
 
 from gpt2giga.harness import cli
+from gpt2giga.harness.harnesses.base import BaseHarness
 from gpt2giga.harness.harnesses.claude_code import ClaudeCodeHarness
 from gpt2giga.harness.harnesses.codex_cli import CodexCliHarness
 from gpt2giga.harness.harnesses.direct_chat import DirectChatHarness
@@ -15,9 +16,12 @@ from gpt2giga.harness.native.models import (
 from gpt2giga.harness.native.registry import NativeHistoryConnectorRegistry
 from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
 from gpt2giga.harness.types import (
+    Availability,
     GigaChatApiMode,
     HarnessCapability,
+    HarnessRequest,
     HarnessResult,
+    HarnessSpec,
 )
 
 
@@ -50,6 +54,36 @@ def test_cli_harness_inspect_json_shows_native_support(capsys):
     assert payload["spec"]["supports_native_sessions"] is True
     assert payload["spec"]["supports_external_history"] is True
     assert payload["spec"]["default_invocation_mode"] == "native"
+    assert payload["validation"]["ok"] is True
+
+
+def test_cli_harness_validate_json_reports_invalid_plugin(
+    capsys,
+    monkeypatch,
+):
+    registry = cli.create_default_registry(include_entry_points=False)
+    registry.register(_InvalidPluginHarness())
+    monkeypatch.setattr(cli, "create_default_registry", lambda: registry)
+
+    exit_code = cli.main(["harness", "validate", "invalid-plugin", "--json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["validation"]["ok"] is False
+    assert {issue["code"] for issue in payload["validation"]["issues"]} == {
+        "no_known_capabilities",
+        "unknown_capability",
+    }
+
+
+def test_cli_harness_scaffold_includes_plugin_metadata(capsys):
+    exit_code = cli.main(["harness", "scaffold", "my-harness"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "config_schema" in output
+    assert "HarnessCapability.CHAT_COMPLETIONS" in output
+    assert "metadata={" in output
 
 
 def test_cli_project_info_json_reports_workspace(capsys, tmp_path):
@@ -579,3 +613,25 @@ class FakeNativeConnector:
     def import_ref(self, ref):
         assert ref.id == self.ref.id
         return self.import_messages
+
+
+class _InvalidPluginHarness(BaseHarness):
+    @classmethod
+    def spec(cls) -> HarnessSpec:
+        return HarnessSpec(
+            id="invalid-plugin",
+            title="Invalid Plugin",
+            kind="custom",
+            description="Invalid plugin harness for CLI tests",
+            capabilities=("future_capability",),
+        )
+
+    def availability(self) -> Availability:
+        return Availability.available("invalid plugin")
+
+    def run(
+        self,
+        request: HarnessRequest,
+        context,
+    ) -> HarnessResult:
+        return HarnessResult(ok=True, text=request.prompt)
