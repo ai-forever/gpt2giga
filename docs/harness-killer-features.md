@@ -207,7 +207,7 @@ this status to choose the next vertical slice.
 | Slice 11: smart router | Implemented as an MVP: `gpt2giga/harness/routing.py` scores available harnesses deterministically from prompt text, attachments, workspace/selected files, requested mode, and harness capabilities; `/api/route/recommendation` exposes the result; the UI shows a Recommended badge with reasons/warnings and one-click apply. Edit-looking prompts remain non-edit unless `edit` was already selected explicitly. |
 | Slice 12: presets and runbooks | Implemented as an MVP: presets support prompt templates, safe variables, workspace policy, API/CLI listing and rendering, CLI dry-run execution, and UI preset chips that prefill run controls. Multi-step runbook orchestration remains future work. |
 | Slice 13: tools/MCP profiles | Implemented as an MVP: `.giga/harness.toml` supports non-secret `[tools.<name>]` profiles; `/api/tools` and `/api/tools/sync` expose per-harness status plus redacted dry-run config previews; the UI has a Tools inspector tab. Actual external tool install/auth/config writes remain future work. |
-| Slice 14: issue/PR mode | Open. |
+| Slice 14: issue/PR mode | Implemented as an MVP: every completed run stores `run.metadata.pr_artifact` with deterministic PR title/body/patch/changed-file data, `/api/runs/{run_id}/pr`, `/api/runs/{run_id}/patch`, and `/api/runs/{run_id}/branch` expose local artifact workflows, `giga run pr-summary|patch <run_id>` exports them from the CLI, and the UI has a PR inspector tab with copy actions plus guarded local branch creation. Hosted GitHub/GitLab writes remain future work. |
 | Slice 15: project memory and decision log | Open. |
 | Slice 16: provenance and replay | Partially implemented through stored runs, commands, raw records, attachments, events, and native links. Replay/fork behavior remains open. |
 | Slice 17: secrets firewall and context budget inspector | Partially implemented through redaction and attachment safety checks. Pre-run scanner and budget inspector remain open. |
@@ -248,14 +248,15 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 14 for issue/PR mode:
-turn stored diffs, changed files, and run context into PR-ready local artifacts
-without adding hosted GitHub/GitLab writes yet.
+The highest-value next implementation slice is Slice 15 for project memory and
+decision log: persist explicit project knowledge, expose CRUD in the UI/CLI, and
+inject only enabled memory into run metadata with visible provenance.
 
 Slice 03 can still be enriched later with richer per-harness stdout/message
 delta emission, Slice 10 can grow parallel execution and arena cancellation,
-Slice 12 can later grow into multi-step runbook orchestration, and Slice 13 can
-later add real opt-in tool config writes after an explicit safety review.
+Slice 12 can later grow into multi-step runbook orchestration, Slice 13 can
+later add real opt-in tool config writes after an explicit safety review, and
+Slice 14 can later add hosted issue/PR integrations behind explicit user action.
 
 ## Safety Rules
 

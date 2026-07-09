@@ -83,6 +83,11 @@ from gpt2giga.harness.project import (
     resolve_project,
     update_project_state,
 )
+from gpt2giga.harness.pr_artifacts import (
+    build_pr_artifact,
+    create_pr_branch,
+    pr_artifact_to_dict,
+)
 from gpt2giga.harness.registry import HarnessRegistry, create_default_registry
 from gpt2giga.harness.routing import (
     recommend_harness_route,
@@ -1185,6 +1190,27 @@ def create_app(
             raise HTTPException(status_code=404, detail="Run not found") from exc
         return {"run": run_to_dict(run), "diff": run_diff_response(run.metadata)}
 
+    @app.get("/api/runs/{run_id}/pr")
+    async def run_pr_artifact(run_id: str) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        artifact = build_pr_artifact(run)
+        return {
+            "run": run_to_dict(run),
+            "pr_artifact": pr_artifact_to_dict(artifact),
+        }
+
+    @app.get("/api/runs/{run_id}/patch")
+    async def run_patch(run_id: str) -> Response:
+        try:
+            run = store.get_run(run_id)
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        artifact = build_pr_artifact(run)
+        return Response(content=artifact.patch, media_type="text/plain")
+
     @app.post("/api/runs/{run_id}/apply")
     async def apply_run_patch(
         run_id: str,
@@ -1225,6 +1251,53 @@ def create_app(
             "applied": True,
             "run": run_to_dict(run),
             "diff": run_diff_response(run.metadata),
+        }
+
+    @app.post("/api/runs/{run_id}/branch")
+    async def create_run_branch(
+        run_id: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            run = store.get_run(run_id)
+            branch = create_pr_branch(
+                run,
+                branch_name=_optional_text(payload.get("branch_name")),
+            )
+            metadata = {
+                **dict(run.metadata),
+                "workspace_execution": branch["workspace_execution"],
+            }
+            run = store.update_run(run.id, metadata=metadata)
+            artifact = build_pr_artifact(run)
+            metadata = {
+                **dict(run.metadata),
+                "pr_artifact": pr_artifact_to_dict(artifact),
+            }
+            run = store.update_run(run.id, metadata=metadata)
+            store.append_event(
+                HarnessStoredEvent(
+                    id=new_id("evt"),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    type="pr_branch_created",
+                    message="Created local branch from run patch.",
+                    payload={"branch_name": branch["branch_name"]},
+                    created_at=utc_now(),
+                )
+            )
+        except RunNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Run not found") from exc
+        except WorktreeConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except WorktreeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "branch_created": True,
+            "branch_name": branch["branch_name"],
+            "run": run_to_dict(run),
+            "diff": run_diff_response(run.metadata),
+            "pr_artifact": pr_artifact_to_dict(build_pr_artifact(run)),
         }
 
     @app.post("/api/runs/{run_id}/discard")

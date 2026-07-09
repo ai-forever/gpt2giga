@@ -38,12 +38,18 @@ from gpt2giga.harness.project import (
     rendered_project_preset_to_dict,
     resolve_project,
 )
+from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
 from gpt2giga.harness.sessions import (
     FilesystemHarnessSessionStore,
+    RunNotFoundError,
     SessionNotFoundError,
 )
-from gpt2giga.harness.sessions.models import bundle_to_dict, session_to_dict
+from gpt2giga.harness.sessions.models import (
+    bundle_to_dict,
+    run_to_dict,
+    session_to_dict,
+)
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
     HarnessNativeLink,
@@ -92,6 +98,9 @@ def main(argv: list[str] | None = None) -> int:
     except SessionNotFoundError as exc:
         print(f"Unknown session: {exc.args[0]}", file=sys.stderr)
         return 2
+    except RunNotFoundError as exc:
+        print(f"Unknown run: {exc.args[0]}", file=sys.stderr)
+        return 2
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 2
@@ -136,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     ui.set_defaults(handler=_handle_ui)
 
     run = subparsers.add_parser("run", parents=[common])
-    run.add_argument("--agent", required=True, choices=tuple(AGENT_ALIASES))
+    run.add_argument("--agent", choices=tuple(AGENT_ALIASES), default=None)
     run.add_argument("--mode", choices=("plan", "read", "edit"), default="plan")
     run.add_argument("--model", default=None)
     run.add_argument("--api-mode", choices=("v1", "v2"), default=None)
@@ -144,8 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--native", action="store_true")
     run.add_argument("--json", action="store_true")
     run.add_argument("--dry-run", action="store_true")
-    run.add_argument("prompt", nargs="+")
-    run.set_defaults(handler=_handle_agent_alias)
+    run.add_argument("prompt", nargs="*")
+    run.set_defaults(handler=_handle_run_command)
 
     session = subparsers.add_parser("session")
     session_subparsers = session.add_subparsers(dest="session_command")
@@ -392,6 +401,23 @@ def _handle_chat(args: argparse.Namespace, config: HarnessConfig) -> int:
     return 0 if result.ok else 1
 
 
+def _handle_run_command(args: argparse.Namespace, config: HarnessConfig) -> int:
+    action = args.prompt[0] if args.prompt else None
+    if args.agent is None and action in {"patch", "pr-summary"}:
+        return _handle_run_artifact(args, config)
+    if args.agent is None:
+        print(
+            "giga run requires --agent codex|claude|gemini or "
+            "patch|pr-summary <run_id>",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.prompt:
+        print("giga run --agent requires a prompt", file=sys.stderr)
+        return 2
+    return _handle_agent_alias(args, config)
+
+
 def _handle_agent_alias(args: argparse.Namespace, config: HarnessConfig) -> int:
     harness_id = AGENT_ALIASES[args.agent]
     result = _run_harness(
@@ -408,6 +434,36 @@ def _handle_agent_alias(args: argparse.Namespace, config: HarnessConfig) -> int:
     )
     _print_result(result, as_json=args.json)
     return 0 if result.ok else 1
+
+
+def _handle_run_artifact(args: argparse.Namespace, config: HarnessConfig) -> int:
+    if len(args.prompt) != 2:
+        print(f"Usage: giga run {args.prompt[0]} <run_id>", file=sys.stderr)
+        return 2
+    action, run_id = args.prompt
+    store = FilesystemHarnessSessionStore(config.data_dir)
+    run = store.get_run(run_id)
+    artifact = build_pr_artifact(run)
+    artifact_payload = pr_artifact_to_dict(artifact)
+    if action == "patch":
+        if args.json:
+            _print_json(
+                {
+                    "run": run_to_dict(run),
+                    "patch": artifact.patch,
+                    "pr_artifact": artifact_payload,
+                }
+            )
+        else:
+            print(artifact.patch)
+        return 0
+    if args.json:
+        _print_json({"run": run_to_dict(run), "pr_artifact": artifact_payload})
+    else:
+        print(f"Title: {artifact.title}")
+        print()
+        print(artifact.body)
+    return 0
 
 
 def _handle_session_list(args: argparse.Namespace, config: HarnessConfig) -> int:

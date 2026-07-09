@@ -959,6 +959,7 @@ INDEX_HTML = """<!doctype html>
               <button class="tab" type="button" data-tab="raw-response">Raw response</button>
               <button class="tab" type="button" data-tab="command">Command</button>
               <button class="tab" type="button" data-tab="diff">Diff</button>
+              <button class="tab" type="button" data-tab="pr">PR</button>
               <button class="tab" type="button" data-tab="attachments">Attachments</button>
               <button class="tab" type="button" data-tab="tools">Tools</button>
               <button class="tab" type="button" data-tab="native">Native</button>
@@ -978,6 +979,16 @@ INDEX_HTML = """<!doctype html>
                 <button id="open-run-worktree-button" class="secondary" type="button" disabled>Open worktree</button>
               </div>
               <pre id="diff-text">No diff captured.</pre>
+            </div>
+            <div id="pr-panel" class="mono-panel tab-panel">
+              <div class="inline-actions">
+                <input id="pr-branch-input" placeholder="branch name" autocomplete="off" disabled>
+                <button id="copy-pr-title-button" class="secondary" type="button" disabled>Copy title</button>
+                <button id="copy-pr-body-button" class="secondary" type="button" disabled>Copy body</button>
+                <button id="copy-pr-patch-button" class="secondary" type="button" disabled>Copy patch</button>
+                <button id="create-pr-branch-button" type="button" disabled>Create branch</button>
+              </div>
+              <pre id="pr-text">No PR artifact.</pre>
             </div>
             <pre id="attachments-panel" class="mono-panel tab-panel">No attachments selected.</pre>
             <div id="tools-panel" class="mono-panel tab-panel">
@@ -2353,6 +2364,7 @@ INDEX_HTML = """<!doctype html>
       setText("raw-response-panel", "{}");
       setText("command-panel", commandPreview(payload));
       renderDiffInspector(null);
+      renderPrInspector(null);
       byId("run-button").disabled = true;
       byId("run-button").textContent = "Running...";
       try {
@@ -2396,6 +2408,7 @@ INDEX_HTML = """<!doctype html>
       setText("raw-response-panel", "{}");
       setText("command-panel", "Arena runs use normalized headless harness execution.");
       renderDiffInspector(null);
+      renderPrInspector(null);
       setText("arena-panel", "Arena is starting...");
       showTab("arena");
       byId("compare-button").disabled = true;
@@ -2436,6 +2449,7 @@ INDEX_HTML = """<!doctype html>
       setText("raw-response-panel", "{}");
       setText("command-panel", commandPreview(payload));
       renderDiffInspector(null);
+      renderPrInspector(null);
       setText("run-panel", "Starting streamed run...");
       renderEvents([]);
       setHeadlessRunning(true);
@@ -2677,6 +2691,7 @@ INDEX_HTML = """<!doctype html>
       setText("raw-response-panel", rawResponses.length ? pretty(rawResponses[rawResponses.length - 1].payload) : "{}");
       setText("command-panel", run && run.command && run.command.length ? run.command.join(" ") : commandPreview(state.lastPayload));
       renderDiffInspector(run);
+      renderPrInspector(run);
       setText("attachments-panel", run ? attachmentInspectorText(run, rawRequests[rawRequests.length - 1]) : "No attachments selected.");
       setNativeSummary(nativeInspectorText(bundle));
       setText("storage-panel", pretty(bundle.storage || {}));
@@ -2765,6 +2780,60 @@ INDEX_HTML = """<!doctype html>
       byId("open-run-worktree-button").disabled = !(run && run.id && execution.worktree_path);
     }
 
+    function renderPrInspector(run) {
+      const artifact = prArtifactFromRun(run);
+      const execution = run && run.metadata ? (run.metadata.workspace_execution || {}) : {};
+      const canCreateBranch = Boolean(run && run.id && artifact && artifact.patch && artifact.patch !== "No diff captured." && execution.policy === "worktree" && !execution.applied_at && !execution.discarded_at);
+      if (!artifact) {
+        setText("pr-text", "No PR artifact.");
+        byId("pr-branch-input").disabled = true;
+        byId("copy-pr-title-button").disabled = true;
+        byId("copy-pr-body-button").disabled = true;
+        byId("copy-pr-patch-button").disabled = true;
+        byId("create-pr-branch-button").disabled = true;
+        return;
+      }
+      if (run && byId("pr-branch-input").dataset.runId !== run.id) {
+        byId("pr-branch-input").value = artifact.branch_name_suggestion || "";
+        byId("pr-branch-input").dataset.runId = run.id;
+      }
+      const lines = [
+        `Title:\\n${artifact.title || ""}`,
+        `Branch:\\n${artifact.applied_branch || artifact.branch_name_suggestion || ""}`,
+        `Body:\\n${artifact.body || ""}`,
+        `Changed files:\\n${(artifact.changed_files || []).join("\\n") || "None"}`,
+        `Patch:\\n${artifact.patch || "No patch captured."}`
+      ];
+      setText("pr-text", lines.join("\\n\\n"));
+      byId("pr-branch-input").disabled = !canCreateBranch;
+      byId("copy-pr-title-button").disabled = !(artifact.title || "").trim();
+      byId("copy-pr-body-button").disabled = !(artifact.body || "").trim();
+      byId("copy-pr-patch-button").disabled = !(artifact.patch || "").trim();
+      byId("create-pr-branch-button").disabled = !canCreateBranch;
+    }
+
+    function prArtifactFromRun(run) {
+      if (!run || !run.id) return null;
+      const metadata = run.metadata || {};
+      if (metadata.pr_artifact) return metadata.pr_artifact;
+      const execution = metadata.workspace_execution || {};
+      const patch = execution.patch || metadata.diff || "";
+      const changedFiles = Array.isArray(execution.changed_files) ? execution.changed_files : [];
+      if (!patch && !changedFiles.length) return null;
+      const title = changedFiles.length ? `Update ${changedFiles[0]}` : `Update from ${run.id}`;
+      const changeLines = changedFiles.map((item) => "- Updated `" + item + "`").join("\\n") || "- No changed files captured.";
+      return {
+        run_id: run.id,
+        session_id: run.session_id,
+        title,
+        body: "## Summary\\n- Generated from stored harness run.\\n\\n## Changes\\n" + changeLines + "\\n\\n## Tests\\n```text\\nNot recorded.\\n```",
+        patch,
+        changed_files: changedFiles,
+        untracked_files: Array.isArray(execution.untracked_files) ? execution.untracked_files : [],
+        branch_name_suggestion: `giga/${String(title).toLowerCase().replace(/[^a-z0-9._/-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || run.id}`
+      };
+    }
+
     function currentRun() {
       const bundle = state.currentBundle || {};
       const runs = Array.isArray(bundle.runs) ? bundle.runs : [];
@@ -2800,6 +2869,7 @@ INDEX_HTML = """<!doctype html>
       setText("model-status", "Applied run diff.");
       if (state.currentSessionId) await loadSession(state.currentSessionId);
       await refreshRunDiff(run.id);
+      renderPrInspector(currentRun());
     }
 
     async function discardRunWorktree() {
@@ -2817,6 +2887,7 @@ INDEX_HTML = """<!doctype html>
       setText("model-status", "Discarded run worktree.");
       if (state.currentSessionId) await loadSession(state.currentSessionId);
       await refreshRunDiff(run.id);
+      renderPrInspector(currentRun());
     }
 
     async function openRunWorktree() {
@@ -2832,6 +2903,33 @@ INDEX_HTML = """<!doctype html>
       const worktree = result.data.worktree || {};
       setText("model-status", worktree.exists ? `Worktree: ${worktree.path}` : "Worktree path is unavailable.");
       await refreshRunDiff(run.id);
+    }
+
+    async function createPrBranch() {
+      const run = currentRun();
+      if (!run || !run.id) return;
+      const branchName = byId("pr-branch-input").value.trim();
+      byId("create-pr-branch-button").disabled = true;
+      const result = await getJson(`/api/runs/${encodeURIComponent(run.id)}/branch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch_name: branchName || null })
+      });
+      if (!result.ok) {
+        setText("pr-text", result.data.detail || `Branch creation failed with HTTP ${result.status}`);
+        renderPrInspector(run);
+        return;
+      }
+      setText("model-status", `Created branch ${result.data.branch_name}.`);
+      if (state.currentSessionId) await loadSession(state.currentSessionId);
+      renderPrInspector(currentRun());
+      showTab("pr");
+    }
+
+    function copyCurrentPrField(field, status) {
+      const artifact = prArtifactFromRun(currentRun());
+      if (!artifact) return;
+      copyText(artifact[field] || "", status);
     }
 
     function nativeInspectorText(bundle) {
@@ -3259,6 +3357,10 @@ INDEX_HTML = """<!doctype html>
       byId("apply-run-diff-button").addEventListener("click", applyRunDiff);
       byId("discard-run-worktree-button").addEventListener("click", discardRunWorktree);
       byId("open-run-worktree-button").addEventListener("click", openRunWorktree);
+      byId("copy-pr-title-button").addEventListener("click", () => copyCurrentPrField("title", "Copied PR title."));
+      byId("copy-pr-body-button").addEventListener("click", () => copyCurrentPrField("body", "Copied PR body."));
+      byId("copy-pr-patch-button").addEventListener("click", () => copyCurrentPrField("patch", "Copied PR patch."));
+      byId("create-pr-branch-button").addEventListener("click", createPrBranch);
       byId("reset-button").addEventListener("click", resetComposer);
       byId("attach-file-button").addEventListener("click", () => byId("attachment-file-input").click());
       byId("attachment-file-input").addEventListener("change", (event) => {

@@ -178,6 +178,39 @@ or Gemini config files. Profile names are constrained to safe identifier
 characters, secret-looking keys are rejected while loading project config, and
 secret-looking values are redacted in API/UI output.
 
+### PR Artifacts
+
+Every completed run gets a local PR artifact in `run.metadata.pr_artifact`. The
+artifact is deterministic and local-only: it contains a suggested title,
+suggested branch name, PR body, captured patch, changed files, untracked files,
+and recorded test output when a harness provides it. No hosted GitHub or GitLab
+write is attempted by this milestone.
+
+Inspect artifacts from the CLI:
+
+```bash
+giga run pr-summary <run_id>
+giga run pr-summary <run_id> --json
+giga run patch <run_id>
+giga run patch <run_id> --json
+```
+
+The browser UI exposes the same data in the `PR` inspector tab. Use the copy
+buttons for title, body, and patch. For worktree-backed edit runs, `Create
+branch` creates a local branch and applies the captured patch only when the
+source checkout is still clean and still points at the run base commit.
+
+The matching API surface is:
+
+```text
+GET  /api/runs/{run_id}/pr
+GET  /api/runs/{run_id}/patch
+POST /api/runs/{run_id}/branch
+```
+
+`POST /api/runs/{run_id}/branch` accepts an optional `branch_name`; otherwise
+the artifact's safe branch-name suggestion is used.
+
 ## Built-in Harnesses
 
 | Harness | Status | Purpose |

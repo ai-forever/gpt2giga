@@ -360,6 +360,52 @@ def test_runs_api_discard_removes_worktree_without_touching_repo(tmp_path):
     assert (repo / "app.txt").read_text(encoding="utf-8") == "base\n"
 
 
+def test_runs_api_pr_artifact_patch_and_branch_creation(tmp_path):
+    repo = _git_repo(tmp_path / "repo")
+    registry = HarnessRegistry()
+    registry.register(_FileEditHarness())
+    client = _client(
+        config=HarnessConfig(data_dir=str(tmp_path / "data")),
+        registry=registry,
+    )
+    response = client.post(
+        "/api/sessions/run",
+        json={
+            "harness_id": "edit-file",
+            "prompt": "change file",
+            "mode": "edit",
+            "workspace": str(repo),
+        },
+    )
+    assert response.status_code == 200
+    run_id = response.json()["run"]["id"]
+
+    artifact = client.get(f"/api/runs/{run_id}/pr")
+
+    assert artifact.status_code == 200
+    pr_artifact = artifact.json()["pr_artifact"]
+    assert pr_artifact["title"] == "Update app.txt"
+    assert "edited" in pr_artifact["body"]
+    assert pr_artifact["changed_files"] == ["app.txt"]
+    assert "diff --git a/app.txt b/app.txt" in pr_artifact["patch"]
+
+    patch = client.get(f"/api/runs/{run_id}/patch")
+    assert patch.status_code == 200
+    assert "diff --git a/app.txt b/app.txt" in patch.text
+
+    branched = client.post(
+        f"/api/runs/{run_id}/branch",
+        json={"branch_name": "codex/pr-artifact-test"},
+    )
+
+    assert branched.status_code == 200
+    assert branched.json()["branch_created"] is True
+    assert branched.json()["branch_name"] == "codex/pr-artifact-test"
+    assert branched.json()["pr_artifact"]["applied_branch"] == "codex/pr-artifact-test"
+    assert _git_output(repo, "branch", "--show-current") == "codex/pr-artifact-test"
+    assert (repo / "app.txt").read_text(encoding="utf-8") == "changed\n"
+
+
 def _client(
     *,
     config: HarnessConfig | None = None,
@@ -498,3 +544,12 @@ def _git(cwd: Path, *args: str) -> None:
         capture_output=True,
         text=True,
     )
+
+
+def _git_output(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ("git", "-C", str(cwd), *args),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()

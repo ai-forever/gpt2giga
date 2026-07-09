@@ -16,6 +16,7 @@ from gpt2giga.harness.attachments import (
 from gpt2giga.harness.config import HarnessConfig
 from gpt2giga.harness.native.models import parse_invocation_mode
 from gpt2giga.harness.project import resolve_project
+from gpt2giga.harness.pr_artifacts import build_pr_artifact, pr_artifact_to_dict
 from gpt2giga.harness.registry import HarnessRegistry
 from gpt2giga.harness.sessions.models import (
     HarnessMessage,
@@ -429,6 +430,34 @@ class HarnessSessionRunner:
                             "workspace_policy": workspace_execution.policy.value,
                         },
                     )
+        pr_artifact_run = HarnessRun(
+            id=run.id,
+            session_id=session.id,
+            harness_id=options["harness_id"],
+            status=status,
+            prompt=options["prompt"],
+            model=options["model"],
+            api_mode=options["api_mode"],
+            capability=options["capability"],
+            mode=options["mode"],
+            workspace=options["workspace"],
+            created_at=run.created_at,
+            updated_at=run.updated_at,
+            invocation_mode=options["invocation_mode"],
+            started_at=run.started_at,
+            finished_at=utc_now(),
+            error=error,
+            command=result.command,
+            native_session_id=run.native_session_id,
+            metadata=metadata,
+        )
+        metadata["pr_artifact"] = pr_artifact_to_dict(
+            build_pr_artifact(
+                pr_artifact_run,
+                result_text=content if role == "assistant" else None,
+                result_raw=result.raw,
+            )
+        )
         updated_run = self.store.update_run(
             run.id,
             status=status,

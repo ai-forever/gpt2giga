@@ -14,7 +14,11 @@ from gpt2giga.harness.native.models import (
 )
 from gpt2giga.harness.native.registry import NativeHistoryConnectorRegistry
 from gpt2giga.harness.sessions import FilesystemHarnessSessionStore
-from gpt2giga.harness.types import HarnessResult
+from gpt2giga.harness.types import (
+    GigaChatApiMode,
+    HarnessCapability,
+    HarnessResult,
+)
 
 
 def test_cli_harness_list_outputs_direct_chat(capsys):
@@ -122,6 +126,44 @@ prompt = "Ask {{project_name}}: {{user_prompt}}"
     assert payload["prompt"] == "Ask cli-demo: hello"
     assert payload["result"]["ok"] is True
     assert payload["result"]["text"] == "Ask cli-demo: hello"
+
+
+def test_cli_run_pr_summary_and_patch(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    store = FilesystemHarnessSessionStore(tmp_path / "data")
+    session = store.create_session(title="PR demo")
+    run = store.create_run(
+        session_id=session.id,
+        harness_id="echo",
+        prompt="change file",
+        model="GigaChat-2-Max",
+        api_mode=GigaChatApiMode.V2,
+        capability=HarnessCapability.CHAT_COMPLETIONS,
+        mode="edit",
+        workspace=str(tmp_path),
+        status="succeeded",
+        metadata={
+            "workspace_execution": {
+                "policy": "worktree",
+                "patch": "diff --git a/app.txt b/app.txt\n",
+                "changed_files": ["app.txt"],
+                "untracked_files": [],
+            }
+        },
+    )
+
+    summary_code = cli.main(["run", "pr-summary", run.id, "--json"])
+    summary = json.loads(capsys.readouterr().out)
+
+    assert summary_code == 0
+    assert summary["pr_artifact"]["title"] == "Update app.txt"
+    assert summary["pr_artifact"]["changed_files"] == ["app.txt"]
+
+    patch_code = cli.main(["run", "patch", run.id])
+    patch_output = capsys.readouterr().out
+
+    assert patch_code == 0
+    assert "diff --git a/app.txt b/app.txt" in patch_output
 
 
 def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
