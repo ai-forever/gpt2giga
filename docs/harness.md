@@ -116,6 +116,20 @@ API mode, mode, enabled harnesses, presets, and future attachment safety
 defaults. It must not contain API keys, tokens, cookies, credentials, private
 keys, certificates, or `.env` contents.
 
+Project init also creates safe prompt templates under `.giga/prompts/`.
+Presets can render inline `prompt` text or a relative `prompt_file` inside the
+project root. Supported template variables are:
+
+- `{{project_name}}`
+- `{{branch}}`
+- `{{selected_files}}`
+- `{{selected_files_inline}}`
+- `{{last_run_diff}}`
+- `{{user_prompt}}`
+
+The same variables can also be written as `${project_name}` or `$project_name`.
+Preset files are never allowed to point outside the project root.
+
 `giga ui` also keeps mutable, non-secret cockpit state per project under the
 harness data directory. This includes the last selected harness, model, API
 mode, run mode, invocation mode, and selected session. It is intentionally local
@@ -126,7 +140,13 @@ Use JSON output when wiring tools or checking what `giga ui` will use:
 ```bash
 giga project info --json
 giga project init --name my-project --json
+giga preset list --json
+giga preset run fix_tests --prompt "focus on tests/harness" --dry-run --json
 ```
+
+In the browser cockpit, preset chips fill the composer with the rendered prompt
+and preset defaults. They do not execute automatically; use `Run` or `Compare`
+after reviewing the filled request.
 
 ## Built-in Harnesses
 

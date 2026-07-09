@@ -15,6 +15,8 @@ from gpt2giga.harness.project import (
     project_state_path,
     project_state_to_dict,
     project_to_dict,
+    render_project_preset,
+    rendered_project_preset_to_dict,
     resolve_project,
     update_project_state,
 )
@@ -92,6 +94,7 @@ def test_init_project_config_writes_non_secret_template(tmp_path):
     assert "TOKEN" not in text
     assert config.defaults.harness == "codex-cli"
     assert "plan" in config.presets
+    assert (tmp_path / ".giga" / "prompts" / "plan.md").exists()
 
 
 def test_load_project_config_parses_defaults_presets_and_attachments(tmp_path):
@@ -116,6 +119,17 @@ title = "Ask"
 harness = "direct-chat"
 api_mode = "v2"
 mode = "plan"
+prompt = "Ask {{project_name}}: {{user_prompt}}"
+
+[presets.fix_tests]
+title = "Fix tests"
+harness = "codex-cli"
+api_mode = "v2"
+mode = "edit"
+invocation_mode = "headless"
+workspace_policy = "worktree"
+prompt_file = ".giga/prompts/fix.md"
+selected_files = ["tests/test_demo.py"]
 
 [attachments]
 max_file_mb = 10
@@ -142,6 +156,12 @@ ignore = [
     assert config.enabled_harnesses == ("echo", "direct-chat")
     assert config.presets["ask"].harness == "direct-chat"
     assert config.presets["ask"].api_mode.value == "v2"
+    assert config.presets["ask"].prompt == "Ask {{project_name}}: {{user_prompt}}"
+    assert config.presets["fix_tests"].mode == "edit"
+    assert config.presets["fix_tests"].invocation_mode.value == "headless"
+    assert config.presets["fix_tests"].workspace_policy == "worktree"
+    assert config.presets["fix_tests"].prompt_file == ".giga/prompts/fix.md"
+    assert config.presets["fix_tests"].selected_files == ("tests/test_demo.py",)
     assert config.attachments.max_file_mb == 10
     assert config.attachments.max_total_mb_per_run == 20
     assert config.attachments.allow_images is False
@@ -149,6 +169,60 @@ ignore = [
     assert config.attachments.respect_gitignore is False
     assert config.attachments.ignore == (".env", "private/**")
     assert project_config_to_dict(config)["defaults"]["api_mode"] == "v1"
+
+
+def test_render_project_preset_applies_safe_template_variables(tmp_path):
+    config_path = tmp_path / ".giga" / "harness.toml"
+    prompt_path = tmp_path / ".giga" / "prompts" / "fix.md"
+    prompt_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        """
+[project]
+name = "render-demo"
+
+[presets.fix_tests]
+title = "Fix tests"
+harness = "codex-cli"
+mode = "edit"
+workspace_policy = "worktree"
+prompt_file = ".giga/prompts/fix.md"
+selected_files = ["tests/test_project.py"]
+""",
+        encoding="utf-8",
+    )
+    prompt_path.write_text(
+        "Project {{ project_name }} on ${branch}\n"
+        "Files:\n{{selected_files}}\n"
+        "Task: $user_prompt\n"
+        "Diff:\n{{last_run_diff}}\n",
+        encoding="utf-8",
+    )
+    project = resolve_project(tmp_path, data_dir=tmp_path / "data")
+    config = load_project_config(tmp_path)
+
+    rendered = render_project_preset(
+        project,
+        config,
+        "fix_tests",
+        user_prompt="repair failing tests",
+        selected_files=("gpt2giga/harness/project.py",),
+        last_run_diff="diff --git a/x b/x",
+    )
+    payload = rendered_project_preset_to_dict(rendered)
+
+    assert rendered.workspace_policy == "worktree"
+    assert rendered.selected_files == (
+        "tests/test_project.py",
+        "gpt2giga/harness/project.py",
+    )
+    assert "Project render-demo" in rendered.prompt
+    assert "repair failing tests" in rendered.prompt
+    assert "diff --git a/x b/x" in rendered.prompt
+    assert payload["run"]["workspace_policy"] == "worktree"
+    assert payload["variables"]["selected_files"] == [
+        "tests/test_project.py",
+        "gpt2giga/harness/project.py",
+    ]
 
 
 def test_load_project_config_rejects_secret_keys(tmp_path):

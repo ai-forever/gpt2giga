@@ -75,8 +75,11 @@ from gpt2giga.harness.project import (
     load_project_state,
     load_project_config,
     project_config_to_dict,
+    project_preset_to_dict,
     project_state_to_dict,
     project_to_dict,
+    render_project_preset,
+    rendered_project_preset_to_dict,
     resolve_project,
     update_project_state,
 )
@@ -231,6 +234,54 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {"config": project_config_to_dict(loaded)}
+
+    @app.get("/api/project/presets")
+    async def project_presets(
+        workspace: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(workspace),
+                data_dir=config.data_dir,
+            )
+            loaded = load_project_config(project_context.root)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "presets": [
+                project_preset_to_dict(name, preset)
+                for name, preset in loaded.presets.items()
+            ],
+        }
+
+    @app.post("/api/project/presets/{preset_name}/render")
+    async def render_preset(
+        preset_name: str,
+        payload: dict[str, Any] = Body(default_factory=dict),
+    ) -> dict[str, Any]:
+        try:
+            project_context = resolve_project(
+                _optional_text(payload.get("workspace")),
+                data_dir=config.data_dir,
+            )
+            loaded = load_project_config(project_context.root)
+            rendered = render_project_preset(
+                project_context,
+                loaded,
+                preset_name,
+                user_prompt=_optional_text(payload.get("user_prompt")),
+                selected_files=_text_tuple(payload.get("selected_files")),
+                last_run_diff=_optional_text(payload.get("last_run_diff")),
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Preset not found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "project": project_to_dict(project_context),
+            "preset": rendered_project_preset_to_dict(rendered),
+        }
 
     @app.get("/api/project/state")
     async def project_state(

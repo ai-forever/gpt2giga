@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,49 @@ DEFAULT_ATTACHMENT_IGNORE = (
     "build/**",
 )
 PROJECT_STATE_FILE = "state.json"
+DEFAULT_PROMPT_TEMPLATE_DIR = Path(".giga") / "prompts"
+DEFAULT_PROMPT_TEMPLATES = {
+    "plan.md": (
+        "Create a concise implementation plan for this project task.\n\n"
+        "Project: {{project_name}}\n"
+        "Branch: {{branch}}\n"
+        "Selected files:\n{{selected_files}}\n\n"
+        "Task:\n{{user_prompt}}\n"
+    ),
+    "review.md": (
+        "Review the selected context and current task. Prioritize bugs, "
+        "regressions, missing tests, and security risks.\n\n"
+        "Project: {{project_name}}\n"
+        "Branch: {{branch}}\n"
+        "Selected files:\n{{selected_files}}\n\n"
+        "Task:\n{{user_prompt}}\n"
+    ),
+    "implement.md": (
+        "Implement the requested change in the smallest safe slice. Keep the "
+        "existing project conventions and run focused verification.\n\n"
+        "Project: {{project_name}}\n"
+        "Branch: {{branch}}\n"
+        "Selected files:\n{{selected_files}}\n\n"
+        "Task:\n{{user_prompt}}\n"
+    ),
+    "pr-summary.md": (
+        "Write a pull request summary from the latest run diff. Include the "
+        "user-facing change, tests, and risks.\n\n"
+        "Project: {{project_name}}\n"
+        "Branch: {{branch}}\n\n"
+        "Diff:\n{{last_run_diff}}\n\n"
+        "Additional notes:\n{{user_prompt}}\n"
+    ),
+}
+PRESET_WORKSPACE_POLICIES = {"auto", "current", "worktree", "temp_copy"}
+_PRESET_VARIABLE_NAMES = (
+    "project_name",
+    "branch",
+    "selected_files",
+    "selected_files_inline",
+    "last_run_diff",
+    "user_prompt",
+)
 
 
 @dataclass(frozen=True)
@@ -78,6 +122,32 @@ class ProjectPreset:
     model: str | None = None
     api_mode: GigaChatApiMode | None = None
     mode: str | None = None
+    invocation_mode: HarnessInvocationMode | None = None
+    workspace_policy: str | None = None
+    prompt: str | None = None
+    prompt_file: str | None = None
+    selected_files: tuple[str, ...] = ()
+    attachment_rules: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RenderedProjectPreset:
+    """Preset after applying project variables to its prompt template."""
+
+    name: str
+    title: str
+    prompt: str
+    prompt_source: str
+    harness: str | None = None
+    model: str | None = None
+    api_mode: GigaChatApiMode | None = None
+    mode: str | None = None
+    invocation_mode: HarnessInvocationMode | None = None
+    workspace_policy: str | None = None
+    selected_files: tuple[str, ...] = ()
+    attachment_rules: Mapping[str, Any] = field(default_factory=dict)
+    variables: Mapping[str, Any] = field(default_factory=dict)
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -259,7 +329,51 @@ def init_project_config(
     path.parent.mkdir(parents=True, exist_ok=True)
     name = _optional_text(project_name) or root.name
     path.write_text(default_project_config_text(name), encoding="utf-8")
+    _write_default_prompt_templates(root, overwrite=overwrite)
     return load_project_config(project_root)
+
+
+def render_project_preset(
+    project: HarnessProject,
+    config: HarnessProjectConfig,
+    name: str,
+    *,
+    user_prompt: str | None = None,
+    selected_files: tuple[str, ...] = (),
+    last_run_diff: str | None = None,
+) -> RenderedProjectPreset:
+    """Render a project preset prompt with safe project variables."""
+    try:
+        preset = config.presets[name]
+    except KeyError as exc:
+        raise KeyError(f"Unknown project preset: {name}") from exc
+    template, source = _preset_prompt_template(project.root, preset)
+    merged_selected_files = tuple(
+        dict.fromkeys((*preset.selected_files, *selected_files))
+    )
+    variables = _preset_variables(
+        project,
+        selected_files=merged_selected_files,
+        last_run_diff=last_run_diff,
+        user_prompt=user_prompt,
+    )
+    prompt = _render_preset_template(template, variables).strip()
+    return RenderedProjectPreset(
+        name=name,
+        title=preset.title,
+        prompt=prompt,
+        prompt_source=source,
+        harness=preset.harness,
+        model=preset.model,
+        api_mode=preset.api_mode,
+        mode=preset.mode,
+        invocation_mode=preset.invocation_mode,
+        workspace_policy=preset.workspace_policy,
+        selected_files=merged_selected_files,
+        attachment_rules=preset.attachment_rules,
+        variables=_public_preset_variables(variables),
+        warnings=_preset_render_warnings(prompt, preset, source),
+    )
 
 
 def default_project_config_text(project_name: str) -> str:
@@ -287,24 +401,53 @@ def default_project_config_text(project_name: str) -> str:
         'harness = "direct-chat"\n'
         'mode = "plan"\n'
         'api_mode = "v2"\n'
+        'prompt = "{{user_prompt}}"\n'
         "\n"
         "[presets.plan]\n"
         'title = "Plan"\n'
         'harness = "codex-cli"\n'
         'mode = "plan"\n'
         'api_mode = "v2"\n'
+        'workspace_policy = "current"\n'
+        'prompt_file = ".giga/prompts/plan.md"\n'
         "\n"
         "[presets.review]\n"
         'title = "Review"\n'
         'harness = "claude-code"\n'
         'mode = "read"\n'
         'api_mode = "v2"\n'
+        'workspace_policy = "current"\n'
+        'prompt_file = ".giga/prompts/review.md"\n'
+        "\n"
+        "[presets.fix_tests]\n"
+        'title = "Fix tests"\n'
+        'harness = "codex-cli"\n'
+        'mode = "edit"\n'
+        'api_mode = "v2"\n'
+        'workspace_policy = "worktree"\n'
+        'prompt = "Run the relevant tests, diagnose failures, and propose the minimal patch. {{user_prompt}}"\n'
         "\n"
         "[presets.implement]\n"
         'title = "Implement"\n'
         'harness = "codex-cli"\n'
         'mode = "edit"\n'
         'api_mode = "v2"\n'
+        'workspace_policy = "worktree"\n'
+        'prompt_file = ".giga/prompts/implement.md"\n'
+        "\n"
+        "[presets.explain_screenshot]\n"
+        'title = "Explain screenshot"\n'
+        'harness = "direct-chat"\n'
+        'mode = "read"\n'
+        'api_mode = "v2"\n'
+        'prompt = "Explain the attached screenshot in the context of {{project_name}}. {{user_prompt}}"\n'
+        "\n"
+        "[presets.pr_summary]\n"
+        'title = "PR summary"\n'
+        'harness = "direct-chat"\n'
+        'mode = "read"\n'
+        'api_mode = "v2"\n'
+        'prompt_file = ".giga/prompts/pr-summary.md"\n'
         "\n"
         "[attachments]\n"
         "max_file_mb = 25\n"
@@ -348,15 +491,7 @@ def project_config_to_dict(config: HarnessProjectConfig) -> dict[str, Any]:
         },
         "harnesses": {"enabled": list(config.enabled_harnesses)},
         "presets": {
-            name: {
-                "title": preset.title,
-                "harness": preset.harness,
-                "model": preset.model,
-                "api_mode": (
-                    preset.api_mode.value if preset.api_mode is not None else None
-                ),
-                "mode": preset.mode,
-            }
+            name: project_preset_to_dict(name, preset)
             for name, preset in config.presets.items()
         },
         "attachments": {
@@ -369,6 +504,60 @@ def project_config_to_dict(config: HarnessProjectConfig) -> dict[str, Any]:
             "ignore": list(config.attachments.ignore),
         },
     }
+
+
+def project_preset_to_dict(name: str, preset: ProjectPreset) -> dict[str, Any]:
+    """Serialize one project preset for API and CLI responses."""
+    return {
+        "name": name,
+        "title": preset.title,
+        "harness": preset.harness,
+        "model": preset.model,
+        "api_mode": preset.api_mode.value if preset.api_mode is not None else None,
+        "mode": preset.mode,
+        "invocation_mode": (
+            preset.invocation_mode.value if preset.invocation_mode is not None else None
+        ),
+        "workspace_policy": preset.workspace_policy,
+        "prompt": preset.prompt,
+        "prompt_file": preset.prompt_file,
+        "selected_files": list(preset.selected_files),
+        "attachment_rules": dict(preset.attachment_rules),
+    }
+
+
+def rendered_project_preset_to_dict(
+    preset: RenderedProjectPreset,
+) -> dict[str, Any]:
+    """Serialize a rendered project preset."""
+    payload = {
+        "name": preset.name,
+        "title": preset.title,
+        "harness": preset.harness,
+        "model": preset.model,
+        "api_mode": preset.api_mode.value if preset.api_mode is not None else None,
+        "mode": preset.mode,
+        "invocation_mode": (
+            preset.invocation_mode.value if preset.invocation_mode is not None else None
+        ),
+        "workspace_policy": preset.workspace_policy,
+        "prompt": preset.prompt,
+        "prompt_source": preset.prompt_source,
+        "selected_files": list(preset.selected_files),
+        "attachment_rules": dict(preset.attachment_rules),
+        "variables": dict(preset.variables),
+        "warnings": list(preset.warnings),
+    }
+    payload["run"] = {
+        "harness_id": preset.harness,
+        "model": preset.model,
+        "api_mode": payload["api_mode"],
+        "mode": preset.mode,
+        "invocation_mode": payload["invocation_mode"],
+        "workspace_policy": preset.workspace_policy,
+        "prompt": preset.prompt,
+    }
+    return payload
 
 
 def project_state_to_dict(state: HarnessProjectState) -> dict[str, Any]:
@@ -496,8 +685,140 @@ def _parse_presets(data: Mapping[str, Any]) -> Mapping[str, ProjectPreset]:
             model=_optional_text(preset_data.get("model")),
             api_mode=parse_api_mode(api_mode_value) if api_mode_value else None,
             mode=_optional_text(preset_data.get("mode")),
+            invocation_mode=_parse_optional_invocation_mode(
+                preset_data.get("invocation_mode")
+            ),
+            workspace_policy=_parse_preset_workspace_policy(
+                preset_data.get("workspace_policy")
+            ),
+            prompt=_optional_text(preset_data.get("prompt")),
+            prompt_file=_optional_text(preset_data.get("prompt_file")),
+            selected_files=_string_tuple(
+                preset_data.get("selected_files"),
+                default=(),
+            ),
+            attachment_rules=_mapping(preset_data.get("attachments")),
         )
     return presets
+
+
+def _parse_preset_workspace_policy(value: Any) -> str | None:
+    text = _optional_text(value)
+    if text is None:
+        return None
+    if text not in PRESET_WORKSPACE_POLICIES:
+        raise ValueError(
+            "Preset workspace_policy must be one of: "
+            f"{', '.join(sorted(PRESET_WORKSPACE_POLICIES))}"
+        )
+    return text
+
+
+def _preset_prompt_template(
+    project_root: str,
+    preset: ProjectPreset,
+) -> tuple[str, str]:
+    if preset.prompt is not None:
+        return preset.prompt, "prompt"
+    if preset.prompt_file is None:
+        return "{{user_prompt}}", "user_prompt"
+    prompt_path = _resolve_prompt_file(project_root, preset.prompt_file)
+    try:
+        return prompt_path.read_text(encoding="utf-8"), preset.prompt_file
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"Preset prompt_file does not exist: {preset.prompt_file}"
+        ) from exc
+    except OSError as exc:
+        raise ValueError(
+            f"Preset prompt_file cannot be read: {preset.prompt_file}"
+        ) from exc
+
+
+def _resolve_prompt_file(project_root: str, value: str) -> Path:
+    relative = Path(value)
+    if relative.is_absolute():
+        raise ValueError("Preset prompt_file must be relative to the project root")
+    root = Path(project_root).expanduser().resolve()
+    path = (root / relative).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            "Preset prompt_file must stay inside the project root"
+        ) from exc
+    if not path.is_file():
+        raise FileNotFoundError(str(path))
+    return path
+
+
+def _preset_variables(
+    project: HarnessProject,
+    *,
+    selected_files: tuple[str, ...],
+    last_run_diff: str | None,
+    user_prompt: str | None,
+) -> dict[str, str]:
+    return {
+        "project_name": project.name,
+        "branch": project.git_branch or "",
+        "selected_files": "\n".join(selected_files),
+        "selected_files_inline": ", ".join(selected_files),
+        "last_run_diff": last_run_diff or "",
+        "user_prompt": user_prompt or "",
+    }
+
+
+def _public_preset_variables(variables: Mapping[str, str]) -> dict[str, Any]:
+    return {
+        "project_name": variables.get("project_name") or "",
+        "branch": variables.get("branch") or "",
+        "selected_files": [
+            line
+            for line in str(variables.get("selected_files") or "").splitlines()
+            if line
+        ],
+        "has_last_run_diff": bool(variables.get("last_run_diff")),
+        "has_user_prompt": bool(variables.get("user_prompt")),
+    }
+
+
+def _render_preset_template(
+    template: str,
+    variables: Mapping[str, str],
+) -> str:
+    rendered = template
+    for name in _PRESET_VARIABLE_NAMES:
+        value = str(variables.get(name) or "")
+        rendered = re.sub(r"{{\s*" + re.escape(name) + r"\s*}}", value, rendered)
+        rendered = rendered.replace("${" + name + "}", value)
+        rendered = re.sub(
+            r"(?<![A-Za-z0-9_])\$" + re.escape(name) + r"\b", value, rendered
+        )
+    return rendered
+
+
+def _preset_render_warnings(
+    prompt: str,
+    preset: ProjectPreset,
+    source: str,
+) -> tuple[str, ...]:
+    warnings: list[str] = []
+    if not prompt.strip():
+        warnings.append("Preset rendered an empty prompt.")
+    if preset.prompt_file and source == preset.prompt_file and preset.prompt:
+        warnings.append("Preset prompt_file was ignored because inline prompt is set.")
+    return tuple(warnings)
+
+
+def _write_default_prompt_templates(root: Path, *, overwrite: bool) -> None:
+    prompt_dir = root / DEFAULT_PROMPT_TEMPLATE_DIR
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    for filename, text in DEFAULT_PROMPT_TEMPLATES.items():
+        path = prompt_dir / filename
+        if path.exists() and not overwrite:
+            continue
+        path.write_text(text, encoding="utf-8")
 
 
 def _parse_attachment_settings(

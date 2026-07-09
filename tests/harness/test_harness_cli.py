@@ -78,6 +78,52 @@ def test_cli_init_alias_writes_project_config(capsys, tmp_path):
     assert (tmp_path / ".giga" / "harness.toml").exists()
 
 
+def test_cli_preset_list_and_run_dry_run_json(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("GPT2GIGA_HARNESS_DATA_DIR", str(tmp_path / "data"))
+    config_path = tmp_path / ".giga" / "harness.toml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        """
+[project]
+name = "cli-demo"
+
+[presets.ask]
+title = "Ask"
+harness = "echo"
+mode = "plan"
+prompt = "Ask {{project_name}}: {{user_prompt}}"
+""",
+        encoding="utf-8",
+    )
+
+    list_code = cli.main(["preset", "list", "--workspace", str(tmp_path), "--json"])
+    listed = json.loads(capsys.readouterr().out)
+
+    assert list_code == 0
+    assert listed[0]["name"] == "ask"
+    assert listed[0]["harness"] == "echo"
+
+    run_code = cli.main(
+        [
+            "preset",
+            "run",
+            "ask",
+            "--workspace",
+            str(tmp_path),
+            "--prompt",
+            "hello",
+            "--dry-run",
+            "--json",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert run_code == 0
+    assert payload["prompt"] == "Ask cli-demo: hello"
+    assert payload["result"]["ok"] is True
+    assert payload["result"]["text"] == "Ask cli-demo: hello"
+
+
 def test_cli_chat_passes_api_mode_and_model(monkeypatch, capsys):
     captured = {}
 

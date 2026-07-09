@@ -34,6 +34,8 @@ from gpt2giga.harness.project import (
     project_config_path,
     project_config_to_dict,
     project_to_dict,
+    render_project_preset,
+    rendered_project_preset_to_dict,
     resolve_project,
 )
 from gpt2giga.harness.registry import UnknownHarnessError, create_default_registry
@@ -202,6 +204,28 @@ def build_parser() -> argparse.ArgumentParser:
     project_init.add_argument("--overwrite", action="store_true")
     project_init.add_argument("--json", action="store_true")
     project_init.set_defaults(handler=_handle_project_init)
+
+    preset = subparsers.add_parser("preset")
+    preset_subparsers = preset.add_subparsers(dest="preset_command")
+
+    preset_list = preset_subparsers.add_parser("list")
+    preset_list.add_argument("--workspace", default=None)
+    preset_list.add_argument("--json", action="store_true")
+    preset_list.set_defaults(handler=_handle_preset_list)
+
+    preset_run = preset_subparsers.add_parser("run", parents=[common])
+    preset_run.add_argument("preset_name")
+    preset_run.add_argument("--workspace", default=None)
+    preset_run.add_argument("--prompt", default=None)
+    preset_run.add_argument("--selected-file", action="append", default=[])
+    preset_run.add_argument("--last-run-diff", default=None)
+    preset_run.add_argument("--model", default=None)
+    preset_run.add_argument("--api-mode", choices=("v1", "v2"), default=None)
+    preset_run.add_argument("--mode", choices=("plan", "read", "edit"), default=None)
+    preset_run.add_argument("--native", action="store_true")
+    preset_run.add_argument("--json", action="store_true")
+    preset_run.add_argument("--dry-run", action="store_true")
+    preset_run.set_defaults(handler=_handle_preset_run)
 
     harness = subparsers.add_parser("harness")
     harness_subparsers = harness.add_subparsers(dest="harness_command")
@@ -570,6 +594,60 @@ def _handle_native_import(args: argparse.Namespace, config: HarnessConfig) -> in
     return 0
 
 
+def _handle_preset_list(args: argparse.Namespace, config: HarnessConfig) -> int:
+    payload = _project_payload(
+        workspace=args.workspace,
+        config=config,
+        load_config_name=True,
+    )
+    if args.json:
+        _print_json(payload["presets"])
+    else:
+        _print_preset_table(payload["presets"])
+    return 0
+
+
+def _handle_preset_run(args: argparse.Namespace, config: HarnessConfig) -> int:
+    project = resolve_project(args.workspace, data_dir=config.data_dir)
+    loaded = load_project_config(project.root)
+    rendered = render_project_preset(
+        project,
+        loaded,
+        args.preset_name,
+        user_prompt=args.prompt,
+        selected_files=tuple(args.selected_file or ()),
+        last_run_diff=args.last_run_diff,
+    )
+    result = _run_harness(
+        harness_id=rendered.harness or loaded.defaults.harness,
+        prompt=rendered.prompt,
+        model=args.model or rendered.model or loaded.defaults.model,
+        api_mode=(
+            args.api_mode
+            or (rendered.api_mode.value if rendered.api_mode is not None else None)
+            or loaded.defaults.api_mode.value
+        ),
+        capability=None,
+        mode=args.mode or rendered.mode or loaded.defaults.mode,
+        workspace=project.root,
+        workspace_policy=rendered.workspace_policy,
+        dry_run=args.dry_run,
+        native=args.native
+        or (
+            rendered.invocation_mode is not None
+            and rendered.invocation_mode is HarnessInvocationMode.NATIVE
+        ),
+        config=config,
+    )
+    if args.json:
+        payload = rendered_project_preset_to_dict(rendered)
+        payload["result"] = result_to_dict(result)
+        _print_json(payload)
+    else:
+        _print_result(result, as_json=False)
+    return 0 if result.ok else 1
+
+
 def _handle_ui(args: argparse.Namespace, config: HarnessConfig) -> int:
     config = config.with_overrides(ui_host=args.host, ui_port=args.port)
     validate_ui_bind(config.ui_host, allow_remote=args.allow_remote)
@@ -626,6 +704,7 @@ def _run_harness(
     dry_run: bool,
     native: bool,
     config: HarnessConfig,
+    workspace_policy: str | None = None,
 ):
     registry = create_default_registry()
     harness = registry.get(harness_id)
@@ -637,11 +716,13 @@ def _run_harness(
         prompt=prompt,
         model=model,
         api_mode=parse_api_mode(api_mode or config.default_api_mode),
-        capability=parse_capability(capability),
+        capability=parse_capability(
+            capability or (spec.capabilities[0].value if spec.capabilities else None)
+        ),
         mode=mode,
         invocation_mode=invocation_mode,
         workspace=resolve_workspace(workspace),
-        extra={"dry_run": dry_run},
+        extra=_run_extra(dry_run=dry_run, workspace_policy=workspace_policy),
     )
     if native:
         if not spec.supports_native_sessions:
@@ -707,6 +788,23 @@ def _print_table(rows: list[dict[str, Any]]) -> None:
             f"{row['id']:<16}{row['kind']:<14}{row['status']:<12}"
             f"{native:<8}{row['description']}"
         )
+
+
+def _print_preset_table(rows: list[dict[str, Any]]) -> None:
+    print(f"{'Name':<18}{'Harness':<16}{'Mode':<8}{'Policy':<10}Title")
+    for row in rows:
+        print(
+            f"{row['name']:<18}{(row.get('harness') or '-'):<16}"
+            f"{(row.get('mode') or '-'):<8}"
+            f"{(row.get('workspace_policy') or '-'):<10}{row['title']}"
+        )
+
+
+def _run_extra(*, dry_run: bool, workspace_policy: str | None) -> dict[str, Any]:
+    extra: dict[str, Any] = {"dry_run": dry_run}
+    if workspace_policy is not None:
+        extra["workspace_policy"] = workspace_policy
+    return extra
 
 
 def _session_row(

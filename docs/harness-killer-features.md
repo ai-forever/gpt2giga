@@ -156,6 +156,21 @@ roadmap.
   redacted output persistence.
 - Native start/resume links and native attachment rendering into command plans.
 
+### Presets And Runbooks
+
+- Project presets now support inline prompts, relative prompt files under the
+  project root, invocation mode, workspace policy, selected-file defaults, and
+  attachment-rule metadata.
+- `giga init` writes starter prompt templates under `.giga/prompts/`.
+- Preset templates can use project name, branch, selected files, last run diff,
+  and user prompt variables without executing template code.
+- `/api/project/presets` lists safe preset metadata and
+  `/api/project/presets/{name}/render` returns the rendered run payload.
+- `giga preset list` and `giga preset run <name>` expose the same contract from
+  the CLI.
+- The no-build UI renders preset chips that prefill the composer and run
+  controls for review before execution.
+
 ## Open Roadmap Status
 
 The next work should not reimplement foundations that are already present. Use
@@ -165,7 +180,7 @@ this status to choose the next vertical slice.
 | --- | --- |
 | Slice 00: architecture note | Covered by this document. |
 | Slice 01: project-first cockpit | Implemented for project identity, config, mutable local state, project-scoped sessions, native history scoping, and UI header/default restoration. |
-| Slice 02: `giga init` and `.giga/harness.toml` | Implemented for config, defaults, presets, and attachment settings. Prompt template files and richer preset/runbook execution remain future work. |
+| Slice 02: `giga init` and `.giga/harness.toml` | Implemented for config, defaults, prompt template files, presets, and attachment settings. |
 | Slice 03: live run event stream | Implemented as an MVP for headless UI runs: `/api/sessions/*/run/start` starts runs in the background, `/api/runs/{run_id}/events/stream` replays and streams persisted SSE events, and `/api/runs/{run_id}/cancel` requests cooperative cancellation. True stdout/message deltas still depend on individual harnesses emitting them. |
 | Slice 04: native terminal pane | Implemented with native process manager, API, and UI terminal polling. SSE/WebSocket and resize can still be added later. |
 | Slice 05: native session discovery/import | Implemented for Codex, Claude Code, and Gemini CLI with project scoping and UI/CLI flows. |
@@ -175,7 +190,7 @@ this status to choose the next vertical slice.
 | Slice 09: worktree-safe edit/apply flow | Implemented as an MVP for headless external agent edit runs: `auto` policy creates an isolated git worktree, captures changed/untracked files and patch metadata, exposes diff/apply/discard/open-worktree endpoints, and wires Apply/Discard/Open controls into the Diff inspector. `temp_copy` remains a future fallback policy. |
 | Slice 10: multi-harness arena | Implemented as an MVP: `/api/arena/runs` creates a JSON parent record under `arenas/<arena_id>.json`, runs selected headless harnesses sequentially with isolated request history, links child `HarnessRun` ids, aggregates child events through `/api/arena/runs/{arena_id}/events/stream`, and renders side-by-side UI result cards. Parallel execution and arena cancellation remain future work. |
 | Slice 11: smart router | Implemented as an MVP: `gpt2giga/harness/routing.py` scores available harnesses deterministically from prompt text, attachments, workspace/selected files, requested mode, and harness capabilities; `/api/route/recommendation` exposes the result; the UI shows a Recommended badge with reasons/warnings and one-click apply. Edit-looking prompts remain non-edit unless `edit` was already selected explicitly. |
-| Slice 12: presets and runbooks | Partially implemented as config parsing and UI preset defaults; template variables, preset CLI execution, and runbook behavior remain open. |
+| Slice 12: presets and runbooks | Implemented as an MVP: presets support prompt templates, safe variables, workspace policy, API/CLI listing and rendering, CLI dry-run execution, and UI preset chips that prefill run controls. Multi-step runbook orchestration remains future work. |
 | Slice 13: tools/MCP profiles | Open. |
 | Slice 14: issue/PR mode | Open. |
 | Slice 15: project memory and decision log | Open. |
@@ -218,18 +233,17 @@ opaque stores.
 
 ## Next Recommended Slice
 
-The highest-value next implementation slice is Slice 12 for presets and
-runbooks:
+The highest-value next implementation slice is Slice 13 for one-click tools/MCP
+profiles:
 
-- extend project presets beyond default selection into runnable task templates;
-- add template variables for project, branch, selected files, last diff, and
-  user prompt;
-- expose preset listing/execution through the UI and CLI without storing
-  secrets.
+- add a generic non-secret tool profile model;
+- start with dry-run config generation instead of installing or authenticating
+  tools;
+- expose tool profile status through API and UI with redacted previews.
 
 Slice 03 can still be enriched later with richer per-harness stdout/message
-delta emission, and Slice 10 can grow parallel execution and arena cancellation
-after the sequential MVP has settled.
+delta emission, Slice 10 can grow parallel execution and arena cancellation, and
+Slice 12 can later grow into multi-step runbook orchestration.
 
 ## Safety Rules
 

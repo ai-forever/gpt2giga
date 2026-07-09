@@ -448,7 +448,8 @@ INDEX_HTML = """<!doctype html>
     .attachment-toolbar,
     .attachment-list,
     .attachment-card,
-    .attachment-chip-row {
+    .attachment-chip-row,
+    .preset-list {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -488,6 +489,16 @@ INDEX_HTML = """<!doctype html>
     }
     .attachment-chip {
       max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .preset-list {
+      align-items: stretch;
+    }
+    .preset-button {
+      max-width: 180px;
+      min-width: 70px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -868,6 +879,13 @@ INDEX_HTML = """<!doctype html>
               </div>
               <div id="route-recommendation-reasons" class="details">Type a prompt or attach context to refresh the recommendation.</div>
             </div>
+            <div class="span-4">
+              <div class="inline-actions">
+                <h2>Presets</h2>
+                <span id="preset-status" class="badge info">Presets: loading</span>
+              </div>
+              <div id="preset-list" class="preset-list"></div>
+            </div>
           </div>
         </div>
         <div id="output-panel" class="chat-scroll">
@@ -986,6 +1004,7 @@ INDEX_HTML = """<!doctype html>
       project: null,
       projectConfig: null,
       projectState: null,
+      projectPresets: [],
       applyingProjectState: false,
       selectedHarness: null,
       arenaSelectionTouched: false,
@@ -1051,6 +1070,7 @@ INDEX_HTML = """<!doctype html>
       state.project = result.data.project || null;
       state.projectConfig = result.data.config || null;
       state.projectState = result.data.state || null;
+      state.projectPresets = Array.isArray(result.data.presets) ? result.data.presets : [];
       applyProject();
     }
 
@@ -1085,6 +1105,7 @@ INDEX_HTML = """<!doctype html>
       }
       if (projectState.last_invocation_mode) byId("invocation-select").value = projectState.last_invocation_mode;
       updateRouteNote();
+      renderPresetButtons();
       state.applyingProjectState = false;
     }
 
@@ -1102,6 +1123,7 @@ INDEX_HTML = """<!doctype html>
       state.project = result.data.project || null;
       state.projectConfig = result.data.config || null;
       state.projectState = result.data.state || null;
+      state.projectPresets = Array.isArray(result.data.presets) ? result.data.presets : [];
       applyProject();
       await loadSessions();
     }
@@ -2062,6 +2084,89 @@ INDEX_HTML = """<!doctype html>
       updateHarnessDrivenControls();
       renderRouteRecommendation(recommendation);
       persistProjectState();
+    }
+
+    function renderPresetButtons() {
+      const list = byId("preset-list");
+      list.textContent = "";
+      const presets = Array.isArray(state.projectPresets) ? state.projectPresets : [];
+      setText("preset-status", presets.length ? `Presets: ${presets.length}` : "Presets: none");
+      if (!presets.length) {
+        const empty = document.createElement("span");
+        empty.className = "status-line";
+        empty.textContent = "No project presets configured.";
+        list.appendChild(empty);
+        return;
+      }
+      for (const preset of presets) {
+        const button = document.createElement("button");
+        button.className = "secondary preset-button";
+        button.type = "button";
+        button.textContent = preset.title || preset.name;
+        button.title = preset.name || preset.title || "preset";
+        button.addEventListener("click", () => applyPreset(preset.name));
+        list.appendChild(button);
+      }
+    }
+
+    async function applyPreset(presetName) {
+      if (!presetName || !state.project || !state.project.root) return;
+      const result = await getJson(`/api/project/presets/${encodeURIComponent(presetName)}/render`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace: state.project.root,
+          user_prompt: byId("prompt-input").value,
+          selected_files: selectedWorkspaceFiles(),
+          last_run_diff: currentLastDiff()
+        })
+      });
+      const body = result.data || {};
+      if (!result.ok || !body.preset) {
+        setText("preset-status", body.detail || "Preset failed.");
+        return;
+      }
+      const preset = body.preset;
+      if (preset.harness) selectHarness(preset.harness);
+      if (preset.model) {
+        byId("model-input").value = preset.model;
+        renderModelList();
+      }
+      if (preset.api_mode) {
+        const apiMode = byId(`api-mode-${preset.api_mode}`);
+        if (apiMode) apiMode.checked = true;
+      }
+      if (preset.mode && byId("mode-select").querySelector(`option[value="${preset.mode}"]`)) {
+        byId("mode-select").value = preset.mode;
+      }
+      if (preset.invocation_mode) byId("invocation-select").value = preset.invocation_mode;
+      if (preset.workspace_policy && byId("workspace-policy-select").querySelector(`option[value="${preset.workspace_policy}"]`)) {
+        byId("workspace-policy-select").value = preset.workspace_policy;
+      }
+      byId("prompt-input").value = preset.prompt || "";
+      updateHeaderBadges();
+      updateRouteNote();
+      updateHarnessDrivenControls();
+      scheduleRouteRecommendation();
+      persistProjectState();
+      const warnings = Array.isArray(preset.warnings) && preset.warnings.length ? ` (${preset.warnings.length} warning)` : "";
+      setText("preset-status", `Preset: ${preset.title || preset.name}${warnings}`);
+    }
+
+    function selectedWorkspaceFiles() {
+      return state.attachments
+        .map((attachment) => attachment.workspace_path)
+        .filter(Boolean);
+    }
+
+    function currentLastDiff() {
+      const runs = state.currentBundle && Array.isArray(state.currentBundle.runs) ? state.currentBundle.runs : [];
+      for (let index = runs.length - 1; index >= 0; index -= 1) {
+        const run = runs[index] || {};
+        const metadata = run.metadata || {};
+        if (metadata.diff) return String(metadata.diff);
+      }
+      return "";
     }
 
     async function runHarness() {
